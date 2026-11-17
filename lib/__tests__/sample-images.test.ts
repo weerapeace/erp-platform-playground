@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextProductName, nextVersionName, isAutoAlbumName, sortSubAlbums, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
+import { nextProductName, nextVersionName, brandViewItems, brandCards, albumMonthKey, isAutoAlbumName, sortSubAlbums, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -303,5 +303,27 @@ describe("อัลบั้มย่อยไม่มีชื่อ + เร�
     const list = [mk("a", 1, []), mk("b", 2, ["CTL110"]), mk("c", 3, ["CTL107"]), mk("d", 4, ["CTL110"])];
     expect(sortSubAlbums(list, "parent").map((x) => x.id)).toEqual(["c", "b", "d", "a"]);
     expect(sortSubAlbums(list, "manual").map((x) => x.id)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+describe("หน้าแรกแยกแบรนด์", () => {
+  const A = (id: string, name: string, parent: string | null, brand: string | null, photos: number, deep: number, at = "2026-11-13T03:00:00Z") =>
+    ({ id, name, parent_id: parent, brand_id: brand, created_at: at, counts: { photos, trash: 0, sent: 0 }, deep: { photos: deep, sent: 0, preview_keys: [`k-${id}`], sub_count: 0 }, preview_keys: [`k-${id}`] }) as never;
+  const list = [
+    A("d1", "SAMPLE Good Goods 13 พ.ย. 2569", null, "g", 5, 9),
+    A("p1", "Product 001", "d1", "g", 4, 4),
+    A("v1", "Version 1", "p1", "g", 2, 2),
+    A("t1", "Good Goods 2024", null, "g", 3, 3, "2026-10-02T03:00:00Z"),
+    A("d2", "SAMPLE X 14 พ.ย. 2569", null, "x", 0, 0),
+  ];
+  it("ในแบรนด์: อัลบั้มสินค้าเรียงเลย (ไม่มีชั้นวัน · ไม่รวม Version ข้างใน) + รูปยังไม่จัดของวัน", () => {
+    const items = brandViewItems(list, "g", "newest", null);
+    expect(items.map((i) => `${i.kind}:${i.album.id}`)).toEqual(["loose:d1", "album:p1", "album:t1"]);
+    expect(brandViewItems(list, "g", "newest", "2026-10").map((i) => i.album.id)).toEqual(["t1"]);
+    expect(albumMonthKey({ created_at: "2026-10-31T20:00:00Z" })).toBe("2026-11");   // เวลาไทยข้ามเดือนแล้ว
+  });
+  it("การ์ดแบรนด์: ไม่มีรูป = ไม่โชว์", () => {
+    const cards = brandCards(list, [{ id: "g", name: "Good Goods", color: null, logo_url: null }, { id: "x", name: "X", color: null, logo_url: null }]);
+    expect(cards.map((c) => [c.id, c.albums, c.photos])).toEqual([["g", 2, 12]]);
   });
 });

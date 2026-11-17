@@ -35,6 +35,8 @@ import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@
 import { DesignSheetPickerModal, type PickedDesignSheet } from "@/components/design-sheet-picker";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useStepHistory } from "@/lib/use-step-history";
+import { AlbumCover } from "@/components/album-cover";
+import { brandCards, brandViewItems, albumMonthKey } from "@/lib/sample-images";
 import { SAMPLE_SUB_SORTS, isAutoAlbumName, isSubSort, sortSubAlbums, parentGroupOf, type SampleSubSort } from "@/lib/sample-images";
 import { SampleAlbumPickerModal } from "./album-picker";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -132,6 +134,8 @@ export function SampleImagesPage() {
   // อัลบั้มย่อย: เรียง (จัดเอง / ตาม Parent SKU / ใหม่สุด) · โหมดจัดลำดับ (← →) · โน้ตข้าง ๆ (เจ้าของเลือก 2026-11-17)
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
+  const [month, setMonth] = useState<string | null>(null);   // หน้าแบรนด์: กรองเดือนที่ลง
+  const [dropHost, setDropHost] = useState<SampleAlbum | null>(null);   // อัลบั้มแม่ของป๊อปลงรูป (อัลบั้มที่เปิด / อัลบั้มของวันนี้ตอนลงจากหน้าแบรนด์)
   const [noteOpen, setNoteOpen] = useState(false);
   const isLg = useMediaQuery("(min-width: 1024px)");
   const [dropKind, setDropKind] = useUserPref<"one" | "many">("sample_images_drop_kind", "one", (r) => (r === "one" || r === "many" ? r : null));   // โหมดลงรูป (ลงชุดเดียว / ลงหลายอัลบั้ม)
@@ -196,7 +200,7 @@ export function SampleImagesPage() {
     if (!fromHistory && albumId) steps.push({ album: null });
     setAlbumId(null); setPhotos(null); setSel(new Set()); setTrashView(false); setToBrand(false); setChooser(null); setQuery("");
   };
-  const switchTab = (next: BrandTab) => { setTab(next); closeAlbum(); };
+  const switchTab = (next: BrandTab) => { setTab(next); setMonth(null); closeAlbum(); };
 
   // ── แบรนด์ที่จะลงรูป: แท็บแบรนด์ = แบรนด์นั้น · ไม่ระบุแบรนด์ = ไม่มี · ทุกแบรนด์ = ปุ่มเลือกในกรอบวางรูป (จำล่าสุด) ──
   const uploadBrandId: string | null = tab === NONE ? null : tab !== ALL ? tab : (brandOf(lastBrand)?.id ?? brands[0]?.id ?? null);
@@ -249,17 +253,32 @@ export function SampleImagesPage() {
   const onDropFiles = (files: File[], key = "main", info?: { shiftKey: boolean }) => {
     if (key.startsWith("card:")) { void dropOnCard(key.slice(5), files); return; }
     const openNow = albums?.find((a) => a.id === albumId) ?? null;
-    if (!openNow || trashView || !canUpload || !splitSampleFiles(files).ok.length) { void upload(files); return; }
+    if (trashView || !canUpload || !splitSampleFiles(files).ok.length) { void upload(files); return; }
     const kind = info?.shiftKey ? (dropKind === "one" ? "many" : "one") : dropKind;
-    if (kind === "many") { setDropMode("new"); setDropFiles(files); return; }
+    if (!openNow) { void dropAtBrand(files, kind); return; }
+    if (kind === "many") { setDropHost(openNow); setDropMode("new"); setDropFiles(files); return; }
     void quickAlbum(openNow, files);
   };
-  const quickAlbum = async (parent: SampleAlbum, files: File[]) => {
+  // หน้าแบรนด์ / ทุกแบรนด์: อัลบั้มสินค้าไปอยู่ในอัลบั้มของวันนี้ของแบรนด์ (ซ่อนชั้นวันที่ไว้ · หน้าจอยังอยู่หน้าแบรนด์)
+  const dropAtBrand = async (files: File[], kind: "one" | "many") => {
+    try {
+      const day = await ensureTodayAlbum(uploadBrandId);
+      const d = await loadSamples(null);
+      const host = d.albums.find((a) => a.id === day.id);
+      if (!host) { void upload(files); return; }
+      setAlbums(d.albums);
+      if (kind === "many") { setDropHost(host); setDropMode("new"); setDropFiles(files); return; }
+      await quickAlbum(host, files, "");
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
+  /** stay = หลังลงเสร็จเปิดอัลบั้มไหน ("" = หน้าแบรนด์ · ไม่ส่ง = อัลบั้มแม่) */
+  const quickAlbum = async (parent: SampleAlbum, files: File[], stay?: string) => {
+    const stayOn = stay ?? parent.id;
     const name = commonFolderName(splitSampleFiles(files).ok.map(filePathOf)) ?? subNameFor(parent);
     let made: { id: string; name: string };
     try { made = await createSubAlbum(parent.id, name); }
     catch (e) { pushToast("error", t(`สร้างอัลบั้ม "${name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${name}"`)); return; }
-    const done = await upload(files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id, true);
+    const done = await upload(files, { id: made.id, name: made.name, brand_id: parent.brand_id }, stayOn, true);
     if (!done) return;
     toast.action(t(`ลง ${done} รูปในอัลบั้มใหม่ "${made.name}" แล้ว`, `Added ${done} to new album "${made.name}"`), t("ย้อนกลับ", "Undo"),
       // ย้อนกลับ = รูปกลับไปอยู่อัลบั้มแม่ + ลบอัลบั้มใหม่ที่ว่างแล้ว
@@ -269,10 +288,10 @@ export function SampleImagesPage() {
         if (ids.length) await movePhotosTo(ids, made.id, parent.id);
         await deleteEmptyAlbum(made.id);
         return t(`ย้อนกลับแล้ว — รูปอยู่ใน "${nameOf(parent)}" ตามเดิม`, "Undone");
-      }, parent.id),
+      }, stayOn),
       { ms: 12000, more: [
         { label: t("เปิดอัลบั้ม", "Open"), onClick: () => void openAlbum(made.id) },
-        { label: t("เปลี่ยนชื่อ", "Rename"), onClick: () => void renameById(made.id, made.name, parent.id) },
+        { label: t("เปลี่ยนชื่อ", "Rename"), onClick: () => void renameById(made.id, made.name, stayOn) },
       ] });
   };
   const renameById = async (id: string, current: string, stayOn: string | null) => {
@@ -300,15 +319,16 @@ export function SampleImagesPage() {
   const cardDropLabel = (a: SampleAlbum) => (drop.over === `card:${a.id}` ? t(`วางเพื่อลงรูปใน "${nameOf(a)}"`, `Drop to add to "${nameOf(a)}"`) : null);
   const dropName = useMemo(() => {
     if (!dropFiles) return "";
-    const openNow = albums?.find((a) => a.id === albumId);
+    const openNow = dropHost;
     const paths = splitSampleFiles(dropFiles).ok.map(filePathOf);
     // มีโฟลเดอร์ย่อย = แยกหลายอัลบั้มตามโฟลเดอร์ → ชื่อ Product ### นับต่อ (ไม่ใช้ชื่อโฟลเดอร์บนสุด)
     return (folderGroups(paths) ? null : commonFolderName(paths)) ?? (openNow ? subNameFor(openNow) : nextProductName(albums ?? [], null));
-  }, [dropFiles, albums, albumId]);
+  }, [dropFiles, albums, dropHost]);   // eslint-disable-line react-hooks/exhaustive-deps
   // แผนจากป๊อป: ใส่อัลบั้มนี้ / สร้าง 1 อัลบั้มขึ้นไป (แยกตาม SKU) แต่ละอัลบั้มเชื่อม Parent + SKU (เจ้าของเลือก 2026-11-17)
   const confirmDrop = async (plan: DropPlan) => {
-    const files = dropFiles; const parent = albums?.find((a) => a.id === albumId) ?? null;
-    setDropFiles(null);
+    const files = dropFiles; const parent = dropHost ?? albums?.find((a) => a.id === albumId) ?? null;
+    setDropFiles(null); setDropHost(null);
+    const stay = albumId ? parent?.id ?? "" : "";   // ลงจากหน้าแบรนด์ = อยู่หน้าแบรนด์ต่อ
     if (!files) return;
     setDropPref(plan.mode === "here" ? "here" : "new");
     if (plan.mode === "new") setDropSplit(plan.split);
@@ -321,16 +341,16 @@ export function SampleImagesPage() {
           const ex = albums?.find((a) => a.id === g.existingId);
           if (g.rename) await renameAlbum(g.existingId, g.name);
           if (g.relink) { await linkAlbumProduct(g.existingId, g.parentCode ? [g.parentCode] : [], g.parentCode ? g.skuCodes : []); if (g.parentCode) setLastParent(g.parentCode); }
-          await upload(g.files, { id: g.existingId, name: g.name, brand_id: ex?.brand_id ?? parent.brand_id }, parent.id);
+          await upload(g.files, { id: g.existingId, name: g.name, brand_id: ex?.brand_id ?? parent.brand_id }, stay);
           continue;
         }
         const made = await createSubAlbum(parent.id, g.name);
         if (g.parentCode) { await linkAlbumProduct(made.id, [g.parentCode], g.skuCodes); setLastParent(g.parentCode); }
-        await upload(g.files, { id: made.id, name: made.name, brand_id: parent.brand_id }, parent.id);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
+        await upload(g.files, { id: made.id, name: made.name, brand_id: parent.brand_id }, stay);   // อยู่ที่อัลบั้มแม่ต่อ — วางชุดถัดไปได้เลย
       } catch (e) { pushToast("error", t(`สร้าง "${g.name}" ไม่สำเร็จ — ${(e as Error).message}`, `Could not create "${g.name}" — ${(e as Error).message}`)); return; }
     }
     // รูปที่ยังไม่จัด (แบบแยกหลายอัลบั้ม) → ลงอัลบั้มที่เปิดอยู่ตรง ๆ
-    if (plan.rest?.length) await upload(plan.rest, { id: parent.id, name: parent.name, brand_id: parent.brand_id }, parent.id);
+    if (plan.rest?.length) await upload(plan.rest, { id: parent.id, name: parent.name, brand_id: parent.brand_id }, stay);
   };
   const drop = useFileDrop((files, key, info) => onDropFiles(files, key, info), { folders: true, disabled: !canUpload || !!up, onBusy: () => pushToast("info", t("กำลังลงรูปอยู่ — รอสักครู่", "Uploading — please wait")) });
 
@@ -339,6 +359,11 @@ export function SampleImagesPage() {
   const albumBrand = brandOf(album?.brand_id);
   // หน้าแฟ้ม = อัลบั้มชั้นบนสุดของแท็บ · อัลบั้มย่อยโผล่ตอนเปิดอัลบั้มแม่
   // การ์ดหน้าแฟ้ม: ไม่ค้น = ชั้นบนสุดของแท็บ · ค้น = ทุกชั้นที่ตรง (บอกว่าอยู่ในอัลบั้มไหน) — lib/sample-images browseAlbums
+  // หน้าแรก = การ์ดแบรนด์ · ในแบรนด์ = อัลบั้มสินค้าเรียงเลย + รูปยังไม่จัด (เจ้าของเลือก 2026-11-17 · แสดงอย่างเดียว ข้อมูลเดิม)
+  const bCards = useMemo(() => brandCards(albums ?? [], brands), [albums, brands]);
+  const bItemsAll = useMemo(() => brandViewItems(albums ?? [], tab, albumSort, null), [albums, tab, albumSort]);
+  const bItems = useMemo(() => (month ? bItemsAll.filter((i) => albumMonthKey(i.album) === month) : bItemsAll), [bItemsAll, month]);
+  const bMonths = useMemo(() => [...new Set(bItemsAll.map((i) => albumMonthKey(i.album)))].sort().reverse(), [bItemsAll]);
   const cards = useMemo(() => browseAlbums(albums ?? [], tab, query, albumSort, (id) => brands.find((b) => b.id === id)?.name ?? null), [albums, tab, query, albumSort, brands]);
   const tree = useMemo(() => (albums ?? []).map((a) => ({ id: a.id, parent_id: a.parent_id })), [albums]);
   const path = useMemo(() => (album ? albumPath(tree, album.id).map((id) => albums!.find((a) => a.id === id)!) : []), [album, tree, albums]);
@@ -602,7 +627,7 @@ export function SampleImagesPage() {
                   </SampleSearchSort>
                   <div className="text-[13px] text-slate-500">
                     <b className="font-semibold text-slate-800">{tab === ALL ? t("อัลบั้มทุกแบรนด์", "All albums") : tab === NONE ? t("อัลบั้มที่ยังไม่ระบุแบรนด์", "Albums without a brand") : t(`อัลบั้มของ ${brandOf(tab)?.name ?? ""}`, `Albums of ${brandOf(tab)?.name ?? ""}`)}</b>
-                    {cards.length > 0 && <> · {searching ? t(`พบ ${cards.length} อัลบั้ม (รวมอัลบั้มย่อย)`, `${cards.length} found (incl. sub-albums)`) : t(`${cards.length} อัลบั้ม`, `${cards.length} albums`)}</>}
+                    {searching ? (cards.length > 0 && <> · {t(`พบ ${cards.length} อัลบั้ม (รวมอัลบั้มย่อย)`, `${cards.length} found (incl. sub-albums)`)}</>) : tab === ALL ? <> · {t(`${bCards.length} แบรนด์`, `${bCards.length} brands`)}</> : <> · {t(`${bItemsAll.filter((x) => x.kind === "album").length} อัลบั้ม`, `${bItemsAll.filter((x) => x.kind === "album").length} albums`)}</>}
                   </div>
                 </>
               )}
@@ -832,6 +857,55 @@ export function SampleImagesPage() {
                     </div>
                   )}
                 </>
+              ) : !searching && tab === ALL ? (
+                /* หน้าแรก: การ์ดแบรนด์ (ไม่มีรูป = ไม่โชว์) */
+                !bCards.length ? <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีรูป", "No photos yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน", "Drop photos above") : undefined} />
+                : <div style={albumGrid.gridStyle} {...albumGrid.compactAttr} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
+                  {bCards.map((b) => (
+                    <button key={b.id} type="button" onClick={() => switchTab(b.id)} className="overflow-hidden rounded-xl border border-slate-200 bg-white text-left transition hover:border-violet-300 hover:shadow-md">
+                      <AlbumCover keys={b.keys} total={b.photos} />
+                      <div className="space-y-1 p-3">
+                        <div className="flex items-center gap-1.5 text-[15px] font-semibold text-slate-800">{dot(b.color)}{b.name ?? t("ไม่ระบุแบรนด์", "No brand")}</div>
+                        <div className="text-[12px] text-slate-500">{t(`${b.albums} อัลบั้ม · ${b.photos} รูป`, `${b.albums} albums · ${b.photos} photos`)}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : !searching ? (
+                /* ในแบรนด์: อัลบั้มสินค้าเรียงเลย (ไม่มีชั้นวันที่) · ป้ายวันที่ลง · กรองเดือน · รูปยังไม่จัด (กรอบส้ม) */
+                <div className="space-y-3">
+                  {bMonths.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[null, ...bMonths].map((m) => (
+                        <button key={m ?? "all"} type="button" onClick={() => setMonth(m)}
+                          className={`h-7 rounded-full border px-3 text-[12px] ${month === m ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-violet-300"}`}>
+                          {m ? new Date(`${m}-01T00:00:00+07:00`).toLocaleDateString("th-TH", { month: "short", year: "numeric" }) : t("ทั้งหมด", "All")}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!bItems.length ? <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้มในแบรนด์นี้", "No albums in this brand yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มให้เอง", "Drop photos above — an album is created for you") : undefined} />
+                  : (
+                    <div style={albumGrid.gridStyle} {...albumGrid.compactAttr} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
+                      {bItems.map((it, i) => it.kind === "loose" ? (
+                        <button key={`l:${it.album.id}`} type="button" onClick={() => void openAlbum(it.album.id)} {...withFileDrop(it.album.id, dropOnAlbum(it.album))}
+                          className={`relative overflow-hidden rounded-xl border-2 border-dashed bg-white text-left transition hover:shadow-md ${overKey === `al:${it.album.id}` || cardDropLabel(it.album) ? "border-emerald-400" : "border-amber-300"}`}>
+                          {cardDropLabel(it.album) && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{cardDropLabel(it.album)}</span>}
+                          <AlbumCover keys={it.album.preview_keys} total={it.count} />
+                          <div className="space-y-1 p-2.5">
+                            <div className="flex items-center gap-1 text-[13px] font-medium text-amber-800"><Icon value="i:photo" />{t("รูปยังไม่จัด", "Unsorted photos")}</div>
+                            <div className="text-[11px] text-slate-500">{t(`${it.count} รูป · ลง ${albumCardLabel(it.album)} · กดเพื่อจัด`, `${it.count} photos · ${albumCardLabel(it.album)}`)}</div>
+                          </div>
+                        </button>
+                      ) : (
+                        <SampleAlbumCard key={it.album.id} sub album={it.album} order={i + 1 - bItems.filter((x) => x.kind === "loose").length}
+                          dateTag={it.day ? albumCardLabel(it.day) : thaiShortDate(new Date(it.album.created_at))}
+                          onOpen={() => void openAlbum(it.album.id)} highlight={overKey === `al:${it.album.id}`} dropLabel={cardDropLabel(it.album)}
+                          extra={{ ...dragProps(() => ({ kind: "album", id: it.album.id })), ...withFileDrop(it.album.id, dropOnAlbum(it.album)) }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : !cards.length ? (
                 searching ? <EmptyState icon={<Icon value="i:search" />} className="p-8" title={t(`ไม่พบ "${query.trim()}"`, `No match for "${query.trim()}"`)} hint={t("ลองคำอื่น หรือเปลี่ยนแบรนด์ด้านบน", "Try another word or brand")} />
                 : <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้ม", "No albums yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มของวันนี้ให้เอง", "Drop photos above — today's album is created for you") : undefined} />
@@ -875,11 +949,11 @@ export function SampleImagesPage() {
           }} />
       )}
 
-      <DropAlbumDialog files={dropFiles} inside={album ? nameOf(album) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
-        insideId={album?.id ?? null} brandName={albumBrand?.name ?? null}
-        existing={dropFiles && album ? (albums ?? []).filter((a) => a.id !== album.id && (a.brand_id ?? null) === (album.brand_id ?? null)) : []}
-        defaultParentCode={album?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
-        onCancel={() => setDropFiles(null)} onConfirm={(plan) => void confirmDrop(plan)} />
+      <DropAlbumDialog files={dropFiles} inside={dropHost ? nameOf(dropHost) : ""} defaultName={dropName} mode={dropMode} onMode={setDropMode}
+        insideId={dropHost?.id ?? null} brandName={brandOf(dropHost?.brand_id)?.name ?? null}
+        existing={dropFiles && dropHost ? (albums ?? []).filter((a) => a.id !== dropHost.id && (a.brand_id ?? null) === (dropHost.brand_id ?? null)) : []}
+        defaultParentCode={dropHost?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
+        onCancel={() => { setDropFiles(null); setDropHost(null); }} onConfirm={(plan) => void confirmDrop(plan)} />
 
       <DesignSheetPickerModal open={picking} onClose={() => setPicking(false)} onConfirm={doMove}
         initialBrand={albumBrand?.name ?? null}

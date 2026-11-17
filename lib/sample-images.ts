@@ -356,3 +356,44 @@ export function splitSampleFiles<F extends { name: string; type: string }>(files
   }
   return { ok, unsupported, notImage };
 }
+
+// ── หน้าแรกแยกแบรนด์ (เจ้าของเลือก 2026-11-17 ข้อ 1-4, 6) — เปลี่ยนแค่วิธีแสดง ข้อมูลยังเก็บแบบอัลบั้มของวันเหมือนเดิม ──
+/** การ์ดแบรนด์หน้าแรก: ปก (รูปจากอัลบั้มของแบรนด์) + จำนวนอัลบั้มสินค้า + จำนวนรูป · ไม่มีรูปเลย = ไม่โชว์ (ข้อ 6) */
+export function brandCards<T extends SampleAlbum>(albums: readonly T[], brands: readonly SampleBrand[]): { id: string; name: string | null; color: string | null; keys: string[]; albums: number; photos: number }[] {
+  const out: { id: string; name: string | null; color: string | null; keys: string[]; albums: number; photos: number }[] = [];
+  const ids = [...brands.map((b) => b.id), SAMPLE_TAB_NONE];
+  for (const id of ids) {
+    const mine = albums.filter((a) => inBrandTab(a, id));
+    const top = sortAlbums(mine.filter((a) => !a.parent_id), "newest");
+    const photos = top.reduce((s, a) => s + (a.deep?.photos ?? 0), 0);
+    if (!photos) continue;
+    const keys: string[] = [];
+    for (const a of top) { for (const k of a.preview_keys ?? []) { if (keys.length < 4 && !keys.includes(k)) keys.push(k); } if (keys.length >= 4) break; }
+    const b = brands.find((x) => x.id === id);
+    out.push({ id, name: b?.name ?? null, color: b?.color ?? null, keys, albums: brandViewItems(albums, id, "manual", null).filter((x) => x.kind === "album").length, photos });
+  }
+  return out;
+}
+
+export type BrandViewItem<T> = { kind: "album"; album: T; day: T | null } | { kind: "loose"; album: T; count: number };
+/** เดือนที่ลง (YYYY-MM ตามเวลาไทย) — ใช้กรองในหน้าแบรนด์ */
+export const albumMonthKey = (a: Pick<SampleAlbum, "created_at">): string => new Date(new Date(a.created_at).getTime() + 7 * 3600_000).toISOString().slice(0, 7);
+/**
+ * ในแบรนด์: อัลบั้มสินค้าเรียงเลย ไม่มีชั้นวันที่คั่น (อัลบั้มที่อยู่ชั้นบนสุด หรืออยู่ในอัลบั้มของวัน)
+ * + การ์ด "รูปยังไม่จัด" ต่ออัลบั้มของวันที่มีรูปค้าง (ขึ้นก่อน · ใหม่สุดก่อน) · month = กรองเดือนที่ลง (null = ทั้งหมด)
+ */
+export function brandViewItems<T extends SampleAlbum>(albums: readonly T[], tab: string, sort: SampleAlbumSort, month: string | null): BrandViewItem<T>[] {
+  const mine = albums.filter((a) => inBrandTab(a, tab));
+  const byId = new Map(mine.map((a) => [a.id, a]));
+  const inMonth = (a: T) => !month || albumMonthKey(a) === month;
+  const days = sortAlbums(mine.filter((a) => isDayAlbum(a)), "newest");
+  const loose: BrandViewItem<T>[] = days.filter((d) => d.counts.photos > 0 && inMonth(d)).map((d) => ({ kind: "loose", album: d, count: d.counts.photos }));
+  const flat = mine.filter((a) => {
+    if (isDayAlbum(a)) return false;
+    if (!a.parent_id) return true;
+    const p = byId.get(a.parent_id);
+    return !!p && isDayAlbum(p);
+  }).filter(inMonth);
+  const items: BrandViewItem<T>[] = sortAlbums(flat, sort === "manual" ? "newest" : sort).map((a) => ({ kind: "album", album: a, day: a.parent_id ? byId.get(a.parent_id) ?? null : null }));
+  return [...loose, ...items];
+}

@@ -104,7 +104,7 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel, order, bigOrder, onShift }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel, order, bigOrder, onShift, dateTag }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
   /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
   selected?: boolean;
@@ -121,6 +121,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   /** โหมดจัดลำดับ: เลขใหญ่ + ปุ่ม ← → */
   bigOrder?: boolean;
   onShift?: (dir: -1 | 1) => void;
+  /** ป้ายวันที่ลง (หน้าแบรนด์ — ไม่มีชั้นวันที่คั่นแล้ว) */
+  dateTag?: string | null;
 }) {
   const t = useT();
   const a = album;
@@ -169,6 +171,7 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
           {link && !auto && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-1.5 text-violet-800"><Icon value="i:link" />{link}</span>}
+          {dateTag && <span className="inline-flex h-5 items-center rounded-full bg-slate-100 px-1.5 text-slate-600">{t(`ลง ${dateTag}`, `Added ${dateTag}`)}</span>}
         </div>
       </div>
     </button>
