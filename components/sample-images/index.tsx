@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth";
-import { usePushToast } from "@/components/toast";
+import { usePushToast, useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { filePathOf, useFileDrop } from "@/components/file-drop";
@@ -106,6 +106,7 @@ export function SampleImagesPage() {
   const t = useT();
   const { can, permsReady, user } = useAuth();
   const pushToast = usePushToast();
+  const toast = useToast();
   const actor = user?.name ?? user?.email ?? null;
   const [brands, setBrands] = useState<SampleBrand[]>([]);
   const [albums, setAlbums] = useState<SampleAlbum[] | null>(null);
@@ -293,7 +294,9 @@ export function SampleImagesPage() {
   const moveAlbums = (ids: string[], toParent: SampleAlbum | null) => {
     const bad = ids.filter((id) => !canMoveAlbum(tree, id, toParent?.id ?? null));
     if (bad.length) { pushToast("warning", t("ย้ายอัลบั้มเข้าไปในตัวเอง หรือในอัลบั้มย่อยของตัวเองไม่ได้", "Can't move an album into itself")); return; }
-    void act(async () => { for (const id of ids) await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้าย ${ids.length} อัลบั้ม${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, `Moved ${ids.length} album(s)`); }, albumId);
+    const was = ids.map((id) => [id, albums?.find((a) => a.id === id)?.parent_id ?? null] as const);
+    void act(async () => { for (const id of ids) await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้าย ${ids.length} อัลบั้ม${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, `Moved ${ids.length} album(s)`); }, albumId,
+      async () => { for (const [id, p] of was) await moveAlbumTo(id, p); });
   };
 
   // ── ส่งเข้าใบงาน / ลบ / เอากลับ / ย้ายอัลบั้มเข้าแบรนด์ ──
@@ -345,9 +348,15 @@ export function SampleImagesPage() {
   // ── อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14): สร้างจากรูปที่เลือก · ย้ายรูป/อัลบั้ม · เปลี่ยนชื่อ · ลบอัลบั้มว่าง ──
   // อัลบั้มของวัน = โชว์เป็นวันที่ · อัลบั้มที่ตั้งชื่อเอง (ชั้นไหนก็ได้ เช่น Louis Batch สร้าง) = ชื่อจริง
   const nameOf = (a: SampleAlbum | null | undefined) => (a ? albumFullName(a, brandOf(a.brand_id)?.name) : "");
-  const act = async (fn: () => Promise<string | null>, stayOn?: string | null) => {
+  // undo = ทำย้อนได้ → แจ้งเตือนมีปุ่ม "ย้อนกลับ" 8 วิ (เจ้าของขอ 2026-11-17 หลังเผลอลากอัลบั้มผิด)
+  const act = async (fn: () => Promise<string | null>, stayOn?: string | null, undo?: () => Promise<void>) => {
     setBusy(true);
-    try { const msg = await fn(); if (msg) pushToast("success", msg); await reload(stayOn); }
+    try {
+      const msg = await fn();
+      if (msg && undo) toast.action(msg, t("ย้อนกลับ", "Undo"), () => void act(async () => { await undo(); return t("ย้อนกลับแล้ว", "Undone"); }, stayOn), { ms: 8000 });
+      else if (msg) pushToast("success", msg);
+      await reload(stayOn);
+    }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setBusy(false); }
   };
@@ -360,12 +369,22 @@ export function SampleImagesPage() {
   };
   const movePhotos = (ids: string[], to: SampleAlbum) => {
     if (!album || !ids.length || to.id === album.id) return;
-    void act(async () => { const r = await movePhotosTo(ids, album.id, to.id); setChooser(null); return t(`ย้าย ${r.moved} รูปไป "${nameOf(to)}" แล้ว`, `Moved ${r.moved} image(s)`); }, album.id);
+    const from = album.id;
+    void act(async () => { const r = await movePhotosTo(ids, from, to.id); setChooser(null); return t(`ย้าย ${r.moved} รูปไป "${nameOf(to)}" แล้ว`, `Moved ${r.moved} image(s)`); }, from,
+      async () => { await movePhotosTo(ids, to.id, from); });
   };
   const moveAlbum = (id: string, toParent: SampleAlbum | null) => {
     if (!canMoveAlbum(tree, id, toParent?.id ?? null)) { pushToast("warning", t("ย้ายอัลบั้มเข้าไปในตัวเอง หรือในอัลบั้มย่อยของตัวเองไม่ได้", "Can't move an album into itself")); return; }
     const moving = albums?.find((a) => a.id === id);
-    void act(async () => { await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้ายอัลบั้ม "${nameOf(moving)}" ${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, "Album moved"); }, albumId);
+    const was = moving?.parent_id ?? null;
+    void act(async () => { await moveAlbumTo(id, toParent?.id ?? null); setChooser(null); return t(`ย้ายอัลบั้ม "${nameOf(moving)}" ${toParent ? `ไปไว้ใน "${nameOf(toParent)}"` : "ขึ้นชั้นบนสุด"} แล้ว`, "Album moved"); }, albumId,
+      async () => { await moveAlbumTo(id, was); });
+  };
+  // ย้ายออก 1 ชั้น = ไปอยู่ข้าง ๆ อัลบั้มแม่ (ในอัลบั้มชั้นบนของแม่ · แม่อยู่ชั้นบนสุด = ชั้นบนสุด) · ไม่มีแม่ = undefined
+  const upTarget = (a: SampleAlbum | null | undefined): SampleAlbum | null | undefined => {
+    const p = a?.parent_id ? albums?.find((x) => x.id === a.parent_id) : null;
+    if (!p) return undefined;
+    return (p.parent_id ? albums?.find((x) => x.id === p.parent_id) : null) ?? null;
   };
   const rename = async () => {
     if (!album) return;
@@ -554,6 +573,10 @@ export function SampleImagesPage() {
                     <>
                       <button type="button" onClick={() => void rename()} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:pencil" />{t("เปลี่ยนชื่อ", "Rename")}</button>
                       <button type="button" onClick={() => setChooser((c) => (c === "album" ? null : "album"))} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายอัลบั้มนี้", "Move album")}</button>
+                      {upTarget(album) !== undefined && (() => { const up = upTarget(album) ?? null; return (
+                        <button type="button" disabled={busy} onClick={() => moveAlbum(album.id, up)} title={t("ย้ายอัลบั้มนี้ออกไป 1 ชั้น (กดย้อนกลับได้)", "Move this album up one level (undo available)")}
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-back-up" />{t(`ย้ายออกไป ${up ? nameOf(up) : "ชั้นบนสุด"}`, `Move up to ${up ? nameOf(up) : "top level"}`)}</button>
+                      ); })()}
                       {album.counts.photos + album.counts.trash === 0 && !children.length && (
                         <button type="button" onClick={() => void removeEmpty()} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 text-[12px] text-rose-600 hover:bg-rose-50"><Icon value="i:trash" />{t("ลบอัลบั้ม (ว่าง)", "Delete empty album")}</button>
                       )}
@@ -644,7 +667,12 @@ export function SampleImagesPage() {
                       {shownChildren.map((c) => (
                         <SampleAlbumCard key={c.id} sub album={c} selected={selAlbums.has(c.id)} onOpen={() => (selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}`}
                           edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c), ...selAttr(`a:${c.id}`) }} />
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...subAlbumDrop(c), ...selAttr(`a:${c.id}`) }}
+                          menu={canEdit ? [
+                            { label: t(`ย้ายออก 1 ชั้น (ไป ${upTarget(c) ? nameOf(upTarget(c)) : "ชั้นบนสุด"})`, "Move up one level"), icon: "i:arrow-back-up",
+                              onClick: () => moveAlbum(c.id, upTarget(c) ?? null) },
+                            { label: t("ย้ายไป…", "Move to…"), icon: "i:transfer-out", onClick: () => { setSelAlbums(new Set([c.id])); setChooser("albums"); } },
+                          ] : undefined} />
                       ))}
                     </div>
                   </div>

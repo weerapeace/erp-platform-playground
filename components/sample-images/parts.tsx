@@ -12,6 +12,7 @@ import { useMemo, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { AlbumCover } from "@/components/album-cover";
+import { Popover } from "@/components/popover";
 import { safeColor } from "@/components/design-dashboard/dashboard-helpers";
 import { withImageWidth } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
@@ -103,7 +104,7 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
   /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
   selected?: boolean;
@@ -111,6 +112,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   edge?: "before" | "after" | null;
   /** ผลค้นหาที่เป็นอัลบั้มย่อย → บอกว่าอยู่ในอัลบั้มไหน (เช่น "Good Goods · 15 พ.ย. 2569") */
   inside?: string | null;
+  /** เมนู ⋯ บนการ์ดอัลบั้มย่อย (เช่น "ย้ายออก 1 ชั้น") */
+  menu?: { label: string; icon?: string; onClick: () => void }[];
 }) {
   const t = useT();
   const a = album;
@@ -122,7 +125,23 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
       {selected && <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       <div className="overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} /></div>
       <div className="space-y-1 p-2.5">
-        <div className="flex items-center gap-1 truncate text-[13px] font-medium text-slate-800"><Icon value="i:folder" />{a.name}</div>
+        <div className="flex items-center gap-1 text-[13px] font-medium text-slate-800">
+          <Icon value="i:folder" /><span className="min-w-0 flex-1 truncate">{a.name}</span>
+          {!!menu?.length && (
+            // ปุ่ม ⋯ อยู่ในการ์ด (ที่เป็นปุ่ม) → หยุดคลิกไม่ให้เปิดอัลบั้ม · แผงอยู่ใน portal แต่คลิกยังไหลถึงการ์ด จึงหยุดที่แผงด้วย
+            <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="shrink-0">
+              <Popover align="right" panelClassName="w-60 py-1"
+                trigger={(toggle) => <span role="button" tabIndex={0} aria-label={t("เมนูอัลบั้ม", "Album menu")} onClick={toggle}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon value="i:dots-vertical" /></span>}>
+                {(close) => <div onClick={(e) => e.stopPropagation()}>
+                  {menu.map((m) => <button key={m.label} type="button" onClick={() => { close(); m.onClick(); }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-slate-700 hover:bg-violet-50">{m.icon && <Icon value={m.icon} />}{m.label}</button>)}
+                </div>}
+              </Popover>
+            </span>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
