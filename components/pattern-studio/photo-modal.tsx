@@ -18,7 +18,8 @@ import { apiFetch } from "@/lib/api";
 import type { BagParams } from "@/lib/bag-templates";
 import { contourShape, EDIT_ERASE, EDIT_KEEP, paintEdits, traceGray } from "@/lib/pattern-trace";
 import { matchMaterials, type LabelRead } from "@/lib/pattern-label-read";
-import { SearchableSelect } from "@/components/searchable-select";
+import { MaterialAddSelect, MaterialQuickCreate, useCanCreateMaterial } from "@/components/material-quick-create";
+import type { QuickMaterial } from "@/lib/material-quick-create";
 import { ZoomBox, ZoomControls } from "@/components/zoom-box";
 import { shortcutKey } from "@/lib/shortcut-key";
 import type { Pt } from "@/lib/pattern-shape";
@@ -169,14 +170,16 @@ function OwnAiTab({ onPlace }: { onPlace: (r: Extract<AiImport, { ok: true }>) =
   );
 }
 
-export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceOnly = false }: {
+export function PhotoModal({ open, onClose, onPieces, onDraft, materials, onMaterialCreated, traceOnly = false }: {
   open: boolean; onClose: () => void;
   /** true = มีแค่แท็บ "รูปแพทเทิร์นกระดาษ (ลอกเส้น)" (ไม่มีทาง AI) — หน้าคิดผ้าก่อนซื้อใช้ */
   traceOnly?: boolean;
   /** ชิ้นที่ลอกจากรูปแพทเทิร์น / ที่ AI ของผู้ใช้ร่างให้ → วางลงกระดาน · seams = ตะเข็บตั้งต้น (อ้างลำดับชิ้นในรายการ) */
   onPieces: (pieces: EditorPiece[], seams?: AiSeam[]) => void;
   /** วัสดุที่เลือกได้ในหน้านี้ — ชื่อวัสดุที่ AI ตอบมาตรงกับชื่อในรายการ = ใส่วัสดุให้ชิ้นเลย */
-  materials?: { id: string; name: string }[];
+  materials?: { id: string; name: string; sub?: string | null }[];
+  /** ส่งมา = แผงชิ้นเพิ่มวัสดุใหม่ได้ (ผู้มีสิทธิ์) — หน้าแม่ต้องต่อท้ายรายการ materials */
+  onMaterialCreated?: (m: QuickMaterial) => void;
   /** ค่าแม่แบบที่ AI ร่างจากรูปกระเป๋า → เปิดตัวสร้างจากแม่แบบ */
   onDraft: (params: BagParams, info: AiDraftInfo) => void;
 }) {
@@ -252,6 +255,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const [pvRot, setPvRot] = useState(0);             // หมุนรูปชิ้นในแผง (ให้อ่านตัวเขียนตรง)
   const [reading, setReading] = useState(false);     // กำลังให้ AI อ่านตัวเขียน
   const [readText, setReadText] = useState<string | null>(null);
+  const [missMats, setMissMats] = useState<{ name: string; count: number | null }[]>([]);   // วัสดุที่ AI อ่านได้แต่ไม่มีในรายการ
+  const [missOpen, setMissOpen] = useState<number | null>(null);
+  const canCreateMat = useCanCreateMaterial() && !!onMaterialCreated;
   const cornerDrag = useRef<number | null>(null);
   const resetEdits = () => { setEdits(null); setBgVals([]); setStroke(null); hist.current = []; fut.current = []; setHistTick((x) => x + 1); setFixes([]); setEditFix(null); setCrop(null); };
   const snapshot = (): EditSnap => ({ edits: edits ? edits.slice() : null, bg: [...bgVals] });
@@ -311,13 +317,13 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
   const startFix = (ci: number) => {
     const c = contours[ci]; if (!c) return;
     const k = fixOf[ci];
-    setReadText(null); setPvRot(0);
+    setReadText(null); setPvRot(0); setMissMats([]); setMissOpen(null);
     if (k != null) { const f = fixes[k]; setEditFix({ ci, quad: f.quad, w: f.w, h: f.h, name: f.name ?? "", count: f.count ?? 1, mats: f.mats ?? [], split: !!f.split, idx: k }); return; }
     const q = autoQuad(c.pts); if (!q) return;
     // ขนาดเริ่มว่าง (ช่องโชว์ค่าประมาณเป็นตัวจาง) — กดบันทึกโดยไม่ใส่ขนาด = เก็บแค่ชื่อ/จำนวน ไม่ดัดชิ้น · วัสดุ = ชุดที่ใช้ล่าสุด (ลบออกได้)
     setEditFix({ ci, quad: q, w: 0, h: 0, name: "", count: 1, mats: lastMats.current.mats.map((m) => ({ ...m })), split: lastMats.current.split, idx: null });
   };
-  const matOptions = (materials ?? []).filter((m) => !editFix?.mats.some((x) => x.id === m.id)).map((m) => ({ value: m.id, label: m.name }));
+  const addMat = (m: { id: string; name: string }, q?: number | null) => setEditFix((f) => (f && !f.mats.some((x) => x.id === m.id) ? { ...f, mats: [...f.mats, { id: m.id, name: m.name, q: q ?? f.count }], split: f.split || (q != null && q !== f.count && f.mats.length > 0) } : f));
   /** ขนาดโดยประมาณของชิ้นที่กำลังแก้ (จากมาตราส่วนตอนนี้) — โชว์เป็นตัวจางในช่อง */
   const estSize = (q: PPt[]): [number, number] | null => {
     const k2 = cmPerPxRef.current; if (!(k2 > 0)) return null;
@@ -422,7 +428,7 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
       // วัสดุที่เขียนไว้ → จับคู่รายการวัสดุของหน้า (ไม่เจอ = ข้าม ไม่สร้างใหม่) · จำนวนต่อวัสดุต่างกัน = เปิดแยกจำนวนให้
       const hit = matchMaterials(d.mats ?? [], materials ?? []);
       const miss = (d.mats ?? []).filter((m) => !hit.some((h) => h.name.toLowerCase().includes(m.name.toLowerCase()) || m.name.toLowerCase().includes(h.name.toLowerCase())));
-      setReadText((d.text || t("(อ่านไม่ออก)", "(nothing readable)")) + (miss.length ? t(` · ไม่มีในรายการวัสดุ: ${miss.map((m) => m.name).join(", ")}`, ` · not in the material list: ${miss.map((m) => m.name).join(", ")}`) : ""));
+      setReadText(d.text || t("(อ่านไม่ออก)", "(nothing readable)")); setMissMats(miss); setMissOpen(null);
       setEditFix((f) => {
         if (!f) return f;
         const mats = hit.length ? hit.map((m) => ({ id: m.id, name: m.name, q: m.count ?? d.count ?? f.count })) : f.mats;
@@ -592,9 +598,9 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
                 </span>
               )) : <span className="text-amber-600">{t("ยังไม่เลือกวัสดุ", "No material yet")}</span>}
             </div>
-            {(materials?.length ?? 0) > 0
-              ? <SearchableSelect value="" options={matOptions} placeholder={t("＋ เพิ่มวัสดุ (เช่น ผ้าตัว, ซับใน)", "＋ Add material (e.g. fabric, lining)")}
-                  onChange={(v) => { const m = materials?.find((x) => x.id === v); if (m) setEditFix((f) => (f && !f.mats.some((x) => x.id === m.id) ? { ...f, mats: [...f.mats, { id: m.id, name: m.name, q: f.count }] } : f)); }} />
+            {(materials?.length ?? 0) > 0 || onMaterialCreated
+              ? <MaterialAddSelect materials={materials ?? []} exclude={editFix.mats.map((m) => m.id)} onPick={(m) => addMat(m)} onCreated={onMaterialCreated}
+                  placeholder={t("＋ เพิ่มวัสดุ (เช่น ผ้าตัว, ซับใน)", "＋ Add material (e.g. fabric, lining)")} />
               : <div className="text-[11px] text-slate-400">{t("เลือกวัสดุทีหลังบนกระดาน", "Pick materials later on the board")}</div>}
             {editFix.split && editFix.mats.length > 1 && <p className="text-[11px] text-slate-500">{t(`ตอนวางจะแยกเป็น ${editFix.mats.length} ชิ้น (ชิ้นละวัสดุ ตามจำนวนที่ใส่)`, `Will be placed as ${editFix.mats.length} pieces (one per material, with these quantities)`)}</p>}
           </div>
@@ -603,6 +609,22 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, traceO
             <button type="button" data-photo-read-label disabled={reading || !pvImg} onClick={() => void readLabel()} className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 bg-white px-2 text-amber-800 hover:bg-amber-50 disabled:opacity-50"><Icon value="i:sparkles" className="text-sm" />{reading ? t("AI กำลังอ่าน…", "Reading…") : t("อ่านตัวเขียนด้วย AI", "Read the writing with AI")}</button>
             <span className="ml-1.5 text-[11px] text-amber-800">{t("เสียเงินตามการใช้ ราวไม่กี่สตางค์ · ลายมืออาจอ่านผิด ตรวจก่อนกด", "Paid per use (a few satang) · handwriting may be misread, check before saving")}</span>
             {readText != null && <div className="mt-1 text-[11px] text-slate-700">{t("AI อ่านได้", "AI read")}: “{readText}”</div>}
+            {missMats.length > 0 && (
+              <div data-photo-miss-mats className="mt-1 space-y-1 text-[11px] text-amber-900">
+                <div className="flex flex-wrap items-center gap-1">
+                  <span>{t("ไม่มีในรายการวัสดุ:", "Not in the material list:")}</span>
+                  {missMats.map((m, i) => canCreateMat
+                    ? <button key={i} type="button" onClick={() => setMissOpen(missOpen === i ? null : i)} aria-pressed={missOpen === i} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">＋ {m.name}{m.count ? ` ×${m.count}` : ""}</button>
+                    : <span key={i} className="rounded-full bg-white px-2 py-0.5">{m.name}</span>)}
+                </div>
+                {!canCreateMat && <div className="text-slate-500">{t("ให้หัวหน้าเพิ่มที่หน้าวัสดุตีราคา", "Ask a lead to add it on the costing materials page")}</div>}
+                {missOpen != null && missMats[missOpen] && onMaterialCreated && (
+                  <MaterialQuickCreate key={missOpen} name={missMats[missOpen].name} materials={materials ?? []} onCancel={() => setMissOpen(null)}
+                    onPickExisting={(m) => { addMat(m, missMats[missOpen].count); setMissMats((l) => l.filter((_, k) => k !== missOpen)); setMissOpen(null); }}
+                    onCreated={(m) => { onMaterialCreated(m); addMat(m, missMats[missOpen].count); setMissMats((l) => l.filter((_, k) => k !== missOpen)); setMissOpen(null); }} />
+                )}
+              </div>
+            )}
           </div>
           {err && <p className="rounded-md bg-red-50 px-2 py-1 text-[12px] text-red-700">{err}</p>}
           <div className="flex flex-wrap items-center gap-1.5">

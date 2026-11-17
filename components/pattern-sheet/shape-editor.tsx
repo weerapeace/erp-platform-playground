@@ -25,7 +25,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
-import { SearchableSelect } from "@/components/searchable-select";
+import { MaterialAddSelect } from "@/components/material-quick-create";
+import type { QuickMaterial } from "@/lib/material-quick-create";
+import { boardMatColors, fitFontSize } from "@/lib/pattern-mat-colors";
+import { useUserPref } from "@/lib/use-user-pref";
 import {
   SNAP_STEPS, ALLOW_CORNERS, foldSecondLines, cleanAllow, defaultGrain, cleanFoldEdges, edgeAllowances, foldSegments, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth, pointInPolygon, INNER_KINDS, HW_KINDS, hwKind, hwLine, hwSpot, innerOffset, placeInner, setInnerLength,
@@ -183,7 +186,7 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
   );
 }
 
-export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
+export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [], onMaterialCreated,
   embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote, inject, onSelChange, selectPid, onLive, seams, onSeamsChange, initialTool, pieceInfoFields, matProps, onMatPropsChange, innerLines = false, hidePids = null, pieceLinks = false, unit: unitProp, seamTol, lockPids = null, flagged = null, focusEdge = null, onToolChange, level = 3, toolReq = null, ghosts = null, initialEdit = false }: {
   /** รูปชิ้นของรุ่นเทียบ (Bag CAD รอบ H) — วาดเส้นประชมพูใต้ชิ้น กดไม่ได้ · null = ไม่วาด */
   ghosts?: { shape: Shape; holes?: Shape[]; color?: string }[] | null;
@@ -252,8 +255,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   materials?: { id: string; name: string; sub?: string | null }[];
   /** วัสดุตั้งต้นของชิ้นที่วาดใหม่ (เปิดจากบรรทัด = วัสดุของบรรทัดนั้น) */
   defaultMats?: PieceMat[];
+  /** ส่งมา = แผงชิ้นเพิ่มวัสดุใหม่ได้ (ผู้มีสิทธิ์ · ของกลาง MaterialAddSelect) — หน้าแม่ต้องต่อท้ายรายการ materials */
+  onMaterialCreated?: (m: QuickMaterial) => void;
 }) {
   const t = useT();
+  const [showMats, setShowMats] = useUserPref<boolean>("pattern_board_show_mats", true, (v) => (typeof v === "boolean" ? v : null));   // โชว์ป้ายวัสดุบนชิ้น (จำต่อคน)
   const unit: LengthUnit = unitProp ?? "cm";
   const lenDigits = unitProp ? undefined : 1;   // ไม่ส่งหน่วย (ใบงานออกแบบ) = ซม. ทศนิยม 1 ตำแหน่งเหมือนเดิม
   const uL = t(unitLabel(unit, "th"), unitLabel(unit, "en"));
@@ -2111,7 +2117,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const selIdx = selPiece ? pieces.indexOf(selPiece) : -1;
   const selGeo = selPiece ? geo.get(selPiece.id) ?? null : null;
   const selHost = selPiece ? hostOf(selPiece) : null;
-  const matOptions = materials.filter((m) => !selPiece?.mats.some((x) => x.id === m.id)).map((m) => ({ value: m.id, label: m.name, sub: m.sub ?? undefined }));
+  // สีวัสดุบนกระดาน (วัสดุละสี · สีที่ตั้งในวัสดุก่อน) + จำนวนชิ้นต่อวัสดุ สำหรับป้ายบอกสี
+  const matColors = useMemo(() => boardMatColors(pieces.flatMap((p) => p.mats), matProps), [pieces, matProps]);
+  const matLegend = useMemo(() => { const m = new Map<string, { id: string; name: string; n: number }>(); for (const p of pieces) for (const x of p.mats) { const e = m.get(x.id); if (e) e.n += p.count || 1; else m.set(x.id, { id: x.id, name: x.name, n: p.count || 1 }); } return [...m.values()]; }, [pieces]);
+  const noMatCount = pieces.filter((p) => !p.mats.length).length;
 
   const activeRefObj = refs.find((r) => r.id === activeRef) ?? refs[refs.length - 1] ?? null;
   const footerEl = (<>
@@ -2256,8 +2265,23 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           </div>
         )}
       </div>
-      {/* บนขวา: ขยายเต็มป๊อป · พับแผง */}
+      {/* บนขวา: ขยายเต็มป๊อป · พับแผง · ป้ายวัสดุ */}
+      {showMats && (matLegend.length > 0 || (noMatCount > 0 && (materials.length > 0 || !!onMaterialCreated))) && (
+        <div data-mat-legend className="pointer-events-auto absolute right-2 top-14 z-[1] max-h-[40%] max-w-[min(15rem,55%)] overflow-y-auto rounded-xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] text-slate-600 shadow-sm">
+          {matLegend.map((m) => (
+            <div key={m.id} className="flex items-center gap-1.5 py-0.5">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: matColors[m.id]?.dot }} />
+              <span className="min-w-0 flex-1 truncate">{m.name}</span>
+              <span className="shrink-0 tabular-nums text-slate-400">{t(`${m.n} ชิ้น`, `${m.n} pcs`)}</span>
+            </div>
+          ))}
+          {noMatCount > 0 && (materials.length > 0 || !!onMaterialCreated) && <div className="flex items-center gap-1.5 py-0.5 text-red-700"><span className="h-2.5 w-2.5 shrink-0 rounded-full border border-red-300 bg-red-50" /><span className="flex-1">{t(`ยังไม่ใส่วัสดุ ${noMatCount} ชิ้น`, `${noMatCount} without material`)}</span></div>}
+        </div>
+      )}
       <div className={`${fbar} absolute right-2 top-2`}>
+        <button type="button" data-toggle-mat-labels onClick={() => setShowMats(!showMats)} aria-pressed={showMats} title={showMats ? t("ซ่อนป้ายวัสดุบนชิ้น", "Hide material labels") : t("โชว์ป้ายวัสดุบนชิ้น (วัสดุละสี)", "Show material labels (one colour per material)")} aria-label={t("ป้ายวัสดุบนชิ้น", "Material labels")} className={ibCls(showMats)}>
+          <Icon value="i:tags" className="text-[16px]" />
+        </button>
         <button type="button" onClick={() => setFocus((v) => !v)} title={focus ? t("ย่อกลับ", "Exit full view") : t("ขยายพื้นที่วาดเต็มหน้าจอ", "Expand the board to full screen")} className={ibCls(focus)}>
           <Icon value={focus ? "i:x" : "i:maximize"} className="text-[16px]" />{focus ? t("ย่อกลับ", "Exit") : null}
         </button>
@@ -2373,7 +2397,27 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                         <line key={ni} x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke={MARK_COLOR} strokeWidth={2} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                       ))}
                       {notchMode && p.id === sel && (p.notches ?? []).map((n, ni) => <circle key={`n${ni}`} cx={n[0]} cy={n[1]} r={fs * 0.22} fill="#fff" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />)}
-                      <text x={b.x + b.w / 2} y={b.y + b.h / 2} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fill={COLORS.text} style={{ pointerEvents: "none" }}>P{i + 1}{p.name ? ` ${p.name}` : ""}{p.count > 1 ? ` ×${p.count}` : ""}</text>
+                      {(() => {   // ป้ายชิ้น: ชื่อ (ย่อให้พอดีกว้างชิ้น) + ป้ายวัสดุคนละสี (เจ้าของขอ 2026-11-17)
+                        const label = `P${i + 1}${p.name ? ` ${p.name}` : ""}${p.count > 1 ? ` ×${p.count}` : ""}`;
+                        const nf = fitFontSize(label, b.w, fs), cx = b.x + b.w / 2;
+                        const chips: { key: string; text: string; c: { bg: string; border: string; text: string } }[] = !showMats ? []
+                          : p.mats.length ? [...p.mats.slice(0, 3).map((m) => ({ key: m.id, text: m.name, c: matColors[m.id] ?? { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569" } })),
+                              ...(p.mats.length > 3 ? [{ key: "more", text: `+${p.mats.length - 3}`, c: { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569" } }] : [])]
+                          : materials.length || onMaterialCreated ? [{ key: "none", text: t("ยังไม่ใส่วัสดุ", "No material"), c: { bg: "#fef2f2", border: "#fca5a5", text: "#b91c1c" } }] : [];
+                        const cf = chips.length ? Math.min(...chips.map((c) => fitFontSize(c.text, b.w * 0.92 - fs * 0.5, fs * 0.62))) : 0, chH = cf * 1.55, gap = cf * 0.3;
+                        const fits = chips.length > 0 && nf * 1.2 + chips.length * (chH + gap) <= b.h * 0.95;
+                        const shown = fits ? chips : [];
+                        const total = nf * 1.2 + shown.length * (chH + gap), top = b.y + b.h / 2 - total / 2;
+                        return <g data-piece-label style={{ pointerEvents: "none" }}>
+                          <text x={cx} y={top + nf * 0.6} fontSize={nf} textAnchor="middle" dominantBaseline="middle" fill={COLORS.text}>{label}</text>
+                          {shown.map((c, k) => { const w = Math.min(b.w * 0.92, c.text.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "").length * cf * 0.58 + cf * 1.1), y = top + nf * 1.2 + gap + k * (chH + gap);
+                            return <g key={c.key} data-mat-chip={c.key}>
+                              <rect x={cx - w / 2} y={y} width={w} height={chH} rx={chH / 2} fill={c.c.bg} stroke={c.c.border} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                              <text x={cx} y={y + chH / 2} fontSize={cf} textAnchor="middle" dominantBaseline="central" fill={c.c.text}>{c.text}</text>
+                            </g>; })}
+                          {!fits && showMats && p.mats.length > 0 && <g>{p.mats.slice(0, 6).map((m, k) => <circle key={m.id} cx={cx + (k - (Math.min(6, p.mats.length) - 1) / 2) * fs * 0.55} cy={top + nf * 1.35 + fs * 0.25} r={fs * 0.2} fill={matColors[m.id]?.dot ?? "#94a3b8"} />)}</g>}
+                        </g>;
+                      })()}
                       {single && editId !== p.id && <>
                         <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} fill="none" stroke={COLORS.sel} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                         <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 || g.segAllow ? t("ตัด ", "cut ") : ""}{fmtL(cb.w)}</text>
@@ -2597,16 +2641,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <div className="mb-1.5 flex flex-wrap gap-1">
                   {selPiece.mats.length ? selPiece.mats.map((m) => (
                     <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
-                      {matProps?.[m.id]?.color && <span className="h-2.5 w-2.5 rounded-full border border-white" style={{ background: matProps[m.id].color }} />}
+                      {matColors[m.id] && <span className="h-2.5 w-2.5 rounded-full border border-white" style={{ background: matColors[m.id].dot }} />}
                       {m.name}
                       {onMatPropsChange && <button type="button" onClick={() => setMatOpen(matOpen === m.id ? null : m.id)} aria-pressed={matOpen === m.id} title={t("ตั้งค่าวัสดุ: ความอยู่ทรง ความหนา สี", "Material settings: stiffness, thickness, colour")} aria-label={t(`ตั้งค่า ${m.name}`, `Settings for ${m.name}`)} className={matProps?.[m.id] ? "text-blue-600" : "text-blue-300 hover:text-blue-600"}><Icon value="i:adjustments-horizontal" className="text-[13px]" /></button>}
                       <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, mats: p.mats.filter((x) => x.id !== m.id) }))} aria-label={t(`เอา ${m.name} ออก`, `Remove ${m.name}`)} className="text-blue-400 hover:text-rose-600">✕</button>
                     </span>
                   )) : <span className="text-amber-600">{t("ยังไม่เลือกวัสดุ", "No material yet")}</span>}
                 </div>
-                {materials.length > 0
-                  ? <SearchableSelect value="" options={matOptions} placeholder={t("＋ เพิ่มวัสดุ (เช่น หนัง, ซับใน)", "＋ Add material (e.g. leather, lining)")}
-                      onChange={(v) => { const m = materials.find((x) => x.id === v); if (m) patchPiece(selPiece.id, (p) => ({ ...p, mats: [...p.mats, { id: m.id, name: m.name }] })); }} />
+                {materials.length > 0 || onMaterialCreated
+                  ? <MaterialAddSelect materials={materials} exclude={selPiece.mats.map((m) => m.id)} onCreated={onMaterialCreated}
+                      placeholder={t("＋ เพิ่มวัสดุ (เช่น หนัง, ซับใน)", "＋ Add material (e.g. leather, lining)")}
+                      onPick={(m) => patchPiece(selPiece.id, (p) => (p.mats.some((x) => x.id === m.id) ? p : { ...p, mats: [...p.mats, { id: m.id, name: m.name }] }))} />
                   : <div className="text-slate-400">{t("เลือกวัสดุในตารางตีราคาทีหลังได้", "Pick materials in the costing table later")}</div>}
                 {onMatPropsChange && matOpen && selPiece.mats.some((m) => m.id === matOpen) && (() => {
                   const m = selPiece.mats.find((x) => x.id === matOpen)!, cur = matProps?.[m.id], val: MatProps = cur ?? { stiff: 0.5, thick: 1 };

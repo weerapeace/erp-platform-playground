@@ -14,7 +14,8 @@
  */
 export type DeptColor = { dot: string; bg: string; border: string; text: string };
 
-const PALETTE: DeptColor[] = [
+/** ชุดสี 10 สีที่แยกกันชัด — ของกลางอื่นที่ต้องให้สีอัตโนมัติใช้ร่วมได้ (เช่น สีวัสดุบนกระดานแพทเทิร์น lib/pattern-mat-colors) */
+export const NAME_COLOR_PALETTE: DeptColor[] = [
   { dot: "#6366f1", bg: "#eef2ff", border: "#c7d2fe", text: "#4338ca" },   // indigo
   { dot: "#10b981", bg: "#ecfdf5", border: "#a7f3d0", text: "#047857" },   // emerald
   { dot: "#f59e0b", bg: "#fffbeb", border: "#fde68a", text: "#b45309" },   // amber
@@ -35,5 +36,5 @@ export function deptColor(name: string | null | undefined): DeptColor {
   if (!key) return NONE;
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return PALETTE[h % PALETTE.length];
+  return NAME_COLOR_PALETTE[h % NAME_COLOR_PALETTE.length];
 }

@@ -373,6 +373,7 @@ export function PatternProjectEditor({ id }: { id: string }) {
         </div>
       )}
       <PatternStudio key={`board-${boardNonce}`} imageName={`${patternNo ?? ""} ${name}`.trim() || undefined} readonly={!canEdit} initial={initial} initialBasis={basis} onChange={onBoard} onTemplateInsert={onTemplate} materials={matOptions}
+        onMaterialCreated={canEdit ? (m) => setMaterials((l) => (l.some((x) => x.id === m.id) ? l : [...l, { id: m.id, name: m.name, group: m.group ?? null }])) : undefined}
         startDraft={pieces.length === 0 ? dlDraftOf(template) : null}
         sew={{ seams, onChange: onSeams, attaches, onAttachesChange: canEdit ? onAttaches : undefined, pieceStiff,
           tol: seamTol, onTolChange: canEdit ? (v) => { setTemplate((tp) => ({ ...(tp ?? {}), settings: { ...((tp?.settings as Record<string, unknown> | undefined) ?? {}), seamTol: v } })); setDirty(true); } : undefined,

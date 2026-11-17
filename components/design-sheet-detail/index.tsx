@@ -17,6 +17,7 @@ import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-bo
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { createDesignMaterial } from "@/lib/material-quick-create";
 import { formatDate, todayBangkok, addDaysYmd } from "@/lib/date";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
@@ -1654,9 +1655,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const createPriceItemInline = useCallback(async (name: string, onPicked: (it: PriceItem) => void) => {
     const nm = name.trim(); if (!nm) return;
     try {
-      const res = await apiFetch("/api/master-v2/design-price-items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      const newId = (j.data?.id as string | undefined) ?? undefined;
+      const newId = (await createDesignMaterial(nm)).id;   // ของกลาง "เพิ่มวัสดุด่วน" (lib/material-quick-create)
       const pr = await apiFetch("/api/design-sheets/price-items").then((r) => r.json());
       const items = (pr.data ?? []) as PriceItem[];
       setPriceItems(items); setPriceGroups((pr.groups ?? []) as PriceGroup[]);

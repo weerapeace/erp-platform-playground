@@ -770,7 +770,7 @@ export function PatternStudio({ onTemplateInsert, sew, imageName, startDraft, ..
           : t(`นำเข้าแล้ว ${list.length} ชิ้น — ไฟล์ DXF ไม่มีตะเข็บและวัสดุ ต้องเย็บขอบและเลือกวัสดุเอง · ตรวจขนาดเทียบกับของจริงอย่างน้อย 1 ชิ้น`, `Imported ${list.length} pieces — DXF has no seams or materials, so sew the edges and pick materials yourself · check at least one size against the original`));
       }} />}
       {photo && <PhotoModal open onClose={() => setPhoto(false)}
-        materials={props.materials}
+        materials={props.materials} onMaterialCreated={props.onMaterialCreated}
         onPieces={(pieces, aiSeams) => {
           setPhoto(false);
           const stamp = Date.now().toString(36), pids = pieces.map((_, i) => `pc${stamp}p${i}`);
