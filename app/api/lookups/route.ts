@@ -15,6 +15,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export type LookupRow = {
   id:           string;
@@ -102,12 +104,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     created_by:  user.email,
   };
 
-  const { data, error } = await supabase
+  // 🔒 (audit 2026-11-17) erp_lookups ปิดเขียนตรงแล้ว → เขียนผ่านเซิร์ฟเวอร์หลังเช็กล็อกอินด้านบน
+  const admin = supabaseAdmin();
+  const { data, error } = await admin
     .from("erp_lookups")
     .insert(payload)
     .select()
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await writeAudit(admin, {
+    action: "create", entityType: "erp_lookup", entityId: (data as { id?: string } | null)?.id ?? null,
+    actorId: user.id, actorName: user.email ?? null, metadata: { lookup_type: type, name },
+  });
   return NextResponse.json({ data, error: null });
 }

@@ -48,8 +48,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!type || !SAFE.test(type)) return NextResponse.json({ error: "invalid lookup_type — ใช้ตัวอักษร a-z + _" }, { status: 400 });
   if (!label) return NextResponse.json({ error: "label required" }, { status: 400 });
 
-  const supabase = supabaseFromRequest(request);
-  const { data, error } = await supabase
+  // 🔒 (audit 2026-11-17) erp_lookup_types ปิดเขียนตรงแล้ว → เขียนผ่านเซิร์ฟเวอร์หลังผ่าน guardApi
+  const { data, error } = await supabaseAdmin()
     .from("erp_lookup_types")
     .insert({
       lookup_type: type,
