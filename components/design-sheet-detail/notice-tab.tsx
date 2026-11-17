@@ -24,6 +24,7 @@ import { DblClickToEdit } from "@/components/dbl-click-edit";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { useAuth } from "@/components/auth";
+import type { NestUsage } from "@/lib/nest-usage";
 import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { SheetSize } from "@/lib/cost-usage";
@@ -69,7 +70,7 @@ function Seg<T extends string | number>({ value, options, onChange, disabled }: 
   );
 }
 
-export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLines, sheetOf, orderOf, onDirtyChange, saveRef, onCountChange }: {
+export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLines, sheetOf, nestUsage, orderOf, onDirtyChange, saveRef, onCountChange }: {
   sheetId: string;
   canEdit: boolean;
   sheet: { code: string; name: string; brandName: string };
@@ -78,6 +79,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   /** บรรทัดตีราคาทุกแท็บ (ไม่มีสิทธิ์ดูต้นทุน = ว่าง → พิมพ์ใช้ต่อใบเอง) */
   costLines: NoticeCostLine[];
   sheetOf?: (itemId: string) => SheetSize | null | undefined;
+  /** ใช้ต่อใบจากการวางบนผ้าจริง (มี = ใช้ก่อนค่าประมาณ) */
+  nestUsage?: NestUsage;
   /** จำนวนสั่งตั้งต้นของไซส์ (เช่น จากรอบเสนอราคาล่าสุด) */
   orderOf?: (tabKey: string) => number | null;
   onDirtyChange?: (dirty: boolean) => void;
@@ -107,7 +110,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => { if (list) onCountChange?.(list.length); }, [list, onCountChange]);
 
-  const mats = useMemo(() => noticeMaterialsFromCost(costLines, sheetOf), [costLines, sheetOf]);
+  const mats = useMemo(() => noticeMaterialsFromCost(costLines, sheetOf, nestUsage), [costLines, sheetOf, nestUsage]);
   const matOptions: SelectOption[] = useMemo(() => mats.map((m) => ({
     value: m.key, label: m.name,
     sub: costTabs.filter((tb) => m.perTab[tb.key] != null).map((tb) => `${tb.label} ${fmtN(m.perTab[tb.key], 3)}`).join(" · ") + ` ${m.unit}`,

@@ -139,3 +139,18 @@ describe("buildNoticeHtml", () => {
     expect(buildNoticeHtml(doc, ctx)).not.toContain("nt-fit");
   });
 });
+
+describe("วางจริงแทนค่าประมาณ (เจ้าของขอ 2026-11-17)", () => {
+  const L = (parent: string, qty: number) => ({ parent_code: parent, item_id: "cv", item_name: "ผ้าแคนวาส", group_name: "ผ้า", qty, uom: "หลา", piece: false, amount: 10 });
+  it("ไซส์ที่มีวางจริงใช้ตัวนั้น · ไซส์อื่นยังเป็นค่าประมาณ · หมายเหตุบอก", () => {
+    const ms = noticeMaterialsFromCost([L("S", 1.125), L("M", 1.3)], () => null, { S: { cv: { qty: 1.05, unit: "หลา" } } });
+    expect(ms[0].perTab.S).toBe(1.05);
+    expect(ms[0].perTab.M).toBeCloseTo(1.3, 4);
+    expect(ms[0].note).toContain("วางผ้าจริง");
+  });
+  it("ไม่มีวางจริง = เหมือนเดิม", () => {
+    const ms = noticeMaterialsFromCost([L("S", 1.125)], () => null, {});
+    expect(ms[0].perTab.S).toBeCloseTo(1.125, 4);
+    expect(ms[0].note).not.toContain("วางผ้าจริง");
+  });
+});

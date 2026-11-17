@@ -29,6 +29,9 @@ import {
 import { cleanExtra, extraAmountAt, extraKindOf, type SnapExtra, type SnapExtraMap } from "@/lib/design-sheet-cost-snapshot";
 import { cutLaborRows, cutLaborSummary, overheadRows, overheadTotal, presetsOf, type CostPreset } from "@/lib/design-cost-presets";
 import { costUsagePerUnit } from "@/lib/cost-usage";
+import { cleanNestUsage, setNestEntry, type NestUsage } from "@/lib/nest-usage";
+import { NestUsageChip } from "@/components/design-sheet-detail/nest-usage-chip";
+import { useAuth } from "@/components/auth";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 
 type Row = CostLine & { key: string };
@@ -108,18 +111,20 @@ function NumField({ label, value, onChange, suffix, step, need = false }: {
   );
 }
 
-export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabCodes, canEdit, onSaved, onDirtyChange, onReload, onOpenFull }: {
+export function MobileCostTab({ sheetId, lines, costExtraRaw, nestRaw, generalLabel, tabCodes, canEdit, onSaved, onDirtyChange, onReload, onOpenFull }: {
   sheetId: string;
   /** บรรทัดตีราคาที่โหลดมาแล้ว (หน้าแม่โหลดครั้งเดียว) */
   lines: CostLine[];
   /** design_sheets.cost_extra ดิบ */
   costExtraRaw: unknown;
+  /** design_sheets.nest_usage ดิบ (ใช้ต่อใบจากการวางบนผ้าจริง) */
+  nestRaw?: unknown;
   generalLabel?: string | null;
   /** แท็บไซส์ที่ใบงานรู้จัก (Parent จริง + ร่าง) — เพิ่มจากบรรทัด/ค่าใช้จ่ายที่มีอยู่ให้เอง */
   tabCodes: string[];
   /** แก้ได้ไหม (สิทธิ์แก้ใบงาน + เห็นต้นทุน) */
   canEdit: boolean;
-  onSaved: (lines: CostLine[], costExtra: SnapExtraMap) => void;
+  onSaved: (lines: CostLine[], costExtra: SnapExtraMap, nestUsage: NestUsage) => void;
   onDirtyChange?: (dirty: boolean) => void;
   /** โหลดใบงานใหม่ทั้งหน้า (ตอนมีคนบันทึกทับ) */
   onReload: () => void;
@@ -132,14 +137,15 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
   // ── ชุดที่แก้อยู่ (draft) + ชุดตั้งต้น (เทียบว่าแก้ค้างไหม) ──
   const [rows, setRows] = useState<Row[]>(() => toRows(lines));
   const [extras, setExtras] = useState<SnapExtraMap>(() => parseExtraMap(costExtraRaw));
-  const [base, setBase] = useState(() => ({ fp: serverFp(lines), lines, extras: parseExtraMap(costExtraRaw) }));
+  const [nest, setNest] = useState<NestUsage>(() => cleanNestUsage(nestRaw));   // 📏 วางจริง (lib/nest-usage)
+  const [base, setBase] = useState(() => ({ fp: serverFp(lines), lines, extras: parseExtraMap(costExtraRaw), nest: cleanNestUsage(nestRaw) }));
   useEffect(() => {   // หน้าแม่โหลดใหม่ / บันทึกเสร็จ → ตั้งต้นใหม่
-    const ex = parseExtraMap(costExtraRaw);
-    setRows(toRows(lines)); setExtras(ex); setBase({ fp: serverFp(lines), lines, extras: ex });
-  }, [lines, costExtraRaw]);
+    const ex = parseExtraMap(costExtraRaw), nu = cleanNestUsage(nestRaw);
+    setRows(toRows(lines)); setExtras(ex); setNest(nu); setBase({ fp: serverFp(lines), lines, extras: ex, nest: nu });
+  }, [lines, costExtraRaw, nestRaw]);
   const dirty = useMemo(
-    () => JSON.stringify(stripKeys(rows)) !== JSON.stringify(stripKeys(toRowsStable(base.lines))) || JSON.stringify(extras) !== JSON.stringify(base.extras),
-    [rows, extras, base],
+    () => JSON.stringify(stripKeys(rows)) !== JSON.stringify(stripKeys(toRowsStable(base.lines))) || JSON.stringify(extras) !== JSON.stringify(base.extras) || JSON.stringify(nest) !== JSON.stringify(base.nest),
+    [rows, extras, nest, base],
   );
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => {   // ปิดแท็บ/รีเฟรชทั้งที่แก้ค้าง = เบราว์เซอร์ถามก่อน
@@ -214,9 +220,20 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
     const parts: string[] = [];
     if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}`);
     for (const x of u.byUom) parts.push(`${fmtN(Math.round(x.qty * 1000) / 1000, 3)} ${x.uom}`);
-    return parts.length ? t(`ใช้ต่อใบ ≈ ${parts.join(" + ")}`, `Per unit ≈ ${parts.join(" + ")}`) : null;
+    const act = Object.entries(nest[parent] ?? {}).filter(([id]) => curRows.some((r) => r.item_id === id))
+      .map(([id, e]) => `${itemById.get(id)?.name ?? ""} ${fmtN(e.qty, 3)} ${e.unit}`.trim());
+    const est = parts.length ? t(`ใช้ต่อใบ ≈ ${parts.join(" + ")}`, `Per unit ≈ ${parts.join(" + ")}`) : "";
+    return [est, act.length ? t(`วางจริง: ${act.join(" · ")}`, `Actual layout: ${act.join(" · ")}`) : ""].filter(Boolean).join(" · ") || null;
   })();
   const zeroRows = curRows.filter(isZeroCostLine);
+  // 📏 วางจริง ต่อวัสดุในกลุ่ม — ค่าประมาณของวัสดุนั้น (ผืน/แผ่น หรือหน่วยเดียว) ตัวเดียวกับหน้าคอม
+  const { user } = useAuth();
+  const nestItems = (gRows: Row[]) => [...new Set(gRows.map((r) => r.item_id).filter(Boolean))].flatMap((id) => {
+    const its = gRows.filter((r) => r.item_id === id);
+    const u = costUsagePerUnit(its.map((r) => ({ item_id: r.item_id, group_name: r.group_name, qty: r.qty, uom: r.uom, piece: isPieceGroup(r.group_code, r.group_name) })), (x) => itemById.get(x));
+    const est = u.sheets ? { qty: u.sheets.qty, unit: u.sheets.unit } : u.byUom.length === 1 ? { qty: u.byUom[0].qty, unit: u.byUom[0].uom } : null;
+    return est ? [{ id: id as string, name: its[0].item_name || "", est }] : [];
+  });
 
   // ── แผ่นแก้ ──
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
@@ -279,20 +296,20 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
       // 2) บรรทัด (PUT ทั้งชุด) + ค่าใช้จ่ายเพิ่ม (PATCH ใบงาน) — ชุดเดียวกับหน้าคอม
       const [lr, er] = await Promise.all([
         apiFetch(`/api/design-sheets/${sheetId}/cost-lines`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: stripKeys(rows), cost_extra: extras }) }),
-        apiFetch(`/api/design-sheets/${sheetId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cost_extra: extras }) }),
+        apiFetch(`/api/design-sheets/${sheetId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cost_extra: extras, nest_usage: nest }) }),
       ]);
       const lj = await lr.json().catch(() => ({})); if (!lr.ok || lj.error) throw new Error(lj.error || t("บันทึกบรรทัดตีราคาไม่สำเร็จ", "Failed to save cost lines"));
       const ej = await er.json().catch(() => ({})); if (!er.ok || ej.error) throw new Error(ej.error || t("บันทึกค่าใช้จ่ายเพิ่มไม่สำเร็จ", "Failed to save additional costs"));
       // 3) โหลดชุดใหม่ (id ใหม่) ให้รอบหน้าเช็กกันทับได้ถูก
       const fresh = await apiFetch(`/api/design-sheets/${sheetId}/cost-lines`).then((r) => r.json()).catch(() => null) as { data?: CostLine[] } | null;
-      onSaved(Array.isArray(fresh?.data) ? fresh.data : stripKeys(rows), extras);
+      onSaved(Array.isArray(fresh?.data) ? fresh.data : stripKeys(rows), extras, nest);
       toast.success(t("บันทึกตีราคาแล้ว", "Costing saved"));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกตีราคาไม่สำเร็จ", "Failed to save costing")); }
     finally { setSaving(false); }
   };
   const discard = async () => {
     if (!(await askConfirm({ title: t("ทิ้งที่แก้ค้าง?", "Discard unsaved changes?"), message: t("กลับไปเป็นตีราคาที่บันทึกไว้", "Go back to the saved costing"), variant: "danger", confirmText: t("ทิ้ง", "Discard") }))) return;
-    setRows(toRows(base.lines)); setExtras(base.extras);
+    setRows(toRows(base.lines)); setExtras(base.extras); setNest(base.nest);
   };
 
   const empty = curRows.length === 0 && curExtra.every((c) => !c.amount);
@@ -349,6 +366,13 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, generalLabel, tabC
                   </button>
                   {open && (
                     <div className="bg-slate-50/70 pb-1">
+                      {nestItems(g.rows).map((n) => (
+                        <div key={n.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-100 py-1.5 pl-6 pr-3 text-[11px]">
+                          <span className="text-emerald-700">{n.name ? `${n.name} · ` : ""}{t("ใช้ต่อใบ ≈", "Per unit ≈")} <span className="font-semibold tabular-nums">{fmtN(Math.round(n.est.qty * 1000) / 1000, 3)} {n.est.unit}</span></span>
+                          <NestUsageChip entry={nest[parent]?.[n.id]} estimate={Math.round(n.est.qty * 1000) / 1000} unit={n.est.unit} editable={canEdit}
+                            userName={user?.name ?? user?.email ?? null} onChange={(e) => setNest((m) => setNestEntry(m, parent, n.id, e))} />
+                        </div>
+                      ))}
                       {g.rows.map((r) => {
                         const zero = isZeroCostLine(r);
                         return (

@@ -9,6 +9,7 @@
  *   design_sheet_quotes.parent_code           (รอบเสนอราคา — เปลี่ยนชื่อตาม · ลบแท็บไม่ลบประวัติรอบ)
  *   design_sheets.cost_extra[key]             (ค่าใช้จ่ายเพิ่ม)
  *   design_sheets.profit_splits[key]          (แบ่งกำไรทั้งใบ)
+ *   design_sheets.nest_usage[key]             (ใช้ต่อใบจากการวางบนผ้าจริง)
  *   design_sheets.parent_sku_drafts[]         (ชื่อเวอร์ชัน/ร่าง Parent)
  * → ทำที่เดียวตรงนี้ให้ครบทุกตาราง หน้าจอแค่รีโหลด
  *
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const admin = supabaseAdmin();
   const { data: sheet, error: sErr } = await admin.from("design_sheets")
-    .select("id, code, parent_sku_codes, parent_sku_drafts, cost_extra, profit_splits").eq("id", id).maybeSingle();
+    .select("id, code, parent_sku_codes, parent_sku_drafts, cost_extra, profit_splits, nest_usage").eq("id", id).maybeSingle();
   if (sErr) return NextResponse.json({ error: friendlyDbError(sErr.message) }, { status: 500 });
   if (!sheet) return NextResponse.json({ error: "ไม่พบใบงาน" }, { status: 404 });
 
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (sheet.cost_extra && typeof sheet.cost_extra === "object" && !Array.isArray(sheet.cost_extra)) {
     patch.cost_extra = moveKey(sheet.cost_extra, from, newParent);
   }
+  if (sheet.nest_usage && typeof sheet.nest_usage === "object") patch.nest_usage = moveKey(sheet.nest_usage, from, newParent);
   const { error: uErr } = await admin.from("design_sheets").update(patch).eq("id", id);
   if (uErr) return NextResponse.json({ error: friendlyDbError(uErr.message) }, { status: 400 });
 

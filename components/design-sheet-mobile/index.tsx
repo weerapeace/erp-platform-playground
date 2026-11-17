@@ -74,6 +74,7 @@ type Sheet = {
   linked_skus: { id: string; code: string; name_th: string | null; color: string | null; image_key: string | null; is_active: boolean; parent_code: string | null; from_sheet: boolean }[];
   updated_at: string;
   cost_extra?: unknown;   // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย) — array หรือ map ต่อ Parent
+  nest_usage?: unknown;   // ใช้ต่อใบจากการวางบนผ้าจริง (lib/nest-usage)
   cost_general_label?: string | null;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง
   cost_restricted?: boolean;   // API บอก: คนนี้ไม่มีสิทธิ์เห็นต้นทุน → ไม่มีแท็บตีราคา
 };
@@ -546,10 +547,10 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       {/* ตีราคา — คงไว้หลังเปิดครั้งแรก (สลับแท็บแล้วที่แก้ค้างไม่หาย) */}
       {costAllowed && costMounted && (
         <div className={tab === "cost" ? "" : "hidden"}>
-          <MobileCostTab sheetId={sheet.id} lines={costLines} costExtraRaw={sheet.cost_extra} generalLabel={sheet.cost_general_label}
+          <MobileCostTab sheetId={sheet.id} lines={costLines} costExtraRaw={sheet.cost_extra} nestRaw={sheet.nest_usage} generalLabel={sheet.cost_general_label}
             tabCodes={[...sheet.parent_sku_refs.map((p) => p.code), ...(sheet.parent_sku_drafts ?? [])]}
             canEdit={canEdit} onDirtyChange={setCostDirty} onOpenFull={() => void openFull()}
-            onSaved={(ls, ex) => { setCostLines(ls); setSheet((s) => (s ? { ...s, cost_extra: ex } : s)); }}
+            onSaved={(ls, ex, nu) => { setCostLines(ls); setSheet((s) => (s ? { ...s, cost_extra: ex, nest_usage: nu } : s)); }}
             onReload={() => { setCostDirty(false); setReloadKey((k) => k + 1); }} />
         </div>
       )}

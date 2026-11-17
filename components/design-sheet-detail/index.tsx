@@ -43,6 +43,8 @@ import { COST_QTY_TIERS, costItemPatch, costLineFromItem, isPieceGroup, isZeroCo
 import { buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
+import { cleanNestUsage, setNestEntry, type NestEntry, type NestUsage } from "@/lib/nest-usage";
+import { NestUsageChip } from "./nest-usage-chip";
 import { CostSummaryCard } from "./cost-summary-card";
 import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
 import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type CostPreset, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
@@ -645,6 +647,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     return Math.min(...pool.filter((q) => batchOf(q) === last).map((q) => q.qty as number));
   }, [quotes]);
   const [orderQtyDraft, setOrderQtyDraft] = useState<Record<string, number | null>>({});
+  // 📏 ใช้ต่อใบจากการวางบนผ้าจริง ต่อแท็บ ต่อวัสดุ (เจ้าของขอ 2026-11-17 · lib/nest-usage) — บันทึกพร้อมปุ่มบันทึกตีราคา
+  const [nestMap, setNestMap] = useState<NestUsage>({});
   const [packRefs, setPackRefs] = useState<Record<string, PackRef>>({});   // ขนาดสินค้า/กล่องส่งของแต่ละรุ่น (GET ใบงาน pack_refs)
   const [extraOpen, setExtraOpen] = useState<Set<string>>(new Set());      // แถวค่าใช้จ่ายเพิ่มที่กางดูรายละเอียด (โหมดดู)
   const hasSplitExtra = costExtra.some((c) => c.mode === "split");
@@ -1046,6 +1050,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const removeParentDraft = (label: string) =>
     setForm((f) => (f ? { ...f, parent_sku_drafts: f.parent_sku_drafts.filter((d) => d !== label) } : f));
 
+  const setNestUsage = (itemId: string, e: NestEntry | null) => {
+    setNestMap((m) => setNestEntry(m, costParent, itemId, e)); setCostDirty(true); setEditing(true);
+  };
+
   const saveCost = useCallback(async (linesOverride?: CostRow[]): Promise<boolean> => {
     if (!form?.id) return false;
     const src = linesOverride ?? costLines;
@@ -1057,7 +1065,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           body: JSON.stringify({ lines: src.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }), cost_extra: costExtraMap }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
           // ส่ง cost_extra ทั้ง map (แยกตาม Parent) + ชื่อเวอร์ชัน/ร่าง Parent (แท็บที่เพิ่มจากหน้านี้จะได้ไม่หายตอนรีโหลด)
-          body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts, order_qty: cleanOrderQty(orderQtyDraft) }) }),
+          body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts, order_qty: cleanOrderQty(orderQtyDraft), nest_usage: nestMap }) }),
       ]);
       const lj = await lr.json(); if (lj.error) throw new Error(lj.error);
       const ej = await er.json(); if (ej.error) throw new Error(ej.error);
@@ -1066,7 +1074,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       return true;
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกตีราคาไม่สำเร็จ", "Failed to save costing")); return false; }
     finally { setCostSaving(false); }
-  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, orderQtyDraft, toast, t]);
+  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, orderQtyDraft, nestMap, toast, t]);
 
   // เปลี่ยนชื่อ / ลบ "เวอร์ชันตีราคา" (แท็บ) — เซิร์ฟเวอร์แก้ให้ครบทุกตาราง (วัสดุ/สั่งจากร้าน/เสนอราคา/ค่าใช้จ่ายเพิ่ม/แบ่งกำไร/ชื่อ) แล้วหน้าจอรีโหลด
   const versionOp = async (action: "rename" | "delete", from: string, to?: string): Promise<boolean> => {
@@ -1454,7 +1462,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       }
       if (!(ceMap[""]?.length)) ceMap[""] = defaultCostExtra();   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
       setCostParent(""); setCostExtraMap(ceMap);
-      setOrderQtyDraft(cleanOrderQty(d.order_qty));   // จำนวนที่สั่งที่บันทึกไว้ต่อแท็บ
+      setOrderQtyDraft(cleanOrderQty(d.order_qty));
+      setNestMap(cleanNestUsage(d.nest_usage));   // จำนวนที่สั่งที่บันทึกไว้ต่อแท็บ
       setPackRefs(d.pack_refs && typeof d.pack_refs === "object" ? (d.pack_refs as Record<string, PackRef>) : {});
     } catch (e) { setFormErr(e instanceof Error ? e.message : t("โหลดไม่ได้", "Could not load")); }
     finally { setLoadingForm(false); }
@@ -2114,7 +2123,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     const parts: string[] = [];
     if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}`);
     for (const x of u.byUom) parts.push(`${fmtQty(Math.round(x.qty * 1000) / 1000)} ${x.uom}`);
-    return parts.length ? t(`ใช้ต่อใบ ≈ ${parts.join(" + ")}`, `Per unit ≈ ${parts.join(" + ")}`) : null;
+    // 📏 วางจริง (ถ้ามี) ต่อท้าย — ชื่อวัสดุ + ตัวเลข
+    const nest = Object.entries(nestMap[costParent] ?? {}).filter(([id]) => curLines.some((r) => r.item_id === id))
+      .map(([id, e]) => `${priceItemById.get(id)?.name ?? ""} ${fmtQty(e.qty)} ${e.unit}`.trim());
+    const est = parts.length ? t(`ใช้ต่อใบ ≈ ${parts.join(" + ")}`, `Per unit ≈ ${parts.join(" + ")}`) : "";
+    const act = nest.length ? t(`วางจริง: ${nest.join(" · ")}`, `Actual layout: ${nest.join(" · ")}`) : "";
+    return [est, act].filter(Boolean).join(" · ") || null;
   })();
   const costSummaryCard = (
     <CostSummaryCard grandTotal={grandTotal} materialTotal={costTotal} groups={costByGroup}
@@ -2413,7 +2427,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className={modalTab === "notice" ? "" : "hidden"}>
                 <DesignSheetNoticeTab key={form.id} sheetId={form.id} canEdit={canEdit}
                   sheet={{ code: form.code ?? "", name: form.name ?? "", brandName: brands.find((b) => b.id === form.brand_id)?.name ?? "" }}
-                  costTabs={noticeCostTabs} costLines={noticeCostLines} sheetOf={noticeSheetOf} orderOf={noticeOrderOf}
+                  costTabs={noticeCostTabs} costLines={noticeCostLines} sheetOf={noticeSheetOf} nestUsage={nestMap} orderOf={noticeOrderOf}
                   onDirtyChange={setNoticeDirty} saveRef={noticeSaveRef} onCountChange={setNoticeCount} />
               </div>
             )}
@@ -2752,7 +2766,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}${u.sheets.size ? t(` (${u.sheets.unit}ละ ${u.sheets.size} ซม.)`, ` (${u.sheets.size} cm per ${u.sheets.unit})`) : ""}`);
                   for (const b of u.byUom) parts.push(`${fmtQty(Math.round(b.qty * 1000) / 1000)} ${b.uom}`);
                   const missing = priceItemById.size > 0 ? u.missingSize : 0;   // รายการวัสดุยังไม่โหลด = ไม่เตือน
-                  if (!parts.length && !missing) return null;
+                  // 📏 วางจริง — เฉพาะกลุ่มที่เป็นวัสดุตัวเดียว (จัดกลุ่มตามวัสดุ) · ค่าประมาณ = ผืน/แผ่น หรือหน่วยเดียว
+                  const ids = [...new Set(rows.map((r) => r.item_id).filter(Boolean))] as string[];
+                  const est = u.sheets ? { qty: u.sheets.qty, unit: u.sheets.unit } : u.byUom.length === 1 ? { qty: u.byUom[0].qty, unit: u.byUom[0].uom } : null;
+                  const nestId = ids.length === 1 && est ? ids[0] : null;
+                  const nestChip = nestId ? (
+                    <NestUsageChip entry={nestMap[costParent]?.[nestId]} estimate={Math.round(est!.qty * 1000) / 1000} unit={est!.unit} editable={canEdit}
+                      userName={user?.name ?? user?.email ?? null} onChange={(e) => setNestUsage(nestId, e)} />
+                  ) : null;
+                  if (!parts.length && !missing) return nestChip;
                   const sheetHow = u.sheets
                     ? (() => {
                         const sh = u.sheets;
@@ -2765,6 +2787,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <span className="text-emerald-700" title={sheetHow}>
                       {parts.length > 0 && <>{t("· ใช้ต่อใบ ≈", "· Per sheet ≈")} <span className="font-semibold tabular-nums">{parts.join(" + ")}</span></>}
                       {u.sheets?.perSheet ? <span className="text-slate-500">{t(` · 1 ${u.sheets.unit} ทำได้ ~${u.sheets.perSheet} ใบ`, ` · 1 ${u.sheets.unit} makes ~${u.sheets.perSheet} sheets`)}</span> : null}
+                      {nestChip && <span className="ml-1.5 inline-flex align-middle">{nestChip}</span>}
                       {missing > 0 && <span className="text-amber-600">{t(` · ${missing} บรรทัดคิดเป็นผืนไม่ได้ (วัสดุไม่มีขนาดผืนในทะเบียนวัสดุตีราคา)`, ` · ${missing} lines can't be converted to sheets (material has no sheet size in the costing materials register)`)}</span>}
                     </span>
                   );

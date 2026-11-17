@@ -13,6 +13,7 @@
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { costUsagePerUnit, type SheetSize } from "@/lib/cost-usage";
+import type { NestUsage } from "@/lib/nest-usage";
 import { formatThaiAddress } from "@/lib/thai-address";
 import { r2ImageUrl } from "@/lib/r2-image";
 
@@ -237,7 +238,8 @@ export const NOTICE_YARD_CM = 90;
 export type NoticeCostTab = { key: string; label: string; kind?: string };
 
 const matKey = (l: NoticeCostLine) => l.item_sku_id || l.item_id || `name:${(l.item_name ?? "").trim().toLowerCase()}`;
-export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemId: string) => SheetSize | null | undefined = () => null): NoticeMaterialOption[] {
+/** nest = ใช้ต่อใบจากการวางบนผ้าจริง (design_sheets.nest_usage · lib/nest-usage) — มีตัวเลขวางจริงของไซส์ไหน ใช้แทนค่าประมาณจากพื้นที่ (เจ้าของขอ 2026-11-17) */
+export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemId: string) => SheetSize | null | undefined = () => null, nest?: NestUsage): NoticeMaterialOption[] {
   const groups = new Map<string, NoticeCostLine[]>();
   for (const l of lines) {
     if (!(Number(l.qty) > 0) || !(l.item_name ?? "").trim()) continue;
@@ -269,6 +271,16 @@ export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemI
         if (w > 0 && Number(l.qty) > 0) put("หลา", tab, Number(l.qty) / (w * NOTICE_YARD_CM), { width: w });
       }
     }
+    // 📏 วางจริง: แทนค่าประมาณของไซส์นั้น (หน่วยตามที่ช่างใส่)
+    const itemId = ls.find((l) => l.item_id)?.item_id ?? null;
+    const actualUnits = new Set<string>();
+    if (itemId && nest) for (const tab of byTab.keys()) {
+      const e = nest[tab]?.[itemId];
+      if (!e?.unit || !(e.qty > 0)) continue;
+      let v = byUnit.get(e.unit);
+      if (!v) { v = { perTab: {}, widths: new Set(), sizes: new Set() }; byUnit.set(e.unit, v); }
+      v.perTab[tab] = e.qty; actualUnits.add(e.unit);
+    }
     if (!byUnit.size) continue;
     const r4 = (n: number) => Math.round(n * 10000) / 10000;
     const units = [...byUnit.entries()].map(([unit, v]) => ({
@@ -276,11 +288,12 @@ export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemI
       perTab: Object.fromEntries(Object.entries(v.perTab).map(([k, q]) => [k, r4(q)])),
       note: unit === "หลา" && v.widths.size ? (v.widths.size === 1 ? `คิดจากหน้ากว้าง ${[...v.widths][0]} ซม.` : "คิดจากหน้ากว้างผืน")
         : v.sizes.size === 1 ? `${unit}ละ ${[...v.sizes][0]} ซม.` : "",
+      actual: actualUnits.has(unit),
       tabs: Object.keys(v.perTab).length,
     }))
       // ผ้า → หลาก่อน (เจ้าของคิดเป็นหลา) · แล้วหน่วยที่ครอบคลุมแท็บมากสุด · cm² ไว้ท้าย
-      .sort((a, b) => Number(fabric && b.unit === "หลา") - Number(fabric && a.unit === "หลา") || b.tabs - a.tabs || Number(a.unit === "cm²") - Number(b.unit === "cm²"))
-      .map(({ unit, perTab, note }) => ({ unit, perTab, note }));
+      .sort((a, b) => Number(b.actual) - Number(a.actual) || Number(fabric && b.unit === "หลา") - Number(fabric && a.unit === "หลา") || b.tabs - a.tabs || Number(a.unit === "cm²") - Number(b.unit === "cm²"))
+      .map(({ unit, perTab, note, actual }) => ({ unit, perTab, note: actual ? [note, "ใช้ตัวเลขจากการวางผ้าจริง"].filter(Boolean).join(" · ") : note }));
     out.push({
       key, name: (ls[0].item_name ?? "").trim(), unit: units[0].unit, perTab: units[0].perTab, note: units[0].note, units,
       fabric, cost: ls.reduce((a, l) => a + (Number(l.amount) || 0), 0),
