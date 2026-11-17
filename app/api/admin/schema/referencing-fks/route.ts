@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -12,6 +13,10 @@ export const revalidate = 0;
 type FkRow = { child_table: string; fk_column: string; child_is_module: boolean; child_label: string };
 
 export async function GET(request: NextRequest) {
+  // 🔒 ต้องล็อกอิน (เดิมเปิดให้คนนอกเห็นโครงสร้างตาราง — audit 2026-11-17)
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ links: [], error: "ต้องเข้าสู่ระบบ" }, { status: 401 });
+
   const { searchParams } = new URL(request.url);
   const moduleKey = searchParams.get("module");
   let table = searchParams.get("table");
