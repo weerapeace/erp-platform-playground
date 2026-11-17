@@ -6,6 +6,7 @@
  * โหมด "ทุกเมนู" = จัดการรวม (ผูกเมนูเข้าแอป/ลบ/แก้ข้ามแอป)
  * เก็บความสามารถเดิมครบ: app+PWA, sidebar/launcher, โมดูล, สิทธิ์, เปิด/ปิด, ค้นหา, นำเข้าเริ่มต้น
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -665,7 +666,7 @@ export default function MenuManagerPage() {
         )}
 
         {/* 4. รายการเมนู + ตัวอย่าง */}
-        {loading ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : rows.length === 0 ? (
+        {loading ? <LoadingState /> : rows.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-sm">ยังไม่มีเมนูในทะเบียน — ระบบใช้ “เมนูเริ่มต้น” อยู่<br />กด <b>นำเข้าเมนูเริ่มต้น</b> เพื่อเริ่มจัดการเอง</div>
         ) : (
           <div className={`grid grid-cols-1 gap-5 ${sel !== ALL ? "lg:grid-cols-[1fr_260px]" : ""}`}>

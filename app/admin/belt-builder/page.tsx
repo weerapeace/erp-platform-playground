@@ -7,6 +7,7 @@
  *   ?shop=<id>  = ร้านที่เลือก (ค่าเริ่มต้น louismontini หรือร้านแรก)
  * API: /api/belt-builder/* (guardApi belt_builder.view/edit + writeAudit)
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BeltStudio } from "@/components/belt-builder/studio";
@@ -43,7 +44,7 @@ function BeltBuilderAdminInner() {
           <button type="button" onClick={() => go("studio")} className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 hover:bg-slate-50">← กลับสตูดิโอ</button>
           <span className="text-sm text-slate-500">📋 มุมมองตาราง (ขั้นสูง){shop ? ` · ${shop.name}` : ""}</span>
         </div>
-        {shopId ? <BeltBuilderTables shopId={shopId} /> : <div className="p-6 text-sm text-slate-500">กำลังโหลดร้าน…</div>}
+        {shopId ? <BeltBuilderTables shopId={shopId} /> : <LoadingState label="กำลังโหลดร้าน…" boxClassName="p-6 text-sm text-slate-500" />}
       </div>
     );
   }
@@ -52,7 +53,7 @@ function BeltBuilderAdminInner() {
 
 export default function BeltBuilderAdminPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>}>
+    <Suspense fallback={<LoadingState />}>
       <BeltBuilderAdminInner />
     </Suspense>
   );

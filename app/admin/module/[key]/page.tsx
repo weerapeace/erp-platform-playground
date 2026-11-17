@@ -11,6 +11,7 @@
  * tableId = `master-<moduleKey>` (คอนเวนชันกลางของ MasterPage/MasterCRUD)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -31,7 +32,7 @@ import {
 
 const SchemaSyncClient = dynamic(
   () => import("@/app/admin/schema-sync/schema-sync-client").then((m) => m.SchemaSyncClient),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 type Tab = "general" | "fields" | "views" | "layout" | "actions";
@@ -217,9 +218,7 @@ function RowActionsPanel({ moduleKey }: { moduleKey: string }) {
         </div>
 
         {loading ? (
-          <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
-            กำลังโหลดค่ากลาง...
-          </div>
+          <LoadingState label="กำลังโหลดค่ากลาง..." boxClassName="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400" />
         ) : actions.length === 0 ? (
           <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
             โมดูลนี้ยังไม่ได้ประกาศ Row Actions กลางไว้ จึงยังตั้งค่าจากหน้านี้ไม่ได้
@@ -321,7 +320,7 @@ function SavedViewsPanel({ tableId }: { tableId: string }) {
     <div className="max-w-3xl mx-auto px-6 py-6">
       <p className="text-sm text-slate-500 mb-3">มุมมองที่บันทึกไว้ของตารางนี้ — กดดาวเพื่อตั้งเป็นค่าเริ่มต้น (เปิดหน้านี้ครั้งหน้าจะใช้มุมมองนั้น)</p>
       {loading ? (
-        <div className="text-sm text-slate-400 py-10 text-center">กำลังโหลด…</div>
+        <LoadingState />
       ) : views.length === 0 ? (
         <div className="text-sm text-slate-400 py-10 text-center border border-dashed border-slate-200 rounded-lg">— ยังไม่มีมุมมองที่บันทึกไว้ —<br /><span className="text-xs">ไปที่หน้าตารางของโมดูลนี้ แล้วกดปุ่ม + เพื่อบันทึกมุมมอง</span></div>
       ) : (
@@ -413,7 +412,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
     finally { setSaving(false); }
   };
 
-  if (loading) return <div className="text-sm text-slate-400 py-10 text-center">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
   if (err && !data) return <div className="max-w-2xl mx-auto px-6 py-10 text-center text-sm text-red-600">⚠️ {err}</div>;
 
   const card = "bg-white border border-slate-200 rounded-xl p-5";

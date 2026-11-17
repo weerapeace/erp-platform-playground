@@ -7,6 +7,7 @@
  * หน้าจอ: components/product-configurator/studio.tsx · API: /api/configurator/* (configurator.view/edit + audit)
  * เอกสาร: docs/product-configurator.md
  */
+import { LoadingState } from "@/components/state-views";
 import { Suspense, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ConfiguratorStudio } from "@/components/product-configurator/studio";
@@ -26,7 +27,7 @@ function Inner() {
 
 export default function ProductConfiguratorPage() {
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>}>
+    <Suspense fallback={<LoadingState />}>
       <Inner />
     </Suspense>
   );

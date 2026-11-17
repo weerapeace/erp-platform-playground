@@ -5,6 +5,7 @@
 // เสริมหน้า /admin/roles-permissions (ตารางติ๊กเทคนิค) — ตัวนี้เห็นภาพ + แก้ได้
 // reuse /api/admin/roles (roles+permissions+matrix, PATCH toggle) + /api/menu/apps
 // ============================================================
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -241,7 +242,7 @@ export default function RoleBoardPage() {
 
         {err &&<div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-2">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
 
-        {loading ? <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div> : !data ? null : (
+        {loading ? <LoadingState /> : !data ? null : (
           <>
             {/* เลือกตำแหน่ง (โหมดตามตำแหน่ง/เทียบ) */}
             {mode !== "person" && (
@@ -470,7 +471,7 @@ export default function RoleBoardPage() {
                 {!personId ? (
                   <div className="text-center text-sm text-slate-400 py-10 bg-white border border-slate-200 rounded-xl">เลือกคนเพื่อดูว่าเขาเห็นอะไร (รวมสิทธิ์เฉพาะคน)</div>
                 ) : !personEff ? (
-                  <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+                  <LoadingState />
                 ) : (
                   <>
                     <div className="text-sm text-slate-600">ตำแหน่ง: <b>{roleLabel(personEff.role_key ?? "")}</b>{personEff.ov.size > 0 && <span className="text-amber-600"> · มีสิทธิ์เฉพาะคน {personEff.ov.size} รายการ</span>}</div>

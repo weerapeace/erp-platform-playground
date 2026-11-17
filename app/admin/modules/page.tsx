@@ -7,6 +7,7 @@
  * (/admin/module/<key>). โมดูลใหม่ในอนาคตจะโผล่เองอัตโนมัติ ไม่ต้องแก้ code
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -43,7 +44,7 @@ export default function AllModulesSettingsPage() {
 
         <div className="max-w-5xl mx-auto px-6 py-6">
           {loading ? (
-            <div className="text-sm text-slate-400 py-10 text-center">กำลังโหลด…</div>
+            <LoadingState />
           ) : filtered.length === 0 ? (
             <div className="text-sm text-slate-400 py-10 text-center">— ไม่พบโมดูล —</div>
           ) : (

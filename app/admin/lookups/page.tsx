@@ -11,6 +11,7 @@
  * - type: ✏️ เปลี่ยนชื่อ/ไอคอน · 🗑 ลบ (เฉพาะ type ที่สร้างเอง ไม่มีค่าข้างใน ไม่มีฟิลด์ใช้อยู่)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss, ConfirmDialog } from "@/components/modal";
@@ -257,7 +258,7 @@ export default function LookupsAdminPage() {
               {/* Table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 {loading ? (
-                  <div className="py-12 text-center text-slate-400">กำลังโหลด...</div>
+                  <LoadingState />
                 ) : filtered.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 text-sm">ยังไม่มีรายการ — เพิ่มด้านบน</div>
                 ) : (

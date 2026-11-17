@@ -11,6 +11,7 @@
  * ใช้ API กลาง master-v2 (product_family_groups + product_families) — ไม่ query Supabase ตรง
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -141,7 +142,7 @@ function FamilyGroupsPageInner() {
 
   const active = groupById(activeId);
 
-  if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
 
   return (
     <div className="min-h-screen bg-slate-50">

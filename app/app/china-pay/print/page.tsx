@@ -7,6 +7,7 @@
  *   ตัวสร้างใบ = lib/china-bills-print (เทสต์ได้) · ตั้งค่า = ของกลาง lib/list-print + ListPrintPanel (+สวิตช์ เรท / ค่าโอน / บัญชีร้าน ใน extra)
  *   เรทฐานสำหรับบิลที่ยังไม่มีเรท = เรทล่าสุดในเมนู "เรท" (แก้ได้เฉพาะครั้งนี้ ไม่บันทึกลงระบบ)
  */
+import { LoadingState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -245,7 +246,7 @@ function ChinaBillsPrintView() {
               <button onClick={() => void load()} className="ml-2 underline">ลองใหม่</button>
             </div>
           ) : !rows ? (
-            <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400">กำลังโหลดบิล…</div>
+            <LoadingState label="กำลังโหลดบิล…" boxClassName="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-400" />
           ) : (
             <ListPrintFrame html={html} state={print} maxWidth={frameWidth} onPrint={doPrint} />
           )}
@@ -274,5 +275,5 @@ function ChinaBillsPrintView() {
 }
 
 export default function ChinaBillsPrintPage() {
-  return <Suspense fallback={<div className="py-20 text-center text-slate-400">กำลังโหลด…</div>}><ChinaBillsPrintView /></Suspense>;
+  return <Suspense fallback={<LoadingState />}><ChinaBillsPrintView /></Suspense>;
 }

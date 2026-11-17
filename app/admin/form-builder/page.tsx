@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
@@ -132,7 +133,7 @@ export default function FormBuilderPage() {
       </div>
 
       <div className="px-8 py-6">
-        {!loaded ? <div className="text-center py-12 text-slate-400">กำลังโหลด...</div> : (
+        {!loaded ? <LoadingState /> : (
           <div className="grid grid-cols-1 xl:grid-cols-[240px_1fr_380px] gap-5">
 
             {/* คลัง field */}

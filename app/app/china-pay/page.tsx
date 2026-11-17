@@ -5,6 +5,7 @@
  * เปิดผ่าน /app/china-pay · เห็นแค่โมดูลนี้ ไม่มี sidebar/โมดูลอื่น
  * reuse data layer กลาง: /api/master-v2/china-bills + RelationPicker + FileInput + toast
  */
+import { LoadingState } from "@/components/state-views";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -1209,7 +1210,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
     </button>
   );
 
-  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
 
   // ---- จอคอม: ตัวเลขสำคัญแถวเดียว + บิลรอโอน (เก่าสุดก่อน) + ทางลัด ----
   if (desk) {
@@ -1726,7 +1727,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
         )}
 
         {loading ? (
-          <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+          <LoadingState />
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200 p-3">
             <MiniTable rows={shown} columns={cols} rowKey={r => String(r.id)}
@@ -1789,7 +1790,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
       )}
 
       {loading ? (
-        <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+        <LoadingState />
       ) : shown.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ไม่มีรายการ —</div>
       ) : (
@@ -2804,7 +2805,7 @@ function SupplierList({ canManage }: { canManage?: boolean }) {
           className="w-full h-11 px-3 mt-3 text-base border border-slate-200 rounded-lg" />
       </Card>
 
-      {loading ? <Card><div className="text-center text-slate-400 py-6">กำลังโหลด…</div></Card>
+      {loading ? <Card><LoadingState /></Card>
         : shown.length === 0 ? <Card><div className="text-center text-slate-400 py-6">{kw ? "ไม่พบร้านที่ค้นหา" : "ยังไม่มีร้านจีน — กด ➕ เพิ่มร้าน"}</div></Card>
         : deskGrid(desk, shown.map(r => {
           const acct = String(r.account_number ?? "").trim();
@@ -2979,7 +2980,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
         </div>
       )}
       {loading ? (
-        <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+        <LoadingState />
       ) : tabRows.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW ในกลุ่มนี้ —</div>
       ) : (
@@ -3409,7 +3410,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: T
     return true;
   };
 
-  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
   if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ยังไม่มีรายการโอน —</div>;
 
   // ตัวกรอง "WeChat รอกรอกยอดบาท" (โชว์เมื่อมีรายการค้าง)
@@ -3995,7 +3996,7 @@ function TransferPage({ preselect = [], onConsumePreselect, mode = "bank" }: { p
     finally { setSaving(false); }
   };
 
-  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
 
   // บริษัท CTW ที่ค้างเก่าสุด (เรียงตามวันที่บิล) → บัญชีที่ควรโอนไป
   const oldestCtw = [...ctw].filter(b => ctwRemain(b) > 0)
@@ -5566,7 +5567,7 @@ function AutomationPage() {
           <button onClick={load} disabled={loading} className="text-xs text-blue-500 disabled:opacity-50">↻ รีเฟรช</button>
         </div>
         {loading
-          ? <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>
+          ? <LoadingState />
           : <pre className="whitespace-pre-wrap break-words text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 font-sans">{text || "— ไม่มีข้อมูล —"}</pre>}
         <button onClick={sendNow} disabled={sending || loading}
           className="mt-3 w-full h-12 bg-[#06C755] text-white rounded-xl font-semibold disabled:opacity-50">{sending ? "กำลังส่ง…" : "📩 ส่งทดสอบตอนนี้"}</button>

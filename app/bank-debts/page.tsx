@@ -9,6 +9,7 @@
  * "เพิ่มหนี้ใหม่" = เปิดฟอร์มสร้างของโมดูลที่เลือก (สัญญาเงินกู้ / OD / บัตร) ไม่เขียนฟอร์มซ้ำ
  * จำมุมมอง (จัดกลุ่ม/บริษัท) ต่อคนใน localStorage
  */
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -177,7 +178,7 @@ export default function BankDebtsPage() {
 
         {/* รายการตามกลุ่ม */}
         {loading && !data ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-400 text-sm">กำลังโหลดหนี้ทุกก้อน...</div>
+          <LoadingState label="กำลังโหลดหนี้ทุกก้อน..." boxClassName="rounded-xl border border-slate-200 bg-white p-10 text-center text-slate-400 text-sm" />
         ) : items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
             ยังไม่มีหนี้ในระบบ{company !== "all" ? "สำหรับบริษัทนี้" : ""} — กด "＋ เพิ่มหนี้ใหม่" เพื่อลงสัญญาเงินกู้ วงเงิน OD หรือบัตรเครดิต

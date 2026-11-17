@@ -5,6 +5,7 @@
  * เพิ่ม/แก้/ลบ/เรียง ฟิลด์ (สเปกร่วม=model / รายสี=sku) · ชนิดฟิลด์ · ตัวเลือก many2one · กรองแท็กของ sku-ref
  * ใช้กับหน้า "แก้รายละเอียดสั่งงาน" (work-instruction)
  */
+import { LoadingState } from "@/components/state-views";
 import { InlineEdit } from "@/components/inline-edit";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -106,7 +107,7 @@ export default function AttributeFieldsPage() {
           {canEdit && <button onClick={addFamily} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">＋ ประเภทใหม่</button>}
         </div>
 
-        {loading ? <div className="text-center py-16 text-slate-400">กำลังโหลด…</div>
+        {loading ? <LoadingState />
           : !family ? <div className="text-center py-16 text-slate-300">กด “＋ ประเภทใหม่” เพื่อเริ่ม</div>
             : (
               <div className="space-y-5">

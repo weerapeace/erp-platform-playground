@@ -7,6 +7,7 @@
  *   - เทมเพลต: ตั้งค่าฟิลด์/ค่าตั้งต้น ต่อแท็ก (Parent SKU / SKU)  ← ฝังหน้า family-template
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -54,7 +55,7 @@ function ProductFamiliesHubInner() {
   const patchGroup = (id: string, body: Record<string, unknown>) =>
     apiFetch(`${GROUPS_API}/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-  if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
+  if (loading) return <LoadingState />;
 
   return (
     <div className="min-h-screen bg-slate-50">

@@ -8,6 +8,7 @@
  *
  * ระบบเตือนอัตโนมัติ (แจ้งเตือนในแอป + LINE) จะยิงเมื่อมีคนเข้าจาก "เครื่องใหม่"
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
@@ -90,7 +91,7 @@ export default function LoginEventsPage() {
         </div>
 
         {err && <div className="mb-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{err}</div>}
-        {loading && <div className="py-10 text-center text-slate-400">กำลังโหลด…</div>}
+        {loading && <LoadingState />}
 
         {!loading && !err && shown.length === 0 && (
           <div className="rounded-xl border border-slate-200 bg-white px-5 py-10 text-center text-sm text-slate-400">

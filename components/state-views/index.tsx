@@ -112,9 +112,11 @@ export function SkeletonRows({ variant = "list", rows = 5 }: { variant?: "list" 
   );
 }
 
-export function LoadingState({ label, className = "", variant, rows = 4 }: {
+export function LoadingState({ label, className = "", variant, rows = 4, boxClassName }: {
   label?: ReactNode;
   className?: string;
+  /** แบบข้อความ: ใช้คลาสนี้แทนกล่องมาตรฐานทั้งชุด (คงหน้าตาเดิมของหน้าที่ย้ายมาใช้ของกลาง) */
+  boxClassName?: string;
   /** "text" = ข้อความแบบเดิม · อื่น ๆ = โครงสีเทา
    *  ไม่ระบุ: ไม่มี label = โครง "list" · มี label (ข้อความรอเฉพาะ เช่น "กำลังเตรียมข้อมูลส่ง Shopee") = ข้อความเหมือนเดิม */
   variant?: "list" | "table" | "cards" | "text";
@@ -123,7 +125,7 @@ export function LoadingState({ label, className = "", variant, rows = 4 }: {
   const t = useT();
   const text = label ?? t("กำลังโหลด...", "Loading...");
   const mode = variant ?? (label != null ? "text" : "list");
-  if (mode === "text") return <div className={`py-16 text-center text-slate-400 ${className}`} role="status">{text}</div>;
+  if (mode === "text") return <div className={boxClassName ?? `py-16 text-center text-slate-400 ${className}`} role="status">{text}</div>;
   return (
     <div className={`px-4 py-6 ${className}`} role="status" aria-busy="true">
       <span className="sr-only">{text}</span>

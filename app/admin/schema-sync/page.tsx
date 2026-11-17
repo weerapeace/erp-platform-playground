@@ -8,11 +8,12 @@
  * → กัน Error 1102 (Worker exceeded resource limits ตอน render)
  */
 
+import { LoadingState } from "@/components/state-views";
 import dynamic from "next/dynamic";
 
 const SchemaSyncClient = dynamic(
   () => import("./schema-sync-client").then((m) => m.SchemaSyncClient),
-  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+  { ssr: false, loading: () => <LoadingState /> },
 );
 
 export default function SchemaSyncAdminPage() {

@@ -11,6 +11,7 @@
  *  - row action: เปิด/ปิดบัญชี + เปลี่ยน role (drawer)
  */
 
+import { LoadingState } from "@/components/state-views";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -580,7 +581,7 @@ export default function AdminUsersPage() {
                   </div>
                 )}
                 {uploadBusy && (
-                  <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center text-white text-[10px]">กำลังโหลด</div>
+                  <LoadingState />
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
@@ -697,7 +698,7 @@ export default function AdminUsersPage() {
                 ⚠ ผู้ดูแลระบบมีทุกสิทธิ์เสมอ (กันล็อกออก) — การตั้งค่าตรงนี้จะไม่มีผลกับ admin
               </div>
             )}
-            {permLoading ? <div className="py-10 text-center text-slate-400">กำลังโหลด...</div> : (
+            {permLoading ? <LoadingState /> : (
               <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
                 {permGroups.map((g) => (
                   <div key={g.category}>

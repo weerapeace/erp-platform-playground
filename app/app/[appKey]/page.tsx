@@ -6,6 +6,7 @@
  * reuse หน้า master กลาง (MasterPage) ผ่าน ShellPresentContext (ไม่ซ้อน sidebar)
  * หมายเหตุ: /app/china-pay มีหน้า custom เฉพาะ (route นั้นชนะ dynamic นี้)
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -33,7 +34,7 @@ import { useEmbeddedPageBar } from "@/lib/app-shell-bar";
 // ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
 const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
-  ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
+  ssr: false, loading: () => <LoadingState />,
 });
 
 type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null; parent_id?: string | null; section?: string; audience?: unknown; app_overrides?: unknown };

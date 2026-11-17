@@ -9,6 +9,7 @@
  * เพิ่ม = "+ เพิ่มบริษัท" · แก้ = เลือกบริษัทแล้วแก้ในฟอร์ม · ลบ = "ปิดใช้งาน" (ไม่ลบทิ้ง เพราะใบขายเก่าอ้างถึง · เปิดกลับได้)
  * มีตัวอย่างหัวบิลให้ดูสด ๆ ระหว่างกรอก — จะได้เห็นว่าพิมพ์ออกมาหน้าตาแบบไหน
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ImageAttachKeys } from "@/components/image-attach";
@@ -131,7 +132,7 @@ export default function CompaniesPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
           {/* รายชื่อ */}
           <div className="space-y-2">
-            {loading ? <div className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</div>
+            {loading ? <LoadingState />
               : rows.length === 0 ? <div className="text-sm text-slate-400 py-6 text-center">ยังไม่มีบริษัท</div>
               : rows.map((c) => (
                 <button key={c.id} onClick={() => pick(c)}

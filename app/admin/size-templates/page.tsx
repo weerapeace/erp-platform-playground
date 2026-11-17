@@ -4,6 +4,7 @@
  * จัดการชุดไซส์มาตรฐาน — /admin/size-templates
  * เพิ่ม/แก้/ลบ/เรียง ชุดไซส์ (ชื่อ + รายการไซส์) → ใช้เติมไซส์ให้สูตร BOM เร็วๆ
  */
+import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useToast } from "@/components/toast";
@@ -70,7 +71,7 @@ export default function SizeTemplatesPage() {
           </div>
         )}
 
-        {loading ? <div className="text-center py-16 text-slate-400">กำลังโหลด…</div>
+        {loading ? <LoadingState />
           : list.length === 0 ? <div className="text-center py-16 text-slate-300">ยังไม่มีชุดไซส์</div>
             : (
               <div className="space-y-2">
