@@ -284,7 +284,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "searchable-select", label: "ช่องเลือกแบบพิมพ์ค้นหา", code: "SearchableSelect · SearchableMultiSelect", category: "input",
     source: { path: "components/searchable-select" },
-    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา · แบบเลือกหลายค่า (SearchableMultiSelect) = ติ๊กได้หลายตัว ชิปไม่กางเต็มจอ (+N) ป้ายค่าที่ระบบแนะนำ พิมพ์ค่าเองได้ · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง) · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง)",
+    what: "dropdown ที่พิมพ์กรองรายการได้ ใช้แทน select ธรรมดา · แบบเลือกหลายค่า (SearchableMultiSelect) = ติ๊กได้หลายตัว ชิปไม่กางเต็มจอ (+N) ป้ายค่าที่ระบบแนะนำ พิมพ์ค่าเองได้ · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง) · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง) · ค้นไม่ต้องตรงเป๊ะ (lib/fuzzy-rank: เป๊ะก่อน · ข้ามตัวคั่น · ลืมสลับแป้นไทย/อังกฤษ) · ปุ่ม + สร้างใหม่ท้ายรายการ (onCreate + createPermission · Enter สร้าง)",
     when: "รายการตัวเลือกยาวกว่า ~10 ตัว · ช่องเลือกหลายค่า เช่น คุณลักษณะของหมวดร้านค้า (LazadaAttrField ใช้อยู่)",
     notWhen: "เลือกข้อมูลหลัก (สินค้า ร้าน ลูกค้า) ให้ใช้ Picker เฉพาะของมัน",
     sameJob: "select", primary: true,
@@ -317,7 +317,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "sku-multi-picker", label: "เลือกสินค้าหลายตัว", code: "SkuMultiPickerModal", category: "pick",
     source: { path: "components/sku-multi-picker" },
-    what: "ป๊อปเลือกสินค้าหลายตัวพร้อมกัน กรองตามแท็ก/แบรนด์ · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes }) · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes })",
+    what: "ป๊อปเลือกสินค้าหลายตัวพร้อมกัน กรองตามแท็ก/แบรนด์ · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes }) · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes }) · วางรหัสหลายตัวจาก Excel ในช่องค้น → ติ๊กให้ + บอกรหัสที่ไม่พบ (POST /api/pickers/skus { codes })",
     when: "ส่งสินค้าหลายตัวเข้าเอกสารหรือแผน",
   },
   {
@@ -631,7 +631,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "print-panels", label: "พิมพ์เอกสาร / พิมพ์ตาราง", code: "DocPrintPanel · ListPrintPanel · usePrintLog", category: "print",
     source: { path: "components/report" },
-    what: "แผงตั้งค่าพิมพ์ เลือกคอลัมน์ บันทึกประวัติการพิมพ์ บันทึกเป็นรูป · ปุ่ม ⤓ พอดี 1 หน้า (ListPrintPanel ส่ง pageGroups · fitListToOnePage) · แผงพิมพ์เอกสารจำค่าที่ใช้ล่าสุดต่อคน",
+    what: "แผงตั้งค่าพิมพ์ เลือกคอลัมน์ บันทึกประวัติการพิมพ์ บันทึกเป็นรูป · ปุ่ม ⤓ พอดี 1 หน้า (ListPrintPanel ส่ง pageGroups · fitListToOnePage) · แผงพิมพ์เอกสารจำค่าที่ใช้ล่าสุดต่อคน · ปุ่ม 📤 ส่ง PDF ในแถบพิมพ์ (SendPdfButton · ทำ PDF ในเครื่อง → Drive → LINE ลิงก์ / อีเมลแนบ · /api/print-send · lib/print-send)",
     when: "ทุกหน้าพิมพ์เอกสารและพิมพ์รายการ",
     doc: "list-print.md",
   },

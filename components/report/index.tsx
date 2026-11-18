@@ -1,5 +1,6 @@
 "use client";
 
+import { SendPdfButton } from "./send-pdf";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { PRINT_EVENT, type PrintHow } from "@/lib/print-log";
 import React, { useEffect, useRef, useState } from "react";
@@ -319,6 +320,8 @@ export function PrintToolbar({ onBack, onPrint, fileName }: {
       )}
       {name ? (
         <>
+          {/* 📤 ส่ง PDF ไป LINE/อีเมล (ของกลาง components/report/send-pdf) — มีให้ทุกหน้าที่ตั้งชื่อไฟล์ */}
+          <SendPdfButton fileName={name} />
           <button onClick={run} title="เปิดหน้าต่างพิมพ์เพื่อพิมพ์ออกกระดาษ"
             className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
             🖨️ พิมพ์
