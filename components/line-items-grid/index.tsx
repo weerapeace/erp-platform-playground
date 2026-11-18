@@ -80,6 +80,8 @@ export type LineItemsGridProps<T> = {
   /** หัวกลุ่ม "+ เพิ่มรายการ" (เจ้าของขอ 2026-11-18): คืนแถวใหม่จากแถวในกลุ่ม (null = กลุ่มนี้ไม่มีปุ่ม) */
   groupAdd?: (groupRows: T[]) => T | null;
   groupAddFocusCol?: string;
+  /** ชิปที่หัวกลุ่ม: กดแล้วติ๊ก/เอาออก ชุดบรรทัดนั้น (เช่น ตามหมายเหตุ "ซับใน (2)") — ใช้กับ selectable */
+  groupChips?: (groupRows: T[]) => { key: string; label: string; rows: T[] }[];
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
@@ -122,7 +124,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  addMenu, enterNav, groupAdd, groupAddFocusCol, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
+  addMenu, enterNav, groupAdd, groupAddFocusCol, groupChips, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
@@ -390,6 +392,11 @@ export function LineItemsGrid<T>({
                       className="rounded border border-dashed border-blue-300 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50">+ เพิ่มรายการ</button>
                   )}
                   <span className="text-slate-400">· {d.count} รายการ</span>
+                  {selectable && !readonly && groupChips?.(d.rows).map((c) => {
+                    const ids = c.rows.map(rowId); const on = ids.length > 0 && ids.every((id) => selected.has(id));
+                    return <button key={c.key} type="button" onClick={() => toggleSelGroup(c.rows)} title={on ? "เอาออกจากที่ติ๊ก" : "ติ๊กชุดนี้ทั้งหมด"}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-300 text-slate-600 hover:bg-white"}`}>{on ? "✓ " : ""}{c.label} ({ids.length})</button>;
+                  })}
                   {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch), d.rows)}
                   {d.sums.filter((s) => s.total).map((s) => (
                     <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>

@@ -379,7 +379,7 @@ export function MobileCostTab({ sheetId, lines, costExtraRaw, nestRaw, generalLa
                           <button key={r.key} type="button" onClick={() => canEdit && setEditKey(r.key)} disabled={!canEdit}
                             className="flex w-full items-start gap-2 py-2 pl-6 pr-3 text-left active:bg-white disabled:active:bg-transparent">
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-[13px] text-slate-800">{r.item_name || r.item_sku_code || "—"}{r.note ? <span className="text-slate-400"> · {r.note}</span> : null}</span>
+                              <span className="block truncate text-[13px] text-slate-800">{r.item_name || r.item_sku_code || "—"}{r.variant ? <span className="ml-1 rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-600">{r.variant}</span> : null}{r.note ? <span className="text-slate-400"> · {r.note}</span> : null}</span>
                               <span className="block truncate text-[11px] text-slate-400">{lineDetail(r) || "—"}</span>
                               {r.prev_item && <span className="mt-0.5 inline-block rounded bg-sky-50 px-1.5 text-[10px] text-sky-800">{t("เปลี่ยนวัสดุแล้ว · แตะดู", "Material changed · tap to review")}</span>}
                             </span>

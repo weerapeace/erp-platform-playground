@@ -131,8 +131,10 @@ function summaryHtml(inp: CostPrintInput, groups: { label: string; amount: numbe
   };
 }
 
+/** ชื่อวัสดุ + สี/แบบ (ถ้ามี) — "PU จอนนี่ · ดำ" */
+const nameOf = (l: CostLine) => [l.item_name ?? "", l.variant?.trim()].filter(Boolean).join(" · ");
 const lineRow = (l: CostLine) => ({
-  item_name:     l.item_name ?? "",
+  item_name:     nameOf(l),
   dims:          (l.width_cm != null && l.length_cm != null) ? `${num(l.width_cm, 2)}×${num(l.length_cm, 2)}` : "—",
   pieces:        l.pieces != null ? num(l.pieces, 2) : "—",
   waste:         l.waste_percent != null ? `${num(l.waste_percent, 2)}%` : "—",
@@ -178,8 +180,9 @@ export function costTableRows(lines: CostLine[], mode: ListMode): Record<string,
     out.push({ __group: type, __sum: baht(sumOf(ls)) });
     if (mode === "lines") { for (const l of ls) out.push(lineRow(l)); continue; }
     const byMat = new Map<string, CostLine[]>();
-    for (const l of ls) { const k = l.item_id ?? l.item_sku_id ?? l.item_name ?? "—"; byMat.set(k, [...(byMat.get(k) ?? []), l]); }
-    for (const ms of byMat.values()) out.push(merged(ms[0].item_name ?? "—", ms));
+    // รวมตามวัสดุ + สี/แบบ (PU ดำ กับ PU น้ำตาล = คนละแถว)
+    for (const l of ls) { const k = `${l.item_id ?? l.item_sku_id ?? l.item_name ?? "—"}|${l.variant?.trim() ?? ""}`; byMat.set(k, [...(byMat.get(k) ?? []), l]); }
+    for (const ms of byMat.values()) out.push(merged(nameOf(ms[0]) || "—", ms));
   }
   return out;
 }

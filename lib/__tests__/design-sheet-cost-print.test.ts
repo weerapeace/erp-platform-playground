@@ -110,3 +110,16 @@ describe("buildCostPrintData", () => {
     expect(templateSupportsCostSettings({ body_html: "{{{lines_table}}}" })).toBe(false);
   });
 });
+
+describe("สี/แบบ ในใบพิมพ์ (เจ้าของขอ 2026-11-18)", () => {
+  const L = (variant: string | null, amount: number): CostLine => ({
+    item_id: "pu", item_name: "PU จอนนี่", group_name: "PU", calc_method: null, width_cm: 10, length_cm: 10, pieces: 1,
+    face_width_cm: null, waste_percent: null, divisor: null, qty: 1, uom: "หลา", unit_price: amount, amount, note: null, sort_order: 1, variant,
+  });
+  it("รวมตามวัสดุ แยกแถวตามสี · ชื่อมีสีต่อท้าย", () => {
+    const rows = costTableRows([L("ดำ", 10), L("ดำ", 5), L("น้ำตาล", 3), L(null, 1)], "material");
+    const names = rows.filter((r) => !("__group" in r)).map((r) => r.item_name);
+    expect(names).toEqual(["PU จอนนี่ · ดำ", "PU จอนนี่ · น้ำตาล", "PU จอนนี่"]);
+    expect(costTableRows([L("ดำ", 10)], "lines").find((r) => !("__group" in r))?.item_name).toBe("PU จอนนี่ · ดำ");
+  });
+});

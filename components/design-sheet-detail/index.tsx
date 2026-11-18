@@ -46,6 +46,7 @@ import { costUsagePerUnit } from "@/lib/cost-usage";
 import { cleanNestUsage, setNestEntry, type NestEntry, type NestUsage } from "@/lib/nest-usage";
 import { NestUsageChip } from "./nest-usage-chip";
 import { GroupFabricLayout } from "./group-fabric-layout";
+import { VariantChip } from "./variant-chip";
 import { CostSummaryCard } from "./cost-summary-card";
 import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
 import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type CostPreset, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
@@ -1774,8 +1775,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     );
   }, [priceItems, costParent, createPriceItemInline, toast, t]);
 
+  // สี/แบบ ที่ใช้ในใบนี้แล้ว (ทุกแท็บ) — ให้เลือกซ้ำได้เร็ว
+  const variantOptions = useMemo(() => [...new Set(costLines.map((r) => r.variant?.trim()).filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b, "th")), [costLines]);
+
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
     { key: "item", header: t("วัสดุ / กลุ่ม", "Material / group"), minWidth: cw(220, 150), sortable: true, getValue: (r) => r.item_name,
+      // จัดกลุ่มตามวัสดุ = แยกตามสี/แบบด้วย ("PU จอนนี่ · ดำ") → แต่ละสีมี "เปลี่ยนวัสดุ" / ใช้ต่อใบ / วางบนผ้า ของตัวเอง (เจ้าของขอ 2026-11-18)
+      groupLabel: (r) => [r.item_name || r.item_sku_code || t("— ยังไม่เลือกวัสดุ —", "— No material —"), r.variant?.trim()].filter(Boolean).join(" · "),
       groupEditNode: groupSwapNode,
       render: (r, u) => {
         const inGroupMode = !r.item_id && !!r.group_code;   // รายการเดิมที่เคยเลือกแบบกลุ่ม
@@ -1787,7 +1793,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         if (!fullEdit) {
           // โหมดดู: ชื่อวัสดุบรรทัดเดียว (ไม่มีช่องเลือก/ปุ่มเสริม) — ดับเบิลคลิกแถวเพื่อแก้
           const name = r.item_sku_id ? [r.item_sku_code, r.item_name].filter(Boolean).join(" ") : (r.item_name || (inGroupMode ? `${t("กลุ่ม", "Group")}: ${r.group_name ?? r.group_code}` : ""));
-          return <span className="block truncate text-sm text-slate-800" title={name || roTip}>{name || <span className="text-slate-300">{t("— ยังไม่เลือกวัสดุ —", "— No material yet —")}</span>}</span>;
+          return <span className="flex min-w-0 items-center gap-1"><span className="block min-w-0 truncate text-sm text-slate-800" title={name || roTip}>{name || <span className="text-slate-300">{t("— ยังไม่เลือกวัสดุ —", "— No material yet —")}</span>}</span><VariantChip value={r.variant} options={variantOptions} editable={false} onChange={() => {}} /></span>;
         }
         return (
           <div className="flex items-center gap-1">
@@ -1810,6 +1816,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
               )}
             </div>
+            {/* 🎨 สี/แบบ — แยกกลุ่มย่อยในวัสดุเดียวกัน (เจ้าของขอ 2026-11-18) */}
+            <VariantChip value={r.variant} options={variantOptions} editable={fullEdit} onChange={(v) => u({ variant: v })} />
             {/* สลับแหล่ง: 🏷️ = เลือกจาก SKU คลังสินค้า · 🧮 = กลับไปใช้ master วัสดุตีราคา */}
             {fullEdit && (
               <button type="button"
@@ -1930,7 +1938,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         : <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmtBaht(r.amount)}</span>) },
     { key: "note", header: t("หมายเหตุ", "Note"), minWidth: cw(120, 80), getValue: (r) => r.note,
       render: (r, u) => textCell(r.note, (v) => u({ note: v }), "—") },
-  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, groupSwapNode, t]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, groupSwapNode, variantOptions, t]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -2892,6 +2900,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 // หัวกลุ่ม "+ เพิ่มรายการ" = แถวใหม่วัสดุเดียวกับกลุ่ม (กลุ่มที่มีวัสดุหลายตัว ใช้ของแถวสุดท้าย) ขนาดว่าง (เจ้าของขอ 2026-11-18)
                 groupAdd={(gRows) => { const last = gRows[gRows.length - 1]; return last && (last.item_id || last.item_sku_id) ? repeatCostRow(last) : null; }}
                 groupAddFocusCol="width_cm"
+                // ชิปที่หัวกลุ่ม: ติ๊กตามหมายเหตุ (ตัว / ซับใน) ทีละชุด → ตั้งวัสดุ/สี ให้ที่ติ๊กจากแถบลอยล่าง (เจ้าของขอ 2026-11-18)
+                groupChips={(gRows) => {
+                  const m = new Map<string, CostRow[]>();
+                  for (const r of gRows) { const n = (r.note ?? "").trim(); if (n) m.set(n, [...(m.get(n) ?? []), r]); }
+                  return m.size >= 2 || (m.size === 1 && [...m.values()][0].length < gRows.length) ? [...m.entries()].map(([k, rs]) => ({ key: k, label: k, rows: rs })) : [];
+                }}
                 // ⌨️ Enter ไปช่องถัดไป → ช่องสุดท้ายขึ้นแถวใหม่ + เปิดช่องเลือกวัสดุ · Shift+Enter = แถวใหม่วัสดุเดิม ขนาดว่าง (เจ้าของขอ 2026-11-17)
                 enterNav={{ repeatFocusCol: "width_cm", repeatRow: repeatCostRow }}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
@@ -2917,6 +2931,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   };
                   return (
                     <>
+                      {/* 🎨 ตั้งสี/แบบ ให้ที่เลือก (เจ้าของขอ 2026-11-18) */}
+                      <div className="w-44">
+                        <SearchableSelect value="" placeholder={t("🎨 ตั้งสี/แบบ…", "🎨 Set colour…")}
+                          options={[{ value: "__none", label: t("— ไม่มีสี —", "— No colour —") }, ...variantOptions.map((v) => ({ value: v, label: v }))]}
+                          onChange={(val) => { const v = val === "__none" ? null : val; setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? { ...r, variant: v } : r))); setCostDirty(true);
+                            toast.success(v ? t(`ตั้งสี "${v}" ให้ ${keys.size} บรรทัดแล้ว`, `Set colour "${v}" on ${keys.size} lines`) : t(`เอาสีออก ${keys.size} บรรทัด`, `Removed colour from ${keys.size} lines`)); }}
+                          onCreate={(q) => { const v = q.trim().slice(0, 40); if (!v) return; setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? { ...r, variant: v } : r))); setCostDirty(true); toast.success(t(`ตั้งสี "${v}" ให้ ${keys.size} บรรทัดแล้ว`, `Set colour "${v}" on ${keys.size} lines`)); }}
+                          createLabel={t("ใช้สีใหม่", "New colour")} />
+                      </div>
                       <div className="w-56">
                         <SearchableSelect value="" placeholder={t("🧰 ตั้งวัสดุให้ที่เลือก…", "🧰 Set material for selected…")}
                           options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
