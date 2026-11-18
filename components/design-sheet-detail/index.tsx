@@ -550,6 +550,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // บรรทัด + ค่าใช้จ่าย ของ Parent ที่กำลังดู (ตีราคาแยกตาม Parent SKU)
   const curLines = useMemo(() => costLines.filter((r) => pkey(r.parent_code) === costParent), [costLines, costParent]);
   const costExtra = costExtraMap[costParent] ?? [];
+  // แท็บ Parent/เวอร์ชันที่ยังไม่มีค่าใช้จ่ายเพิ่ม → ใส่ค่าแรงตั้งต้นให้เหมือนแท็บทั่วไป (เจ้าของขอ 2026-11-18)
+  //   ทำครั้งเดียวต่อแท็บต่อการเปิดใบ (ลบหมดแล้วไม่ใส่กลับระหว่างแก้) · ยอดตั้งต้นเป็น 0 ไม่กระทบต้นทุน
+  const extraFilledRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (extraFilledRef.current.has(costParent)) return;
+    extraFilledRef.current.add(costParent);
+    setCostExtraMap((m) => (m[costParent]?.length ? m : { ...m, [costParent]: defaultCostExtra() }));
+  }, [costParent, costExtraMap]);
   const setCurExtra = (updater: (l: CostExtra[]) => CostExtra[]) =>
     setCostExtraMap((m) => ({ ...m, [costParent]: updater(m[costParent] ?? []) }));
   // บรรทัดตีราคาว่าง 1 บรรทัด (ของแท็บ Parent ที่กำลังดู) — ใช้ทั้งปุ่มในตารางและปุ่มในกล่องว่าง
@@ -1521,7 +1529,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         ceMap = { "": arr.length ? arr : defaultCostExtra() };
       }
       if (!(ceMap[""]?.length)) ceMap[""] = defaultCostExtra();   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
-      setCostParent(""); setCostExtraMap(ceMap);
+      extraFilledRef.current = new Set([""]); setCostParent(""); setCostExtraMap(ceMap);
       setOrderQtyDraft(cleanOrderQty(d.order_qty));
       setNestMap(cleanNestUsage(d.nest_usage));   // จำนวนที่สั่งที่บันทึกไว้ต่อแท็บ
       setPackRefs(d.pack_refs && typeof d.pack_refs === "object" ? (d.pack_refs as Record<string, PackRef>) : {});
