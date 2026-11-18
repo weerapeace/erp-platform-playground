@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addToCart, applyCartToLines, cartEntryAmount, isPartsItem, parseSetItems, partsModeOf } from "@/lib/parts-cart";
+import { addToCart, applyCartToLines, cartEntryAmount, isPartsItem, kitDefaultChoices, kitMembers, kitSelfCm, kitToCart, parseSetItems, partsModeOf } from "@/lib/parts-cart";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 
 const item = (id: string, name: string, calc: string, price: number, uom: string, group: string): CostItemLike => ({
@@ -61,5 +61,29 @@ describe("ตะกร้า → บรรทัดตีราคา", () => {
   it("วัสดุไม่ใช่อะไหล่/ไม่รู้จัก = ข้าม", () => {
     const r = applyCartToLines([], [{ item_id: "f", qty: 1 }, { item_id: "nope", qty: 1 }], items, make);
     expect(r).toMatchObject({ added: 0, merged: 0, lines: [] });
+  });
+});
+
+describe("ชุดสำเร็จรูป (เจ้าของขอ 2026-11-18)", () => {
+  const set = parseSetItems([
+    { item_id: "strap", self: true, cm: 120 },
+    { item_id: "buckle", qty: 1, group: "g1" }, { item_id: "adj", qty: 1, group: "g1" },
+    { item_id: "hook", qty: 2 }, { item_id: "d", qty: 2, on: false },
+  ], "strap");
+  const modeOf = (id: string) => (id === "strap" ? "length" as const : "count" as const);
+  it("อ่าน group / self cm · ตัวในชุดไม่รวม self", () => {
+    expect(kitSelfCm(set)).toBe(120);
+    expect(kitMembers(set).map((m) => m.item_id)).toEqual(["buckle", "adj", "hook", "d"]);
+    expect(kitDefaultChoices(set)).toEqual({ g1: "buckle" });
+  });
+  it("ใส่ทั้งชุด × 2: ตัวหลักยาว 120 · เลือก 1 อย่าง · ตัวที่ไม่ติ๊กไม่ใส่", () => {
+    const c = kitToCart([], "strap", set, modeOf, { on: {}, choices: { g1: "adj" } }, 2);
+    expect(c).toEqual([
+      { item_id: "strap", qty: 2, cm: 120 },
+      { item_id: "adj", qty: 2, cm: null },
+      { item_id: "hook", qty: 4, cm: null },
+    ]);
+    const c2 = kitToCart([], "strap", set, modeOf, { on: { d: true }, choices: { g1: "buckle" } }, 1, false);
+    expect(c2.map((x) => x.item_id)).toEqual(["buckle", "hook", "d"]);
   });
 });

@@ -6,6 +6,8 @@
  *   · ชุด: วัสดุที่ตั้งชุดไว้ (design_price_items.set_items) → ใส่ตะกร้าแล้วถามว่าจะลงตัวในชุดด้วยไหม (ติ๊กออกได้ เช่น ไม่มีหางซิป)
  *   · ปุ่ม "เพิ่มอะไหล่ใหม่" อยู่บนสุดข้างช่องค้นหา · เพิ่มเสร็จเปิดช่องราคาให้ทันที (2026-11-17)
  *   · ช่องแก้ราคา: "เช็คราคาจาก SKU" (ComponentPicker) → ต้นทุนมาตรฐาน + ราคาซื้อล่าสุด (/api/sku-trade-history) → กดใช้ราคา
+ *   · แท็บ "ชุดสำเร็จรูป" (2026-11-18): อะไหล่ที่ตั้งชุดไว้ = การ์ดเห็นของในชุด · จำนวนชุด ×N · "เลือกอย่างใดอย่างหนึ่ง" (group)
+ *     · สร้างชุดใหม่ / แก้ / ลบชุด (ย้อนกลับได้จากแจ้งผล) · ยาวตัวหลักต่อชุด (เช่น สายผ้า 120 ซม.) — lib/parts-cart kitToCart
  *   · แท็บ "สต็อกจริง (SKU)": เลือกวัตถุดิบ SKU จริงใส่ตะกร้าได้ → onConfirm(cart, skuCart) หน้าแม่ลงเป็นบรรทัด SKU
  *   · เพิ่มอะไหล่ใหม่ = MaterialQuickCreate (ของกลางตัวเดียวกับสตูดิโอ) · แก้ชื่อ/ราคา/หน่วย · เอาออก (ปิดใช้งาน ไม่ลบจริง) · ตั้งชุด
  *     ผ่าน API กลาง /api/master-v2/design-price-items (ด่านสิทธิ์ products.edit + ประวัติ audit อยู่ที่นั่น)
@@ -30,7 +32,7 @@ import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import {
-  MAX_SET_ITEMS, PARTS_MAX_CM, PARTS_MAX_QTY, addToCart, cartEntryAmount, partsModeOf,
+  MAX_SET_ITEMS, PARTS_MAX_CM, PARTS_MAX_QTY, addToCart, cartEntryAmount, kitDefaultChoices, kitMembers, kitSelfCm, kitToCart, partsModeOf,
   type CartEntry, type PartsMode, type SetItem,
 } from "@/lib/parts-cart";
 
@@ -64,18 +66,22 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   const [q, setQ] = useState("");
   const [grp, setGrp] = useState<string>(ALL);
   const [cart, setCart] = useState<CartEntry[]>([]);
-  const [ask, setAsk] = useState<{ id: string; on: Record<string, boolean> } | null>(null);
+  type KitPick = { qty: number; on: Record<string, boolean>; choices: Record<string, string> };
+  const [ask, setAsk] = useState<({ id: string } & KitPick) | null>(null);
+  const [kitState, setKitState] = useState<Record<string, KitPick>>({});
+  const [newKitFor, setNewKitFor] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string; price: string; uom: string } | null>(null);
-  const [setFor, setSetFor] = useState<{ id: string; list: SetItem[] } | null>(null);
+  const [setFor, setSetFor] = useState<{ id: string; list: SetItem[]; selfCm: number | null } | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"parts" | "sku">("parts");
+  const [tab, setTab] = useState<"parts" | "kits" | "sku">("parts");
   const [skuCart, setSkuCart] = useState<SkuCartEntry[]>([]);
   const addSku = (c: BomComponent) => setSkuCart((x) => (x.some((y) => y.c.id === c.id) ? x.map((y) => (y.c.id === c.id ? { ...y, qty: Math.min(PARTS_MAX_QTY, y.qty + 1) } : y)) : [...x, { c, qty: 1 }]));
 
   const parts = useMemo(() => items.flatMap((it) => { const mode = partsModeOf(it.calc_method); return mode ? [{ ...it, mode }] : []; }), [items]);
   const byId = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  const kits = useMemo(() => parts.filter((p) => kitMembers(p.set_items).length > 0 && (!q.trim() || p.name.toLowerCase().includes(q.trim().toLowerCase()))), [parts, q]);
   const groups = useMemo(() => [...new Set(parts.map((p) => p.group_name ?? t("ไม่ระบุชนิด", "No type")))], [parts, t]);
   const shown = useMemo(() => {
     const k = q.trim().toLowerCase();
@@ -85,28 +91,70 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   const total = cart.reduce((s, c) => s + cartEntryAmount(c, byId.get(c.item_id)), 0) + skuCart.reduce((s, x) => s + (x.c.standard_price ?? 0) * x.qty, 0);
   const cartCount = cart.length + skuCart.length;
 
-  const reset = () => { setSkuCart([]); setTab("parts"); setCart([]); setAsk(null); setEditing(null); setSetFor(null); setCreating(null); setQ(""); };
+  const reset = () => { setSkuCart([]); setTab("parts"); setCart([]); setAsk(null); setKitState({}); setEditing(null); setSetFor(null); setCreating(null); setQ(""); };
   const close = () => { reset(); onClose(); };
 
   const add = (id: string, n = 1) => {
     const p = byId.get(id); if (!p || !canEdit) return;
     const first = qtyOf(id) === 0;
-    setCart((c) => addToCart(c, id, p.mode, n));
-    const set = (p.set_items ?? []).filter((s) => byId.has(s.item_id));
-    if (first && set.length) setAsk({ id, on: Object.fromEntries(set.map((s) => [s.item_id, s.on])) });
+    setCart((c) => addToCart(c, id, p.mode, n, kitSelfCm(p.set_items)));
+    const set = kitMembers(p.set_items).filter((s) => byId.has(s.item_id));
+    if (first && set.length) setAsk({ id, qty: 1, on: Object.fromEntries(set.map((s) => [s.item_id, s.on])), choices: kitDefaultChoices(p.set_items) });
   };
+  const modeOf = (id: string) => byId.get(id)?.mode ?? null;
+  const pickOf = (ownerId: string): KitPick => kitState[ownerId] ?? (() => {
+    const set = byId.get(ownerId)?.set_items;
+    return { qty: 1, on: Object.fromEntries(kitMembers(set).map((m) => [m.item_id, m.on])), choices: kitDefaultChoices(set) };
+  })();
+  const setPick = (ownerId: string, p: Partial<KitPick>) => setKitState((m) => ({ ...m, [ownerId]: { ...pickOf(ownerId), ...p } }));
+  /** ใส่ทั้งชุด (แท็บชุดสำเร็จรูป) */
+  const addKit = (ownerId: string) => {
+    const p = byId.get(ownerId); if (!p || !canEdit) return;
+    const pk = pickOf(ownerId);
+    setCart((c) => kitToCart(c, ownerId, p.set_items, modeOf, pk, pk.qty));
+    toast.success(t(`ใส่ชุด "${p.name}" × ${pk.qty} ลงตะกร้าแล้ว`, `Added set "${p.name}" × ${pk.qty} to the cart`));
+  };
+  /** ราคาต่อชุด (ตามที่ติ๊ก/เลือกอยู่) */
+  const kitAmount = (ownerId: string, pk: KitPick) => kitToCart([], ownerId, byId.get(ownerId)?.set_items, modeOf, pk, 1)
+    .reduce((sum, c) => sum + cartEntryAmount(c, byId.get(c.item_id)), 0);
+  /** ของในชุด: ติ๊ก (ตัวทั่วไป) · วงกลม (กลุ่มเลือก 1 อย่าง) — ใช้ทั้งแท็บชุดและตอนถามหลังใส่ตัวหลัก */
+  const kitRows = (ownerId: string, pk: KitPick, onPk: (p: Partial<KitPick>) => void) => {
+    const set = byId.get(ownerId)?.set_items;
+    const mem = kitMembers(set).filter((m) => byId.has(m.item_id));
+    const groupsSeen = new Set<string>();
+    return mem.map((m) => {
+      if (m.group) {
+        if (groupsSeen.has(m.group)) return null;
+        groupsSeen.add(m.group);
+        const opts = mem.filter((x) => x.group === m.group);
+        return (
+          <div key={`g:${m.group}`} className="rounded-md border border-dashed border-blue-300 px-2 py-1">
+            <div className="text-[11px] text-slate-500">{t("เลือกอย่างใดอย่างหนึ่ง", "Choose one")}</div>
+            {opts.map((o) => (
+              <label key={o.item_id} className="flex items-center gap-2 py-0.5 text-sm">
+                <input type="radio" name={`kit-${ownerId}-${m.group}`} checked={pk.choices[m.group!] === o.item_id} onChange={() => onPk({ choices: { ...pk.choices, [m.group!]: o.item_id } })} />
+                <span className="min-w-0 flex-1 truncate">{byId.get(o.item_id)?.name}</span><span className="text-xs text-slate-500">× {o.qty}{o.cm ? ` · ${o.cm} ซม.` : ""}</span>
+              </label>
+            ))}
+          </div>
+        );
+      }
+      return (
+        <label key={m.item_id} className="flex items-center gap-2 py-0.5 text-sm">
+          <input type="checkbox" checked={pk.on[m.item_id] ?? m.on} onChange={(e) => onPk({ on: { ...pk.on, [m.item_id]: e.target.checked } })} />
+          <span className="min-w-0 flex-1 truncate">{byId.get(m.item_id)?.name}</span><span className="text-xs text-slate-500">× {m.qty}{m.cm ? ` · ${m.cm} ซม.` : ""}</span>
+        </label>
+      );
+    });
+  };
+  const openSetEditor = (id: string) => { const p = byId.get(id); setSetFor({ id, list: kitMembers(p?.set_items).map((m) => ({ ...m })), selfCm: kitSelfCm(p?.set_items) }); };
   const bump = (id: string, d: number) => setCart((c) => c.flatMap((x) => (x.item_id !== id ? [x] : x.qty + d <= 0 ? [] : [{ ...x, qty: Math.min(PARTS_MAX_QTY, x.qty + d) }])));
   const setQty = (id: string, v: number | null) => setCart((c) => c.flatMap((x) => (x.item_id !== id ? [x] : !v || v <= 0 ? [] : [{ ...x, qty: Math.min(PARTS_MAX_QTY, Math.round(v)) }])));
   const setCm = (id: string, v: number | null) => setCart((c) => c.map((x) => (x.item_id === id ? { ...x, cm: v == null ? null : Math.min(PARTS_MAX_CM, Math.max(0, v)) } : x)));
   const acceptSet = () => {
     if (!ask) return;
-    const p = byId.get(ask.id);
-    let next = cart;
-    for (const s of p?.set_items ?? []) {
-      const sp = byId.get(s.item_id);
-      if (sp && ask.on[s.item_id]) next = addToCart(next, s.item_id, sp.mode, s.qty);
-    }
-    setCart(next); setAsk(null);
+    setCart((c) => kitToCart(c, ask.id, byId.get(ask.id)?.set_items, modeOf, ask, 1, false));   // ตัวหลักใส่ไปแล้ว
+    setAsk(null);
   };
 
   const api = async (id: string, method: "PATCH" | "DELETE", body?: Record<string, unknown>) => {
@@ -131,7 +179,17 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   };
   const saveSet = async () => {
     if (!setFor) return;
-    if (await api(setFor.id, "PATCH", { set_items: setFor.list.slice(0, MAX_SET_ITEMS) })) { setSetFor(null); toast.success(t("บันทึกชุดแล้ว", "Set saved")); }
+    const list: SetItem[] = [...setFor.list.slice(0, MAX_SET_ITEMS), ...(setFor.selfCm && setFor.selfCm > 0 ? [{ item_id: setFor.id, qty: 1, on: true, cm: setFor.selfCm, self: true as const }] : [])];
+    if (await api(setFor.id, "PATCH", { set_items: list })) { setKitState((m) => { const n = { ...m }; delete n[setFor.id]; return n; }); setSetFor(null); toast.success(t("บันทึกชุดแล้ว", "Set saved")); }
+  };
+  /** ลบชุด (ล้างของในชุด — ตัวอะไหล่ยังอยู่) · ย้อนกลับได้จากแจ้งผล */
+  const deleteKit = async (id: string) => {
+    const p = byId.get(id); if (!p) return;
+    const before = p.set_items ?? [];
+    if (await api(id, "PATCH", { set_items: [] })) {
+      setSetFor(null);
+      toast.action(t(`ลบชุด "${p.name}" แล้ว`, `Removed set "${p.name}"`), t("ย้อนกลับ", "Undo"), () => { void api(id, "PATCH", { set_items: before }); });
+    }
   };
   const doDelete = async () => {
     if (!delId) return;
@@ -158,7 +216,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
     <span className="inline-flex items-center">
       <button type="button" title={t("แก้ชื่อ/ราคา/หน่วย", "Edit name/price/unit")} aria-label={t(`แก้ ${p.name}`, `Edit ${p.name}`)} onClick={() => setEditing({ id: p.id, name: p.name, price: p.price_per_unit == null ? "" : String(p.price_per_unit), uom: p.uom ?? "" })}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon value="i:pencil" className="text-sm" /></button>
-      <button type="button" title={t("ตั้งชุด (ลงพร้อมกัน)", "Set up a set")} aria-label={t(`ตั้งชุดของ ${p.name}`, `Set up set for ${p.name}`)} onClick={() => setSetFor({ id: p.id, list: [...(p.set_items ?? [])] })}
+      <button type="button" title={t("ตั้งชุด (ลงพร้อมกัน)", "Set up a set")} aria-label={t(`ตั้งชุดของ ${p.name}`, `Set up set for ${p.name}`)} onClick={() => openSetEditor(p.id)}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon value="i:link" className="text-sm" /></button>
       <button type="button" title={t("เอาออกจากรายการ", "Remove from list")} aria-label={t(`เอา ${p.name} ออก`, `Remove ${p.name}`)} onClick={() => setDelId(p.id)}
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:trash" className="text-sm" /></button>
@@ -185,13 +243,31 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
     return (
       <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2 text-xs">
         <div className="font-medium text-emerald-800">{t(`ชุดของ "${owner?.name ?? ""}" — ใส่ตะกร้าแล้วจะถามว่าจะลงตัวไหนด้วย`, `Set for "${owner?.name ?? ""}" — asked when added to the cart`)}</div>
+        {owner?.mode === "length" && (
+          <label className="flex flex-wrap items-center gap-2 text-slate-600">{t(`ยาว "${owner.name}" ต่อชุด`, `Length of "${owner.name}" per set`)}
+            <StepInput value={setFor.selfCm} step={1} min={0} max={PARTS_MAX_CM} unit={t("ซม.", "cm")} className="h-8 w-32" ariaLabel={t("ยาวต่อชุด", "Length per set")}
+              onChange={(v) => setSetFor({ ...setFor, selfCm: v && v > 0 ? v : null })} />
+            <span className="text-[11px] text-slate-400">{t("ว่าง = 30 ซม. แก้ในตะกร้าได้", "Empty = 30 cm, editable in the cart")}</span>
+          </label>
+        )}
         {setFor.list.length === 0 && <div className="text-slate-500">{t("ยังไม่มีของในชุด — เลือกอะไหล่ด้านล่าง", "No set items yet — pick parts below")}</div>}
         {setFor.list.map((s, i) => (
           <div key={s.item_id} className="flex flex-wrap items-center gap-2 rounded-md bg-white px-2 py-1">
             <span className="min-w-0 flex-1 truncate text-sm">{byId.get(s.item_id)?.name ?? t("(วัสดุนี้ถูกเอาออกแล้ว)", "(removed material)")}</span>
             <StepInput value={s.qty} step={1} min={1} max={PARTS_MAX_QTY} integer className="h-8 w-24" ariaLabel={t("จำนวนในชุด", "Qty in set")}
               onChange={(v) => setSetFor({ ...setFor, list: setFor.list.map((x, k) => (k === i ? { ...x, qty: Math.max(1, Math.round(v ?? 1)) } : x)) })} />
-            <label className="inline-flex items-center gap-1 text-slate-600"><input type="checkbox" checked={s.on} onChange={(e) => setSetFor({ ...setFor, list: setFor.list.map((x, k) => (k === i ? { ...x, on: e.target.checked } : x)) })} />{t("ติ๊กไว้ก่อน", "Ticked by default")}</label>
+            {byId.get(s.item_id)?.mode === "length" && (
+              <StepInput value={s.cm ?? null} step={1} min={0} max={PARTS_MAX_CM} unit={t("ซม./เส้น", "cm each")} className="h-8 w-32" ariaLabel={t("ยาวต่อเส้นในชุด", "Length each in set")}
+                onChange={(v) => setSetFor({ ...setFor, list: setFor.list.map((x, k) => (k === i ? { ...x, cm: v && v > 0 ? v : undefined } : x)) })} />
+            )}
+            {/* เลือกอย่างใดอย่างหนึ่ง: ตัวที่อยู่กลุ่มเดียวกัน = ให้เลือกได้ตัวเดียวตอนใส่ตะกร้า */}
+            <select value={s.group ?? ""} aria-label={t("กลุ่มเลือก 1 อย่าง", "Choose-one group")} title={t("ตัวที่อยู่กลุ่มเดียวกัน = เลือกได้อย่างเดียว (เช่น หัวเข็มขัด / ปรับสาย)", "Items in the same group = pick one (e.g. buckle / adjuster)")}
+              onChange={(e) => setSetFor({ ...setFor, list: setFor.list.map((x, k) => (k === i ? { ...x, group: e.target.value || undefined } : x)) })}
+              className="h-8 rounded border border-slate-200 bg-white px-1.5 text-xs">
+              <option value="">{t("ใส่ทุกครั้ง", "Always")}</option>
+              {["ก", "ข", "ค", "ง"].map((g) => <option key={g} value={g}>{t(`เลือก 1 อย่าง กลุ่ม ${g}`, `Choose one · group ${g}`)}</option>)}
+            </select>
+            {!s.group && <label className="inline-flex items-center gap-1 text-slate-600"><input type="checkbox" checked={s.on} onChange={(e) => setSetFor({ ...setFor, list: setFor.list.map((x, k) => (k === i ? { ...x, on: e.target.checked } : x)) })} />{t("ติ๊กไว้ก่อน", "Ticked by default")}</label>}
             <button type="button" aria-label={t("เอาออกจากชุด", "Remove from set")} onClick={() => setSetFor({ ...setFor, list: setFor.list.filter((_, k) => k !== i) })} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:x" className="text-sm" /></button>
           </div>
         ))}
@@ -202,6 +278,9 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={() => void saveSet()} className="h-8 rounded-md bg-emerald-600 px-3 text-white hover:bg-emerald-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกชุด", "Save set")}</button>
           <button type="button" onClick={() => setSetFor(null)} className="h-8 rounded-md border border-slate-200 bg-white px-3 text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          {kitMembers(byId.get(setFor.id)?.set_items).length > 0 && (
+            <button type="button" disabled={busy} onClick={() => void deleteKit(setFor.id)} className="ml-auto h-8 rounded-md border border-rose-200 bg-white px-3 text-rose-600 hover:bg-rose-50 disabled:opacity-50">{t("ลบชุดนี้", "Delete this set")}</button>
+          )}
         </div>
       </div>
     );
@@ -209,16 +288,11 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
 
   const askPanel = ask && (() => {
     const p = byId.get(ask.id);
-    const set = (p?.set_items ?? []).filter((s) => byId.has(s.item_id));
+    const set = kitMembers(p?.set_items).filter((s) => byId.has(s.item_id));
     return (
       <div className="space-y-1.5 rounded-lg border border-blue-300 bg-blue-50 p-2.5 text-sm text-blue-900" role="dialog" aria-label={t("ลงชุดด้วยไหม", "Add set items?")}>
         <div className="font-medium">{t(`${p?.name ?? ""} มีชุด — ลงอะไรด้วยไหม?`, `${p?.name ?? ""} has a set — add these too?`)}</div>
-        {set.map((s) => (
-          <label key={s.item_id} className="flex items-center gap-2">
-            <input type="checkbox" checked={!!ask.on[s.item_id]} onChange={(e) => setAsk({ ...ask, on: { ...ask.on, [s.item_id]: e.target.checked } })} />
-            <span>{byId.get(s.item_id)?.name} × {s.qty}</span>
-          </label>
-        ))}
+        {set.length > 0 && kitRows(ask.id, ask, (pp) => setAsk({ ...ask, ...pp }))}
         <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={acceptSet} className="h-8 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">{t("ใส่ตะกร้าที่ติ๊ก", "Add ticked items")}</button>
           <button type="button" onClick={() => setAsk(null)} className="h-8 rounded-md border border-blue-200 bg-white px-3 text-xs text-blue-800 hover:bg-blue-50">{t(`เฉพาะ ${p?.name ?? ""}`, `Only ${p?.name ?? ""}`)}</button>
@@ -299,15 +373,51 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
               </div>
             </div>
             <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={t("แหล่งอะไหล่", "Part source")}>
-              {(["parts", "sku"] as const).map((k) => (
+              {(["parts", "kits", "sku"] as const).map((k) => (
                 <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
                   className={`inline-flex items-center gap-1 rounded-lg border px-3 py-1 text-xs font-medium ${tab === k ? "border-amber-400 bg-amber-100 text-amber-900" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                  <Icon value={k === "parts" ? "i:paperclip" : "i:package"} className="text-xs" />{k === "parts" ? t("อะไหล่ตีราคา", "Costing parts") : t("สต็อกจริง (SKU)", "Real stock (SKU)")}
+                  <Icon value={k === "parts" ? "i:paperclip" : k === "kits" ? "i:link" : "i:package"} className="text-xs" />{k === "parts" ? t("อะไหล่ตีราคา", "Costing parts") : k === "kits" ? t(`ชุดสำเร็จรูป (${kits.length})`, `Ready sets (${kits.length})`) : t("สต็อกจริง (SKU)", "Real stock (SKU)")}
                   {k === "sku" && skuCart.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] text-white">{skuCart.length}</span>}
                 </button>
               ))}
             </div>
-            {tab === "sku" ? (
+            {tab === "kits" ? (
+              <div className="space-y-2">
+                {setPanel}
+                {canManage && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-emerald-300 bg-emerald-50/40 p-2 text-xs text-emerald-800">
+                    <Icon value="i:plus" className="text-xs" />{t("สร้างชุดใหม่ — เลือกตัวหลักของชุด (เช่น สายผ้า 2 cm.)", "New set — pick the main part (e.g. 2 cm strap)")}
+                    <div className="w-64 max-w-full"><SearchableSelect value={newKitFor} placeholder={t("— เลือกตัวหลัก —", "— Main part —")}
+                      options={parts.filter((p) => !kitMembers(p.set_items).length).map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
+                      onChange={(v) => { setNewKitFor(""); if (v) openSetEditor(v); }} /></div>
+                  </div>
+                )}
+                {kits.length === 0 ? <p className="py-6 text-center text-sm text-slate-400">{t("ยังไม่มีชุด — สร้างชุดใหม่ด้านบน", "No sets yet — create one above")}</p> : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {kits.map((p) => {
+                      const pk = pickOf(p.id); const selfCm = kitSelfCm(p.set_items);
+                      return (
+                        <div key={p.id} className="flex flex-col rounded-lg border border-slate-200 p-2.5">
+                          <div className="mb-1 flex items-start justify-between gap-2">
+                            <div className="min-w-0"><div className="truncate text-sm font-medium text-slate-800">{t(`ชุด${p.name}`, `${p.name} set`)}</div>
+                              <div className="text-[11px] text-slate-500">{p.name}{p.mode === "length" ? ` · ${selfCm ?? 30} ซม./ชุด` : " × 1"}</div></div>
+                            {canManage && <button type="button" onClick={() => openSetEditor(p.id)} title={t("แก้ชุด", "Edit set")} aria-label={t(`แก้ชุด ${p.name}`, `Edit set ${p.name}`)}
+                              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon value="i:pencil" className="text-sm" /></button>}
+                          </div>
+                          <div className="space-y-0.5">{kitRows(p.id, pk, (pp) => setPick(p.id, pp))}</div>
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                            <StepInput value={pk.qty} step={1} min={1} max={PARTS_MAX_QTY} integer unit={t("ชุด", "sets")} className="h-8 w-28" ariaLabel={t("จำนวนชุด", "Number of sets")}
+                              onChange={(v) => setPick(p.id, { qty: Math.max(1, Math.round(v ?? 1)) })} />
+                            <span className="text-[11px] text-slate-500">{t(`ต่อชุด ${money(kitAmount(p.id, pk))}`, `Per set ${money(kitAmount(p.id, pk))}`)}</span>
+                            {canEdit && <button type="button" onClick={() => addKit(p.id)} className="h-8 rounded-md bg-amber-500 px-3 text-xs font-medium text-white hover:bg-amber-600">{t("ใส่ตะกร้าทั้งชุด", "Add whole set")}</button>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : tab === "sku" ? (
               <div className="space-y-2 rounded-lg border border-slate-200 p-3">
                 <p className="text-xs text-slate-500">{t("เลือกวัตถุดิบ SKU จริงจากคลัง → ใส่ตะกร้า (ราคา = ต้นทุนมาตรฐานของ SKU) · ลงตารางเป็นบรรทัด SKU", "Pick a real stock SKU → into the cart (price = SKU standard cost) · becomes an SKU line")}</p>
                 {canEdit ? <ComponentPicker sku="" name="" placeholder={t("ค้นหา SKU อะไหล่ เช่น หัวซิป", "Search an SKU, e.g. zipper slider")} onPick={addSku} />
@@ -331,7 +441,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                   toast.success(t("เพิ่มอะไหล่แล้ว — ใส่ราคา (หรือเช็คราคาจาก SKU) แล้วกดบันทึก", "Part added — set the price (or check an SKU price), then save"));
                 }} />
             )}
-            {askPanel}{editPanel}{setPanel}
+            {askPanel}{editPanel}{tab === "parts" && setPanel}
             {parts.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">{t("ยังไม่มีวัสดุกลุ่มอะไหล่/ซิป/เทป (หรือคุณไม่มีสิทธิ์ดูราคาต้นทุน)", "No parts/zips/tapes yet (or you can't see cost prices)")}</p>
             ) : shown.length === 0 ? (
