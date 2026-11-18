@@ -14,6 +14,8 @@ export type WorkPopupFloatMode = "card" | "drawer";
 export type WorkPopupFloatPref = {
   enabled: boolean; minimized: boolean; position: WorkPopupFloatPosition; anchor?: CornerAnchor | null; mode?: WorkPopupFloatMode;
   width?: number; tabOrder?: string[]; tabHidden?: string[]; hideImg?: boolean;
+  /** เตือนในแอปเดี่ยวด้วย (ค่าเริ่ม ไม่เตือน — เจ้าของสั่ง 2026-11-18 "ไม่อยากให้ GIF แจ้งเตือน เตือนตรง standalone app") */
+  inApps?: boolean;
 };
 
 export const WORK_POPUP_FLOAT_KEY = "work_popup_float";
@@ -29,6 +31,16 @@ export const workPopupAnchor = (p: WorkPopupFloatPref): CornerAnchor => p.anchor
 export const FLOAT_MIN_WIDTH = 1280;
 /** ข้อความบอกวิธีปิดถาวร — ปิดได้ที่เดียวคือเมนูโปรไฟล์ (✕ บนการ์ด = แค่ซ่อนเป็นปุ่มเล็ก) */
 export const WORK_POPUP_HIDE_HINT = "ซ่อนตัว Pet ได้ที่ คลิกขวาที่ตัว Pet → ซ่อนตัว Pet · เปิดคืนที่เมนูโปรไฟล์ (กดที่ชื่อคุณ)";
+
+// ── แอปเดี่ยว: ไม่มีตัว Pet / ไม่เด้งป๊อปเตือนงานตอนเปิด (เปิดคืนได้ที่หน้าตั้งค่าตัว Pet → "เตือนในแอปเดี่ยวด้วย") ──
+/** แอปเดี่ยว = เชลล์แอป /app/<key> · แอปหน้าเดียว /solo/<path> · หรือหน้าใดก็ได้ที่เปิดจากไอคอนที่ติดตั้ง (installed = display-mode standalone) */
+export function isStandaloneAppMode(pathname: string, installed: boolean): boolean {
+  return installed || /^\/app\/[^/]+/.test(pathname) || /^\/solo\//.test(pathname);
+}
+/** หน้านี้ให้ตัว Pet / ป๊อปเตือนงานโผล่ไหม (ลิงก์ ?popup= จากกระดิ่งยังเปิดได้เสมอ — ผู้เรียกจัดการเอง) */
+export function workPopupAllowedHere(pref: Pick<WorkPopupFloatPref, "inApps">, pathname: string, installed: boolean): boolean {
+  return !isStandaloneAppMode(pathname, installed) || pref.inApps === true;
+}
 
 // ── ความกว้าง: ยิ่งกว้าง แถวยิ่งเตี้ย (แคบ 3 บรรทัดต่องาน · กลาง 2 · กว้าง 1 บรรทัดแบบตาราง) ──
 export const FLOAT_WIDTH_MIN = 360;
@@ -95,5 +107,6 @@ export function parseWorkPopupFloatPref(raw: unknown): WorkPopupFloatPref | null
     ...(tabOrder ? { tabOrder } : {}),
     ...(tabHidden ? { tabHidden } : {}),
     ...(r.hideImg === true ? { hideImg: true } : {}),
+    ...(r.inApps === true ? { inApps: true } : {}),
   };
 }

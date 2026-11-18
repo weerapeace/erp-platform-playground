@@ -338,6 +338,10 @@ function CenterLayoutPanel({ pref, setPref, tabs, width, room, level, onDone, on
           </div>
         </div>
         <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] text-slate-700">เตือนในแอปเดี่ยวด้วย <span className="text-[11px] text-slate-400">(แอปที่ติดตั้ง · /app · /solo)</span></span>
+          <ToggleSwitch size="sm" on={!!pref.inApps} onChange={(v) => setPref({ ...pref, inApps: v ? true : undefined })} title="ปิด (ค่าเริ่ม) = ในแอปเดี่ยวไม่มีตัว Pet และไม่เด้งป๊อปเตือนงาน" />
+        </div>
+        <div className="flex items-center justify-between gap-2">
           <span className="text-[13px] text-slate-700">รูปสินค้าในแท็บงาน</span>
           <ToggleSwitch size="sm" on={!pref.hideImg} onChange={(v) => setPref({ ...pref, hideImg: v ? undefined : true })} title="ปิด = แถวเตี้ยลงอีก" />
         </div>
@@ -381,7 +385,14 @@ export function WorkPopupFloatToggle() {
         <span aria-hidden className="relative shrink-0 w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
       </label>
       {pref.enabled && !wide && (
-        <button type="button" onClick={() => setPickOpen(true)} className="mt-1 ml-6 min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ตั้งค่าการแจ้งเตือน</button>
+        <div className="mt-1 ml-6 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setPickOpen(true)} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ตั้งค่าการแจ้งเตือน</button>
+          {/* จอแคบไม่มีตัว Pet ให้คลิกขวา → สวิตช์แอปเดี่ยวอยู่ตรงนี้ (จอคอมอยู่ในหน้าตั้งค่าตัว Pet) */}
+          <label className="inline-flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
+            <input type="checkbox" checked={!!pref.inApps} onChange={(e) => setPref({ ...pref, inApps: e.target.checked ? true : undefined })} />
+            เตือนในแอปเดี่ยวด้วย
+          </label>
+        </div>
       )}
       {pickOpen && <PetPickerModal open initialTab="notify" onClose={() => setPickOpen(false)} />}
     </div>

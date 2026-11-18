@@ -84,3 +84,24 @@ describe("orderTabs — ลำดับแท็บที่จัดเอง +
     expect(new Set(CENTER_TABS.map((t) => t.key)).size).toBe(CENTER_TABS.length);
   });
 });
+
+describe("แอปเดี่ยว — ไม่มีตัว Pet / ไม่เด้งป๊อป (เปิดคืนได้)", () => {
+  it("รู้ว่าเป็นแอปเดี่ยว: /app/<key> · /solo/ · ติดตั้งเป็นแอป", async () => {
+    const { isStandaloneAppMode } = await import("@/components/work-popup/float-pref");
+    expect(isStandaloneAppMode("/app/production", false)).toBe(true);
+    expect(isStandaloneAppMode("/solo/fabric-calc", false)).toBe(true);
+    expect(isStandaloneAppMode("/fabric-calc", true)).toBe(true);
+    expect(isStandaloneAppMode("/fabric-calc", false)).toBe(false);
+    expect(isStandaloneAppMode("/apps", false)).toBe(false);
+  });
+  it("ค่าเริ่ม = ไม่เตือนในแอปเดี่ยว · เปิดสวิตช์ = เตือน · หน้าปกติเตือนเสมอ", async () => {
+    const { workPopupAllowedHere } = await import("@/components/work-popup/float-pref");
+    expect(workPopupAllowedHere({}, "/solo/fabric-calc", false)).toBe(false);
+    expect(workPopupAllowedHere({ inApps: true }, "/solo/fabric-calc", false)).toBe(true);
+    expect(workPopupAllowedHere({}, "/master/skus", false)).toBe(true);
+  });
+  it("อ่านค่า inApps: true เท่านั้นถึงเก็บ", () => {
+    expect(parseWorkPopupFloatPref({ inApps: true })?.inApps).toBe(true);
+    expect(parseWorkPopupFloatPref({ inApps: "yes" })?.inApps).toBeUndefined();
+  });
+});

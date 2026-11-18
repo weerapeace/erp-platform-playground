@@ -24,7 +24,7 @@ import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } fr
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
 import { isChromelessPath } from "@/lib/chromeless-routes";
 import { FloatViewContext, WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useFloatView, useWorkPopupFloatPref, type FloatTab } from "./float";
-import type { FloatLevel } from "./float-pref";
+import { workPopupAllowedHere, type FloatLevel } from "./float-pref";
 import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
 import { ChatTab, type ChatSummary } from "./chat-tab";
@@ -340,12 +340,19 @@ export function WorkPopupHost() {
   const uid = user?.id ?? null;
   // หน้าที่ฝังในกรอบ (เช่น แท็บตั้งค่าแอป ?embed=1) ไม่เด้ง — ให้หน้าหลักเด้งที่เดียว ไม่ซ้อน 2 ป๊อป
   const inFrame = typeof window !== "undefined" && window.self !== window.top;
-  const skip = inFrame || isChromelessPath(pathname);
+  const hardSkip = inFrame || isChromelessPath(pathname);
+  // แอปเดี่ยว (/app/<key> · /solo/<path> · เปิดจากไอคอนที่ติดตั้ง) = ไม่มีตัว Pet ไม่เด้งเอง เว้นแต่เปิด "เตือนในแอปเดี่ยวด้วย"
+  //   (เจ้าของสั่ง 2026-11-18 · ลิงก์ ?popup= จากกระดิ่งยังเปิดได้)
+  const [installed, setInstalled] = useState(false);
+  useEffect(() => {
+    setInstalled(window.matchMedia?.("(display-mode: standalone)").matches || (window.navigator as unknown as { standalone?: boolean }).standalone === true);
+  }, []);
   // ลอยมุมจอ (จอคอม) / ซ่อน — ค่าตั้งต่อคนจากเมนูโปรไฟล์ (./float) · ปิดอยู่ = ไม่ถาม ไม่เด้ง (ยกเว้นกดลิงก์ ?popup= จากกระดิ่งเอง)
   const [floatPref] = useWorkPopupFloatPref();
   const wide = useFloatScreen();
   const [forced, setForced] = useState<Set<string>>(new Set());
   const enabled = floatPref.enabled;
+  const skip = hardSkip || !workPopupAllowedHere(floatPref, pathname, installed);
 
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
@@ -698,7 +705,7 @@ export function WorkPopupHost() {
   };
 
   // ปิดถาวรทำได้ที่เดียว = เมนูโปรไฟล์ (สวิตช์ในนั้นตั้ง enabled) · ✕ บนการ์ด = แค่ซ่อนเป็นปุ่มเล็ก (collapse)
-  const visible = !!cur && !skip && (enabled || forced.has(cur.report_id));
+  const visible = !!cur && ((!hardSkip && forced.has(cur.report_id)) || (!skip && enabled));
   const title = cur ? `${cur.audience === "mine" ? "งานที่รอคุณอยู่" : cur.heading}` : "";
   const subtitle = cur
     ? `${new Date(`${cur.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}${queue.length > 1 ? ` · ป๊อป ${queue.length} รายการ` : ""}`
