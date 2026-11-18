@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
-import { hasOpenDrawer } from "@/lib/drawer-history";
+import { useStepHistory } from "@/lib/use-step-history";   // ปุ่ม Back ย้อนทีละชั้น (ของกลาง)
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 
@@ -99,15 +99,20 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   }, []);
   useEffect(() => { void loadBrands(); }, [loadBrands, reloadKey]);
 
+  // ปุ่ม Back (เบราว์เซอร์ · ปุ่มย้อนของเมาส์) ย้อนทีละชั้น: Parent → แบรนด์ → ทุกแบรนด์ — ของกลาง useStepHistory
+  const steps = useStepHistory<{ level: "parents" | "parent" }>("brand-nav", (s) => {
+    if (!s) { setBrand(null); setParents([]); setDetail(null); }
+    else if (s.level === "parents") setDetail(null);
+  });
   const openBrand = async (b: Brand) => {
     setBrand(b); setDetail(null); setParents([]); setLoadingParents(true);
-    try { window.history.pushState({ __brandNav: { level: "parents" } }, ""); } catch { /* ignore */ }
+    steps.push({ level: "parents" });
     try { const j = await apiFetch(`/api/assets/brand-tree?mode=parents&brand_id=${b.brand_id ?? "none"}`).then((r) => r.json()); setParents(j.parents ?? []); }
     catch { /* ignore */ } finally { setLoadingParents(false); }
   };
   const openParent = async (pid: string) => {
     setDetail(null); setLoadingDetail(true); setOpenSku(new Set()); setSkuImages({});
-    try { window.history.pushState({ __brandNav: { level: "parent" } }, ""); } catch { /* ignore */ }
+    steps.push({ level: "parent" });
     try { const j = await apiFetch(`/api/assets/brand-tree?mode=parent&parent_id=${pid}`).then((r) => r.json()); setDetail(j as ParentDetail); }
     catch { /* ignore */ } finally { setLoadingDetail(false); }
   };
@@ -127,18 +132,6 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   const backToBrands = () => { setBrand(null); setParents([]); setDetail(null); };
   const backToParents = () => setDetail(null);
 
-  // ปุ่ม Back เบราว์เซอร์ย้อนทีละชั้น (Parent → แบรนด์ → ทุกแบรนด์)
-  useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      // ปิด drawer/ป๊อปอัปของกลางก็ยิง popstate — ไม่ใช่การย้อนการเดินของหน้านี้ → อย่าเด้งกลับราก
-      if (hasOpenDrawer()) return;
-      const s = (e.state as { __brandNav?: { level?: string } } | null)?.__brandNav;
-      if (!s) { setBrand(null); setParents([]); setDetail(null); }
-      else if (s.level === "parents") setDetail(null);
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
 
   // เปิด Parent ตรงจากการค้นหา (กดโฟลเดอร์ในผลค้นหา → กระโดดเข้ารายละเอียด Parent เลย)
   const lastOpened = useRef<string | null>(null);

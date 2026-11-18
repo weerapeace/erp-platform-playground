@@ -53,3 +53,21 @@ export function useStepHistory<T>(key: string, onStep: (step: T | null) => void)
 
   return { push, replace };
 }
+
+/**
+ * อ่านก้าวปัจจุบันจากประวัติ (ใช้นอก hook ได้ เช่น ค่าเริ่มของ useState → refresh แล้วอยู่ที่เดิม)
+ * key ต้องตรงกับ useStepHistory(key, …)
+ */
+export function readStep<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try { return ((window.history.state as Record<string, unknown> | null)?.[`__step:${key}`] as T | undefined) ?? null; } catch { return null; }
+}
+
+/** แก้ก้าวปัจจุบันบางส่วน (ไม่เพิ่มก้าว) — เช่น เปลี่ยนหน้าที่ 1→2 ให้ refresh/Back กลับมาหน้าเดิม */
+export function patchStep<T extends object>(key: string, patch: Partial<T>, base: T): void {
+  if (typeof window === "undefined") return;
+  try {
+    const cur = readStep<T>(key) ?? base;
+    window.history.replaceState({ ...((window.history.state as Record<string, unknown> | null) ?? {}), [`__step:${key}`]: { ...cur, ...patch } }, "");
+  } catch { /* ใช้ไม่ได้ = ข้าม */ }
+}

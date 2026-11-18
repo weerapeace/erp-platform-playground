@@ -22,7 +22,7 @@ import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
-import { hasOpenDrawer } from "@/lib/drawer-history";
+import { useStepHistory, readStep, patchStep } from "@/lib/use-step-history";   // ปุ่ม Back ย้อนทีละก้าว (ของกลาง)
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { MaterialRequestButton } from "@/components/material-request";
 import { ParentSkuCreateModal } from "@/components/parent-sku-create-modal";
@@ -65,20 +65,12 @@ const MissingImagesModal = nextDynamic(() => import("@/components/missing-images
 
 type Crumb = { id: string; name: string };
 
-// ── สถานะการเดินเก็บใน history.state (__skuNav) — รอดตอน refresh + ปุ่ม Back ย้อนได้ ──
+// ── สถานะการเดินเก็บในประวัติเบราว์เซอร์ (ของกลาง lib/use-step-history · key "sku-nav") — รอดตอน refresh + ปุ่ม Back ย้อนได้ ──
+const NAV_KEY = "sku-nav";
 type SkuNav = { gp: Crumb[]; tf: TagFilterValue; sp?: "all" | "recent" | "trash" | null; page?: number; en?: "skus" | "parent-skus" };
-function savedNav(): SkuNav | null {
-  if (typeof window === "undefined") return null;
-  try { return (window.history.state as { __skuNav?: SkuNav } | null)?.__skuNav ?? null; } catch { return null; }
-}
+function savedNav(): SkuNav | null { return readStep<SkuNav>(NAV_KEY); }
 // อัปเดตสถานะในรายการประวัติปัจจุบัน (ไม่เพิ่มรายการใหม่) — ใช้ตอนเปลี่ยนหน้า/สลับชนิด
-function patchNav(p: Partial<SkuNav>): void {
-  if (typeof window === "undefined") return;
-  try {
-    const cur = savedNav() ?? { gp: [], tf: EMPTY_FILTER };
-    window.history.replaceState({ ...(window.history.state ?? {}), __skuNav: { ...cur, ...p } }, "");
-  } catch { /* ignore */ }
-}
+function patchNav(p: Partial<SkuNav>): void { patchStep<SkuNav>(NAV_KEY, p, { gp: [], tf: EMPTY_FILTER }); }
 
 const CARD_FIELDS: { key: string; label: string }[] = [
   { key: "image",  label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "ชื่อ" },
@@ -323,23 +315,17 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const childGroups = (tree?.groups ?? []).filter((g) => g.parent_group_id === currentGroupId);
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
 
-  // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back ย้อนทีละชั้น (ไม่เด้งออกหน้าเลย)
+  // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back (รวมปุ่มย้อนของเมาส์) ย้อนทีละชั้น — ของกลาง useStepHistory
+  // (ปิด drawer ของกลางก็ยิง popstate — ของกลางข้ามให้แล้ว ไม่เด้งกลับหน้า 1)
+  const steps = useStepHistory<SkuNav>(NAV_KEY, (s) => {
+    setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER); setSpecial(s?.sp ?? null);   // ไม่มีก้าวของเรา = กลับถึงราก
+    setPage(s?.page ?? 0); if (s?.en) setEntity(s.en);
+  });
+  const pushStep = steps.push;
   const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue, sp: "all" | "recent" | "trash" | null = null) => {
     setGroupPath(gp); setTagFilter(tf); setSpecial(sp); setPage(0);   // เดินที่ใหม่ = เริ่มหน้า 1
-    try { window.history.pushState({ __skuNav: { gp, tf, sp, page: 0, en: entityRef.current } }, ""); } catch { /* ignore */ }
-  }, []);
-  useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      // ปิด drawer (ของกลาง drawer-history) ก็ยิง popstate เหมือนกัน — ไม่ใช่การ "ย้อนการเดิน" ของหน้านี้
-      // → ต้องไม่แตะหน้า/โฟลเดอร์ที่กำลังดู (เดิมเด้งกลับหน้า 1 หลังปิดสินค้าที่หน้า 4/70)
-      if (hasOpenDrawer()) return;
-      const s = (e.state as { __skuNav?: SkuNav } | null)?.__skuNav;
-      setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER); setSpecial(s?.sp ?? null);   // ไม่มี state ของเรา = กลับถึงราก
-      setPage(s?.page ?? 0); if (s?.en) setEntity(s.en);
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
+    pushStep({ gp, tf, sp, page: 0, en: entityRef.current });
+  }, [pushStep]);
 
   const openGroup   = (g: BrowseGroup) => pushNav([...groupPath, { id: g.id, name: g.name }], EMPTY_FILTER);
   const openTag     = (t: BrowseTag)   => pushNav(groupPath, { tagIds: [t.id], none: false });

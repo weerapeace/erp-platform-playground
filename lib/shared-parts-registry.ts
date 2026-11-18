@@ -575,6 +575,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "รับข้อความที่พิมพ์ (ต้องการตัวอักษรตามภาษา) → ใช้ e.key ตามเดิม",
   },
   {
+    key: "step-history", label: "ปุ่มย้อน (Back / ปุ่มเมาส์) ย้อนทีละก้าวในหน้า", code: "useStepHistory", category: "system",
+    source: { path: "lib/use-step-history" },
+    what: "หน้าที่เดินลึกด้วย state (แฟ้ม → อัลบั้ม → อัลบั้มย่อย · กลุ่ม → แท็ก · แบรนด์ → รุ่น) กด Back ของเบราว์เซอร์/ปุ่มย้อนของเมาส์/มือถือ แล้วถอยทีละชั้น ไม่เด้งออกหน้า · push = จดก้าว · replace = จดหน้าตาตอนนี้ · readStep/patchStep = อ่าน/แก้ก้าวปัจจุบัน (refresh แล้วอยู่ที่เดิม) · ข้ามการปิดลิ้นชักของกลางให้เอง",
+    when: "ทุกหน้าที่มีการเดินเข้าออกหลายชั้นในหน้าเดียว (ใช้ที่ SAMPLE Images · เลือกดูสินค้าตามแท็ก · อัลบั้มแบรนด์)",
+    notWhen: "ป๊อป/จอซ้อนชั้นเดียว (เปิด-ปิด) → lib/use-back-close · ลิ้นชัก → lib/drawer-history · เปลี่ยนหน้า (URL) → router ปกติ",
+  },
+  {
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
     source: { path: "lib/export" },
     what: "ส่งออกแถวที่เห็น / ที่เลือก / ทั้งหมดที่กรองไว้ เป็น CSV หรือ Excel",
