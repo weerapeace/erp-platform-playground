@@ -11,6 +11,7 @@
  *   - Group by + [เฟส 2] หัวกลุ่ม "พับ/ขยายได้" + บอกจำนวน + "รวมยอด" คอลัมน์ที่ summable
  *   - [เฟส 2] แก้ค่าที่หัวกลุ่ม → ทุกบรรทัดในกลุ่มเปลี่ยนตาม (คอลัมน์ที่มี setValue)
  *   - enterNav: Enter ในช่องกรอก = ไปช่องถัดไปในแถว · ช่องสุดท้าย = แถวใหม่ (ต่อจากแถวนี้) + เปิดช่องเลือกตัวแรก · Shift+Enter = แถวใหม่ซ้ำของเดิม (repeatRow)
+ *   - groupAdd: ปุ่ม "+ เพิ่มรายการ" หลังชื่อหัวกลุ่ม → แถวใหม่ (เช่น วัสดุเดียวกัน) ต่อท้ายกลุ่ม แล้วโฟกัส groupAddFocusCol · ดูอย่างเดียว = ขอเข้าโหมดแก้ก่อน
  *   - selectable + bulkBar: ติ๊กแถว/ติ๊กทั้งกลุ่ม → แถบคำสั่งลอยติดขอบล่าง (sticky) ท้ายตาราง
  *   - [เฟส 2] ปรับขนาดคอลัมน์ (ลากขอบหัวคอลัมน์) + จำค่าไว้ (localStorage ถ้ามี storageKey)
  *   - ลากเรียงลำดับ (dnd-kit) เมื่อไม่ sort/group · เพิ่ม/ลบบรรทัด · readonly
@@ -76,6 +77,9 @@ export type LineItemsGridProps<T> = {
   /** กรอกด้วยคีย์บอร์ด (เจ้าของขอ 2026-11-17): Enter ไปช่องถัดไป → ช่องสุดท้ายขึ้นแถวใหม่ + เปิดช่องเลือก (ปุ่ม data-field-trigger ตัวแรก)
    *  repeatRow = Shift+Enter ทำแถวใหม่จากแถวนี้ (เช่น วัสดุเดิม ขนาดว่าง) แล้วโฟกัสคอลัมน์ repeatFocusCol */
   enterNav?: { repeatRow?: (row: T) => T; repeatFocusCol?: string };
+  /** หัวกลุ่ม "+ เพิ่มรายการ" (เจ้าของขอ 2026-11-18): คืนแถวใหม่จากแถวในกลุ่ม (null = กลุ่มนี้ไม่มีปุ่ม) */
+  groupAdd?: (groupRows: T[]) => T | null;
+  groupAddFocusCol?: string;
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
@@ -118,7 +122,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  addMenu, enterNav, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
+  addMenu, enterNav, groupAdd, groupAddFocusCol, groupByOptions = [], defaultGroupBy = "", groupByMemoryKey, addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
   stickyHeader = false, maxHeight, stickyTop, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
@@ -145,12 +149,14 @@ export function LineItemsGrid<T>({
   const syncHeadScroll = () => { if (headScrollRef.current && bodyScrollRef.current) headScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
   const pendingFocus = useRef<{ id: string; col: string | null; open?: boolean } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
   const pendingAdd = useRef(false);
+  const pendingGroupAdd = useRef<{ row: T; afterId: string } | null>(null);   // หัวกลุ่ม "+ เพิ่มรายการ" ตอน readonly → เพิ่มหลังเข้าโหมดแก้
   const rowsRef = useRef(rows); rowsRef.current = rows;   // แถวล่าสุด (หลัง blur commit) — ใช้ตอน Enter ขึ้นแถวใหม่   // กด "เพิ่มบรรทัด" ตอน readonly → เพิ่มให้หลังเข้าโหมดแก้
 
   // เพิ่งออกจาก readonly: กดเพิ่มบรรทัด → เพิ่มแล้วโฟกัสบรรทัดใหม่ · ดับเบิลคลิก → โฟกัสช่องที่คลิกไว้
   // (ฟังตาม rows.length ด้วย — บรรทัดใหม่วาดเสร็จรอบถัดไปค่อยโฟกัส)
   useEffect(() => {
     if (readonly) return;
+    if (pendingGroupAdd.current) { const p = pendingGroupAdd.current; pendingGroupAdd.current = null; insertAfter(p.row, p.afterId); return; }
     if (pendingAdd.current && onAdd) {
       pendingAdd.current = false;
       const r = onAdd();
@@ -379,6 +385,10 @@ export function LineItemsGrid<T>({
                   ) : (
                     <span className="font-semibold text-slate-700">{d.label}</span>
                   )}
+                  {groupAdd && (!readonly || onRequestEdit) && groupAdd(d.rows) && (
+                    <button type="button" onClick={() => addToGroup(d.rows)} title="เพิ่มบรรทัดใหม่ในกลุ่มนี้ (ของเดียวกัน)"
+                      className="rounded border border-dashed border-blue-300 px-1.5 py-0.5 text-[11px] font-medium text-blue-600 hover:bg-blue-50">+ เพิ่มรายการ</button>
+                  )}
                   <span className="text-slate-400">· {d.count} รายการ</span>
                   {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch), d.rows)}
                   {d.sums.filter((s) => s.total).map((s) => (
@@ -398,6 +408,20 @@ export function LineItemsGrid<T>({
           </SortableContext>
         </DndContext>
   );
+
+  // หัวกลุ่ม "+ เพิ่มรายการ" — แทรกต่อท้ายแถวสุดท้ายของกลุ่ม แล้วโฟกัสคอลัมน์ที่ตั้งไว้
+  function insertAfter(r: T, afterId: string) {
+    const cur = rowsRef.current;
+    const i = cur.findIndex((x) => rowId(x) === afterId);
+    pendingFocus.current = { id: rowId(r), col: groupAddFocusCol ?? null };
+    onChange(i < 0 ? [...cur, r] : [...cur.slice(0, i + 1), r, ...cur.slice(i + 1)]);
+  }
+  const addToGroup = (groupRows: T[]) => {
+    const r = groupAdd?.(groupRows); const last = groupRows[groupRows.length - 1];
+    if (!r || !last) return;
+    if (readonly) { if (onRequestEdit) { pendingGroupAdd.current = { row: r, afterId: rowId(last) }; onRequestEdit(null); } return; }
+    insertAfter(r, rowId(last));
+  };
 
   // ⌨️ Enter ในช่องกรอกของแถว (enterNav) — ไปช่องถัดไป / ช่องสุดท้าย = แถวใหม่ต่อจากแถวนี้
   const onGridKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

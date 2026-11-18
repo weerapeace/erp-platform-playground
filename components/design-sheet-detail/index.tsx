@@ -577,6 +577,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     const added = res.added + skuRows.length;
     toast.success(t(`ลงอะไหล่แล้ว: บรรทัดใหม่ ${added}${res.merged ? ` · บวกเข้าบรรทัดเดิม ${res.merged}` : ""} — ตรวจแล้วกดบันทึก`, `Parts added: ${added} new${res.merged ? ` · ${res.merged} merged` : ""} — check, then save`));
   };
+  // แถวใหม่วัสดุเดียวกับแถวนี้ (ขนาด/จำนวนว่าง) — Shift+Enter + หัวกลุ่ม "+ เพิ่มรายการ"
+  const repeatCostRow = (r: CostRow): CostRow => recomputeRow({ ...r, id: undefined, key: `n${Date.now()}_${Math.round(Math.random() * 1e6)}`,
+    width_cm: null, length_cm: null, pieces: null, qty: null, amount: null, note: null, shape: null, prev_item: null, price_ack: null });
   // เมนู "＋ เพิ่มวัตถุดิบ ▾" ของตารางตีราคา (ต่อจาก "เพิ่มปกติ" ที่ตารางกลางใส่ให้)
   const costAddMenu: AddMenuItem[] = [
     { key: "parts", label: t("เพิ่มอะไหล่ (ตะกร้า)", "Add parts (cart)"), icon: "i:paperclip", onSelect: () => setPartsOpen(true),
@@ -586,6 +589,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     { key: "note", label: t("อ่านจากรูปโน้ต (AI)", "Read from note photo (AI)"), icon: "i:camera", onSelect: () => setNoteOpen(true),
       hint: t("ถ่ายรูปโน้ตขนาดชิ้น → AI อ่านเป็นตาราง ให้ตรวจก่อนเพิ่ม", "Photo of piece sizes → AI reads it into a table to check first") },
   ];
+  // ไปหน้าจัดการอะไหล่ (แท็บใหม่) → กลับมาที่ใบงานแล้วโหลดวัสดุตีราคาใหม่เอง (เจ้าของขอ 2026-11-18)
+  const managePartsRef = useRef(false);
+  useEffect(() => {
+    const back = () => { if (managePartsRef.current && document.visibilityState === "visible") { managePartsRef.current = false; reloadPriceItems(); } };
+    window.addEventListener("focus", back); document.addEventListener("visibilitychange", back);
+    return () => { window.removeEventListener("focus", back); document.removeEventListener("visibilitychange", back); };
+  });   // eslint-disable-line react-hooks/exhaustive-deps
   const reloadPriceItems = () => {
     apiFetch("/api/design-sheets/price-items").then((r) => r.json())
       .then((j) => { if (!j.error) { setPriceItems((j.data ?? []) as PriceItem[]); setPriceGroups((j.groups ?? []) as PriceGroup[]); } }).catch(() => {});
@@ -2879,9 +2889,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
                 // ปุ่ม "＋ เพิ่มวัตถุดิบ ▾" เป็นเมนู (เจ้าของขอ 2026-11-17): เพิ่มปกติ / อะไหล่ / วาดชิ้น / อ่านโน้ต
                 addMenu={costAddMenu}
+                // หัวกลุ่ม "+ เพิ่มรายการ" = แถวใหม่วัสดุเดียวกับกลุ่ม (กลุ่มที่มีวัสดุหลายตัว ใช้ของแถวสุดท้าย) ขนาดว่าง (เจ้าของขอ 2026-11-18)
+                groupAdd={(gRows) => { const last = gRows[gRows.length - 1]; return last && (last.item_id || last.item_sku_id) ? repeatCostRow(last) : null; }}
+                groupAddFocusCol="width_cm"
                 // ⌨️ Enter ไปช่องถัดไป → ช่องสุดท้ายขึ้นแถวใหม่ + เปิดช่องเลือกวัสดุ · Shift+Enter = แถวใหม่วัสดุเดิม ขนาดว่าง (เจ้าของขอ 2026-11-17)
-                enterNav={{ repeatFocusCol: "width_cm", repeatRow: (r) => recomputeRow({ ...r, id: undefined, key: `n${Date.now()}_${Math.round(Math.random() * 1e6)}`,
-                  width_cm: null, length_cm: null, pieces: null, qty: null, amount: null, note: null, shape: null, prev_item: null, price_ack: null }) }}
+                enterNav={{ repeatFocusCol: "width_cm", repeatRow: repeatCostRow }}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
                 emptyAction={canEdit ? (
@@ -3443,7 +3455,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* 🧷 เพิ่มอะไหล่ · ซิป · เทป แบบตะกร้า → ลงตารางตีราคาของแท็บที่ดู */}
       {form?.id && partsOpen && (
         <PartsCartModal open={partsOpen} onClose={() => setPartsOpen(false)} items={priceItems} canEdit={canEdit}
-          onConfirm={applyPartsCart} onItemsChanged={reloadPriceItems} />
+          onConfirm={applyPartsCart} onItemsChanged={reloadPriceItems} onManage={() => { managePartsRef.current = true; }} />
       )}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (

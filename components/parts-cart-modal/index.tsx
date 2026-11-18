@@ -42,7 +42,7 @@ const ALL = "__all";
 const money = (v: number) => v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const ICON: Record<PartsMode, string> = { count: "i:circle-dot", length: "i:line-dashed" };
 
-export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged, canEdit = true }: {
+export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged, canEdit = true, onManage }: {
   open: boolean;
   onClose: () => void;
   /** วัสดุตีราคาทั้งหมด (ป๊อปกรองเหลือกลุ่มอะไหล่/ซิป/เทปเอง) */
@@ -53,6 +53,8 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
   onItemsChanged: () => void;
   /** ใบนี้แก้ได้ไหม (ไม่ได้ = ดูอย่างเดียว ใส่ตะกร้าไม่ได้) */
   canEdit?: boolean;
+  /** กด "จัดการอะไหล่ ↗" (เปิดหน้าวัสดุตีราคาแท็บใหม่) — หน้าแม่ใช้รู้ว่าต้องโหลดวัสดุใหม่ตอนกลับมา */
+  onManage?: () => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -286,6 +288,9 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                 <button type="button" onClick={() => setCreating(q.trim())}
                   className="inline-flex h-9 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-medium text-amber-800 hover:bg-amber-100"><Icon value="i:plus" className="text-sm" />{t("เพิ่มอะไหล่ใหม่", "New part")}</button>
               )}
+              <a href="/master/design-price-items" target="_blank" rel="noopener noreferrer" onClick={() => onManage?.()}
+                title={t("เปิดหน้าวัสดุตีราคา (เพิ่ม/แก้/ปิดใช้ อะไหล่ทั้งหมด) ในแท็บใหม่ · กลับมาแล้วรายการโหลดใหม่เอง", "Open the costing materials page in a new tab · the list reloads when you come back")}
+                className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:settings" className="text-sm" />{t("จัดการอะไหล่", "Manage parts")}<Icon value="i:external-link" className="text-xs" /></a>
               <div className="inline-flex rounded-lg border border-slate-200 p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
                 {(["table", "grid"] as const).map((v) => (
                   <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} title={v === "table" ? t("ตาราง", "Table") : t("การ์ด", "Grid")}
