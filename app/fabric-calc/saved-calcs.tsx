@@ -12,6 +12,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { FabricBuyCalcRow } from "@/app/api/fabric-buy-calcs/route";
 import { fmt, textCls } from "./buy-ui";
+import { baseCalcName, nextVersionName, versionOf } from "@/lib/fabric-buy-sheet";
 
 export type SavePack = { mode: "single" | "family"; payload: Record<string, unknown>; summary: FabricBuyCalcRow["summary"]; suggestName: string };
 
@@ -22,7 +23,8 @@ const summaryTxt = (r: FabricBuyCalcRow) => {
   return `${s.need != null ? `ใช้ ${fmt(s.need)} ${s.unit ?? ""}` : "-"}${s.to_buy ? ` · ซื้อเพิ่ม ${fmt(s.to_buy)}` : ""}${s.cost_buy ? ` · ฿${fmt(s.cost_buy, 0)}` : ""}`;
 };
 
-export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePack; onLoad: (row: FabricBuyCalcRow) => void; onCurrent?: (cur: { id: string; name: string } | null) => void }) {
+export function SavedCalcsBar({ pack, onLoad, onCurrent, autoName }: { pack: () => SavePack; onLoad: (row: FabricBuyCalcRow) => void; onCurrent?: (cur: { id: string; name: string } | null) => void;
+  /** ชื่อตั้งต้นจากที่มา (ใบออกแบบ / SKU / Parent) — เติมให้เองจนกว่าผู้ใช้จะพิมพ์ชื่อเอง (2026-11-18) */ autoName?: string }) {
   const toast = useToast();
   const [cur, setCur] = useState<{ id: string; name: string } | null>(null);
   // แจ้งหน้าแม่ว่าเปิด/บันทึกชุดไหนอยู่ (ใบพิมพ์ใช้ทำ QR ลิงก์กลับ)
@@ -33,6 +35,13 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
   const [list, setList] = useState<FabricBuyCalcRow[] | null>(null);
   const [listErr, setListErr] = useState("");
   const [del, setDel] = useState<FabricBuyCalcRow | null>(null);
+  const [touched, setTouched] = useState(false);      // ผู้ใช้พิมพ์ชื่อเอง → หยุดเติมชื่ออัตโนมัติ
+  const [names, setNames] = useState<string[]>([]);   // ชื่อที่บันทึกไว้แล้ว (ไว้ต่อเวอร์ชัน v2 v3)
+  useEffect(() => { if (!touched && !cur && autoName) setName(autoName); }, [autoName, touched, cur]);
+  const loadNames = async () => {
+    try { const j = await apiFetch("/api/fabric-buy-calcs", { cache: "no-store" }).then((r) => r.json()); if (!j.error) setNames(((j.data ?? []) as FabricBuyCalcRow[]).map((r) => r.name)); } catch { /* ไม่มีรายชื่อ = ไม่ต่อเวอร์ชันล่วงหน้า (เช็กอีกทีตอนบันทึก) */ }
+  };
+  useEffect(() => { void loadNames(); }, []);
 
   const openRow = async (id: string, quiet = false) => {
     try {
@@ -40,7 +49,7 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
       if (j.error || !j.data) { toast.error(j.error ?? "เปิดไม่สำเร็จ"); return; }
       const row = j.data as FabricBuyCalcRow;
       onLoad(row);
-      setCur({ id: row.id, name: row.name }); setName(row.name); setListOpen(false);
+      setCur({ id: row.id, name: row.name }); setName(row.name); setTouched(true); setListOpen(false);
       if (!quiet) toast.success(`เปิด “${row.name}” แล้ว`);
     } catch { toast.error("เปิดไม่สำเร็จ ลองใหม่อีกครั้ง"); }
   };
@@ -56,24 +65,32 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
     setList(null); setListErr("");
     try {
       const j = await apiFetch("/api/fabric-buy-calcs", { cache: "no-store" }).then((r) => r.json());
-      if (j.error) setListErr(j.error); else setList(j.data ?? []);
+      if (j.error) setListErr(j.error); else { setList(j.data ?? []); setNames(((j.data ?? []) as FabricBuyCalcRow[]).map((r) => r.name)); }
     } catch { setListErr("โหลดรายการไม่สำเร็จ"); }
   };
 
   const save = async (asNew: boolean) => {
     const p = pack();
-    const nm = name.trim() || p.suggestName;
+    let nm = name.trim() || p.suggestName;
     if (!nm) { toast.error("ตั้งชื่อก่อนบันทึก"); return; }
     setSaving(true);
     try {
+      // ชุดใหม่ที่ชื่อซ้ำของเดิม → ต่อท้าย v2, v3 (ของเดิมยังอยู่) · บันทึกทับ = ใช้ชื่อเดิม
+      const creating = !(cur && !asNew);
+      if (creating) {
+        const fresh = await apiFetch("/api/fabric-buy-calcs", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+        const all = fresh?.data ? ((fresh.data as FabricBuyCalcRow[]).map((r) => r.name)) : names;
+        nm = nextVersionName(nm, all);
+      }
       const body = JSON.stringify({ name: nm, mode: p.mode, payload: p.payload, summary: p.summary });
       const res = cur && !asNew
         ? await apiFetch(`/api/fabric-buy-calcs?id=${encodeURIComponent(cur.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body })
         : await apiFetch("/api/fabric-buy-calcs", { method: "POST", headers: { "Content-Type": "application/json" }, body });
       const j = await res.json();
       if (!res.ok || j.error) { toast.error(j.error ?? "บันทึกไม่สำเร็จ"); return; }
-      setCur({ id: j.data.id, name: j.data.name }); setName(j.data.name);
-      toast.success(cur && !asNew ? "บันทึกทับแล้ว" : "บันทึกแล้ว — คัดลอกลิงก์ส่งให้คนอื่นเปิดดูได้");
+      setCur({ id: j.data.id, name: j.data.name }); setName(j.data.name); setTouched(true);
+      setNames((ns) => (ns.includes(j.data.name) ? ns : [...ns, j.data.name]));
+      toast.success(cur && !asNew ? "บันทึกทับแล้ว" : versionOf(j.data.name) > 1 ? `บันทึกเป็น “${j.data.name}” แล้ว (ชื่อนี้มีอยู่ — เวอร์ชันเก่ายังอยู่)` : "บันทึกแล้ว — คัดลอกลิงก์ส่งให้คนอื่นเปิดดูได้");
     } catch { toast.error("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
     finally { setSaving(false); }
   };
@@ -97,8 +114,23 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
     finally { setDel(null); }
   };
 
+  // เวอร์ชันชื่อเดียวกัน (v1 v2 v3) อยู่ติดกัน เวอร์ชันใหม่สุดก่อน · กลุ่มเรียงตามแก้ล่าสุด
+  const verCount = new Map<string, number>();
+  for (const r of list ?? []) verCount.set(baseCalcName(r.name), (verCount.get(baseCalcName(r.name)) ?? 0) + 1);
+  const groupLatest = new Map<string, string>();
+  for (const r of list ?? []) { const b = baseCalcName(r.name); if ((groupLatest.get(b) ?? "") < r.updated_at) groupLatest.set(b, r.updated_at); }
+  const grouped = [...(list ?? [])].sort((a, b) => {
+    const ba = baseCalcName(a.name), bb = baseCalcName(b.name);
+    if (ba !== bb) return (groupLatest.get(bb) ?? "").localeCompare(groupLatest.get(ba) ?? "");
+    return versionOf(b.name) - versionOf(a.name);
+  });
   const cols: MiniColumn<FabricBuyCalcRow>[] = [
-    { key: "n", header: "ชื่อ", width: "2fr", sortValue: (r) => r.name, cell: (r) => <span className="font-medium text-slate-700">{r.name}</span> },
+    { key: "n", header: "ชื่อ", width: "2fr", sortValue: (r) => r.name, cell: (r) => {
+      const b = baseCalcName(r.name), v = versionOf(r.name), n = verCount.get(b) ?? 1;
+      return <span className="flex min-w-0 items-center gap-1.5"><span className="truncate font-medium text-slate-700">{b}</span>
+        {n > 1 && <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10.5px] ${v === Math.max(...(list ?? []).filter((x) => baseCalcName(x.name) === b).map((x) => versionOf(x.name))) ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>v{v}</span>}
+        {n > 1 && v === Math.max(...(list ?? []).filter((x) => baseCalcName(x.name) === b).map((x) => versionOf(x.name))) && <span className="shrink-0 text-[10.5px] text-slate-400">{n} เวอร์ชัน</span>}</span>;
+    } },
     { key: "m", header: "แบบ", width: "0.9fr", cell: (r) => <span className={`rounded px-1.5 py-0.5 text-[11px] ${r.mode === "family" ? "bg-violet-50 text-violet-700" : "bg-slate-100 text-slate-600"}`}>{r.mode === "family" ? "ทั้งตระกูล" : "ผ้าเดียว"}</span> },
     { key: "s", header: "สรุป", width: "2fr", cell: (r) => <span className="text-[12px] text-slate-500">{summaryTxt(r)}</span> },
     { key: "by", header: "โดย", width: "1fr", cell: (r) => <span className="text-[12px] text-slate-500">{r.updated_by_name ?? r.created_by_name ?? "-"}</span> },
@@ -109,7 +141,9 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-indigo-100 bg-white px-3 py-2 shadow-sm">
       <Icon name="save" />
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ตั้งชื่อการคำนวณ เช่น TOTE-01 ล็อต ธ.ค." className={`${textCls} !h-8 max-w-xs flex-1`} />
+      <input value={name} onChange={(e) => { setName(e.target.value); setTouched(true); }} placeholder="ตั้งชื่อการคำนวณ เช่น TOTE-01 ล็อต ธ.ค." className={`${textCls} !h-8 min-w-[10rem] max-w-xs flex-1`} />
+      {!cur && name.trim() && names.some((x) => baseCalcName(x) === baseCalcName(name)) && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">มีชื่อนี้แล้ว → บันทึกเป็น {nextVersionName(name, names).slice(baseCalcName(name).length).trim()}</span>}
+      {!cur && !touched && autoName && name === autoName && <span className="text-[11px] text-slate-400">ชื่ออัตโนมัติ · แก้ได้</span>}
       <button type="button" disabled={saving} onClick={() => void save(false)} className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : cur ? "บันทึกทับ" : "บันทึก"}</button>
       {cur && <button type="button" disabled={saving} onClick={() => void save(true)} className="h-8 rounded-lg border border-slate-200 px-3 text-[12px] text-slate-600 hover:bg-slate-50">บันทึกเป็นชุดใหม่</button>}
       {cur && <button type="button" onClick={() => void copyLink()} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="link" /> คัดลอกลิงก์</button>}
@@ -117,7 +151,7 @@ export function SavedCalcsBar({ pack, onLoad, onCurrent }: { pack: () => SavePac
       {cur && <span className="w-full text-[11.5px] text-slate-400">กำลังแก้ “{cur.name}” — กดบันทึกทับเพื่ออัปเดต</span>}
 
       <ERPModal open={listOpen} onClose={() => setListOpen(false)} title="การคำนวณที่บันทึกไว้" size="lg">
-        <MiniTable rows={list ?? []} columns={cols} rowKey={(r) => r.id} searchText={(r) => `${r.name} ${r.created_by_name ?? ""}`} searchPlaceholder="ค้นชื่อ / คนบันทึก" countUnit="ชุด"
+        <MiniTable rows={grouped} columns={cols} rowKey={(r) => r.id} searchText={(r) => `${r.name} ${r.created_by_name ?? ""}`} searchPlaceholder="ค้นชื่อ / คนบันทึก" countUnit="ชุด"
           onRowClick={(r) => void openRow(r.id)}
           emptyText={listErr ? <span className="text-rose-600">{listErr} <button type="button" onClick={() => void loadList()} className="underline">ลองใหม่</button></span> : list === null ? "กำลังโหลด…" : "ยังไม่มีการคำนวณที่บันทึกไว้ — คำนวณแล้วตั้งชื่อ กดบันทึก"} />
       </ERPModal>

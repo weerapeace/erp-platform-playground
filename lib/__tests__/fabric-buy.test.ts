@@ -215,3 +215,31 @@ describe("ใบพิมพ์แบบเลือกได้ (renderFabricPr
     expect(renderFabricPrintHtml([{ key: "A", input: big, res: r, fabric_name: "x" }], { title: "t", date: "d", qr_html: '<img class="scan-qr" src="data:x">' }, DEFAULT_FABRIC_PRINT)).toContain("scan-qr");
   });
 });
+
+describe("ใบงาน Design Dashboard → คิดผ้า (fabric-buy-sheet · 2026-11-18)", () => {
+  const L = (o: Record<string, unknown>) => ({ item_name: "ผ้าแคนวาส", width_cm: 40, length_cm: 35, pieces: 2, face_width_cm: 150, parent_code: null, variant: null, ...o });
+  it("แยกผ้าตามแท็บ/สี · ข้ามบรรทัดไม่มีขนาด · วัสดุไม่มีรหัส = (ชื่อ)", async () => {
+    const { sheetFabrics, sheetColorGroups, nameFromKey } = await import("../fabric-buy-sheet");
+    const lines = [L({}), L({ width_cm: 6, length_cm: 60 }), L({ item_name: "ซับใน", face_width_cm: 110 }), L({ parent_code: "S" }), L({ width_cm: 0 }), L({ variant: "ดำ" })];
+    const fs = sheetFabrics(lines);
+    expect(fs.map((f) => `${f.tab}|${f.name}`)).toEqual(["ทั่วไป|ผ้าแคนวาส", "ทั่วไป|ซับใน", "S|ผ้าแคนวาส"]);
+    expect(fs[0].pieces).toHaveLength(3);
+    expect(fs[0].pieces[2].label).toBe("ดำ · 40×35");
+    expect(fs[0].sku).toBe("(ผ้าแคนวาส)");
+    expect(nameFromKey(fs[0].sku)).toBe("ผ้าแคนวาส");
+    expect(fs[1].face).toBe(110);
+    const gs = sheetColorGroups(lines);
+    expect(gs.map((g) => g.code)).toEqual(["ทั่วไป", "S"]);
+    expect(sheetFabrics([L({ item_name: "โฟม", face_width_cm: null }), L({})])[0].name).toBe("ผ้าแคนวาส");
+    expect(gs[0].face["(ซับใน)"]).toBe(110);
+  });
+  it("ชื่อซ้ำ → v2, v3 · ไม่ซ้ำ = ชื่อเดิม", async () => {
+    const { nextVersionName, baseCalcName, versionOf } = await import("../fabric-buy-sheet");
+    expect(nextVersionName("TOTE-01", [])).toBe("TOTE-01");
+    expect(nextVersionName("TOTE-01", ["TOTE-01"])).toBe("TOTE-01 v2");
+    expect(nextVersionName("TOTE-01", ["TOTE-01", "TOTE-01 v2", "อื่น"])).toBe("TOTE-01 v3");
+    expect(nextVersionName("TOTE-01 v2", ["TOTE-01", "TOTE-01 v2"])).toBe("TOTE-01 v3");
+    expect(baseCalcName("DS-1 กระเป๋า v4")).toBe("DS-1 กระเป๋า");
+    expect(versionOf("X")).toBe(1);
+  });
+});

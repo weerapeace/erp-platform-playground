@@ -12,6 +12,7 @@ import { ScrollTabs } from "@/components/scroll-tabs";
 import { Icon } from "@/components/icon";
 import { FabricBuyCalc } from "./buy-calc";
 import { ClassicFabricCalc } from "./classic-calc";
+import { QuickFabricCalc, QUICK_HANDOFF_KEY, type QuickSend } from "./quick-calc";
 
 type Tab = "buy" | "classic";
 const TAB_KEY = "fabric-calc.tab";
@@ -27,6 +28,8 @@ export default function FabricCalcPage() {
   }, []);
   const choose = (t: Tab) => { setTab(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ } };
   const cur = TABS.find((t) => t.key === tab)!;
+  // แท็บสูตร BOM: คิดเร็วยังลอยอยู่ → "ส่งเข้าคิดละเอียด" ฝากค่าไว้แล้วสลับไปแท็บคิดผ้าก่อนซื้อ (หน้านั้นหยิบไปใช้ตอนเปิด)
+  const quickToBuy = (q: QuickSend) => { try { sessionStorage.setItem(QUICK_HANDOFF_KEY, JSON.stringify(q)); } catch { /* ไม่ได้ก็แค่ไม่ยกค่า */ } choose("buy"); };
 
   return (
     <PlaygroundShell>
@@ -42,7 +45,7 @@ export default function FabricCalcPage() {
               </button>
             ))}
           </ScrollTabs>
-          {tab === "buy" ? <FabricBuyCalc /> : <div className="max-w-5xl"><ClassicFabricCalc /></div>}
+          {tab === "buy" ? <FabricBuyCalc /> : <div className="max-w-5xl"><ClassicFabricCalc /><QuickFabricCalc onSend={quickToBuy} /></div>}
         </div>
       </div>
     </PlaygroundShell>

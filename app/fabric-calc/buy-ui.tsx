@@ -7,7 +7,7 @@ import { useState, type ReactNode } from "react";
 import { unitFromUomName, type BuyRound, type BuyUnit } from "@/lib/fabric-buy";
 
 export const fmt = (n: number, d = 2) => (Math.round(n * 10 ** d) / 10 ** d).toLocaleString("th-TH", { maximumFractionDigits: d });
-const boxCls = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-indigo-400";
+const boxCls = "h-11 w-full rounded-lg border border-slate-200 bg-white px-2 text-base outline-none focus:border-indigo-400 sm:h-9 sm:text-sm";   // มือถือ: สูง 44px + ตัว 16px (กดง่าย · iPhone ไม่ซูมตอนแตะ)
 export const inputCls = `${boxCls} text-right`;   // ช่องตัวเลข
 export const textCls = `${boxCls} text-left`;     // ช่องข้อความ / ตัวเลือก
 

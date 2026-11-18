@@ -22,7 +22,7 @@ import type { BomSourceGroup, BomSourceProduct, BomState } from "@/app/api/fabri
 
 export type BomHead = { id: string; bom_code: string; product_sku: string | null; product_name: string | null; version: string | number | null };
 export type BomLine = { component_sku?: string | null; component_name?: string | null; material_type?: string | null; cut_block_code?: string | null; piece_name?: string | null; cut_width?: number | null; cut_length?: number | null; pieces?: number | null; no_rotate?: boolean | null; face_width_cm?: number | null; size_variant?: boolean | null };
-export type SrcFabric = { sku: string; name: string; note: string; pieces: Omit<BuyPiece, "key">[]; sized?: boolean; product?: string | null; mo_no?: string | null; mo_qty?: number };
+export type SrcFabric = { sku: string; name: string; note: string; pieces: Omit<BuyPiece, "key">[]; face?: number; sized?: boolean; product?: string | null; mo_no?: string | null; mo_qty?: number };
 
 /** สูตรของสินค้า (ตรงรหัสเท่านั้น) */
 export async function bomsOfSku(sku: string): Promise<BomHead[]> {

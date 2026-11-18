@@ -25,14 +25,18 @@ import type { FabricPrintItem } from "@/lib/fabric-buy-print";
 import { FabricPrintSetup } from "./print-setup";
 import { Card, Num, fmt, unitComparable, type FabricSettings } from "./buy-ui";
 import { CutStatusBadge, MeasureModal, useCutChecks, type MeasureTarget } from "./cut-check";
+import { DesignSheetPickerModal } from "@/components/design-sheet-picker";
+import { nameFromKey, sheetColorGroups, type SheetCostLine } from "@/lib/fabric-buy-sheet";
 
 /** สิ่งที่บันทึก/เปิดกลับได้ของโหมดนี้ */
 export type FamilyState = {
   parent: ParentSkuPickerValue | null;
+  /** ที่มาเป็นใบงาน Design Dashboard แทน Parent (2026-11-18) — 1 แถว = แท็บ / สี ในใบงาน */
+  sheet?: { id: string; code: string; name: string } | null;
   qty: Record<string, number>;                                            // รหัส SKU ลูก → จำนวน
   over: Record<string, { face?: number; price?: number; match?: boolean }>;   // รหัสผ้า → ค่าที่ผู้ใช้แก้เอง
 };
-export const emptyFamily = (): FamilyState => ({ parent: null, qty: {}, over: {} });
+export const emptyFamily = (): FamilyState => ({ parent: null, sheet: null, qty: {}, over: {} });
 
 /** ส่งผ้า 1 ตัวไปแก้ละเอียดในโหมดผ้าเดียว */
 export type OpenSingleArgs = { fabric: BomComponent | null; pieces: BuyPiece[]; qty: number; face: number; form: "roll" | "sheet"; sheetLen: number; price: number; source: string;
@@ -43,14 +47,14 @@ export type FamilySummary = { fabrics: number; qty: number; cost_buy: number; sh
 
 type ProdSku = { id: string; code: string; name: string | null; color: string | null; is_active: boolean };
 type ProdBom = { id: string; bom_code: string; product_sku: string; is_default: boolean; updated_at: string | null; status?: string | null; version?: string | number | null };
-type ColorRow = { code: string; name: string | null; color: string | null; bom: ProdBom | null; lines: FamilyLine[] | null; err?: string };
+type ColorRow = { code: string; name: string | null; color: string | null; bom: ProdBom | null; lines: FamilyLine[] | null; err?: string; fromSheet?: boolean };
 type FabInfo = { face: number; sheetW: number; sheetL: number; supply: string | null; uom: string | null };
 type Row = { f: FamilyFabric; comp: BomComponent | null; input: BuyInput; res: BuyResult; label: string };
 
 const pickBom = (bs: ProdBom[]): ProdBom | null =>
   bs.find((b) => b.is_default) ?? [...bs].sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))[0] ?? null;
 
-export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle, calcId }: {
+export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle, calcId, onLabel }: {
   settings: FabricSettings;
   initial: FamilyState;
   onState: (s: FamilyState) => void;
@@ -58,9 +62,14 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   onOpenSingle: (a: OpenSingleArgs) => void;
   /** ชุดคำนวณที่บันทึกแล้ว → QR ลิงก์กลับในใบพิมพ์ */
   calcId?: string | null;
+  /** ชื่อตั้งต้นของชุดคำนวณ (ตั้งชื่ออัตโนมัติ) */
+  onLabel?: (name: string) => void;
 }) {
   const toast = useToast();
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(initial.parent);
+  const [sheet, setSheet] = useState<FamilyState["sheet"]>(initial.sheet ?? null);
+  const [srcKind, setSrcKind] = useState<"parent" | "sheet">(initial.sheet ? "sheet" : "parent");
+  const [dsPick, setDsPick] = useState(false);
   const [qty, setQty] = useState<Record<string, number>>(initial.qty);
   const [over, setOver] = useState<FamilyState["over"]>(initial.over);
   const [colors, setColors] = useState<ColorRow[] | null>(null);
@@ -74,17 +83,52 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   const [reloadKey, setReloadKey] = useState(0);                 // บันทึกสูตรแล้ว → โหลดสูตรทุกสีใหม่ (จำนวนต่อสีคงเดิม)
   const [measure, setMeasure] = useState<MeasureTarget | null>(null);
 
-  useEffect(() => { onState({ parent, qty, over }); }, [parent, qty, over, onState]);
+  useEffect(() => { onState({ parent, sheet, qty, over }); }, [parent, sheet, qty, over, onState]);
+  useEffect(() => { onLabel?.(sheet ? `${sheet.code} ${sheet.name} ทุกผ้า`.trim() : parent ? `${parent.code} ทั้งตระกูล` : ""); }, [parent, sheet, onLabel]);
 
   // โหลดสี + สูตร + ชิ้นตัด + ข้อมูลผ้า + ราคา + สต็อก เมื่อเปลี่ยน Parent
   const loadSeq = useRef(0);
   useEffect(() => {
     setColors(null); setInfo({}); setComps({}); setStock({}); setOpen(new Set());
-    if (!parent?.id) return;
+    if (!parent?.id && !sheet?.id) return;
     const seq = ++loadSeq.current;
     const alive = () => seq === loadSeq.current;
     (async () => {
       try {
+        if (sheet?.id) {
+          // ── ใบงาน Design Dashboard: บรรทัดตีราคา → แถว (แท็บ/สี) · ผ้า = ชื่อวัสดุ (ไม่มีรหัส) ──
+          setBusy("กำลังดึงชิ้นตัดจากใบงาน…");
+          const j = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/cost-lines`, { cache: "no-store" }).then((r) => r.json());
+          if (!alive()) return;
+          if (j.restricted) throw new Error("ไม่มีสิทธิ์ดูตีราคา — ขนาดชิ้นอยู่ในตารางตีราคาของใบงาน");
+          if (j.error) throw new Error(j.error);
+          const groups = sheetColorGroups((j.data ?? []) as SheetCostLine[]);
+          setColors(groups.map((g) => ({ code: g.code, name: null, color: g.color, bom: null, lines: g.lines, fromSheet: true })));
+          const fabInfo: Record<string, FabInfo> = {};
+          for (const g of groups) for (const [k, f] of Object.entries(g.face)) if (!fabInfo[k]) fabInfo[k] = { face: f, sheetW: 0, sheetL: 0, supply: null, uom: null };
+          for (const g of groups) for (const l of g.lines) if (!fabInfo[l.component_sku]) fabInfo[l.component_sku] = { face: 0, sheetW: 0, sheetL: 0, supply: null, uom: null };
+          setInfo(fabInfo);
+          setBusy("กำลังหาผ้าในคลังจากชื่อวัสดุ…");
+          const found: Record<string, BomComponent> = {};
+          await Promise.all(Object.keys(fabInfo).map(async (key) => {
+            const nm = nameFromKey(key);
+            try {
+              const c = await apiFetch(`/api/bom/components?search=${encodeURIComponent(nm ?? key)}&limit=10`).then((x) => x.json());
+              const list = (c.data ?? []) as BomComponent[];
+              const hit = nm ? list.find((x) => (x.name ?? "").trim().toLowerCase() === nm.trim().toLowerCase()) : list.find((x) => x.code === key);
+              if (hit) found[key] = hit;
+            } catch { /* ไม่เจอ = ไม่มีราคา/สต็อก */ }
+          }));
+          if (!alive()) return;
+          setComps(found);
+          const ids = Object.values(found).map((c) => c.id).filter(Boolean);
+          if (ids.length) {
+            const st = await apiFetch(`/api/inventory/sku-stock?ids=${ids.map(encodeURIComponent).join(",")}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null);
+            if (alive() && st?.data) setStock(Object.fromEntries((st.data as { sku_id: string; qty_on_hand: number }[]).map((x) => [x.sku_id, Number(x.qty_on_hand) || 0])));
+          }
+          return;
+        }
+        if (!parent?.id) return;
         setBusy("กำลังโหลดสีและสูตร…");
         const j = await apiFetch(`/api/parent-skus/${encodeURIComponent(parent.id)}/production`).then((r) => r.json());
         if (!alive()) return;
@@ -136,7 +180,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
       } finally { if (alive()) setBusy(""); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parent?.id, reloadKey]);   // toast ไม่ใส่ (กันโหลดซ้ำถ้าตัวแจ้งเตือนเปลี่ยนตัว)
+  }, [parent?.id, sheet?.id, reloadKey]);   // toast ไม่ใส่ (กันโหลดซ้ำถ้าตัวแจ้งเตือนเปลี่ยนตัว)
 
   // ── คำนวณ ──
   const dQty = useDeferredValue(qty), dOver = useDeferredValue(over), dSet = useDeferredValue(settings);
@@ -179,6 +223,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   // ── สถานะวัดจริง: ต่อ "สี + ผ้า" (ชิ้นของสีนั้นตอนนี้ เทียบลายนิ้วมือ) ──
   const colorFabric = useMemo(() => {
     const out: Record<string, { code: string; color: string; fp: string }[]> = {};
+    if (sheet) return out;   // ใบงานยังไม่ใช่สินค้า → ไม่มีผลวัดจริงให้ผูก
     for (const c of colors ?? []) {
       if (!((qty[c.code] ?? 0) > 0)) continue;
       const bySku = new Map<string, FamilyLine[]>();
@@ -186,7 +231,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
       for (const [sku, ls] of bySku) (out[sku] ??= []).push({ code: c.code, color: c.color || c.code, fp: piecesFingerprint(ls) });
     }
     return out;
-  }, [colors, qty]);
+  }, [colors, qty, sheet]);
   const pairs = useMemo(() => Object.entries(colorFabric).flatMap(([sku, cs]) => cs.map((c) => `${c.code}|${sku}`)), [colorFabric]);
   const { checks, reload: reloadChecks } = useCutChecks(pairs);
   const fabricState = (sku: string) => {
@@ -195,7 +240,7 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
     const done = each.filter((e) => e.st.state === "measured").length;
     return { each, done, total: each.length, all: each.length > 0 && done === each.length };
   };
-  const parentLabel = parent ? `[${parent.code}] ${parent.name}` : "";
+  const parentLabel = sheet ? `ใบออกแบบ ${sheet.code} ${sheet.name}`.trim() : parent ? `[${parent.code}] ${parent.name}` : "";
 
   const addAllCart = () => {
     if (!shorts.length) { toast.success(rows.length ? "สต็อกพอทุกผ้าแล้ว ไม่ต้องซื้อเพิ่ม" : "ยังไม่มีผ้าให้คิด — ใส่จำนวนต่อสีก่อน"); return; }
@@ -246,13 +291,13 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   };
 
   const colorCols: MiniColumn<ColorRow>[] = [
-    { key: "c", header: "สี (SKU ลูก)", width: "1.6fr", cell: (c) => <span><b className="font-medium text-slate-700">{c.color || "-"}</b> <span className="text-[12px] text-slate-400">{c.code}</span></span> },
-    { key: "b", header: "สูตร", width: "1.4fr", cell: (c) => !c.bom ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">ไม่มีสูตร</span>
+    { key: "c", header: sheet ? "แท็บในใบงาน" : "สี (SKU ลูก)", width: "1.6fr", cell: (c) => c.fromSheet ? <b className="font-medium text-slate-700">{c.color}</b> : <span><b className="font-medium text-slate-700">{c.color || "-"}</b> <span className="text-[12px] text-slate-400">{c.code}</span></span> },
+    { key: "b", header: sheet ? "ผ้าในแถวนี้" : "สูตร", width: "1.4fr", cell: (c) => c.fromSheet ? <span className="text-[12px] text-emerald-700">{new Set((c.lines ?? []).map((l) => l.component_sku)).size} ผ้า · {(c.lines ?? []).length} ชิ้น</span> : !c.bom ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">ไม่มีสูตร</span>
       : c.err ? <span className="text-[11px] text-rose-600">{c.err}</span>
       : c.lines === null ? <span className="text-[11px] text-slate-400">กำลังโหลด…</span>
       : c.lines.length === 0 ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">{c.bom.bom_code} · ไม่มีขนาดชิ้นตัด</span>
       : <span className="text-[12px] text-emerald-700">{c.bom.bom_code} · {new Set(c.lines.map((l) => l.component_sku)).size} ผ้า</span> },
-    { key: "e", header: "", width: "5.5rem", align: "right", cell: (c) => c.bom
+    { key: "e", header: "", width: "5.5rem", align: "right", cell: (c) => c.fromSheet ? null : c.bom
       ? <button type="button" onClick={() => setBomEdit(c.code)} className="h-7 rounded-lg border border-amber-300 bg-amber-50 px-2 text-[11.5px] text-amber-800 hover:bg-amber-100" title="ขนาดชิ้นไม่ตรง → แก้สูตรของสีนี้ (บันทึกแล้วโหลดใหม่ให้)">แก้สูตร</button>
       : <button type="button" onClick={() => setBomEdit(c.code)} className="h-7 rounded-lg border border-slate-200 px-2 text-[11.5px] text-slate-600 hover:bg-slate-50" title="สร้างสูตรให้สีนี้">สร้างสูตร</button> },
     { key: "q", header: "จำนวน (ใบ)", width: "8rem", align: "right", cell: (c) => (c.lines?.length ?? 0) > 0
@@ -308,11 +353,22 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
   const usable = (colors ?? []).filter((c) => (c.lines?.length ?? 0) > 0);
   return (
     <div className="space-y-4">
-      <Card title="1. เลือกสินค้าแม่ (Parent SKU) + ใส่จำนวนต่อสี" tag="need" right={busy && <span className="text-[12px] text-slate-500">{busy}</span>}>
-        <div className="mb-3 max-w-md"><ParentSkuPicker value={parent} onChange={(v) => { setParent(v); setQty({}); setOver({}); }} placeholder="ค้นรหัส / ชื่อสินค้าแม่..." disableCreate /></div>
-        {!parent ? <div className="text-[12px] text-slate-400">เลือกสินค้าแม่ ระบบจะดึงทุกสีพร้อมสูตรให้ แล้วรวมผ้าที่ต้องซื้อทั้งตระกูล</div>
+      <Card title={srcKind === "sheet" ? "1. เลือกใบงาน (Design Dashboard) + ใส่จำนวนต่อแถว" : "1. เลือกสินค้าแม่ (Parent SKU) + ใส่จำนวนต่อสี"} tag="need" right={busy && <span className="text-[12px] text-slate-500">{busy}</span>}>
+        <div className="mb-2 inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-[12px]">
+          {([["parent", "จากสินค้าแม่ + สูตร BOM"], ["sheet", "จากใบงาน Design Dashboard"]] as ["parent" | "sheet", string][]).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setSrcKind(k)} className={`rounded-md px-3 py-1 ${srcKind === k ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-indigo-50"}`}>{label}</button>
+          ))}
+        </div>
+        {srcKind === "parent"
+          ? <div className="mb-3 max-w-md"><ParentSkuPicker value={parent} onChange={(v) => { setParent(v); setSheet(null); setQty({}); setOver({}); }} placeholder="ค้นรหัส / ชื่อสินค้าแม่..." disableCreate /></div>
+          : <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setDsPick(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-[13px] text-indigo-700 hover:bg-indigo-50"><Icon name="palette" /> {sheet ? `${sheet.code} ${sheet.name}` : "เลือกใบงาน…"}</button>
+              {sheet && <span className="text-[11.5px] text-slate-400">1 แถว = แท็บ (Parent) ในตีราคาของใบงาน · ผ้าจับคู่จากชื่อวัสดุ</span>}
+            </div>}
+        {(srcKind === "parent" ? !parent : !sheet) ? <div className="text-[12px] text-slate-400">{srcKind === "parent" ? "เลือกสินค้าแม่ ระบบจะดึงทุกสีพร้อมสูตรให้ แล้วรวมผ้าที่ต้องซื้อทั้งตระกูล" : "เลือกใบงาน ระบบจะดึงทุกผ้าในตีราคา (ที่ใส่ กว้าง × ยาว × ชิ้น) แล้วรวมผ้าที่ต้องซื้อ"}</div>
+          : (srcKind === "parent") !== !sheet ? <div className="text-[12px] text-slate-400">{srcKind === "parent" ? "เลือกสินค้าแม่" : "เลือกใบงาน"} เพื่อเปลี่ยนที่มา</div>
           : colors === null ? <div className="text-[12px] text-slate-500">กำลังโหลด…</div>
-          : colors.length === 0 ? <div className="text-[12px] text-amber-700">สินค้าแม่นี้ยังไม่มี SKU ลูก</div>
+          : colors.length === 0 ? <div className="text-[12px] text-amber-700">{sheet ? "ใบงานนี้ยังไม่มีบรรทัดตีราคาที่ใส่ กว้าง × ยาว × ชิ้น" : "สินค้าแม่นี้ยังไม่มี SKU ลูก"}</div>
           : <>
               {usable.length > 1 && (
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
@@ -348,7 +404,9 @@ export function FamilyCalc({ settings, initial, onState, onSummary, onOpenSingle
         <div className="mt-2 text-[11.5px] text-slate-400">กดแถว = แก้หน้ากว้าง/ราคา · ดูผังการวาง · เปิดแก้ละเอียด · ค่าตั้ง (ริม เผื่อเสีย หน่วย ปัดขึ้น ลายซ้ำ) ใช้ชุดด้านล่างกับทุกผ้า · ผ้าผืนไม่หักริม</div>
       </section>
       {bomEdit && <BomEditorModal sku={bomEdit} onClose={(changed) => { setBomEdit(null); if (changed) { setReloadKey((k) => k + 1); toast.success("บันทึกสูตรแล้ว — โหลดชิ้นตัดใหม่"); } }} />}
-      <FabricPrintSetup open={printOpen} onClose={() => setPrintOpen(false)} items={printItems} meta={printMeta} buildCut={buildCut} calcId={calcId} docNo={parent?.code ?? null} />
+      <DesignSheetPickerModal open={dsPick} onClose={() => setDsPick(false)} title="คิดผ้าจากใบงานไหน?" confirmText="ใช้ใบนี้"
+        onConfirm={(sh) => { setDsPick(false); setSheet({ id: sh.id, code: sh.code, name: sh.name }); setParent(null); setQty({}); setOver({}); }} />
+      <FabricPrintSetup open={printOpen} onClose={() => setPrintOpen(false)} items={printItems} meta={printMeta} buildCut={buildCut} calcId={calcId} docNo={parent?.code ?? sheet?.code ?? null} />
       <MeasureModal target={measure} current={measure ? checks[`${measure.product_sku}|${measure.component_sku}`] ?? null : null} onClose={() => setMeasure(null)} onSaved={reloadChecks} />
     </div>
   );
