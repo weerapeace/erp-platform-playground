@@ -38,6 +38,7 @@ import { useStepHistory } from "@/lib/use-step-history";
 import { AlbumCover } from "@/components/album-cover";
 import { AlbumDropDialog } from "./album-drop-dialog";
 import { SampleTwoPane } from "./two-pane";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { brandCards, brandViewItems, albumMonthKey } from "@/lib/sample-images";
 import { SAMPLE_SUB_SORTS, isAutoAlbumName, isSubSort, sortSubAlbums, parentGroupOf, type SampleSubSort } from "@/lib/sample-images";
 import { SampleAlbumPickerModal } from "./album-picker";
@@ -137,6 +138,7 @@ export function SampleImagesPage() {
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
   const [organize, setOrganize] = useState(false);   // ⇆ จัดเรียง 2 ฝั่ง
+  const [viewAt, setViewAt] = useState(-1);   // ดูรูปใหญ่ (ImageLightbox) — ลำดับในรายการรูปที่เห็น
   const [paneL, setPaneL] = useState<string | null>(null);
   const [paneR, setPaneR] = useState<string | null>(null);
   const [month, setMonth] = useState<string | null>(null);
@@ -914,7 +916,7 @@ export function SampleImagesPage() {
                         const over = zone === "merge";
                         const idx = list.indexOf(p);
                         return (
-                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over} thumbW={thumbW(480)}
+                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over} thumbW={thumbW(480)} onView={() => setViewAt(idx)}
                             extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)), ...selAttr(`p:${p.id}`) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
                             {(zone === "before" || zone === "after") && <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1.5 rounded-full bg-violet-500 ${zone === "before" ? "left-0" : "right-0"}`} />}
@@ -1028,6 +1030,10 @@ export function SampleImagesPage() {
         existing={dropFiles && dropHost ? (albums ?? []).filter((a) => a.id !== dropHost.id && (a.brand_id ?? null) === (dropHost.brand_id ?? null)) : []}
         defaultParentCode={dropHost?.parent_sku_codes?.[0] || lastParent || null} defaultSplit="album"
         onCancel={() => { setDropFiles(null); setDropHost(null); }} onConfirm={(plan) => void confirmDrop(plan)} />
+
+      {/* ดูรูปใหญ่: เลื่อนซ้าย/ขวา (ลูกศร · ปัดนิ้ว) · ซูม · แถบรูปเล็ก — ของกลาง ImageLightbox */}
+      <ImageLightbox index={viewAt} onClose={() => setViewAt(-1)} onIndex={setViewAt} thumbnails
+        images={list.map((p) => ({ url: sampleImgUrl(p.r2_key), thumbUrl: sampleImgUrl(p.r2_key, 240), label: p.file_name }))} />
 
       <AlbumDropDialog src={albumDrop?.src ?? null} dst={albumDrop?.dst ?? null} nameOf={(a) => nameOf(a)} onClose={() => setAlbumDrop(null)}
         onMerge={() => { const x = albumDrop; setAlbumDrop(null); if (x) mergeAlbums(x.src, x.dst); }}

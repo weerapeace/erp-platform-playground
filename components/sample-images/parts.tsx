@@ -230,20 +230,25 @@ export function SampleAlbumPath({ path, brandColor, nameOf, onBack, onOpen, crum
 
 /** ช่องรูป 1 รูป: กด = เลือก/เลิกเลือก · ชี้แล้วมีปุ่มดูรูปเต็ม · ป้าย → DS-xxxx = อยู่ในใบงานแล้ว
  *  faded = รูปในถังขยะ · highlight = ลากผ่าน · extra = props ลาก-วาง · children = ป้ายลอยเพิ่ม (เช่น "ปล่อย = รวมเป็นอัลบั้มใหม่") */
-export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children, thumbW = 480 }: {
+export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children, thumbW = 480, onView }: {
   photo: SamplePhoto; on: boolean; onToggle: () => void; faded?: boolean; highlight?: boolean; thumbW?: number;
+  /** ดูรูปใหญ่ (ป๊อปเต็มจอ ImageLightbox) — ส่งมา = ดับเบิลคลิกรูป / ปุ่มแว่นขยาย เปิดดู · ไม่ส่ง = ปุ่มเปิดรูปในแท็บใหม่แบบเดิม */
+  onView?: () => void;
   extra?: HTMLAttributes<HTMLDivElement>; children?: ReactNode;
 }) {
   const t = useT();
   const p = photo;
   return (
     <div {...extra} className={`group relative overflow-hidden rounded-xl border bg-white ${highlight ? "border-emerald-400 ring-2 ring-emerald-300" : on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
-      <button type="button" onClick={onToggle} className="block w-full cursor-pointer" aria-pressed={on} title={p.file_name}>
+      <button type="button" onClick={onToggle} onDoubleClick={onView ? (e) => { e.preventDefault(); onView(); } : undefined} className="block w-full cursor-pointer" aria-pressed={on} title={onView ? t(`${p.file_name} · ดับเบิลคลิก = ดูรูปใหญ่`, `${p.file_name} · double-click to view`) : p.file_name}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={sampleImgUrl(p.r2_key, thumbW)} alt={p.file_name} loading="lazy" draggable={false} className={`aspect-square w-full bg-slate-50 object-contain ${faded ? "opacity-60" : ""}`} />
       </button>
-      <a href={sampleImgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")} draggable={false}
-        className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>
+      {onView
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); onView(); }} title={t("ดูรูปใหญ่", "View large")} draggable={false}
+            className="absolute left-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 sm:hidden sm:group-hover:inline-flex"><Icon value="i:zoom-in" /></button>
+        : <a href={sampleImgUrl(p.r2_key)} target="_blank" rel="noopener noreferrer" title={t("ดูรูปเต็ม", "Open full image")} draggable={false}
+            className="absolute left-1.5 top-1.5 hidden h-7 w-7 items-center justify-center rounded-full bg-white/90 text-slate-600 shadow-sm hover:text-violet-700 group-hover:inline-flex"><Icon value="i:external-link" /></a>}
       {on && <span className="absolute right-1.5 top-1.5 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       {children}
       <div className="gallery-label space-y-1 px-2 py-1.5">

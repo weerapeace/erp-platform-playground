@@ -20,8 +20,9 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { useMarqueeSelect } from "@/lib/use-marquee-select";
 import { albumPath, brandViewItems, inBrandTab, canMoveAlbum, isAutoAlbumName, productLinkLabel, sortAlbums, sortPhotos, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { loadSamples, moveAlbumTo, movePhotosTo } from "./api";
-import { SamplePhotoTile } from "./parts";
+import { SamplePhotoTile, sampleImgUrl } from "./parts";
 import { SampleAlbumPickerModal } from "./album-picker";
+import { ImageLightbox } from "@/components/image-lightbox";
 
 const MIME = "application/x-sample-two-pane";
 type Side = "L" | "R";
@@ -54,6 +55,7 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [over, setOver] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [viewAt, setViewAt] = useState(-1);   // ดูรูปใหญ่
   const shift = useRef(false);
   const last = useRef<string | null>(null);
   const grid = useGalleryColumns(`sample-two-pane-${side}`, 4, "0.4rem", { ctrlWheel: true });
@@ -152,7 +154,7 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
           : (
             <div style={grid.gridStyle} {...grid.compactAttr}>
               {list.map((p) => (
-                <SamplePhotoTile key={p.id} photo={p} on={sel.has(p.id)} onToggle={() => toggle(p.id)} thumbW={240}
+                <SamplePhotoTile key={p.id} photo={p} on={sel.has(p.id)} onToggle={() => toggle(p.id)} thumbW={240} onView={() => setViewAt(list.indexOf(p))}
                   extra={{
                     draggable: canEdit,
                     onMouseDown: (e) => { shift.current = e.shiftKey; },
@@ -174,6 +176,8 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
         )}
       </div>
 
+      <ImageLightbox index={viewAt} onClose={() => setViewAt(-1)} onIndex={setViewAt} thumbnails
+        images={list.map((p) => ({ url: sampleImgUrl(p.r2_key), thumbUrl: sampleImgUrl(p.r2_key, 240), label: p.file_name }))} />
       <SampleAlbumPickerModal open={picking} onClose={() => setPicking(false)} title={t("เปิดอัลบั้มในฝั่งนี้", "Open an album here")} brandName={brandName}
         albums={picks} labelOf={(a) => albumPath(tree, a.id).map((id) => nameOf(albums.find((x) => x.id === id))).join(" › ")}
         onPick={(a) => { setPicking(false); setAlbumId(a.id); }} />
