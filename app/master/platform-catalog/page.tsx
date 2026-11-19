@@ -14,7 +14,10 @@ import { useToast } from "@/components/toast";
 import { MiniTable, LayoutSwitch, useMiniTableLayout, type MiniColumn } from "@/components/mini-table";
 import { HoverImage } from "@/components/hover-image";
 import { ListingCard, ShopStateBadge } from "@/components/platform-catalog/listing-card";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, BottomSheet } from "@/components/modal";
+import { GalleryColumnsControl, galleryTemplate, useGalleryColumns } from "@/components/gallery-columns";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useUserPref } from "@/lib/use-user-pref";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { StatFilterCards } from "@/components/stat-filter-cards";
@@ -94,6 +97,11 @@ function readViewParam(): PageView {
 
 // ยืนยันทีเดียวเกินนี้ต้องพิมพ์คำยืนยัน (กฎ bulk ของระบบ)
 const TYPED_CONFIRM_OVER = 100;
+/** ช่องว่างระหว่างการ์ด — ต้องตรงกับ gap-2 ของ MiniTable โหมดการ์ด */
+const CARD_GAP = "0.5rem";
+const parseBool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+const parseLast = (v: unknown): { platformId?: string; brandId?: string } | null =>
+  v && typeof v === "object" ? { platformId: typeof (v as { platformId?: unknown }).platformId === "string" ? (v as { platformId: string }).platformId : undefined, brandId: typeof (v as { brandId?: unknown }).brandId === "string" ? (v as { brandId: string }).brandId : undefined } : null;
 const LAST_KEY = "platform-catalog:last";
 function readLast(): { platformId?: string; brandId?: string } {
   try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as { platformId?: string; brandId?: string }; } catch { return {}; }
@@ -169,6 +177,18 @@ export default function PlatformCatalogPage() {
   const [summLoading, setSummLoading] = useState(false);
   const [shopFilter, setShopFilter] = useState<ShopFilter>("");
   const [layout, setLayout] = useMiniTableLayout("platform-catalog-listings");
+  // หน้าเต็มจอ + แถบซ้าย (เจ้าของเลือกแบบ A 2026-11-19): จอใหญ่ = แถบซ้าย (แบรนด์ · ร้าน · สถานะ · มุมมอง) · จอเล็ก = ชิปเลื่อนข้าง + ปุ่มตัวกรอง
+  const isWide = useMediaQuery("(min-width: 1024px)");
+  const [sideCollapsed, setSideCollapsed] = useUserPref<boolean>("platform_catalog_side_collapsed", false, parseBool);
+  const [statusSlot, setStatusSlot] = useState<HTMLElement | null>(null);   // กล่องสถานะในแถบซ้าย (มุมมองหน้าร้านส่งรายการสถานะมาวางที่นี่)
+  const [filterSheet, setFilterSheet] = useState(false);
+  // ร้าน/แบรนด์ที่ดูล่าสุด จำต่อคน (ตามไปทุกเครื่อง) — เครื่องเดิมยังอ่านค่าเก่าในเครื่องได้
+  const [lastPref, setLastPref] = useUserPref<{ platformId?: string; brandId?: string }>("platform_catalog_last", {}, parseLast);
+  const lastPrefRef = useRef(lastPref);
+  lastPrefRef.current = lastPref;
+  // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน · ค่าเดียวกับมุมมองหน้าร้าน) · พับแถบซ้าย = +1 ใบ
+  const gallery = useGalleryColumns("platform-catalog-cards", 6, CARD_GAP);
+  const cardGrid = galleryTemplate(sideCollapsed && isWide ? gallery.cols + 1 : gallery.cols, CARD_GAP);
   // เปิด/ปิดขายบน LINE (สวิตช์ในแถว/การ์ด/แถบเลือกหลายตัว) → อัปเดตสถานะในหน้าเลย ไม่ต้องโหลดใหม่
   const disp = useLineDisplay((results) => {
     setSumm((m) => {
@@ -223,7 +243,8 @@ export default function PlatformCatalogPage() {
       if (j.error) throw new Error(j.error);
       const pfs = ((j.platforms ?? []) as Platform[]).filter((p) => isSellingPlatform(p.code));
       const brs = (j.brands ?? []) as Brand[];
-      const last = readLast();
+      const pref = lastPrefRef.current;
+      const last = pref.platformId || pref.brandId ? pref : readLast();
       const url = readUrlPick();
       const wantBrand = url.brandId ?? last.brandId;
       const urlPf = url.platformCode ? pfs.find((p) => p.code === url.platformCode)?.id : undefined;
@@ -236,6 +257,9 @@ export default function PlatformCatalogPage() {
   useEffect(() => {
     if (!platformId) return;
     try { localStorage.setItem(LAST_KEY, JSON.stringify({ platformId, brandId })); } catch { /* โหมดส่วนตัว — ไม่จำก็ได้ */ }
+    const cur = lastPrefRef.current;
+    if (cur.platformId !== platformId || (cur.brandId ?? "") !== brandId) setLastPref({ platformId, brandId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platformId, brandId]);
 
   // โหลดชนิดไฟล์ที่ผู้ใช้สร้างเอง (เฉพาะที่เปิดใช้งาน) สำหรับใช้เดา/เลือกตอนนำเข้า
@@ -987,18 +1011,120 @@ export default function PlatformCatalogPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="flex items-start justify-between gap-3 mb-1">
-        <h1 className="text-xl font-semibold text-slate-900">🛒 สินค้าบนแพลตฟอร์ม</h1>
-        <button onClick={() => setShowHelp((v) => !v)} className="shrink-0 h-8 px-3 text-sm text-sky-700 border border-sky-200 bg-sky-50 rounded-lg hover:bg-sky-100">{showHelp ? "ซ่อนวิธีใช้" : "ℹ️ วิธีใช้"}</button>
+    <div className="px-3 py-4 sm:px-5 lg:flex lg:items-start lg:gap-5">
+      {/* แถบซ้าย (จอใหญ่) — แบรนด์ · ร้าน · สถานะ · มุมมอง · พับเหลือไอคอนได้ (จำต่อคน) */}
+      {!gate && viewReady && (
+        <aside className={`hidden shrink-0 lg:block ${sideCollapsed ? "w-14" : "w-44"}`} aria-label="ตัวกรองสินค้าบนแพลตฟอร์ม">
+          <div className="sticky top-14 max-h-[calc(100vh-4.5rem)] space-y-3 overflow-y-auto pb-4">
+            <div className={`flex ${sideCollapsed ? "justify-center" : "justify-end"}`}>
+              <button type="button" onClick={() => setSideCollapsed(!sideCollapsed)} title={sideCollapsed ? "กางแถบซ้าย" : "พับแถบซ้ายเหลือไอคอน"} aria-label={sideCollapsed ? "กางแถบซ้าย" : "พับแถบซ้าย"}
+                className="h-7 w-7 rounded-md text-sm text-slate-400 hover:bg-slate-100 hover:text-slate-700">{sideCollapsed ? "»" : "«"}</button>
+            </div>
+            {/* แบรนด์ */}
+            <div>
+              {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">แบรนด์</div>}
+              {sideCollapsed ? (
+                <button type="button" onClick={() => setSideCollapsed(false)} title={activeBrand ? `แบรนด์: ${activeBrand.name}` : "ทุกแบรนด์/ร้าน"} className="mx-auto flex">
+                  <BrandAvatar name={activeBrand?.name ?? "ทั้งหมด"} logoKey={activeBrand && pickedBrand?.id === activeBrand.id ? pickedBrand.logo_key : null} color={activeBrand && pickedBrand?.id === activeBrand.id ? pickedBrand.color : null} size={32} />
+                </button>
+              ) : view === "shop" && activeBrand ? (
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-1.5">
+                  <BrandAvatar name={activeBrand.name} logoKey={pickedBrand?.id === activeBrand.id ? pickedBrand.logo_key : null} color={pickedBrand?.id === activeBrand.id ? pickedBrand.color : null} size={24} />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800" title={activeBrand.name}>{activeBrand.name}</span>
+                  <button type="button" onClick={() => setBrandId("")} title="เปลี่ยนแบรนด์" aria-label="เปลี่ยนแบรนด์" className="h-7 w-7 shrink-0 rounded-md text-violet-700 hover:bg-violet-50 inline-flex items-center justify-center"><Icon name="shuffle" /></button>
+                </div>
+              ) : (
+                <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  <option value="">ทุกแบรนด์/ร้าน</option>
+                  {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              )}
+            </div>
+            {/* ร้าน */}
+            <div>
+              {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">ร้าน</div>}
+              <div className="space-y-0.5">
+                {platforms.map((p) => {
+                  const on = p.id === platformId;
+                  const n = platformCounts[p.id];
+                  return (
+                    <button key={p.id} type="button" onClick={() => setPlatformId(p.id)} aria-pressed={on} title={sideCollapsed ? `${p.name_th}${n != null ? ` ${n.toLocaleString()}` : ""}` : undefined}
+                      className={`flex w-full items-center gap-2 rounded-lg text-sm ${sideCollapsed ? "justify-center px-1 py-1.5" : "px-2 py-1.5"} ${on ? "bg-violet-50 font-medium text-violet-800" : "text-slate-600 hover:bg-slate-50"}`}>
+                      <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />
+                      {!sideCollapsed && <span className="min-w-0 flex-1 truncate text-left">{p.name_th}</span>}
+                      {!sideCollapsed && n != null && <span className={`text-xs tabular-nums ${on ? "text-violet-600" : "text-slate-400"}`}>{n.toLocaleString()}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* สถานะ (หน้าร้าน = รายการสถานะจากมุมมองหน้าร้าน · จับคู่ = หน้าย่อยของการจับคู่) */}
+            <div>
+              {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">{view === "shop" ? "สถานะ" : "หน้า"}</div>}
+              {view === "shop" ? <div ref={setStatusSlot} /> : (
+                <div className="space-y-0.5">
+                  {([
+                    { k: "catalog" as const, label: "รายการสินค้า", n: listings.length },
+                    { k: "fields" as const, label: `ช่องข้อมูลของ ${activePf?.name_th ?? "ร้าน"}`, n: fields.length },
+                    { k: "mapping" as const, label: "ตั้งค่าส่งข้อมูล", n: mappedCount, of: fields.length },
+                  ]).map((t) => {
+                    const on = tab === t.k;
+                    const num = t.of != null ? `${t.n}/${t.of}` : t.n.toLocaleString();
+                    return (
+                      <button key={t.k} type="button" onClick={() => setTab(t.k)} aria-pressed={on} title={sideCollapsed ? `${t.label} ${num}` : undefined}
+                        className={`flex w-full items-center gap-2 rounded-lg text-sm ${sideCollapsed ? "justify-center px-1 py-1.5" : "px-2.5 py-1.5"} ${on ? "bg-violet-50 font-medium text-violet-800" : "text-slate-600 hover:bg-slate-50"}`}>
+                        {!sideCollapsed && <span className="min-w-0 flex-1 truncate text-left">{t.label}</span>}
+                        <span className={`text-xs tabular-nums ${on ? "text-violet-600" : "text-slate-400"}`}>{num}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {/* มุมมอง */}
+            <div>
+              {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">มุมมอง</div>}
+              <div className="space-y-0.5">
+                {([{ v: "shop" as const, icon: "store", label: "หน้าร้าน" }, { v: "match" as const, icon: "link", label: "จับคู่ + ตั้งค่า" }]).map((o) => (
+                  <button key={o.v} type="button" onClick={() => setView(o.v)} aria-pressed={view === o.v} title={sideCollapsed ? o.label : undefined}
+                    className={`flex w-full items-center gap-2 rounded-lg text-sm ${sideCollapsed ? "justify-center px-1 py-1.5" : "px-2 py-1.5"} ${view === o.v ? "bg-violet-50 font-medium text-violet-800" : "text-slate-600 hover:bg-slate-50"}`}>
+                    <Icon name={o.icon} />{!sideCollapsed && <span className="truncate">{o.label}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* ที่ว่างไว้สำหรับหัวข้อในอนาคต (เช่น "หมวดในร้าน") — เพิ่มเป็นกล่องแบบเดียวกันต่อท้าย */}
+          </div>
+        </aside>
+      )}
+      <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        <h1 className="mr-auto text-xl font-semibold text-slate-900">🛒 สินค้าบนแพลตฟอร์ม</h1>
+        {!gate && (
+          <>
+            <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
+            <button type="button" onClick={() => setAddPick(true)} disabled={!canEdit || !platformId || !brandId}
+              title={!brandId ? "เลือกแบรนด์ก่อน" : `เลือกสินค้าในระบบที่ยังไม่ได้ลง ${activePf?.name_th ?? "ร้านนี้"} แล้วลงขึ้นร้าน`}
+              className="h-9 px-3 text-sm text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="add" /><span className="hidden sm:inline">เพิ่มสินค้าขึ้นร้าน</span><span className="sm:hidden">เพิ่ม</span></button>
+            <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="import" mode="line" />{importing ? "กำลังนำเข้า..." : <><span className="hidden sm:inline">นำเข้าสินค้าจากไฟล์</span><span className="sm:hidden">นำเข้า</span></>}</button>
+            <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
+            <button ref={toolsRef} type="button" onClick={() => setToolsOpen((o) => !o)} disabled={!platformId} aria-expanded={toolsOpen}
+              title="ตั้งค่าร้าน: ดึงสินค้าจากร้าน · ส่งราคา · นำเข้าหมวด · ชนิดไฟล์นำเข้า · บัญชีร้าน"
+              className="relative h-9 px-3 text-sm text-slate-700 border border-slate-200 bg-white rounded-lg hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5">
+              <Icon name="settings" mode="line" /><span className="hidden sm:inline">ตั้งค่า</span>
+              {toolsAlert && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white" title="มีเรื่องต้องดูในตั้งค่า" />}
+            </button>
+          </>
+        )}
+        <button onClick={() => setShowHelp((v) => !v)} className="shrink-0 h-9 px-3 text-sm text-sky-700 border border-sky-200 bg-sky-50 rounded-lg hover:bg-sky-100">{showHelp ? "ซ่อนวิธีใช้" : <><span aria-hidden>ℹ️</span><span className="hidden sm:inline"> วิธีใช้</span></>}</button>
       </div>
-      <p className="text-sm text-slate-500 mb-3">ดูว่าแต่ละร้านมีสินค้าอะไร แล้วจับคู่กับสินค้าในระบบเรา — จับคู่แล้วถึงจะเทียบสต๊อก/ส่งราคาได้ถูกตัว</p>
+      <p className="text-sm text-slate-500 mb-3 hidden sm:block">ดูว่าแต่ละร้านมีสินค้าอะไร แล้วจับคู่กับสินค้าในระบบเรา — จับคู่แล้วถึงจะเทียบสต๊อก/ส่งราคาได้ถูกตัว</p>
 
       {showHelp && (
         <div className="mb-4 border border-sky-200 bg-sky-50/60 rounded-xl p-4 text-sm text-slate-700 space-y-2">
           <p className="font-medium text-slate-800">หน้านี้ใช้ทำอะไร?</p>
           <ol className="list-decimal ml-5 space-y-1">
-            <li><b>เลือกร้าน</b> (ปุ่มด้านบน) + แบรนด์ — ระบบจำร้านที่ดูล่าสุดไว้ให้</li>
+            <li><b>เลือกร้าน</b> + แบรนด์ (แถบซ้าย · มือถือ = ปุ่มร้านด้านบน + ปุ่มตัวกรอง) — ระบบจำร้านที่ดูล่าสุดไว้ให้</li>
             <li>ยังไม่มีสินค้า? กด <b>⬆️ นำเข้าสินค้าจากร้าน</b> แล้วเลือกไฟล์ export จาก Seller Center (เลือกหลายไฟล์พร้อมกันได้ ระบบดูให้เองว่าแต่ละไฟล์คืออะไร)</li>
             <li>ดู <b>การ์ดตัวเลข</b> — กดการ์ดเพื่อกรองตาราง: <span className="text-emerald-700">จับคู่แล้ว</span> · <span className="text-sky-700">รอยืนยัน (ระบบเดาให้แล้ว)</span> · <span className="text-amber-700">ต้องหาคู่เอง</span> — สองใบหลังรวมกัน = ยังไม่จับคู่</li>
             <li>จับคู่: กด <b>ยืนยัน</b> ในแถวถ้าระบบเดาถูก · กด <b>🔍 จับคู่</b> เพื่อดูตัวเลือก/ค้นหาเอง · หรือกด <b>⚡ จับคู่ทีละตัว</b> ไล่ทีละตัวด้วยคีย์ลัด (1-3 เลือก · S ข้าม)</li>
@@ -1014,50 +1140,57 @@ export default function PlatformCatalogPage() {
 
       {/* มุมมองหน้าร้านยังไม่เลือกแบรนด์ → โชว์แค่หน้าเลือกแบรนด์ (ซ่อนปุ่มร้าน/นำเข้า/ดึงสินค้า ที่ต้องรู้แบรนด์) */}
       {!gate && (<>
-      {/* เลือกร้าน + แบรนด์ + ปุ่มนำเข้า */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      {/* จอเล็ก/แท็บเล็ต: ร้านเป็นชิปเลื่อนข้าง + ปุ่มตัวกรอง (แบรนด์ · มุมมอง) — จอใหญ่ใช้แถบซ้าย */}
+      <div className="mb-3 flex items-center gap-2 lg:hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5">
         {platforms.map((p) => {
           const on = p.id === platformId;
           const n = platformCounts[p.id];
           return (
             <button key={p.id} type="button" onClick={() => setPlatformId(p.id)} aria-pressed={on}
-              className={`h-9 px-3 rounded-full border text-sm inline-flex items-center gap-1.5 ${on ? "bg-violet-50 border-violet-300 text-violet-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              className={`h-9 shrink-0 whitespace-nowrap px-3 rounded-full border text-sm inline-flex items-center gap-1.5 ${on ? "bg-violet-50 border-violet-300 text-violet-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
               <PlatformIcon code={p.code} iconKey={p.icon_key} size={16} />
               {p.name_th}
               {n != null && <span className={`text-xs tabular-nums ${on ? "text-violet-600" : "text-slate-400"}`}>{n.toLocaleString()}</span>}
             </button>
           );
         })}
-        {view === "shop" && activeBrand ? (
-          // มุมมองหน้าร้าน = ดูทีละแบรนด์เสมอ (ไม่มี "ทุกแบรนด์") · เปลี่ยน = กลับไปหน้าเลือกแบรนด์
-          <span className="h-9 pl-1.5 pr-1 rounded-lg border border-slate-200 bg-white inline-flex items-center gap-2 text-sm">
-            <BrandAvatar name={activeBrand.name} logoKey={pickedBrand?.id === activeBrand.id ? pickedBrand.logo_key : null} color={pickedBrand?.id === activeBrand.id ? pickedBrand.color : null} size={24} />
-            <span className="font-medium text-slate-800">{activeBrand.name}</span>
-            <button type="button" onClick={() => setBrandId("")} className="h-7 px-2 text-xs text-violet-700 rounded-md hover:bg-violet-50 inline-flex items-center gap-1"><Icon name="shuffle" />เปลี่ยนแบรนด์</button>
-          </span>
-        ) : (
-          <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white">
-            <option value="">ทุกแบรนด์/ร้าน</option>
-            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        )}
-        <div className="flex-1" />
-        <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
-        {/* ปุ่มนำเข้า + ⚙️ ติดกันเสมอ (ร้านเยอะแล้วแถวเต็ม ⚙️ เคยตกไปอยู่บรรทัดใหม่คนเดียว) */}
-        <div className="flex items-center gap-2 shrink-0 ml-auto">
-          <button type="button" onClick={() => setAddPick(true)} disabled={!canEdit || !platformId || !brandId}
-            title={!brandId ? "เลือกแบรนด์ก่อน" : `เลือกสินค้าในระบบที่ยังไม่ได้ลง ${activePf?.name_th ?? "ร้านนี้"} แล้วลงขึ้นร้าน`}
-            className="h-9 px-3 text-sm text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="add" />เพิ่มสินค้าขึ้นร้าน</button>
-          <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="import" mode="line" />{importing ? "กำลังนำเข้า..." : "นำเข้าสินค้าจากไฟล์"}</button>
-          <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
-          <button ref={toolsRef} type="button" onClick={() => setToolsOpen((o) => !o)} disabled={!platformId} aria-expanded={toolsOpen}
-            title="ตั้งค่าร้าน: ดึงสินค้าจากร้าน · ส่งราคา · นำเข้าหมวด · ชนิดไฟล์นำเข้า · บัญชีร้าน"
-            className="relative h-9 px-3 text-sm text-slate-700 border border-slate-200 bg-white rounded-lg hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5">
-            <Icon name="settings" mode="line" />ตั้งค่า
-            {toolsAlert && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white" title="มีเรื่องต้องดูในตั้งค่า" />}
-          </button>
         </div>
+        <button type="button" onClick={() => setFilterSheet(true)} className="relative h-9 shrink-0 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 inline-flex items-center gap-1.5">
+          <Icon name="sliders" />ตัวกรอง
+          {activeBrand && <span className="max-w-[6rem] truncate text-xs text-violet-700">{activeBrand.name}</span>}
+        </button>
       </div>
+      <BottomSheet open={filterSheet} onClose={() => setFilterSheet(false)} title="ตัวกรอง" backKey="platform-catalog-filter">
+        <div className="space-y-4 p-4">
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-slate-500">แบรนด์</div>
+            {view === "shop" && activeBrand ? (
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                <BrandAvatar name={activeBrand.name} logoKey={pickedBrand?.id === activeBrand.id ? pickedBrand.logo_key : null} color={pickedBrand?.id === activeBrand.id ? pickedBrand.color : null} size={28} />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{activeBrand.name}</span>
+                <button type="button" onClick={() => { setBrandId(""); setFilterSheet(false); }} className="h-8 px-2 text-xs text-violet-700 rounded-md hover:bg-violet-50 inline-flex items-center gap-1"><Icon name="shuffle" />เปลี่ยนแบรนด์</button>
+              </div>
+            ) : (
+              <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                <option value="">ทุกแบรนด์/ร้าน</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            )}
+          </div>
+          <div>
+            <div className="mb-1.5 text-xs font-medium text-slate-500">มุมมอง</div>
+            <div className="grid grid-cols-2 gap-2">
+              {([{ v: "shop" as const, icon: "store", label: "หน้าร้าน" }, { v: "match" as const, icon: "link", label: "จับคู่ + ตั้งค่า" }]).map((o) => (
+                <button key={o.v} type="button" onClick={() => { setView(o.v); setFilterSheet(false); }} aria-pressed={view === o.v}
+                  className={`h-10 rounded-lg border text-sm inline-flex items-center justify-center gap-1.5 ${view === o.v ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600"}`}>
+                  <Icon name={o.icon} />{o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </BottomSheet>
       {/* เมนูตั้งค่าร้าน (เจ้าของ 2026-11-10: ย้ายแถว "ต่อ API" มาไว้ในตั้งค่า · ไอคอนเส้นมีสี) */}
       <FloatingDropdown anchorRef={toolsRef} open={toolsOpen} onClose={() => setToolsOpen(false)} minWidth={340} maxWidth={390}>
         <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
@@ -1157,14 +1290,10 @@ export default function PlatformCatalogPage() {
       )}
       </>)}
 
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        {/* สลับมุมมอง: หน้าร้าน (แบบ Seller Center) / จับคู่ + ตั้งค่า (เดิม) */}
-        <div role="group" aria-label="มุมมอง" className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 text-sm">
-          <button type="button" onClick={() => setView("shop")} aria-pressed={view === "shop"} className={`px-3 py-1 rounded inline-flex items-center gap-1.5 ${view === "shop" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon name="store" />หน้าร้าน</button>
-          <button type="button" onClick={() => setView("match")} aria-pressed={view === "match"} className={`px-3 py-1 rounded inline-flex items-center gap-1.5 ${view === "match" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon name="link" />จับคู่ + ตั้งค่า</button>
-        </div>
+      <div className={`mb-3 flex flex-wrap items-center gap-2 lg:hidden ${view === "match" ? "" : "hidden"}`}>
+        {/* สลับมุมมองอยู่ในแถบซ้าย (จอใหญ่) / ปุ่มตัวกรอง (จอเล็ก) · แถวนี้เหลือแท็บย่อยของการจับคู่บนจอเล็ก */}
         {view === "match" && (
-          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm">
+          <div className="flex max-w-full items-center gap-1 overflow-x-auto bg-slate-100 rounded-lg p-0.5 w-fit text-sm [&>button]:whitespace-nowrap">
             <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({listings.length.toLocaleString()})</button>
             <button onClick={() => setTab("fields")} className={`px-3 py-1 rounded ${tab === "fields" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ช่องข้อมูลของ {activePf?.name_th ?? "ร้าน"} ({fields.length})</button>
             <button onClick={() => setTab("mapping")} className={`px-3 py-1 rounded ${tab === "mapping" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ตั้งค่าส่งข้อมูล ({mappedCount}/{fields.length})</button>
@@ -1177,6 +1306,7 @@ export default function PlatformCatalogPage() {
         : view === "shop" ? (
           <PlatformShopView platformId={platformId} platformCode={platformCode} brandId={brandId} brandName={activeBrand?.name ?? null}
             where={where} reloadKey={shopReload} onCounts={setPlatformCounts}
+            statusSlot={isWide ? statusSlot : null} sidebarCollapsed={sideCollapsed && isWide}
             onGoMatch={() => { setView("match"); setTab("catalog"); setFilter("all"); }} />
         )
         : loading ? <LoadingState label={`กำลังโหลดสินค้าของ ${where}...`} />
@@ -1195,7 +1325,7 @@ export default function PlatformCatalogPage() {
                 : canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />
           ) : (
             <div className="space-y-3">
-              <StatFilterCards value={filter} onChange={(k) => setFilter(k as Filter)} cards={[
+              <StatFilterCards compact value={filter} onChange={(k) => setFilter(k as Filter)} cards={[
                 { key: "all", label: "ทั้งหมด", value: counts.all, hint: unmatchedCount > 0 ? `ยังไม่จับคู่ ${unmatchedCount.toLocaleString()}` : "จับคู่ครบแล้ว" },
                 { key: "ok", label: "จับคู่แล้ว", value: counts.ok, tone: "success", hint: `${pct}% · ${matchedParents.toLocaleString()} รุ่นในระบบ` },
                 { key: "guess", label: "รอยืนยัน", value: suggestLoading ? null : counts.guess, tone: "info", hint: suggestError ? "เดาคู่ไม่สำเร็จ — กดโหลดใหม่" : highRows.length ? `ระบบเดาให้ · รหัสตรงกัน ${highRows.length.toLocaleString()}` : "ระบบเดาให้แล้ว" },
@@ -1237,9 +1367,10 @@ export default function PlatformCatalogPage() {
                   )}
                 </div>
               )}
+              <div ref={layout === "cards" ? gallery.wheelRef : undefined}>
               <MiniTable
                 rows={shownRows} columns={cols} rowKey={(l) => l.id} onRowClick={openRow}
-                layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
+                layout={layout} cardPick cardGrid={cardGrid}
                 renderCard={(l) => {
                   const s = summ[l.id];
                   return (
@@ -1275,6 +1406,7 @@ export default function PlatformCatalogPage() {
                 emptyText="ไม่มีสินค้าในกลุ่มนี้"
                 actions={(
                   <div className="flex flex-wrap items-center justify-end gap-2">
+                    {layout === "cards" && <GalleryColumnsControl as="select" cols={gallery.cols} onChange={gallery.setCols} />}
                     <LayoutSwitch value={layout} onChange={setLayout} />
                     {canEdit && unmatchedRows.length > 0 && (
                       <button type="button" onClick={() => setWorkbench(true)} className="h-8 px-3 text-sm whitespace-nowrap text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">⚡ จับคู่ทีละตัว ({unmatchedRows.length.toLocaleString()})</button>
@@ -1286,6 +1418,7 @@ export default function PlatformCatalogPage() {
                 )}
                 resizable storageKey="platform-catalog-listings-v2" dense
               />
+              </div>
             </div>
           )
         ) : tab === "fields" ? (
@@ -1484,6 +1617,7 @@ export default function PlatformCatalogPage() {
           </div>
         )}
       />
+      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@
  * ร้านเลือก/แบรนด์/ปุ่มดึงสินค้า อยู่ที่หน้าแม่ (ใช้ร่วมกับมุมมองจับคู่)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { mutateSWR, peekSWR, useSWRLite } from "@/lib/swr-lite";
@@ -35,6 +36,13 @@ import { ToggleSwitch } from "@/components/toggle-switch";
 import { AddToPlatformWizard, type AddWizardParent, type CopySourceRef } from "@/components/platform-listing/add-to-platform-wizard";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
 import { COPY_MAX_ITEMS } from "@/lib/listing-copy-map";
+import { useUserPref } from "@/lib/use-user-pref";
+import { GalleryColumnsControl, galleryTemplate, useGalleryColumns } from "@/components/gallery-columns";
+
+/** สถานะที่เลือกไว้ จำต่อคน (เจ้าของ 2026-11-19) */
+const parseShopTab = (v: unknown): ShopTab | null => (SHOP_TABS.some((t) => t.key === v) ? v as ShopTab : null);
+/** ช่องว่างระหว่างการ์ด — ต้องตรงกับ gap-2 ของ MiniTable โหมดการ์ด */
+const CARD_GAP = "0.5rem";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
 // ลิ้นชักสินค้าบนร้าน (หนัก) — โหลดแยก ไม่รวมในหน้า
@@ -60,7 +68,7 @@ function thDate(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export function PlatformShopView({ platformId, platformCode, brandId, brandName, where, reloadKey, onCounts, onGoMatch }: {
+export function PlatformShopView({ platformId, platformCode, brandId, brandName, where, reloadKey, onCounts, onGoMatch, statusSlot, sidebarCollapsed = false }: {
   platformId: string;
   platformCode: string;
   brandId: string;
@@ -73,6 +81,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   onCounts?: (c: Record<string, number>) => void;
   /** ไปมุมมองจับคู่ (รายการที่ยังไม่จับคู่) */
   onGoMatch: () => void;
+  /** จอใหญ่: กล่องในแถบซ้ายของหน้าแม่ → รายการสถานะไปอยู่ที่นั่นแทนแท็บบนตาราง (null = แท็บบนตารางเหมือนเดิม) */
+  statusSlot?: HTMLElement | null;
+  /** แถบซ้ายพับเหลือไอคอน → การ์ดต่อแถว +1 (ขนาดการ์ดเท่าเดิม) และรายการสถานะเหลือแค่ตัวเลข */
+  sidebarCollapsed?: boolean;
 }) {
   const { can } = useAuth();
   const toast = useToast();
@@ -95,7 +107,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const error = swr.error ? (swr.error.message || "โหลดข้อมูลไม่สำเร็จ") : null;
   const reload = swr.revalidate;
   const load = useCallback(() => { void reload(true); }, [reload]);
-  const [tab, setTab] = useState<ShopTab>("all");
+  const [tab, setTab] = useUserPref<ShopTab>("platform_catalog_shop_tab", "all", parseShopTab);
   const [queue, setQueue] = useState<QueueKey>("none");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<SortKey>("default");
@@ -108,6 +120,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [cat, setCat] = useState("");   // หมวดกลาง ("" = ทุกหมวด · "__none" = ไม่รู้หมวด เช่น ยังไม่จับคู่)
   const canAdd = can("products.platforms.edit");
   const [layout, setLayout] = useMiniTableLayout("platform-shop-items");   // ตาราง / การ์ด (การ์ดใบเดียวกับแท็บจับคู่)
+  // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน · ใช้ค่าเดียวกับแท็บจับคู่)
+  const gallery = useGalleryColumns("platform-catalog-cards", 6, CARD_GAP);
+  const cardGrid = galleryTemplate(sidebarCollapsed ? gallery.cols + 1 : gallery.cols, CARD_GAP);
   // ลิ้นชักสินค้าบนร้าน (กดแถว/การ์ด) + เปิด/ปิดขายบน LINE
   const canPublish = can("products.platforms.publish");
   const isLine = platformCode === "line_shopping";
@@ -132,8 +147,8 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   }, [reloadKey, reload]);
   // จำนวนสินค้าต่อร้าน → ปุ่มเลือกร้านของหน้าแม่
   useEffect(() => { if (data?.platform_counts) onCounts?.(data.platform_counts); }, [data, onCounts]);
-  // เปลี่ยนร้าน/แบรนด์ → เริ่มที่แท็บแรก
-  useEffect(() => { setTab("all"); setQueue("none"); setPage(1); setQ(""); setCat(""); setSelected(new Set()); }, [platformId, brandId]);
+  // เปลี่ยนร้าน/แบรนด์ → ล้างกอง/ค้นหา/หมวด/หน้า (สถานะที่เลือกไว้คงเดิม — จำต่อคน)
+  useEffect(() => { setQueue("none"); setPage(1); setQ(""); setCat(""); setSelected(new Set()); }, [platformId, brandId]);
 
   const allItems = useMemo(() => data?.items ?? [], [data]);
   const noData = allItems.length > 0 && allItems.every((it) => it.state === "nodata");
@@ -327,6 +342,23 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   }
 
   const queueOn = queue !== "none";
+  // รายการสถานะในแถบซ้ายของหน้าแม่ (จอใหญ่) — พับแถบ = เหลือตัวเลข (ชื่อขึ้นตอนชี้)
+  const statusList = statusSlot ? createPortal(
+    <div className="space-y-0.5">
+      {SHOP_TABS.map((t) => {
+        const on = !queueOn && t.key === tab;
+        const n = tabCount(t.key);
+        if (t.key === "gone" && !n && !on) return null;
+        const num = n == null ? "?" : n.toLocaleString();
+        return (
+          <button key={t.key} type="button" onClick={() => pickTab(t.key)} aria-pressed={on} title={sidebarCollapsed ? `${t.label} ${num}` : undefined}
+            className={`flex w-full items-center gap-2 rounded-lg text-sm ${sidebarCollapsed ? "justify-center px-1 py-1.5" : "px-2.5 py-1.5"} ${on ? "bg-violet-50 font-medium text-violet-800" : "text-slate-600 hover:bg-slate-50"}`}>
+            {!sidebarCollapsed && <span className="min-w-0 flex-1 truncate text-left">{t.label}</span>}
+            <span className={`text-xs tabular-nums ${on ? "text-violet-600" : "text-slate-400"}`}>{num}</span>
+          </button>
+        );
+      })}
+    </div>, statusSlot) : null;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
@@ -341,9 +373,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       )}
 
+      {statusList}
       {data.categories.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-slate-500 mr-0.5">หมวด</span>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
+          <span className="shrink-0 text-xs text-slate-500 mr-0.5">หมวด</span>
           {[{ id: "", name: "ทุกหมวด", n: allItems.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: allItems.filter((it) => it.category_id === c.id).length })),
             ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])]
             .filter((c) => c.id === "" || c.n > 0 || cat === c.id)   // หมวดที่เป็น 0 ซ่อน (กติกาเดียวกับการ์ดกลาง)
@@ -356,10 +389,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       )}
 
-      <ShopQueues items={items} noImage={noImage} value={queue} onChange={pickQueue} />
+      <ShopQueues items={items} noImage={noImage} value={queue} onChange={pickQueue} compact />
 
       <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
-        <ScrollTabs activeKey={queueOn ? null : tab} className="border-b border-slate-200 px-1">
+        {!statusSlot && <ScrollTabs activeKey={queueOn ? null : tab} className="border-b border-slate-200 px-1">
           {SHOP_TABS.map((t) => {
             const on = !queueOn && t.key === tab;
             const n = tabCount(t.key);
@@ -371,7 +404,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
               </button>
             );
           })}
-        </ScrollTabs>
+        </ScrollTabs>}
 
         <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
           {queueOn && (
@@ -387,6 +420,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
               {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           )}
+          {!parentMode && layout === "cards" && <GalleryColumnsControl as="select" cols={gallery.cols} onChange={gallery.setCols} />}
           {!parentMode && <LayoutSwitch value={layout} onChange={setLayout} />}
           {queueOn && queue === "unmatched" && (
             <button type="button" onClick={onGoMatch} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 inline-flex items-center gap-1.5"><Icon name="link" />ไปหน้าจับคู่</button>
@@ -408,9 +442,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : tab === "notlisted" ? `สินค้า${brandName ? ` ${brandName}` : ""} ลงร้านนี้ครบแล้ว` : "ทุกสินค้ามีรูปแล้ว"} dense
             resizable storageKey="platform-shop-parents" />
         ) : (
+          <div ref={layout === "cards" ? gallery.wheelRef : undefined}>
           <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id} onRowClick={(it) => setOpenId(it.id)}
             selectable={canCreateTask || (canPublish && isLine) || canCopy} selected={selected} onSelectedChange={setSelected}
-            layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
+            layout={layout} cardPick cardGrid={cardGrid}
             renderCard={(it) => (
               <ListingCard badges={(
                 <>
@@ -441,6 +476,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             )}
             emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : "ไม่มีสินค้าในกลุ่มนี้"} dense
             resizable storageKey="platform-shop-items" />
+          </div>
         )}
         <div className="px-3 py-2 border-t border-slate-100">
           <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} unitLabel={parentMode ? "สินค้า" : "รายการ"}

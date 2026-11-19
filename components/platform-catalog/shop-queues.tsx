@@ -11,12 +11,14 @@ import { SHOP_QUEUES, SHOP_QUEUES_NOT_IN_TOTAL, inShopQueue, type ShopItem, type
 /** กองของรายการบนร้าน + กอง "ไม่มีรูปในระบบ" (เป็นสินค้าของเรา) · none = ไม่กรอง */
 export type QueueKey = ShopQueue | "noimg_erp" | "none";
 
-export function ShopQueues({ items, noImage, value, onChange }: {
+export function ShopQueues({ items, noImage, value, onChange, compact = false }: {
   items: ShopItem[];
   /** สินค้าแบรนด์นี้ที่ไม่มีรูปปก (null = ยังไม่ได้เลือกแบรนด์) */
   noImage: ShopParent[] | null;
   value: QueueKey;
   onChange: (k: QueueKey) => void;
+  /** การ์ดแถวเดียวแบบเตี้ย (StatFilterCards compact) */
+  compact?: boolean;
 }) {
   const counts = SHOP_QUEUES.map((q) => ({ ...q, n: items.filter((it) => inShopQueue(it, q.key)).length }));
   const noneImg = noImage?.filter((p) => p.image_state === "none").length ?? 0;
@@ -36,7 +38,7 @@ export function ShopQueues({ items, noImage, value, onChange }: {
   if (noneImg + skuOnly > 0) {
     cards.push({ key: "noimg_erp", label: "ไม่มีรูปในระบบ", value: noneImg, tone: "warning", hint: skuOnly ? `อีก ${skuOnly.toLocaleString()} มีรูป SKU แต่ยังไม่ตั้งปก` : "ลงร้านใหม่ไม่ได้ถ้าไม่มีรูป" });
   }
-  return <StatFilterCards cards={cards} value={value} onChange={(k) => onChange(k as QueueKey)} />;
+  return <StatFilterCards cards={cards} value={value} onChange={(k) => onChange(k as QueueKey)} compact={compact} />;
 }
 
 /** คำอธิบายของกอง (โชว์เหนือตารางตอนเลือกกอง) */

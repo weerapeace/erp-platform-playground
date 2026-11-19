@@ -36,7 +36,7 @@ const TONE: Record<StatTone, { label: string; on: string }> = {
 // Tailwind ต้องเห็นชื่อคลาสเต็ม — จำนวนการ์ด → คอลัมน์บนจอกว้าง
 const COLS: Record<number, string> = { 2: "sm:grid-cols-2", 3: "sm:grid-cols-3", 4: "sm:grid-cols-4", 5: "sm:grid-cols-5", 6: "sm:grid-cols-6" };
 
-export function StatFilterCards({ cards, value, onChange, className = "", showZero = false }: {
+export function StatFilterCards({ cards, value, onChange, className = "", showZero = false, compact = false }: {
   cards: StatFilterCard[];
   /** key ของการ์ดที่เลือกอยู่ */
   value: string;
@@ -44,9 +44,31 @@ export function StatFilterCards({ cards, value, onChange, className = "", showZe
   className?: string;
   /** โชว์การ์ดที่เป็น 0 ด้วย (ค่าเริ่ม = ซ่อน) */
   showZero?: boolean;
+  /** แถวเดียวแบบเตี้ย: ป้าย + ตัวเลขบรรทัดเดียว · คำอธิบายขึ้นตอนชี้ · ล้นแถว = เลื่อนข้าง (2026-11-19 สินค้าบนแพลตฟอร์ม) */
+  compact?: boolean;
 }) {
   const first = cards[0]?.key ?? "";
   const shown = showZero ? cards : cards.filter((c) => c.key === first || c.key === value || c.value == null || c.value !== 0 || c.keep);
+  if (compact) {
+    return (
+      <div className={`flex gap-2 overflow-x-auto pb-0.5 ${className}`}>
+        {shown.map((c) => {
+          const tone = TONE[c.tone ?? "neutral"];
+          const on = c.key === value;
+          return (
+            <button key={c.key} type="button" aria-pressed={on} title={typeof c.hint === "string" ? c.hint : undefined}
+              onClick={() => onChange(on && c.key !== first ? first : c.key)}
+              className={`flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition ${on ? `ring-1 ${tone.on}` : "border-slate-200 bg-white hover:border-slate-300"}`}>
+              <span className={`flex items-center gap-1 whitespace-nowrap text-xs ${tone.label}`}>{c.icon}{c.label}</span>
+              <span className="text-sm font-semibold tabular-nums text-slate-900">
+                {c.value == null ? <span className="inline-block h-4 w-8 animate-pulse rounded bg-slate-100 align-middle" /> : c.value.toLocaleString()}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div className={`grid grid-cols-2 ${COLS[shown.length] ?? "sm:grid-cols-4"} gap-2 ${className}`}>
       {shown.map((c) => {
