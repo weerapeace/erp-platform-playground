@@ -153,3 +153,26 @@ export function quoteOrderPayload(q: QuoteForOrder, today = new Date().toISOStri
     })),
   };
 }
+
+// ─── ผูกรายการใบเสนอราคากับ SKU ก่อนเปิดใบสั่งขาย (เจ้าของขอ 2026-11-19) ───
+/** 1 บรรทัดที่ผูก: บรรทัดใบเสนอราคา → SKU · use_sku_price = ใบสั่งขายใช้ราคาขาย SKU แทนราคาเสนอ · set_sku_price = SKU ยังไม่มีราคาขาย → ตั้งเป็นราคาเสนอ */
+export type QuoteLineSkuMap = { line_id: string; sku_id: string; use_sku_price?: boolean; set_sku_price?: boolean };
+export type SkuGuessable = { id: string; code: string; name_th: string | null; color: string | null };
+const normTxt = (s: string) => s.toLowerCase().replace(/[\s.\-_/()]/g, "");
+/**
+ * เดา SKU ของบรรทัดจากชื่อสินค้าในใบเสนอราคา — รหัสอยู่ในชื่อ (+10) · สีอยู่ในชื่อ (+3) · คำในชื่อ SKU ตรง (+1/คำ)
+ * คะแนนสูงสุดต้องมีตัวเดียว (เสมอกัน = ไม่เดา ให้คนเลือก)
+ */
+export function guessSkuForLine<T extends SkuGuessable>(productName: string, skus: readonly T[]): T | null {
+  const name = normTxt(productName || "");
+  if (!name) return null;
+  let best: T | null = null, bestScore = 0, tie = false;
+  for (const s of skus) {
+    let sc = 0;
+    if (s.code && name.includes(normTxt(s.code))) sc += 10;
+    if (s.color && name.includes(normTxt(s.color))) sc += 3;
+    for (const w of (s.name_th ?? "").split(/\s+/).filter((x) => x.length >= 2)) if (name.includes(normTxt(w))) sc += 1;
+    if (sc > bestScore) { best = s; bestScore = sc; tie = false; } else if (sc > 0 && sc === bestScore) tie = true;
+  }
+  return bestScore > 0 && !tie ? best : null;
+}

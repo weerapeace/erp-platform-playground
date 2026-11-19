@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quoteFailAction, isQuoteOpen, latestOpenDraft, duplicateQuoteWarning, sortSheetQuotations, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { guessSkuForLine, quoteFailAction, isQuoteOpen, latestOpenDraft, duplicateQuoteWarning, sortSheetQuotations, type SheetQuotation } from "@/lib/design-sheet-quotations";
 import { quoteCopyPayload } from "@/lib/quote-copy";
 import type { QuoteDetail } from "@/app/api/quotations/route";
 
@@ -49,5 +49,18 @@ describe("ใบงานออกแบบ ↔ ใบเสนอราคา �
     expect(header).not.toHaveProperty("quote_number");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ sku: "S1", qty: 2, unit_price: 100, image_key: "k1", discount_type: "percent" });
+  });
+});
+
+describe("guessSkuForLine — ผูกบรรทัดใบเสนอราคากับ SKU (2026-11-19)", () => {
+  const skus = [
+    { id: "a", code: "CTL117-01", name_th: "พวงกุญแจมิกกี้", color: "แดง" },
+    { id: "b", code: "CTL117-02", name_th: "พวงกุญแจมิกกี้", color: "เขียว" },
+  ];
+  it("สีอยู่ในชื่อ = เลือกตัวนั้น · รหัสในชื่อชนะ · เสมอกัน = ไม่เดา", () => {
+    expect(guessSkuForLine("พวงกุญแจมิกกี้ ผ้าแดง", skus)?.id).toBe("a");
+    expect(guessSkuForLine("CTL117-02 พวงกุญแจ", skus)?.id).toBe("b");
+    expect(guessSkuForLine("พวงกุญแจมิกกี้", skus)).toBeNull();
+    expect(guessSkuForLine("", skus)).toBeNull();
   });
 });

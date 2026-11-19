@@ -29,6 +29,8 @@ export type DesignSheetLinkedSku = {
   id: string; code: string; name_th: string | null; color: string | null;
   standard_price: number | null; image_key: string | null; is_active: boolean;
   parent_code: string | null; from_sheet: boolean;
+  /** ราคาขาย (ใช้ตอนผูก SKU กับใบเสนอราคา) */
+  list_price?: number | null;
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ⚡ เร็วขึ้น (เจ้าของบ่น 2026-11-07 "เปิดใบงานโหลดนาน อยากให้ < 1 วิ"): เดิมถามทีละขั้น 6 รอบ (สิทธิ์ → ใบงาน → Parent → SKU ของใบ → SKU พี่น้อง → สิทธิ์ต้นทุน)
   //   ตอนนี้ 2 รอบ: [สิทธิ์ + ใบงาน + SKU ของใบ + สิทธิ์ต้นทุน] พร้อมกัน → [Parent พร้อม SKU ลูกในคำขอเดียว]
   //   ข้อมูลที่ดึงก่อนผ่านด่านสิทธิ์อยู่แค่ฝั่งเซิร์ฟเวอร์ — ไม่ผ่าน = ทิ้ง ไม่ส่งออก
-  const SKU_COLS = "id, code, name_th, color, standard_price, cover_image_r2_key, is_active, parent_sku_id, design_sheet_id";
+  const SKU_COLS = "id, code, name_th, color, standard_price, list_price, cover_image_r2_key, is_active, parent_sku_id, design_sheet_id";
   const [denied, sheetRes, ownRes, canCost] = await Promise.all([
     guardApi(request, "products.view"),
     admin.from("design_sheets").select("*, brand:brands!brand_id(name, color, is_customer_job)").eq("id", id).single(),
@@ -86,6 +88,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     id: String(s.id), code: String(s.code ?? ""), name_th: (s.name_th as string) ?? null,
     color: (s.color as string) ?? null,
     standard_price: s.standard_price == null ? null : Number(s.standard_price),
+    list_price: s.list_price == null ? null : Number(s.list_price),
     image_key: (s.cover_image_r2_key as string) ?? null,
     is_active: s.is_active !== false,
     parent_code: s.parent_sku_id ? (parentIdToCode.get(String(s.parent_sku_id)) ?? null) : null,

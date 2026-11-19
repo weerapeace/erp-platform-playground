@@ -6,7 +6,9 @@
  *
  * POST /api/design-sheets/[id]/quotations
  *   body { action: "fail" | "revise", quotation_id, reason? }
- *   body { action: "confirm", quotation_id, close_ids? }   ← ยืนยันใบนี้ "ผ่าน" (เจ้าของขอ 2026-11-07)
+ *   body { action: "confirm", quotation_id, close_ids?, line_map? }   ← ยืนยันใบนี้ "ผ่าน" (เจ้าของขอ 2026-11-07)
+ *     line_map = ผูกบรรทัดกับ SKU (2026-11-19): เขียน sku/product_id (+รูป SKU ถ้าบรรทัดยังไม่มีรูป) กลับลงบรรทัดใบเสนอราคา
+ *       · use_sku_price → ใบสั่งขายใช้ราคาขาย SKU · set_sku_price → SKU ที่ยังไม่มีราคาขาย ตั้ง = ราคาเสนอ (จดประวัติ)
  *   - confirm = ใบนี้ผ่าน (ร่าง → ส่ง → ตอบรับ · ส่งแล้ว → ตอบรับ) + ใบอื่นที่ติ๊ก (close_ids) ปิด (ร่าง = ยกเลิก · ส่งแล้ว = ปฏิเสธ "ลูกค้าเลือก …")
  *     → คืน existing_order (งานนี้มีใบสั่งขายแล้ว) หรือ order_payload ให้หน้าจอส่งต่อ POST /api/so-orders (ใช้เลขที่/ยอด/"แปลงแล้ว" ของกลางเดิม)
  *   - fail   = ใบนี้ไม่ผ่าน (ร่าง → ยกเลิก · ส่งแล้ว/ตอบรับ → ปฏิเสธ ต้องมีเหตุผล)
@@ -20,9 +22,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi, apiCan } from "@/lib/api-auth";
-import { writeAuditMany } from "@/lib/audit";
+import { auditDiff, writeAudit, writeAuditMany } from "@/lib/audit";
 import { quoteCopyPayload } from "@/lib/quote-copy";
-import { quoteChosenReason, quoteConfirmSteps, quoteFailAction, quoteOrderPayload, sortSheetQuotations, QUOTE_STATUS_TH, QUOTE_STEP_PERM, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { type QuoteLineSkuMap, quoteChosenReason, quoteConfirmSteps, quoteFailAction, quoteOrderPayload, sortSheetQuotations, QUOTE_STATUS_TH, QUOTE_STEP_PERM, type SheetQuotation } from "@/lib/design-sheet-quotations";
 import { loadSheetQuotations, linkSheetQuotations } from "@/lib/design-sheet-quotations-db";
 import type { QuoteDetail } from "../../../quotations/route";
 
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-type Body = { action?: string; quotation_id?: string; reason?: string | null; close_ids?: string[] };
+type Body = { action?: string; quotation_id?: string; reason?: string | null; close_ids?: string[]; line_map?: QuoteLineSkuMap[] };
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 /** เติมใบสั่งขาย (so_orders ที่ยังไม่ยกเลิก) ที่ดึงแต่ละใบเสนอราคาไปแล้ว — ผ่าน so_order_lines.quote_id */
@@ -64,7 +66,7 @@ async function withOrders(admin: Admin, rows: SheetQuotation[]): Promise<SheetQu
 }
 
 /** ยืนยันใบนี้ "ผ่าน" + ปิดใบอื่นที่ติ๊ก — คืนข้อมูลให้หน้าจอเปิดใบสั่งขายต่อ (ถ้างานนี้ยังไม่มี) */
-async function confirmQuote(request: NextRequest, sheetId: string, qid: string, closeIds: string[]): Promise<NextResponse> {
+async function confirmQuote(request: NextRequest, sheetId: string, qid: string, closeIds: string[], lineMap: QuoteLineSkuMap[] = []): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const linked = await withOrders(admin, await loadSheetQuotations(admin, sheetId));
   if (!linked.some((r) => r.quotation_id === qid)) return NextResponse.json({ error: "ใบเสนอราคานี้ไม่ได้ผูกกับใบงานนี้" }, { status: 404 });
@@ -104,6 +106,33 @@ async function confirmQuote(request: NextRequest, sheetId: string, qid: string, 
     else closed.push({ quote_number: row.quote_number, action: fa.action });
   }
 
+  // 2.5) ผูกบรรทัดกับ SKU (เจ้าของขอ 2026-11-19) — เฉพาะบรรทัดของใบนี้ · SKU ต้องมีจริง
+  const priceOverride = new Map<string, number>();
+  let mapped = 0;
+  const lineIds = new Set((q.lines ?? []).map((l) => l.id).filter(Boolean) as string[]);
+  const maps = lineMap.filter((m) => isUuid(m.line_id) && isUuid(m.sku_id) && lineIds.has(m.line_id));
+  if (maps.length) {
+    const { data: skus } = await admin.from("skus_v2").select("id, code, list_price, cover_image_r2_key").in("id", [...new Set(maps.map((m) => m.sku_id))]);
+    const skuById = new Map(((skus ?? []) as { id: string; code: string; list_price: number | null; cover_image_r2_key: string | null }[]).map((s) => [s.id, s]));
+    for (const m of maps) {
+      const s = skuById.get(m.sku_id); if (!s) continue;
+      const line = q.lines.find((l) => l.id === m.line_id); if (!line) continue;
+      const { data: cur } = await admin.from("erp_playground_quote_lines").select("image_key").eq("id", m.line_id).maybeSingle();
+      const patch: Record<string, unknown> = { sku: s.code, product_id: s.id };
+      if (!(cur as { image_key: string | null } | null)?.image_key && s.cover_image_r2_key) patch.image_key = s.cover_image_r2_key;
+      const { error: uErr } = await admin.from("erp_playground_quote_lines").update(patch).eq("id", m.line_id);
+      if (uErr) continue;
+      line.sku = s.code; line.product_id = s.id; mapped++;
+      if (m.use_sku_price && s.list_price != null && Number(s.list_price) > 0) priceOverride.set(m.line_id, Number(s.list_price));
+      if (m.set_sku_price && (s.list_price == null || Number(s.list_price) <= 0) && Number(line.unit_price) > 0) {
+        const { error: pErr } = await admin.from("skus_v2").update({ list_price: Number(line.unit_price) }).eq("id", s.id);
+        if (!pErr) await writeAudit(admin, { action: "update", entityType: "skus_v2", entityId: s.id, actorId: user?.id ?? null, actorName: actor,
+          metadata: { code: s.code, reason: `ราคาจากใบเสนอราคา ${q.quote_number ?? ""}`, changes: auditDiff({ list_price: s.list_price }, { list_price: Number(line.unit_price) }) } });
+      }
+    }
+  }
+  if (priceOverride.size) q.lines = q.lines.map((l) => (l.id && priceOverride.has(l.id) ? { ...l, unit_price: priceOverride.get(l.id)! } : l));
+
   // 3) ใบสั่งขายของงานนี้ที่มีอยู่แล้ว (จากใบนี้ หรือใบอื่นของงานเดียวกัน) — มีแล้วไม่เปิดใหม่
   const pickRow = linked.find((r) => r.quotation_id === qid);
   const withOrder = [pickRow, ...linked.filter((r) => r.quotation_id !== qid)].find((r) => r?.order_id);
@@ -114,7 +143,7 @@ async function confirmQuote(request: NextRequest, sheetId: string, qid: string, 
   const sheetIds = [...new Set(((sheetRows ?? []) as { design_sheet_id: string }[]).map((r) => r.design_sheet_id))];
   await writeAuditMany(admin, sheetIds.map((sid) => ({
     action: "quote_confirm", entityType: "design_sheet", entityId: sid, actorId: user?.id ?? null, actorName: actor,
-    metadata: { quotation_id: qid, quote_number: q.quote_number, from_status: q.status, steps, closed, skipped, existing_order: existing?.order_no ?? null, code: q.quote_number ?? undefined },
+    metadata: { quotation_id: qid, quote_number: q.quote_number, from_status: q.status, steps, closed, skipped, existing_order: existing?.order_no ?? null, sku_mapped: mapped, code: q.quote_number ?? undefined },
   })));
 
   return NextResponse.json({
@@ -135,7 +164,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const qid = body.quotation_id;
   if (action !== "fail" && action !== "revise" && action !== "confirm") return NextResponse.json({ error: "action ต้องเป็น fail / revise / confirm" }, { status: 400 });
   if (!isUuid(id) || !isUuid(qid)) return NextResponse.json({ error: "รหัสไม่ถูกต้อง" }, { status: 400 });
-  if (action === "confirm") return confirmQuote(request, id, qid, Array.isArray(body.close_ids) ? body.close_ids.filter(isUuid) : []);
+  if (action === "confirm") return confirmQuote(request, id, qid, Array.isArray(body.close_ids) ? body.close_ids.filter(isUuid) : [], Array.isArray(body.line_map) ? body.line_map : []);
 
   const admin = supabaseAdmin();
   const { data: link } = await admin.from("design_sheet_quotations").select("id").eq("design_sheet_id", id).eq("quotation_id", qid).maybeSingle();

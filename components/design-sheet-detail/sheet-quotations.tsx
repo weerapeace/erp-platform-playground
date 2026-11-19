@@ -25,12 +25,16 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { openLink } from "@/lib/open-link";
-import { isQuoteOpen, quoteConfirmPlan, quoteFailAction, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type QuoteConfirmPlan, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { guessSkuForLine, isQuoteOpen, quoteConfirmPlan, quoteFailAction, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type QuoteConfirmPlan, type QuoteLineSkuMap, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { SearchableSelect } from "@/components/searchable-select";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
+import type { QuoteLine } from "@/app/api/quotations/route";
 
 const fmtBaht = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string | null) => { if (!d) return "—"; const x = new Date(d); return Number.isNaN(x.getTime()) ? d : x.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit" }); };
 
-export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsCart, onSend, onChanged, compact = false }: {
+export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsCart, onSend, onChanged, compact = false, linkedSkus = [], onCreateSku }: {
   sheetId: string;
   canEdit: boolean;
   /** เปลี่ยนค่า = โหลดใหม่ (หลังหย่อนสินค้าเข้าใบเสนอราคา) */
@@ -44,6 +48,10 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
   /** สถานะใบเปลี่ยน → ให้หน้าแม่โหลดตะกร้าใหม่ */
   onChanged?: () => void;
   compact?: boolean;
+  /** SKU ของงานนี้ — ผูกกับรายการใบเสนอราคาก่อนเปิดใบสั่งขาย (เจ้าของขอ 2026-11-19) */
+  linkedSkus?: DesignSheetLinkedSku[];
+  /** งานนี้ยังไม่มี SKU → ปุ่ม "สร้าง SKU" ในหน้าต่างยืนยัน (ไม่ส่ง = ไม่มีสิทธิ์สร้าง) */
+  onCreateSku?: () => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -106,13 +114,13 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
   };
 
   // ยืนยันใบนี้ผ่าน → (เซิร์ฟเวอร์) เปลี่ยนสถานะ + ปิดใบอื่น → (หน้าจอ) เปิดใบสั่งขายถ้างานนี้ยังไม่มี
-  const confirm = async (plan: QuoteConfirmPlan, closeIds: string[], makeOrder: boolean) => {
+  const confirm = async (plan: QuoteConfirmPlan, closeIds: string[], makeOrder: boolean, lineMap: QuoteLineSkuMap[] = []) => {
     const no = plan.pick.quote_number ?? tr("ใบนี้", "This one");
     setBusy(plan.pick.quotation_id);
     try {
       const j = await apiFetch(`/api/design-sheets/${sheetId}/quotations`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "confirm", quotation_id: plan.pick.quotation_id, close_ids: closeIds }),
+        body: JSON.stringify({ action: "confirm", quotation_id: plan.pick.quotation_id, close_ids: closeIds, line_map: lineMap }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setConfirmPlan(null);
@@ -224,8 +232,9 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
   return (
     <div className="mb-3 rounded-xl border border-slate-200 bg-white p-2.5">
       {confirmPlan && (
-        <ConfirmQuoteDialog plan={confirmPlan} busy={busy === confirmPlan.pick.quotation_id}
-          onClose={() => setConfirmPlan(null)} onConfirm={(closeIds, makeOrder) => void confirm(confirmPlan, closeIds, makeOrder)} />
+        <ConfirmQuoteDialog plan={confirmPlan} busy={busy === confirmPlan.pick.quotation_id} linkedSkus={linkedSkus}
+          onCreateSku={onCreateSku ? () => { setConfirmPlan(null); onCreateSku(); } : undefined}
+          onClose={() => setConfirmPlan(null)} onConfirm={(closeIds, makeOrder, lineMap) => void confirm(confirmPlan, closeIds, makeOrder, lineMap)} />
       )}
       <MiniTable
         rows={rows}
@@ -263,20 +272,53 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
 }
 
 /** หน้าต่าง "ยืนยัน · ผ่าน" — บอกว่าระบบจะทำอะไรบ้าง ติ๊กเอาออกได้ (ของกลาง ERPModal) */
-function ConfirmQuoteDialog({ plan, busy, onClose, onConfirm }: {
-  plan: QuoteConfirmPlan; busy: boolean; onClose: () => void; onConfirm: (closeIds: string[], makeOrder: boolean) => void;
+function ConfirmQuoteDialog({ plan, busy, onClose, onConfirm, linkedSkus, onCreateSku }: {
+  plan: QuoteConfirmPlan; busy: boolean; onClose: () => void; onConfirm: (closeIds: string[], makeOrder: boolean, lineMap: QuoteLineSkuMap[]) => void;
+  linkedSkus: DesignSheetLinkedSku[]; onCreateSku?: () => void;
 }) {
   const t = useT();
   const no = plan.pick.quote_number ?? t("ใบร่าง", "Draft");
   const [makeOrder, setMakeOrder] = useState(true);
   const [close, setClose] = useState<Set<string>>(() => new Set(plan.close.filter((c) => c.defaultOn).map((c) => c.quotation_id)));
   const row = "flex items-start gap-2 border-b border-slate-100 py-2 text-[13px] last:border-b-0";
+  // ── ผูกรายการกับ SKU (เจ้าของขอ 2026-11-19) — ต้องครบก่อนเปิดใบสั่งขาย ──
+  type MapRow = { sku_id: string | null; guessed: boolean; useSkuPrice: boolean; setSkuPrice: boolean; other: boolean };
+  type SkuInfo = { id: string; code: string; label: string; list_price: number | null; image_key: string | null };
+  const [lines, setLines] = useState<QuoteLine[] | null>(null);
+  const [map, setMap] = useState<Record<string, MapRow>>({});
+  const [extra, setExtra] = useState<Record<string, SkuInfo>>({});   // SKU นอกงานนี้ที่เลือกจากตัวค้นหา
+  const sheetSkus: SkuInfo[] = linkedSkus.filter((s) => s.is_active).map((s) => ({ id: s.id, code: s.code, label: [s.color, s.name_th].filter(Boolean).join(" · "), list_price: s.list_price ?? null, image_key: s.image_key }));
+  const skuInfo = (id: string | null) => (id ? sheetSkus.find((s) => s.id === id) ?? extra[id] ?? null : null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch(`/api/quotations/${plan.pick.quotation_id}`).then((r) => r.json()).then((j) => {
+      if (!alive) return;
+      const ls = ((j?.data?.lines ?? []) as QuoteLine[]).filter((l) => l.id && ((l.product_name ?? "").trim() || l.sku));
+      const init: Record<string, MapRow> = {};
+      for (const l of ls) {
+        const byId = l.product_id ? linkedSkus.find((s) => s.id === l.product_id) : null;
+        const byCode = !byId && l.sku ? linkedSkus.find((s) => s.code === l.sku) : null;
+        const g = byId || byCode ? null : guessSkuForLine(l.product_name ?? "", linkedSkus.filter((s) => s.is_active));
+        const pick = byId ?? byCode ?? g;
+        init[l.id!] = { sku_id: pick?.id ?? null, guessed: !!g && !byId && !byCode, useSkuPrice: false, setSkuPrice: true, other: false };
+      }
+      setLines(ls); setMap(init);
+    }).catch(() => { if (alive) setLines([]); });
+    return () => { alive = false; };
+  }, [plan.pick.quotation_id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const setRow = (id: string, p: Partial<MapRow>) => setMap((m) => ({ ...m, [id]: { ...m[id], ...p } }));
+  const needMap = makeOrder && !plan.existingOrder;
+  const unmapped = (lines ?? []).filter((l) => !map[l.id!]?.sku_id).length;
+  const blocked = needMap && (lines === null || unmapped > 0);
+  const lineMap: QuoteLineSkuMap[] = (lines ?? []).flatMap((l) => { const m = map[l.id!]; return m?.sku_id ? [{ line_id: l.id!, sku_id: m.sku_id, use_sku_price: m.useSkuPrice, set_sku_price: m.setSkuPrice }] : []; });
+  const baht = (v: number | null | undefined) => (v == null ? "—" : Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
   return (
-    <ERPModal open onClose={onClose} size="md" title={t(`ยืนยันใบ ${no} ผ่าน?`, `Confirm ${no} as passed?`)}
+    <ERPModal open onClose={onClose} size="lg" title={t(`ยืนยันใบ ${no} ผ่าน?`, `Confirm ${no} as passed?`)}
       description={t("ระบบจะทำตามนี้ให้ (ติ๊กเอาออกได้)", "The system will do the following (untick to skip)")}
       footer={<>
         <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" onClick={() => onConfirm([...close], makeOrder)} disabled={busy}
+        <button type="button" onClick={() => onConfirm([...close], makeOrder, lineMap)} disabled={busy || blocked}
+          title={blocked ? t("ผูก SKU ให้ครบทุกรายการก่อน (หรือเอาติ๊ก “เปิดใบสั่งขาย” ออก)", "Link every line to an SKU first (or untick “create sales order”)") : undefined}
           className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50">{busy ? t("กำลังทำ...", "Working...") : t("ยืนยัน · ผ่าน", "Confirm · passed")}</button>
       </>}>
       <div>
@@ -313,6 +355,66 @@ function ConfirmQuoteDialog({ plan, busy, onClose, onConfirm }: {
           </label>
         ))}
         {plan.close.length === 0 && <p className="pt-2 text-[11px] text-slate-400">{t("ไม่มีใบเสนอราคาอื่นของงานนี้ที่ต้องปิด", "No other open quotation for this job")}</p>}
+
+        {/* 🔗 ผูกรายการกับ SKU — ต้องครบก่อนเปิดใบสั่งขาย · เขียน SKU (+รูป) กลับลงใบเสนอราคาด้วย */}
+        {needMap && (
+          <div className="mt-3 rounded-lg border border-slate-200 p-2.5">
+            <div className="mb-1 flex flex-wrap items-center gap-2 text-[13px]">
+              <b>{t("ผูกรายการกับ SKU", "Link lines to SKUs")}</b>
+              <span className="text-[11px] text-slate-500">{t("ต้องครบก่อนเปิดใบสั่งขาย · รูปและรหัสในใบสั่งขายมาจาก SKU", "Required before the sales order · its image and code come from the SKU")}</span>
+            </div>
+            {sheetSkus.length === 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2 py-1.5 text-[12px] text-amber-800">
+                {t("งานนี้ยังไม่มี SKU — สร้าง SKU ก่อน หรือค้นหา SKU ที่มีอยู่แล้ว", "This job has no SKUs yet — create them first, or search existing SKUs")}
+                {onCreateSku && <button type="button" onClick={onCreateSku} className="h-7 rounded-md bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700">{t("สร้าง SKU", "Create SKU")}</button>}
+              </div>
+            )}
+            {lines === null ? <p className="py-3 text-center text-xs text-slate-400">{t("กำลังโหลดรายการ…", "Loading lines…")}</p> : lines.length === 0 ? <p className="py-2 text-xs text-slate-400">{t("ใบนี้ไม่มีรายการ", "No lines")}</p> : (
+              <div className="divide-y divide-slate-100">
+                {lines.map((l) => {
+                  const m = map[l.id!] ?? { sku_id: null, guessed: false, useSkuPrice: false, setSkuPrice: true, other: false };
+                  const info = skuInfo(m.sku_id);
+                  const noSkuPrice = !!info && (info.list_price == null || info.list_price <= 0);
+                  return (
+                    <div key={l.id} className="grid gap-2 py-2 text-[13px] sm:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] sm:items-start">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-slate-800" title={l.product_name}>{l.product_name || l.sku}</div>
+                        <div className="text-[11px] text-slate-500">{t(`${Number(l.qty).toLocaleString("th-TH")} ${l.unit || ""} × ${baht(l.unit_price)}`, `${l.qty} × ${baht(l.unit_price)}`)}</div>
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          {info?.image_key ? <img src={`/api/r2-image?key=${encodeURIComponent(info.image_key)}`} alt="" className="h-8 w-8 shrink-0 rounded object-cover" /> : <span className="h-8 w-8 shrink-0 rounded bg-slate-100" />}
+                          <div className={`min-w-0 flex-1 ${!m.sku_id ? "rounded-md ring-1 ring-rose-300" : ""}`}>
+                            {m.other ? (
+                              <SkuPicker value={null} placeholder={t("ค้นหา SKU (รหัส / ชื่อ)", "Search SKU (code / name)")}
+                                onChange={(v: SkuPickerValue | null) => { if (!v) return; setExtra((x) => ({ ...x, [v.id]: { id: v.id, code: v.code, label: [v.color, v.name].filter(Boolean).join(" · "), list_price: v.list_price ?? null, image_key: v.image_key ?? null } })); setRow(l.id!, { sku_id: v.id, guessed: false, other: false }); }} />
+                            ) : (
+                              <SearchableSelect value={m.sku_id ?? ""} placeholder={t("— เลือก SKU —", "— Pick SKU —")}
+                                options={[...sheetSkus, ...Object.values(extra).filter((x) => !sheetSkus.some((s) => s.id === x.id))].map((s) => ({ value: s.id, label: s.code, sub: s.label || undefined }))}
+                                onChange={(v) => setRow(l.id!, { sku_id: v || null, guessed: false })} />
+                            )}
+                          </div>
+                          {m.guessed && <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title={t("ระบบเดาจากชื่อ/สี — ตรวจให้ถูก", "Guessed from name/colour — please check")}>{t("เดา", "Guess")}</span>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                          <button type="button" onClick={() => setRow(l.id!, { other: !m.other })} className="text-blue-600 hover:underline">{m.other ? t("เลือกจาก SKU ของงานนี้", "Pick from this job's SKUs") : t("SKU อื่น (ค้นหา)", "Other SKU (search)")}</button>
+                          {info && (
+                            <>
+                              <label className="inline-flex items-center gap-1"><input type="radio" checked={!m.useSkuPrice} onChange={() => setRow(l.id!, { useSkuPrice: false })} />{t(`ราคาเสนอ ${baht(l.unit_price)}`, `Quote price ${baht(l.unit_price)}`)}</label>
+                              {!noSkuPrice && <label className="inline-flex items-center gap-1"><input type="radio" checked={m.useSkuPrice} onChange={() => setRow(l.id!, { useSkuPrice: true })} />{t(`ราคา SKU ${baht(info.list_price)}`, `SKU price ${baht(info.list_price)}`)}</label>}
+                              {noSkuPrice && <label className="inline-flex items-center gap-1 text-amber-700"><input type="checkbox" checked={m.setSkuPrice} onChange={(e) => setRow(l.id!, { setSkuPrice: e.target.checked })} />{t(`SKU ยังไม่มีราคาขาย — ตั้ง = ${baht(l.unit_price)}`, `SKU has no sale price — set to ${baht(l.unit_price)}`)}</label>}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {lines && unmapped > 0 && <p className="mt-1 text-[12px] text-rose-600">{t(`เหลือ ${unmapped} รายการยังไม่ผูก SKU — ผูกให้ครบ หรือเอาติ๊ก “เปิดใบสั่งขาย” ออกเพื่อยืนยันผ่านอย่างเดียว`, `${unmapped} line(s) not linked — link them, or untick “create sales order”`)}</p>}
+          </div>
+        )}
       </div>
     </ERPModal>
   );

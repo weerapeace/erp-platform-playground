@@ -3224,7 +3224,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {modalTab === "quotes" && form.id && (
               <>
               {/* ใบเสนอราคาของงานนี้ (ระบบขาย) ทุกเวอร์ชัน + ไม่ผ่าน/เปิดใบใหม่แทน — components/design-sheet-detail/sheet-quotations.tsx */}
-              <SheetQuotations sheetId={form.id} canEdit={canEdit} refreshKey={cartRefresh} cartId={cartId}
+              <SheetQuotations sheetId={form.id} canEdit={canEdit} refreshKey={cartRefresh} cartId={cartId} linkedSkus={linkedSkus}
+                onCreateSku={canCreate ? () => { setSkuWizardCode(""); setSkuWizard(true); } : undefined}
                 onUseAsCart={(qid) => { setCart(qid); bumpCart(); }} onChanged={bumpCart}
                 onSend={canEdit ? () => setToQuote(true) : undefined} />
               {/* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */}
