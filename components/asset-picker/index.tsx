@@ -35,6 +35,7 @@ import { type AssetRow } from "@/app/api/assets/shared";
 import { VideoThumb } from "@/components/video-thumb";
 import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 import { Icon } from "@/components/icon";
+import { AlbumSelect } from "@/components/album-picker";
 import {
   PARENT_ATT_PREFIX, PARENT_IMAGE_GROUP_LABEL, isPendingParentImage, type ParentImageGroup, type ParentImageHit,
 } from "@/lib/parent-sku-images";
@@ -111,7 +112,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [confirming, setConfirming] = useState(false);
   const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
   const [tagId, setTagId] = useState("");            // แท็ก
-  const [collections, setCollections] = useState<{ id: string; name: string; count: number }[]>([]);
+  const [collections, setCollections] = useState<{ id: string; name: string; count: number; parent_id?: string | null; group?: string | null }[]>([]);
   const [tags, setTags] = useState<{ id: string; name: string; count: number }[]>([]);
   const [selected, setSelected] = useState<Map<string, AssetRow>>(new Map());
   const [actor, setActor] = useState<string | null>(null);
@@ -338,11 +339,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
               <option value="parent">📦 รูปจาก Parent SKU</option>
               <option value="all">ทุกที่มา</option>
             </select>
-            <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} title="อัลบั้ม"
-              className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="">📚 ทุกอัลบั้ม</option>
-              {collections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
-            </select>
+            <AlbumSelect albums={collections} value={collectionId} onChange={setCollectionId} compact showCount noneLabel="ทุกอัลบั้ม" className="w-48 max-w-full" />
             <select value={tagId} onChange={(e) => setTagId(e.target.value)} title="แท็ก"
               className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <option value="">🏷 ทุกแท็ก</option>

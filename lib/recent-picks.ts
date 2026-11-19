@@ -38,6 +38,7 @@ export const RECENT_KEYS = {
   mos:         "erp-recent-mos",              // ตัวเลือกใบงาน (components/mo-picker) — id = เลขใบสั่งผลิต
   moGroups:    "erp-recent-mo-groups",        // ตัวเลือกชุด / กลุ่มใบสั่งงาน (components/mo-group-picker)
   designSheets: "erp-recent-design-sheets",   // ตัวเลือกใบงานออกแบบ (components/design-sheet-picker)
+  albums:      "erp-recent-albums",           // ตัวเลือกอัลบั้มคลังไฟล์ (components/album-picker) — "ใช้ล่าสุด" บนสุด
   assets:      "erp-recent-assets",           // ตัวเลือกรูปจากคลัง (components/asset-picker) — แท็บ "⏱ ใช้ล่าสุด" (เก็บ 30)
 } as const;
 

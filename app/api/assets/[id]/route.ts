@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { driveConfigured, driveTrashFolder, parseDriveFolderId } from "@/lib/google-drive";
 import { type AssetDetail, type AssetUsage, type AssetSize, rowOf, attachTags, actorId, loadCollectionIds, setCollections, normalizeSizes, normalizeCodes, normalizePrintItems } from "../shared";
 
@@ -80,6 +80,13 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   if (body.parent_sku_codes !== undefined) patch.parent_sku_codes = normalizeCodes(body.parent_sku_codes);
   if (body.print_items !== undefined)      patch.print_items = normalizePrintItems(body.print_items);
 
+  // ค่าเดิมไว้จด "จากอะไรเป็นอะไร" ในประวัติ (ช่องที่แก้ + อัลบั้มเป็นชื่อ)
+  const patchKeys = Object.keys(patch).filter((k) => k !== "updated_at");
+  const [{ data: beforeRow }, beforeCols] = await Promise.all([
+    patchKeys.length ? admin.from("assets").select(patchKeys.join(",")).eq("id", id).maybeSingle() : Promise.resolve({ data: null }),
+    Array.isArray(body.collection_ids) ? loadCollectionIds(admin, id) : Promise.resolve([] as string[]),
+  ]);
+
   const { error } = await admin.from("assets").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -92,7 +99,21 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   // อัลบั้ม: แทนที่ทั้งชุด (asset อยู่ได้หลายอัลบั้ม)
   if (Array.isArray(body.collection_ids)) await setCollections(admin, id, body.collection_ids);
 
-  await writeAudit(admin, { action: "update", entityType: "asset", entityId: id, actorId: await actorId(request) });
+  const meta: Record<string, unknown> = { ...auditChangeMeta(beforeRow as Record<string, unknown> | null, Object.fromEntries(patchKeys.map((k) => [k, patch[k]]))) };
+  if (Array.isArray(body.collection_ids)) {
+    const after = [...new Set(body.collection_ids.filter(Boolean))];
+    const added = after.filter((c) => !beforeCols.includes(c)), removed = beforeCols.filter((c) => !after.includes(c));
+    if (added.length || removed.length) {
+      const { data: names } = await admin.from("asset_collections").select("id, name").in("id", [...added, ...removed]);
+      const nm = new Map(((names ?? []) as { id: string; name: string }[]).map((r) => [r.id, r.name]));
+      const label = (ids: string[]) => ids.map((c) => nm.get(c) ?? c).join(", ");
+      const albumChange = { field: "albums", label: "อัลบั้ม", old: label(beforeCols), new: label(after) };
+      meta.changes = [...((meta.changes as unknown[]) ?? []), albumChange];
+      meta.albums_added = added.map((c) => nm.get(c) ?? c);
+      meta.albums_removed = removed.map((c) => nm.get(c) ?? c);
+    }
+  }
+  await writeAudit(admin, { action: "update", entityType: "asset", entityId: id, actorId: await actorId(request), metadata: meta });
 
   const { data } = await admin.from("assets").select("*").eq("id", id).maybeSingle();
   return NextResponse.json({ data: data ? await rowOf(admin, data as Parameters<typeof rowOf>[1]) : null, error: null });

@@ -9,6 +9,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow, type AssetDetail, type AssetSize } from "@/app/api/assets/shared";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
+import { AlbumSelect } from "@/components/album-picker";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 import { type LookupItem, isImage, useDriveFolderMaps, brandFolderPath } from "./asset-shared";
 import { ArtTypeMultiSelect, SizesEditor, ParentSkuField, TagPickerField } from "./asset-fields";
@@ -60,11 +61,7 @@ export function BulkMoveModal({ count, collections, onClose, onApply }: {
         </div>
       }>
       <label className="text-[12px] text-slate-500">{t("เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)", "Select album (an asset can be in multiple albums)")}
-        <select value={col} onChange={(e) => setCol(e.target.value)}
-          className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">{t("— เอาออกจากทุกอัลบั้ม —", "— Remove from all albums —")}</option>
-          {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        <AlbumSelect albums={collections} value={col} onChange={setCol} className="mt-1" noneLabel={t("— เอาออกจากทุกอัลบั้ม —", "— Remove from all albums —")} />
       </label>
     </ERPModal>
   );

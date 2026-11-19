@@ -147,7 +147,7 @@ export function SearchableSelect({
 
 // ───────── เลือกหลายค่า (ตัวเดียวกัน · ไม่สร้างกล่องเลือกชุดที่ 2) ─────────
 /** ตำแหน่ง dropdown ลอย (คำนวณจากปุ่ม · เด้งขึ้นถ้าด้านล่างไม่พอ · ตามการเลื่อนจอ) */
-function useFloatPos(open: boolean, ref: RefObject<HTMLElement | null>, panelMax = 360): Pos | null {
+export function useFloatPos(open: boolean, ref: RefObject<HTMLElement | null>, panelMax = 360): Pos | null {
   const [pos, setPos] = useState<Pos | null>(null);
   const compute = useCallback(() => {
     const el = ref.current; if (!el) return;

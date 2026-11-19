@@ -9,11 +9,14 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { actorId, countActiveByGroup } from "../shared";
+import { parseSampleMark } from "@/lib/sample-images";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type AssetCollection = { id: string; name: string; description: string | null; count: number };
+/** อัลบั้มในคลังไฟล์ · parent_id = อัลบั้มแม่ (อัลบั้ม SAMPLE ซ้อนกัน) · group = กลุ่ม ("SAMPLE · <แบรนด์>" · อัลบั้มปกติ = null)
+ *  ตัวเลือกอัลบั้มกลาง components/album-picker ใช้ 2 ช่องนี้โชว์เส้นทางแม่ + จัดกลุ่ม (ไม่มี = อัลบั้มปกติชั้นบนสุด) */
+export type AssetCollection = { id: string; name: string; description: string | null; count: number; parent_id?: string | null; group?: string | null };
 
 export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "assets.view");
@@ -32,9 +35,19 @@ export async function GET(request: NextRequest) {
   // จำนวนไฟล์ active ต่ออัลบั้ม (asset อยู่ได้หลายอัลบั้ม → นับผ่าน map) — นับที่ฐานข้อมูล (ของกลาง countActiveByGroup)
   const counts = await countActiveByGroup(admin, "asset_collection_map", "collection_id", (cols ?? []).map((c) => (c as { id: string }).id));
 
+  // อัลบั้ม SAMPLE: แม่ + แบรนด์ อยู่ในป้าย description ("sample-images:<brand>|in:<parent>") → ส่งเป็นช่องตรง ๆ ให้ตัวเลือกอัลบั้มกลางจัดต้นไม้
+  const marks = new Map((cols ?? []).map((c) => [(c as { id: string }).id, parseSampleMark((c as { description: string | null }).description)]));
+  const brandIds = [...new Set([...marks.values()].map((m) => m?.brandId).filter((x): x is string => !!x))];
+  const brandName = new Map<string, string>();
+  if (brandIds.length) {
+    const { data: bs } = await admin.from("brands").select("id, name").in("id", brandIds);
+    for (const b of (bs ?? []) as { id: string; name: string }[]) brandName.set(b.id, b.name);
+  }
   const out: AssetCollection[] = (cols ?? []).map((c) => {
     const r = c as { id: string; name: string; description: string | null };
-    return { id: r.id, name: r.name, description: r.description, count: counts.get(r.id) ?? 0 };
+    const m = marks.get(r.id);
+    const group = m ? `SAMPLE · ${(m.brandId && brandName.get(m.brandId)) || "ยังไม่ระบุแบรนด์"}` : null;
+    return { id: r.id, name: r.name, description: r.description, count: counts.get(r.id) ?? 0, parent_id: m?.parentId ?? null, group };
   });
   return NextResponse.json({ data: out, error: null });
 }

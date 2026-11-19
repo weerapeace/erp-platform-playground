@@ -441,6 +441,15 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "ทุกช่องรูปที่น่าจะมีรูปในคลังอยู่แล้ว",
   },
   {
+    key: "album-picker", label: "เลือกอัลบั้มคลังไฟล์ (ค้นได้ · โชว์อัลบั้มแม่ · ย่อเกิน 6)", code: "AlbumMultiPicker · AlbumSelect · AlbumTree · lib/album-options", category: "pick",
+    source: { path: "components/album-picker" },
+    what: "เลือกอัลบั้มหลายอัน (ชิปเฉพาะที่เลือก + ปุ่ม \"+ เพิ่มอัลบั้ม\") หรืออันเดียว (แทน select ยาว) · ค้นชื่อหรือชื่อแม่ได้ ไม่ต้องตรงเป๊ะ · ทุกอันโชว์เส้นทางแม่ (\"SAMPLE … › Product 012 › Version 2\") · ใช้ล่าสุดขึ้นบน · กลุ่ม SAMPLE ยุบตามแบรนด์ กางทีละชั้น · รายการไหนเกิน 6 อัน = โชว์ 6 + \"ดูอีก N\" · AlbumTree = ต้นไม้เดียวกันให้แถบข้างวาดแถวเอง",
+    when: "ทุกช่องที่เลือก/กรองอัลบั้มของคลังไฟล์ (รายละเอียดไฟล์ · เพิ่ม Artwork · ลงหลายไฟล์ · สแกน Drive · เพิ่มเข้าอัลบั้ม · อัปโหลด · ตัวกรองใน AssetPicker · แถบซ้ายคลังไฟล์)",
+    notWhen: "เลือกอัลบั้ม SAMPLE แบบเห็นรูปปก → SampleAlbumPickerModal · อัลบั้มหน้า Contents → แถบ Contents ของมัน",
+    doc: "album-picker.md",
+    note: "เจ้าของเลือกจาก widget 2026-11-19 (ชิป + ค้น + เส้นทางแม่ · ข้อเสนอ 1-5) · ข้อมูลแม่/กลุ่มมาจาก /api/assets/collections (parent_id + group) · CollectionMultiSelect ในคลังไฟล์ = ตัวห่อที่สร้างอัลบั้มใหม่",
+  },
+  {
     key: "image-input", label: "ช่องรูปเดี่ยว", code: "ImageInput", category: "file",
     source: { path: "components/image-input" },
     what: "อัปโหลดรูป 1 รูป + ดูตัวอย่าง + ลบ",

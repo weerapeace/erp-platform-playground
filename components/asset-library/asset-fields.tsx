@@ -10,6 +10,7 @@ import { type AssetRow, type AssetUsage, type AssetSize, type PrintItem } from "
 import { AssetPicker } from "@/components/asset-picker";
 import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
+import { AlbumMultiPicker } from "@/components/album-picker";
 import { type LookupItem, sizeText, SIZE_UNITS } from "./asset-shared";
 
 export function Meta({ label, value }: { label: string; value: ReactNode }) {
@@ -77,62 +78,23 @@ export function TagChips({ value, onChange }: { value: string[]; onChange: (v: s
   );
 }
 
-// ── เลือก Group Album หลายอัน (m2m) + สร้างอัลบั้มใหม่ inline ──
-export function CollectionMultiSelect({ value, collections, onChange, onCreated }: {
-  value: string[]; collections: AssetCollection[]; onChange: (v: string[]) => void; onCreated: (c: AssetCollection) => void;
+// ── เลือกอัลบั้มหลายอัน (m2m) + สร้างอัลบั้มใหม่จากคำค้น — หน้าตา/ค้น/ย่อ อยู่ที่ของกลาง AlbumMultiPicker (components/album-picker) ──
+export function CollectionMultiSelect({ value, collections, onChange, onCreated, disabled }: {
+  value: string[]; collections: AssetCollection[]; onChange: (v: string[]) => void; onCreated: (c: AssetCollection) => void; disabled?: boolean;
 }) {
   const toast = useToast();
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [busy, setBusy] = useState(false);
   const t = useT();
-  const nameOf = (id: string) => collections.find((c) => c.id === id)?.name ?? id;
-  const add = (id: string) => { if (id && !value.includes(id)) onChange([...value, id]); };
-  const remaining = collections.filter((c) => !value.includes(c.id));
-  const create = async () => {
-    const n = newName.trim(); if (!n) return;
-    setBusy(true);
+  const create = async (n: string): Promise<string | null> => {
     try {
       const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
       const j = await r.json(); if (!r.ok || j.error || !j.data) throw new Error(j.error || t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album"));
-      const col = j.data as AssetCollection;
-      onCreated(col); onChange([...value, col.id]); setNewName(""); setCreating(false);
+      const col = { ...(j.data as AssetCollection), count: 0, parent_id: null, group: null };
+      onCreated(col);
       toast.success(`${t("สร้างอัลบั้ม", "Created album")} "${n}"`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album")); }
-    finally { setBusy(false); }
+      return col.id;
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album")); return null; }
   };
-  return (
-    <div>
-      <div className="flex flex-wrap items-center gap-1.5">
-        {value.map((id) => (
-          <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-700 rounded">
-            {nameOf(id)}<button type="button" onClick={() => onChange(value.filter((x) => x !== id))} className="text-emerald-300 hover:text-rose-500 leading-none">✕</button>
-          </span>
-        ))}
-        {value.length === 0 && <span className="text-[11px] text-slate-400">{t("— ไม่ระบุ —", "— None —")}</span>}
-      </div>
-      <div className="flex items-center gap-1.5 mt-1">
-        <select value="" onChange={(e) => { add(e.target.value); e.target.value = ""; }}
-          className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white max-w-[150px]">
-          <option value="">{t("＋ เลือกอัลบั้ม…", "＋ Choose album…")}</option>
-          {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        {!creating ? (
-          <button type="button" onClick={() => setCreating(true)}
-            className="text-[11px] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50">{t("＋ อัลบั้มใหม่", "＋ New album")}</button>
-        ) : (
-          <span className="inline-flex items-center gap-1">
-            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} disabled={busy}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
-              placeholder={t("ชื่ออัลบั้มใหม่", "New album name")} className="h-8 w-32 px-2 text-[12px] border border-emerald-300 rounded-lg" />
-            <button type="button" onClick={() => void create()} disabled={busy}
-              className="text-[11px] px-2 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{t("เพิ่ม", "Add")}</button>
-            <button type="button" onClick={() => { setCreating(false); setNewName(""); }} className="text-[11px] text-slate-400 hover:text-slate-600">{t("ยกเลิก", "Cancel")}</button>
-          </span>
-        )}
-      </div>
-    </div>
-  );
+  return <AlbumMultiPicker albums={collections} value={value} onChange={onChange} onCreate={create} disabled={disabled} />;
 }
 
 // ── เลือกชนิด Artwork หลายอัน (m2m) + เพิ่มชนิดใหม่ inline (lookup กลาง) ──

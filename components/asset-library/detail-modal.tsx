@@ -17,7 +17,8 @@ import { HelpButton } from "@/components/help-guides";
 import { StorageProviderBadge } from "@/components/storage-rules";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { type LookupItem, isImage, TYPE_ICON, driveFolderNameOf, commonNameSeed, uploadArtworkToDrive, useArtworkPathRule, pathMatchesRule, useDriveFolderMaps, brandFolderPath } from "./asset-shared";
-import { ArtTypeMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField, Meta, UsageList } from "./asset-fields";
+import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
+import { CollectionMultiSelect, ArtTypeMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField, Meta, UsageList } from "./asset-fields";
 
 // ── รายละเอียดไฟล์ ──
 export function DetailModal({ id, actor, collections, artTypes, onClose, onChanged, ids, onNavigate }: {
@@ -35,6 +36,8 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
   const [tags, setTags] = useState<string[]>([]);
   const [keywords, setKeywords] = useState("");
   const [collectionIds, setCollectionIds] = useState<string[]>([]);
+  const [colList, setColList] = useState<AssetCollection[]>(collections);   // สำเนา + ต่อท้ายเมื่อสร้างอัลบั้มใหม่ในช่อง
+  useEffect(() => { setColList((cur) => { const have = new Set(collections.map((c) => c.id)); return [...collections, ...cur.filter((c) => !have.has(c.id))]; }); }, [collections]);
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
   const [artTypesSel, setArtTypesSel] = useState<string[]>([]);          // ชนิดหลายอัน (m2m)
@@ -95,7 +98,19 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
         body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_types: artTypesSel, keywords, sizes, parent_sku_codes: parentCodes, ...(d?.source === "print" ? { print_items: printItems } : {}) }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(t("บันทึกแล้ว", "Saved")); await loadDetail(); onChanged();
+      // เอาออกจากอัลบั้ม → แจ้งผลมีปุ่ม "ย้อนกลับ" 5 วิ (ใส่อัลบั้มเดิมคืน · API ลงประวัติทั้งตอนเอาออกและตอนย้อน)
+      const removed = (d?.collection_ids ?? []).filter((x) => !collectionIds.includes(x));
+      if (removed.length) {
+        const names = removed.map((x) => colList.find((c) => c.id === x)?.name ?? "").filter(Boolean);
+        const kept = collectionIds;
+        toast.undo(`${t("บันทึกแล้ว · เอาออกจากอัลบั้ม", "Saved · removed from")} ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`, async () => {
+          const r2 = await apiFetch(`/api/assets/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ collection_ids: [...new Set([...kept, ...removed])] }) });
+          const j2 = await r2.json().catch(() => ({}));
+          if (!r2.ok || j2.error) { toast.error(j2.error || t("ย้อนกลับไม่สำเร็จ", "Undo failed")); return; }
+          toast.success(t("ใส่กลับเข้าอัลบั้มเดิมแล้ว", "Restored to album")); await loadDetail(); onChanged();
+        });
+      } else toast.success(t("บันทึกแล้ว", "Saved"));
+      await loadDetail(); onChanged();
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setSaving(false); }
   };
@@ -221,6 +236,7 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
   };
 
   const trashed = d?.status === "trashed";
+  useSaveShortcut(save, { enabled: !!d && !trashed && !saving });   // Ctrl+S / ⌘S = บันทึก (ของกลาง · แป้นไทยได้)
   const pathWarn = !trashed && !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
   return (
@@ -284,23 +300,10 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <div className="text-[12px] text-slate-500">{t("อัลบั้ม", "Album")} <span className="text-[10px] text-slate-400">{t("(เลือกได้หลายอัน)", "(multiple allowed)")}</span>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {collections.length === 0 && <span className="text-[11px] text-slate-400">{t("ยังไม่มีอัลบั้ม", "No albums yet")}</span>}
-                  {collections.map((c) => {
-                    const on = collectionIds.includes(c.id);
-                    return (
-                      <button key={c.id} type="button" disabled={trashed}
-                        onClick={() => setCollectionIds((s) => on ? s.filter((x) => x !== c.id) : [...s, c.id])}
-                        className={`text-[11px] px-2.5 py-1 rounded-full border disabled:opacity-50 ${on
-                          ? "bg-indigo-600 border-indigo-600 text-white"
-                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"}`}>
-                        {on ? "✓ " : ""}{c.name}
-                      </button>
-                    );
-                  })}
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              <div className="min-w-0 text-[12px] text-slate-500">{t("อัลบั้ม", "Album")} <span className="text-[10px] text-slate-400">({collectionIds.length})</span>
+                {/* ของกลาง: ชิปเฉพาะอัลบั้มที่อยู่ (เกิน 6 ย่อ) + "+ เพิ่มอัลบั้ม" ค้นได้ โชว์เส้นทางแม่ — components/album-picker */}
+                <div className="mt-1"><CollectionMultiSelect value={collectionIds} collections={colList} onChange={setCollectionIds} onCreated={(c) => setColList((cur) => [...cur, c])} disabled={trashed} /></div>
               </div>
               <div className="text-[12px] text-slate-500">{t("แท็ก", "Tags")}
                 <div className="mt-1">{trashed ? <span className="text-[11px] text-slate-400">{tags.join(", ") || "—"}</span> : <TagPickerField value={tags} onChange={setTags} />}</div>

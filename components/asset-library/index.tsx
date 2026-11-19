@@ -8,7 +8,7 @@
  *
  * ใช้ของกลาง: apiFetch · useToast · ERPModal · ConfirmDialog · R2 (ผ่าน /api/assets)
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -40,6 +40,7 @@ import { UploadModal } from "./upload-modal";
 import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
 import { Icon } from "@/components/icon";
+import { AlbumTree, buildAlbumOptions } from "@/components/album-picker";
 
 // 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
 const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
@@ -480,10 +481,7 @@ export function AssetLibrary() {
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label={t("ทั้งหมด", "All")} />
             <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label={t("ไม่อยู่อัลบั้ม", "No album")} />
-            {collections.map((c) => (
-              <SideItem key={c.id} active={collectionId === c.id} onClick={() => setCollectionId(c.id)}
-                label={c.name} count={c.count} icon="📁" />
-            ))}
+            <SideAlbums collections={collections} activeId={collectionId} onSelect={setCollectionId} />
           </div>
           {tags.length > 0 && (
             <>
@@ -708,6 +706,24 @@ export function AssetLibrary() {
 }
 
 // ─────────────────────────── sub-components ───────────────────────────
+
+// แถบซ้าย: อัลบั้มเป็นต้นไม้ของกลาง — อัลบั้มปกติ (เกิน 6 ย่อ) → กลุ่ม SAMPLE ตามแบรนด์ (ยุบไว้) → กางทีละชั้น
+function SideAlbums({ collections, activeId, onSelect }: { collections: AssetCollection[]; activeId: string | null; onSelect: (id: string) => void }) {
+  const options = useMemo(() => buildAlbumOptions(collections), [collections]);
+  return (
+    <AlbumTree key={options.length ? "ready" : "empty"} options={options} activeId={activeId}
+      renderRow={(o, x) => (
+        <div className="flex items-center min-w-0" style={{ paddingLeft: x.depth * 12 }}>
+          {x.hasKids
+            ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? "ยุบ" : "กาง"}>{x.expanded ? "▾" : "▸"}</button>
+            : <span className="w-4 shrink-0" />}
+          <div className="flex-1 min-w-0 flex flex-col">
+            <SideItem active={activeId === o.value} onClick={() => onSelect(o.value)} label={o.label} count={o.count} icon="📁" />
+          </div>
+        </div>
+      )} />
+  );
+}
 
 function SideItem({ active, onClick, label, count, icon }: {
   active: boolean; onClick: () => void; label: string; count?: number; icon?: string;

@@ -246,7 +246,10 @@ export async function loadCollectionIds(admin: Db, assetId: string): Promise<str
 /** ตั้งอัลบั้มของ asset (แทนที่ทั้งชุด) + sync assets.collection_id = อัลบั้มแรก (ให้ฟิลเตอร์ "ไม่อยู่อัลบั้ม" ทำงาน) */
 export async function setCollections(admin: Db, assetId: string, ids: string[]): Promise<void> {
   const clean = [...new Set(ids.filter(Boolean))];
-  await admin.from("asset_collection_map").delete().eq("asset_id", assetId);
+  // ลบเฉพาะอัลบั้มที่เอาออก (ไม่ล้างทั้งชุด) → แถวเดิมคงอยู่ ลำดับรูปที่จัดเองในอัลบั้ม (sort_order) ไม่หาย
+  const { data: cur } = await admin.from("asset_collection_map").select("collection_id").eq("asset_id", assetId);
+  const removed = ((cur ?? []) as { collection_id: string }[]).map((r) => r.collection_id).filter((c) => !clean.includes(c));
+  if (removed.length) await admin.from("asset_collection_map").delete().eq("asset_id", assetId).in("collection_id", removed);
   if (clean.length)
     await admin.from("asset_collection_map").upsert(
       clean.map((collection_id) => ({ asset_id: assetId, collection_id })),

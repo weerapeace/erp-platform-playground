@@ -9,6 +9,7 @@ import { formatBytes } from "@/lib/assets";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
+import { AlbumSelect } from "@/components/album-picker";
 
 // ── อัปโหลด (ลากวาง) ──
 export type UpItem = { file: File; status: "pending" | "uploading" | "done" | "dup" | "error"; msg?: string };
@@ -160,11 +161,7 @@ export function UploadModal({ actor, collections, onClose, onDone, initialFiles,
         </label>
         <label className="text-[12px] text-slate-500">
           {t("อัลบั้ม", "Album")}
-          <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)}
-            className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
-            {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <AlbumSelect albums={collections} value={collectionId} onChange={setCollectionId} className="mt-1" noneLabel={t("— ไม่ระบุ —", "— None —")} />
         </label>
       </div>
     </ERPModal>
