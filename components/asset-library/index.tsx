@@ -40,7 +40,7 @@ import { UploadModal } from "./upload-modal";
 import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
 import { Icon } from "@/components/icon";
-import { AlbumTree, buildAlbumOptions } from "@/components/album-picker";
+import { AlbumTree, albumFullName, buildAlbumOptions } from "@/components/album-picker";
 
 // 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
 const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
@@ -717,7 +717,7 @@ function SideAlbums({ collections, activeId, onSelect }: { collections: AssetCol
           {x.hasKids
             ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? "ยุบ" : "กาง"}>{x.expanded ? "▾" : "▸"}</button>
             : <span className="w-4 shrink-0" />}
-          <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex-1 min-w-0 flex flex-col" title={albumFullName(o)}>
             <SideItem active={activeId === o.value} onClick={() => onSelect(o.value)} label={o.label} count={o.count} icon="📁" />
           </div>
         </div>

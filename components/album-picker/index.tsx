@@ -24,7 +24,7 @@ import { useFloatPos } from "@/components/searchable-select";
 import { useEscLayer } from "@/components/modal/esc-layer";
 import { rankOptions } from "@/lib/fuzzy-rank";
 import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";
-import { ALBUM_COLLAPSE_AT, albumFullName, ancestorIds, buildAlbumOptions, collapseList, type AlbumLike, type AlbumOption } from "@/lib/album-options";
+import { ALBUM_COLLAPSE_AT, albumFullName, albumNearPath, ancestorIds, buildAlbumOptions, collapseList, type AlbumLike, type AlbumOption } from "@/lib/album-options";
 
 export type { AlbumLike, AlbumOption };
 export { buildAlbumOptions, albumFullName };
@@ -260,7 +260,7 @@ export function AlbumMultiPicker({ albums, value, onChange, disabled, onCreate, 
             return (
               <span title={o ? albumFullName(o) : id}
                 className="inline-flex max-w-full items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 pl-2.5 pr-1 py-0.5 text-[11px] text-indigo-700">
-                <span className="min-w-0 truncate">{o?.label ?? t("(อัลบั้มถูกลบ)", "(deleted album)")}{o?.sub ? <span className="text-indigo-400"> · {o.sub}</span> : null}</span>
+                <span className="min-w-0 truncate">{o?.label ?? t("(อัลบั้มถูกลบ)", "(deleted album)")}{o?.sub ? <span className="text-indigo-400"> · {albumNearPath(o)}</span> : null}</span>
                 {!disabled && <button type="button" onClick={() => toggle(id)} aria-label={t("เอาออกจากอัลบั้ม", "Remove from album")} className="shrink-0 px-1 text-indigo-300 hover:text-rose-500">✕</button>}
               </span>
             );
@@ -293,7 +293,7 @@ export function AlbumSelect({ albums, value, onChange, noneLabel, compact, class
       <button ref={btnRef} type="button" onClick={() => setOpen((v) => !v)} title={cur ? albumFullName(cur) : noneLabel}
         className={`w-full ${compact ? "h-8 text-[12px]" : "h-9 text-sm"} px-2 text-left border border-slate-200 rounded-lg bg-white flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-indigo-500`}>
         <span className="flex-1 min-w-0 truncate">
-          {cur ? <>{cur.label}{showCount && cur.count ? ` (${cur.count})` : ""}{cur.sub ? <span className="text-[11px] text-slate-400"> · {cur.sub}</span> : null}</> : <span className="text-slate-500">{noneLabel}</span>}
+          {cur ? <>{cur.label}{showCount && cur.count ? ` (${cur.count})` : ""}{cur.sub ? <span className="text-[11px] text-slate-400"> · {albumNearPath(cur)}</span> : null}</> : <span className="text-slate-500">{noneLabel}</span>}
         </span>
         <span className="text-slate-400 text-xs">▾</span>
       </button>

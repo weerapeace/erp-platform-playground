@@ -65,6 +65,13 @@ export function buildAlbumOptions(albums: readonly AlbumLike[]): AlbumOption[] {
   return out;
 }
 
+/** แม่ชั้นใกล้สุด (ชิป/ปุ่มที่แคบ — ส่วนที่ใช้แยก "Version 1" ซ้ำกัน) · ชั้นลึก = "… › Product 012" · ชั้นบนสุด = "" */
+export function albumNearPath(o: Pick<AlbumOption, "sub">): string {
+  if (!o.sub) return "";
+  const parts = o.sub.split(PATH_SEP);
+  return parts.length > 1 ? `…${PATH_SEP}${parts[parts.length - 1]}` : parts[0];
+}
+
 /** ชื่อเต็มพร้อมเส้นทาง เช่น "SAMPLE … › Product 012 › Version 2" */
 export const albumFullName = (o: Pick<AlbumOption, "label" | "sub">): string => (o.sub ? `${o.sub}${PATH_SEP}${o.label}` : o.label);
 

@@ -46,3 +46,12 @@ describe("collapseList", () => {
     expect(collapseList([1, 2, 3, 4, 5, 6, 7, 8], true).hidden).toBe(0);
   });
 });
+
+describe("albumNearPath", () => {
+  it("ชิปแคบ = แม่ชั้นใกล้สุด", async () => {
+    const { albumNearPath } = await import("../album-options");
+    expect(albumNearPath({ sub: "SAMPLE GG 13 › Product 028" })).toBe("… › Product 028");
+    expect(albumNearPath({ sub: "SAMPLE GG 13" })).toBe("SAMPLE GG 13");
+    expect(albumNearPath({ sub: "" })).toBe("");
+  });
+});
