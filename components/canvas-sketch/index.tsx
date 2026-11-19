@@ -61,6 +61,8 @@ export type CanvasSketchControls = {
   patchElements: (patch: (el: Record<string, unknown>) => Record<string, unknown> | null) => void;
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
   removeCards: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean) => void;
+  /** เอา element ที่ลบไป (isDeleted) กลับมา ตาม id — ใช้ปุ่ม "ย้อนกลับ" หลังเก็บการ์ดออก (removeCards) */
+  restoreElements: (ids: string[]) => void;
   /** แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม + วางใหม่ที่ตำแหน่งเดิม) — ใช้ตอนแก้ตารางแล้ว render การ์ดใหม่ */
   replaceCard: (match: (card: { kind: string; id: string; data: Record<string, unknown> }) => boolean, skeletons: Record<string, unknown>[]) => Promise<void>;
   /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
@@ -446,6 +448,16 @@ export function CanvasSketch({
         }
         if (!removeGids.size) return;
         const next = all.map((el) => { const gid = el?.groupIds?.[0]; return (gid && removeGids.has(gid) && !el.isDeleted) ? { ...el, isDeleted: true, version: (el.version ?? 0) + 1 } : el; });
+        api.updateScene({ elements: next });
+        if (editable) queueSave();
+      },
+      restoreElements: (ids) => {
+        const api = apiRef.current; if (!api || !ids.length) return;
+        const want = new Set(ids);
+        const all = ((api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements()) as any[]);
+        let n = 0;
+        const next = all.map((el) => (want.has(el?.id) && el.isDeleted) ? (n++, { ...el, isDeleted: false, version: (el.version ?? 0) + 1 }) : el);
+        if (!n) return;
         api.updateScene({ elements: next });
         if (editable) queueSave();
       },

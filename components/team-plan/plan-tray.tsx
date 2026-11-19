@@ -16,7 +16,7 @@ export type TrayItem = { id: string; title: string; due_at: string | null; assig
 export type TrayTab<T extends TrayItem = TrayItem> = { key: string; label: string; filter: (t: T) => boolean };
 const FOLD_KEY = "team-plan-tray-fold";
 
-export function PlanTray<T extends TrayItem>({ items, tabs, title = "งานในแผน", selectedId, onPick, renderExtra, renderLead, keyOf = (t) => t.id, canDrag, footer, mobileOpen, onMobileClose, emptyText, height }: {
+export function PlanTray<T extends TrayItem>({ items, tabs, title = "งานในแผน", selectedId, onPick, renderExtra, renderLead, keyOf = (t) => t.id, canDrag, dragData, footer, mobileOpen, onMobileClose, emptyText, height }: {
   items: T[];
   tabs: TrayTab<T>[];
   title?: string;
@@ -29,6 +29,8 @@ export function PlanTray<T extends TrayItem>({ items, tabs, title = "งาน�
   keyOf?: (t: T) => string;
   /** ลากได้ไหม (ไม่ส่ง = ลากได้ทุกใบ) — ลาก = dataTransfer "text/plan-id" */
   canDrag?: (t: T) => boolean;
+  /** ค่าที่ส่งตอนลาก (ไม่ส่ง = id) */
+  dragData?: (t: T) => string;
   footer?: ReactNode;
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -64,7 +66,7 @@ export function PlanTray<T extends TrayItem>({ items, tabs, title = "งาน�
         <button type="button" onClick={onMobileClose} className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-500 hover:bg-slate-100 md:hidden" aria-label="ปิด"><Icon name="cancel" /></button>
       </div>
       {tabs.length > 1 && (
-        <div className="flex gap-1 px-3 pb-1.5">
+        <div className="flex flex-wrap gap-1 px-3 pb-1.5">
           {tabs.map((x) => (
             <button key={x.key} type="button" onClick={() => setTab(x.key)}
               className={`rounded px-2 py-0.5 text-[11px] ${x.key === cur?.key ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:bg-slate-100"}`}>
@@ -86,7 +88,7 @@ export function PlanTray<T extends TrayItem>({ items, tabs, title = "งาน�
             const k = keyOf(t);
             return (
               <div key={k} draggable={drag} onClick={() => onPick?.(t)}
-                onDragStart={drag ? (e) => { e.dataTransfer.setData("text/plan-id", t.id); e.dataTransfer.effectAllowed = "copy"; } : undefined}
+                onDragStart={drag ? (e) => { e.dataTransfer.setData("text/plan-id", dragData ? dragData(t) : t.id); e.dataTransfer.effectAllowed = "copy"; } : undefined}
                 title={`${t.title}${t.assigned_name ? ` — ${t.assigned_name}` : ""}`}
                 className={`${drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} rounded-lg border border-l-4 bg-white px-2 py-1.5 text-left hover:border-violet-300 ${selectedId === k ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200"}`}
                 style={{ borderLeftColor: over ? "#dc2626" : PRIORITY_META[t.priority].color }}>

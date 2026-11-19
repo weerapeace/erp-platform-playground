@@ -7,7 +7,7 @@
  *   - ⭐ งานหลักวันนี้ (สูงสุด 3 งานต่อคน) · ⏸ รอคนอื่น · 🔁 ทำซ้ำ · 🔔 เตือน · ลิงก์กลับเรื่องเดิม
  *   - ทั้งทีม / ของฉัน + ตัวกรอง (⭐ วันนี้ / รอคนอื่น / เกินกำหนด) · จำมุมมองต่อคน
  *   - 📅 ปฏิทิน (ของกลาง ScheduleBoard): ลากงานลงวัน = ตั้งกำหนดวันนั้น (คงเวลาเดิม) · ลากกลับกล่อง = ไม่กำหนดวัน
- *   - 🧲 กระดาน (2026-11-15 · ./board-view): กระดานทีม 1 อัน วางงานคู่การ์ดจากระบบอื่น · ลากเส้น = ผูกงาน (ผูกไว้ N อย่าง โชว์ทุกมุมมอง)
+ *   - 🧲 กระดาน (2026-11-15): 2 โหมด — งานทั้งหมด (./board-view · กรอบหมวดงาน 3 ชนิด + ลากเส้น = ผูกงาน) · ผังระบบ (./flow-view · ผังระบบล้วน)
  * ข้อมูล: /api/team-plan (lib/team-plan-client) · กฎ: lib/team-plan · doc: docs/team-plan.md
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -50,7 +50,7 @@ const PlanFlowBoard = dynamic(() => import("./flow-view").then((m) => m.PlanFlow
 });
 
 const VIEWS = ["priority", "matrix", "calendar", "board"] as const;
-/** แท็บ "กระดาน" มี 2 โหมด: ผังระบบ (ค่าเริ่ม · เจ้าของเลือกแบบ C 2026-11-19) · กระดานวาดอิสระ */
+/** แท็บ "กระดาน" มี 2 โหมด: ผังระบบ (ผังของระบบล้วน ไม่มีรายการงาน) · งานทั้งหมด (กระดานวาด + กรอบหมวดงาน · ค่าเริ่ม — เจ้าของเลือก 2026-11-19) */
 const BOARD_MODES = ["flow", "draw"] as const;
 export type PlanView = (typeof VIEWS)[number];
 const SCOPES = ["all", "me"] as const;
@@ -71,7 +71,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const [forcedView, setForcedView] = useState<PlanView | null>(initialView ?? null);
   const viewport = useViewportLayout();
   const scopePref = useViewPref<(typeof SCOPES)[number]>("team_plan_scope", SCOPES, "all");
-  const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode", BOARD_MODES, "flow");
+  const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode2", BOARD_MODES, "draw");   // คีย์ใหม่ 2026-11-19 = ทุกคนเริ่มที่ "งานทั้งหมด" 1 ครั้ง แล้วจำต่อคน
   const view = forcedView ?? viewPref.view, scope = scopePref.view;
   // ⛶ เต็มจอแบบ Miro (ของกลาง FullscreenStage · จำต่อคน · มือถือเต็มจอเสมอ) — เฉพาะแท็บกระดาน
   const boardFs = useFullscreenStage("team_plan_board_fullscreen", { active: view === "board" && !!items && !err, defaultOn: true, autoHide: true });
@@ -241,16 +241,16 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
             )}
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
               <button type="button" className={seg(boardModePref.view === "flow")} onClick={() => { boardModePref.setView("flow"); void boardModePref.saveDefault("flow"); }}
-                title="แผนผังการทำงาน (ซื้อ · ผลิต · จ่ายงาน · ขาย) + เอางานไปเกาะกล่องของระบบ"><Icon name="map" /> ผังระบบ</button>
+                title="แผนผังการทำงานของระบบ (ซื้อ · ผลิต · จ่ายงาน · ขาย) — ไว้ดู/จัดการระบบ"><Icon name="map" /> ผังระบบ</button>
               <button type="button" className={seg(boardModePref.view === "draw")} onClick={() => { boardModePref.setView("draw"); void boardModePref.saveDefault("draw"); }}
-                title="กระดานวาดอิสระ วางงานคู่ใบงาน / SKU / งาน / คอนเทนต์"><Icon name="magnet" /> กระดานวาด</button>
+                title="งานค้างทั้งหมด (แผน · งาน Task · ใบงาน) จัดเป็นกรอบตามชนิดงาน + วาด/วางการ์ดอื่นได้อิสระ"><Icon name="magnet" /> งานทั้งหมด</button>
             </div>
             <span className="flex-1" />
             <FullscreenToggle fs={boardFs} />
             </div>
             </FullscreenBar>
             {boardModePref.view === "flow"
-              ? <PlanFlowBoard items={all} canEdit={canEdit} onOpen={setEditing} onUpsert={upsert} fill={boardFs.on} />
+              ? <PlanFlowBoard canEdit={canEdit} fill={boardFs.on} />
               : <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}
                   onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} fill={boardFs.on} />}
           </FullscreenStage>

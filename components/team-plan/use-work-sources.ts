@@ -21,7 +21,13 @@ export type WorkSources = {
   sheets: WorkItem[];
   /** แถวงาน Task ตัวเต็ม (ใช้เปลี่ยนสถานะผ่านกฎเดิม applyTaskTransition) */
   taskRows: Map<string, CreativeTask>;
+  /** แถวใบงานตัวเต็ม (ใช้ทำการ์ดใบงานบนกระดาน) */
+  sheetRows: Map<string, SheetRow>;
+  /** ใบงานที่ปิดแล้ว (ตามสถานะ is_terminal) — ใช้ทำการ์ดจาง */
+  sheetClosed: (status: string) => boolean;
   loading: boolean;
+  /** โหลดเสร็จแล้วอย่างน้อย 1 รอบ (ก่อนนี้ = ยังไม่รู้ว่ามีงานกี่ชิ้น) */
+  loaded: boolean;
   error: string | null;
   reload: () => Promise<void>;
 };
@@ -34,6 +40,7 @@ export function useWorkSources(enabled: boolean): WorkSources {
   const [sheetRaw, setSheetRaw] = useState<SheetRow[]>([]);
   const [sheetStatuses, setSheetStatuses] = useState<SheetStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -53,6 +60,7 @@ export function useWorkSources(enabled: boolean): WorkSources {
     ]);
     setError(errs.length ? errs.join(" · ") : null);
     setLoading(false);
+    setLoaded(true);
   }, [enabled, canTasks, canSheets]);
 
   useEffect(() => { void reload(); }, [reload]);
@@ -63,11 +71,13 @@ export function useWorkSources(enabled: boolean): WorkSources {
     .filter((w): w is WorkItem => !!w), [taskRaw]);
   const taskRows = useMemo(() => new Map(taskRaw.map((r) => [r.id, r])), [taskRaw]);
 
+  const closed = useMemo(() => (sheetStatuses.length ? new Set(sheetStatuses.filter((s) => s.is_terminal).map((s) => s.state_key)) : SHEET_CLOSED_FALLBACK), [sheetStatuses]);
+  const sheetRows = useMemo(() => new Map(sheetRaw.map((r) => [r.id, r])), [sheetRaw]);
+  const sheetClosed = useCallback((status: string) => closed.has(status), [closed]);
   const sheets = useMemo(() => {
-    const closed = sheetStatuses.length ? new Set(sheetStatuses.filter((s) => s.is_terminal).map((s) => s.state_key)) : SHEET_CLOSED_FALLBACK;
     const label = new Map(sheetStatuses.map((s) => [s.state_key, s.label]));
     return sheetRaw.map((r) => sheetToWork(r, (s) => label.get(s) ?? s, closed)).filter((w): w is WorkItem => !!w);
-  }, [sheetRaw, sheetStatuses]);
+  }, [sheetRaw, sheetStatuses, closed]);
 
-  return { canTasks, canSheets, tasks, sheets, taskRows, loading, error, reload };
+  return { canTasks, canSheets, tasks, sheets, taskRows, sheetRows, sheetClosed, loading, loaded, error, reload };
 }
