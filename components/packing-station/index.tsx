@@ -28,6 +28,8 @@ import { useClipRecorder, type RecordedClip } from "./use-clip-recorder";
 import { saveClip, sha256Hex, pruneClips, requestPersist } from "./clip-store";
 import { playPackSound, setPackMasterVolume, type PackSound } from "./sounds";
 import { usePackSoundBank } from "./sound-bank";
+import { ScreenFlash, vibrateFor, type FlashPulse } from "./screen-flash";
+import { useWakeLock } from "./use-wake-lock";
 import { packAlertSound } from "@/lib/packing-sound";
 import { LocalClipsPanel } from "./local-clips";
 import { StationSettings, loadSettings, saveSettings, type StationSettingsValue } from "./settings";
@@ -86,10 +88,20 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
   const isPhone = useMediaQuery("(max-width: 1023px)");
   const soundBank = usePackSoundBank();                              // ชุดเสียงกลาง (ใช้ร่วมทุกโต๊ะ)
   useEffect(() => { setPackMasterVolume(settings.soundVolume); }, [settings.soundVolume]);
+  const [pulse, setPulse] = useState<FlashPulse | null>(null);        // ไฟเต็มจอ (ข้อเสนอ 4 รอบมือถือ)
+  const [lastScanAt, setLastScanAt] = useState<number | null>(null); // แถบสถานะ: เครื่องสแกนยิงล่าสุดเมื่อไหร่
+  const [manualOpen, setManualOpen] = useState(false);               // มือถือ: ช่องพิมพ์เลขซ่อนหลังปุ่ม "พิมพ์เอง" (ไม่เด้งคีย์บอร์ด)
+  const manualRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (manualOpen) manualRef.current?.focus(); }, [manualOpen]);
+  const awake = useWakeLock(settings.wakeLock && tab === "station"); // จอไม่ดับระหว่างแพ็ค
   usePageOwnsBottomBar(isPhone && !!active && tab === "station");   // มือถือ: แถบปุ่มจบของหน้านี้อยู่ล่างจอ แทนแถบเมนูแอป
 
   const setAct = useCallback((a: Active | null) => { activeRef.current = a; setActive(a); }, []);
-  const sound = useCallback((k: PackSound) => { if (settings.sound) playPackSound(k); }, [settings.sound]);
+  // เสียง + ไฟเต็มจอ + สั่น (ตั้งปิดแยกกันได้ในตั้งค่าสถานี)
+  const sound = useCallback((k: PackSound) => {
+    if (settings.screenFlash) { setPulse({ kind: k, at: Date.now() }); vibrateFor(k); }
+    if (settings.sound) playPackSound(k);
+  }, [settings.sound, settings.screenFlash]);
   const say = useCallback((tone: Flash["tone"], text: string, snd?: PackSound) => {
     setFlash({ tone, text, at: Date.now() });
     if (snd) sound(snd);
@@ -99,7 +111,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
     deviceId: settings.deviceId || undefined,
     enabled: settings.record && tab === "station",
     readBarcodes: settings.camScan,
-    onBarcode: (code) => { void handleScanRef.current(code); },
+    onBarcode: (code) => { setLastScanAt(Date.now()); void handleScanRef.current(code); },
     onAutoStop: () => {
       void rec.stop().then((clip) => { autoClipRef.current = clip; });
       say("warn", `ครบ ${CLIP_MAX_SEC} วิ — หยุดอัดแล้ว (แพ็คต่อได้ ยิงจบตามปกติ)`, "warn");
@@ -357,7 +369,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
   const handleScanRef = useRef(handleScan);
   useEffect(() => { handleScanRef.current = handleScan; }, [handleScan]);
 
-  useScanGun((code) => { void handleScan(code); }, { enabled: tab === "station" });
+  useScanGun((code) => { setLastScanAt(Date.now()); void handleScan(code); }, { enabled: tab === "station" });
 
   // แป้นเหยียบ / Spacebar / F9 = จบ · Ctrl+Z = ย้อนการยิงล่าสุด (ไม่นับตอนพิมพ์ในช่อง หรือเป็นส่วนหนึ่งของการยิงรัว)
   useEffect(() => {
@@ -457,6 +469,9 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
       {tab === "clips" && <LocalClipsPanel keepDays={settings.keepDays} />}
       {tab === "settings" && <StationSettings value={settings} onChange={updateSettings} devices={rec.devices} canDetect={rec.canDetect} mime={rec.mime} soundBank={soundBank} />}
 
+      {tab === "station" && <StationStatus lastScanAt={lastScanAt} record={settings.record} camStatus={rec.status} recording={rec.recording} elapsed={rec.elapsed} awake={awake} station={settings.station} />}
+      {tab === "station" && <ScreenFlash pulse={pulse} />}
+
       {tab === "station" && isPhone && (
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
           {([["queue", "คิว"], ["pack", active ? `กำลังแพ็ค` : "แพ็ค"], ["done", "แพ็คแล้ว"]] as [PhoneTab, string][]).map(([k, label]) => (
@@ -472,11 +487,15 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
           {/* ซ้าย: กล้อง + ช่องยิง + คิวรอแพ็ค */}
           <div className="flex flex-col gap-3">
             <div className={show("pack") ? "flex flex-col gap-3" : "hidden"}>{camera}</div>
-            <form onSubmit={(e) => { e.preventDefault(); const v = typed; setTyped(""); void handleScan(v); }} className={`gap-2 ${show("queue") || show("pack") ? "flex" : "hidden"}`}>
-              <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="ยิงบาร์โค้ด หรือพิมพ์เลขออเดอร์/เลขพัสดุ แล้วกด Enter"
+            <form onSubmit={(e) => { e.preventDefault(); const v = typed; setTyped(""); if (isPhone) { setManualOpen(false); manualRef.current?.blur(); } void handleScan(v); }} className={`gap-2 ${(show("queue") || show("pack")) && (!isPhone || manualOpen) ? "flex" : "hidden"}`}>
+              <input ref={manualRef} value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="ยิงบาร์โค้ด หรือพิมพ์เลขออเดอร์/เลขพัสดุ แล้วกด Enter"
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" inputMode="text" autoComplete="off" />
               <button type="submit" disabled={busy} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50">{busy ? "กำลังค้น…" : "ค้น"}</button>
+              {isPhone && <button type="button" onClick={() => { setManualOpen(false); setTyped(""); }} aria-label="ปิดช่องพิมพ์" className="rounded-lg border border-slate-200 px-3 text-sm text-slate-500">×</button>}
             </form>
+            {isPhone && !manualOpen && show("queue") && (
+              <button type="button" onClick={() => setManualOpen(true)} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2 text-sm text-slate-600"><Icon name="edit" /> พิมพ์เลขออเดอร์ / เลขพัสดุเอง</button>
+            )}
             {show("queue") && <PackQueue refreshKey={refreshKey} activeOrderId={active?.data.order.id ?? null} meId={packerId} onPick={(r) => void pickFromQueue(r)} />}
           </div>
 
@@ -517,12 +536,23 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
                       <Icon name="package" className="text-5xl text-slate-300" />
                       <p className="mt-2 text-xl font-semibold text-slate-700">ยิงใบปะหน้า หรือกดเลือกจากคิว</p>
                       <p className="mt-1 text-sm text-slate-500">{camOk ? `กล้องจะเริ่มอัดทันที (ไม่เกิน ${CLIP_MAX_SEC} วิ) · ` : ""}ยิงใบถัดไป = จบใบเดิมอัตโนมัติ · เครื่องยิงเสียก็เลือกจากคิวได้</p>
-                      {isPhone && <button type="button" onClick={() => setPhoneTab("queue")} className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-sm">ไปที่คิวรอแพ็ค</button>}
+                      {isPhone && (
+                        <div className="mt-3 flex flex-wrap justify-center gap-2">
+                          <button type="button" onClick={() => setPhoneTab("queue")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm">ไปที่คิวรอแพ็ค</button>
+                          <button type="button" onClick={() => setManualOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"><Icon name="edit" /> พิมพ์เอง</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
                 {active && <OrderPanel a={active} boxes={boxes} onManual={manualTick} onMinus={minusLine} onBox={setBox} onUndoLast={undoLast} onClose={() => void handleScan("*PK-SKIP")} />}
+                {active && isPhone && !manualOpen && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={undoLast} disabled={!active.history.length} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2.5 text-sm disabled:opacity-40"><Icon name="back" /> ย้อนการยิง</button>
+                    <button type="button" onClick={() => setManualOpen(true)} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2.5 text-sm"><Icon name="edit" /> พิมพ์เอง</button>
+                  </div>
+                )}
 
                 {active && problemOpen && (
                   <div className="rounded-xl border-2 border-red-300 bg-red-50 p-4">
@@ -580,11 +610,11 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-2 sm:grid-cols-2 sm:gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <p className="text-xs text-slate-500">กล่องที่ใช้ {a.boxUsed && a.boxUsed !== a.data.box?.name ? "(เปลี่ยนเอง)" : "(แนะนำ)"}</p>
           {boxName ? (
-            <p className="text-3xl font-bold text-slate-900">{boxName} <span className="text-sm font-normal text-slate-500">{boxSizeText(boxInfo)}</span></p>
+            <p className="text-3xl font-bold text-slate-900">{boxName} <span className="block text-sm font-normal text-slate-500 sm:inline">{boxSizeText(boxInfo)}</span></p>
           ) : <p className="text-lg font-semibold text-amber-700">ยังไม่ได้ตั้งกล่อง — เลือกกล่องที่ใช้จริง</p>}
           {a.data.missing_box && boxName && <p className="text-xs text-amber-700">บางรายการยังไม่ได้ตั้งกล่อง</p>}
           <button type="button" onClick={() => setBoxOpen((v) => !v)} className="mt-1 text-xs text-sky-700 underline">เปลี่ยนกล่อง</button>
@@ -643,7 +673,7 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
                     <span className={`min-w-[44px] text-center text-lg font-bold tabular-nums ${done ? "text-emerald-700" : "text-slate-700"}`}>{n}/{l.qty}</span>
                   </div>
                   {!done && (
-                    <select value="" onChange={(e) => { if (e.target.value) onManual(l.key, e.target.value); }} className="max-w-[130px] rounded border border-slate-200 px-1 py-0.5 text-xs text-slate-600">
+                    <select value="" onChange={(e) => { if (e.target.value) onManual(l.key, e.target.value); e.target.blur(); /* ปล่อยโฟกัส ไม่งั้นเครื่องสแกนยิงไม่ติด */ }} className="max-w-[130px] rounded border border-slate-200 px-1 py-0.5 text-xs text-slate-600">
                       <option value="">ติ๊กมือ (ไม่ยิง)…</option>
                       {MANUAL_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
@@ -657,6 +687,30 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
           <p className="border-t border-slate-100 px-3 py-2 text-xs text-red-600">ยิงผิด {a.wrongScans.length} ครั้ง{a.overScans ? ` · ยิงเกิน ${a.overScans} ครั้ง` : ""}</p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── แถบสถานะบนสุด (รอบมือถือ 2026-11-19): เครื่องสแกนยิงล่าสุด · กล้อง/อัดคลิป · จอไม่ดับ · ชื่อโต๊ะ ──
+function StationStatus({ lastScanAt, record, camStatus, recording, elapsed, awake, station }: {
+  lastScanAt: number | null; record: boolean; camStatus: string; recording: boolean; elapsed: number; awake: boolean; station: string;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const t = window.setInterval(() => setNow(Date.now()), 5000); return () => window.clearInterval(t); }, []);
+  const ago = lastScanAt == null ? null : Math.max(0, Math.round((Math.max(now, lastScanAt) - lastScanAt) / 1000));
+  const agoText = ago == null ? "ยังไม่ได้สแกน" : ago < 5 ? "สแกนเมื่อกี้" : ago < 60 ? `สแกนล่าสุด ${ago} วิที่แล้ว` : `สแกนล่าสุด ${Math.round(ago / 60)} นาทีที่แล้ว`;
+  const pill = "inline-flex items-center gap-1 rounded-full px-2 py-0.5";
+  const cam = !record ? { t: "ไม่ใช้กล้อง", c: "bg-slate-100 text-slate-500" }
+    : recording ? { t: `● อัด ${elapsed} วิ`, c: "bg-red-50 text-red-700" }
+    : camStatus === "on" ? { t: "กล้องพร้อม", c: "bg-emerald-50 text-emerald-700" }
+    : camStatus === "error" ? { t: "กล้องใช้ไม่ได้", c: "bg-amber-50 text-amber-800" }
+    : { t: "กำลังเปิดกล้อง", c: "bg-slate-100 text-slate-500" };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className={`${pill} ${ago != null && ago < 600 ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}><Icon value="i:scan" /> {agoText}</span>
+      <span className={`${pill} ${cam.c}`}><Icon name="camera" /> {cam.t}</span>
+      {awake && <span className={`${pill} bg-sky-50 text-sky-700`}>จอไม่ดับ</span>}
+      {station && <span className="ml-auto text-slate-400">{station}</span>}
     </div>
   );
 }

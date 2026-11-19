@@ -74,5 +74,4 @@ export function playPackSound(kind: PackSound, override?: Partial<BankEntry>) {
     src.buffer = e.buffer; g.gain.value = s;
     src.connect(g).connect(c.destination); src.start();
   } else playBase(kind, s);
-  if ((kind === "error" || kind === "cancelled") && typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate([200, 80, 200]);
 }

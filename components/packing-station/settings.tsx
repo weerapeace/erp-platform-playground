@@ -2,6 +2,7 @@
 
 import { SoundSettings } from "./sound-settings";
 import type { usePackSoundBank } from "./sound-bank";
+import { ScannerTest } from "./scanner-test";
 
 /**
  * ⚙️ ตั้งค่าสถานีแพ็ค — จำในเครื่องนี้ (แต่ละโต๊ะตั้งต่างกันได้: ชื่อโต๊ะ / กล้อง / เปิดเสียง + ความดังรวม)
@@ -17,10 +18,12 @@ export type StationSettingsValue = {
   sound: boolean;         // เสียงตอบรับ
   soundVolume: number;    // ความดังรวมของเครื่องนี้ 0–1 (ชุดเสียงตั้งกลาง)
   camScan: boolean;       // อ่านบาร์โค้ดจากกล้อง (มือถือ)
+  screenFlash: boolean;   // ไฟเต็มจอเขียว/แดง + สั่น (ข้อเสนอ 4 รอบมือถือ)
+  wakeLock: boolean;      // จอไม่ดับระหว่างอยู่หน้าสถานี (ข้อเสนอ 2 รอบมือถือ)
   keepDays: number;       // เก็บคลิปในเครื่องกี่วัน
 };
 
-export const DEFAULT_SETTINGS: StationSettingsValue = { station: "", deviceId: "", record: true, sound: true, soundVolume: 1, camScan: false, keepDays: 14 };
+export const DEFAULT_SETTINGS: StationSettingsValue = { station: "", deviceId: "", record: true, sound: true, soundVolume: 1, camScan: false, screenFlash: true, wakeLock: true, keepDays: 14 };
 
 export function loadSettings(): StationSettingsValue {
   try {
@@ -31,6 +34,7 @@ export function loadSettings(): StationSettingsValue {
       station: typeof v.station === "string" ? v.station.slice(0, 40) : "",
       deviceId: typeof v.deviceId === "string" ? v.deviceId : "",
       record: v.record !== false, sound: v.sound !== false, camScan: v.camScan === true,
+      screenFlash: v.screenFlash !== false, wakeLock: v.wakeLock !== false,
       soundVolume: Number.isFinite(Number(v.soundVolume)) ? Math.min(1, Math.max(0, Number(v.soundVolume))) : 1,
       keepDays: [7, 14, 30, 60].includes(Number(v.keepDays)) ? Number(v.keepDays) : 14,
     };
@@ -69,6 +73,9 @@ export function StationSettings({ value, onChange, devices, canDetect, mime, sou
         <span className="text-xs text-slate-500">ชนิดไฟล์ที่เครื่องนี้อัดได้: {mime ? mime.split(";")[0] : "อัดวิดีโอไม่ได้ (ลอง Chrome รุ่นใหม่)"}</span>
       </label>
       <Toggle label="อัดคลิปตอนแพ็ค" hint="ไม่เกิน 60 วิ ต่อออเดอร์ · ตัวหนังสือ (เลขออเดอร์/คนแพ็ค/เวลา) ฝังในคลิป" checked={value.record} onChange={(v) => set({ record: v })} />
+      <Toggle label="ไฟเต็มจอ + สั่น" hint="ยิงถูก = ขอบจอเขียว · ผิด = แดง + สั่น · เตือน = เหลือง — เห็นจากไกล ๆ ไม่ต้องอ่าน (สั่นได้เฉพาะ Android)" checked={value.screenFlash} onChange={(v) => set({ screenFlash: v })} />
+      <Toggle label="จอไม่ดับระหว่างแพ็ค" hint="เปิดหน้าสถานีแพ็คไว้ จอมือถือ/แท็บเล็ตจะไม่ล็อกเอง (กินแบตเพิ่มนิดหน่อย)" checked={value.wakeLock} onChange={(v) => set({ wakeLock: v })} />
+      <ScannerTest />
       <SoundSettings bank={soundBank} enabled={value.sound} volume={value.soundVolume} onEnabled={(v) => set({ sound: v })} onVolume={(v) => set({ soundVolume: v })} />
       <Toggle label="อ่านบาร์โค้ดจากกล้อง (มือถือ)" hint={canDetect ? "ใช้กล้องตัวที่อัดคลิปอ่านใบปะหน้า/สินค้า — เหมาะกับมือถือที่ไม่มีเครื่องยิง" : "เครื่องนี้อ่านบาร์โค้ดจากกล้องไม่ได้ (iPhone) — ใช้เครื่องยิงหรือพิมพ์"} checked={value.camScan && canDetect} onChange={(v) => set({ camScan: v })} />
       <label className="grid gap-1 rounded-lg border border-slate-200 bg-white p-3">

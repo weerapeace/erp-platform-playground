@@ -77,7 +77,7 @@ export function PackQueue({ refreshKey, activeOrderId, meId, onPick }: { refresh
               const isActive = r.id === activeOrderId;
               return (
                 <li key={r.id}>
-                  <button type="button" onClick={() => onPick(r)}
+                  <button type="button" onClick={() => { (document.activeElement as HTMLElement | null)?.blur(); onPick(r); /* ปล่อยโฟกัสช่องค้น ไม่งั้นเครื่องสแกนยิงไม่ติด */ }}
                     className={`w-full rounded-lg border px-3 py-2 text-left ${isActive ? "border-sky-500 bg-sky-50" : "border-slate-200 hover:border-slate-400"}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-sm font-semibold text-slate-900">{r.order_no}</span>
