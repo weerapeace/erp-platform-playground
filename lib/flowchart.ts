@@ -102,6 +102,25 @@ export type FlowHandle = (typeof FLOW_HANDLES)[number];
 export const GRID = 20;
 export const snap = (v: number): number => Math.round(v / GRID) * GRID;
 
+/** ด้านของกล่อง (= id จุดต่อเส้น t/r/b/l) */
+export type FlowSide = "t" | "r" | "b" | "l";
+export const OPPOSITE_SIDE: Record<FlowSide, FlowSide> = { t: "b", b: "t", l: "r", r: "l" };
+export const isFlowSide = (v: unknown): v is FlowSide => v === "t" || v === "r" || v === "b" || v === "l";
+type Rect = { x: number; y: number; w: number; h: number };
+/** "ขั้นตอนต่อไป" (กดจุดข้างกล่อง · เจ้าของสั่ง 2026-11-19): มุมซ้ายบนของกล่องใหม่ — ห่างจากกล่องต้นทางตามด้านที่กด
+ *  ทับกล่องอื่น = เลื่อนตั้งฉากไปเรื่อย ๆ (ขวา/ซ้าย → เลื่อนลง · บน/ล่าง → เลื่อนขวา) */
+export function nextNodePos(src: Rect, side: FlowSide, size: { w: number; h: number }, others: Rect[], gap = 80): { x: number; y: number } {
+  let x: number, y: number;
+  if (side === "r") { x = src.x + src.w + gap; y = src.y + src.h / 2 - size.h / 2; }
+  else if (side === "l") { x = src.x - gap - size.w; y = src.y + src.h / 2 - size.h / 2; }
+  else if (side === "b") { x = src.x + src.w / 2 - size.w / 2; y = src.y + src.h + gap * 0.75; }
+  else { x = src.x + src.w / 2 - size.w / 2; y = src.y - gap * 0.75 - size.h; }
+  const M = 12;
+  const hit = (px: number, py: number) => others.some((o) => px < o.x + o.w + M && px + size.w + M > o.x && py < o.y + o.h + M && py + size.h + M > o.y);
+  for (let i = 0; i < 40 && hit(x, y); i++) { if (side === "r" || side === "l") y += size.h + 30; else x += size.w + 40; }
+  return { x: snap(x), y: snap(y) };
+}
+
 const isKind = (v: unknown): v is FlowKind => typeof v === "string" && (FLOW_KINDS as readonly string[]).includes(v);
 const isColor = (v: unknown): v is FlowColor => typeof v === "string" && (FLOW_COLORS as readonly string[]).includes(v);
 const num = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? v : d);

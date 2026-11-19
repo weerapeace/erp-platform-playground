@@ -44,6 +44,7 @@ import {
   flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
+  OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
 } from "@/lib/flowchart";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
@@ -183,6 +184,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   useEffect(() => { setClipReady(!!recallClip()); }, []);
   const [edgeShape, setEdgeShapeDefault] = useState<FlowEdgeShape>("step");   // แบบลูกศรของเส้นใหม่
   const edgeShapeRef = useRef(edgeShape); edgeShapeRef.current = edgeShape;
+  // ➕ ขั้นตอนต่อไป: กด (ไม่ลาก) จุดข้างกล่อง → เมนูชนิดกล่อง → สร้างกล่องใหม่ต่อเส้นให้ (เจ้าของสั่ง 2026-11-19 ข้อ 1,2,3,4,6)
+  const [nextMenu, setNextMenu] = useState<{ id: string; side: FlowSide; x: number; y: number } | null>(null);
+  const [autoEditId, setAutoEditId] = useState<string | null>(null);
+  const pressRef = useRef<{ el: HTMLElement; x: number; y: number; at: number } | null>(null);
+  const [recentKind, setRecentKind] = useState<FlowKind | null>(null);
+  useEffect(() => { try { const k = localStorage.getItem("flowchart-next-kind"); if (k && (FLOW_KINDS as readonly string[]).includes(k)) setRecentKind(k as FlowKind); } catch { /* ไม่มีที่จำ */ } }, []);
   useEffect(() => { setEdgeShapeDefault(loadDefaultShape()); }, []);
 
   // ── ข้อมูลล่าสุด (ref ไว้ใช้ใน callback/timer ไม่ให้ค้างค่าเก่า) ──
@@ -510,6 +517,40 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     });
   }, [t]);
 
+  /** สร้างกล่องถัดไปจากเมนู — ต่อจากกล่อง "คำถาม" = 2 กล่อง ใช่ / ไม่ใช่ (เท่าที่ยังขาด) · สีตามกล่องต้นทาง · หลบไม่ทับ */
+  const createNext = useCallback((kind: FlowKind) => {
+    const m = nextMenu; setNextMenu(null);
+    if (!m) return;
+    const src = nodesRef.current.find((n) => n.id === m.id); if (!src) return;
+    const sb = boxOf(src as FlowRFNode);
+    const srcKind = src.type as FlowKind;
+    const yes = t("ใช่", "Yes"), no = t("ไม่ใช่", "No");
+    const labels = edges.filter((e) => e.source === src.id).map((e) => String(e.label ?? ""));
+    const count = srcKind === "question" ? Math.max(1, [yes, no].filter((l) => !labels.includes(l)).length) : 1;
+    const rects = nodesRef.current.filter((n) => n.type !== "zone" && n.id !== src.id).map((n) => { const b = boxOf(n as FlowRFNode); return { x: b.position.x, y: b.position.y, w: b.width, h: b.height }; });
+    const color = (src.data as FlowNodeData).color;
+    const made: FlowSceneNode[] = [];
+    const newEdges: Edge[] = [];
+    const shape = edgeShapeRef.current;
+    for (let i = 0; i < count; i++) {
+      const node = makeFlowNode(kind, { x: 0, y: 0 }, t, color ? { color } : undefined);
+      node.position = nextNodePos({ x: sb.position.x, y: sb.position.y, w: sb.width, h: sb.height }, m.side, { w: node.width, h: node.height },
+        [...rects, ...made.map((x) => ({ x: x.position.x, y: x.position.y, w: x.width, h: x.height }))]);
+      made.push(node);
+      const label = autoEdgeLabel(srcKind, labels, t); labels.push(label);
+      newEdges.push({ id: newFlowId("e"), source: src.id, sourceHandle: m.side, target: node.id, targetHandle: OPPOSITE_SIDE[m.side], type: "flow", markerEnd: MARKER, label, ...(shape !== "step" ? { data: { shape } } : {}) });
+    }
+    setNodes((ns) => [...ns.map((x) => (x.selected ? { ...x, selected: false } : x)), ...toRFNodes({ ...EMPTY_FLOW_SCENE, nodes: made }, new Set([made[0].id]))]);
+    setEdges((es) => [...es, ...newEdges]);
+    setRecentKind(kind);
+    try { localStorage.setItem("flowchart-next-kind", kind); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ }
+    const first = made[0].id;
+    if (kind === "storage") setPlacePick({ id: first });
+    else if (kind === "page") setPagePick({ id: first });
+    else if (kind === "file") setFilePick({ id: first });
+    else setTimeout(() => setAutoEditId(first), 30);   // รอกล่องขึ้นจอก่อน แล้วเข้าโหมดพิมพ์
+  }, [nextMenu, edges, t]);
+
   const addNode = useCallback((kind: FlowKind, data?: Partial<FlowNodeData>) => {
     const r = wrapRef.current?.getBoundingClientRect();
     const n = nodesRef.current.length;
@@ -542,6 +583,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const hasRule = nodes.some((n) => n.type === "storage" && !!n.data.rule);
   const storageRules = useStorageRules(hasRule || !!rulePick);
   const actions = useMemo<FlowBoardActions>(() => ({
+    autoEditId,
+    clearAutoEdit: () => setAutoEditId(null),
     editRule: (id) => setRulePick({ id }),
     ruleCheck: (data) => {
       if (!data.rule) return null;
@@ -606,7 +649,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId]);
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
   const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
@@ -820,6 +863,19 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         {/* กระดาน */}
         <div ref={wrapRef} className="relative min-h-0 flex-1"
           onPointerMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY }; }}
+          onPointerDownCapture={(e) => {
+            const h = readOnly ? null : (e.target as HTMLElement).closest(".fc-h") as HTMLElement | null;
+            pressRef.current = h ? { el: h, x: e.clientX, y: e.clientY, at: Date.now() } : null;
+          }}
+          onPointerUpCapture={(e) => {
+            // กดจุดข้างกล่องแล้วปล่อยตรงเดิม (ไม่ได้ลากเส้น) = เปิดเมนูขั้นตอนต่อไป · ลาก = ต่อเส้นเหมือนเดิม
+            const p = pressRef.current; pressRef.current = null;
+            if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5 || Date.now() - p.at > 700) return;
+            const id = p.el.getAttribute("data-nodeid"), side = p.el.getAttribute("data-handleid");
+            const r = wrapRef.current?.getBoundingClientRect();
+            if (!id || !r || !isFlowSide(side) || isSysId(id)) return;
+            setNextMenu((cur) => (cur && cur.id === id && cur.side === side ? null : { id, side, x: e.clientX - r.left, y: e.clientY - r.top }));
+          }}
           onPointerLeave={() => { pointerRef.current = null; }}>
           <FlowLockedCtx.Provider value={lockedCtx}>
           <ReactFlow<BoardNode, Edge>
@@ -832,6 +888,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             onEdgeClick={(_, e) => { if (isSysId(e.id)) locked?.onLineClick?.(unSysId(e.id)); }}
             onEdgeDoubleClick={(_, e) => { if (!readOnly && !isSysId(e.id)) actions.editEdgeLabel(e.id); }}
             connectionMode={ConnectionMode.Loose}
+            connectOnClick={false}
+            onPaneClick={() => setNextMenu(null)}
+            onMoveStart={() => setNextMenu(null)}
             defaultEdgeOptions={{ type: "flow", markerEnd: MARKER }}
             connectionLineStyle={{ stroke: "#7c3aed", strokeWidth: 2 }}
             connectionLineType={CONNECTION_LINE[edgeShape]}
@@ -852,6 +911,33 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             )}
           </ReactFlow>
           </FlowLockedCtx.Provider>
+          {/* ➕ เมนูขั้นตอนต่อไป (กดจุดข้างกล่อง) — ชนิดที่ใช้ล่าสุดขึ้นก่อน */}
+          {nextMenu && !readOnly && (() => {
+            const r = wrapRef.current?.getBoundingClientRect();
+            const W = 272, H = 200;
+            const left = Math.max(4, Math.min(nextMenu.x + 14, (r?.width ?? 800) - W - 4));
+            const top = Math.max(4, Math.min(nextMenu.y - 24, (r?.height ?? 600) - H - 4));
+            const kinds: FlowKind[] = FLOW_KINDS.filter((k) => k !== "zone");
+            const ordered = recentKind && kinds.includes(recentKind) ? [recentKind, ...kinds.filter((k) => k !== recentKind)] : kinds;
+            const isQ = nodesRef.current.find((n) => n.id === nextMenu.id)?.type === "question";
+            return (
+              <div className="nodrag nopan absolute z-30 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl" style={{ left, top, width: W }}
+                onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Escape") setNextMenu(null); }}>
+                <div className="flex items-center px-1 pb-1 text-[11px] text-slate-500">
+                  <span className="flex-1">{t("ขั้นตอนต่อไป", "Next step")}{isQ ? t(" · สร้างทาง ใช่ / ไม่ใช่ ให้", " · adds Yes / No paths") : ""}</span>
+                  <button type="button" onClick={() => setNextMenu(null)} className="rounded p-0.5 text-slate-400 hover:bg-slate-100" aria-label={t("ปิด", "Close")}><Icon value="i:x" /></button>
+                </div>
+                <div className="grid grid-cols-4 gap-0.5">
+                  {ordered.map((k) => (
+                    <button key={k} type="button" autoFocus={k === ordered[0]} onClick={() => createNext(k)} title={t(FLOW_KIND_META[k].hintTh, FLOW_KIND_META[k].hintEn)}
+                      className="flex flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[11px] leading-tight text-slate-600 hover:bg-violet-50 hover:text-violet-700 focus:bg-violet-50 focus:outline-none">
+                      <Icon value={FLOW_KIND_META[k].icon} /><span className="line-clamp-1">{t(FLOW_KIND_META[k].th, FLOW_KIND_META[k].en)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {nodes.length === 0 && !locked && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <EmptyState title={readOnly ? t("ยังไม่มีแผนผัง", "No chart yet") : t("เริ่มจากกดปุ่มกล่องด้านบน", "Start with a box button above")}

@@ -37,6 +37,9 @@ export type FlowBoardActions = {
   growNode: (id: string, w: number, h: number) => void;
   /** จัดรูปแบบทั้งกล่อง (หลายกล่องพร้อมกันได้) + สีพื้น/เส้นขอบกำหนดเอง — ./rich-text BoxFormatBar */
   formatNodes: (ids: string[], op: BoxFormatOp) => void;
+  /** กล่องที่เพิ่งสร้างจาก "ขั้นตอนต่อไป" → เข้าโหมดพิมพ์ทันที (กล่องเห็นแล้วเรียก clearAutoEdit) */
+  autoEditId: string | null;
+  clearAutoEdit: () => void;
   /** กล่อง "ไฟล์" (และไฟล์ที่เก็บในกล่อง "ที่เก็บ"): เปิดป๊อปเลือกประเภทไฟล์ */
   editFileTypes: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปเลือกไอคอนที่เก็บ (Google Drive · R2 · NAS ...) */
@@ -233,7 +236,7 @@ function ShapeBg({ kind, color, fill, stroke }: { kind: FlowKind; color: FlowCol
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, growNode, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule } = useBoard();
+  const { readOnly, t, updateData, growNode, autoEditId, clearAutoEdit, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
@@ -242,6 +245,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
   const meta = FLOW_KIND_META[kind];
   // กล่องไฟล์ = ป๊อปเลือกประเภท · กล่องหน้าใน ERP ที่ยังไม่ได้เลือกหน้า = ป๊อปเลือกหน้า (เลือกแล้ว = แก้ข้อความ)
   const startEdit = () => (kind === "file" ? editFileTypes(id) : kind === "page" && !data.href ? editPage(id) : setEditing(true));
+  useEffect(() => { if (autoEditId === id && !readOnly) { clearAutoEdit(); startEdit(); } }, [autoEditId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const place = kind === "storage" ? storagePlaceOf(data.place) : null;
 
