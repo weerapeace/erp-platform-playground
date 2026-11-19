@@ -37,7 +37,7 @@ import { PlanTagChip } from "./tag-input";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 import { AiSplitModal } from "./ai-split-modal";
 import type { PlanBoardHandle } from "./board-view";
-import { FullscreenStage, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
+import { FullscreenBar, FullscreenStage, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
 
 // กระดาน (Excalidraw ก้อนใหญ่) — โหลดเฉพาะตอนกดแท็บ "กระดาน" ไม่ถ่วงมุมมองอื่น
 const PlanCanvasBoard = dynamic(() => import("./board-view").then((m) => m.PlanCanvasBoard), {
@@ -74,7 +74,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode", BOARD_MODES, "flow");
   const view = forcedView ?? viewPref.view, scope = scopePref.view;
   // ⛶ เต็มจอแบบ Miro (ของกลาง FullscreenStage · จำต่อคน · มือถือเต็มจอเสมอ) — เฉพาะแท็บกระดาน
-  const boardFs = useFullscreenStage("team_plan_board_fullscreen", { active: view === "board" && !!items && !err });
+  const boardFs = useFullscreenStage("team_plan_board_fullscreen", { active: view === "board" && !!items && !err, defaultOn: true, autoHide: true });
   const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
   const [filter, setFilter] = useState<Filter>("");
   const [tagFilter, setTagFilter] = useState("");   // 🏷 กรองตามแท็ก (ว่าง = ทุกงาน)
@@ -232,6 +232,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         : !items ? <LoadingState />
         : view === "board" ? (
           <FullscreenStage fs={boardFs}>
+            <FullscreenBar order={10}>
             <div className="flex flex-wrap items-center gap-2">
             {boardFs.on && (
               <button type="button" onClick={() => boardFs.set(false)} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 hover:bg-slate-50" title="กลับหน้าแผนงาน">
@@ -247,6 +248,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
             <span className="flex-1" />
             <FullscreenToggle fs={boardFs} />
             </div>
+            </FullscreenBar>
             {boardModePref.view === "flow"
               ? <PlanFlowBoard items={all} canEdit={canEdit} onOpen={setEditing} onUpsert={upsert} fill={boardFs.on} />
               : <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}

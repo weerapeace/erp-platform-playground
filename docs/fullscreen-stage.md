@@ -8,6 +8,15 @@
 - **จำต่อคน** (`useUserPref`) → เข้าหน้านี้ครั้งหน้าเปิดเต็มจอเลย ตามไปทุกเครื่อง
 - **มือถือ (จอ < 768px) เต็มจอเสมอ** · มีปุ่ม "แผนงาน ←" ออกชั่วคราว (ไม่จำ)
 - สลับเต็มจอแล้วกระดาน **ไม่โหลดใหม่** (แค่เปลี่ยนกรอบเป็นชั้นลอย ไม่ย้ายของข้างใน)
+- `defaultOn` = คนที่ยังไม่เคยเลือก เปิดมาเต็มจอเลย (กดออกแล้วจำต่อคน)
+- **เปิดในแอปเดี่ยว** (/app/<key>) → บอกเชลล์ให้ซ่อนหัวแอปสีเข้ม + แถบเมนูแอปด้วย (`lib/app-shell-bar` · `usePageWantsFullFrame` — ของกลางเรียกให้เอง)
+
+## ซ่อนแถบปุ่มไว้ขอบบน (`autoHide`) — เจ้าของขอ 2026-11-19 "ข้างบนเอาเมาส์ไปวางแล้วค่อยโชว์"
+- ห่อแถบปุ่มด้วย `<FullscreenBar order={n}>` (ใช้ในลูกลึก ๆ ได้ เช่น แถบเครื่องมือของ FlowchartBoard order 40) → ตอนเต็มจอย้ายไปแถบลอยขอบบน เรียงตาม order · นอกโหมดนี้แสดงที่เดิม
+- **ชี้ขอบบน** = แถบเลื่อนลงมา · เมาส์ออก ~1 วิ = ซ่อน (กำลังพิมพ์ในช่องของแถบ = ไม่ซ่อน)
+- `<FullscreenPeek>` = ชิปเล็กกลางขอบบนที่ค้างไว้ (เช่น ค้าง 110 · เกิน 37) + ปุ่ม "เครื่องมือ" กดเปิด/ปิดแถบ → **มือถือใช้ทางนี้** · แตะกระดาน = ปิดแถบ
+- ปุ่ม **ปักไว้** ท้ายแถบ = แถบโชว์ค้าง (จำต่อคน `<prefKey>_pin`)
+- ป๊อปที่เปิดจากปุ่มในแถบควรเป็นชั้นลอยของตัวเอง (ERPModal/portal) — แถบซ่อนแล้วป๊อปไม่ปิดตาม
 
 ## ใช้เมื่อไหร่ / ห้ามใช้เมื่อไหร่
 - ใช้: หน้ากระดานวาด / ผังงาน / canvas ที่อยากได้พื้นที่มากสุด
@@ -15,11 +24,12 @@
 
 ## วิธีใช้
 ```tsx
-import { FullscreenStage, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
+import { FullscreenBar, FullscreenPeek, FullscreenStage, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
 
-const fs = useFullscreenStage("my_board_fullscreen", { active: isBoardTab });
+const fs = useFullscreenStage("my_board_fullscreen", { active: isBoardTab, defaultOn: true, autoHide: true });
 <FullscreenStage fs={fs}>
-  <div className="flex items-center gap-2">…ปุ่มของกระดาน… <FullscreenToggle fs={fs} /></div>
+  <FullscreenBar order={10}><div className="flex items-center gap-2">…ปุ่มของกระดาน… <FullscreenToggle fs={fs} /></div></FullscreenBar>
+  <FullscreenPeek>ค้าง 12 · เกิน 3</FullscreenPeek>
   <MyBoard fill={fs.on} />   {/* fill = ยืดเต็มที่เหลือ: กรอบเป็น flex-1 min-h-0 · กระดานสูง 100% */}
 </FullscreenStage>
 ```
@@ -32,7 +42,7 @@ const fs = useFullscreenStage("my_board_fullscreen", { active: isBoardTab });
 - ลิ้นชักมือถือที่เปิดจากในกระดานต้อง ≥ z-50 (เช่น `PlanTray`)
 
 ## สิทธิ์ / ประวัติ
-- ไม่มีข้อมูลธุรกิจ — เก็บแค่ค่าตั้งส่วนตัว (user_ui_prefs) ไม่ต้องลง audit log
+- ไม่มีข้อมูลธุรกิจ — เก็บแค่ค่าตั้งส่วนตัว (เต็มจอ · ปักแถบ ใน user_ui_prefs) ไม่ต้องลง audit log
 
 ## ใช้อยู่ที่
-- แผนงานทีม `/tasks/plan` แท็บ "กระดาน" (ทั้งโหมดผังระบบ และกระดานวาด) — key `team_plan_board_fullscreen`
+- แผนงานทีม `/tasks/plan` แท็บ "กระดาน" (ทั้งโหมดผังระบบ และกระดานวาด) — key `team_plan_board_fullscreen` · เปิดมาเต็มจอ + ซ่อนแถบ (แถบโหมด · ตัวกรอง · สรุป · เครื่องมือวาดของผัง)

@@ -16,6 +16,7 @@ import { useCallback, useMemo, useRef, useState, type DragEvent, type MouseEvent
 import dynamic from "next/dynamic";
 import { useStore } from "@xyflow/react";
 import { Icon } from "@/components/icon";
+import { FullscreenBar, FullscreenPeek } from "@/components/fullscreen-stage";
 import { useToast, usePushToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { ERPModal } from "@/components/modal";
@@ -384,7 +385,20 @@ export function PlanFlowBoard({ items, canEdit, onOpen, onUpsert, fill = false }
   const freePlans = planWork.filter((w) => w.plan && flowPinsOf(w.plan).length === 0).length;
   return (
     <div className={fill ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-2"}>
-      {/* แถบบน: แท็บผัง · ตัวกรองรวม · เฉพาะกล่องที่มีงาน · ปุ่มถาด (มือถือ) */}
+      {/* ตอนเต็มจอแถบซ่อน: ชิปสรุปค้างไว้กลางขอบบน (กด = เปิดแถบ) + ปุ่มถาด (มือถือ) */}
+      <FullscreenPeek>
+        <span className="inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full border border-slate-200 bg-white/95 px-2.5 text-xs text-slate-600 shadow-sm">
+          ค้าง <b className="font-medium text-slate-800">{summary.total}</b>
+          {summary.overdue > 0 && <>· <button type="button" onClick={() => patchPref({ filter: filter === "over" ? "all" : "over" })} className="hover:underline" title="กรองเฉพาะเกินกำหนด">เกิน <b className="font-medium text-rose-600">{summary.overdue}</b></button></>}
+          {filter !== "all" && <span className="rounded-full bg-violet-100 px-1.5 text-[10px] text-violet-700">{WORK_FILTERS.find((f) => f.key === filter)?.label}</span>}
+        </span>
+        <button type="button" onClick={() => setTrayOpen(true)} className="inline-flex h-7 items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2.5 text-xs text-slate-600 shadow-sm md:hidden">
+          <Icon name="list" /> งาน {shownWork.length}
+        </button>
+      </FullscreenPeek>
+
+      {/* แถบบน: แท็บผัง · ตัวกรองรวม · เฉพาะกล่องที่มีงาน · ปุ่มถาด (มือถือ) — เต็มจอ = ซ่อนไว้ขอบบน (FullscreenBar) */}
+      <FullscreenBar order={20}>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-white p-0.5">
           <button type="button" className={seg(isWork)} onClick={() => { patchPref({ view: WORK_VIEW }); setPop(null); }} title="งาน Task + ใบงานออกแบบ เกาะกล่องเองตามสถานะ">ครีเอทีฟ / ออกแบบ</button>
@@ -406,8 +420,10 @@ export function PlanFlowBoard({ items, canEdit, onOpen, onUpsert, fill = false }
           <Icon name="list" /> งาน {shownWork.length}
         </button>
       </div>
+      </FullscreenBar>
 
       {/* แถบสรุป — กดป้ายชนิด = ซ่อน/โชว์ชนิดนั้น · กดตัวเลข = กรองทันที */}
+      <FullscreenBar order={30}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500">
         <span>ค้าง <b className="font-medium text-slate-800">{summary.total}</b></span>
         {KINDS.filter((k) => k === "plan" || (k === "task" ? src.canTasks : src.canSheets)).map((k) => {
@@ -427,6 +443,7 @@ export function PlanFlowBoard({ items, canEdit, onOpen, onUpsert, fill = false }
         {src.error && <span className="text-rose-600" title={src.error}>โหลดบางระบบไม่สำเร็จ</span>}
         {!fill && <span className="text-slate-400">{canEdit ? "ลากงานแผนไปวางบนกล่อง · งาน/ใบงานเกาะเองตามสถานะ · ซูมเข้า = เห็นสถานะย่อย" : "ดูอย่างเดียว"}</span>}
       </div>
+      </FullscreenBar>
 
       <div className={fill ? "flex min-h-0 flex-1 gap-2" : "flex gap-2"}>
         <div className={`min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-1 ${fill ? "flex flex-col" : ""}`}>

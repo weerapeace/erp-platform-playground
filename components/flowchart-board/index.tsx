@@ -24,6 +24,7 @@ import {
   type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
 import { useT } from "@/components/i18n";
+import { FullscreenBar } from "@/components/fullscreen-stage";
 import { Icon } from "@/components/icon";
 import { usePushToast } from "@/components/toast";
 import { LoadingState, ErrorState, EmptyState } from "@/components/state-views";
@@ -701,7 +702,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   return (
     <FlowBoardCtx.Provider value={actions}>
       <div ref={boardRef} className={`fc-board flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${readOnly ? "fc-readonly" : ""}`} style={{ height }}>
-        {/* แถบเครื่องมือ */}
+        {/* แถบเครื่องมือ — อยู่ในชั้นเต็มจอแบบซ่อนแถบ (FullscreenStage autoHide) = ย้ายไปแถบขอบบน */}
+        <FullscreenBar order={40}>
         <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-200 px-2 py-1">
           {!readOnly && FLOW_KINDS.map((k) => {
             const m = FLOW_KIND_META[k];
@@ -789,6 +791,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             </span>
           )}
         </div>
+        </FullscreenBar>
         {stale.length > 0 && !hideOwn && (
           <div className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-800">
             <Icon value="i:alert-triangle" />

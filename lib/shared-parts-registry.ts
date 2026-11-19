@@ -848,7 +848,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "fullscreen-stage", label: "โหมดเต็มจอของกระดาน/ผัง", code: "FullscreenStage", category: "layout",
     source: { path: "components/fullscreen-stage" },
-    what: "ปุ่ม + คีย์ F ทำให้กระดาน/ผังใช้พื้นที่เต็มจอ (ซ่อนหัวเว็บ เมนูแอป แถบปุ่มของหน้า) แบบ Miro · Esc ออก · จำต่อคน · มือถือเต็มจอเสมอ · ไม่โหลดกระดานใหม่ตอนสลับ",
+    what: "ปุ่ม + คีย์ F ทำให้กระดาน/ผังใช้พื้นที่เต็มจอ (ซ่อนหัวเว็บ เมนูแอป แถบปุ่มของหน้า) แบบ Miro · Esc ออก · จำต่อคน · มือถือเต็มจอเสมอ · ไม่โหลดกระดานใหม่ตอนสลับ · autoHide: แถบปุ่ม (FullscreenBar) ซ่อนขอบบน ชี้แล้วโชว์ + ชิปสรุป (FullscreenPeek) + ปักไว้ · เปิดในแอปเดี่ยวก็ซ่อนหัวแอปให้",
     when: "หน้ากระดานวาด / ผังงาน / canvas ที่อยากได้พื้นที่มากสุด (ตอนนี้ใช้ที่แท็บกระดานของแผนงานทีม)",
     notWhen: "ป๊อปฝังหน้าอื่น ใช้ EmbedModal · ดูรูปเต็มจอ ใช้ ImageLightbox · ทั้งแอปไม่มีเมนูข้าง ใช้ StandaloneShell",
     doc: "fullscreen-stage.md",
@@ -959,10 +959,10 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "รูปที่ปัดดูทีละรูป / แถวที่เลื่อนแนวนอนเอง (ใส่ data-no-swipe) · จอคอมที่ลากวางการ์ด",
   },
   {
-    key: "app-shell-bar", label: "หน้าบอกแอปเดี่ยวว่ามีแถบล่างเอง (กันแถบล่างซ้อน)", code: "usePageOwnsBottomBar · useEmbeddedPageBar", category: "layout",
-    source: { path: "lib/app-shell-bar", names: ["usePageOwnsBottomBar", "useEmbeddedPageBar"] },
-    what: "หน้าที่มีแถบล่างของตัวเองเปิดในแอปเดี่ยว /app/<key> → เชลล์ซ่อนแถบเมนูแอป (เมนูแอปอยู่ที่ ☰) · หน้าอื่นแถบอยู่ตามเดิม",
-    when: "หน้ามือถือที่ทำแถบล่างของตัวเอง → เรียก usePageOwnsBottomBar(isPhone)",
+    key: "app-shell-bar", label: "หน้าบอกแอปเดี่ยวให้ซ่อนแถบของเชลล์ (แถบล่างซ้อน · เต็มจอ)", code: "usePageOwnsBottomBar · usePageWantsFullFrame", category: "layout",
+    source: { path: "lib/app-shell-bar", names: ["usePageOwnsBottomBar", "useEmbeddedPageBar", "usePageWantsFullFrame", "useEmbeddedFullFrame"] },
+    what: "หน้าที่มีแถบล่างของตัวเองเปิดในแอปเดี่ยว /app/<key> → เชลล์ซ่อนแถบเมนูแอป (เมนูแอปอยู่ที่ ☰) · หน้าขอเต็มจอ → เชลล์ซ่อนหัวแอป + แถบเมนูแอป · หน้าอื่นอยู่ตามเดิม",
+    when: "หน้ามือถือที่ทำแถบล่างของตัวเอง → usePageOwnsBottomBar(isPhone) · หน้าเต็มจอ → ใช้ FullscreenStage (เรียก usePageWantsFullFrame ให้เอง)",
     notWhen: "หน้าที่ไม่มีแถบล่างเอง (ไม่ต้องเรียก)",
   },
   {

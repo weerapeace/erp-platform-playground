@@ -29,7 +29,7 @@ import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, moreLabelOf, appMenuRows } from "@/lib/app-menu-layout";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useAppGo } from "@/lib/app-go";
-import { useEmbeddedPageBar } from "@/lib/app-shell-bar";
+import { useEmbeddedFullFrame, useEmbeddedPageBar } from "@/lib/app-shell-bar";
 
 // ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
 const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
@@ -211,6 +211,8 @@ export default function StandaloneApp() {
 
   // หน้าในกรอบมีแถบล่างของตัวเอง (เช่น Design Dashboard มือถือ) → ซ่อนแถบเมนูแอปด้านล่าง กันซ้อน 2 แถบ · เมนูแอปยังอยู่ที่ ☰ (lib/app-shell-bar)
   const pageOwnsBar = useEmbeddedPageBar(iframeRef, `${items[active]?.href ?? ""}#${goNonce}`);
+  // หน้าในกรอบเต็มจอ (เช่น กระดานแผนงาน — ของกลาง FullscreenStage) → ซ่อนหัวแอป + แถบเมนูแอป ให้หน้าใช้ทั้งจอ (lib/app-shell-bar)
+  const pageFull = useEmbeddedFullFrame(iframeRef, `${items[active]?.href ?? ""}#${goNonce}`);
 
   if (!ready) return <AppLoading />;
   if (!user) return (
@@ -282,7 +284,7 @@ export default function StandaloneApp() {
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope={searchScope} />
       <InstallHereBanner appLabel={app?.label ?? appKey} iconSrc={appIconSrc(app?.icon_url)} autoShow={installAsk} />
-      <header className="relative flex-shrink-0 z-20 text-white px-3 sm:px-4"
+      <header className={`relative flex-shrink-0 z-20 text-white px-3 sm:px-4 ${pageFull ? "hidden" : ""}`}
         style={{ ...appHeaderStyle(app ?? {}), paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-2.5 flex items-center gap-2 w-full min-w-0">
           {/* ปุ่มเมนู (จอกว้าง) — ใช้ตอนเมนูเยอะ/มือถือใช้แถบล่าง */}
@@ -456,7 +458,7 @@ export default function StandaloneApp() {
 
       {/* มือถือ: แถบเมนูล่าง (iPad ซ่อน เพราะใช้ ☰ drawer แทน) · เมนูแม่แตะ = เปิด drawer เลือกลูก
           หน้าที่มีแถบล่างของตัวเอง (pageOwnsBar) = ไม่โชว์แถบนี้ → เมนูแอปเปิดจาก ☰ บนหัว (เจ้าของสั่ง 2026-11-11) */}
-      {topLevel.length > 0 && !pageOwnsBar && (
+      {topLevel.length > 0 && !pageOwnsBar && !pageFull && (
         <nav className="md:hidden flex-shrink-0 bg-white border-t border-slate-200 grid z-20"
           style={{ gridTemplateColumns: `repeat(${barCols}, minmax(0,1fr))`, paddingBottom: "env(safe-area-inset-bottom)" }}>
           {barItems.map((it) => {
