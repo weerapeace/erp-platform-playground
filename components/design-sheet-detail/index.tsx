@@ -1485,7 +1485,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const reloadLinkedSkus = useCallback(async (sheetId: string) => {
     try {
       const j = await apiFetch(`/api/design-sheets/${sheetId}`).then((r) => r.json());
-      if (!j.error) setLinkedSkus((j.data?.linked_skus ?? []) as DesignSheetLinkedSku[]);
+      if (!j.error) {
+        setLinkedSkus((j.data?.linked_skus ?? []) as DesignSheetLinkedSku[]);
+        // Parent ที่เพิ่งสร้างจาก wizard → รหัสเป็นลิงก์ + ปุ่ม "สร้าง SKU" หายไป (เดิมโหลดแค่ SKU · เจ้าของเจอ 2026-11-19)
+        const refs: Record<string, string> = {};
+        for (const r of (Array.isArray(j.data?.parent_sku_refs) ? j.data.parent_sku_refs : []) as { code: string; id: string }[]) refs[r.code] = r.id;
+        setParentRefs(refs);
+      }
     } catch { /* ไม่ critical */ }
   }, []);
 

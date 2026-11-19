@@ -132,7 +132,7 @@ export function ParentSkuBox({
                 )}
                 <span className="text-[11px] text-slate-500">{mine.length > 0 ? t(`${mine.length} SKU`, `${mine.length} SKUs`) : pid ? t("ยังไม่มี SKU จากใบนี้", "No SKUs from this sheet yet") : t("ยังไม่ได้สร้าง", "Not created yet")}</span>
                 <span className="flex-1" />
-                {!pid && onCreateSku && (
+                {!pid && mine.length === 0 && sibs.length === 0 && onCreateSku && (
                   <button type="button" onClick={(e) => { e.stopPropagation(); onCreateSku(c); }}
                     title={t(`สร้าง Parent ${c} + SKU ลูก จากใบงานนี้`, `Create Parent ${c} + child SKUs from this sheet`)}
                     className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700">
