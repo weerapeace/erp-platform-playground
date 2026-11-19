@@ -185,6 +185,65 @@ export function buildQuoteTemplateData(quote: QuotePrintDetail, origin: string, 
   };
 }
 
+/** จำนวนแบบอ่านง่าย — จำนวนเต็มไม่ต้องมีทศนิยม (3,800 ไม่ใช่ 3,800.00) */
+export const formatQtyPlain = (n: number | null | undefined) =>
+  Number(n ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
+
+/** ขนาดในการ์ดตามจำนวนต่อแถว — ยิ่งน้อยต่อแถว ยิ่งใหญ่ (ตัวอักษร px · รูปสูง mm) */
+const CARD_SIZES: Record<number, { price: number; name: number; sub: number; imgMm: number }> = {
+  1: { price: 34, name: 22, sub: 16, imgMm: 62 },
+  2: { price: 26, name: 17, sub: 14, imgMm: 66 },
+  3: { price: 20, name: 14, sub: 12, imgMm: 46 },
+  4: { price: 17, name: 12, sub: 11, imgMm: 34 },
+};
+
+/** แบบการ์ดรูปใหญ่ — แต่ละรายการเป็นการ์ด รูปใหญ่ ราคาตัวใหญ่ (ผู้ใหญ่อ่านง่าย · เจ้าของขอ 2026-11-19) */
+export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout: ReportLayoutSettings): string {
+  const n = layout.cardsPerRow;
+  const z = CARD_SIZES[n] ?? CARD_SIZES[2];
+  const lines = sortQuoteLines(quote.lines, layout);
+  if (!lines.length) return `<div class="center" style="border:1px solid #000;padding:6mm">ไม่มีรายการสินค้า</div>`;
+  const cards = lines.map((line, index) => {
+    const src = layout.showImage ? imageSrc(line, origin) : "";
+    const sku = layout.showSku ? printableSku(line.sku) : "";
+    const unit = escapeHtml(line.unit || "ชิ้น");
+    const qtyHtml = layout.showQty ? `<span>จำนวน <b>${formatQtyPlain(line.qty)}</b> ${unit}</span>` : "<span></span>";
+    const totalHtml = layout.showLineTotal ? `<span class="qc-total">รวม ${formatMoney(quoteLinePrintAmount(line))} บาท</span>` : "";
+    const img = !layout.showImage ? ""
+      : `<div class="qc-img">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : `<span class="qc-noimg">ไม่มีรูป</span>`}</div>`;
+    return `<div class="qc">
+      <span class="qc-no">${index + 1}</span>
+      ${img}
+      <div class="qc-body">
+        ${sku ? `<div class="qc-sku">${escapeHtml(sku)}</div>` : ""}
+        <div class="qc-name">${escapeHtml(line.product_name)}</div>
+        ${line.note ? `<div class="qc-note">${escapeHtml(line.note)}</div>` : ""}
+        <div class="qc-price">${formatMoney(line.unit_price)} <small>บาท / ${unit}</small></div>
+        ${(layout.showQty || layout.showLineTotal) ? `<div class="qc-foot">${qtyHtml}${totalHtml}</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  // 1 ต่อแถว = รูปซ้าย ข้อความขวา (การ์ดแนวนอน) · 2-4 = รูปบน ข้อความล่าง
+  const wide = n === 1;
+  const css = `<style>
+    .qc-grid { display: grid; grid-template-columns: repeat(${n}, minmax(0, 1fr)); gap: 4mm; }
+    .qc { position: relative; border: 0.3mm solid #444; border-radius: 3mm; padding: 3mm; display: flex; ${wide ? "flex-direction: row; gap: 5mm; align-items: center;" : "flex-direction: column; gap: 2mm;"} break-inside: avoid; page-break-inside: avoid; }
+    .qc-no { position: absolute; top: 2mm; left: 2mm; z-index: 1; background: #111; color: #fff; border-radius: 99px; min-width: 7mm; padding: 0.5mm 2mm; text-align: center; font-size: ${Math.max(11, z.sub - 1)}px; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .qc-img { ${wide ? `width: ${z.imgMm}mm; flex: none;` : ""} height: ${z.imgMm}mm; display: flex; align-items: center; justify-content: center; background: #f6f6f6; border-radius: 2mm; overflow: hidden; }
+    .qc-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .qc-noimg { color: #999; font-size: ${z.sub}px; }
+    .qc-body { display: flex; flex-direction: column; gap: 1mm; min-width: 0; flex: 1; }
+    .qc-sku { font-size: ${Math.max(10, z.sub - 2)}px; color: #555; }
+    .qc-name { font-size: ${z.name}px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+    .qc-note { font-size: ${z.sub}px; color: #333; }
+    .qc-price { font-size: ${z.price}px; font-weight: 700; line-height: 1.15; margin-top: 1mm; }
+    .qc-price small { font-size: ${z.sub}px; font-weight: 400; }
+    .qc-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1mm 3mm; font-size: ${z.sub}px; border-top: 0.3mm dashed #999; padding-top: 1.5mm; margin-top: auto; }
+    .qc-total { font-weight: 700; }
+  </style>`;
+  return `${css}<div class="qc-grid">${cards}</div>`;
+}
+
 export function buildQuotationHtml(
   quote: QuotePrintDetail,
   origin: string,
@@ -217,6 +276,15 @@ export function buildQuotationHtml(
   const nameColPct = Math.max(12, (layout.showSku || layout.showImage ? 29 : 45) - (layout.showImage ? imageColPct - 17 : 0));
   const visibleColumnCount = 6 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const summaryLabelColspan = 1 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
+  const isCards = layout.lineStyle === "cards";
+  // แบบการ์ด: หมายเหตุ + กล่องยอดรวมตัวใหญ่ท้ายใบ (แทนตารางรวมเงินเล็ก)
+  const cardsNote = layout.showNote && quote.note
+    ? `<div class="card-note"><span class="label">หมายเหตุ :</span> ${escapeHtml(quote.note)}</div>` : "";
+  const cardsGrand = layout.showTotals ? `<section class="grand-box">
+      <div class="grand-sub"><span>รวมเงิน ${formatMoney(subtotal)}</span><span>${escapeHtml(vatLabel)} ${formatMoney(quote.total_vat)}</span></div>
+      <div class="grand-main"><span class="g-label">จำนวนเงินทั้งสิ้น</span><span class="g-amount">${formatMoney(quote.grand_total)} บาท</span></div>
+      <div class="grand-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>
+    </section>` : "";
   const signatureMarginTop = layout.signatureToBottom ? "auto" : `${layout.signatureGapMm}mm`;
   const authorizedSignatureImage = layout.showAuthorizedSignature && layout.authorizedSignatureUrl
     ? `<img class="signature-image" src="${escapeHtml(layout.authorizedSignatureUrl)}" alt="authorized signature" style="width: ${layout.authorizedSignatureWidthMm}mm; transform: translate(calc(-50% + ${layout.authorizedSignatureOffsetXMm}mm), ${layout.authorizedSignatureOffsetYMm}mm);">`
@@ -246,7 +314,16 @@ export function buildQuotationHtml(
     .header-box { display: grid; grid-template-columns: 1.4fr 1fr; border: 1px solid #000; min-height: 30mm; margin-bottom: 2mm; }
     .header-left, .header-right { padding: 4mm; }
     .header-right { border-left: 1px solid #000; text-align: right; display: flex; flex-direction: column; justify-content: center; }
+    .header-no-customer { grid-template-columns: 1fr; min-height: 0; width: 50%; margin-left: auto; }
+    .header-no-customer .header-right { border-left: 0; }
     .label { font-weight: 700; }
+    .grand-box { margin-top: 4mm; border: 0.6mm solid #000; border-radius: 3mm; padding: 3mm 5mm; break-inside: avoid; page-break-inside: avoid; }
+    .grand-sub { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 1mm 8mm; font-size: 13px; color: #333; }
+    .grand-main { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 4mm; margin-top: 1mm; }
+    .grand-main .g-label { font-size: 18px; font-weight: 700; }
+    .grand-main .g-amount { font-size: 28px; font-weight: 700; }
+    .grand-text { text-align: right; font-size: 13px; margin-top: 1mm; }
+    .card-note { margin-top: 4mm; border: 1px solid #000; padding: 2mm; min-height: 12mm; break-inside: avoid; page-break-inside: avoid; }
     .items { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .items th, .items td { border: 1px solid #000; padding: 2mm 1.5mm; vertical-align: middle; }
     .items th { text-align: center; font-weight: 700; line-height: 1.1; }
@@ -292,13 +369,13 @@ export function buildQuotationHtml(
     </div>
     <h1>ใบเสนอราคา</h1>
 
-    <section class="header-box">
-      <div class="header-left">
+    <section class="header-box${layout.showCustomer ? "" : " header-no-customer"}">
+      ${layout.showCustomer ? `<div class="header-left">
         <div><span class="label">ลูกค้า / Customer</span></div>
         <div><span class="label">ชื่อ:</span> ${escapeHtml(quote.customer_name || "-")}</div>
         <div><span class="label">ที่อยู่:</span> ${escapeHtml(quote.customer_address || "")}</div>
         ${layout.showPhone ? `<div><span class="label">เบอร์โทร:</span> ${escapeHtml(quote.customer_phone || "")}</div>` : ""}
-      </div>
+      </div>` : ""}
       <div class="header-right">
         <div><span class="label">วันที่:</span> ${escapeHtml(thaiDate(quote.quote_date))}</div>
         <div><span class="label">เลขที่ใบเสนอราคา:</span> ${escapeHtml(quote.quote_number || "-")}</div>
@@ -306,7 +383,7 @@ export function buildQuotationHtml(
       </div>
     </section>
 
-    <table class="items">
+    ${isCards ? buildQuoteCards(quote, origin, layout) : `<table class="items">
       <colgroup>
         <col style="width: 6%">
         ${layout.showSku ? `<col style="width: 13%">` : ""}
@@ -340,9 +417,9 @@ export function buildQuotationHtml(
           <td class="right">${formatMoney(subtotal)}</td>
         </tr>` : ""}
       </tbody>
-    </table>
+    </table>`}
 
-    ${layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
+    ${isCards ? `${cardsNote}${cardsGrand}` : layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
       ${layout.showNote ? `<div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div>` : ""}
       <table class="totals">
         <tr><td class="label">รวมเงิน</td><td class="right">${formatMoney(subtotal)}</td></tr>

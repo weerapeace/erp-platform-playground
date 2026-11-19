@@ -64,8 +64,8 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 
 
 // จำค่าที่ตั้งรายใบ (ต่อ browser): "ไม่รวมยอดทั้งหมด" + การเรียงรายการ — เปิดพิมพ์ใบเดิมซ้ำไม่ต้องตั้งใหม่
-type PerQuoteView = Partial<Pick<ReportLayoutSettings, "showTotals" | "sortBy" | "sortDesc" | "sortGroupByNote">>;
-const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote"] as const;
+type PerQuoteView = Partial<Pick<ReportLayoutSettings, (typeof PER_QUOTE_FIELDS)[number]>>;
+const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote", "lineStyle", "cardsPerRow", "showCustomer", "showQty", "showLineTotal"] as const;
 const viewKey = (id: string) => `qt-print-view:${id}`;
 const legacyHideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
 const readPerQuoteView = (id: string): PerQuoteView | null => {
@@ -144,7 +144,8 @@ export default function PrintQuotationPage() {
 
   const html = useMemo(() => {
     if (!quote) return "";
-    if (template && !useStandardLayout) {
+    // แบบการ์ดรูปใหญ่ สร้างจากโค้ดเสมอ (แม่แบบในฐานข้อมูลเป็นแบบตาราง)
+    if (template && !useStandardLayout && layout.lineStyle !== "cards") {
       return buildReportHtml({
         paper_size: template.paper_size,
         orientation: template.orientation,

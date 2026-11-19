@@ -2,6 +2,12 @@
 export type ReportLineSort = "none" | "qty" | "price" | "sku";
 export const REPORT_LINE_SORTS: ReportLineSort[] = ["none", "qty", "price", "sku"];
 
+/** แบบรายการตอนพิมพ์ — table = ตารางเดิม · cards = การ์ดรูปใหญ่ อ่านง่าย (เจ้าของขอ 2026-11-19) */
+export type ReportLineStyle = "table" | "cards";
+export const REPORT_LINE_STYLES: ReportLineStyle[] = ["table", "cards"];
+export const REPORT_CARDS_PER_ROW_MIN = 1;
+export const REPORT_CARDS_PER_ROW_MAX = 4;
+
 export const REPORT_IMAGE_SIZE_MIN_MM = 10;
 export const REPORT_IMAGE_SIZE_MAX_MM = 45;
 
@@ -22,6 +28,16 @@ export type ReportLayoutSettings = {
   showNote: boolean;
   /** แสดงยอดรวม (แถวรวม + รวมเงิน/VAT/ทั้งสิ้น + ตัวอักษร) — ปิดได้ เช่น ใบเสนอราคาหลายราคาตามจำนวน ที่รวมยอดแล้วไม่มีความหมาย */
   showTotals: boolean;
+  /** แสดงข้อมูลลูกค้า (ชื่อ/ที่อยู่/เบอร์) — ปิดแล้วยังเหลือวันที่ + เลขที่เอกสาร */
+  showCustomer: boolean;
+  /** แบบรายการ: ตาราง / การ์ดรูปใหญ่ */
+  lineStyle: ReportLineStyle;
+  /** (การ์ด) จำนวนการ์ดต่อแถว 1-4 */
+  cardsPerRow: number;
+  /** (การ์ด) แสดงจำนวน */
+  showQty: boolean;
+  /** (การ์ด) แสดงราคารวมของรายการ */
+  showLineTotal: boolean;
   /** เรียงรายการตาม จำนวน/ราคา/รหัส (เฉพาะตอนพิมพ์ ไม่แก้ลำดับในเอกสารจริง) */
   sortBy: ReportLineSort;
   sortDesc: boolean;
@@ -54,6 +70,11 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   showResponsible: true,
   showNote: true,
   showTotals: true,
+  showCustomer: true,
+  lineStyle: "table",
+  cardsPerRow: 2,
+  showQty: true,
+  showLineTotal: true,
   sortBy: "none",
   sortDesc: false,
   sortGroupByNote: true,
@@ -100,6 +121,11 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     showResponsible: input.showResponsible ?? DEFAULT_REPORT_LAYOUT.showResponsible,
     showNote: input.showNote ?? DEFAULT_REPORT_LAYOUT.showNote,
     showTotals: input.showTotals ?? DEFAULT_REPORT_LAYOUT.showTotals,
+    showCustomer: input.showCustomer ?? DEFAULT_REPORT_LAYOUT.showCustomer,
+    lineStyle: REPORT_LINE_STYLES.includes(input.lineStyle as ReportLineStyle) ? (input.lineStyle as ReportLineStyle) : DEFAULT_REPORT_LAYOUT.lineStyle,
+    cardsPerRow: Math.round(clamp(input.cardsPerRow, REPORT_CARDS_PER_ROW_MIN, REPORT_CARDS_PER_ROW_MAX, DEFAULT_REPORT_LAYOUT.cardsPerRow)),
+    showQty: input.showQty ?? DEFAULT_REPORT_LAYOUT.showQty,
+    showLineTotal: input.showLineTotal ?? DEFAULT_REPORT_LAYOUT.showLineTotal,
     sortBy: REPORT_LINE_SORTS.includes(input.sortBy as ReportLineSort) ? (input.sortBy as ReportLineSort) : DEFAULT_REPORT_LAYOUT.sortBy,
     sortDesc: input.sortDesc ?? DEFAULT_REPORT_LAYOUT.sortDesc,
     sortGroupByNote: input.sortGroupByNote ?? DEFAULT_REPORT_LAYOUT.sortGroupByNote,
@@ -128,6 +154,8 @@ export function compactReportLayout(input: Partial<ReportLayoutSettings> = DEFAU
     imageSizeMm: Math.min(current.imageSizeMm, 16),
     signatureGapMm: Math.min(current.signatureGapMm, 10),
     signatureToBottom: true,
+    // แบบการ์ด: บีบ = การ์ดเล็กลง (อย่างน้อย 3 ต่อแถว)
+    cardsPerRow: current.lineStyle === "cards" ? Math.max(current.cardsPerRow, 3) : current.cardsPerRow,
   });
 }
 

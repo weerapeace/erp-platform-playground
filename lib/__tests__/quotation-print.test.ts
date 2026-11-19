@@ -175,4 +175,28 @@ describe("quotation print", () => {
     const print = html.slice(html.indexOf("@media print"));
     expect(print.slice(0, print.indexOf("</style>"))).not.toMatch(/padding:\s*0/);   // ตอนพิมพ์ห้ามล้างขอบทิ้ง
   });
+
+  it("prints big product cards with chosen cards per row and hidden fields (2026-11-19)", () => {
+    const html = buildQuotationHtml(quote, "", { lineStyle: "cards", cardsPerRow: 3 });
+    expect(html).toContain("qc-grid");
+    expect(html).toContain("repeat(3, minmax(0, 1fr))");
+    expect(html).not.toContain("class=\"items\"");
+    expect(html).toContain("จำนวน <b>5,000</b> ชิ้น");
+    expect(html).toContain("รวม 290,000.00 บาท");
+    expect(html).toContain("grand-box");
+    expect(html).toContain("บริษัท ตัวอย่าง จำกัด");
+
+    const hidden = buildQuotationHtml(quote, "", { lineStyle: "cards", showQty: false, showLineTotal: false, showCustomer: false, showTotals: false });
+    expect(hidden).not.toContain("จำนวน <b>");
+    expect(hidden).not.toContain("รวม 290,000.00 บาท");
+    expect(hidden).not.toContain("บริษัท ตัวอย่าง จำกัด");
+    expect(hidden).not.toContain("<section class=\"grand-box");
+    expect(hidden).toContain("QT-202606-0003");   // ซ่อนลูกค้าแล้วยังเหลือเลขที่ใบ
+  });
+
+  it("hides the customer in table style too", () => {
+    const html = buildQuotationHtml(quote, "", { showCustomer: false });
+    expect(html).toContain("class=\"items\"");
+    expect(html).not.toContain("บริษัท ตัวอย่าง จำกัด");
+  });
 });

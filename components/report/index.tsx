@@ -491,6 +491,21 @@ export function ReportLayoutControls({
   const layout = normalizeReportLayout(value);
   const patch = (next: Partial<ReportLayoutSettings>) => onChange(normalizeReportLayout({ ...layout, ...next }));
   const setImageSize = (mm: number) => onChange(withReportImageSize(layout, mm));
+  const [hideOpen, setHideOpen] = useState(false);
+  // ซ่อนข้อมูล — จำนวน/ราคารวมรายการ มีเฉพาะแบบการ์ด (ตารางขาดไม่ได้)
+  type ShowKey = "showSku" | "showCustomer" | "showImage" | "showQty" | "showLineTotal" | "showNote" | "showTotals";
+  const hideItems: { key: ShowKey; label: string }[] = [
+    { key: "showSku", label: "รหัสสินค้า" },
+    { key: "showCustomer", label: "ลูกค้า" },
+    { key: "showImage", label: "รูปสินค้า" },
+    ...(layout.lineStyle === "cards" ? [
+      { key: "showQty" as const, label: "จำนวน" },
+      { key: "showLineTotal" as const, label: "ราคารวมรายการ" },
+    ] : []),
+    { key: "showNote", label: "หมายเหตุ" },
+    { key: "showTotals", label: "ยอดรวมท้ายใบ" },
+  ];
+  const hiddenCount = hideItems.filter(item => !layout[item.key]).length;
 
   return (
     <div className="no-print mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -537,7 +552,31 @@ export function ReportLayoutControls({
           <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />
           ไม่รวมยอดทั้งหมด
         </label>
-        {layout.showImage && (
+        {/* แบบรายการ: ตาราง / การ์ดรูปใหญ่ (เจ้าของขอ 2026-11-19) */}
+        <div className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 text-sm" title="แบบการแสดงรายการสินค้า">
+          <span className="px-1 font-medium text-slate-700">แบบ</span>
+          {([["table", "ตาราง"], ["cards", "การ์ดรูปใหญ่"]] as const).map(([v, label]) => (
+            <button key={v} type="button" onClick={() => patch({ lineStyle: v })} aria-pressed={layout.lineStyle === v}
+              className={`h-7 rounded px-2.5 text-sm font-medium ${layout.lineStyle === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{label}</button>
+          ))}
+        </div>
+        {layout.lineStyle === "cards" && (
+          <div className={`flex h-9 items-center gap-1 rounded-lg border px-1.5 text-sm ${layout.cardsPerRow === DEFAULT_REPORT_LAYOUT.cardsPerRow ? "border-slate-200 bg-white" : "border-sky-300 bg-sky-50"}`} title="จำนวนการ์ดต่อแถว — น้อย = รูปและตัวหนังสือใหญ่ขึ้น">
+            <span className="px-1 font-medium text-slate-700">ต่อแถว</span>
+            {[1, 2, 3, 4].map(n => (
+              <button key={n} type="button" onClick={() => patch({ cardsPerRow: n })} aria-pressed={layout.cardsPerRow === n}
+                className={`h-7 w-7 rounded text-sm font-semibold ${layout.cardsPerRow === n ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-white"}`}>{n}</button>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setHideOpen(current => !current)}
+          className={`h-9 rounded-lg border px-4 text-sm font-medium ${hideOpen ? "border-slate-900 bg-slate-900 text-white" : hiddenCount ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+        >
+          ซ่อนข้อมูล{hiddenCount ? ` (${hiddenCount})` : ""}
+        </button>
+        {layout.showImage && layout.lineStyle === "table" && (
           <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.imageSizeMm === DEFAULT_REPORT_LAYOUT.imageSizeMm ? "border-slate-200 bg-white text-slate-700" : "border-sky-300 bg-sky-50 text-sky-800"}`}
             title="ขนาดรูปสินค้าในตาราง — แถวสูง/เตี้ยตามรูปอัตโนมัติ">
             <span className="font-medium">ขนาดรูป</span>
@@ -589,6 +628,17 @@ export function ReportLayoutControls({
         )}
         {defaultMessage && <span className="text-xs text-slate-500">{defaultMessage}</span>}
       </div>
+
+      {hideOpen && (
+        <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-700">
+          {hideItems.map(item => (
+            <label key={item.key} className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={!layout[item.key]} onChange={(e) => patch({ [item.key]: !e.target.checked } as Partial<ReportLayoutSettings>)} className="h-4 w-4 cursor-pointer" />
+              ซ่อน{item.label}
+            </label>
+          ))}
+        </div>
+      )}
 
       {open && (
         <div className="grid gap-4 border-t border-slate-100 px-4 py-4 lg:grid-cols-[1.5fr_1fr]">
