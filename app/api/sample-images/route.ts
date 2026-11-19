@@ -403,6 +403,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ data: { ordered: ok.length }, error: null });
     }
 
+    // ── เรียงอัลบั้มข้ามแม่ (หน้าแบรนด์ "ลากสลับจัดเรียง" · 2026-11-19) — ลำดับ 1..n ทั้งชุด · ลำดับในแม่เดียวกันยังเหมือนเดิม ──
+    if (body.action === "reorder_flat") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const ids = Array.isArray(body.album_ids) ? [...new Set(body.album_ids.filter((x) => typeof x === "string" && x))].slice(0, 1000) : [];
+      if (!ids.length) return NextResponse.json({ error: "ไม่มีอัลบั้มให้เรียง" }, { status: 400 });
+      const all = await loadAlbums(admin, 3000);
+      const ok = ids.filter((id) => all.some((a) => a.id === id));
+      for (let i = 0; i < ok.length; i++) {
+        const { error } = await admin.from("asset_collections").update({ sort_order: i + 1 }).eq("id", ok[i]);
+        if (error) throw new Error(error.message);
+      }
+      if (ok.length) await audit("update", ok[0], { reorder_flat: ok.length });
+      return NextResponse.json({ data: { ordered: ok.length }, error: null });
+    }
+
     // ── ลบอัลบั้มย่อยที่ว่างแล้ว ──
     if (body.action === "delete_album") {
       const denied = await guardApi(request, "assets.edit");

@@ -123,5 +123,8 @@ export const reorderPhotos = (albumId: string, assetIds: string[]) =>
   post<{ ordered: number }>({ action: "reorder_photos", album_id: albumId, asset_ids: assetIds }, "บันทึกลำดับรูปไม่สำเร็จ");
 
 /** ลำดับอัลบั้มย่อยในอัลบั้มแม่แบบจัดเอง — ส่งทั้งชุดตามลำดับใหม่ */
+/** เรียงอัลบั้มข้ามแม่ (หน้าแบรนด์) — ลำดับ 1..n ตามที่ส่ง */
+export const reorderAlbumsFlat = (albumIds: string[]) =>
+  post<{ ordered: number }>({ action: "reorder_flat", album_ids: albumIds }, "บันทึกลำดับอัลบั้มไม่สำเร็จ");
 export const reorderAlbums = (parentId: string | null, albumIds: string[]) =>
   post<{ ordered: number }>({ action: "reorder_albums", parent_id: parentId, album_ids: albumIds }, "บันทึกลำดับอัลบั้มไม่สำเร็จ");

@@ -394,6 +394,8 @@ export function brandViewItems<T extends SampleAlbum>(albums: readonly T[], tab:
     const p = byId.get(a.parent_id);
     return !!p && isDayAlbum(p);
   }).filter(inMonth);
-  const items: BrandViewItem<T>[] = sortAlbums(flat, sort === "manual" ? "newest" : sort).map((a) => ({ kind: "album", album: a, day: a.parent_id ? byId.get(a.parent_id) ?? null : null }));
+  // จัดเอง (หน้าแบรนด์) = ตามลำดับที่ลากสลับไว้ทั้งแบรนด์ (sort_order) · ยังไม่จัด = ล่าสุดก่อน
+  const sorted = sort === "manual" ? [...flat].sort((a, b) => byManual(a, b) || newestFirst(a, b)) : sortAlbums(flat, sort);
+  const items: BrandViewItem<T>[] = sorted.map((a) => ({ kind: "album", album: a, day: a.parent_id ? byId.get(a.parent_id) ?? null : null }));
   return [...loose, ...items];
 }

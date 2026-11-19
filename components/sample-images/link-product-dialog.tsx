@@ -19,7 +19,7 @@ import { linkAlbumProduct, loadChildSkus, type ChildSku } from "./api";
 const thumb = (key: string | null, w = 80) => (key ? withImageWidth(`/api/r2-image?key=${encodeURIComponent(key)}`, w) : null);
 
 /** SKU ลูกของรุ่นที่เลือก (ใต้ตาราง) */
-function ChildChips({ parent, picked, onToggle, onAll }: { parent: SkuPickerItem; picked: Set<string>; onToggle: (code: string) => void; onAll: (codes: string[]) => void }) {
+export function ChildChips({ parent, picked, onToggle, onAll }: { parent: SkuPickerItem; picked: Set<string>; onToggle: (code: string) => void; onAll: (codes: string[]) => void }) {
   const t = useT();
   const [kids, setKids] = useState<ChildSku[] | null>(null);
   useEffect(() => {

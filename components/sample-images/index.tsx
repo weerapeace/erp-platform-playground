@@ -38,6 +38,8 @@ import { useStepHistory } from "@/lib/use-step-history";
 import { AlbumCover } from "@/components/album-cover";
 import { AlbumDropDialog } from "./album-drop-dialog";
 import { SampleTwoPane } from "./two-pane";
+import { MassLinkPanel, SkuChipsDialog, PRODUCT_DRAG } from "./mass-link-panel";
+import type { SkuPickerItem } from "@/components/marketing-sku-picker-modal";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { brandCards, brandViewItems, albumMonthKey } from "@/lib/sample-images";
 import { SAMPLE_SUB_SORTS, isAutoAlbumName, isSubSort, sortSubAlbums, parentGroupOf, type SampleSubSort } from "@/lib/sample-images";
@@ -45,7 +47,7 @@ import { SampleAlbumPickerModal } from "./album-picker";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, nextVersionName, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
-import { linkAlbumProduct } from "./api";
+import { linkAlbumProduct, reorderAlbumsFlat } from "./api";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากสลับลำดับ: ตำแหน่งที่ชี้บนรูป/การ์ด — ขอบซ้าย 30% = วางก่อน · ขอบขวา 30% = วางหลัง · กลาง = รวม/ย้ายเข้า (แบบเดิม) */
@@ -137,6 +139,9 @@ export function SampleImagesPage() {
   // อัลบั้มย่อย: เรียง (จัดเอง / ตาม Parent SKU / ใหม่สุด) · โหมดจัดลำดับ (← →) · โน้ตข้าง ๆ (เจ้าของเลือก 2026-11-17)
   const [subSort, setSubSort] = useUserPref<SampleSubSort>("sample_images_sub_sort", "manual", (r) => (isSubSort(r) ? r : null));
   const [orderMode, setOrderMode] = useState(false);
+  const [massMode, setMassMode] = useState(false);          // 🔗 ใส่ SKU แบบ Mass
+  const [massOnly, setMassOnly] = useState(false);          // Mass: เฉพาะที่ยังไม่เชื่อม
+  const [chipFor, setChipFor] = useState<SampleAlbum | null>(null);   // Mass: ติ๊ก SKU ลูกของอัลบั้มนี้
   const [organize, setOrganize] = useState(false);   // ⇆ จัดเรียง 2 ฝั่ง
   const [viewAt, setViewAt] = useState(-1);   // ดูรูปใหญ่ (ImageLightbox) — ลำดับในรายการรูปที่เห็น
   const [paneL, setPaneL] = useState<string | null>(null);
@@ -191,13 +196,13 @@ export function SampleImagesPage() {
 
   // ปุ่ม Back (เบราว์เซอร์ · ปุ่มย้อนของเมาส์ · มือถือ) ย้อนทีละก้าว — ของกลาง lib/use-step-history
   // ก้าว = ทั้งหน้าตา: แท็บแบรนด์ · อัลบั้มที่เปิด · โหมดจัดเรียง 2 ฝั่ง + อัลบั้มแต่ละฝั่ง (เจ้าของสั่ง 2026-11-17 "กดย้อนกลับที่เมาส์แล้วย้อนด้วย")
-  type View = { album: string | null; tab: string; org: boolean; L: string | null; R: string | null };
-  const snap = (p: Partial<View> = {}): View => ({ album: albumId, tab, org: organize, L: paneL, R: paneR, ...p });
+  type View = { album: string | null; tab: string; org: boolean; L: string | null; R: string | null; ord?: boolean; mass?: boolean };
+  const snap = (p: Partial<View> = {}): View => ({ album: albumId, tab, org: organize, L: paneL, R: paneR, ord: orderMode, mass: massMode, ...p });
   const stepped = useRef(false);
   const steps = useStepHistory<View>("sample-view", (s) => {
     if (!s) { setOrganize(false); closeAlbum(true); return; }
     if (s.tab !== tab) { setTab(s.tab as BrandTab); setMonth(null); }
-    setOrganize(s.org); setPaneL(s.L); setPaneR(s.R);
+    setOrganize(s.org); setPaneL(s.L); setPaneR(s.R); setOrderMode(!!s.ord); setMassMode(!!s.mass);
     if (s.album === albumId) return;            // ป๊อปที่เพิ่งปิดพากลับมาก้าวเดิม — อยู่ที่เดิมแล้ว
     if (s.album) void openAlbum(s.album, true); else closeAlbum(true);
   });
@@ -206,7 +211,16 @@ export function SampleImagesPage() {
     if (!stepped.current) { steps.replace(snap()); stepped.current = true; }
     steps.push(snap(p));
   };
-  const setOrganizeStep = (v: boolean) => { if (v === organize) return; pushStep({ org: v, L: v ? albumId : paneL }); setOrganize(v); if (v) setPaneL(albumId); };
+  const setOrganizeStep = (v: boolean) => setMode(v ? "two" : "normal");
+  // แถบโหมดเดียว (เจ้าของเลือก 2026-11-19): ปกติ · ลากสลับจัดเรียง · จัดเรียง 2 ฝั่ง · ใส่ SKU แบบ Mass — เปลี่ยนโหมด = จดก้าว (ปุ่มย้อนของเมาส์ถอยได้)
+  type PageMode = "normal" | "reorder" | "two" | "mass";
+  const mode: PageMode = organize ? "two" : orderMode ? "reorder" : massMode ? "mass" : "normal";
+  const setMode = (m: PageMode) => {
+    if (m === mode) return;
+    pushStep({ org: m === "two", ord: m === "reorder", mass: m === "mass", L: m === "two" ? albumId : paneL });
+    setOrganize(m === "two"); setOrderMode(m === "reorder"); setMassMode(m === "mass"); setSelAlbums(new Set());
+    if (m === "two") setPaneL(albumId);
+  };
   const setPaneLStep = (id: string | null) => { if (id === paneL) return; pushStep({ L: id }); setPaneL(id); };
   const setPaneRStep = (id: string | null) => { if (id === paneR) return; pushStep({ R: id }); setPaneR(id); };
   /** เปิดอัลบั้ม · fromHistory = มาจากปุ่ม Back (ไม่จดก้าวซ้ำ) */
@@ -386,7 +400,7 @@ export function SampleImagesPage() {
   // การ์ดหน้าแฟ้ม: ไม่ค้น = ชั้นบนสุดของแท็บ · ค้น = ทุกชั้นที่ตรง (บอกว่าอยู่ในอัลบั้มไหน) — lib/sample-images browseAlbums
   // หน้าแรก = การ์ดแบรนด์ · ในแบรนด์ = อัลบั้มสินค้าเรียงเลย + รูปยังไม่จัด (เจ้าของเลือก 2026-11-17 · แสดงอย่างเดียว ข้อมูลเดิม)
   const bCards = useMemo(() => brandCards(albums ?? [], brands), [albums, brands]);
-  const bItemsAll = useMemo(() => brandViewItems(albums ?? [], tab, albumSort, null), [albums, tab, albumSort]);
+  const bItemsAll = useMemo(() => brandViewItems(albums ?? [], tab, orderMode ? "manual" : albumSort, null), [albums, tab, albumSort, orderMode]);
   const bItems = useMemo(() => (month ? bItemsAll.filter((i) => albumMonthKey(i.album) === month) : bItemsAll), [bItemsAll, month]);
   const bMonths = useMemo(() => [...new Set(bItemsAll.map((i) => albumMonthKey(i.album)))].sort().reverse(), [bItemsAll]);
   const cards = useMemo(() => browseAlbums(albums ?? [], tab, query, albumSort, (id) => brands.find((b) => b.id === id)?.name ?? null), [albums, tab, query, albumSort, brands]);
@@ -404,7 +418,7 @@ export function SampleImagesPage() {
   const allOn = list.length > 0 && list.every((p) => sel.has(p.id));
   // ลากกรอบจากที่ว่าง = เลือกหลายรูป + การ์ดอัลบั้มย่อย (เจ้าของขอ 2026-11-17 · ของกลาง lib/use-marquee-select) · id = "p:<รูป>" / "a:<อัลบั้ม>"
   const mq = useMarqueeSelect({
-    disabled: !album || organize,
+    disabled: (!album && !massMode) || organize,
     getSelected: () => [...[...sel].map((id) => `p:${id}`), ...[...selAlbums].map((id) => `a:${id}`)],
     setSelected: (ids) => {
       setSel(new Set(ids.filter((x) => x.startsWith("p:")).map((x) => x.slice(2))));
@@ -607,6 +621,43 @@ export function SampleImagesPage() {
     });
   };
 
+  // ── 🔗 Mass: เชื่อมหลายอัลบั้มกับสินค้าเดียว (กดสินค้า / ลากสินค้ามาวาง) + ย้อนกลับ ──
+  const [productOver, setProductOver] = useState<string | null>(null);
+  const massLink = async (ids: string[], code: string) => {
+    const before = ids.map((id) => { const a = albums?.find((x) => x.id === id); return { id, p: a?.parent_sku_codes ?? [], s: a?.sku_codes ?? [] }; });
+    try {
+      const out = new Map<string, { parent_sku_codes: string[]; sku_codes: string[] }>();
+      for (const id of ids) out.set(id, await linkAlbumProduct(id, [code], []));
+      setAlbums((as) => as && as.map((a) => (out.has(a.id) ? { ...a, ...out.get(a.id)! } : a)));
+      setSelAlbums(new Set());
+      toast.action(t(`เชื่อม ${ids.length} อัลบั้มกับ ${code} แล้ว`, `Linked ${ids.length} album(s) to ${code}`), t("ย้อนกลับ", "Undo"), () => void (async () => {
+        for (const b of before) await linkAlbumProduct(b.id, b.p, b.s);
+        setAlbums((as) => as && as.map((a) => { const b = before.find((x) => x.id === a.id); return b ? { ...a, parent_sku_codes: b.p, sku_codes: b.s } : a; }));
+        pushToast("success", t("ย้อนกลับแล้ว", "Undone"));
+      })(), { ms: 10000 });
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
+  /** การ์ดอัลบั้มรับการลากสินค้า (โหมด Mass) — รวมกับตัวรับลากอื่นของการ์ด */
+  const withProductDrop = (a: SampleAlbum, inner: { onDragOver?: (e: React.DragEvent<HTMLElement>) => void; onDragLeave?: (e: React.DragEvent<HTMLElement>) => void; onDrop?: (e: React.DragEvent<HTMLElement>) => void }) => {
+    if (!massMode) return inner;
+    const isProd = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes(PRODUCT_DRAG);
+    return {
+      onDragOver: (e: React.DragEvent<HTMLElement>) => { if (isProd(e)) { e.preventDefault(); e.stopPropagation(); if (productOver !== a.id) setProductOver(a.id); return; } inner.onDragOver?.(e); },
+      onDragLeave: (e: React.DragEvent<HTMLElement>) => { setProductOver((x) => (x === a.id ? null : x)); inner.onDragLeave?.(e); },
+      onDrop: (e: React.DragEvent<HTMLElement>) => { if (isProd(e)) { e.preventDefault(); e.stopPropagation(); setProductOver(null); const code = e.dataTransfer.getData(PRODUCT_DRAG); if (code) void massLink(selAlbums.has(a.id) ? [...selAlbums] : [a.id], code); return; } inner.onDrop?.(e); },
+    };
+  };
+  // ── ↕ ลากสลับจัดเรียง (หน้าแบรนด์): เลื่อนอัลบั้มก่อน/หลัง แล้วบันทึกลำดับทั้งแบรนด์ ──
+  const shiftBrandAlbum = (id: string, d: -1 | 1) => {
+    const ids = bItemsAll.flatMap((i) => (i.kind === "album" ? [i.album.id] : []));
+    const at = ids.indexOf(id), to = at + d;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    const next = [...ids]; [next[at], next[to]] = [next[to], next[at]];
+    const pos = new Map(next.map((x, i) => [x, i + 1]));
+    setAlbums((as) => as && as.map((a) => (pos.has(a.id) ? { ...a, sort_order: pos.get(a.id)! } : a)));
+    void reorderAlbumsFlat(next).catch((e) => { pushToast("error", (e as Error).message); void reload(albumId); });
+  };
+
   /** ปล่อยบนรูป: ขอบซ้าย/ขวา = สลับลำดับ · กลาง = รวมเป็นอัลบั้มใหม่ (แบบเดิม) */
   const photoDrop = (id: string) => {
     const zoneHere = (e: React.DragEvent): DropZone => (canReorder ? zoneOf(e) : "merge");
@@ -666,10 +717,12 @@ export function SampleImagesPage() {
           </>
         )}
         {canEdit && albums && (
-          <button type="button" onClick={() => setOrganizeStep(!organize)}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${organize ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
-            <span aria-hidden>⇆</span>{organize ? t("ปิดจัดเรียง", "Close organizer") : t("จัดเรียง 2 ฝั่ง", "Two-pane organizer")}
-          </button>
+          <div role="radiogroup" aria-label={t("โหมด", "Mode")} className="inline-flex max-w-full flex-wrap overflow-hidden rounded-lg border border-slate-200 text-[12.5px]">
+            {([["normal", "ปกติ", "Normal"], ["reorder", "↕ ลากสลับจัดเรียง", "↕ Reorder"], ["two", "⇆ จัดเรียง 2 ฝั่ง", "⇆ Two panes"], ["mass", "🔗 ใส่ SKU แบบ Mass", "🔗 Mass link"]] as const).map(([k, th, en]) => (
+              <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => setMode(k)}
+                className={`h-9 px-3 ${mode === k ? "bg-violet-600 font-medium text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>{t(th, en)}</button>
+            ))}
+          </div>
         )}
         <a href="/master/design-dashboard" target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:external-link" />Design Dashboard</a>
       </div>
@@ -867,25 +920,25 @@ export function SampleImagesPage() {
                         </label>
                       )}
                       {canReorder && shownChildren.length > 1 && (
-                        <button type="button" onClick={() => setOrderMode((v) => !v)}
+                        <button type="button" onClick={() => setMode(orderMode ? "normal" : "reorder")}
                           className={`inline-flex h-7 items-center gap-1 rounded-md border px-2.5 ${orderMode ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
                           {orderMode ? t("✓ เสร็จ", "✓ Done") : t("↕ โหมดจัดลำดับ", "↕ Reorder")}</button>
                       )}
                       {orderMode && <span className="text-slate-500">{t("ลากการ์ดสลับ หรือกด ← → · บันทึกทันที", "Drag cards or use ← → · saved right away")}</span>}
                     </div>
                     <div className="grid max-sm:!grid-cols-2" style={gridStyle} {...compactAttr}>
-                      {shownChildren.map((c, ci) => (<Fragment key={c.id}>
+                      {shownChildren.filter((c) => !(massMode && massOnly && (c.parent_sku_codes ?? []).length)).map((c, ci) => (<Fragment key={c.id}>
                         {subSort === "parent" && !orderMode && (ci === 0 || parentGroupOf(shownChildren[ci - 1]) !== parentGroupOf(c)) && (
                           <div className="col-span-full mt-1 border-b border-dashed border-slate-200 pb-0.5 text-[12px] font-semibold text-slate-500">
                             {parentGroupOf(c) || t("ยังไม่เชื่อมสินค้า", "No product linked")} <span className="font-normal text-slate-400">{shownChildren.filter((x) => parentGroupOf(x) === parentGroupOf(c)).length}</span>
                           </div>
                         )}
-                        <SampleAlbumCard sub album={c} order={ci + 1} bigOrder={orderMode} onLink={canEdit ? () => setLinkTarget(c) : undefined}
+                        <SampleAlbumCard sub album={c} order={ci + 1} bigOrder={orderMode} onLink={canEdit ? () => setLinkTarget(c) : undefined} onLinkChip={massMode ? () => setChipFor(c) : undefined}
                           onShift={orderMode ? (d) => { const nb = shownChildren[ci + d]; if (nb) void moveAlbumOrder(c.id, nb.id, d < 0 ? "before" : "after"); } : undefined}
-                          selected={selAlbums.has(c.id)} onOpen={() => (orderMode ? undefined : selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}`}
+                          selected={selAlbums.has(c.id)} onOpen={() => (orderMode ? undefined : massMode || selAlbums.size ? toggleAlbum(c.id) : void openAlbum(c.id))} highlight={overKey === `al:${c.id}` || productOver === c.id}
                           edge={overKey === `alo:${c.id}:before` ? "before" : overKey === `alo:${c.id}:after` ? "after" : null}
                           dropLabel={cardDropLabel(c)}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...withFileDrop(c.id, subAlbumDrop(c)), ...selAttr(`a:${c.id}`) }}
+                          extra={{ ...dragProps(() => ({ kind: "album", id: c.id })), ...withProductDrop(c, withFileDrop(c.id, subAlbumDrop(c))), ...selAttr(`a:${c.id}`) }}
                           menu={canEdit ? [
                             { label: t(`ย้ายออก 1 ชั้น (ไป ${upTarget(c) ? nameOf(upTarget(c)) : "ชั้นบนสุด"})`, "Move up one level"), icon: "i:arrow-back-up",
                               onClick: () => moveAlbum(c.id, upTarget(c) ?? null) },
@@ -957,7 +1010,7 @@ export function SampleImagesPage() {
                   {!bItems.length ? <EmptyState icon={<Icon value="i:folder" />} className="p-8" title={t("ยังไม่มีอัลบั้มในแบรนด์นี้", "No albums in this brand yet")} hint={canUpload ? t("ลากรูปมาวางด้านบน ระบบสร้างอัลบั้มให้เอง", "Drop photos above — an album is created for you") : undefined} />
                   : (
                     <div style={albumGrid.gridStyle} {...albumGrid.compactAttr} className="max-sm:!grid-cols-2 max-[419px]:!grid-cols-1">
-                      {bItems.map((it, i) => it.kind === "loose" ? (
+                      {bItems.filter((it) => !(massMode && (it.kind === "loose" || (massOnly && (it.album.parent_sku_codes ?? []).length)))).map((it, i, arr) => it.kind === "loose" ? (
                         <button key={`l:${it.album.id}`} type="button" onClick={() => void openAlbum(it.album.id)} {...withFileDrop(it.album.id, dropOnAlbumCard(it.album))}
                           className={`relative overflow-hidden rounded-xl border-2 border-dashed bg-white text-left transition hover:shadow-md ${overKey === `al:${it.album.id}` || cardDropLabel(it.album) ? "border-emerald-400" : "border-amber-300"}`}>
                           {cardDropLabel(it.album) && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{cardDropLabel(it.album)}</span>}
@@ -968,15 +1021,17 @@ export function SampleImagesPage() {
                           </div>
                         </button>
                       ) : (
-                        <SampleAlbumCard key={it.album.id} sub album={it.album} order={i + 1 - bItems.filter((x) => x.kind === "loose").length}
+                        <SampleAlbumCard key={it.album.id} sub album={it.album} order={i + 1 - arr.filter((x) => x.kind === "loose").length} bigOrder={orderMode}
+                          onShift={orderMode ? (d) => shiftBrandAlbum(it.album.id, d) : undefined}
+                          selected={selAlbums.has(it.album.id)} onLinkChip={massMode ? () => setChipFor(it.album) : undefined}
                           dateTag={it.day ? albumCardLabel(it.day) : thaiShortDate(new Date(it.album.created_at))}
-                          onOpen={() => void openAlbum(it.album.id)} highlight={overKey === `al:${it.album.id}`} dropLabel={cardDropLabel(it.album)}
+                          onOpen={() => (orderMode ? undefined : massMode ? toggleAlbum(it.album.id) : void openAlbum(it.album.id))} highlight={overKey === `al:${it.album.id}` || productOver === it.album.id} dropLabel={cardDropLabel(it.album)}
                           onLink={canEdit ? () => setLinkTarget(it.album) : undefined}
                           menu={canEdit ? [
                             { label: (it.album.parent_sku_codes ?? []).length ? t("แก้การเชื่อมสินค้า", "Edit product link") : t("เชื่อมสินค้า", "Link product"), icon: "i:link", onClick: () => setLinkTarget(it.album) },
                             { label: isAutoAlbumName(it.album.name) ? t("ตั้งชื่อ", "Name it") : t("เปลี่ยนชื่อ", "Rename"), icon: "i:pencil", onClick: () => void renameById(it.album.id, isAutoAlbumName(it.album.name) ? "" : it.album.name, null) },
                           ] : undefined}
-                          extra={{ ...dragProps(() => ({ kind: "album", id: it.album.id })), ...withFileDrop(it.album.id, dropOnAlbumCard(it.album)) }} />
+                          extra={{ ...(orderMode ? {} : dragProps(() => ({ kind: "album", id: it.album.id }))), ...withProductDrop(it.album, withFileDrop(it.album.id, dropOnAlbumCard(it.album))), ...selAttr(`a:${it.album.id}`) }} />
                       ))}
                     </div>
                   )}
@@ -995,7 +1050,7 @@ export function SampleImagesPage() {
           </>
         )}
 
-      <BulkActionBar count={selected.length + selAlbums.size}
+      <BulkActionBar count={massMode ? 0 : selected.length + selAlbums.size}
         unit={selAlbums.size && !selected.length ? t("อัลบั้ม", "albums") : selAlbums.size ? t("รายการ", "items") : t("รูป", "images")}
         onClear={() => { setSel(new Set()); setSelAlbums(new Set()); }}>
         {selAlbums.size > 0 && canEdit && (
@@ -1034,6 +1089,18 @@ export function SampleImagesPage() {
       {/* ดูรูปใหญ่: เลื่อนซ้าย/ขวา (ลูกศร · ปัดนิ้ว) · ซูม · แถบรูปเล็ก — ของกลาง ImageLightbox */}
       <ImageLightbox index={viewAt} onClose={() => setViewAt(-1)} onIndex={setViewAt} thumbnails
         images={list.map((p) => ({ url: sampleImgUrl(p.r2_key), thumbUrl: sampleImgUrl(p.r2_key, 240), label: p.file_name }))} />
+
+      {/* 🔗 ใส่ SKU แบบ Mass: แผงสินค้า + ติ๊ก SKU ลูก */}
+      {massMode && !organize && (() => {
+        const pool = album ? children : bItemsAll.flatMap((i) => (i.kind === "album" ? [i.album] : []));
+        return <MassLinkPanel brandId={album ? album.brand_id : tab === ALL || tab === NONE ? null : tab} selectedCount={selAlbums.size}
+          linked={pool.filter((a) => (a.parent_sku_codes ?? []).length).length} total={pool.length}
+          onlyUnlinked={massOnly} onOnlyUnlinked={setMassOnly} onClose={() => setMode("normal")}
+          onPick={(item) => { if (!selAlbums.size) { pushToast("info", t("เลือกอัลบั้มก่อน แล้วค่อยกดสินค้า", "Select albums first")); return; } void massLink([...selAlbums], item.code); }} />;
+      })()}
+      <SkuChipsDialog open={!!chipFor} albumName={chipFor ? nameOf(chipFor) : ""} parentCode={chipFor?.parent_sku_codes?.[0] ?? null} skuCodes={chipFor?.sku_codes ?? []}
+        onClose={() => setChipFor(null)}
+        onSave={async (skus) => { if (!chipFor?.parent_sku_codes?.[0]) return; const id = chipFor.id; const r = await linkAlbumProduct(id, chipFor.parent_sku_codes, skus); setAlbums((as) => as && as.map((a) => (a.id === id ? { ...a, ...r } : a))); pushToast("success", t("บันทึก SKU ลูกแล้ว", "Child SKUs saved")); }} />
 
       <AlbumDropDialog src={albumDrop?.src ?? null} dst={albumDrop?.dst ?? null} nameOf={(a) => nameOf(a)} onClose={() => setAlbumDrop(null)}
         onMerge={() => { const x = albumDrop; setAlbumDrop(null); if (x) mergeAlbums(x.src, x.dst); }}

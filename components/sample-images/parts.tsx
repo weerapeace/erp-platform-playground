@@ -104,7 +104,7 @@ function NoteMark({ note }: { note: string }) {
 
 /** การ์ดอัลบั้ม ปกรวมรูป (ของกลาง AlbumCover แบบ C) — หน้าแฟ้ม (ชื่อ = วันที่/ชื่อจริง + แบรนด์) หรือ sub = อัลบั้มย่อย (ไอคอนแฟ้ม + ชื่อ)
  *  highlight = ไฮไลต์ตอนลากผ่าน · extra = props ลาก-วางจากหน้าเจ้าของ */
-export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel, order, bigOrder, onShift, dateTag, onLink }: {
+export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, inside, edge, selected, menu, dropLabel, order, bigOrder, onShift, dateTag, onLink, onLinkChip }: {
   album: SampleAlbum; brand?: SampleBrand | null; onOpen: () => void; sub?: boolean; highlight?: boolean; extra?: CardExtra;
   /** ถูกเลือกอยู่ (ลากกรอบเลือก) — กรอบม่วง + ติ๊ก */
   selected?: boolean;
@@ -125,6 +125,8 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
   dateTag?: string | null;
   /** กดคำว่า "ยังไม่เชื่อมสินค้า" = เปิดหน้าเชื่อมสินค้า */
   onLink?: () => void;
+  /** กดชื่อสินค้าที่เชื่อมแล้ว (โหมด Mass) = ติ๊ก SKU ลูก */
+  onLinkChip?: () => void;
 }) {
   const t = useT();
   const a = album;
@@ -154,6 +156,9 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
           <Icon value="i:folder" />{auto && !link && onLink
             ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onLink(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onLink(); } }}
                 className="min-w-0 flex-1 truncate font-normal text-violet-600 hover:underline">{t("＋ เชื่อมสินค้า", "＋ Link product")}</span>
+            : auto && link && onLinkChip
+            ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onLinkChip(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onLinkChip(); } }}
+                title={t("กดเพื่อติ๊ก SKU ลูก", "Click to pick child SKUs")} className="min-w-0 flex-1 truncate text-teal-700 underline decoration-dotted underline-offset-2">{link}</span>
             : <span className={`min-w-0 flex-1 truncate ${auto && !link ? "font-normal text-slate-400" : ""}`}>{auto ? (link ?? t("ยังไม่เชื่อมสินค้า", "No product linked")) : a.name}</span>}
           {!!menu?.length && (
             // ปุ่ม ⋯ อยู่ในการ์ด (ที่เป็นปุ่ม) → หยุดคลิกไม่ให้เปิดอัลบั้ม · แผงอยู่ใน portal แต่คลิกยังไหลถึงการ์ด จึงหยุดที่แผงด้วย
