@@ -34,7 +34,7 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const p = FLOW_PALETTE[color];
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
-  const frameless = n.type === "file" || !!place;
+  const frameless = n.type === "file" || n.type === "text" || !!place;
   const labelHtml = `<div style="width:100%;text-align:${n.type === "note" || n.type === "page" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
   const col = (inner: string, gap = 4) => `<div style="display:flex;flex-direction:column;align-items:center;gap:${gap}px;width:100%">${inner}</div>`;
   const icons = flowIconSizes(n);   // ไอคอนโตตามกล่อง — สูตรเดียวกับบนจอ

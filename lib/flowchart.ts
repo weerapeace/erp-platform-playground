@@ -10,7 +10,8 @@ import { cleanExtList } from "./file-types";
 import { isPlaceKey, storagePlaceOf } from "./storage-places";
 import { isAppKey, isErpPageHref } from "./menu-pages";
 
-export const FLOW_KINDS = ["start", "step", "question", "storage", "file", "folder", "page", "note", "zone"] as const;
+/** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
+export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "zone"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -30,7 +31,8 @@ export const FLOW_PALETTE: Record<FlowColor, { stroke: string; fill: string; tex
 /** ค่าเริ่มต้นของกล่องแต่ละชนิด (ขนาด/สี/ข้อความ/ไอคอนปุ่ม) */
 export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: FlowColor; th: string; en: string; hintTh: string; hintEn: string; icon: string }> = {
   start:    { w: 160, h: 56,  color: "slate",   th: "เริ่ม / จบ",   en: "Start / end", hintTh: "จุดเริ่มหรือจุดจบของขั้นตอน", hintEn: "Where the flow starts or ends", icon: "i:player-play" },
-  step:     { w: 170, h: 64,  color: "slate",   th: "ขั้นตอน",      en: "Step",        hintTh: "สิ่งที่ต้องทำ 1 อย่าง", hintEn: "One thing to do", icon: "i:list" },
+  step:     { w: 170, h: 64,  color: "slate",   th: "กล่อง",        en: "Box",         hintTh: "กล่องข้อความ / ขั้นตอน 1 อย่าง", hintEn: "A box — one step or idea", icon: "i:square" },
+  text:     { w: 180, h: 40,  color: "slate",   th: "ข้อความ",      en: "Text",        hintTh: "ตัวหนังสืออิสระ ไม่มีกรอบ — ดับเบิลคลิกพิมพ์", hintEn: "Free text without a box — double-click to type", icon: "i:typography" },
   question: { w: 190, h: 104, color: "amber",   th: "คำถาม ใช่/ไม่ใช่", en: "Yes/no question", hintTh: "แยกทาง — ลากเส้นออก 2 เส้น ระบบใส่ ใช่ / ไม่ใช่ ให้", hintEn: "Branch — draw 2 lines out, labelled yes / no", icon: "i:help-circle" },
   storage:  { w: 180, h: 96,  color: "violet",  th: "ที่เก็บ",      en: "Storage",     hintTh: "ที่เก็บไฟล์/ข้อมูล เช่น R2 · Supabase · Drive", hintEn: "Where files/data live, e.g. R2 · Supabase · Drive", icon: "i:database" },
   file:     { w: 200, h: 120, color: "slate",   th: "ไฟล์",         en: "File",        hintTh: "ประเภทไฟล์ เช่น JPG · CR2 · PSD · AI · PDF (เลือกได้หลายชนิด)", hintEn: "File types, e.g. JPG · CR2 · PSD · AI · PDF (pick several)", icon: "i:files" },

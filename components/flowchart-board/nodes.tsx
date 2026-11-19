@@ -232,7 +232,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
   }
 
   // กล่องไฟล์ + ที่เก็บแบบมีไอคอน = ไม่มีกรอบ (ไอคอน + ชื่อ) · ที่เก็บไม่มีไอคอน = ทรงกระบอกเดิม
-  const frameless = kind === "file" || !!place;
+  const frameless = kind === "file" || kind === "text" || !!place;
   const boxStyle: React.CSSProperties =
     kind === "question" || kind === "storage" || frameless ? {}
     : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
