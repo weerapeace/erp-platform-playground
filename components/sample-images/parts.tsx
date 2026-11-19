@@ -139,27 +139,9 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
       {bar}
       {selected && <span className="absolute right-1.5 top-1.5 z-10 rounded-full bg-white text-xl text-violet-600"><Icon value="i:circle-check" /></span>}
       {dropLabel && <span className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-emerald-500/85 p-2 text-center text-[13px] font-semibold text-white">{dropLabel}</span>}
-      <div className="relative overflow-hidden rounded-t-xl"><AlbumCover keys={a.preview_keys} total={a.deep.photos} />
-        {order !== undefined && <span className={`absolute left-1.5 top-1.5 rounded-lg bg-violet-600 font-bold tabular-nums text-white shadow ${bigOrder ? "px-2.5 py-1 text-lg" : "px-1.5 text-[12px]"}`}>#{order}</span>}
-        {onShift && (
-          <span className="absolute bottom-1.5 right-1.5 flex gap-1" onClick={(e) => e.stopPropagation()}>
-            {([-1, 1] as const).map((d) => (
-              <span key={d} role="button" tabIndex={0} aria-label={d < 0 ? t("เลื่อนไปก่อน", "Move earlier") : t("เลื่อนไปหลัง", "Move later")}
-                onClick={() => onShift(d)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onShift(d); } }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-base font-bold text-violet-700 shadow hover:bg-violet-50">{d < 0 ? "←" : "→"}</span>
-            ))}
-          </span>
-        )}
-      </div>
-      <div className="space-y-1 p-2.5">
-        <div className="flex items-center gap-1 text-[13px] font-medium text-slate-800">
-          <Icon value="i:folder" />{auto && !link && onLink
-            ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onLink(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onLink(); } }}
-                className="min-w-0 flex-1 truncate font-normal text-violet-600 hover:underline">{t("＋ เชื่อมสินค้า", "＋ Link product")}</span>
-            : auto && link && onLinkChip
-            ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onLinkChip(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onLinkChip(); } }}
-                title={t("กดเพื่อติ๊ก SKU ลูก", "Click to pick child SKUs")} className="min-w-0 flex-1 truncate text-teal-700 underline decoration-dotted underline-offset-2">{link}</span>
-            : <span className={`min-w-0 flex-1 truncate ${auto && !link ? "font-normal text-slate-400" : ""}`}>{auto ? (link ?? t("ยังไม่เชื่อมสินค้า", "No product linked")) : a.name}</span>}
+      {/* หัวการ์ด: ชื่ออัลบั้ม (ระบบตั้งเอง = "อัลบั้ม #n" จาง) + เมนู ⋮ — เจ้าของขอ 2026-11-19 "ชื่อไปอยู่ข้างบน · ข้างล่างโชว์ Parent SKU + เชื่อม" */}
+      <div className="flex items-center gap-1 px-2.5 pb-1.5 pt-2 text-[13px] font-medium text-slate-800">
+        <Icon value="i:folder" /><span className={`min-w-0 flex-1 truncate ${auto ? "font-normal text-slate-400" : ""}`} title={a.name}>{auto ? t(`อัลบั้ม #${order}`, `Album #${order}`) : a.name}</span>
           {!!menu?.length && (
             // ปุ่ม ⋯ อยู่ในการ์ด (ที่เป็นปุ่ม) → หยุดคลิกไม่ให้เปิดอัลบั้ม · แผงอยู่ใน portal แต่คลิกยังไหลถึงการ์ด จึงหยุดที่แผงด้วย
             <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="shrink-0">
@@ -174,13 +156,37 @@ export function SampleAlbumCard({ album, brand, onOpen, sub, highlight, extra, i
               </Popover>
             </span>
           )}
+      </div>
+      <div className="relative overflow-hidden"><AlbumCover keys={a.preview_keys} total={a.deep.photos} />
+        {order !== undefined && <span className={`absolute left-1.5 top-1.5 rounded-lg bg-violet-600 font-bold tabular-nums text-white shadow ${bigOrder ? "px-2.5 py-1 text-lg" : "px-1.5 text-[12px]"}`}>#{order}</span>}
+        {onShift && (
+          <span className="absolute bottom-1.5 right-1.5 flex gap-1" onClick={(e) => e.stopPropagation()}>
+            {([-1, 1] as const).map((d) => (
+              <span key={d} role="button" tabIndex={0} aria-label={d < 0 ? t("เลื่อนไปก่อน", "Move earlier") : t("เลื่อนไปหลัง", "Move later")}
+                onClick={() => onShift(d)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onShift(d); } }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-base font-bold text-violet-700 shadow hover:bg-violet-50">{d < 0 ? "←" : "→"}</span>
+            ))}
+          </span>
+        )}
+      </div>
+      <div className="space-y-1 p-2.5">
+        {/* สินค้าที่เชื่อม (Parent SKU) — ยังไม่เชื่อม = "+ เชื่อม" */}
+        <div className="flex min-w-0 items-center gap-1 text-[12.5px]">
+          {link
+            ? <span role={onLinkChip || onLink ? "button" : undefined} tabIndex={onLinkChip || onLink ? 0 : undefined}
+                onClick={onLinkChip || onLink ? (e) => { e.stopPropagation(); (onLinkChip ?? onLink)!(); } : undefined}
+                title={onLinkChip ? t("กดเพื่อติ๊ก SKU ลูก", "Click to pick child SKUs") : onLink ? t("กดเพื่อแก้การเชื่อมสินค้า", "Click to edit the product link") : undefined}
+                className="inline-flex min-w-0 max-w-full items-center gap-1 truncate rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-800 hover:bg-violet-200"><Icon value="i:link" /><span className="truncate">{link}</span></span>
+            : onLink
+            ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); onLink(); }} onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onLink(); } }}
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-violet-300 px-2 py-0.5 text-violet-700 hover:bg-violet-50">{t("＋ เชื่อมสินค้า", "＋ Link product")}</span>
+            : <span className="text-slate-400">{t("ยังไม่เชื่อมสินค้า", "No product linked")}</span>}
         </div>
         <div className="gallery-label flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500">
           <span className="inline-flex items-center gap-1"><Icon value="i:photo" />{a.deep.photos}</span>
           {a.deep.sub_count > 0 && <span className="inline-flex items-center gap-1"><Icon value="i:folder" />{a.deep.sub_count}</span>}
           {a.note && <NoteMark note={a.note} />}
           {a.deep.sent > 0 && <span className="inline-flex h-5 items-center rounded-full bg-emerald-50 px-1.5 text-emerald-700">{t(`ส่งเข้าใบงาน ${a.deep.sent}`, `${a.deep.sent} in sheets`)}</span>}
-          {link && !auto && <span className="inline-flex h-5 max-w-full items-center gap-0.5 truncate rounded-full bg-violet-100 px-1.5 text-violet-800"><Icon value="i:link" />{link}</span>}
           {dateTag && <span className="inline-flex h-5 items-center rounded-full bg-slate-100 px-1.5 text-slate-600">{t(`ลง ${dateTag}`, `Added ${dateTag}`)}</span>}
         </div>
       </div>

@@ -504,6 +504,24 @@ export function SampleImagesPage() {
     const name = subNameFor(album);
     await act(async () => { const r = await createSubAlbum(album.id, name, ids, album.id); setChooser(null); return t(`สร้างอัลบั้มใหม่แล้ว${r.moved ? ` · ย้าย ${r.moved} รูปเข้าไป` : ""}`, "Album created"); }, album.id);
   };
+  // สร้างอัลบั้มจากรูปที่เลือก "ไว้ข้างนอก" (ระดับเดียวกับอัลบั้มที่เปิด · เจ้าของขอ 2026-11-19) — ย้อนกลับ = รูปกลับมา + ลบอัลบั้มใหม่
+  const createOutside = async (ids: string[]) => {
+    if (!album || !ids.length) return;
+    const host = album.parent_id ? albums?.find((a) => a.id === album.parent_id) ?? null : null;
+    const from = album.id;
+    let made: { id: string; name: string } | null = null;
+    await act(async () => {
+      const name = host ? subNameFor(host) : nextProductName(albums ?? [], album.brand_id);
+      made = await createSubAlbum(host ? host.id : album.id, name, ids, from);
+      if (!host) await moveAlbumTo(made.id, null);   // อัลบั้มที่เปิดอยู่ชั้นบนสุด = อัลบั้มใหม่ไปชั้นบนสุดด้วย
+      setSel(new Set());
+      return t(`สร้างอัลบั้มใหม่ข้างนอกแล้ว · ย้าย ${ids.length} รูปไป`, `New album created outside with ${ids.length} photo(s)`);
+    }, from, async () => {
+      if (!made) return;
+      await movePhotosTo(ids, made.id, from);
+      await deleteEmptyAlbum(made.id);
+    });
+  };
   const movePhotos = (ids: string[], to: SampleAlbum) => {
     if (!album || !ids.length || to.id === album.id) return;
     const from = album.id;
@@ -1060,6 +1078,7 @@ export function SampleImagesPage() {
         {!trashView && !selAlbums.size && (
           <>
             {album && canUpload && <button type="button" onClick={() => void createSub(selected.map((p) => p.id))} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:folders" />{!isDayAlbum(album) ? t("สร้าง Version จากที่เลือก", "New version from selection") : t("สร้างอัลบั้มจากที่เลือก", "New album from selection")}</button>}
+            {album && canUpload && !isDayAlbum(album) && <button type="button" onClick={() => void createOutside(selected.map((p) => p.id))} disabled={busy} title={t("สร้างอัลบั้มใหม่ระดับเดียวกับอัลบั้มนี้ แล้วย้ายรูปที่เลือกไปไว้", "New album next to this one with the selected photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("สร้างอัลบั้มไว้ข้างนอก", "New album outside")}</button>}
             {album && canEdit && <button type="button" onClick={() => setChooser("photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายไปอัลบั้ม…", "Move to album…")}</button>}
             {canMove && <button type="button" onClick={() => setPicking(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:arrow-right" />{t("ส่งไป Design Dashboard", "Send to Design Dashboard")}</button>}
             {canDelete && <button type="button" onClick={() => setAskDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon value="i:trash" />{t("ลบ (ไปถังขยะ)", "Delete (to trash)")}</button>}
