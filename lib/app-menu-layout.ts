@@ -14,7 +14,8 @@
  */
 
 export type AppMenuPlace = "bar" | "more" | "hidden";
-export type AppMenuOverride = { section?: string; label?: string; sort?: number; place?: "more" | "hidden" };
+/** label_en / section_en / counter = ชื่อ EN ในแอปนี้ + ตัวนับงานค้าง (ตั้งจากแอปพนักงาน — lib/staff-apps) */
+export type AppMenuOverride = { section?: string; label?: string; sort?: number; place?: "more" | "hidden"; label_en?: string; section_en?: string; counter?: string };
 export type AppOverrides = Record<string, AppMenuOverride>;
 /** ค่าที่หน้าตั้งค่าส่งมาเปลี่ยน — place "bar" = ล้างออก (กลับไปอยู่บนแถบ) */
 export type AppMenuOverrideSet = { sort?: number; place?: AppMenuPlace };

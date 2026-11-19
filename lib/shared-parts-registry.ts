@@ -883,6 +883,22 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่ใช้ StandaloneShell หรือเปลือกของตัวเอง (เปลือกหลักกันให้อยู่แล้ว)",
   },
   {
+    key: "staff-app-home", label: "หน้าแรกแอปพนักงาน (ปุ่มเมนูใหญ่)", code: "StaffAppHome · useStaffAppPrefs", category: "layout",
+    source: { path: "components/staff-app-home" },
+    what: "หน้าแรกของแอปพนักงาน: ปุ่มเมนูใหญ่จัดตามหัวข้อ (มือถือ 2 คอลัมน์) · ค้นหาเมนู · ปักโปรด/ใช้ล่าสุดรายคน · TH/EN",
+    when: "แอปเดี่ยว /app/<key> ที่เป็นแอปพนักงาน + ตัวอย่างหน้าจอในตัวช่วยสร้างแอป",
+    notWhen: "หน้ารวมทุกแอป (/apps launcher) · แถบเมนูของแอปหลัก (เชลล์แอปเดี่ยวจัดให้แล้ว)",
+    doc: "staff-apps.md",
+  },
+  {
+    key: "staff-app-builder", label: "ตัวช่วยสร้างแอปพนักงาน", code: "StaffAppBuilder · StaffAppCreateModal · StaffAppTrash · lib/staff-apps", category: "feature",
+    source: { path: "components/staff-app-builder" },
+    what: "สร้างแอปให้พนักงาน 3 ขั้น (ชื่อ+ไอคอน+สี → ติ๊ก/ลากเรียงเมนู ตั้งชื่อเฉพาะแอป 2 ภาษา → ใครเห็น) · แม่แบบ/คัดลอก · ร่าง→เผยแพร่ · ประวัติเวอร์ชัน · ถังขยะแอป",
+    when: "สร้าง/แก้แอปพนักงาน (อยู่ใน /admin/app-manager)",
+    notWhen: "จัดเมนูของแอปหลักเดิม (ใช้ AppSettingsPanel) · แก้ชื่อเมนูกลาง (/admin/menu)",
+    doc: "staff-apps.md",
+  },
+  {
     key: "master-page", label: "ตัวช่วยสร้างหน้าข้อมูลหลัก", code: "MasterPage", category: "layout",
     source: { path: "components/master-page" },
     what: "สร้างหน้ารายการ + ฟอร์มจากทะเบียน field ในไม่กี่บรรทัด (ห่อ MasterCRUD ให้)",

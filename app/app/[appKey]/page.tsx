@@ -7,7 +7,7 @@
  * หมายเหตุ: /app/china-pay มีหน้า custom เฉพาะ (route นั้นชนะ dynamic นี้)
  */
 import { LoadingState } from "@/components/state-views";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -18,7 +18,10 @@ import { PwaInstallButton } from "@/components/pwa-install-button";
 import { InstallHereBanner } from "@/components/install-app";
 import { appIconSrc } from "@/components/device-view";
 import { NotificationBell } from "@/components/notification-bell";
-import { LangToggle } from "@/components/i18n";
+import { LangToggle, useLang } from "@/components/i18n";
+import { StaffAppHome, useStaffAppPrefs } from "@/components/staff-app-home";
+import { appLabelFor, appMenuLabel, appMenuSection } from "@/lib/staff-apps";
+import { Icon } from "@/components/icon";
 import { AccountMenu } from "@/components/account-menu";
 import { appHeaderStyle } from "@/lib/app-header-theme";
 import { GlobalSearch } from "@/components/global-search";
@@ -46,7 +49,7 @@ function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
   }
   return <span className={`text-xl flex-shrink-0`}>{it.icon ?? "•"}</span>;
 }
-type AppGroup = { id?: string; menu_more_label?: string | null; key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
+type AppGroup = { id?: string; kind?: string | null; label_en?: string | null; menu_more_label?: string | null; key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
 // ไอคอนแอป: รูปอัปโหลด (icon_url) > emoji
 function AppIcon({ app, size = 22 }: { app: AppGroup | null; size?: number }) {
   if (app?.icon_url) {
@@ -64,8 +67,16 @@ export default function StandaloneApp() {
   const searchScope = getSearchScope(appKey)?.key;
   const { user, ready, can, permsReady } = useAuth();
   const [app, setApp] = useState<AppGroup | null>(null);
-  const [items, setItems] = useState<MenuItem[]>([]);
+  const [rawItems, setItems] = useState<MenuItem[]>([]);
+  // 🌐 ชื่อเมนู/หัวข้อตามภาษา — EN ที่ตั้งไว้ในแอปนี้ (แอปพนักงาน · lib/staff-apps) · ไม่ได้ตั้ง = ชื่อไทย
+  const { lang } = useLang();
+  const items = useMemo(() => (lang === "en"
+    ? rawItems.map((m) => ({ ...m, label: appMenuLabel(m, appKey, "en"), section: appMenuSection(m, appKey, "en") }))
+    : rawItems), [rawItems, lang, appKey]);
   const [active, setActive] = useState(0);
+  // 📱 แอปพนักงาน: หน้าแรกเป็นปุ่มเมนูใหญ่ (components/staff-app-home) — กดเมนูแล้วเปิดหน้า · ปุ่ม 🏠 กลับหน้าแรก
+  const [home, setHome] = useState(true);
+  const staffPrefs = useStaffAppPrefs(appKey);
   // คงหน้าที่เปิดอยู่ไว้ตาม id ตอนรายการเมนูคำนวณใหม่ (สิทธิ์จริงมาทีหลัง / บันทึกตั้งค่า)
   const itemsRef = useRef<MenuItem[]>([]);
   itemsRef.current = items;
@@ -153,11 +164,11 @@ export default function StandaloneApp() {
         let goIdx = -1;
         if (go) its.forEach((m, i) => { const b = base(m.href); if (b !== "/" && base(go).startsWith(b) && (goIdx < 0 || b.length > base(its[goIdx].href).length)) goIdx = i; });
         if (go && goIdx >= 0) {
-          setActive(goIdx); setDeepSrc(go); lastSavedRef.current = go;
+          setActive(goIdx); setDeepSrc(go); lastSavedRef.current = go; setHome(false);
           try { sessionStorage.setItem(`appdeep:${appKey}`, go); } catch { /* noop */ }
           try { window.history.replaceState(null, "", `/app/${appKey}`); } catch { /* noop */ }
         }
-        else if (saved && deepIdx >= 0) { setActive(deepIdx); setDeepSrc(saved); lastSavedRef.current = saved; }
+        else if (saved && deepIdx >= 0) { setActive(deepIdx); setDeepSrc(saved); lastSavedRef.current = saved; setHome(false); }
         else if (ag?.default_href) { const i = its.findIndex((m) => m.href === ag.default_href); if (i >= 0) setActive(i); }
       }
       initedRef.current = true;
@@ -203,7 +214,7 @@ export default function StandaloneApp() {
     let idx = -1;
     items.forEach((m, i) => { const b = base(m.href); if (b !== "/" && base(path).startsWith(b) && (idx < 0 || b.length > base(items[idx].href).length)) idx = i; });
     if (idx < 0) return false;
-    setSettingsOn(false); setMoreOpen(false); setActive(idx); setDeepSrc(path); setGoNonce((n) => n + 1);
+    setSettingsOn(false); setMoreOpen(false); setHome(false); setActive(idx); setDeepSrc(path); setGoNonce((n) => n + 1);
     lastSavedRef.current = path;
     try { sessionStorage.setItem(`appdeep:${appKey}`, path); } catch { /* noop */ }
     return true;
@@ -235,10 +246,24 @@ export default function StandaloneApp() {
     </Center>
   );
 
+  // แอปพนักงานที่ไม่อยู่ในรายชื่อของคนนี้ / ยังเป็นร่าง / อยู่ถังขยะ → รายชื่อแอปไม่ส่งมา (lib/staff-apps appVisibleTo) = เข้าไม่ได้
+  //   (แอปหลักเดิมอยู่ในรายชื่อเสมอ — ไม่กระทบ)
+  if (!app && !loadErr) return (
+    <Center>
+      <div className="mb-2 text-4xl text-slate-400"><Icon name="lock" /></div>
+      <div className="text-slate-700 font-medium mb-1">{lang === "en" ? "This app isn't available to you" : "คุณยังเข้าแอปนี้ไม่ได้"}</div>
+      <div className="text-slate-400 text-sm mb-3 max-w-xs">{lang === "en" ? "It may not be published yet, or you're not on its list. Ask your admin." : "แอปอาจยังไม่เผยแพร่ หรือคุณไม่ได้อยู่ในรายชื่อผู้ใช้แอปนี้ — ติดต่อแอดมิน"}</div>
+      <Link href="/apps" className="h-10 px-5 leading-10 bg-slate-100 text-slate-700 rounded-lg font-medium">{lang === "en" ? "← All apps" : "← กลับหน้ารวมแอป"}</Link>
+    </Center>
+  );
+
+  const isStaff = app?.kind === "staff";
+  const appTitle = app ? appLabelFor(app, lang) : appKey;
   const cur = items[active];
   const canAdmin = can("admin.users");
   const showSettings = settingsOn && canAdmin;
-  const activeId = showSettings ? undefined : cur?.id;
+  const showHome = isStaff && home && !showSettings;
+  const activeId = showSettings || showHome ? undefined : cur?.id;
   // ---- เมนูซ้อนชั้น (nested / dropdown) ----
   // เมนูหลัก = ไม่มีแม่ หรือแม่ไม่อยู่ในลิสต์ (เช่นแม่ถูกซ่อน) · ลูก = จัดตาม parent_id
   const idInList = new Set(items.map((it) => it.id));
@@ -270,7 +295,7 @@ export default function StandaloneApp() {
   const onBar = barItems.some((it) => it.id === activeId || kidsOf(it.id).some((k) => k.id === activeId));
 
   // กดเมนู → ไปหน้าหลักของเมนูนั้น (ล้างหน้าลึกที่จำไว้)
-  const goto = (i: number) => { setSettingsOn(false); setActive(i); setDeepSrc(null); lastSavedRef.current = ""; try { sessionStorage.removeItem(`appdeep:${appKey}`); } catch { /* noop */ } setMoreOpen(false); };
+  const goto = (i: number) => { setSettingsOn(false); setHome(false); if (isStaff && items[i]) staffPrefs.pushRecent(items[i].id); setActive(i); setDeepSrc(null); lastSavedRef.current = ""; try { sessionStorage.removeItem(`appdeep:${appKey}`); } catch { /* noop */ } setMoreOpen(false); };
   // หน้า custom โหลดผ่าน iframe → ส่ง embed=1 ให้ shell ในหน้านั้นซ่อน sidebar/แถบ App ของตัวเอง (กันเมนูซ้อน)
   // ถ้ามีหน้าลึกที่จำไว้และเป็นของเมนูนี้ → เปิดหน้าลึกนั้น (กัน refresh เด้งหน้าแรก)
   const baseHref = cur ? cur.href.split("?")[0] : "";
@@ -292,8 +317,18 @@ export default function StandaloneApp() {
             <button onClick={() => setMoreOpen(true)} aria-label="เปิดเมนู"
               className="md:hidden flex items-center justify-center h-9 w-9 -ml-1 rounded-lg hover:bg-white/15 text-xl flex-shrink-0">☰</button>
           )}
-          <AppIcon app={app} size={24} />
-          <div className="font-semibold text-lg truncate flex-shrink-0 max-w-[40vw] md:max-w-none">{app?.label ?? appKey}</div>
+          {/* แอปพนักงาน: แตะไอคอน/ชื่อแอป = กลับหน้าแรก (ปุ่มเมนูใหญ่) */}
+          {isStaff ? (
+            <button type="button" onClick={() => { setSettingsOn(false); setHome(true); setMoreOpen(false); }} title={lang === "en" ? "Home" : "หน้าแรกของแอป"}
+              className={`flex min-w-0 items-center gap-2 rounded-lg px-1 py-0.5 hover:bg-white/15 ${showHome ? "" : "pr-2"}`}>
+              {!showHome && <Icon name="home" size={18} />}
+              <AppIcon app={app} size={24} />
+              <span className="font-semibold text-lg truncate max-w-[40vw] md:max-w-none">{appTitle}</span>
+            </button>
+          ) : (<>
+            <AppIcon app={app} size={24} />
+            <div className="font-semibold text-lg truncate flex-shrink-0 max-w-[40vw] md:max-w-none">{appTitle}</div>
+          </>)}
 
           {/* เมนูเป็นแท็บบนแถบ (จอกว้าง) — เลื่อนได้ถ้าเยอะ · เมนูแม่กดเปิด dropdown */}
           {topLevel.length > 0 && (
@@ -415,7 +450,12 @@ export default function StandaloneApp() {
             onSaved={() => setMenuRev((n) => n + 1)} />
         ) : (() => {
           const content = (<>
-        {moduleKey ? (
+        {showHome ? (
+          <StaffAppHome
+            items={items.map((it) => ({ id: it.id, label: it.label, section: it.section ?? "", icon: it.icon, icon_url: it.icon_url }))}
+            onOpen={(id) => { const i = items.findIndex((m) => m.id === id); if (i >= 0) goto(i); }}
+            favs={staffPrefs.favs} recent={staffPrefs.recent} onToggleFav={staffPrefs.toggleFav} />
+        ) : moduleKey ? (
           <div className="flex-1 overflow-y-auto">
             <ShellPresentContext.Provider value={true}>
               <MasterPage key={moduleKey} apiPath={moduleKey} moduleKey={moduleKey} title={cur!.label} icon={cur!.icon ?? "🧩"} />
@@ -458,7 +498,8 @@ export default function StandaloneApp() {
 
       {/* มือถือ: แถบเมนูล่าง (iPad ซ่อน เพราะใช้ ☰ drawer แทน) · เมนูแม่แตะ = เปิด drawer เลือกลูก
           หน้าที่มีแถบล่างของตัวเอง (pageOwnsBar) = ไม่โชว์แถบนี้ → เมนูแอปเปิดจาก ☰ บนหัว (เจ้าของสั่ง 2026-11-11) */}
-      {topLevel.length > 0 && !pageOwnsBar && !pageFull && (
+      {/* แอปพนักงานไม่มีแถบล่าง — หน้าแรกคือที่เลือกเมนู (แตะชื่อแอป = กลับหน้าแรก · ☰ = รายการเมนู) */}
+      {topLevel.length > 0 && !pageOwnsBar && !pageFull && !isStaff && (
         <nav className="md:hidden flex-shrink-0 bg-white border-t border-slate-200 grid z-20"
           style={{ gridTemplateColumns: `repeat(${barCols}, minmax(0,1fr))`, paddingBottom: "env(safe-area-inset-bottom)" }}>
           {barItems.map((it) => {
@@ -491,12 +532,18 @@ export default function StandaloneApp() {
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
             {/* หัว — ชื่อแอป + ปิด (แอปเดี่ยว: โชว์เฉพาะเมนูของแอปนี้ ไม่มีทางออกไปแอปอื่น) */}
             <div className="flex-shrink-0 bg-white px-3 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
-              <div className="font-semibold text-slate-800 truncate px-1">{app?.icon ?? "🧩"} {app?.label ?? "เมนูทั้งหมด"}</div>
+              <div className="font-semibold text-slate-800 truncate px-1">{app?.icon ?? "🧩"} {app ? appTitle : "เมนูทั้งหมด"}</div>
               <button onClick={closeDrawer} aria-label="ปิด" className="text-slate-400 text-xl leading-none px-2">✕</button>
             </div>
 
             {/* เนื้อหา — รายการเมนูของแอปนี้ (เมนูแม่โชว์เป็นหัวข้อ + ลูกย่อหน้าเข้า) · เมนูที่รวมไว้อยู่ใต้หัวข้อ "เพิ่มเติม" */}
             <div className="flex-1 overflow-y-auto p-2">
+              {isStaff && (
+                <button onClick={() => { setSettingsOn(false); setHome(true); closeDrawer(); }}
+                  className={`w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 ${showHome ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  <span className="w-6 text-center text-lg"><Icon name="home" /></span><span className="truncate">{lang === "en" ? "Home" : "หน้าแรก"}</span>
+                </button>
+              )}
               {[...barTop, ...(moreTop.length ? [null] : []), ...moreTop].map((it) => {
                 if (!it) return (
                   <div key="__more" className="mt-2 border-t border-slate-100 px-3 pt-3 pb-1 text-xs font-semibold text-slate-400">⋯ {moreLabel}</div>

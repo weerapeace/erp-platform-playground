@@ -7,6 +7,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { authCacheHeaders } from "@/lib/auth-cache-headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { appVisibleTo } from "@/lib/staff-apps";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,7 +25,18 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabaseFromRequest(request)
     .from("erp_app_groups").select("*").order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data ?? [], error: null }, { headers: authCacheHeaders(request) });
+  // ร่างของแอปพนักงานไม่ส่งออกที่นี่ (ดู/แก้ผ่าน /api/staff-apps เท่านั้น)
+  let rows = ((data ?? []) as Record<string, unknown>[]).map(({ draft: _d, ...a }) => { void _d; return a; });
+  // แอปพนักงาน (lib/staff-apps): ร่าง / ถังขยะ = เห็นเฉพาะแอดมิน · ที่เผยแพร่แล้วเห็นตาม audience
+  //   แอปหลักเดิมไม่กระทบ — ถามว่าใครดูอยู่เฉพาะตอนมีแถวที่ต้องกรอง (ไม่เพิ่มงานให้ทุกคำขอ)
+  if (rows.some((a) => a.kind === "staff" || a.deleted_at)) {
+    const sb = supabaseFromRequest(request);
+    const { data: { user } } = await sb.auth.getUser();
+    const { data: prof } = user ? await sb.from("user_profiles").select("role").eq("id", user.id).maybeSingle() : { data: null };
+    const viewer = user ? { id: user.id, role: (prof as { role?: string } | null)?.role ?? null } : null;
+    rows = rows.filter((a) => appVisibleTo(a as Parameters<typeof appVisibleTo>[0], viewer));
+  }
+  return NextResponse.json({ data: rows, error: null }, { headers: authCacheHeaders(request) });
 }
 
 export async function POST(request: NextRequest) {
