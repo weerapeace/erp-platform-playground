@@ -7,12 +7,14 @@ import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { AppAccessGate } from "@/components/app-access-gate";
+import { useFullWidthAppAttr } from "@/lib/use-full-width-app";
 
 type Cat = { id: string; name: string; path: string };
 type Attr = { name: string; label: string; required: boolean; input_type: string; is_sale_prop: boolean; options: string[] };
 type Brand = { id: string; name: string };
 
 export default function LazadaCategoriesPage() {
+  const fullWidth = useFullWidthAppAttr();   // เปิดจากแอปช่องทางขาย = เต็มความกว้าง
   const [brands, setBrands] = useState<Brand[]>([]);
   const [brandId, setBrandId] = useState("");
   const [cached, setCached] = useState(0);
@@ -59,7 +61,7 @@ export default function LazadaCategoriesPage() {
 
   return (
     <AppAccessGate appKey="master">
-    <div className="max-w-5xl mx-auto p-6">
+    <div className="max-w-5xl mx-auto p-6" {...fullWidth}>
       <h1 className="text-xl font-semibold text-slate-900 mb-1">🛒 หมวดหมู่ + คุณสมบัติ Lazada</h1>
       <p className="text-sm text-slate-500 mb-4">ดึงหมวดหมู่ของ Lazada มาไว้ก่อน → ค้นหาหมวดที่จะลงสินค้า → ดูว่าหมวดนั้นบังคับกรอกอะไรบ้าง (ฐานสำหรับระบบลงสินค้า Lazada)</p>
 

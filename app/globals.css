@@ -22,6 +22,13 @@
 }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 
+/* แอปเต็มจอ (FULL_WIDTH_APPS ใน components/playground-shell.tsx · 2026-11-19 แอปช่องทางขาย)
+   ปลดความกว้างสูงสุดของ "กล่องบนสุดของหน้า" ที่ตั้ง max-w-* ไว้เอง · มือถือ: ขอบซ้ายขวาเหลือ 12px */
+[data-app-wide] > [class*="max-w-"], [class*="max-w-"][data-app-wide] { max-width: none !important; }
+@media (max-width: 639px) {
+  [data-app-wide] > [class*="max-w-"], [class*="max-w-"][data-app-wide] { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+}
+
 body {
   font-family: 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

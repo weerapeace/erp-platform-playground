@@ -20,6 +20,7 @@ import { BackButton } from "@/components/back-button";
 import { formatDateTime } from "@/lib/date";
 import { platformShopUrl } from "@/lib/platform-links";
 import { LazadaAppPanel } from "./lazada-app-panel";
+import { useFullWidthAppAttr } from "@/lib/use-full-width-app";
 
 type Platform ={ id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null; hidden?: boolean; shop_count?: number };
@@ -240,6 +241,7 @@ function Note({ tone = "warn", children }: { tone?: "warn" | "bad"; children: Re
 }
 
 export default function PlatformAccountsPage() {
+  const fullWidth = useFullWidthAppAttr();   // เปิดจากแอปช่องทางขาย = เต็มความกว้าง
   const { can } = useAuth();
   const canManage = can("products.platforms.manage_accounts");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -820,7 +822,7 @@ export default function PlatformAccountsPage() {
 
   return (
     <AppAccessGate appKey="master">
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8" {...fullWidth}>
       {/* ── หัวหน้า: ชื่อ + สรุป · ขวา = เลือกแบรนด์ ── */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">

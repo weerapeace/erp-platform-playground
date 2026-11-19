@@ -26,7 +26,7 @@ import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
 import { appHomeHref, appPickState, choosePageApp, visibleAppMenus } from "@/lib/app-orbit";
-import { clearAppPick, initialActiveApp, pendingAppPick, pickActiveApp, rememberLastApp, setTabActiveApp } from "@/lib/active-app";
+import { clearAppPick, initialActiveApp, isFullWidthApp, pendingAppPick, pickActiveApp, rememberLastApp, setTabActiveApp } from "@/lib/active-app";
 import { Icon } from "@/components/icon";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 
@@ -458,6 +458,9 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
   const [activeApp, setActiveAppState] = useState<string | null>(null);
+  // แอปเต็มจอ (รายการ FULL_WIDTH_APPS ใน lib/active-app) → ใส่ data-app-wide ที่กล่องเนื้อหา · CSS ใน app/globals.css ปลด max-w ของกล่องบนสุดของหน้า
+  //   ทำงานเฉพาะตอนเปิดจากแอปในรายการ (หน้าที่ใช้ร่วมกับแอปอื่น เปิดจากแอปอื่น = กว้างเท่าเดิม)
+  const wideAttr = isFullWidthApp(activeApp) ? { "data-app-wide": "" } : {};
   // ผู้ใช้เข้าแอปนี้ได้ไหม (ไม่ล็อก หรือมีสิทธิ์)
   const canOpenApp = (k: string): boolean => {
     const ag = appGroups.find((a) => a.key === k);
@@ -698,7 +701,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   // embed mode (เปิดในกรอบแอปเดี่ยว) — โชว์แค่เนื้อหา ไม่มี sidebar/แถบ App (เมนูมาจากเชลล์แอปเดี่ยวแทน)
   if (embed) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-slate-50" {...wideAttr}>
         <ShellPresentContext.Provider value={true}>
           {blockedAppLabel
             ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
@@ -876,7 +879,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
             <a href="/apps" className="ml-auto px-3 py-2.5 text-xs text-slate-400 hover:text-slate-700 whitespace-nowrap">⊞ ทุก App</a>
           </div>
         )}
-        <div className="flex-1">
+        <div className="flex-1" {...wideAttr}>
           <ShellPresentContext.Provider value={true}>
             {blockedAppLabel
               ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />

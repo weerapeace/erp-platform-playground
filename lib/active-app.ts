@@ -16,6 +16,12 @@
 import { APP_PICK_TTL_MS, hrefPath, type AppPick } from "@/lib/app-orbit";
 
 const LS_KEY = "erp-active-app";
+
+/** แอปที่ทุกหน้า "เต็มความกว้างจอ" (เจ้าของสั่ง 2026-11-19 แอปช่องทางขาย) — ตั้งที่นี่ที่เดียว
+ *  เชลล์ใส่ data-app-wide ให้หน้าในเชลล์ · หน้าที่ไม่มีเชลล์ใช้ useFullWidthAppAttr (lib/use-full-width-app) · CSS อยู่ app/globals.css
+ *  แอปอื่นอยากเต็มจอ = เพิ่ม key ของแอป (ตาม erp_menu_items.app_keys) */
+export const FULL_WIDTH_APPS: readonly string[] = ["marketplace"];
+export const isFullWidthApp = (key: string | null | undefined): boolean => !!key && FULL_WIDTH_APPS.includes(key);
 let tabApp: string | null = null;
 let pending: AppPick | null = null;
 
