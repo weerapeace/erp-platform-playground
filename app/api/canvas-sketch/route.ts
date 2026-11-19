@@ -28,6 +28,8 @@ const PERM: Record<string, { view: string; edit: string }> = {
   creative_trend:   { view: "tasks.view",    edit: "tasks.edit" },
   // กระดานแผนงานทีม (หน้า /tasks/plan มุมมอง "กระดาน" · entity_id="main" กระดานเดียวทั้งทีม) — สิทธิ์เดียวกับแผนงาน
   team_plan_board:  { view: "tasks.view",    edit: "tasks.edit" },
+  // โหมด "ผังระบบ" ของกระดานแผนงาน (entity_id = key แท็บผัง) — ที่วาดเสริม/ตำแหน่งกล่องที่ย้าย แยกจากหน้าแผนผังการทำงาน
+  team_plan_flow:   { view: "tasks.view",    edit: "tasks.edit" },
   // กระดานแคนวาสของบอร์ดจ่ายงาน (1 กระดาน = 1 แผนจ่ายงาน) — ใครดู/แก้สินค้าได้ ก็วาดบนกระดานได้
   // (การย้ายงานเข้าโต๊ะจริง ๆ ยังต้องผ่าน API แผนจ่ายงานที่ขอสิทธิ์ work_board.dispatch อีกชั้น)
   work_board:       { view: "products.view", edit: "products.edit" },

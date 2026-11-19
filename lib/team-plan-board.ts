@@ -59,12 +59,16 @@ export function boardPlanLinks(elements: El[]): { onBoard: Set<string>; links: M
   return { onBoard, links };
 }
 
-/** งานที่ต้องบันทึกรายการผูกใหม่ (เฉพาะงานที่มีการ์ดบนกระดาน และรายการไม่ตรงกับที่เก็บไว้) */
+/** ชนิดที่ผูกจากที่อื่น (ไม่ได้มาจากเส้นบนกระดานวาด) — กระดานวาดต้องเก็บไว้ ไม่ลบทิ้งตอนซิงค์เส้น
+ *  flow_node = งานเกาะกล่องในโหมด "ผังระบบ" (lib/team-plan-flow) */
+export const OFF_BOARD_LINK_KINDS = new Set(["flow_node"]);
+
+/** งานที่ต้องบันทึกรายการผูกใหม่ (เฉพาะงานที่มีการ์ดบนกระดาน และรายการไม่ตรงกับที่เก็บไว้) · ของที่ผูกจากที่อื่น (OFF_BOARD_LINK_KINDS) คงไว้เสมอ */
 export function planLinkPatches(items: { id: string; plan: { linked: PlanLinkedRef[] } }[], board: { onBoard: Set<string>; links: Map<string, PlanLinkedRef[]> }): { id: string; linked: PlanLinkedRef[] }[] {
   const out: { id: string; linked: PlanLinkedRef[] }[] = [];
   for (const t of items) {
     if (!board.onBoard.has(t.id)) continue;
-    const want = board.links.get(t.id) ?? [];
+    const want = [...(board.links.get(t.id) ?? []), ...t.plan.linked.filter((r) => OFF_BOARD_LINK_KINDS.has(r.kind))];
     if (!sameLinked(want, t.plan.linked)) out.push({ id: t.id, linked: want });
   }
   return out;

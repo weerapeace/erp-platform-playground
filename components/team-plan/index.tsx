@@ -43,7 +43,14 @@ const PlanCanvasBoard = dynamic(() => import("./board-view").then((m) => m.PlanC
   ssr: false, loading: () => <LoadingState />,
 });
 
+// โหมด "ผังระบบ" (แผนผังการทำงาน + งานเกาะกล่อง) — โหลดเฉพาะตอนเลือก
+const PlanFlowBoard = dynamic(() => import("./flow-view").then((m) => m.PlanFlowBoard), {
+  ssr: false, loading: () => <LoadingState />,
+});
+
 const VIEWS = ["priority", "matrix", "calendar", "board"] as const;
+/** แท็บ "กระดาน" มี 2 โหมด: ผังระบบ (ค่าเริ่ม · เจ้าของเลือกแบบ C 2026-11-19) · กระดานวาดอิสระ */
+const BOARD_MODES = ["flow", "draw"] as const;
 export type PlanView = (typeof VIEWS)[number];
 const SCOPES = ["all", "me"] as const;
 type Filter = "" | "star" | "waiting" | "overdue";
@@ -63,6 +70,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const [forcedView, setForcedView] = useState<PlanView | null>(initialView ?? null);
   const viewport = useViewportLayout();
   const scopePref = useViewPref<(typeof SCOPES)[number]>("team_plan_scope", SCOPES, "all");
+  const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode", BOARD_MODES, "flow");
   const view = forcedView ?? viewPref.view, scope = scopePref.view;
   const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
   const [filter, setFilter] = useState<Filter>("");
@@ -220,8 +228,18 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
       {err ? <ErrorState title="โหลดแผนงานไม่สำเร็จ" hint={err} onRetry={() => void load()} />
         : !items ? <LoadingState />
         : view === "board" ? (
-          <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}
-            onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} />
+          <div className="space-y-2">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+              <button type="button" className={seg(boardModePref.view === "flow")} onClick={() => { boardModePref.setView("flow"); void boardModePref.saveDefault("flow"); }}
+                title="แผนผังการทำงาน (ซื้อ · ผลิต · จ่ายงาน · ขาย) + เอางานไปเกาะกล่องของระบบ"><Icon name="map" /> ผังระบบ</button>
+              <button type="button" className={seg(boardModePref.view === "draw")} onClick={() => { boardModePref.setView("draw"); void boardModePref.saveDefault("draw"); }}
+                title="กระดานวาดอิสระ วางงานคู่ใบงาน / SKU / งาน / คอนเทนต์"><Icon name="magnet" /> กระดานวาด</button>
+            </div>
+            {boardModePref.view === "flow"
+              ? <PlanFlowBoard items={all} canEdit={canEdit} onOpen={setEditing} onUpsert={upsert} />
+              : <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}
+                  onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} />}
+          </div>
         )
         : all.length === 0 ? <EmptyState title="ยังไม่มีงานในแผน" hint="พิมพ์งานแรกในช่องด้านบน แล้วกด Enter — เลือกความด่วน กำหนด และคนรับผิดชอบได้" />
         : view === "calendar" ? (

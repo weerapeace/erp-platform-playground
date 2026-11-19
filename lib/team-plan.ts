@@ -88,6 +88,8 @@ export const PLAN_LINK_KINDS: Record<string, { label: string; href?: (id: string
   asset: { label: "รูปจากคลัง" },
   table: { label: "ตารางคำนวณ" },
   folder: { label: "โฟลเดอร์" },
+  // 🧭 กล่องในแผนผังการทำงาน (id = key ใน lib/flow-map FLOW_NODES) — เกาะงานกับกล่องจากโหมด "ผังระบบ" ของกระดานแผนงาน (lib/team-plan-flow)
+  flow_node: { label: "กล่องในแผนผัง", href: (id) => `/master/flow-map?node=${encodeURIComponent(id)}` },
 };
 const isInternalHref = (v: string) => v.startsWith("/") && !v.startsWith("//") && !/[\s\\]/.test(v);
 /** URL รูป: ลิงก์ในเว็บ (/api/r2-image…) หรือ https เท่านั้น · ยาวสุด 600 · อย่างอื่น = ไม่มีรูป */

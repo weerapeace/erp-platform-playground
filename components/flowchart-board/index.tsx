@@ -65,6 +65,8 @@ export type FlowLockedLayer = {
   renderBox: (id: string) => ReactNode;
   onBoxClick?: (id: string) => void;
   onLineClick?: (id: string) => void;
+  /** สั่งให้กระดานเลื่อน/ซูมไปหากล่องระบบ (n เปลี่ยน = ไปใหม่ แม้ id เดิม) — เช่น กดงานในถาดแล้วพาไปกล่องที่งานเกาะ */
+  focus?: { id: string; n: number } | null;
 };
 type BoardNode = FlowRFNode | SysRFNode | SysBgRFNode;
 const SYS_BG = "sys-bg";
@@ -640,6 +642,13 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     try { localStorage.setItem(hideKey, next ? "1" : "0"); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ }
   };
   const removeStale = () => { const s = new Set(stale); setEdges((es) => es.filter((e) => !s.has(e.id))); };
+
+  // หน้าแม่สั่งไปหากล่องระบบ (locked.focus)
+  const focusN = locked?.focus?.n ?? 0, focusId = locked?.focus?.id ?? "";
+  useEffect(() => {
+    if (!focusN || !focusId) return;
+    void rf.fitView({ nodes: [{ id: sysId(focusId) }], padding: 0.8, maxZoom: 1.2, duration: 400 });
+  }, [focusN, focusId, rf]);
 
   // ── ค้นหากล่อง + ซูมไปหา ──
   const [findQ, setFindQ] = useState("");

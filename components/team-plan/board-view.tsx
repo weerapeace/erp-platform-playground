@@ -5,7 +5,7 @@
  *   - การ์ดจากระบบอื่น = ของกลาง useCardKit (ชุดเดียวกับกระดานแคมเปญ): ใบงานออกแบบ · SKU/Parent · งาน · คอนเทนต์ · เทรนด์ · รูป · โฟลเดอร์ · ตาราง
  *     + การ์ดเฉพาะกระดานนี้: งานในแผน (team_plan) · หน้าใน ERP · โน้ตแปะ
  *   - การ์ดงานในแผน: ข้อมูลสดทุกครั้งที่เปิด + ปุ่ม "อัปเดตการ์ด" · ดับเบิลคลิก = ป๊อปงานเดิม (ติ๊กเสร็จ → ทุกมุมมองเปลี่ยน + แจ้งคนติดตาม)
- *   - ถาด "งานที่ยังไม่ได้วาง" ด้านล่าง: กด = วางกลางจอ · ลากลงกระดาน = วางตรงที่ปล่อย
+ *   - ถาดงานด้านขวา (PlanTray · 2026-11-19 ย้ายจากด้านล่าง): กด = วางกลางจอ · ลากลงกระดาน = วางตรงที่ปล่อย · มือถือ = ลิ้นชัก
  *   - 🔗 ลากเส้นจากการ์ดงาน → การ์ดอื่น = ผูกจริง (หลังกระดานบันทึก ระบบเขียน metadata.plan.linked ให้ · ลบเส้น = เลิกผูก) — ตรรกะ lib/team-plan-board
  *   - กรอบโปรเจกต์ = Section (frame) ตั้งชื่อตามแท็กที่ใช้อยู่ได้
  *   - 📋 เลือกการ์ดที่มีเช็กลิสต์ → ปุ่ม "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด (ของกลาง useChecklistExplode · ติ๊ก/เพิ่มข้อได้ · ซิงค์ตอนเปิด/อัปเดตการ์ด)
@@ -20,7 +20,7 @@ import { ToolMenu, type ToolMenuItem } from "@/components/canvas-cards/drawers";
 import { useCardKit } from "@/components/canvas-cards/use-card-kit";
 import { useChecklistExplode } from "@/components/canvas-cards/use-checklist-explode";
 import { MenuPagePickerModal } from "@/components/menu-page-picker";
-import { dueLabel, isOverdue, planCoverSource, PRIORITY_META, type PlanItem } from "@/lib/team-plan";
+import { planCoverSource, type PlanItem } from "@/lib/team-plan";
 import { patchPlanItem } from "@/lib/team-plan-client";
 import { boardPlanLinks, planLinkPatches, PLAN_CARD_KIND, TEAM_PLAN_BOARD } from "@/lib/team-plan-board";
 import { r2ImageUrl, withImageWidth } from "@/lib/r2-image";
@@ -33,6 +33,7 @@ const planCoverUrl = (t: PlanItem): string | null => {
   return "key" in s ? r2ImageUrl(s.key, 160) : withImageWidth(s.url, 160) ?? s.url;
 };
 import { AddToPlanModal } from "./add-to-plan";
+import { PlanTray, type TrayTab } from "./plan-tray";
 
 // Excalidraw ก้อนใหญ่ — โหลดเฉพาะตอนเปิดมุมมองนี้
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -73,7 +74,7 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
   const readyRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [onBoard, setOnBoard] = useState<Set<string>>(new Set());
-  const [trayOpen, setTrayOpen] = useState(true);
+  const [trayOpen, setTrayOpen] = useState(false);   // มือถือ: ลิ้นชักถาดงาน (PC โชว์คอลัมน์ขวาเสมอ)
   const [planNew, setPlanNew] = useState(false);
   const [pagePick, setPagePick] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -202,11 +203,15 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
   }, [kit, toast, checklist]);
 
   const tray = useMemo(() => trayItems.filter((t) => !onBoard.has(t.id)), [trayItems, onBoard]);
+  const trayTabs: TrayTab[] = useMemo(() => [
+    { key: "free", label: "ยังไม่ได้วาง", filter: (t) => !onBoard.has(t.id) },
+    { key: "all", label: "ทั้งหมด", filter: () => true },
+  ], [onBoard]);
   const k = kit.items;
   const ic = (name: string) => <Icon name={name} />;
   const addItems: ToolMenuItem[] = [
     { icon: ic("add"), label: "งานในแผน (สร้างใหม่)", hint: "สร้างงานใหม่ในแผน แล้ววางการ์ดเลย — โผล่ในทุกมุมมอง", onClick: () => setPlanNew(true) },
-    { icon: ic("list"), label: "งานในแผนที่มีอยู่", hint: "เปิดถาดงานที่ยังไม่ได้วาง (กด/ลากลงกระดาน)", onClick: () => setTrayOpen(true) },
+    { icon: ic("list"), label: "งานในแผนที่มีอยู่", hint: "ถาดงานด้านขวา (กด/ลากลงกระดาน) · มือถือ = เปิดลิ้นชักถาด", onClick: () => setTrayOpen(true) },
     ...(kit.canDesign ? [{ ...k.designSheet, icon: ic("design") }] : []),
     { ...k.sku, icon: ic("package") },
     { ...k.parent, icon: ic("dna") },
@@ -236,42 +241,27 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
           <Icon name="refresh" /> {refreshing ? "กำลังอัปเดต…" : "อัปเดตการ์ด"}
         </button>
         {canEdit && ready && checklist.button}
+        {canEdit && ready && (
+          <button type="button" onClick={() => setTrayOpen(true)} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 md:hidden">
+            <Icon name="list" /> งาน {tray.length}
+          </button>
+        )}
         <span className="text-[11px] text-slate-400">ดับเบิลคลิกการ์ด = เปิดดู/แก้ · ลากเส้นจากการ์ดงานไปการ์ดอื่น = ผูกงาน (ลบเส้น = เลิกผูก) · เลือกการ์ดแล้วกด "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด · ล้อเมาส์ = ซูม</span>
       </div>
 
-      <div className={`relative rounded-xl ${dragOver ? "ring-2 ring-violet-300" : ""}`}
+      <div className="flex gap-2">
+      <div className={`relative min-w-0 flex-1 rounded-xl ${dragOver ? "ring-2 ring-violet-300" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("text/plan-id")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
         <CanvasSketch entityType={TEAM_PLAN_BOARD.entityType} entityId={TEAM_PLAN_BOARD.entityId} editable={canEdit} height="calc(100vh - 260px)"
           controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onReady} onSaved={onSaved} onSelectionChange={checklist.onSelectionChange} collab stickyTop={56} />
-
-        {/* ถาด "งานที่ยังไม่ได้วาง" — ลอยด้านล่างกระดาน */}
-        {canEdit && ready && (
-          <div className="absolute inset-x-3 bottom-3 z-10 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
-            <button type="button" onClick={() => setTrayOpen((v) => !v)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs font-medium text-slate-600">
-              <span>{trayOpen ? "▾" : "▸"}</span> งานที่ยังไม่ได้วาง <span className="font-normal text-slate-400">{tray.length}</span>
-              {trayOpen && tray.length > 0 && <span className="ml-auto font-normal text-slate-400">กด = วางกลางจอ · ลากลงกระดาน = วางตรงนั้น</span>}
-            </button>
-            {trayOpen && (
-              <div className="flex gap-2 overflow-x-auto px-3 pb-2">
-                {tray.length === 0
-                  ? <p className="py-1 text-xs text-slate-400">ทุกงานในแผน (ตามตัวกรองตอนนี้) อยู่บนกระดานแล้ว</p>
-                  : tray.map((t) => (
-                    <button key={t.id} type="button" draggable onClick={() => placePlan(t)}
-                      onDragStart={(e) => { e.dataTransfer.setData("text/plan-id", t.id); e.dataTransfer.effectAllowed = "copy"; }}
-                      title={`${t.title}${t.assigned_name ? ` — ${t.assigned_name}` : ""}`}
-                      className="w-52 shrink-0 cursor-grab rounded-lg border border-l-4 border-slate-200 bg-white px-2 py-1.5 text-left hover:border-violet-300 active:cursor-grabbing"
-                      style={{ borderLeftColor: PRIORITY_META[t.priority].color }}>
-                      <span className="line-clamp-1 text-xs text-slate-800">{t.title}</span>
-                      <span className={`block text-[11px] ${isOverdue(t.due_at) ? "text-rose-600" : "text-slate-400"}`}>
-                        {t.due_at ? dueLabel(t.due_at) : "ไม่มีกำหนด"}{t.assigned_name ? ` · ${t.assigned_name}` : ""}
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            )}
-          </div>
-        )}
+      </div>
+      {/* ถาดงานด้านขวา (ของกลางในโมดูล PlanTray · ใช้ร่วมกับโหมดผังระบบ) — กด = วางกลางจอ · ลากลงกระดาน = วางตรงที่ปล่อย */}
+      {canEdit && ready && (
+        <PlanTray items={trayItems} tabs={trayTabs} title="งานในแผน" onPick={(t) => { if (!onBoard.has(t.id)) { placePlan(t); setTrayOpen(false); } }}
+          emptyText="ทุกงานในแผน (ตามตัวกรองตอนนี้) อยู่บนกระดานแล้ว" footer="กด = วางกลางจอ · ลากลงกระดาน = วางตรงนั้น"
+          mobileOpen={trayOpen} onMobileClose={() => setTrayOpen(false)} height="calc(100vh - 260px)" />
+      )}
       </div>
 
       {/* ป๊อปของชุดการ์ดกลาง (เลือก/สร้าง/เปิดดูการ์ดจากระบบอื่น) */}
