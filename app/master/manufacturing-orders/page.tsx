@@ -6,7 +6,7 @@
  * ของกลาง: DataTable(server) / ERPModal / ConfirmDialog / ComponentPicker / useToast / useAuth
  */
 import { LoadingState } from "@/components/state-views";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -30,6 +30,8 @@ import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { MoStockActions } from "@/components/mo-stock-actions";
 import { MoCreateModal } from "@/components/mo-create";
 import { familyPrintUrl } from "@/lib/family-print-url";
+import { HoverImage } from "@/components/hover-image";
+import { SectionJumpNav, SectionBlock, useSectionSpy, type JumpSection } from "@/components/section-jump-nav";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -38,11 +40,13 @@ type PreviewMat = {
   on_hand_qty: number; is_ready: boolean; purchase_override: number | null; cut_done: boolean;
   size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ทุกไซส์
   lay_note?: string | null;     // วิธีวางผ้าที่ระบบคำนวณให้ (วางผ้าให้คุ้มที่สุด)
+  image_url?: string | null;    // รูปเล็กของวัตถุดิบ (API ส่งมาให้แล้ว)
 };
 type MatRow = PreviewMat & { required: number; to_purchase: number; required_lay?: number | null; required_classic?: number | null; lay_layout?: LayLayout[] | null };
 type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null; lay_note?: string | null;
   required_lay?: number | null; required_classic?: number | null;   // ตัวเลขทั้ง 2 วิธีคิดผ้า (โชว์คู่กัน)
-  lay_layout?: LayLayout[] | null };   // ผังการวางผ้า (ป๊อป 🧵)
+  lay_layout?: LayLayout[] | null;   // ผังการวางผ้า (ป๊อป 🧵)
+  image_url?: string | null };        // รูปเล็กของวัตถุดิบ
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -138,6 +142,12 @@ export default function MoWorkspacePage() {
 
   const [ungroupedOnly, setUngroupedOnly] = useState(false);   // กรองเฉพาะใบที่ยังไม่จับกลุ่ม
   const [fabricModeBusy, setFabricModeBusy] = useState(false);   // กำลังเปลี่ยนวิธีคิดผ้า
+  // ป๊อปแก้ใบ: เมนูหัวข้อ (แบบ C) + ยุบกล่องปัญหาตอนยังว่าง
+  const [issueCount, setIssueCount] = useState<number | null>(null);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const moSecIds = form && !loadingForm ? ["mo-sec-info", "mo-sec-product", "mo-sec-note", ...(form.product_sku ? ["mo-sec-instr", "mo-sec-issues"] : []), "mo-sec-mat", ...(form.id ? ["mo-sec-wo"] : [])] : [];
+  const spy = useSectionSpy(moSecIds);
+  useEffect(() => { setIssuesOpen(false); setIssueCount(null); }, [form?.id, form?.product_sku]);
   const [layView, setLayView] = useState<{ name: string; layouts: LayLayout[] } | null>(null);   // ป๊อป "ดูผังการวางผ้า"
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -242,7 +252,7 @@ export default function MoWorkspacePage() {
           cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
           pieces: m.pieces != null ? Number(m.pieces) : null, size_label: (m.size_label as string) ?? null,
           on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override, cut_done: !!m.cut_done,
-          lay_note: (m.lay_note as string) ?? null,
+          lay_note: (m.lay_note as string) ?? null, image_url: (m.image_url as string) ?? null,
         };
       });
       const summ: SummaryMat[] = (d.summary ?? []).map((s: Record<string, unknown>, i: number) => {
@@ -254,7 +264,7 @@ export default function MoWorkspacePage() {
           material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override,
           lay_note: (s.lay_note as string) ?? null,
           required_lay: s.required_lay != null ? Number(s.required_lay) : null, required_classic: s.required_classic != null ? Number(s.required_classic) : null,
-          lay_layout: Array.isArray(s.lay_layout) ? (s.lay_layout as LayLayout[]) : null };
+          lay_layout: Array.isArray(s.lay_layout) ? (s.lay_layout as LayLayout[]) : null, image_url: (s.image_url as string) ?? null };
       });
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
@@ -320,7 +330,7 @@ export default function MoWorkspacePage() {
       const k = m.component_sku ?? `∅${i}`;
       const e = map.get(k);
       if (e) e.qty_per += m.qty_per || 0;
-      else map.set(k, { key: `a${map.size}`, id: null, component_sku: m.component_sku, component_name: m.component_name, material_type: m.material_type, uom: m.uom, qty_per: m.qty_per || 0, on_hand_qty: 0, is_ready: false, purchase_override: null });
+      else map.set(k, { key: `a${map.size}`, id: null, component_sku: m.component_sku, component_name: m.component_name, material_type: m.material_type, uom: m.uom, qty_per: m.qty_per || 0, on_hand_qty: 0, is_ready: false, purchase_override: null, image_url: m.image_url ?? null });
     });
     return [...map.values()];
   };
@@ -549,241 +559,302 @@ export default function MoWorkspacePage() {
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !canEdit} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </>}>
-        {loadingForm ? <LoadingState /> : form && (
-          <div className="space-y-2">
-            {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
-
-            {/* ใบสั่งขายที่ผูก (กติกา lib/mo-so-rule — แบรนด์ลูกค้าต้องมี) */}
-            {form.so && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5 bg-indigo-50/60 border border-indigo-100 rounded-lg text-xs text-slate-600">
-                <span>ใบสั่งขาย <a href={`/sales/orders?open=${form.so.id}`} target="_blank" rel="noopener" className="font-mono font-medium text-indigo-700 hover:underline">{form.so.order_no ?? "—"}</a></span>
-                {form.so.customer_name && <span className="min-w-0 truncate max-w-[22rem]" title={form.so.customer_name}>ลูกค้า {form.so.customer_name}</span>}
-                {form.so.customer_po_no && <span>PO <b className="font-medium text-slate-800">{form.so.customer_po_no}</b></span>}
-                {form.so.due_date && <span>ส่งลูกค้า <b className="font-medium text-indigo-700">{new Date(form.so.due_date.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}</b></span>}
-                {form.so.due_date && form.due_date && form.due_date.slice(0, 10) > form.so.due_date.slice(0, 10) && (
-                  <span className="text-rose-700">⚠ กำหนดส่งใบผลิตเลยวันส่งลูกค้า</span>
+        {loadingForm ? <LoadingState /> : form && (() => {
+          // ===== คำนวณก่อนวาด (ใช้ทั้งเมนูหัวข้อ + ตารางวัตถุดิบ) =====
+          const editable = !!form.id;  // เช็ค/ขอซื้อ ได้เฉพาะตอนเปิดใบที่บันทึกแล้ว
+          // เตือนในหน้าต่างดึง/อัพเดตสูตร ถ้าจ่ายงานไปแล้ว (ใบจ่ายงานเดิมไม่เปลี่ยนตามสูตรใหม่)
+          const woActive = woList.filter((w) => w.status !== "cancelled").length;
+          const dispatchedWarn = woActive > 0 ? `ใบนี้จ่ายงานไปแล้ว ${woActive} ใบ · วัตถุดิบในใบจ่ายงานเดิมจะไม่เปลี่ยนตามสูตรใหม่ ต้องเช็กกับหน้างานเอง` : null;
+          const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+          // แท็บสรุป: รวมต่อวัตถุดิบ · แท็บบล็อก: แยกรายบล็อก
+          const sumRows: MatRow[] = sumSource().map((s) => {
+            const required = Math.round(s.qty_per * (form.qty || 0) * 10000) / 10000;
+            const base = Math.max(0, Math.round((required - (s.on_hand_qty || 0)) * 10000) / 10000);
+            return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
+              qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
+              on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false, lay_note: s.lay_note ?? null,
+              required_lay: s.required_lay ?? null, required_classic: s.required_classic ?? null, lay_layout: s.lay_layout ?? null, image_url: s.image_url ?? null,
+              required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
+          });
+          const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
+          const blockRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * rowQty(m.size_label) * 10000) / 10000, to_purchase: 0 }));
+          // รวมต้องใช้ = 0 → เตือน (เจ้าของขอ: "รวมที่ต้องใช้ ถ้าเป็น 0 ให้เตือนด้วย") — มักเกิดจากสูตรยังไม่ใส่จำนวนต่อชิ้น หรือวัตถุดิบไม่มีหน้ากว้าง/ขนาดผืน
+          const isZero = (r: MatRow) => (form.qty || 0) > 0 && r.required <= 0;
+          const zeroCount = sumRows.filter(isZero).length;
+          const cantCalc = (r: MatRow) => r.required <= 0 && (r.cut_width ?? 0) > 0 && (r.cut_length ?? 0) > 0;
+          const bomUrl = form.product_sku ? `/master/bom?open=${encodeURIComponent(form.product_sku)}` : null;
+          const codeCol: LineColumn<MatRow> = {
+            key: "component", header: "วัตถุดิบ", minWidth: 240, sortable: true,
+            getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
+            render: (r) => <span className="flex items-center gap-2 min-w-0">
+              <HoverImage url={r.image_url} size={28} rounded="rounded-md" className="shrink-0" />
+              <span className="block min-w-0 flex-1"><span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>
+              {isZero(r) && <span className="flex flex-wrap items-center gap-1.5 text-[10px] text-rose-700">
+                <span>{cantCalc(r) ? "คิดปริมาณไม่ได้ — วัตถุดิบยังไม่มีหน้ากว้าง/ขนาดผืนเต็ม" : "ยังไม่ได้ตั้งจำนวนต่อชิ้นในสูตร"}</span>
+                {bomUrl && <a href={bomUrl} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}
+                  className="h-5 px-1.5 inline-flex items-center rounded border border-rose-200 bg-white text-rose-700 hover:bg-rose-50" title="เปิดสูตร BOM ของสินค้านี้ในแท็บใหม่ แก้แล้วกด 🔄 อัพเดตวัตถุดิบตาม BOM">ไปแก้ใน BOM ↗</a>}
+              </span>}
+              {showLayNote && r.lay_note && <span className="flex items-center gap-1 min-w-0">
+                <span className="truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>
+                {r.lay_layout && r.lay_layout.length > 0 && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setLayView({ name: `${r.component_sku ?? ""} ${r.component_name ?? ""}`.trim(), layouts: r.lay_layout! }); }}
+                    className="shrink-0 h-5 px-1.5 rounded border border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700 hover:bg-indigo-100" title="ดูภาพผังการวางผ้า">🧵 ผัง</button>
                 )}
-              </div>
-            )}
-
-            {/* ===== กล่อง 1: ข้อมูลใบ (เลขที่ · กำหนดส่ง · สถานะ) — มือถือ 2 คอลัมน์ สถานะลงแถวใหม่ ===== */}
-            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-              <div className="text-xs font-semibold text-slate-500 mb-1.5">📄 ข้อมูลใบ</div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                <div className="min-w-0">
-                  <span className="text-[11px] text-slate-500">เลขที่ MO</span>
-                  <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500 truncate">
-                    {form.id ? <code>{form.mo_no}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+              </span>}</span></span>,
+          };
+          const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
+          const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,
+            render: (r) => {
+              // มีขนาดตัดแต่ยอดเป็น 0 = ระบบคิดไม่ได้ (วัตถุดิบไม่มีหน้ากว้าง/ขนาดผืนเต็ม) → บอกตรง ๆ ดีกว่าโชว์ 0 เฉย ๆ (กฎเดียวกับ components/mo-materials)
+              if (cantCalc(r)) {
+                return <span className="block px-1 text-right text-[11px] font-semibold text-rose-700 whitespace-nowrap" title="คิดปริมาณไม่ได้ — วัตถุดิบนี้ยังไม่มี 'หน้ากว้าง' หรือ 'ขนาดผืนเต็ม' ไปใส่ที่ SKU แล้วกด 🔄 อัพเดตวัตถุดิบตาม BOM">⚠ คิดไม่ได้</span>;
+              }
+              if (isZero(r)) return <span className="block px-1 text-right font-semibold text-rose-700 tabular-nums" title="รวมต้องใช้เป็น 0 — สูตรยังไม่ได้ใส่จำนวนต่อชิ้น">⚠ 0</span>;
+              // ตัวเลขเล็กใต้ค่าจริง = "อีกวิธี" (เจ้าของขอเทียบโดยไม่ต้องกดสลับ) — โชว์เฉพาะผ้าที่คิดได้ทั้ง 2 แบบ
+              const isLay = form.fabric_calc_mode === "lay";
+              const other = isLay ? r.required_classic : r.required_lay;
+              const showOther = r.required_lay != null && r.required_classic != null && other != null && Math.abs(other - r.required) >= 0.005;
+              return <span className="block px-1 text-right tabular-nums"><span className="font-semibold text-emerald-700">{fmt(r.required)}</span>
+                {showOther && <span className="block text-[10px] text-slate-400" title={isLay ? "ถ้าคิดแบบ 📐 สูตรเดิม+เผื่อเสีย" : "ถ้าคิดแบบ ✂ วางคุ้มสุด"}>{isLay ? "📐" : "✂"} {fmt(other)}</span>}</span>;
+            } };
+          const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
+          const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
+            render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };
+          const buyCol: LineColumn<MatRow> = { key: "to_purchase", header: "ต้องขอซื้อ", width: 112, align: "right", summable: true, getValue: (r) => r.to_purchase,
+            render: (r, u) => editBuy.has(r.key)
+              ? <input type="number" min={0} step="any" value={r.to_purchase} autoFocus onChange={(e) => u({ purchase_override: Number(e.target.value) })} className={numCls} />
+              : (
+                <div className="flex items-center justify-end gap-1">
+                  <span className={`tabular-nums ${r.to_purchase > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{r.to_purchase > 0 ? fmt(r.to_purchase) : "—"}</span>
+                  <button type="button" title="แก้จำนวนที่ขอซื้อ" onClick={() => setEditBuy((s) => { const n = new Set(s); n.add(r.key); return n; })}
+                    className="shrink-0 h-6 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 rounded">✏</button>
                 </div>
-                <div className="min-w-0">
-                  <span className="text-[11px] text-slate-500">กำหนดส่ง</span>
-                  <div className="mt-0.5"><DateInput value={form.due_date} onChange={(iso) => patch({ due_date: iso })} placeholder="เลือกวันส่ง" /></div>
+              ) };
+          const readyCol: LineColumn<MatRow> = { key: "is_ready", header: "เตรียมครบ", width: 80, align: "center", getValue: (r) => (r.is_ready ? 1 : 0),
+            render: (r, u) => <input type="checkbox" checked={r.is_ready}
+              onChange={(e) => e.target.checked ? u({ is_ready: true, on_hand_qty: r.required, purchase_override: null }) : u({ is_ready: false })}
+              className="rounded border-slate-300" /> };
+          const reqMap = form.requested ?? {};
+          const orderedCol: LineColumn<MatRow> = { key: "ordered", header: "สถานะสั่งซื้อ", width: 124, align: "center", sortable: true,
+            getValue: (r) => (r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0),
+            render: (r) => {
+              const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0;
+              if (got <= 0) return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
+              const full = got >= r.to_purchase - 0.0001;
+              return <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap ${full ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>🛒 ขอแล้ว {fmt(got)}{full ? "" : " (บางส่วน)"}</span>;
+            } };
+          const sumCols: LineColumn<MatRow>[] = editable
+            ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol, orderedCol]
+            : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
+          // ยอดรวมชิ้น = ชิ้นต่อชุด × จำนวนที่สั่ง
+          const totalPcsCol: LineColumn<MatRow> = { key: "total_pieces", header: "ยอดรวมชิ้น", width: 92, align: "right", summable: true,
+            getValue: (r) => (r.pieces ?? 0) * rowQty(r.size_label),
+            render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-slate-700">{r.pieces ? fmt((r.pieces ?? 0) * rowQty(r.size_label)) : "—"}</span> };
+          const cutDoneCol: LineColumn<MatRow> = { key: "cut_done", header: "ตัดครบแล้ว", width: 84, align: "center",
+            getValue: (r) => (r.cut_done ? 1 : 0),
+            render: (r) => needsCutLine(r)
+              ? <input type="checkbox" checked={r.cut_done} disabled={!editable || !canEdit} onChange={() => toggleCutLine(r)} className="rounded border-slate-300 cursor-pointer disabled:cursor-not-allowed" />
+              : <span className="text-slate-300 text-xs">—</span> };
+          const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
+            { key: "size_label", header: "ไซส์", width: 64, sortable: true, getValue: (r) => r.size_label ?? "", render: (r) => r.size_label ? <span className="inline-block px-1.5 py-0.5 text-[11px] font-semibold bg-indigo-50 text-indigo-700 rounded">{r.size_label}</span> : <span className="text-slate-300 text-xs">ทุกไซส์</span> },
+            { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
+            { key: "cut_width", header: "กว้าง", width: 60, align: "right", getValue: (r) => r.cut_width ?? "" },
+            { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
+            { key: "pieces", header: "ชิ้น", width: 54, align: "right", getValue: (r) => r.pieces ?? "" },
+            totalPcsCol, reqCol, uomCol, cutDoneCol];
+          const needCount = sumRows.filter((r) => { const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0; return r.to_purchase - got > 0.0001; }).length;
+          const pendingStages = form.id ? STAGES.filter(([k]) => remainingOf(k) > 0).length : 0;
+
+          // ===== เมนูหัวข้อ (แบบ C: เมนูข้าง + เลื่อนยาว) =====
+          const sections: JumpSection[] = [
+            { id: "mo-sec-info", label: "ข้อมูลใบ", tone: "slate" },
+            { id: "mo-sec-product", label: "สินค้าและสูตร", tone: "blue" },
+            { id: "mo-sec-note", label: "หมายเหตุและกลุ่ม", tone: "violet" },
+            ...(form.product_sku ? [
+              { id: "mo-sec-instr", label: "รายละเอียดสั่งงาน", tone: "teal" as const },
+              { id: "mo-sec-issues", label: "ปัญหาของสินค้า", tone: "amber" as const, badge: issueCount ? { text: String(issueCount), tone: "warning" as const } : null },
+            ] : []),
+            { id: "mo-sec-mat", label: "วัตถุดิบ", tone: "emerald", badge: zeroCount > 0 ? { text: String(zeroCount), tone: "danger" } : needCount > 0 && editable ? { text: `ซื้อ ${needCount}`, tone: "warning" } : null },
+            ...(form.id ? [{ id: "mo-sec-wo", label: "ใบจ่ายงาน", tone: "indigo" as const, badge: pendingStages > 0 ? { text: String(pendingStages), tone: "warning" as const } : null }] : []),
+          ];
+          const st = STATUS[form.status] ?? STATUS.draft;
+          const dueTxt = form.due_date ? new Date(form.due_date.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : null;
+          const issuesEmpty = issueCount === 0 && !issuesOpen;
+
+          return (
+          <div>
+            {/* ===== แถบสรุปติดบนสุด (เลื่อนลงก็ยังเห็น) + เมนูหัวข้อแบบชิป (มือถือ) ===== */}
+            <div className="sticky -top-3 sm:-top-5 z-20 -mx-3 sm:-mx-6 -mt-3 sm:-mt-5 mb-3 px-3 sm:px-6 py-2 bg-white/95 backdrop-blur border-b border-slate-200 space-y-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MoThumb url={form.product_image} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-slate-800 truncate">
+                    {form.id ? <code className="font-mono">{form.mo_no}</code> : "ใบใหม่"}
+                    {form.product_sku ? <span className="font-normal text-slate-600"> · <code className="text-[11px] text-slate-400">{form.product_sku}</code> {form.product_name}</span> : <span className="font-normal text-slate-400"> · ยังไม่เลือกสินค้า</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    <b className="font-medium text-slate-700">{fmt(form.qty || 0)}</b> ชิ้น
+                    {form.bom_version ? <> · สูตร {form.bom_version}</> : null}
+                    {" · "}ส่ง {dueTxt ? <b className="font-medium text-slate-700">{dueTxt}</b> : <span className="text-amber-700">ยังไม่ตั้ง</span>}
+                  </div>
                 </div>
-                <label className="block col-span-2 sm:col-span-1 min-w-0">
-                  <span className="text-[11px] text-slate-500">สถานะ</span>
-                  <select value={form.status} onChange={(e) => patch({ status: e.target.value })}
-                    className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </label>
+                <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
               </div>
-            </section>
+              <SectionJumpNav variant="chips" className="md:hidden" sections={sections} activeId={spy.activeId} onJump={spy.jump} />
+            </div>
 
-            {/* ===== กล่อง 2: สินค้าและสูตร ===== */}
-            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-2">
-              <div className="text-xs font-semibold text-slate-500">📦 สินค้าและสูตร</div>
-              <div>
-                <span className="text-[11px] text-slate-500">สินค้าที่ผลิต</span>
-                <div className="mt-0.5"><ComponentPicker sku={form.product_sku} name={form.product_name} imageKey={form.product_image}
-                  placeholder="— เลือกสินค้าที่ผลิต —" onPick={(c) => onPickProduct(c.code, c.name, c.image_key)} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block min-w-0">
-                  <span className="text-[11px] text-slate-500">จำนวนผลิต{form.sizes.length > 0 ? " (รวมไซส์)" : ""}</span>
-                  <input type="number" min={0} step="any" value={form.qty} onChange={(e) => patch({ qty: Number(e.target.value) })}
-                    readOnly={form.sizes.length > 0} title={form.sizes.length > 0 ? "คิดจากผลบวกจำนวนต่อไซส์ด้านล่าง" : undefined}
-                    className={`w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${form.sizes.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
-                </label>
-                <div className="min-w-0">
-                  <span className="text-[11px] text-slate-500">สูตร (BOM)</span>
-                  <select value={form.bom_id ?? ""} onChange={(e) => e.target.value && selectVersion(e.target.value)}
-                    className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    {(versions.length === 0 || !form.bom_id) && <option value="">{versions.length === 0 ? "— ไม่มีสูตร —" : "— ยังไม่ได้เลือกสูตร —"}</option>}
-                    {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}</option>)}
-                  </select>
-                </div>
+            <div className="md:grid md:grid-cols-[156px_minmax(0,1fr)] md:gap-4">
+              <div className="hidden md:block">
+                <SectionJumpNav sections={sections} activeId={spy.activeId} onJump={spy.jump} className="sticky top-12" />
               </div>
 
-            {/* กลุ่ม C: จำนวนต่อไซส์ (ถ้าสูตรมีไซส์) */}
-            {form.sizes.length > 0 && (
-              <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
-                <div className="text-[11px] font-medium text-slate-600 mb-1.5">📏 จำนวนต่อไซส์ <span className="text-slate-400 font-normal">(สูตรนี้มีไซส์ — กรอกจำนวนที่จะผลิตแต่ละไซส์)</span></div>
-                <div className="flex flex-wrap gap-2">
-                  {form.sizes.map((s) => (
-                    <label key={s.label} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
-                      <span className="text-xs font-medium text-slate-600 min-w-[2rem]">{s.label}</span>
-                      <input type="number" min={0} step="any" value={form.size_qty[s.label] ?? ""} onChange={(e) => setSizeQty(s.label, Number(e.target.value))} placeholder="0"
-                        className="w-16 h-7 px-1.5 text-sm text-right border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
-                    </label>
-                  ))}
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1.5">รวม <b className="text-slate-700">{fmt(form.qty)}</b> ชิ้น · วัตถุดิบที่ผันตามไซส์จะถูกแตกตัด/พิมพ์แยกตามไซส์</div>
-              </div>
-            )}
-            </section>
+              <div className="min-w-0 space-y-3">
+                {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
-            {/* ===== กล่อง 3: หมายเหตุและกลุ่ม ===== */}
-            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-2">
-              <div className="text-xs font-semibold text-slate-500">📝 หมายเหตุและกลุ่ม</div>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">หมายเหตุ</span>
-                <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </label>
-              {/* กลุ่มใบสั่งงาน — เฉพาะใบที่บันทึกแล้ว (มีเลขใบ) */}
-              {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
-            </section>
-
-            {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} onAfterBomEdit={() => refresh()} />}
-
-            {/* รายการปัญหาของสินค้า (ผูก Parent SKU — โชว์ปัญหาที่เคยเกิด, เพิ่มได้) */}
-            {form.product_sku && (
-              <div className="rounded-lg border border-slate-200 bg-white p-3">
-                <ParentIssuesPanel sku={form.product_sku} editable={canEdit} bare />
-              </div>
-            )}
-
-            {/* preview/checklist กางสูตร — 2 แท็บ */}
-            {(() => {
-              const editable = !!form.id;  // เช็ค/ขอซื้อ ได้เฉพาะตอนเปิดใบที่บันทึกแล้ว
-              // เตือนในหน้าต่างดึง/อัพเดตสูตร ถ้าจ่ายงานไปแล้ว (ใบจ่ายงานเดิมไม่เปลี่ยนตามสูตรใหม่)
-              const woActive = woList.filter((w) => w.status !== "cancelled").length;
-              const dispatchedWarn = woActive > 0 ? `ใบนี้จ่ายงานไปแล้ว ${woActive} ใบ · วัตถุดิบในใบจ่ายงานเดิมจะไม่เปลี่ยนตามสูตรใหม่ ต้องเช็กกับหน้างานเอง` : null;
-              const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-              // แท็บสรุป: รวมต่อวัตถุดิบ · แท็บบล็อก: แยกรายบล็อก
-              const sumRows: MatRow[] = sumSource().map((s) => {
-                const required = Math.round(s.qty_per * (form.qty || 0) * 10000) / 10000;
-                const base = Math.max(0, Math.round((required - (s.on_hand_qty || 0)) * 10000) / 10000);
-                return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
-                  qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
-                  on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false, lay_note: s.lay_note ?? null,
-                  required_lay: s.required_lay ?? null, required_classic: s.required_classic ?? null, lay_layout: s.lay_layout ?? null,
-                  required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
-              });
-              const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
-              const blockRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * rowQty(m.size_label) * 10000) / 10000, to_purchase: 0 }));
-              const codeCol: LineColumn<MatRow> = {
-                key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
-                getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
-                render: (r) => <span className="block min-w-0"><span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>
-                  {showLayNote && r.lay_note && <span className="flex items-center gap-1 min-w-0">
-                    <span className="truncate text-[10px] text-indigo-600" title={r.lay_note}>✂ {r.lay_note}</span>
-                    {r.lay_layout && r.lay_layout.length > 0 && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); setLayView({ name: `${r.component_sku ?? ""} ${r.component_name ?? ""}`.trim(), layouts: r.lay_layout! }); }}
-                        className="shrink-0 h-5 px-1.5 rounded border border-indigo-200 bg-indigo-50 text-[10px] text-indigo-700 hover:bg-indigo-100" title="ดูภาพผังการวางผ้า">🧵 ผัง</button>
-                    )}
-                  </span>}</span>,
-              };
-              const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
-              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required,
-                render: (r) => {
-                  // มีขนาดตัดแต่ยอดเป็น 0 = ระบบคิดไม่ได้ (วัตถุดิบไม่มีหน้ากว้าง/ขนาดผืนเต็ม) → บอกตรง ๆ ดีกว่าโชว์ 0 เฉย ๆ (กฎเดียวกับ components/mo-materials)
-                  if (r.required <= 0 && (r.cut_width ?? 0) > 0 && (r.cut_length ?? 0) > 0) {
-                    return <span className="block px-1 text-right text-[11px] text-amber-700 whitespace-nowrap" title="คิดปริมาณไม่ได้ — วัตถุดิบนี้ยังไม่มี 'หน้ากว้าง' หรือ 'ขนาดผืนเต็ม' ไปใส่ที่ SKU แล้วกด 🔄 อัพเดตวัตถุดิบตาม BOM">⚠ คิดไม่ได้</span>;
-                  }
-                  // ตัวเลขเล็กใต้ค่าจริง = "อีกวิธี" (เจ้าของขอเทียบโดยไม่ต้องกดสลับ) — โชว์เฉพาะผ้าที่คิดได้ทั้ง 2 แบบ
-                  const isLay = form.fabric_calc_mode === "lay";
-                  const other = isLay ? r.required_classic : r.required_lay;
-                  const showOther = r.required_lay != null && r.required_classic != null && other != null && Math.abs(other - r.required) >= 0.005;
-                  return <span className="block px-1 text-right tabular-nums"><span className="font-semibold text-emerald-700">{fmt(r.required)}</span>
-                    {showOther && <span className="block text-[10px] text-slate-400" title={isLay ? "ถ้าคิดแบบ 📐 สูตรเดิม+เผื่อเสีย" : "ถ้าคิดแบบ ✂ วางคุ้มสุด"}>{isLay ? "📐" : "✂"} {fmt(other)}</span>}</span>;
-                } };
-              const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
-              const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
-                render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };
-              const buyCol: LineColumn<MatRow> = { key: "to_purchase", header: "ต้องขอซื้อ", width: 112, align: "right", summable: true, getValue: (r) => r.to_purchase,
-                render: (r, u) => editBuy.has(r.key)
-                  ? <input type="number" min={0} step="any" value={r.to_purchase} autoFocus onChange={(e) => u({ purchase_override: Number(e.target.value) })} className={numCls} />
-                  : (
-                    <div className="flex items-center justify-end gap-1">
-                      <span className={`tabular-nums ${r.to_purchase > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{r.to_purchase > 0 ? fmt(r.to_purchase) : "—"}</span>
-                      <button type="button" title="แก้จำนวนที่ขอซื้อ" onClick={() => setEditBuy((s) => { const n = new Set(s); n.add(r.key); return n; })}
-                        className="shrink-0 h-6 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 rounded">✏</button>
+                {/* ===== ข้อมูลใบ (เลขที่ · กำหนดส่ง · สถานะ) + ใบสั่งขายที่ผูก ===== */}
+                <SectionBlock id="mo-sec-info" tone="slate" icon="📄" title="ข้อมูลใบ" bodyClassName="px-3 py-2.5 space-y-2">
+                  {/* ใบสั่งขายที่ผูก (กติกา lib/mo-so-rule — แบรนด์ลูกค้าต้องมี) */}
+                  {form.so && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5 bg-indigo-50/60 border border-indigo-100 rounded-lg text-xs text-slate-600">
+                      <span>ใบสั่งขาย <a href={`/sales/orders?open=${form.so.id}`} target="_blank" rel="noopener" className="font-mono font-medium text-indigo-700 hover:underline">{form.so.order_no ?? "—"}</a></span>
+                      {form.so.customer_name && <span className="min-w-0 truncate max-w-[22rem]" title={form.so.customer_name}>ลูกค้า {form.so.customer_name}</span>}
+                      {form.so.customer_po_no && <span>PO <b className="font-medium text-slate-800">{form.so.customer_po_no}</b></span>}
+                      {form.so.due_date && <span>ส่งลูกค้า <b className="font-medium text-indigo-700">{new Date(form.so.due_date.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}</b></span>}
+                      {form.so.due_date && form.due_date && form.due_date.slice(0, 10) > form.so.due_date.slice(0, 10) && (
+                        <span className="text-rose-700">⚠ กำหนดส่งใบผลิตเลยวันส่งลูกค้า</span>
+                      )}
                     </div>
-                  ) };
-              const readyCol: LineColumn<MatRow> = { key: "is_ready", header: "เตรียมครบ", width: 80, align: "center", getValue: (r) => (r.is_ready ? 1 : 0),
-                render: (r, u) => <input type="checkbox" checked={r.is_ready}
-                  onChange={(e) => e.target.checked ? u({ is_ready: true, on_hand_qty: r.required, purchase_override: null }) : u({ is_ready: false })}
-                  className="rounded border-slate-300" /> };
-              const reqMap = form.requested ?? {};
-              const orderedCol: LineColumn<MatRow> = { key: "ordered", header: "สถานะสั่งซื้อ", width: 124, align: "center", sortable: true,
-                getValue: (r) => (r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0),
-                render: (r) => {
-                  const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0;
-                  if (got <= 0) return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
-                  const full = got >= r.to_purchase - 0.0001;
-                  return <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap ${full ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>🛒 ขอแล้ว {fmt(got)}{full ? "" : " (บางส่วน)"}</span>;
-                } };
-              const sumCols: LineColumn<MatRow>[] = editable
-                ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol, orderedCol]
-                : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
-              // ยอดรวมชิ้น = ชิ้นต่อชุด × จำนวนที่สั่ง
-              const totalPcsCol: LineColumn<MatRow> = { key: "total_pieces", header: "ยอดรวมชิ้น", width: 92, align: "right", summable: true,
-                getValue: (r) => (r.pieces ?? 0) * rowQty(r.size_label),
-                render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-slate-700">{r.pieces ? fmt((r.pieces ?? 0) * rowQty(r.size_label)) : "—"}</span> };
-              const cutDoneCol: LineColumn<MatRow> = { key: "cut_done", header: "ตัดครบแล้ว", width: 84, align: "center",
-                getValue: (r) => (r.cut_done ? 1 : 0),
-                render: (r) => needsCutLine(r)
-                  ? <input type="checkbox" checked={r.cut_done} disabled={!editable || !canEdit} onChange={() => toggleCutLine(r)} className="rounded border-slate-300 cursor-pointer disabled:cursor-not-allowed" />
-                  : <span className="text-slate-300 text-xs">—</span> };
-              const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
-                { key: "size_label", header: "ไซส์", width: 64, sortable: true, getValue: (r) => r.size_label ?? "", render: (r) => r.size_label ? <span className="inline-block px-1.5 py-0.5 text-[11px] font-semibold bg-indigo-50 text-indigo-700 rounded">{r.size_label}</span> : <span className="text-slate-300 text-xs">ทุกไซส์</span> },
-                { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
-                { key: "cut_width", header: "กว้าง", width: 60, align: "right", getValue: (r) => r.cut_width ?? "" },
-                { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
-                { key: "pieces", header: "ชิ้น", width: 54, align: "right", getValue: (r) => r.pieces ?? "" },
-                totalPcsCol, reqCol, uomCol, cutDoneCol];
-              const needCount = sumRows.filter((r) => { const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0; return r.to_purchase - got > 0.0001; }).length;
-              return (
-                <div className="pt-2 border-t border-slate-100">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center">
+                  )}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[11px] text-slate-500">เลขที่ MO</span>
+                      <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500 truncate">
+                        {form.id ? <code>{form.mo_no}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[11px] text-slate-500">กำหนดส่ง</span>
+                      <div className="mt-0.5"><DateInput value={form.due_date} onChange={(iso) => patch({ due_date: iso })} placeholder="เลือกวันส่ง" /></div>
+                    </div>
+                    <label className="block col-span-2 sm:col-span-1 min-w-0">
+                      <span className="text-[11px] text-slate-500">สถานะ</span>
+                      <select value={form.status} onChange={(e) => patch({ status: e.target.value })}
+                        className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                </SectionBlock>
+
+                {/* ===== สินค้าและสูตร ===== */}
+                <SectionBlock id="mo-sec-product" tone="blue" icon="📦" title="สินค้าและสูตร" bodyClassName="px-3 py-2.5 space-y-2">
+                  <div>
+                    <span className="text-[11px] text-slate-500">สินค้าที่ผลิต</span>
+                    <div className="mt-0.5"><ComponentPicker sku={form.product_sku} name={form.product_name} imageKey={form.product_image}
+                      placeholder="— เลือกสินค้าที่ผลิต —" onPick={(c) => onPickProduct(c.code, c.name, c.image_key)} /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block min-w-0">
+                      <span className="text-[11px] text-slate-500">จำนวนผลิต{form.sizes.length > 0 ? " (รวมไซส์)" : ""}</span>
+                      <input type="number" min={0} step="any" value={form.qty} onChange={(e) => patch({ qty: Number(e.target.value) })}
+                        readOnly={form.sizes.length > 0} title={form.sizes.length > 0 ? "คิดจากผลบวกจำนวนต่อไซส์ด้านล่าง" : undefined}
+                        className={`w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${form.sizes.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
+                    </label>
+                    <div className="min-w-0">
+                      <span className="text-[11px] text-slate-500">สูตร (BOM)</span>
+                      <select value={form.bom_id ?? ""} onChange={(e) => e.target.value && selectVersion(e.target.value)}
+                        className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        {(versions.length === 0 || !form.bom_id) && <option value="">{versions.length === 0 ? "— ไม่มีสูตร —" : "— ยังไม่ได้เลือกสูตร —"}</option>}
+                        {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* กลุ่ม C: จำนวนต่อไซส์ (ถ้าสูตรมีไซส์) */}
+                  {form.sizes.length > 0 && (
+                    <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
+                      <div className="text-[11px] font-medium text-slate-600 mb-1.5">📏 จำนวนต่อไซส์ <span className="text-slate-400 font-normal">(สูตรนี้มีไซส์ — กรอกจำนวนที่จะผลิตแต่ละไซส์)</span></div>
+                      <div className="flex flex-wrap gap-2">
+                        {form.sizes.map((s) => (
+                          <label key={s.label} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                            <span className="text-xs font-medium text-slate-600 min-w-[2rem]">{s.label}</span>
+                            <input type="number" min={0} step="any" value={form.size_qty[s.label] ?? ""} onChange={(e) => setSizeQty(s.label, Number(e.target.value))} placeholder="0"
+                              className="w-16 h-7 px-1.5 text-sm text-right border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1.5">รวม <b className="text-slate-700">{fmt(form.qty)}</b> ชิ้น · วัตถุดิบที่ผันตามไซส์จะถูกแตกตัด/พิมพ์แยกตามไซส์</div>
+                    </div>
+                  )}
+                </SectionBlock>
+
+                {/* ===== หมายเหตุและกลุ่ม ===== */}
+                <SectionBlock id="mo-sec-note" tone="violet" icon="📝" title="หมายเหตุและกลุ่ม" bodyClassName="px-3 py-2.5 space-y-2">
+                  <label className="block">
+                    <span className="text-[11px] text-slate-500">หมายเหตุ</span>
+                    <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
+                      className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </label>
+                  {/* กลุ่มใบสั่งงาน — เฉพาะใบที่บันทึกแล้ว (มีเลขใบ) */}
+                  {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
+                </SectionBlock>
+
+                {/* ===== รายละเอียดสั่งงาน (ดึงจาก Parent ของสินค้า) ===== */}
+                {form.product_sku && (
+                  <SectionBlock id="mo-sec-instr" tone="teal" icon="📋" title="รายละเอียดสั่งงาน" bodyClassName="p-2">
+                    <WorkInstructionPanel sku={form.product_sku} editable={canEdit} onAfterBomEdit={() => refresh()} />
+                  </SectionBlock>
+                )}
+
+                {/* ===== ปัญหาของสินค้า (ผูก Parent SKU) — ยังไม่มีปัญหา = ยุบเหลือบรรทัดเดียว ===== */}
+                {form.product_sku && (
+                  <SectionBlock id="mo-sec-issues" tone="amber" icon="⚠️" title={<>ปัญหาของสินค้า{issueCount ? <span className="text-xs font-normal">({issueCount})</span> : null}</>}
+                    right={issuesEmpty && canEdit ? <button type="button" onClick={() => setIssuesOpen(true)} className="h-6 px-2 text-xs rounded border border-amber-300 bg-white text-amber-800 hover:bg-amber-50">＋ เพิ่มปัญหา</button> : null}
+                    bodyClassName={issuesEmpty ? "px-3 py-1.5" : "p-3"}>
+                    {issuesEmpty && <div className="text-xs text-slate-400">ยังไม่มีปัญหาที่บันทึกไว้</div>}
+                    <div className={issuesEmpty ? "hidden" : ""}>
+                      <ParentIssuesPanel sku={form.product_sku} editable={canEdit} bare onCount={setIssueCount} />
+                    </div>
+                  </SectionBlock>
+                )}
+
+                {/* ===== วัตถุดิบ (2 มุมมอง: รวมต่อวัตถุดิบ / แยกบล็อก) ===== */}
+                <SectionBlock id="mo-sec-mat" tone="emerald" icon="🧵" bodyClassName="px-3 py-2.5"
+                  title={<>วัตถุดิบ{zeroCount > 0 && <span className="ml-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">⚠ {zeroCount} รายการรวมต้องใช้ = 0</span>}</>}
+                  right={<>
+                    {form.id && form.bom_code && (
+                      <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs bg-white" title="วิธีคิดจำนวนผ้าของใบนี้ — เปลี่ยนแล้วระบบคิดใหม่ให้ทันที">
+                        {([["lay", "✂ วางคุ้มสุด"], ["classic", "📐 สูตรเดิม+เผื่อเสีย"]] as const).map(([v, lab]) => (
+                          <button key={v} type="button" disabled={!canEdit || fabricModeBusy || form.fabric_calc_mode === v}
+                            onClick={() => void switchFabricMode(v)}
+                            className={`h-7 px-2 ${form.fabric_calc_mode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>
+                            {fabricModeBusy && form.fabric_calc_mode !== v ? "…" : lab}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {editable && canEdit && form.id && form.bom_code && (
+                      <BomRefreshButton moId={form.id} productSku={form.product_sku || null} currentBomCode={form.bom_code} currentBomVersion={form.bom_version}
+                        extraWarning={dispatchedWarn}
+                        sizeBreakdown={form.sizes.length > 0 ? form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 })) : null}
+                        onDone={async () => { await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem); }} />
+                    )}
+                    {editable && matTab === "sum" && needCount > 0 && canEdit && (
+                      <button type="button" onClick={openPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
+                    )}
+                  </>}>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
                     <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
-                      <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
-                      <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
+                      <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-emerald-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
+                      <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-emerald-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
                     </div>
                     {/* โชว์/ซ่อนบรรทัด ✂ วิธีวางผ้า (สีน้ำเงินใต้ชื่อวัตถุดิบ) — ซ่อนเป็นค่าเริ่มต้น · จำการตั้งค่าต่อคน */}
                     {(matTab === "sum" ? sumRows : blockRows).some((r) => !!r.lay_note) && (
                       <button type="button" onClick={() => { const v = showLayNote ? "hide" : "show"; layNotePref.setView(v); void layNotePref.saveDefault(v); }}
                         title={showLayNote ? "ซ่อนบรรทัดวิธีวางผ้า (ยาว/ความคุ้ม/ผัง) ใต้ชื่อวัตถุดิบ" : "โชว์บรรทัดวิธีวางผ้า (ยาว/ความคุ้ม/ปุ่มดูผัง) ใต้ชื่อวัตถุดิบ"}
-                        className={`ml-2 h-7 px-2.5 rounded-lg border text-xs ${showLayNote ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                        className={`h-7 px-2.5 rounded-lg border text-xs ${showLayNote ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                         ✂ {showLayNote ? "ซ่อนวิธีวาง" : "โชว์วิธีวาง"}
                       </button>
                     )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {form.id && form.bom_code && (
-                        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs" title="วิธีคิดจำนวนผ้าของใบนี้ — เปลี่ยนแล้วระบบคิดใหม่ให้ทันที">
-                          {([["lay", "✂ วางคุ้มสุด"], ["classic", "📐 สูตรเดิม+เผื่อเสีย"]] as const).map(([v, lab]) => (
-                            <button key={v} type="button" disabled={!canEdit || fabricModeBusy || form.fabric_calc_mode === v}
-                              onClick={() => void switchFabricMode(v)}
-                              className={`h-7 px-2 ${form.fabric_calc_mode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>
-                              {fabricModeBusy && form.fabric_calc_mode !== v ? "…" : lab}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {editable && canEdit && form.id && form.bom_code && (
-                        <BomRefreshButton moId={form.id} productSku={form.product_sku || null} currentBomCode={form.bom_code} currentBomVersion={form.bom_version}
-                          extraWarning={dispatchedWarn}
-                          sizeBreakdown={form.sizes.length > 0 ? form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 })) : null}
-                          onDone={async () => { await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem); }} />
-                      )}
-                      {editable && matTab === "sum" && needCount > 0 && canEdit && (
-                        <button type="button" onClick={openPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
-                      )}
-                    </div>
                   </div>
                   {form.materials.length === 0 ? (
                     // ใบที่สร้างตอนสินค้ายังไม่มีสูตร แล้วภายหลังเพิ่มสูตรแล้ว → ให้ดึงสูตรเข้าใบได้ (มีหน้าต่างเตือนก่อน)
@@ -807,83 +878,89 @@ export default function MoWorkspacePage() {
                     <LineItemsGrid<MatRow>
                       key={matTab}
                       rows={matTab === "sum" ? sumRows : blockRows} columns={matTab === "sum" ? sumCols : blockCols}
-                      onChange={(rows) => { if (matTab === "sum" && editable) patch({ summary: rows.map((r) => ({ key: r.key, id: r.id, component_sku: r.component_sku, component_name: r.component_name, material_type: r.material_type, uom: r.uom, qty_per: r.qty_per, on_hand_qty: r.on_hand_qty, is_ready: r.is_ready, purchase_override: r.purchase_override })) }); }}
+                      onChange={(rows) => { if (matTab === "sum" && editable) patch({ summary: rows.map((r) => ({ key: r.key, id: r.id, component_sku: r.component_sku, component_name: r.component_name, material_type: r.material_type, uom: r.uom, qty_per: r.qty_per, on_hand_qty: r.on_hand_qty, is_ready: r.is_ready, purchase_override: r.purchase_override, lay_note: r.lay_note, required_lay: r.required_lay, required_classic: r.required_classic, lay_layout: r.lay_layout, image_url: r.image_url })) }); }}
                       rowId={(r) => r.key} readonly={!editable || matTab === "block"} stickyHeader maxHeight="38vh"
                       dense={matTab === "block"} defaultSort={matTab === "block" ? { key: "component", dir: "asc" } : null}
                       groupByOptions={[{ key: "material_type", label: "ประเภท" }, { key: "component", label: "วัตถุดิบ" }]}
+                      rowClassName={(r) => (isZero(r) ? "bg-rose-50/70" : undefined)}
                     />
                   )}
                   {!editable && <p className="text-[11px] text-slate-400 mt-1">บันทึกใบสั่งผลิตก่อน แล้วเปิดใหม่เพื่อเช็ค &ldquo;เตรียมครบ&rdquo; / ขอซื้อ</p>}
-                </div>
-              );
-            })()}
+                </SectionBlock>
 
-            {/* ===== ใบจ่ายงาน (เฟส C) — แสดงเมื่อบันทึกใบแล้ว ===== */}
-            {form.id && (
-              <div className="pt-3 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-slate-800">🧰 ใบจ่ายงาน</h3>
-                  {canEdit && <button type="button" onClick={openDispatch} className="h-7 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">＋ จ่ายงาน</button>}
-                </div>
+                {/* ===== ใบจ่ายงาน (เฟส C) — แสดงเมื่อบันทึกใบแล้ว ===== */}
+                {form.id && (
+                  <SectionBlock id="mo-sec-wo" tone="indigo" icon="🧰" title="ใบจ่ายงาน" bodyClassName="px-3 py-2.5"
+                    right={canEdit ? <button type="button" onClick={openDispatch} className="h-7 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">＋ จ่ายงาน</button> : null}>
+                    {/* สรุปค้างจ่ายต่อขั้นตอน + แถบความคืบหน้า */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                      {STAGES.map(([key, label]) => {
+                        const done = dispatchedOf(key); const remain = remainingOf(key);
+                        const pct = form.qty > 0 ? Math.min(100, Math.round((done / form.qty) * 100)) : 0;
+                        return (
+                          <div key={key} className="flex items-center gap-2.5 border border-slate-200 rounded-lg px-3 py-2 text-xs">
+                            <HoverImage url={form.product_image} size={32} rounded="rounded-md" className="shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium text-slate-700">{label}</span>
+                                <span className="tabular-nums text-slate-500">{pct}%</span>
+                              </div>
+                              <div className="text-slate-500 mt-0.5">จ่ายแล้ว <b className="text-slate-700">{fmt(done)}</b> / {fmt(form.qty || 0)} ชิ้น
+                                {remain > 0 ? <span className="text-rose-600"> · ค้างจ่าย {fmt(remain)}</span> : <span className="text-emerald-600"> · ครบ ✓</span>}</div>
+                              <div className="h-1.5 mt-1 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full rounded-full ${remain > 0 ? "bg-indigo-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} /></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                {/* สรุปค้างจ่ายต่อขั้นตอน */}
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  {STAGES.map(([key, label]) => {
-                    const done = dispatchedOf(key); const remain = remainingOf(key);
-                    return (
-                      <div key={key} className="border border-slate-200 rounded-lg px-3 py-2 text-xs">
-                        <div className="font-medium text-slate-700">{label}</div>
-                        <div className="text-slate-500 mt-0.5">จ่ายแล้ว <b className="text-slate-700">{fmt(done)}</b> / {fmt(form.qty || 0)} ชิ้น
-                          {remain > 0 ? <span className="text-rose-600"> · ค้างจ่าย {fmt(remain)}</span> : <span className="text-emerald-600"> · ครบ ✓</span>}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {woLoading ? <LoadingState />
-                : woList.length === 0 ? (
-                  <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">ยังไม่มีใบจ่ายงาน — กด “จ่ายงาน” เพื่อเริ่ม</div>
-                ) : (
-                  <div className="border border-slate-200 rounded-lg overflow-auto" style={{ maxHeight: "30vh" }}>
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-50 text-slate-500 sticky top-0">
-                        <tr>
-                          <th className="text-left px-2 py-1.5">เลขที่ / ขั้นตอน</th>
-                          <th className="text-left px-2 py-1.5">ผู้รับงาน</th>
-                          <th className="text-right px-2 py-1.5">จ่าย</th>
-                          <th className="text-right px-2 py-1.5">รับคืน</th>
-                          <th className="text-center px-2 py-1.5">สถานะ</th>
-                          <th className="text-left px-2 py-1.5">กำหนดเสร็จ</th>
-                          <th className="px-2 py-1.5"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {woList.map((w) => {
-                          const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
-                          const closed = w.status === "done" || w.status === "cancelled";
-                          return (
-                            <tr key={w.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                              <td className="px-2 py-1.5"><code className="text-[10px] text-slate-400">{w.wo_no}</code><div className="text-slate-600">{stageLabel(w.stage)}</div></td>
-                              <td className="px-2 py-1.5 text-slate-700">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{fmt(w.qty)}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{w.received_qty > 0 ? fmt(w.received_qty) : "—"}</td>
-                              <td className="px-2 py-1.5 text-center"><span className={`px-2 py-0.5 rounded ${st.cls}`}>{st.label}</span></td>
-                              <td className="px-2 py-1.5 text-slate-500">{w.due_date || "—"}</td>
-                              <td className="px-2 py-1.5 text-right whitespace-nowrap">
-                                {canEdit && !closed && <button type="button" onClick={() => openReceive(w)} className="h-6 px-2 text-[11px] border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50">รับงานคืน</button>}
-                                {canEdit && w.status !== "cancelled" && <button type="button" onClick={() => cancelWO(w)} title="ยกเลิกใบจ่ายงาน" className="ml-1 h-6 w-6 text-slate-300 hover:text-rose-500 rounded">✕</button>}
-                              </td>
+                    {woLoading ? <LoadingState />
+                    : woList.length === 0 ? (
+                      <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">ยังไม่มีใบจ่ายงาน — กด “จ่ายงาน” เพื่อเริ่ม</div>
+                    ) : (
+                      <div className="border border-slate-200 rounded-lg overflow-auto" style={{ maxHeight: "30vh" }}>
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                            <tr>
+                              <th className="text-left px-2 py-1.5">เลขที่ / ขั้นตอน</th>
+                              <th className="text-left px-2 py-1.5">ผู้รับงาน</th>
+                              <th className="text-right px-2 py-1.5">จ่าย</th>
+                              <th className="text-right px-2 py-1.5">รับคืน</th>
+                              <th className="text-center px-2 py-1.5">สถานะ</th>
+                              <th className="text-left px-2 py-1.5">กำหนดเสร็จ</th>
+                              <th className="px-2 py-1.5"></th>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                          </thead>
+                          <tbody>
+                            {woList.map((w) => {
+                              const wst = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
+                              const closed = w.status === "done" || w.status === "cancelled";
+                              return (
+                                <tr key={w.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                                  <td className="px-2 py-1.5"><div className="flex items-center gap-2"><HoverImage url={form.product_image} size={24} rounded="rounded" className="shrink-0" /><div><code className="text-[10px] text-slate-400">{w.wo_no}</code><div className="text-slate-600">{stageLabel(w.stage)}</div></div></div></td>
+                                  <td className="px-2 py-1.5 text-slate-700">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{fmt(w.qty)}</td>
+                                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{w.received_qty > 0 ? fmt(w.received_qty) : "—"}</td>
+                                  <td className="px-2 py-1.5 text-center"><span className={`px-2 py-0.5 rounded ${wst.cls}`}>{wst.label}</span></td>
+                                  <td className="px-2 py-1.5 text-slate-500">{w.due_date || "—"}</td>
+                                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                                    {canEdit && !closed && <button type="button" onClick={() => openReceive(w)} className="h-6 px-2 text-[11px] border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50">รับงานคืน</button>}
+                                    {canEdit && w.status !== "cancelled" && <button type="button" onClick={() => cancelWO(w)} title="ยกเลิกใบจ่ายงาน" className="ml-1 h-6 w-6 text-slate-300 hover:text-rose-500 rounded">✕</button>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </SectionBlock>
                 )}
               </div>
-            )}
+            </div>
           </div>
-        )}
+          );
+        })()}
       </ERPModal>
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => !archiving && setArchiveTarget(null)} onConfirm={doArchive}

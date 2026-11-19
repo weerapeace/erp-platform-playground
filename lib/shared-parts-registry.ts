@@ -934,6 +934,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "มีแค่ 2–4 หัวข้อ ให้ใช้แท็บธรรมดาหรือ ScrollTabs · แท็บในป๊อปอัป/ลิ้นชัก",
   },
   {
+    key: "section-jump-nav", label: "เมนูกระโดดไปหัวข้อ + กล่องหัวข้อแถบสี", code: "SectionJumpNav · SectionBlock · useSectionSpy", category: "layout",
+    source: { path: "components/section-jump-nav", names: ["SectionJumpNav", "SectionBlock", "useSectionSpy"] },
+    what: "ฟอร์ม/ป๊อปยาวหลายหัวข้อ: ทุกส่วนอยู่หน้าเดียวเลื่อนยาว มีเมนูซ้าย (PC) / แถบชิป (มือถือ) กดแล้วเลื่อนไปหัวข้อนั้น ไฮไลต์หัวข้อที่ดูอยู่ ป้ายเตือนต่อหัวข้อ · SectionBlock = กล่องที่มีแถบหัวสีคั่นหัวข้อ",
+    when: "ป๊อป/ลิ้นชัก/หน้า ที่มี ~5 หัวข้อขึ้นไปและอยากให้เห็นต่อกัน (ป๊อปแก้ใบสั่งผลิต)",
+    notWhen: "กดแล้วเปลี่ยนเนื้อหาทั้งก้อน ใช้ SettingsNavLayout · แท็บธรรมดา ใช้ ScrollTabs",
+  },
+  {
     key: "chip-overflow", label: "ชิปยาว โชว์ไม่กี่ตัว แล้วกดดูที่เหลือ", code: "ChipOverflow", category: "layout",
     source: { path: "components/chip-overflow" },
     what: "รายการชิปที่ยาวมาก (เช่น ลูกค้า 30 สาขา) โชว์แค่ 3 ตัวแรก + ปุ่ม \"+N ดูทั้งหมด\" กางแล้วจัดกลุ่มได้ มีปุ่มย่อกลับ",

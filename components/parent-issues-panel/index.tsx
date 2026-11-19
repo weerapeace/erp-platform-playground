@@ -16,7 +16,9 @@ import type { ParentIssue } from "@/app/api/parent-sku-issues/route";
 
 type Reason = { id: string; name: string };
 
-export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = false }: {
+export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = false, onCount }: {
+  /** แจ้งจำนวนปัญหาหลังโหลด/แก้ (ใช้ยุบกล่องตอนยังไม่มีปัญหา เช่น ป๊อปใบสั่งผลิต) */
+  onCount?: (n: number) => void;
   sku?: string | null;
   parentSkuId?: string | null;
   editable?: boolean;
@@ -43,6 +45,7 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
   }, [q]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (!loading) onCount?.(items.length); }, [items, loading]);   // eslint-disable-line react-hooks/exhaustive-deps
   // โหลดสาเหตุกลาง (เฉพาะโหมดแก้ไข — ทำ dropdown)
   useEffect(() => {
     if (!editable) return;

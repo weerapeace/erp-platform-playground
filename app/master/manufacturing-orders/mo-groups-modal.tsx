@@ -7,6 +7,7 @@
  * ใช้ของกลาง: ERPModal + /api/mo/groups
  */
 import { useState } from "react";
+import { ChipOverflow } from "@/components/chip-overflow";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -142,15 +143,23 @@ export function MoGroupField({ moNo }: { moNo: string }) {
       <div className="flex flex-wrap gap-1.5 mt-0.5">
         {groups === null ? <span className="text-xs text-slate-300">กำลังโหลด…</span>
           : groups.length === 0 ? <span className="text-xs text-slate-300">ยังไม่มีกลุ่ม — สร้างที่หน้ารายการ (เลือกใบ → 🗂 จัดกลุ่ม)</span>
-          : groups.map((g) => {
-            const on = g.mo_nos.includes(moNo);
+          : (() => {
+            // กลุ่มที่ใบนี้อยู่ขึ้นก่อนเสมอ แล้วยุบที่เหลือเป็น "+N ดูทั้งหมด" (ของกลาง ChipOverflow) · กดชิปยังสลับเข้า/ออกกลุ่มได้เหมือนเดิม
+            const sorted = [...groups].sort((a, b) => Number(b.mo_nos.includes(moNo)) - Number(a.mo_nos.includes(moNo)));
+            const onCount = sorted.filter((g) => g.mo_nos.includes(moNo)).length;
             return (
-              <button key={g.id} type="button" disabled={busy === g.id} onClick={() => void toggle(g)}
-                className={`text-xs px-2 py-1 rounded-full border transition-colors disabled:opacity-50 ${on ? "bg-rose-50 border-rose-300 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                {on ? "✓ " : ""}{g.name}
-              </button>
+              <ChipOverflow items={sorted} getKey={(g) => g.id} max={Math.max(3, onCount)} className="gap-1.5"
+                renderChip={(g) => {
+                  const on = g.mo_nos.includes(moNo);
+                  return (
+                    <button type="button" disabled={busy === g.id} onClick={() => void toggle(g)}
+                      className={`text-xs px-2 py-1 rounded-full border transition-colors disabled:opacity-50 ${on ? "bg-rose-50 border-rose-300 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      {on ? "✓ " : ""}{g.name}
+                    </button>
+                  );
+                }} />
             );
-          })}
+          })()}
       </div>
     </div>
   );
