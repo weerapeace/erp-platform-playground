@@ -29,6 +29,7 @@ import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc
 import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
 import { pickQuoteDocs } from "@/lib/quote-pull";
+import { looksNonProduct, skuLinkErrorText, unlinkedLineNames } from "@/lib/so-sku-link";
 import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
 
 /** รายการตั้งต้นที่หน้าอื่นส่งเข้ามา (เช่น Design Dashboard) */
@@ -266,6 +267,8 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
     if (!customer?.name) e = "เลือกลูกค้าก่อน";
     else if (filled.length === 0) e = "ยังไม่มีรายการ — เพิ่มอย่างน้อย 1 รายการ";
     else { const bad = filled.filter((l) => !(l.qty > 0)).length; if (bad) e = `ใส่จำนวนให้ครบ (ยังว่าง ${bad} แถว — ติ๊กแล้วใส่ทีเดียวได้)`; }
+    // ทุกรายการต้องผูก SKU (เจ้าของสั่ง 2026-11-19 · lib/so-sku-link) — ชื่อขึ้นต้น "ค่า…" = ไม่ใช่สินค้า
+    if (!e) { const un = unlinkedLineNames(filled.map((l) => ({ sku: l.sku, product_name: l.product_name, non_product: looksNonProduct(l.product_name) }))); if (un.length) e = skuLinkErrorText(un); }
     setErr(e); if (e) return;
 
     const newGroups: Record<string, string> = {};
@@ -286,6 +289,7 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
           mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null, quote_id: m?.quote_id ?? null, quote_no: m?.quote_no ?? null,
           source: m?.mo_id ? "mo" : m?.quote_id ? "quote" : (m?.source ?? "manual"),
           mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? newKey(g.name) : null,
+          non_product: !l.sku && looksNonProduct(l.product_name),
         };
       }),
       open_mo: openMo, new_groups: newGroups,

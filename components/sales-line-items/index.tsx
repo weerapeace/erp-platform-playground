@@ -148,6 +148,8 @@ export function SOLineEditor({
   onSaveMasterName,
   hidePrice = false,
   extraColumns = [],
+  rowBelow,
+  rowTone,
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
@@ -161,6 +163,10 @@ export function SOLineEditor({
   hidePrice?: boolean;
   /** คอลัมน์เสริม (โหมดตาราง) — เช่น ติ๊กเลือก / "ชุด" ของใบสั่งขาย · start = หน้าสุด · end = ก่อนปุ่มลบ */
   extraColumns?: LineExtraColumn[];
+  /** ของเสริมใต้ช่องสินค้าของแต่ละรายการ — เช่น ใบสั่งขาย "ผูก SKU" (lib/so-sku-link · 2026-11-19) */
+  rowBelow?: (l: EditorLine, i: number) => ReactNode;
+  /** สีพื้นแถว — "danger" = ต้องแก้ก่อนบันทึก (เช่น ยังไม่ผูก SKU) */
+  rowTone?: (l: EditorLine) => "danger" | null;
 }) {
   const [importOpen, setImportOpen] = useState(false);   // ป๊อป "ลงจากตาราง / Excel"
   // โหมด compact: แถวที่กำลังแก้สินค้า/สี (แถวอื่นเป็นตัวหนังสือ 1 บรรทัด)
@@ -312,7 +318,7 @@ export function SOLineEditor({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {lines.map((l, i) => (
-                <tr key={l.tempId} className={`align-top ${compact && activeId === l.tempId ? "bg-blue-50/40" : ""}`}>
+                <tr key={l.tempId} className={`align-top ${rowTone?.(l) === "danger" ? "bg-rose-50/60" : compact && activeId === l.tempId ? "bg-blue-50/40" : ""}`}>
                   {startCols.map((c) => <td key={c.key} className={`px-2 ${compact ? "py-1.5" : "py-2"} ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
                   <td className={`px-2 ${compact ? "py-1.5" : "py-2"} text-center font-mono text-xs text-slate-400`}>{i + 1}</td>
                   <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
@@ -357,6 +363,7 @@ export function SOLineEditor({
                       </div>
                     </div>
                     )}
+                    {rowBelow?.(l, i)}
                   </td>
                   <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
                     <input type="number" value={l.qty} disabled={readonly}
@@ -505,6 +512,7 @@ export function SOLineEditor({
                     </div>
                   )}
                   {renderNameEditor(l, i)}
+                  {rowBelow?.(l, i)}
 
                   {/* สี/ตัวเลือก — พิมพ์ใต้ชื่อสินค้าบนเอกสาร (เลือก SKU แล้วเติมให้ก่อน แก้ทับได้) */}
                   <div className="mt-2">

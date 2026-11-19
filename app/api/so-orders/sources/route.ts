@@ -18,6 +18,8 @@ export type SourceLine = {
   unit_price: number; due_date: string | null; mo_id: string | null; mo_no: string | null;
   /** มาจากใบเสนอราคาไหน (บรรทัดจากใบสั่งผลิต = null) */
   quote_id: string | null; quote_no: string | null;
+  /** บรรทัดใบเสนอราคาต้นทาง (ไว้เขียน SKU ที่ผูกกลับ · 2026-11-19) */
+  quote_line_id?: string | null;
   discount_type?: "percent" | "amount"; discount_value?: number;
 };
 export type SourceDoc = {
@@ -54,14 +56,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const linesByQuote = new Map<string, SourceLine[]>();
     if (ids.length) {
       const { data: lines } = await admin.from("erp_playground_quote_lines")
-        .select("quote_id, sku, product_name, qty, unit, unit_price, discount_type, discount_value, sort_order").in("quote_id", ids).order("sort_order");
+        .select("id, quote_id, sku, product_name, qty, unit, unit_price, discount_type, discount_value, sort_order").in("quote_id", ids).order("sort_order");
       for (const l of (lines ?? []) as Record<string, unknown>[]) {
         const k = String(l.quote_id);
         (linesByQuote.get(k) ?? linesByQuote.set(k, []).get(k)!).push({
           sku: (l.sku as string) ?? null, product_name: (l.product_name as string) ?? "",
           qty: Number(l.qty) || 0, unit: (l.unit as string) || "ชิ้น",
           unit_price: Number(l.unit_price) || 0, due_date: null, mo_id: null, mo_no: null,
-          quote_id: k, quote_no: noOf.get(k) ?? null,
+          quote_id: k, quote_no: noOf.get(k) ?? null, quote_line_id: (l.id as string) ?? null,
           discount_type: l.discount_type === "percent" ? "percent" : "amount", discount_value: Number(l.discount_value) || 0,
         });
       }

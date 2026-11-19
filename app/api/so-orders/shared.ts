@@ -10,6 +10,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateDocument } from "@/lib/tax";
 import { toMajor } from "@/lib/money";
+import { skuLinkErrorText, unlinkedLineNames } from "@/lib/so-sku-link";
 
 export type SoOrderStatus = "confirmed" | "shipped" | "cancelled";
 
@@ -34,7 +35,56 @@ export type SoOrderLineInput = {
   mo_group_id?: string | null;
   /** ชุดใหม่ที่ยังไม่มีในระบบ — อ้าง key ใน body.new_groups (สร้างให้ตอนบันทึก) */
   mo_group_key?: string | null;
+  /** บรรทัดใบเสนอราคาต้นทาง (ไม่เก็บในใบสั่งขาย) — ใช้เขียน SKU ที่ผูกกลับลงใบเสนอราคา (2026-11-19) */
+  quote_line_id?: string | null;
+  /** ติ๊ก "ไม่ใช่สินค้า" (ค่าบริการ) = ไม่ต้องผูก SKU (ไม่เก็บ · กติกา lib/so-sku-link) */
+  non_product?: boolean | null;
 };
+
+type Admin = ReturnType<typeof supabaseAdmin>;
+
+/**
+ * ตรวจว่าทุกรายการผูก SKU แล้ว + รหัสมีอยู่จริง (เจ้าของสั่ง 2026-11-19 · กติกา lib/so-sku-link)
+ * → ข้อความผิดพลาดภาษาคน หรือ null ถ้าผ่าน
+ */
+export async function checkLineSkus(admin: Admin, lines: SoOrderLineInput[]): Promise<string | null> {
+  const missing = unlinkedLineNames(lines);
+  if (missing.length) return skuLinkErrorText(missing);
+  const codes = [...new Set(lines.map((l) => String(l.sku ?? "").trim()).filter(Boolean))];
+  const found = new Set<string>();
+  for (let i = 0; i < codes.length; i += 200) {
+    const { data } = await admin.from("skus_v2").select("code").in("code", codes.slice(i, i + 200));
+    for (const r of (data ?? []) as { code: string }[]) found.add(r.code);
+  }
+  const unknown = codes.filter((c) => !found.has(c));
+  return unknown.length ? `ไม่พบ SKU ในทะเบียนสินค้า: ${unknown.slice(0, 5).join(", ")}${unknown.length > 5 ? " …" : ""} — เลือก SKU ใหม่` : null;
+}
+
+/**
+ * เขียน SKU ที่ผูกในใบสั่งขายกลับลงบรรทัดใบเสนอราคาต้นทาง (ข้อเสนอ 3 · 2026-11-19)
+ *   sku + product_id · รูป SKU ถ้าบรรทัดใบเสนอราคายังไม่มีรูป · เฉพาะบรรทัดที่อยู่ในใบเสนอราคาเดียวกับที่อ้าง
+ * → จำนวนบรรทัดที่อัปเดต (พลาด = ข้าม ไม่ทำให้บันทึกใบสั่งขายล้ม)
+ */
+export async function writeBackQuoteLineSkus(admin: Admin, lines: SoOrderLineInput[]): Promise<number> {
+  const want = lines.filter((l) => l.quote_line_id && l.quote_id && String(l.sku ?? "").trim());
+  if (!want.length) return 0;
+  const { data: qls } = await admin.from("erp_playground_quote_lines").select("id, quote_id, sku, image_key").in("id", want.map((l) => l.quote_line_id as string));
+  const qlById = new Map(((qls ?? []) as { id: string; quote_id: string; sku: string | null; image_key: string | null }[]).map((q) => [q.id, q]));
+  const codes = [...new Set(want.map((l) => String(l.sku).trim()))];
+  const { data: skus } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("code", codes);
+  const skuByCode = new Map(((skus ?? []) as { id: string; code: string; cover_image_r2_key: string | null }[]).map((s) => [s.code, s]));
+  let n = 0;
+  for (const l of want) {
+    const ql = qlById.get(l.quote_line_id as string);
+    const s = skuByCode.get(String(l.sku).trim());
+    if (!ql || !s || ql.quote_id !== l.quote_id || ql.sku === s.code) continue;
+    const patch: Record<string, unknown> = { sku: s.code, product_id: s.id };
+    if (!ql.image_key && s.cover_image_r2_key) patch.image_key = s.cover_image_r2_key;
+    const { error } = await admin.from("erp_playground_quote_lines").update(patch).eq("id", ql.id);
+    if (!error) n++;
+  }
+  return n;
+}
 
 export type SoOrderHeaderInput = {
   company_id?: string | null;

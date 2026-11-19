@@ -19,7 +19,7 @@
  *          OrderBatchEntryModal · ERPModal/ConfirmDialog · useViewPref · openLink
  */
 import { LoadingState } from "@/components/state-views";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { usePermission, AccessDenied } from "@/components/auth";
@@ -45,6 +45,10 @@ import { useViewPref } from "@/lib/use-view-pref";
 import { openLink, useOpenParam } from "@/lib/open-param";
 import { pickQuoteDocs } from "@/lib/quote-pull";
 import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
+import type { SheetOfQuote, SheetSkuOption } from "@/app/api/so-orders/sheet-skus/route";
+import { SoSkuLinkHint, type SkuLinkPick } from "@/components/so-sku-link";
+import { guessSkuForLine } from "@/lib/design-sheet-quotations";
+import { lineNeedsSku, looksNonProduct, skuLinkErrorText, unlinkedLineNames } from "@/lib/so-sku-link";
 
 type Row = {
   id: string; order_no: string | null; status: string;
@@ -56,6 +60,8 @@ type Row = {
 };
 /** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — key = tempId */
 type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null;
+  /** ผูก SKU (2026-11-19 · lib/so-sku-link): บรรทัดใบเสนอราคาต้นทาง · ระบบเดาให้ · ติ๊กไม่ใช่สินค้า (ไม่ตั้ง = เดาจากชื่อ "ค่า…") */
+  quote_line_id?: string | null; sku_guessed?: boolean; non_product?: boolean;
   /** ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง (อ่านอย่างเดียว — มาจาก GET ใบ · lib/mo-so-rule) */
   progress?: SoLineProgress | null;
   /** ขั้นงานของรายการ 0-4 (อ่านอย่างเดียว — หน้าสถานะ · lib/so-order-stage) */
@@ -167,6 +173,59 @@ export default function SoOrdersPage() {
     if (companyNoVat) setForm((f) => (f && f.vat_rate !== 0 ? { ...f, vat_rate: 0, vat_included: false } : f));
   }, [companyNoVat]);
 
+  // ---- ผูก SKU ทุกรายการ (เจ้าของสั่ง 2026-11-19 · กติกา lib/so-sku-link) ----
+  const lineEditable = !!form && form.status !== "cancelled" && (!form.id || editing);
+  const nonProductOf = (l: EditorLine) => meta[l.tempId]?.non_product ?? looksNonProduct(l.product_name);
+  const skuLines = (form?.lines ?? []).filter((l) => l.product_name.trim() || l.sku)
+    .map((l) => ({ sku: l.sku, product_name: l.product_name, non_product: nonProductOf(l) }));
+  const unlinkedCount = skuLines.filter(lineNeedsSku).length;
+  // SKU ของใบงานเบื้องหลังใบเสนอราคาที่ดึงมา
+  const [sheetSkus, setSheetSkus] = useState<{ sheets: SheetOfQuote[]; skus: SheetSkuOption[]; quote_sheets: Record<string, string[]> }>({ sheets: [], skus: [], quote_sheets: {} });
+  const quoteKey = [...new Set((form?.lines ?? []).map((l) => meta[l.tempId]?.quote_id).filter((x): x is string => !!x))].sort().join(",");
+  useEffect(() => {
+    if (!quoteKey) { setSheetSkus({ sheets: [], skus: [], quote_sheets: {} }); return; }
+    let alive = true;
+    apiFetch(`/api/so-orders/sheet-skus?quote_ids=${quoteKey}`).then((r) => r.json())
+      .then((j) => { if (alive && !j.error) setSheetSkus({ sheets: j.sheets ?? [], skus: j.skus ?? [], quote_sheets: j.quote_sheets ?? {} }); })
+      .catch(() => { /* ไม่มีตัวช่วยก็ยังค้นจาก SKU ทั้งหมดได้ */ });
+    return () => { alive = false; };
+  }, [quoteKey]);
+  const sheetIdsOf = (l: EditorLine) => { const q = meta[l.tempId]?.quote_id; return q ? sheetSkus.quote_sheets[q] ?? [] : sheetSkus.sheets.map((x) => x.id); };
+  const optionsOf = (l: EditorLine) => { const ids = sheetIdsOf(l); return sheetSkus.skus.filter((k) => ids.includes(k.sheet_id)); };
+  const pickLineSku = (tempId: string, p: SkuLinkPick, guessed = false) => {
+    setForm((f) => f ? { ...f, lines: f.lines.map((l) => l.tempId !== tempId ? l : {
+      ...l, sku: p.code, product_name: l.product_name.trim() ? l.product_name : (p.name ?? p.code),
+      image_url: l.image_url || p.image_url, note: l.note?.trim() ? l.note : (p.color ?? undefined),
+    }) } : f);
+    setMeta((m) => ({ ...m, [tempId]: { ...(m[tempId] ?? { mo_id: null, mo_no: null, group: null }), sku_guessed: guessed, non_product: false } }));
+  };
+  const setNonProduct = (tempId: string, v: boolean) =>
+    setMeta((m) => ({ ...m, [tempId]: { ...(m[tempId] ?? { mo_id: null, mo_no: null, group: null }), non_product: v } }));
+  // ข้อเสนอ 1: เดา SKU ให้บรรทัดที่ยังไม่ผูก (จากชื่อ + สี) — เดาครั้งเดียวต่อบรรทัด · มีป้าย "เดา" ให้ตรวจ
+  const guessTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!form || !lineEditable || !sheetSkus.skus.length) return;
+    for (const l of form.lines) {
+      if (l.sku || !l.product_name.trim() || nonProductOf(l) || guessTried.current.has(l.tempId)) continue;
+      guessTried.current.add(l.tempId);
+      const g = guessSkuForLine(`${l.product_name} ${l.note ?? ""}`, optionsOf(l));
+      if (g) pickLineSku(l.tempId, { code: g.code, name: g.name_th, color: g.color, image_url: g.image_url }, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetSkus, form?.lines.length, lineEditable]);
+  const skuRowBelow = (l: EditorLine) => {
+    if (!l.product_name.trim() && !l.sku) return null;
+    const ids = sheetIdsOf(l);
+    return (
+      <SoSkuLinkHint sku={l.sku} needs={lineNeedsSku({ sku: l.sku, non_product: nonProductOf(l) })}
+        guessed={!!meta[l.tempId]?.sku_guessed} nonProduct={nonProductOf(l)} readonly={!lineEditable}
+        options={optionsOf(l)} emptySheets={sheetSkus.sheets.filter((x) => ids.includes(x.id) && x.sku_count === 0)}
+        onPick={(p) => pickLineSku(l.tempId, p)}
+        onConfirmGuess={() => setMeta((m) => ({ ...m, [l.tempId]: { ...m[l.tempId], sku_guessed: false } }))}
+        onNonProduct={(v) => setNonProduct(l.tempId, v)} />
+    );
+  };
+
   const totals = useMemo(() => calculateEditorTotals(form?.lines ?? [], {
     vatRate: form?.vat_rate ?? 7, vatIncluded: !!form?.vat_included, whtRate: form?.wht_rate ?? 0,
     headerDiscountType: form?.header_discount_type ?? "amount", headerDiscountValue: form?.header_discount_value ?? 0,
@@ -240,7 +299,7 @@ export default function SoOrdersPage() {
       due_date: form.due_date || (src.find((l) => l.due_date)?.due_date ?? ""),
       lines: [...keep, ...add],
     });
-    setMeta((m) => { const n = { ...m }; add.forEach((l, i) => { n[l.tempId] = { mo_id: src[i].mo_id, mo_no: src[i].mo_no, quote_id: src[i].quote_id, quote_no: src[i].quote_no, group: null }; }); return n; });
+    setMeta((m) => { const n = { ...m }; add.forEach((l, i) => { n[l.tempId] = { mo_id: src[i].mo_id, mo_no: src[i].mo_no, quote_id: src[i].quote_id, quote_no: src[i].quote_no, quote_line_id: src[i].quote_line_id ?? null, group: null }; }); return n; });
     toast.success(`ดึง ${add.length} รายการจาก ${label} แล้ว`);
   };
   // ใบเสนอราคาหลายใบเข้าใบเดียวได้ — ต้องเป็นลูกค้าเดียวกัน · ใบที่ดึงมาแล้วไม่ดึงซ้ำ (กติกา lib/quote-pull)
@@ -338,6 +397,7 @@ export default function SoOrdersPage() {
           quote_id: m?.quote_id ?? null, quote_no: m?.quote_no ?? null,
           source: m?.mo_id ? "mo" : m?.quote_id ? "quote" : "manual",
           mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? `new:${g.name}` : null,
+          quote_line_id: m?.quote_line_id ?? null, non_product: !l.sku && nonProductOf(l),
         };
       }),
     };
@@ -346,6 +406,8 @@ export default function SoOrdersPage() {
   const save = async (openMo: boolean) => {
     if (!form) return;
     if (!form.customer?.name) { toast.error("เลือกลูกค้าก่อน"); return; }
+    const unlinked = unlinkedLineNames(skuLines);
+    if (unlinked.length) { toast.error(skuLinkErrorText(unlinked)); return; }
     setSaving(true);
     try {
       const body = { ...payload(form), open_mo: openMo };
@@ -474,6 +536,7 @@ export default function SoOrdersPage() {
           <span className="mr-auto inline-flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
             {form.status === "cancelled" ? "ใบนี้ถูกยกเลิกแล้ว" : form.mo_opened_at ? "เปิดใบสั่งผลิตให้แล้ว" : "ยังไม่เปิดใบสั่งผลิต"}
             {form.id && !editing && <PrintHistoryBadge docType="so_order" docId={form.id} label="ใบเช็ก" />}
+            {lineEditable && unlinkedCount > 0 && <span className="inline-flex items-center gap-1 font-medium text-rose-600"><Icon name="link" /> ยังผูก SKU ไม่ครบ {unlinkedCount} รายการ — บันทึกไม่ได้</span>}
           </span>
           {form.id && canCancel && form.status !== "cancelled" && (
             <button onClick={() => setAskCancel(form)} className="h-9 px-3 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">⊘ ยกเลิกใบ</button>
@@ -563,7 +626,8 @@ export default function SoOrdersPage() {
             </div>
 
             {/* ตารางแน่น 1 แถว/รายการ — กดแถวเพื่อเปลี่ยนสินค้า/สี (ของกลาง layout="compact") */}
-            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="compact" readonly={form.status === "cancelled"} extraColumns={groupColumn} />
+            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="compact" readonly={form.status === "cancelled"} extraColumns={groupColumn}
+              rowBelow={skuRowBelow} rowTone={(l) => (lineEditable && lineNeedsSku({ sku: l.sku, non_product: nonProductOf(l) }) && (l.product_name.trim() || l.sku) ? "danger" : null)} />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-2">

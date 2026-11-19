@@ -12,7 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { checkQuotePull, syncQuoteConversions } from "@/lib/quote-convert";
-import { computeTotals, lineQuoteIds, lineRow, nextOrderNo, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
+import { checkLineSkus, computeTotals, lineQuoteIds, lineRow, nextOrderNo, writeBackQuoteLineSkus, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
 import { openMoForOrder } from "./open-mo";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +75,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (lines.length === 0) return NextResponse.json({ error: "ต้องมีรายการสินค้าอย่างน้อย 1 บรรทัด" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  // ทุกรายการต้องผูก SKU (เจ้าของสั่ง 2026-11-19 · lib/so-sku-link)
+  const skuErr = await checkLineSkus(admin, lines);
+  if (skuErr) return NextResponse.json({ error: skuErr }, { status: 400 });
   const quoteIds = lineQuoteIds(lines);
   const quoteErr = await checkQuotePull(admin, quoteIds, { customerId: header.customer_id ?? null });
   if (quoteErr) return NextResponse.json({ error: quoteErr }, { status: 400 });
@@ -117,6 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ใบเสนอราคาที่ดึงมา → "แปลงแล้ว"
   const quotes = await syncQuoteConversions(admin, quoteIds, { actorId: user?.id ?? null, actorName: user?.email ?? null });
+  const quoteSkuWritten = await writeBackQuoteLineSkus(admin, lines);   // SKU ที่ผูก → กลับลงใบเสนอราคา
 
   // ผูกใบสั่งผลิตที่ "ดึงมา" เข้ากับใบนี้ทันที (เจ้าของสั่ง: ยืนยันแล้ว = เปลี่ยนสถานะใบสั่งงานด้วย)
   let opened: { created: number; linked: number } | null = null;
@@ -124,7 +128,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   await writeAudit(admin, { action: "create", entityType: "so_order", entityId: orderId,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened, new_groups: groups.created, ...(quotes.converted.length ? { quotes: quotes.converted } : {}) } });
+    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened, new_groups: groups.created, ...(quoteSkuWritten ? { quote_sku_written: quoteSkuWritten } : {}), ...(quotes.converted.length ? { quotes: quotes.converted } : {}) } });
 
   return NextResponse.json({ id: orderId, order_no: orderNo, opened, new_groups: groups.created, error: null });
 }

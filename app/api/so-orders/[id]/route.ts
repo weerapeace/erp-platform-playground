@@ -21,7 +21,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { checkQuotePull, orderQuoteIds, quotePullProblems, syncQuoteConversions } from "@/lib/quote-convert";
-import { computeTotals, lineQuoteIds, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
+import { checkLineSkus, computeTotals, lineQuoteIds, lineRow, resolveLineGroups, writeBackQuoteLineSkus, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
 import { soLineProgress } from "@/lib/mo-so-rule";
 import { loadMoDispatch } from "@/lib/mo-dispatch";
@@ -170,6 +170,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const header = b.header ?? {};
     const lines = (b.lines ?? []).filter((l) => (l.product_name ?? "").trim() || l.sku);
     if (lines.length === 0) return NextResponse.json({ error: "ต้องมีรายการสินค้าอย่างน้อย 1 บรรทัด" }, { status: 400 });
+    const skuErr = await checkLineSkus(admin, lines);   // ทุกรายการต้องผูก SKU (2026-11-19)
+    if (skuErr) return NextResponse.json({ error: skuErr }, { status: 400 });
     const quoteIds = lineQuoteIds(lines);
     const quoteErr = await checkQuotePull(admin, quoteIds, { orderId: id, customerId: header.customer_id ?? null });
     if (quoteErr) return NextResponse.json({ error: quoteErr }, { status: 400 });
@@ -199,9 +201,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { error: lineErr } = await admin.from("so_order_lines").insert(lines.map((l, i) => lineRow(id, l, i, groups.groupOf(l))));
     if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
     const quotes = await syncQuoteConversions(admin, [...oldQuoteIds, ...quoteIds], actor);
+    const quoteSkuWritten = await writeBackQuoteLineSkus(admin, lines);
     // รายการที่อ้างใบสั่งผลิตไว้ (ดึงจากใบสั่งผลิต / กดผูกในตาราง) → ผูกฝั่งใบสั่งผลิตด้วย · ไม่เปิดใบใหม่
     const linked = await openMoForOrder(admin, id, user?.id ?? null, { linkOnly: true });
-    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total, ...(linked.linked ? { linked_mo: linked.linked } : {}), ...(quotes.converted.length || quotes.released.length ? { quotes } : {}) } });
+    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total, ...(linked.linked ? { linked_mo: linked.linked } : {}), ...(quoteSkuWritten ? { quote_sku_written: quoteSkuWritten } : {}), ...(quotes.converted.length || quotes.released.length ? { quotes } : {}) } });
     return NextResponse.json({ ok: true, linked: linked.linked, error: null });
   }
 
