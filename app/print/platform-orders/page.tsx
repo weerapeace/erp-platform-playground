@@ -24,11 +24,15 @@ import {
   PICK_GROUPS, PICK_PRESETS, PICK_SORTS, PICK_TITLE, buildPickPrint, demoLabelsHtml, packSlipsHtml, pickColumns, pickDefaults, shippingSimLabelsHtml,
   type PrintOrder, type ShipSimLabel,
 } from "@/lib/platform-order-print";
+import { LABEL_SIZES, labelSizeOf, type LabelSize } from "@/lib/shippop";
 
 type Kind = "pick" | "pack" | "label";
 type ApiOrder = PrintOrder & { source: string | null; platform_id: string | null; brand_id: string | null };
 type Company = { id: string; name: string; logo_key: string | null };
 const KIND_LABEL: Record<Kind, string> = { pick: "ใบหยิบรวม", pack: "ใบแพ็ก", label: "ใบปะหน้า" };
+const LABEL_SIZE_KEY = "platform-orders.label-size";
+const safeGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* เก็บไม่ได้ = ข้าม */ } };
 
 /** บาร์โค้ด Code128 ของเลขออเดอร์เป็น SVG (สร้างในเบราว์เซอร์) */
 function barcodeSvg(text: string): string {
@@ -71,12 +75,15 @@ function Inner() {
 
   const isDemo = !!orders?.length && orders.every((o) => o.source === "demo");
   // ใบปะหน้าของออเดอร์ที่จองขนส่งแล้ว (ศูนย์ออเดอร์ › จัดส่ง) — จองจำลอง = ใบของเรามีลายน้ำ · จองจริง = ไฟล์จาก SHIPPOP (ขั้น 2)
-  const [ship, setShip] = useState<{ html: string | null; sims: ShipSimLabel[] } | null>(null);
+  const [ship, setShip] = useState<{ html: string | null; sims: ShipSimLabel[]; booked: string[] } | null>(null);
+  // ขนาดใบปะหน้าจาก SHIPPOP (ใช้กับการจองจริง/ทดลอง) — จำต่อเครื่อง
+  const [size, setSize] = useState<LabelSize>(() => labelSizeOf(sp.get("size") ?? (typeof window !== "undefined" ? safeGet(LABEL_SIZE_KEY) : null)));
   useEffect(() => {
     if (kind !== "label" || isDemo || !orders?.length || ship) return;
-    apiFetch(`/api/platform-orders/ship?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.json())
-      .then((j) => setShip({ html: j.html ?? null, sims: (j.sims ?? []) as ShipSimLabel[] })).catch(() => setShip({ html: null, sims: [] }));
-  }, [kind, isDemo, orders, ids, ship]);
+    apiFetch(`/api/platform-orders/ship?ids=${encodeURIComponent(ids.join(","))}&size=${size}`).then((r) => r.json())
+      .then((j) => setShip({ html: j.html ?? null, sims: (j.sims ?? []) as ShipSimLabel[], booked: (j.booked ?? []) as string[] })).catch(() => setShip({ html: null, sims: [], booked: [] }));
+  }, [kind, isDemo, orders, ids, ship, size]);
+  const pickSize = (s: LabelSize) => { setSize(s); safeSet(LABEL_SIZE_KEY, s); setShip(null); };
   const barcodes = useMemo(() => {
     const m: Record<string, string> = {};
     if (typeof document !== "undefined") {
@@ -93,7 +100,7 @@ function Inner() {
     if (kind === "label" && ship?.sims.length) return shippingSimLabelsHtml(ship.sims, { sender: shop, barcodes });
     return "";
   }, [orders, kind, shop, barcodes, isDemo, ship]);
-  const notBooked = kind === "label" && ship ? orders?.filter((o) => !ship.sims.some((s) => s.orderNo === (o.order_no ?? o.id))) ?? [] : [];
+  const notBooked = kind === "label" && ship ? orders?.filter((o) => !ship.booked.includes(o.id) && !ship.sims.some((s) => s.orderNo === (o.order_no ?? o.id))) ?? [] : [];
 
   const tabs = (
     <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
@@ -113,6 +120,13 @@ function Inner() {
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6">
         {back}{tabs}
         <span className="text-sm text-slate-600">{orders.length} ออเดอร์ · {shop}</span>
+        {kind === "label" && ship?.html && (
+          <label className="inline-flex items-center gap-1.5 text-sm text-slate-600">ขนาด
+            <select value={size} onChange={(e) => pickSize(labelSizeOf(e.target.value))} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+              {LABEL_SIZES.map((s) => <option key={s.code} value={s.code}>{s.label}{s.hint ? ` · ${s.hint}` : ""}</option>)}
+            </select>
+          </label>
+        )}
         <div className="flex-1" />
         {simpleHtml && <button onClick={() => printReportHtmlInNewWindow(simpleHtml)} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">พิมพ์ / บันทึก PDF</button>}
       </div>
@@ -125,7 +139,7 @@ function Inner() {
       )}
       {kind === "label" && !isDemo && !simpleHtml ? null : (
         <>
-          <p className="no-print px-6 pt-3 text-xs text-slate-500">ตอนพิมพ์ให้ตั้ง “ขนาดจริง (100%)”{kind === "label" ? " · กระดาษสติกเกอร์ 100×150 มม. (4×6 นิ้ว)" : " · กระดาษ A4 ตัดครึ่ง"}</p>
+          <p className="no-print px-6 pt-3 text-xs text-slate-500">ตอนพิมพ์ให้ตั้ง “ขนาดจริง (100%)”{kind === "label" ? ` · กระดาษ ${ship?.html ? LABEL_SIZES.find((s) => s.code === size)?.label ?? size : "สติกเกอร์ 100×150 มม. (4×6 นิ้ว)"}` : " · กระดาษ A4 ตัดครึ่ง"}</p>
           <div className="p-6"><PrintFrame html={simpleHtml} maxWidth={kind === "label" ? 420 : 860} /></div>
         </>
       )}

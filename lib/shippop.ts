@@ -12,7 +12,7 @@
 
 export const SHIPPOP_COURIERS = [
   { code: "EMST", label: "ไปรษณีย์ไทย EMS", carrier: "thaipost" },
-  { code: "ECP", label: "ไปรษณีย์ไทย eCo-post", carrier: "thaipost" },
+  { code: "THP", label: "ไปรษณีย์ไทย ลงทะเบียน", carrier: "thaipost" },
   { code: "FLE", label: "Flash Express", carrier: "flash" },
   { code: "KRYX", label: "KEX Express", carrier: "kerry" },
   { code: "JNTP", label: "J&T Express (เข้ารับ)", carrier: "jt" },
@@ -23,9 +23,15 @@ export const SHIPPOP_COURIERS = [
   { code: "LLM", label: "Lalamove (ด่วนในวัน)", carrier: "other" },
 ] as const;
 export type ShippopCourier = (typeof SHIPPOP_COURIERS)[number]["code"];
-export const courierLabel = (code: string) => SHIPPOP_COURIERS.find((c) => c.code === code)?.label ?? code;
+/** รหัสเก่าที่คู่มือทางการไม่มีแล้ว → รหัสที่ใช้จริง (ตรวจ 2026-11-19 · ECP ไม่มีในคู่มือ) */
+const COURIER_ALIAS: Record<string, string> = { ECP: "THP" };
+export const normalizeCourier = (code: string | null | undefined) => { const c = String(code ?? "").trim().toUpperCase(); return COURIER_ALIAS[c] ?? c; };
+export const isKnownCourier = (code: string | null | undefined) => SHIPPOP_COURIERS.some((c) => c.code === normalizeCourier(code));
+/** ขนส่งแบบเอาไปส่งที่จุดเอง (ไม่เข้ารับ) — รหัสลงท้าย DS + KRYS (คู่มือ) · ไปรษณีย์ EMS ต้องเรียกเข้ารับเอง */
+export const isDropOffCourier = (code: string) => /DS$/.test(normalizeCourier(code)) || normalizeCourier(code) === "KRYS";
+export const courierLabel = (code: string) => SHIPPOP_COURIERS.find((c) => c.code === normalizeCourier(code))?.label ?? code;
 /** รหัสขนส่ง Shippop → ช่องขนส่งของเรา (lib/parcel-tracking) — ลูกค้ากดดูพัสดุที่หน้าตามออเดอร์ได้ */
-export const carrierOf = (code: string) => SHIPPOP_COURIERS.find((c) => c.code === code)?.carrier ?? "other";
+export const carrierOf = (code: string) => SHIPPOP_COURIERS.find((c) => c.code === normalizeCourier(code))?.carrier ?? "other";
 
 export interface ShippopAddress {
   name: string;
@@ -35,6 +41,16 @@ export interface ShippopAddress {
   province: string;
   postcode: string;
   tel: string;
+}
+/** รายการสินค้าในพัสดุ — คู่มือบังคับสำหรับพัสดุเก็บเงินปลายทาง (COD) */
+export interface ShippopProduct {
+  product_code: string;
+  name: string;
+  /** ราคาต่อชิ้น (บาท) */
+  price: number;
+  amount: number;
+  /** กรัมต่อชิ้น */
+  weight: number;
 }
 export interface ShippopParcel {
   name: string;
@@ -78,12 +94,29 @@ export const SHIPPOP_STATUS_LABEL: Record<string, string> = {
   cancel: "ยกเลิกแล้ว",
   pending_transfer: "รอโอนเงินปลายทาง",
   transferred: "โอนเงินปลายทางแล้ว",
+  return_shipping: "กำลังตีกลับ",
+  return_problem: "ตีกลับมีปัญหา",
+  return_complete: "ตีกลับถึงร้านแล้ว",
+  return_return: "ตีกลับซ้ำ",
+  return_close: "ปิดเรื่องตีกลับ",
+  rider_accept: "ไรเดอร์รับงานแล้ว",
 };
+
+/**
+ * สถานะที่มาจาก webhook → สถานะที่เก็บ (คู่มือ: หลังยืนยันแล้วส่งให้ขนส่งพลาด SHIPPOP จะส่ง "cancel" ชั่วคราว แล้วลองใหม่เอง ตามด้วย "booking")
+ * → "cancel" จาก webhook ไม่ใช่จุดจบ: จดประวัติแต่คงสถานะเดิม (ไม่ปลดให้จองซ้ำ = กันจ่ายค่าส่ง 2 รอบ) · ยกเลิกจริงทำได้ทางปุ่มยกเลิกของเราเท่านั้น
+ */
+export function statusFromWebhook(current: string, incoming: string): { status: string; note?: string } {
+  if (incoming === "cancel" && current !== "cancel") return { status: current, note: "SHIPPOP แจ้งยกเลิก (อาจชั่วคราว — ระบบส่งให้ขนส่งใหม่เอง) · ถ้าค้างนานให้ติดต่อ SHIPPOP" };
+  return { status: incoming };
+}
 export const shippopStatusLabel = (s: string) => SHIPPOP_STATUS_LABEL[s] ?? s;
 
 /** ข้อมูล Shippop ที่เก็บกับออเดอร์ (store_orders.shippop) */
 export interface ShippopInfo {
   mode: "sim" | "live";
+  /** จองบนระบบทดลองของ SHIPPOP (ไม่เสียเงิน · ใบปะหน้าใช้ส่งจริงไม่ได้) */
+  sandbox?: boolean;
   purchaseId: string;
   trackingCode: string;
   courierCode: string;
@@ -107,7 +140,9 @@ export function shippopMode(): ShippopMode {
  * บังคับ "live" ไม่ได้ถ้าไม่มีกุญแจ
  */
 const effMode = (force?: ShippopMode): ShippopMode => (force === "sim" ? "sim" : shippopMode());
-const baseUrl = () => (process.env.SHIPPOP_ENV === "prod" ? "https://mkpservice.shippop.com" : "https://mkpservice.shippop.dev");
+/** ระบบที่กุญแจชี้ไป: prod = ของจริง (เสียเงิน) · sandbox = ระบบทดลอง (ค่าเริ่มต้น ไม่ตั้ง SHIPPOP_ENV) */
+export const shippopEnv = (): "prod" | "sandbox" => (process.env.SHIPPOP_ENV?.trim() === "prod" ? "prod" : "sandbox");
+const baseUrl = () => (shippopEnv() === "prod" ? "https://mkpservice.shippop.com" : "https://mkpservice.shippop.dev");
 
 type Json = Record<string, unknown>;
 
@@ -152,6 +187,19 @@ export interface BookItem {
   courierCode: string;
   codAmount: number;
   ref: string;
+  /** รายการสินค้า — COD ไม่มี = ระบบใส่ 1 บรรทัดให้เอง (คู่มือบังคับ) */
+  products?: ShippopProduct[];
+}
+
+/** รายการสินค้าที่จะส่งไปกับการจอง: มี = ใช้ (ตัดช่องว่าง) · COD แต่ไม่มี = 1 บรรทัดจากชื่อพัสดุ/ยอดเก็บ · ไม่ COD ไม่มี = ไม่ส่ง */
+export function productsForBooking(it: Pick<BookItem, "products" | "codAmount" | "parcel" | "ref">): ShippopProduct[] | undefined {
+  const list = (it.products ?? []).filter((p) => p.amount > 0).map((p) => ({
+    product_code: String(p.product_code || "-").slice(0, 60), name: String(p.name || p.product_code || "สินค้า").replace(/\s+/g, " ").trim().slice(0, 120),
+    price: Math.max(0, Math.round((Number(p.price) || 0) * 100) / 100), amount: Math.max(1, Math.round(Number(p.amount) || 1)), weight: Math.max(1, Math.round(Number(p.weight) || 1)),
+  }));
+  if (list.length) return list;
+  if (it.codAmount > 0) return [{ product_code: it.ref || "-", name: it.parcel.name || "สินค้า", price: Math.round(it.codAmount), amount: 1, weight: Math.max(1, Math.round(it.parcel.weight)) }];
+  return undefined;
 }
 export interface BookResult {
   key: string;
@@ -175,12 +223,15 @@ export async function shippopBookAndConfirm(items: BookItem[], force?: ShippopMo
     from: it.from,
     to: it.to,
     parcel: it.parcel,
-    courier_code: it.courierCode,
+    courier_code: normalizeCourier(it.courierCode),
     ...(it.codAmount > 0 ? { cod_amount: Math.round(it.codAmount) } : {}),
+    ...(productsForBooking(it) ? { product: productsForBooking(it) } : {}),
     meta: { ref_no_1: it.ref },
   }));
   const b = await call("/booking/", { email: process.env.SHIPPOP_EMAIL ?? "", data });
   if (b.status !== true || !b.purchase_id) throw new Error(String(b.message ?? "Shippop booking failed"));
+  // บัญชีแบบเติมเงินก่อน (PREPAID) ได้ลิงก์จ่ายเงินแทน → จองผ่าน API ให้จบไม่ได้ ต้องขอ SHIPPOP เป็นบัญชีวางบิล
+  if (typeof b.payment_url === "string" && b.payment_url) throw new Error("บัญชี SHIPPOP เป็นแบบเติมเงินก่อน — ต้องจ่ายในเว็บ SHIPPOP เอง (ขอ SHIPPOP เปลี่ยนเป็นบัญชีวางบิล)");
   const purchaseId = String(b.purchase_id);
   const booked = (b.data ?? {}) as Record<string, Json>;
   const c = await call("/confirm/", { purchase_id: purchaseId });
@@ -194,10 +245,21 @@ export async function shippopBookAndConfirm(items: BookItem[], force?: ShippopMo
   return { purchaseId, mode: "live", results };
 }
 
-/** ใบปะหน้า (HTML ขนาด 4×6 นิ้ว) ของรหัส SP… หลายรายการ — โหมดจำลอง = null (ใช้ใบปะหน้าของเราเอง) */
-export async function shippopLabelHtml(trackingCodes: string[], force?: ShippopMode): Promise<string | null> {
+/** ขนาดใบปะหน้าที่ SHIPPOP ทำให้ได้ (คู่มือ /label_tracking_code/) · ค่าเริ่ม = สติกเกอร์ 4×6 นิ้ว (≈100×150 มม.) */
+export const LABEL_SIZES = [
+  { code: "sticker4x6", label: "สติกเกอร์ 4×6 นิ้ว (100×150 มม.)", hint: "เครื่องพิมพ์ความร้อน" },
+  { code: "A6", label: "A6", hint: "" },
+  { code: "A5", label: "A5", hint: "" },
+  { code: "A4", label: "A4", hint: "เครื่องพิมพ์ทั่วไป" },
+  { code: "letter4x6", label: "ซอง 4×6 (152×90 มม.)", hint: "" },
+] as const;
+export type LabelSize = (typeof LABEL_SIZES)[number]["code"];
+export const labelSizeOf = (v: unknown): LabelSize => (LABEL_SIZES.find((s) => s.code === v)?.code ?? "sticker4x6");
+
+/** ใบปะหน้าของรหัส SP… หลายรายการ (HTML) — โหมดจำลอง = null (ใช้ใบปะหน้าของเราเอง) */
+export async function shippopLabelHtml(trackingCodes: string[], force?: ShippopMode, size: LabelSize = "sticker4x6"): Promise<string | null> {
   if (effMode(force) === "sim" || !trackingCodes.length) return null;
-  const j = await call("/label_tracking_code/", { tracking_code: trackingCodes.join(","), size: "sticker4x6", type: "html" });
+  const j = await call("/label_tracking_code/", { tracking_code: trackingCodes.join(","), size: labelSizeOf(size), type: "html", ...(size === "sticker4x6" ? { showproduct: 1 } : {}) });
   return typeof j.html === "string" ? j.html : null;
 }
 

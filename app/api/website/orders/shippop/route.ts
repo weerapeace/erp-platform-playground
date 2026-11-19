@@ -13,7 +13,8 @@ import { guardApi } from "@/lib/api-auth";
 import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { readSiteInfo } from "@/lib/website-site-info";
-import { SHIPPOP_COURIERS, SHIPPOP_STATUS_LABEL, carrierOf, shippopBookAndConfirm, shippopCancel, shippopLabelHtml, shippopMode, shippopQuote, type ShippopInfo } from "@/lib/shippop";
+import { SHIPPOP_STATUS_LABEL, carrierOf, isKnownCourier, labelSizeOf, normalizeCourier, shippopBookAndConfirm, shippopCancel, shippopEnv, shippopLabelHtml, shippopMode, shippopQuote, type ShippopInfo } from "@/lib/shippop";
+import { logShippingCost } from "@/lib/shipping/cost";
 import { SHIPPOP_ORDER_SELECT, applyShippopStatus, bookItemOf, senderOf, type ShippopOrderRow } from "@/lib/shippop-db";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // โหมดจำลอง/จองจำลอง: ส่งข้อมูลให้หน้าพิมพ์ทำใบปะหน้าของเราเอง (มีลายน้ำ "จำลอง")
   const sims = orders.filter((o) => o.shippop && o.shippop.mode === "sim" && o.shippop.status !== "cancel").map((o) => ({ orderNo: o.order_no, name: o.customer_name, tel: o.customer_phone, address: [o.ship_address_line, o.ship_subdistrict, o.ship_district, o.ship_province, o.ship_postal].filter(Boolean).join(" "), courier: o.shippop!.courierCode, tracking: o.shippop!.courierTrackingCode || o.shippop!.trackingCode, cod: o.shippop!.codAmount }));
   try {
-    return NextResponse.json({ mode: shippopMode(), html: await shippopLabelHtml(codes), sims }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ mode: shippopMode(), html: await shippopLabelHtml(codes, undefined, labelSizeOf(request.nextUrl.searchParams.get("size"))), sims }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ error: `ดึงใบปะหน้าไม่สำเร็จ: ${(e as Error).message}` }, { status: 502 });
   }
@@ -76,9 +77,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   if (action === "book") {
     const ids = (Array.isArray(body?.orderIds) ? body!.orderIds : []).filter((x) => UUID.test(String(x))).slice(0, 50);
-    const courier = String(body?.courierCode ?? "");
+    const courier = normalizeCourier(String(body?.courierCode ?? ""));
     if (!ids.length) return NextResponse.json({ error: "เลือกออเดอร์ก่อน" }, { status: 400 });
-    if (!SHIPPOP_COURIERS.some((c) => c.code === courier)) return NextResponse.json({ error: "เลือกขนส่งก่อน" }, { status: 400 });
+    if (!isKnownCourier(courier)) return NextResponse.json({ error: "เลือกขนส่งก่อน" }, { status: 400 });
     const orders = await loadOrders(sb, ids);
     if (!orders.length) return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
     const shopId = orders[0].shop_id;
@@ -104,8 +105,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try {
       booked = await shippopBookAndConfirm(items);
     } catch (e) {
+      await logShippingCost({ mode, sandbox: shippopEnv() !== "prod", courier, price: 0, ok: false, error: (e as Error).message });
       return NextResponse.json({ ok: false, error: `จองไม่สำเร็จ: ${(e as Error).message}`, failed }, { status: 502 });
     }
+    const sandbox = booked.mode === "live" && shippopEnv() !== "prod";
     let done = 0;
     const now = new Date().toISOString();
     for (const r of booked.results) {
@@ -115,7 +118,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         failed.push({ orderNo: o.order_no, error: r.error ?? "จองไม่สำเร็จ" });
         continue;
       }
-      const sp: ShippopInfo = { mode: booked.mode, purchaseId: booked.purchaseId, trackingCode: r.trackingCode, courierCode: courier, courierTrackingCode: r.courierTrackingCode ?? "", price: r.price ?? 0, codAmount: item.codAmount, status: "booking", bookedAt: now, history: [{ status: "booking", at: now }] };
+      await logShippingCost({ mode: booked.mode, sandbox, courier, price: r.price ?? 0, ok: true });
+      const sp: ShippopInfo = { mode: booked.mode, ...(sandbox ? { sandbox: true } : {}), purchaseId: booked.purchaseId, trackingCode: r.trackingCode, courierCode: courier, courierTrackingCode: r.courierTrackingCode ?? "", price: r.price ?? 0, codAmount: item.codAmount, status: "booking", bookedAt: now, history: [{ status: "booking", at: now }] };
       await sb.from("store_orders").update({ shippop: sp, tracking_no: sp.courierTrackingCode || sp.trackingCode, tracking_carrier: carrierOf(courier) }).eq("id", o.id);
       await writeAuditFor(request, sb, { action: "update", entityType: "store_orders", entityId: o.id, metadata: { kind: "shippop_book", orderNo: o.order_no, mode: booked.mode, courier, trackingCode: sp.trackingCode, courierTrackingCode: sp.courierTrackingCode, price: sp.price, cod: item.codAmount } });
       done++;

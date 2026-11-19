@@ -598,6 +598,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "ป๊อป/จอซ้อนชั้นเดียว (เปิด-ปิด) → lib/use-back-close · ลิ้นชัก → lib/drawer-history · เปลี่ยนหน้า (URL) → router ปกติ",
   },
   {
+    key: "shipping-provider", label: "ตัวเรียกขนส่ง (ดูราคา/จอง/ใบปะหน้า/สถานะ)", code: "lib/shipping/provider", category: "system",
+    source: { path: "lib/shipping/provider", names: ["shippingProvider"] },
+    what: "ชั้นกลางเรียกตัวกลางขนส่ง: ดูราคาทุกเจ้า · จอง+ยืนยัน · ใบปะหน้า (A4/A5/A6/สติกเกอร์ 4×6) · ถามสถานะ · ยกเลิก · ตอนนี้เสียบ SHIPPOP · โหมดจำลอง/ทดลอง/จริงตามกุญแจ",
+    when: "ทุกที่ที่ต้องจองขนส่งเองให้ออเดอร์ช่องทางของร้าน (แชต/เว็บ/โทร/LINE SHOPPING) · ค่าส่งจริงบันทึกผ่าน lib/shipping/cost · สถานะเข้าออเดอร์ผ่าน lib/shipping/order-status-db",
+    notWhen: "ออเดอร์ Shopee/Lazada/TikTok — ต้องใช้ขนส่งของแพลตฟอร์ม (canShipViaShippop กันไว้) · เว็บร้านยังเรียก lib/shippop ตรง (ย้ายมาได้)",
+  },
+  {
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
     source: { path: "lib/export" },
     what: "ส่งออกแถวที่เห็น / ที่เลือก / ทั้งหมดที่กรองไว้ เป็น CSV หรือ Excel",

@@ -8,11 +8,43 @@
  *   ตัวเรียก SHIPPOP = lib/shippop (ตัวเดียวกับเว็บร้าน) · ที่อยู่ผู้ส่ง = shipping_profiles ต่อแบรนด์
  * ใช้ที่: app/api/platform-orders/ship · app/api/platform-orders (สร้างออเดอร์เอง/แก้ที่อยู่) · หน้า /master/platform-orders
  */
-import { carrierOf, parseBox, telOf, type BookItem, type ShippopAddress, type ShippopInfo } from "@/lib/shippop";
+import { carrierOf, parseBox, telOf, type BookItem, type ShippopAddress, type ShippopInfo, type ShippopProduct } from "@/lib/shippop";
 import type { PlatformOrderStatus } from "@/lib/platform-order-status";
 
-/** ขั้น 1 = ล็อกโหมดจำลอง (ไม่เรียกขนส่งจริง ไม่เสียเงิน) แม้มีกุญแจ SHIPPOP แล้ว — เปิดจริงในขั้น 2 เมื่อเจ้าของอนุมัติ */
-export const ORDER_CENTER_SHIPPING_FORCE = "sim" as const;
+/**
+ * โหมดของศูนย์ออเดอร์ (เฟส 1 · 2026-11-19) — คืน "sim" = บังคับจำลอง · undefined = ตามกุญแจ
+ *   ไม่มีกุญแจ → จำลอง
+ *   กุญแจทดลอง (SHIPPOP_ENV ไม่ใช่ prod) → เรียกระบบทดลองของ SHIPPOP ได้ (ไม่เสียเงิน)
+ *   กุญแจจริง (SHIPPOP_ENV=prod) → ยังจำลอง จนเจ้าของตั้ง SHIPPOP_ORDER_CENTER_LIVE=1 เอง (เสียเงินจริงต่อการจอง)
+ * pure รับ env ได้ (เทสต์)
+ */
+export function orderCenterShippingForce(env: Record<string, string | undefined> = process.env): "sim" | undefined {
+  if (!env.SHIPPOP_API_KEY?.trim()) return "sim";
+  if (env.SHIPPOP_ENV?.trim() !== "prod") return undefined;
+  return env.SHIPPOP_ORDER_CENTER_LIVE?.trim() === "1" ? undefined : "sim";
+}
+/** ป้ายโหมดสำหรับหน้าจอ: sim = จำลอง · sandbox = ระบบทดลอง SHIPPOP · prod = จริง (เสียเงิน) */
+export function orderCenterShippingMode(env: Record<string, string | undefined> = process.env): "sim" | "sandbox" | "prod" {
+  if (orderCenterShippingForce(env) === "sim") return "sim";
+  return env.SHIPPOP_ENV?.trim() === "prod" ? "prod" : "sandbox";
+}
+
+/** กล่องพัสดุจากสินค้า (parent_skus_v2.parcel_size_id → parcel_sizes) — เลือกกล่องปริมาตรใหญ่สุด
+ *  หลายชิ้น = ใช้กล่องใหญ่สุดแล้วเตือนให้ตรวจ (อาจต้องกล่องใหญ่กว่า) · ไม่มีเลย = null (ใช้ค่าตั้งต้นของแบรนด์) */
+export type BoxDims = { width_cm: number | null; length_cm: number | null; height_cm: number | null; name?: string | null };
+export function boxOfItems(items: { qty: number; box: BoxDims | null }[]): { box: string | null; name: string | null; missing: number; multi: boolean } {
+  let best: { v: number; s: string; name: string | null } | null = null;
+  let missing = 0, pieces = 0;
+  for (const it of items) {
+    const q = Math.max(0, Number(it.qty) || 0);
+    pieces += q;
+    const w = Number(it.box?.width_cm) || 0, l = Number(it.box?.length_cm) || 0, h = Number(it.box?.height_cm) || 0;
+    if (!(w > 0 && l > 0 && h > 0)) { if (q > 0) missing++; continue; }
+    const v = w * l * h;
+    if (!best || v > best.v) best = { v, s: `${w}x${l}x${h}`, name: it.box?.name ?? null };
+  }
+  return { box: best?.s ?? null, name: best?.name ?? null, missing, multi: pieces > 1 };
+}
 
 export const MARKETPLACE_CODES = ["shopee", "lazada", "tiktok"] as const;
 export const isMarketplace = (code: string | null | undefined) => (MARKETPLACE_CODES as readonly string[]).includes(String(code ?? ""));
@@ -107,13 +139,13 @@ export function parcelWeight(items: { qty: number; weight_g: number | null }[], 
 }
 
 /** ออเดอร์ → รายการจอง SHIPPOP */
-export function bookItemOf(o: { id: string; order_no: string | null; ship_to: ShipTo | null; cod_amount: number | null }, from: ShippopAddress, opts: { courierCode: string; grams: number; box: string }): { ok: true; item: BookItem } | { ok: false; error: string } {
+export function bookItemOf(o: { id: string; order_no: string | null; ship_to: ShipTo | null; cod_amount: number | null }, from: ShippopAddress, opts: { courierCode: string; grams: number; box: string; products?: ShippopProduct[] }): { ok: true; item: BookItem } | { ok: false; error: string } {
   const no = o.order_no ?? o.id;
   const st = cleanShipTo(o.ship_to);
   if (!st.ok) return { ok: false, error: `${no}: ${st.error}` };
   return {
     ok: true,
-    item: { key: o.id, from, to: shipToAddress(st.value), parcel: { name: `ออเดอร์ ${no}`, weight: Math.max(50, Math.round(opts.grams)), ...parseBox(opts.box) }, courierCode: opts.courierCode, codAmount: Math.max(0, Math.round(Number(o.cod_amount) || 0)), ref: no },
+    item: { key: o.id, from, to: shipToAddress(st.value), parcel: { name: `ออเดอร์ ${no}`, weight: Math.max(50, Math.round(opts.grams)), ...parseBox(opts.box) }, courierCode: opts.courierCode, codAmount: Math.max(0, Math.round(Number(o.cod_amount) || 0)), ref: no, ...(opts.products?.length ? { products: opts.products } : {}) },
   };
 }
 
@@ -132,9 +164,9 @@ export function nextSimStatus(cur: string): string | null {
 }
 
 /** ข้อมูลการจองใหม่ (เก็บลง platform_orders.shipping) */
-export function newShipping(args: { mode: "sim" | "live"; purchaseId: string; trackingCode: string; courierCode: string; courierTrackingCode?: string; price?: number; codAmount: number; at: string }): OrderShipping {
+export function newShipping(args: { mode: "sim" | "live"; sandbox?: boolean; purchaseId: string; trackingCode: string; courierCode: string; courierTrackingCode?: string; price?: number; codAmount: number; at: string }): OrderShipping {
   return {
-    provider: "shippop", mode: args.mode, purchaseId: args.purchaseId, trackingCode: args.trackingCode, courierCode: args.courierCode,
+    provider: "shippop", mode: args.mode, ...(args.mode === "live" && args.sandbox ? { sandbox: true } : {}), purchaseId: args.purchaseId, trackingCode: args.trackingCode, courierCode: args.courierCode,
     courierTrackingCode: args.courierTrackingCode ?? "", price: args.price ?? 0, codAmount: args.codAmount, status: "booking", bookedAt: args.at,
     history: [{ status: "booking", at: args.at }],
   };
