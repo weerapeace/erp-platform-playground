@@ -82,6 +82,20 @@ async function parcelsOf(admin: Admin, ids: string[], defaultPerPiece: number): 
   return out;
 }
 
+/** กล่องให้เลือกในป๊อปจอง (parcel_sizes) — เรียงตามจำนวนรุ่นที่ใช้กล่องนั้น (ใช้บ่อยก่อน) · dims รูปแบบเดียวกับ boxOfItems/parseBox */
+async function boxOptions(admin: Admin): Promise<{ name: string; dims: string; used: number }[]> {
+  const [{ data: sizes }, { data: used }] = await Promise.all([
+    admin.from("parcel_sizes").select("id, name, width_cm, length_cm, height_cm"),
+    admin.from("parent_skus_v2").select("parcel_size_id").not("parcel_size_id", "is", null).limit(5000),
+  ]);
+  const n = new Map<string, number>();
+  for (const r of (used ?? []) as { parcel_size_id: string }[]) n.set(r.parcel_size_id, (n.get(r.parcel_size_id) ?? 0) + 1);
+  return ((sizes ?? []) as { id: string; name: string | null; width_cm: number | null; length_cm: number | null; height_cm: number | null }[])
+    .filter((z) => Number(z.width_cm) > 0 && Number(z.length_cm) > 0 && Number(z.height_cm) > 0)
+    .map((z) => ({ name: z.name || "กล่อง", dims: `${Number(z.width_cm)}x${Number(z.length_cm)}x${Number(z.height_cm)}`, used: n.get(z.id) ?? 0 }))
+    .sort((a, b) => b.used - a.used || a.name.localeCompare(b.name));
+}
+
 async function profileOf(admin: Admin, brandId: string | null): Promise<ShippingProfile | null> {
   if (!brandId) return null;
   const { data } = await admin.from("shipping_profiles").select(PROFILE_COLS).eq("brand_id", brandId).maybeSingle();
@@ -136,7 +150,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const quotes = await Promise.all(ok.map((o, i) => shippingProvider().quote(DEMO_FROM, o.ship_to ? { name: o.ship_to.name, address: o.ship_to.address, district: o.ship_to.subdistrict, state: o.ship_to.district, province: o.ship_to.province, postcode: o.ship_to.postal, tel: o.ship_to.phone } : DEMO_FROM, { name: "ตัวอย่าง", weight: orders[i].grams, width: 20, length: 30, height: 10 }, "sim")));
       const sum = new Map<string, { courierCode: string; courierName: string; price: number; available: boolean; estimate: string }>();
       for (const qs of quotes) for (const q of qs) { const cur = sum.get(q.courierCode); sum.set(q.courierCode, cur ? { ...cur, price: cur.price + q.price } : { ...q }); }
-      return NextResponse.json({ mode: "sim", demo: true, quotes: [...sum.values()].sort((a, c) => a.price - c.price), orders, blocked, sender: { name: DEMO_FROM.name, province: DEMO_FROM.province }, error: null });
+      return NextResponse.json({ mode: "sim", demo: true, quotes: [...sum.values()].sort((a, c) => a.price - c.price), orders, blocked, sender: { name: DEMO_FROM.name, province: DEMO_FROM.province }, boxes: await boxOptions(supabaseAdmin()).catch(() => []), error: null });
     }
     return NextResponse.json({ ok: true, demo: true, error: null });
   }
@@ -187,7 +201,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             return { id: it.key, order_no: it.ref, grams: it.parcel.weight, missing: pc?.missing ?? 0, cod: it.codAmount, box: `${it.parcel.width}x${it.parcel.length}x${it.parcel.height}`,
               boxName: boxIn ? null : pc?.boxName ?? null, boxFromProduct: !boxIn && !!pc?.box, boxMissing: pc?.boxMissing ?? 0, multi: pc?.multi ?? false };
           }),
-          blocked, sender: { name: sender.from.name, province: sender.from.province }, error: null,
+          blocked, sender: { name: sender.from.name, province: sender.from.province }, boxes: await boxOptions(admin).catch(() => []), error: null,
         });
       } catch (e) { return NextResponse.json({ error: `ดูราคาไม่สำเร็จ: ${(e as Error).message}` }, { status: 502 }); }
     }

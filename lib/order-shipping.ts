@@ -183,3 +183,10 @@ export function manualOrderNo(now = Date.now(), rnd: () => number = Math.random)
   for (let i = 0; i < 4; i++) s += abc[Math.floor(rnd() * abc.length) % abc.length];
   return `M${ymd}-${s}`;
 }
+
+/** "ส่งภายใน" ของออเดอร์สร้างเอง = สิ้นวันพรุ่งนี้ (23:59:59 เวลาไทย) — ไม่ตกไปท้ายรายการ + นับในการ์ดเลยกำหนด/ส่งวันนี้ได้ (เจ้าของเลือก 2026-11-19) */
+export function manualShipBy(now = Date.now()): string {
+  const BKK = 7 * 3600_000, DAY = 86_400_000;
+  const day = Math.floor((now + BKK) / DAY);
+  return new Date((day + 2) * DAY - BKK - 1000).toISOString();
+}

@@ -1,6 +1,7 @@
 "use client";
 
 // แผงรายละเอียดออเดอร์ (ลิ้นชักกลาง Drawer) — ปุ่มสถานะตามกติกากลาง lib/platform-order-status · ผู้รับ + ขนส่ง (lib/order-shipping) · ใบกำกับภาษี
+// รายการสินค้ามีรูป (ชี้ขยาย · HoverImage) + สี/กล่อง/น้ำหนัก — 2026-11-19
 
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog, Drawer } from "@/components/modal";
@@ -15,6 +16,8 @@ import {
 } from "@/lib/platform-order-status";
 import { EMPTY_SHIP_TO, canShipViaShippop, isMarketplace, isShippingActive, manualChannelLabel, nextSimStatus, shipToText, type OrderShipping, type ShipTo } from "@/lib/order-shipping";
 import { courierLabel, shippopStatusLabel } from "@/lib/shippop";
+import { HoverImage } from "@/components/hover-image";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { StatusChip } from "./status-chip";
 import { ShipToFields } from "./ship-to-fields";
 
@@ -139,10 +142,16 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
               <p className="mb-1 text-xs text-slate-400">รายการ ({items.length}){unmatched > 0 && source !== "demo" && <span className="text-rose-500"> · จับคู่สินค้าไม่ได้ {unmatched} (จะไม่ตัดสต๊อก)</span>}</p>
               <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                 {items.map((it) => (
-                  <div key={it.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
-                    <span className="shrink-0 font-mono text-slate-600">{it.sku_code || "—"}</span>
-                    <span className="min-w-0 flex-1 truncate text-slate-700">{it.name || "—"}{it.variant ? <span className="text-slate-400"> ({it.variant})</span> : null}</span>
-                    <span className="shrink-0 text-slate-500">×{it.qty}</span>
+                  <div key={it.id} className="flex items-center gap-3 px-2.5 py-2 text-xs">
+                    <HoverImage url={r2ImageUrl(it.image_key, 600)} size={52} previewSize={320} rounded="rounded-lg" fallback="" />
+                    <div className="min-w-0 flex-1">
+                      <div className="line-clamp-2 text-slate-800">{it.name || "—"}{it.variant ? <span className="text-slate-400"> ({it.variant})</span> : null}</div>
+                      <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                        <span className="font-mono">{it.sku_code || "—"}</span>
+                        {[it.color, it.box_name ? `กล่อง ${it.box_name}` : null, it.weight_g ? `${Math.round(it.weight_g).toLocaleString("th-TH")} ก.` : null].filter(Boolean).map((x) => ` · ${x}`).join("")}
+                      </div>
+                    </div>
+                    <span className="shrink-0 font-medium text-slate-700">×{it.qty}</span>
                   </div>
                 ))}
               </div>

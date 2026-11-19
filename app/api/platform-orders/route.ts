@@ -4,6 +4,8 @@
  * GET  ?platform_id=&brand_id=&view=&status=&q=&due=&invoice=&page=&page_size=
  *        view   todo (ค่าเริ่ม) = ออเดอร์ที่ต้องจัดการ (ไม่รวมออเดอร์จากเมล) · history = ยอดขายจากเมล (ส่งแล้วนอกระบบ) · all
  *        due    late = เลยกำหนดส่ง · today = ต้องส่งวันนี้ (เวลาไทย)  ·  invoice  requested = ขอใบกำกับแต่ยังไม่ออก · issued
+ *        booked=1 = จองขนส่งแล้ว รอขนส่งรับ (ยังไม่ส่ง · การจองไม่ถูกยกเลิก) · q ค้นเลขออเดอร์/ลูกค้า + ชื่อสินค้า/รหัส SKU (2026-11-19)
+ *        แต่ละออเดอร์มี products (3 รายการแรก + รูป) + item_count — คอลัมน์ "สินค้า" (lib/platform-order-items-server)
  *        → { orders (หน้าเดียว), total (ทั้งหมดตามตัวกรอง), summary (นับต่อสถานะ + การ์ด) }
  *        ?demo=1 = ออเดอร์ตัวอย่าง (lib/platform-order-demo) ไม่แตะฐานข้อมูล
  * PATCH { id | ids[], status?, tracking_no?, carrier? }  (platform_orders.manage)
@@ -26,7 +28,8 @@ import {
   type PlatformOrderRow,
 } from "@/lib/platform-order-status";
 import { demoOrder, demoOrders, isDemoId } from "@/lib/platform-order-demo";
-import { cleanShipTo, isManualChannel, isOpenManualChannel, isMarketplace, isShippingActive, manualOrderNo, type OrderShipping } from "@/lib/order-shipping";
+import { cleanShipTo, isManualChannel, isOpenManualChannel, isMarketplace, isShippingActive, manualOrderNo, manualShipBy, type OrderShipping } from "@/lib/order-shipping";
+import { orderIdsByProduct, orderItemsWithMedia, productSummary } from "@/lib/platform-order-items-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,7 +49,7 @@ async function defaultWarehouse(admin: Admin): Promise<string | null> {
   return (any1 as { id?: string } | null)?.id ?? null;
 }
 
-type ListParams = { platformId: string; brandId: string; view: string; status: string; q: string; due: string; invoice: string; active?: boolean };
+type ListParams = { platformId: string; brandId: string; view: string; status: string; q: string; due: string; invoice: string; active?: boolean; booked?: boolean; qIds?: string[] };
 
 /** คำค้น → ปลอดภัยสำหรับ or() ของ PostgREST (ตัด , ( ) ที่ทำให้ตัวกรองพัง) */
 const cleanQ = (q: string) => q.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
@@ -62,7 +65,9 @@ function applyFilters(q: any, p: ListParams) {
   // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction · TikTok ON_HOLD = ผู้ซื้อยังยกเลิกได้ ยังไม่นับ)
   if (p.active) q = q.in("status", OPEN_STATUSES).or("platform_status.is.null,platform_status.not.in.(UNPAID,ON_HOLD)");
   const s = cleanQ(p.q);
-  if (s) q = q.or(`order_no.ilike.*${s}*,external_order_id.ilike.*${s}*,customer_name.ilike.*${s}*`);
+  if (s) q = q.or(`order_no.ilike.*${s}*,external_order_id.ilike.*${s}*,customer_name.ilike.*${s}*${p.qIds?.length ? `,id.in.(${p.qIds.join(",")})` : ""}`);
+  // จองขนส่งแล้ว รอรับ = ยังไม่ส่ง + มีการจองที่ไม่ถูกยกเลิก
+  if (p.booked) q = q.in("status", OPEN_STATUSES).not("shipping", "is", null).neq("shipping->>status", "cancel");
   if (p.due === "late") q = q.lt("ship_by_at", new Date().toISOString()).in("status", OPEN_STATUSES);
   if (p.due === "today") q = q.gte("ship_by_at", new Date().toISOString()).lt("ship_by_at", bangkokDayRange().end).in("status", OPEN_STATUSES);
   if (p.invoice === "requested") q = q.not("tax_invoice_request", "is", null).is("invoice_so_id", null).neq("status", "cancelled");
@@ -97,6 +102,7 @@ function demoList(p: ListParams, page: number, size: number) {
     if (p.invoice === "requested" && !(o.tax_invoice_requested && !o.invoice_so_id && o.status !== "cancelled")) return false;
     if (p.invoice === "issued" && !o.invoice_so_id) return false;
     if (p.active && !needsAction(o)) return false;
+    if (p.booked && !(o.shipping_status && o.shipping_status !== "cancel" && o.status !== "shipped" && o.status !== "cancelled")) return false;
     return true;
   });
   const rows = p.status ? base.filter((o) => o.status === p.status) : base;
@@ -108,9 +114,12 @@ function demoList(p: ListParams, page: number, size: number) {
     late: all.filter((o) => shipDue(o, now) === "late").length,
     today: all.filter((o) => shipDue(o, now) === "today").length,
     invoice_requested: all.filter((o) => o.tax_invoice_requested && !o.invoice_so_id && o.status !== "cancelled").length,
+    booked: all.filter((o) => o.shipping_status && o.shipping_status !== "cancel" && o.status !== "shipped" && o.status !== "cancelled").length,
     view_total: { todo: all.length, history: 0 },
   };
-  const orders = rows.slice((page - 1) * size, page * size).map(({ items: _i, recipient: _r, note: _n, tax_invoice_request: _t, ...row }) => row);
+  const orders = rows.slice((page - 1) * size, page * size).map(({ items, recipient: _r, note: _n, tax_invoice_request: _t, ...row }) => ({
+    ...row, ...productSummary(items.map((i) => ({ sku_code: i.sku_code, name: i.name, qty: Number(i.qty) || 0, image_key: null }))),
+  }));
   return { orders, total: rows.length, summary };
 }
 
@@ -130,11 +139,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const admin = supabaseAdmin();
     const { data: order } = await admin.from("platform_orders").select("*").eq("id", id).maybeSingle();
     if (!order) return NextResponse.json({ error: "ไม่พบออเดอร์" }, { status: 404 });
-    const [{ data: items }, platform_code] = await Promise.all([
+    const [{ data: items }, media, platform_code] = await Promise.all([
       admin.from("platform_order_items").select("*").eq("order_id", id),
+      orderItemsWithMedia(admin, [id]),
       platformCodeOf(admin, (order as Record<string, unknown>).platform_id),
     ]);
-    return NextResponse.json({ order: { ...(order as Record<string, unknown>), platform_code }, items: items ?? [], error: null });
+    // รูป/สี/กล่อง/น้ำหนัก ต่อรายการ (ลิ้นชักออเดอร์)
+    const mById = new Map((media.get(id) ?? []).map((m) => [m.id, m]));
+    const withMedia = ((items ?? []) as Record<string, unknown>[]).map((it) => {
+      const m = mById.get(String(it.id));
+      return { ...it, image_key: m?.image_key ?? null, color: m?.color ?? null, box_name: m?.box_name ?? null, weight_g: m?.weight_g ?? null };
+    });
+    return NextResponse.json({ order: { ...(order as Record<string, unknown>), platform_code }, items: withMedia, error: null });
   }
 
   // ?ids=a,b,c → ออเดอร์ + รายการ หลายใบ (หน้าพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า)
@@ -161,23 +177,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const p: ListParams = {
     platformId: (sp.get("platform_id") ?? "").trim(), brandId: (sp.get("brand_id") ?? "").trim(),
     view: (sp.get("view") ?? "todo").trim(), status: (sp.get("status") ?? "").trim(), q: (sp.get("q") ?? "").trim(),
-    due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1",
+    due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1", booked: sp.get("booked") === "1",
   };
   const page = Math.max(1, Number(sp.get("page")) || 1);
   const size = Math.min(PAGE_MAX, Math.max(10, Number(sp.get("page_size")) || 50));
   if (demo) return NextResponse.json({ ...demoList(p, page, size), page, page_size: size, demo: true, error: null });
 
   const admin = supabaseAdmin();
+  if (cleanQ(p.q)) p.qIds = await orderIdsByProduct(admin, cleanQ(p.q));   // ค้นชื่อสินค้า/รหัส SKU ด้วย
   const count = (extra: Partial<ListParams>): Promise<number> =>
     applyFilters(admin.from("platform_orders").select("id", { count: "exact", head: true }), { ...p, ...extra })
       .then((r: { count: number | null }) => r.count ?? 0);
   // การ์ด = ทั้งร้าน/ทั้งมุมมอง ไม่ขึ้นกับตัวกรองย่อย (สถานะ/คำค้น/กำหนดส่ง/ใบกำกับ)
-  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false };
+  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false };
 
   const listQ = applyFilters(admin.from("platform_orders").select(LIST_COLS, { count: "exact" }), p)
     .order("ship_by_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false })
     .range((page - 1) * size, page * size - 1);
-  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist] = await Promise.all([
+  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist, booked] = await Promise.all([
     listQ,
     Promise.all(PLATFORM_ORDER_STATUSES.map((st) => count({ ...scope, status: st }))),
     count({ ...scope, view: "todo", active: true }),
@@ -186,14 +203,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     count({ ...scope, view: "all", invoice: "requested" }),
     count({ ...scope, view: "todo" }),
     count({ ...scope, view: "history" }),
+    count({ ...scope, view: "todo", booked: true }),
   ]);
   if (list.error) return NextResponse.json({ error: "โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const by: Record<string, number> = {};
   PLATFORM_ORDER_STATUSES.forEach((st, i) => { by[st] = byStatus[i]; });
+  const listRows = ((list.data ?? []) as Record<string, unknown>[]).map(toRow);
+  const media = await orderItemsWithMedia(admin, listRows.map((r) => r.id)).catch(() => new Map());   // คอลัมน์สินค้า — พลาด = แสดงรายการโดยไม่มีสินค้า
   return NextResponse.json({
-    orders: ((list.data ?? []) as Record<string, unknown>[]).map(toRow),
+    orders: listRows.map((r) => ({ ...r, ...productSummary(media.get(r.id) ?? []) })),
     total: list.count ?? 0, page, page_size: size,
-    summary: { by_status: by, todo, late, today, invoice_requested: invReq, view_total: { todo: viewTodo, history: viewHist } },
+    summary: { by_status: by, todo, late, today, invoice_requested: invReq, booked, view_total: { todo: viewTodo, history: viewHist } },
     error: null,
   });
 }
@@ -344,7 +364,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const no = manualOrderNo();
     const { data: ins, error } = await admin.from("platform_orders").insert({
       platform_id: platformId, brand_id: brandId, source: "manual", external_order_id: no, order_no: no, customer_name: st.value.name,
-      status: "new", total, currency: "THB", ordered_at: now, ship_to: st.value, cod_amount: cod,
+      status: "new", total, currency: "THB", ordered_at: now, ship_by_at: manualShipBy(), ship_to: st.value, cod_amount: cod,
       raw: { channel: b!.channel, note: String(b?.note ?? "").trim().slice(0, 500) || null }, created_by: user?.id ?? null,
     }).select("id, order_no").single();
     if (error && (error as { code?: string }).code === "23505") continue;   // เลขชน → สุ่มใหม่

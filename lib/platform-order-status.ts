@@ -27,10 +27,14 @@ export type PlatformOrderRow = {
   shipping_status?: string | null; shipping_courier?: string | null; shipping_mode?: string | null;
   /** ยอดเก็บเงินปลายทาง · ช่องทางของออเดอร์ที่สร้างเอง (raw.channel เช่น phone) */
   cod_amount?: number; channel?: string | null;
+  /** คอลัมน์ "สินค้า" — 3 รายการแรก (ชิ้นมากสุดก่อน) + รูป (lib/platform-order-items-server productSummary) */
+  products?: { sku_code: string | null; name: string | null; qty: number; image_key: string | null }[];
 };
 export type PlatformOrderItemRow = {
   id: string; sku_code: string | null; matched_sku_id: string | null; matched_parent_sku_id?: string | null;
   name: string | null; qty: number; price: number | null; variant?: string | null;
+  /** ลิ้นชักออเดอร์: รูป (SKU → Parent) · สี · ชื่อกล่อง · น้ำหนักต่อชิ้น (กรัม) */
+  image_key?: string | null; color?: string | null; box_name?: string | null; weight_g?: number | null;
 };
 
 export const PLATFORM_ORDER_STATUSES = ["new", "confirmed", "packed", "shipped", "cancelled"] as const;

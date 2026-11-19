@@ -4,7 +4,8 @@
 //   การ์ดตัวเลขกดกรอง · ตารางเลือกหลายใบ → พิมพ์ใบหยิบรวม/ใบแพ็ก/ใบปะหน้า · แพ็กแล้วทีละหลายใบ · แผงรายละเอียด · ใบกำกับภาษี (ผ่านใบขาย)
 //   แท็บ "ต้องจัดการ" ไม่รวมออเดอร์จากเมล (ยอดขายที่ส่งแล้วนอกระบบ → แท็บ "ยอดขายจากเมล" ดูอย่างเดียว)
 //   โหมดทดลอง (?demo=1) = ออเดอร์ตัวอย่างหน้าตาแบบ Shopee ไม่บันทึกอะไร — ลองทุกปุ่มได้ระหว่างรอ Shopee อนุมัติ
-// ของกลาง: StatFilterCards · MiniTable · Pager · BulkActionBar · Drawer/ERPModal/ConfirmDialog · PlatformBadge · กติกา lib/platform-order-status
+// ของกลาง: StatFilterCards · MiniTable · Pager · BulkActionBar · Drawer/ERPModal/ConfirmDialog · PlatformBadge · HoverImage · กติกา lib/platform-order-status
+//   2026-11-19 (เจ้าของเลือกจาก widget): คอลัมน์ "สินค้า" มีรูป · การ์ด "จองขนส่งแล้ว รอรับ" + จองเสร็จพาไปการ์ดนั้นและติดป้าย "เพิ่งจอง" · ค้นชื่อสินค้า/SKU ได้ · มือถือ = การ์ด
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -20,6 +21,9 @@ import { PlatformBadge, PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { ErrorState } from "@/components/state-views";
+import { HoverImage } from "@/components/hover-image";
+import { r2ImageUrl } from "@/lib/r2-image";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { SHIP_DUE_LABEL, platformStatusLabel, platformStatusWarning, shipDue, type PlatformOrderRow } from "@/lib/platform-order-status";
@@ -34,8 +38,8 @@ import { ShippingProfileModal } from "./shipping-profile-modal";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
-type Summary = { by_status: Record<string, number>; todo: number; late: number; today: number; invoice_requested: number; view_total: { todo: number; history: number } };
-type CardKey = "all" | "todo" | "late" | "today" | "invoice" | "shipped" | "cancelled";
+type Summary = { by_status: Record<string, number>; todo: number; late: number; today: number; invoice_requested: number; booked?: number; view_total: { todo: number; history: number } };
+type CardKey = "all" | "todo" | "late" | "today" | "invoice" | "booked" | "shipped" | "cancelled";
 const PAGE_SIZE = 50;
 
 /** การ์ด → ตัวกรองที่ส่งให้ API */
@@ -45,10 +49,44 @@ function cardParams(k: CardKey): Record<string, string> {
     case "late": return { due: "late" };
     case "today": return { due: "today" };
     case "invoice": return { invoice: "requested" };
+    case "booked": return { booked: "1" };
     case "shipped": return { status: "shipped" };
     case "cancelled": return { status: "cancelled" };
     default: return {};
   }
+}
+
+/** คอลัมน์ "สินค้า": รูป (ชี้ขยาย) + ชื่อ × จำนวน + รหัส · หลายรายการ = "+n รายการ" */
+function ProductCell({ o }: { o: PlatformOrderRow }) {
+  const f = o.products?.[0];
+  if (!f) return <span className="text-slate-300">—</span>;
+  const more = Math.max(0, (o.item_count ?? o.products!.length) - 1);
+  return (
+    <div className="flex min-w-0 items-center gap-2" title={o.products!.map((p) => `${p.name ?? p.sku_code} ×${p.qty}`).join("\n")}>
+      <span onClick={(e) => e.stopPropagation()}><HoverImage url={r2ImageUrl(f.image_key, 480)} size={34} previewSize={280} rounded="rounded-md" fallback="" /></span>
+      <div className="min-w-0">
+        <div className="truncate text-xs text-slate-800">{f.name || f.sku_code || "สินค้า"} <span className="text-slate-500">×{f.qty}</span></div>
+        <div className="truncate font-mono text-[11px] text-slate-400">{f.sku_code ?? ""}{more > 0 && <span className="ml-1 font-sans text-slate-500">· +{more} รายการ</span>}</div>
+      </div>
+    </div>
+  );
+}
+
+/** มือถือ: 1 ออเดอร์ = 1 การ์ด */
+function OrderCard({ o, fresh, platform }: { o: PlatformOrderRow; fresh: boolean; platform: Platform | null }) {
+  return (
+    <div className="space-y-1.5 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-1.5"><span className="truncate font-mono text-slate-800">{o.order_no || o.external_order_id || "—"}</span>{fresh && <span className="shrink-0 rounded bg-emerald-50 px-1.5 text-[10px] font-medium text-emerald-700">เพิ่งจอง</span>}</span>
+        {platform ? <PlatformBadge code={platform.code} name={platform.name_th} iconKey={platform.icon_key} size="xs" /> : <span className="rounded-full border border-slate-200 px-1.5 text-[11px] text-slate-600">{manualChannelLabel(o.channel) || "สร้างเอง"}</span>}
+      </div>
+      <ProductCell o={o} />
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-slate-500">
+        <span className="truncate">{o.customer_name || "—"}{o.total != null ? ` · ${o.total.toLocaleString("th-TH")} ฿` : ""}</span>
+        <span className="flex items-center gap-1.5"><StatusChip s={o.status} />{o.shipping_status && o.shipping_status !== "cancel" && <span>{o.shipping_courier ? courierLabel(o.shipping_courier) : "SHIPPOP"}</span>}</span>
+      </div>
+    </div>
+  );
 }
 
 function PlatformOrdersInner() {
@@ -86,6 +124,8 @@ function PlatformOrdersInner() {
   const [ttsSyncing, setTtsSyncing] = useState(false);
   const [shpSyncing, setShpSyncing] = useState(false);
   const reqSeq = useRef(0);   // กันคำตอบเก่ามาทับ (สลับร้าน/การ์ดเร็ว ๆ)
+  const [justBooked, setJustBooked] = useState<Set<string>>(new Set());   // ออเดอร์ที่เพิ่งจองในรอบนี้ → ติดป้าย "เพิ่งจอง"
+  const isPhone = useMediaQuery("(max-width: 640px)");
 
   useEffect(() => { (async () => {
     try {
@@ -135,6 +175,7 @@ function PlatformOrdersInner() {
       { key: "late", label: "เลยกำหนดส่ง", value: summary?.late, tone: "danger", icon: <Icon value="i:alarm" /> },
       { key: "today", label: "ต้องส่งวันนี้", value: summary?.today, tone: "warning", icon: <Icon value="i:clock" /> },
       { key: "invoice", label: "ขอใบกำกับภาษี", value: summary?.invoice_requested, tone: "neutral", icon: <Icon value="i:file-invoice" /> },
+      { key: "booked", label: "จองขนส่งแล้ว รอรับ", value: summary?.booked, tone: "info", icon: <Icon value="i:truck" /> },
       { key: "shipped", label: "ส่งแล้ว", value: summary?.by_status.shipped, tone: "success" },
       { key: "all", label: "ทั้งหมด", value: summary?.view_total.todo, tone: "neutral", keep: true },
     ], [summary, view]);
@@ -145,7 +186,7 @@ function PlatformOrdersInner() {
       const p = o.platform_id ? pf.get(o.platform_id) : null;
       return (
         <div className="min-w-0">
-          <div className="truncate font-mono text-xs text-slate-800">{o.order_no || o.external_order_id || "—"}</div>
+          <div className="flex items-center gap-1.5"><span className="truncate font-mono text-xs text-slate-800">{o.order_no || o.external_order_id || "—"}</span>{justBooked.has(o.id) && <span className="shrink-0 rounded bg-emerald-50 px-1.5 text-[10px] font-medium text-emerald-700">เพิ่งจอง</span>}</div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-400">
             {p ? <PlatformBadge code={p.code} name={p.name_th} iconKey={p.icon_key} size="xs" />
               : (o.source === "manual" || (o.source === "demo" && o.channel)) ? <span className="rounded-full border border-slate-200 px-1.5 text-[11px] text-slate-600">{manualChannelLabel(o.channel) || "สร้างเอง"}{o.source === "demo" ? " (ตัวอย่าง)" : ""}</span>
@@ -155,6 +196,7 @@ function PlatformOrdersInner() {
         </div>
       );
     } },
+    { key: "prod", header: "สินค้า", width: "1.7fr", cell: (o) => <ProductCell o={o} /> },
     { key: "cust", header: "ลูกค้า", width: "1fr", cell: (o) => <span className="truncate">{o.customer_name || "—"}</span> },
     { key: "total", header: "ยอด", width: "0.7fr", align: "right", sortValue: (o) => o.total ?? -1, cell: (o) => o.total != null ? <span>{o.total.toLocaleString("th-TH")} ฿</span> : "—" },
     { key: "due", header: "ส่งภายใน", width: "1fr", sortValue: (o) => o.ship_by_at ?? "", cell: (o) => {
@@ -316,7 +358,7 @@ function PlatformOrdersInner() {
             <ERPSelect value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 w-auto" options={[{ value: "", label: "ทุกแบรนด์" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} />
           </>
         )}
-        <div className="min-w-[180px] flex-1"><ERPInput value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="ค้นเลขออเดอร์ หรือชื่อลูกค้า" leftIcon={<Icon value="i:search" />} /></div>
+        <div className="min-w-[180px] flex-1"><ERPInput value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="ค้นเลขออเดอร์ ชื่อลูกค้า หรือชื่อสินค้า/รหัส SKU" leftIcon={<Icon value="i:search" />} /></div>
         {!demo && view === "todo" && canManage && (
           <>
             <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); }} />
@@ -334,6 +376,7 @@ function PlatformOrdersInner() {
 
       {error ? <ErrorState title={error} onRetry={() => void load()} /> : (
         <MiniTable rows={rows} columns={cols} rowKey={(o) => o.id} hideSearch dense countUnit="ออเดอร์"
+          layout={isPhone ? "cards" : "table"} renderCard={(o) => <OrderCard o={o} fresh={justBooked.has(o.id)} platform={o.platform_id ? pf.get(o.platform_id) ?? null : null} />}
           selectable={view === "todo"} selected={sel} onSelectedChange={setSel} onRowClick={(o) => setOpenId(o.id)}
           emptyText={loading ? "กำลังโหลด…" : card === "todo" && view === "todo" && !demo ? "ไม่มีออเดอร์ที่ต้องจัดส่ง — ออเดอร์จะเข้ามาเองเมื่อเชื่อม Shopee แล้ว (ลองกด โหมดทดลอง เพื่อดูตัวอย่าง)" : "ไม่มีออเดอร์ในกลุ่มนี้"} />
       )}
@@ -350,7 +393,7 @@ function PlatformOrdersInner() {
         </BulkActionBar>
       )}
 
-      {shipIds && <ShipModal ids={shipIds} onClose={() => setShipIds(null)} onBooked={() => { setSel(new Set()); void load(); }} onOpenSettings={() => { setShipIds(null); setShowProfile(true); }} />}
+      {shipIds && <ShipModal ids={shipIds} onClose={() => setShipIds(null)} onBooked={(ids) => { setSel(new Set()); setJustBooked(new Set(ids)); setView("todo"); if (card === "booked") void load(); else setCard("booked"); }} onOpenSettings={() => { setShipIds(null); setShowProfile(true); }} />}
       {showManual && <ManualOrderModal brands={brands} defaultBrandId={brandId} onClose={() => setShowManual(false)} onCreated={(id) => { setShowManual(false); void load(); setOpenId(id); }} />}
       {showProfile && <ShippingProfileModal brands={brands} defaultBrandId={brandId} canManage={canManage} onClose={() => setShowProfile(false)} />}
 
