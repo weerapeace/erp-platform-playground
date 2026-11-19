@@ -68,11 +68,13 @@ function FloatingPanel({ anchorRef, open, children, minWidth = 340 }: { anchorRe
   if (!open || !style) return null;
   return createPortal(<div style={style} onMouseDown={(e) => e.stopPropagation()}>{children}</div>, document.body);
 }
-const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+// รับได้ทั้ง "ชื่อไฟล์ใน R2" และ "ลิงก์รูปเต็ม" (เช่น /api/r2-image?key=... ที่ API ใบสั่งผลิตส่งมา)
+//   เดิมรับแค่ชื่อไฟล์ → ลิงก์เต็มถูกห่อซ้ำ รูปขึ้นเป็นรูปแตก
+const thumbUrl = (key: string) => (/^(\/|https?:|data:|blob:)/.test(key) ? key : `/api/r2-image?key=${encodeURIComponent(key)}`);
 function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
   if (!k) return <span className="inline-block rounded bg-slate-100 shrink-0" style={{ width: size, height: size }} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={thumbUrl(k)} alt="" loading="lazy" className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
+  return <img src={thumbUrl(k)} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
 }
 
 const loadRecentMat = () => loadRecent<BomComponent>(RECENT_KEYS.materials);

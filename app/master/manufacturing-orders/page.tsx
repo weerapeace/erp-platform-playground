@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { useNewParam } from "@/lib/open-param";
 import { BomRefreshButton } from "@/components/bom-refresh";
+import { DateInput } from "@/components/date-input";
 import { ComponentPicker } from "../bom/line-editor";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { AssignToGroupModal, ManageGroupsModal, MoGroupField } from "./mo-groups-modal";
@@ -565,48 +566,53 @@ export default function MoWorkspacePage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[11px] text-slate-500">เลขที่ MO</span>
-                <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500">
-                  {form.id ? <code>{form.mo_no}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+            {/* ===== กล่อง 1: ข้อมูลใบ (เลขที่ · กำหนดส่ง · สถานะ) — มือถือ 2 คอลัมน์ สถานะลงแถวใหม่ ===== */}
+            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+              <div className="text-xs font-semibold text-slate-500 mb-1.5">📄 ข้อมูลใบ</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div className="min-w-0">
+                  <span className="text-[11px] text-slate-500">เลขที่ MO</span>
+                  <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500 truncate">
+                    {form.id ? <code>{form.mo_no}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-slate-500">กำหนดส่ง</span>
+                  <div className="mt-0.5"><DateInput value={form.due_date} onChange={(iso) => patch({ due_date: iso })} placeholder="เลือกวันส่ง" /></div>
+                </div>
+                <label className="block col-span-2 sm:col-span-1 min-w-0">
+                  <span className="text-[11px] text-slate-500">สถานะ</span>
+                  <select value={form.status} onChange={(e) => patch({ status: e.target.value })}
+                    className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </label>
               </div>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">กำหนดส่ง</span>
-                <input type="date" value={form.due_date} onChange={(e) => patch({ due_date: e.target.value })}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </label>
-            </div>
+            </section>
 
-            <div>
-              <span className="text-[11px] text-slate-500">สินค้าที่ผลิต</span>
-              <div className="mt-0.5"><ComponentPicker sku={form.product_sku} name={form.product_name} imageKey={form.product_image}
-                placeholder="— เลือกสินค้าที่ผลิต —" onPick={(c) => onPickProduct(c.code, c.name, c.image_key)} /></div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">จำนวนผลิต{form.sizes.length > 0 ? " (รวมไซส์)" : ""}</span>
-                <input type="number" min={0} step="any" value={form.qty} onChange={(e) => patch({ qty: Number(e.target.value) })}
-                  readOnly={form.sizes.length > 0} title={form.sizes.length > 0 ? "คิดจากผลบวกจำนวนต่อไซส์ด้านล่าง" : undefined}
-                  className={`w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${form.sizes.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
-              </label>
+            {/* ===== กล่อง 2: สินค้าและสูตร ===== */}
+            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-2">
+              <div className="text-xs font-semibold text-slate-500">📦 สินค้าและสูตร</div>
               <div>
-                <span className="text-[11px] text-slate-500">สูตร (BOM)</span>
-                <select value={form.bom_id ?? ""} onChange={(e) => e.target.value && selectVersion(e.target.value)}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {versions.length === 0 && <option value="">— ไม่มีสูตร —</option>}
-                  {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}</option>)}
-                </select>
+                <span className="text-[11px] text-slate-500">สินค้าที่ผลิต</span>
+                <div className="mt-0.5"><ComponentPicker sku={form.product_sku} name={form.product_name} imageKey={form.product_image}
+                  placeholder="— เลือกสินค้าที่ผลิต —" onPick={(c) => onPickProduct(c.code, c.name, c.image_key)} /></div>
               </div>
-              <label className="block">
-                <span className="text-[11px] text-slate-500">สถานะ</span>
-                <select value={form.status} onChange={(e) => patch({ status: e.target.value })}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </label>
-            </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block min-w-0">
+                  <span className="text-[11px] text-slate-500">จำนวนผลิต{form.sizes.length > 0 ? " (รวมไซส์)" : ""}</span>
+                  <input type="number" min={0} step="any" value={form.qty} onChange={(e) => patch({ qty: Number(e.target.value) })}
+                    readOnly={form.sizes.length > 0} title={form.sizes.length > 0 ? "คิดจากผลบวกจำนวนต่อไซส์ด้านล่าง" : undefined}
+                    className={`w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${form.sizes.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
+                </label>
+                <div className="min-w-0">
+                  <span className="text-[11px] text-slate-500">สูตร (BOM)</span>
+                  <select value={form.bom_id ?? ""} onChange={(e) => e.target.value && selectVersion(e.target.value)}
+                    className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {(versions.length === 0 || !form.bom_id) && <option value="">{versions.length === 0 ? "— ไม่มีสูตร —" : "— ยังไม่ได้เลือกสูตร —"}</option>}
+                    {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}</option>)}
+                  </select>
+                </div>
+              </div>
 
             {/* กลุ่ม C: จำนวนต่อไซส์ (ถ้าสูตรมีไซส์) */}
             {form.sizes.length > 0 && (
@@ -624,15 +630,19 @@ export default function MoWorkspacePage() {
                 <div className="text-[11px] text-slate-500 mt-1.5">รวม <b className="text-slate-700">{fmt(form.qty)}</b> ชิ้น · วัตถุดิบที่ผันตามไซส์จะถูกแตกตัด/พิมพ์แยกตามไซส์</div>
               </div>
             )}
+            </section>
 
-            <label className="block">
-              <span className="text-[11px] text-slate-500">หมายเหตุ</span>
-              <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </label>
-
-            {/* กลุ่มใบสั่งงาน — เฉพาะใบที่บันทึกแล้ว (มีเลขใบ) */}
-            {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
+            {/* ===== กล่อง 3: หมายเหตุและกลุ่ม ===== */}
+            <section className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-2">
+              <div className="text-xs font-semibold text-slate-500">📝 หมายเหตุและกลุ่ม</div>
+              <label className="block">
+                <span className="text-[11px] text-slate-500">หมายเหตุ</span>
+                <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </label>
+              {/* กลุ่มใบสั่งงาน — เฉพาะใบที่บันทึกแล้ว (มีเลขใบ) */}
+              {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
+            </section>
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
             {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} onAfterBomEdit={() => refresh()} />}
@@ -647,6 +657,9 @@ export default function MoWorkspacePage() {
             {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {
               const editable = !!form.id;  // เช็ค/ขอซื้อ ได้เฉพาะตอนเปิดใบที่บันทึกแล้ว
+              // เตือนในหน้าต่างดึง/อัพเดตสูตร ถ้าจ่ายงานไปแล้ว (ใบจ่ายงานเดิมไม่เปลี่ยนตามสูตรใหม่)
+              const woActive = woList.filter((w) => w.status !== "cancelled").length;
+              const dispatchedWarn = woActive > 0 ? `ใบนี้จ่ายงานไปแล้ว ${woActive} ใบ · วัตถุดิบในใบจ่ายงานเดิมจะไม่เปลี่ยนตามสูตรใหม่ ต้องเช็กกับหน้างานเอง` : null;
               const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
               // แท็บสรุป: รวมต่อวัตถุดิบ · แท็บบล็อก: แยกรายบล็อก
               const sumRows: MatRow[] = sumSource().map((s) => {
@@ -763,6 +776,7 @@ export default function MoWorkspacePage() {
                       )}
                       {editable && canEdit && form.id && form.bom_code && (
                         <BomRefreshButton moId={form.id} productSku={form.product_sku || null} currentBomCode={form.bom_code} currentBomVersion={form.bom_version}
+                          extraWarning={dispatchedWarn}
                           sizeBreakdown={form.sizes.length > 0 ? form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 })) : null}
                           onDone={async () => { await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem); }} />
                       )}
@@ -772,9 +786,23 @@ export default function MoWorkspacePage() {
                     </div>
                   </div>
                   {form.materials.length === 0 ? (
-                    <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
-                      {form.product_sku ? "สินค้านี้ยังไม่มีสูตร BOM" : "เลือกสินค้าก่อน ระบบจะกางสูตรให้"}
-                    </div>
+                    // ใบที่สร้างตอนสินค้ายังไม่มีสูตร แล้วภายหลังเพิ่มสูตรแล้ว → ให้ดึงสูตรเข้าใบได้ (มีหน้าต่างเตือนก่อน)
+                    form.id && form.product_sku && versions.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                        <span className="flex-1 min-w-[12rem]">⚠️ สินค้านี้มีสูตร BOM แล้ว ({(versions.find((v) => v.is_default) ?? versions[0]).version}{versions.length > 1 ? ` · ทั้งหมด ${versions.length} เวอร์ชัน` : ""}) แต่ใบนี้ยังไม่ได้ดึงวัตถุดิบ</span>
+                        {canEdit && (
+                          <BomRefreshButton moId={form.id} productSku={form.product_sku} currentBomCode={form.bom_code} currentBomVersion={form.bom_version}
+                            label="🔄 ดึงสูตร BOM" extraWarning={dispatchedWarn}
+                            className="h-7 px-3 text-xs font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 whitespace-nowrap"
+                            sizeBreakdown={form.sizes.length > 0 ? form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 })) : null}
+                            onDone={async () => { await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem); }} />
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
+                        {form.product_sku ? "สินค้านี้ยังไม่มีสูตร BOM" : "เลือกสินค้าก่อน ระบบจะกางสูตรให้"}
+                      </div>
+                    )
                   ) : (
                     <LineItemsGrid<MatRow>
                       key={matTab}

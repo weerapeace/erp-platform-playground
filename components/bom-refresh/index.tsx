@@ -17,8 +17,10 @@ import { useToast } from "@/components/toast";
 import type { BomVersion } from "@/app/api/bom/versions/route";
 
 export function BomRefreshButton({
-  moId, productSku, currentBomCode, currentBomVersion, sizeBreakdown, onDone, className, label = "🔄 อัพเดตวัตถุดิบตาม BOM",
+  moId, productSku, currentBomCode, currentBomVersion, sizeBreakdown, onDone, className, label = "🔄 อัพเดตวัตถุดิบตาม BOM", extraWarning,
 }: {
+  /** คำเตือนเพิ่ม (กล่องแดงในหน้าต่างยืนยัน) เช่น "ใบนี้จ่ายงานไปแล้ว 2 ใบ ..." · ไม่ส่ง = ไม่โชว์ */
+  extraWarning?: string | null;
   moId: string;
   productSku: string | null;
   currentBomCode: string | null;
@@ -97,6 +99,9 @@ export function BomRefreshButton({
             ✅ ค่าที่เคยกรอกของวัตถุดิบ <b>ชิ้นเดิมที่ยังอยู่ในสูตร</b> (จำนวนที่มี / เตรียมครบ / ตัดครบ / ขอซื้อ) จะถูกเก็บไว้ให้<br />
             ⚠️ วัตถุดิบที่ถูกเอาออกจากสูตรจะหายไป · ชิ้นใหม่จะเริ่มที่ค่าว่าง
           </div>
+          {extraWarning && (
+            <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-xs text-rose-700">⛔ {extraWarning}</div>
+          )}
         </div>
       </ERPModal>
     </>
