@@ -59,6 +59,8 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
   const shift = useRef(false);
   const last = useRef<string | null>(null);
   const grid = useGalleryColumns(`sample-two-pane-${side}`, 4, "0.4rem", { ctrlWheel: true });
+  // การ์ดอัลบั้มในฝั่งนี้ — Ctrl + ลูกกลิ้ง บนแถวอัลบั้ม = ย่อ/ขยายอัลบั้ม (แยกจากรูป · จำรายคน · เจ้าของขอ 2026-11-19)
+  const albumGrid = useGalleryColumns(`sample-two-pane-albums-${side}`, 3, "0.5rem", { ctrlWheel: true });
 
   // โหลดรูปของอัลบั้มที่ฝั่งนี้เปิด — โหลดใหม่ทุกครั้งที่รายการอัลบั้มเปลี่ยน (หลังย้าย)
   useEffect(() => {
@@ -81,7 +83,7 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
     setSelected: (xs) => setSel(new Set(xs.filter((x) => x.startsWith("p:")).map((x) => x.slice(2)))),
   });
   const mqRef = mq.ref, wheelRef = grid.wheelRef;
-  const bodyRef = useCallback((el: HTMLDivElement | null) => { mqRef(el); wheelRef(el); }, [mqRef, wheelRef]);
+  const bodyRef = useCallback((el: HTMLDivElement | null) => { mqRef(el); }, [mqRef]);
 
   const toggle = (id: string) => {
     const from = last.current;
@@ -130,16 +132,16 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
 
       <div ref={bodyRef} className="relative min-h-0 flex-1 space-y-2 overflow-y-auto p-0.5" style={{ maxHeight: "68vh" }}>
         {kids.length > 0 && (
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+          <div ref={albumGrid.wheelRef} style={albumGrid.gridStyle}>
             {kids.map((a) => {
               const auto = isAutoAlbumName(a.name), link = productLinkLabel(a);
               return (
                 <div key={a.id} draggable={canEdit} onDragStart={(e) => startDrag(e, { side, kind: "album", id: a.id })} {...zone(`al:${a.id}`, a)}
                   onDoubleClick={() => setAlbumId(a.id)}
-                  className={`flex cursor-pointer items-center gap-1.5 rounded-lg border p-1 ${over === `al:${a.id}` ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-slate-50 hover:border-violet-300"}`}
+                  className={`cursor-pointer overflow-hidden rounded-lg border ${over === `al:${a.id}` ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-200" : "border-slate-200 bg-white hover:border-violet-300"}`}
                   onClick={() => setAlbumId(a.id)} title={t("กด = เปิด · ลากไปอีกฝั่งได้", "Click to open · drag to the other side")}>
-                  <span className="w-10 shrink-0 overflow-hidden rounded"><AlbumCover keys={a.preview_keys ?? []} total={a.deep?.photos} /></span>
-                  <span className="min-w-0 flex-1">
+                  <AlbumCover keys={a.preview_keys ?? []} total={a.deep?.photos} />
+                  <span className="block min-w-0 px-1.5 py-1">
                     <span className="block truncate text-[12px] font-medium text-slate-800">{auto ? (link ?? t("ยังไม่เชื่อมสินค้า", "No product")) : nameOf(a)}</span>
                     <span className="text-[11px] text-slate-500">{t(`${a.deep?.photos ?? 0} รูป`, `${a.deep?.photos ?? 0}`)}</span>
                   </span>
@@ -152,7 +154,7 @@ function Pane({ side, albumId, setAlbumId, other, sendTo, sh }: {
           : photos === null ? <p className="py-6 text-center text-[12px] text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
           : !list.length ? <p className="py-6 text-center text-[12px] text-slate-400">{t("อัลบั้มนี้ยังไม่มีรูป — ลากรูปจากอีกฝั่งมาวางได้", "No photos — drag some here")}</p>
           : (
-            <div style={grid.gridStyle} {...grid.compactAttr}>
+            <div ref={wheelRef} style={grid.gridStyle} {...grid.compactAttr}>
               {list.map((p) => (
                 <SamplePhotoTile key={p.id} photo={p} on={sel.has(p.id)} onToggle={() => toggle(p.id)} thumbW={240} onView={() => setViewAt(list.indexOf(p))}
                   extra={{
