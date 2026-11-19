@@ -534,7 +534,8 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
                 )}
 
                 {active && (
-                  <div className="fixed inset-x-0 bottom-0 z-30 flex gap-2 border-t border-slate-200 bg-white p-3 shadow-lg lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+                  // z-[35] = ทับแถบเมนูล่างของแอป (z-30) ตอนกำลังแพ็ค — เดิมเมนูทับปุ่ม "แพ็คเสร็จ" บนจอแคบ กดแล้วหลุดออกจากหน้า (เจอตอนทดสอบ 2026-11-19)
+                  <div className="fixed inset-x-0 bottom-0 z-[35] flex gap-2 border-t border-slate-200 bg-white p-3 shadow-lg lg:static lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none" style={isPhone ? { paddingBottom: "calc(env(safe-area-inset-bottom) + 0.75rem)" } : undefined}>
                     <button type="button" onClick={() => requestDone("button")} className={`flex-1 rounded-xl py-4 text-xl font-bold text-white ${allChecked(active.lines) ? "bg-emerald-600 hover:bg-emerald-700" : "bg-emerald-600/70"}`}>
                       แพ็คเสร็จ <span className="hidden text-sm font-normal lg:inline">(Space / แป้นเหยียบ / การ์ด)</span>
                     </button>
