@@ -73,6 +73,7 @@ export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
   platform_email:                E("sales", "อีเมลยอดขายแพลตฟอร์ม"),
   chat_conversation:             E("sales", "ห้องแชทลูกค้า", (id) => `/chat?c=${id}`),
   chat_settings:                 E("sales", "ตั้งค่าห้องแชท"),
+  packing_sounds:                E("sales", "เสียงสถานีแพ็ค", () => "/packing"),
   erp_playground_stock_movement: E("stock", "ความเคลื่อนไหวสต็อก"),
   creative_task:                 E("creative", "งาน", (id) => `/tasks?task=${id}`),
   skus_v2:                       E("products", "SKU", (id) => `/master/skus?open=${id}`),

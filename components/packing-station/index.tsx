@@ -26,7 +26,9 @@ import {
 } from "@/lib/packing";
 import { useClipRecorder, type RecordedClip } from "./use-clip-recorder";
 import { saveClip, sha256Hex, pruneClips, requestPersist } from "./clip-store";
-import { playPackSound, type PackSound } from "./sounds";
+import { playPackSound, setPackMasterVolume, type PackSound } from "./sounds";
+import { usePackSoundBank } from "./sound-bank";
+import { packAlertSound } from "@/lib/packing-sound";
 import { LocalClipsPanel } from "./local-clips";
 import { StationSettings, loadSettings, saveSettings, type StationSettingsValue } from "./settings";
 import { PackQueue, type QueueRow } from "./queue";
@@ -82,6 +84,8 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
   const doneConfirmAt = useRef(0);                              // กดจบตอนยังเช็กไม่ครบ = กดซ้ำภายใน 4 วิ เพื่อยืนยัน
   const busyRef = useRef(false);
   const isPhone = useMediaQuery("(max-width: 1023px)");
+  const soundBank = usePackSoundBank();                              // ชุดเสียงกลาง (ใช้ร่วมทุกโต๊ะ)
+  useEffect(() => { setPackMasterVolume(settings.soundVolume); }, [settings.soundVolume]);
   usePageOwnsBottomBar(isPhone && !!active && tab === "station");   // มือถือ: แถบปุ่มจบของหน้านี้อยู่ล่างจอ แทนแถบเมนูแอป
 
   const setAct = useCallback((a: Active | null) => { activeRef.current = a; setActive(a); }, []);
@@ -203,10 +207,10 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
   // ── ตรวจก่อนเปิด: ห้ามแพ็ค / เตือน / มีคนอื่นกำลังแพ็คอยู่ (ข้อเสนอ 4) ──
   const openOrder = useCallback(async (d: Lookup, confirmed = false) => {
     // มือถือ: แผงห้ามแพ็ค/ถามก่อนแพ็ค อยู่แท็บ "แพ็ค" → สลับไปให้เห็นปุ่มทันที
-    if (d.gate.level === "block") { setPending(null); setBlocked({ order_no: d.order.order_no, reasons: d.gate.reasons }); setPhoneTab("pack"); say("error", d.gate.reasons[0] ?? "ห้ามแพ็ค", "error"); return; }
+    if (d.gate.level === "block") { setPending(null); setBlocked({ order_no: d.order.order_no, reasons: d.gate.reasons }); setPhoneTab("pack"); say("error", d.gate.reasons[0] ?? "ห้ามแพ็ค", packAlertSound(d.order, false, true) ?? "error"); return; }
     const other = (d.sessions ?? []).find((s) => s.status === "packing" && s.packer_id !== packerId && isFreshLock(s.started_at));
     const reasons = [...(other ? [`${other.packer_name ?? "มีคน"} กำลังแพ็คออเดอร์นี้อยู่ — แพ็คแทน?`] : []), ...d.gate.reasons];
-    if (reasons.length && !confirmed) { setBlocked(null); setPending({ ...d, gate: { level: "warn", reasons } }); setPhoneTab("pack"); say("warn", reasons[0], "warn"); return; }
+    if (reasons.length && !confirmed) { setBlocked(null); setPending({ ...d, gate: { level: "warn", reasons } }); setPhoneTab("pack"); say("warn", reasons[0], packAlertSound(d.order, !!other, false) ?? "warn"); return; }
     await startPacking(d);
   }, [packerId, say, startPacking]);
 
@@ -322,7 +326,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
       }
       if (r.result.kind === "over") {
         setAct({ ...a, overScans: a.overScans + 1 });
-        say("error", "เกินจำนวนที่สั่ง — เอาชิ้นที่เกินออก", "error"); return;
+        say("error", "เกินจำนวนที่สั่ง — เอาชิ้นที่เกินออก", "over"); return;
       }
     }
 
@@ -451,7 +455,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
       </div>
 
       {tab === "clips" && <LocalClipsPanel keepDays={settings.keepDays} />}
-      {tab === "settings" && <StationSettings value={settings} onChange={updateSettings} devices={rec.devices} canDetect={rec.canDetect} mime={rec.mime} />}
+      {tab === "settings" && <StationSettings value={settings} onChange={updateSettings} devices={rec.devices} canDetect={rec.canDetect} mime={rec.mime} soundBank={soundBank} />}
 
       {tab === "station" && isPhone && (
         <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-100 p-1">
