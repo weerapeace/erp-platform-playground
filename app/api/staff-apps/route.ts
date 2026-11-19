@@ -24,19 +24,20 @@ import {
   cleanDraft, draftFromMenus, newStaffAppKey, planDetachAll, planPublish, publishProblems,
   STAFF_APP_TEMPLATES, type StaffAppDraft, type MenuPublishPatch,
 } from "@/lib/staff-apps";
+import { computeAllowedHrefs, computeAllowedPerms } from "@/lib/app-lock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const PERM = "admin.users";
-const APP_COLS = "id, key, label, label_en, icon, icon_url, theme_color, sort_order, kind, status, draft, audience, published_version, published_at, deleted_at, is_active, permission_key, default_href, updated_at";
+const APP_COLS = "id, key, label, label_en, icon, icon_url, theme_color, sort_order, kind, status, draft, audience, published_version, published_at, deleted_at, is_active, permission_key, default_href, updated_at, lock, allowed_perms, allowed_hrefs";
 const MENU_COLS = "id, label, href, icon, section, parent_id, sort_order, app_keys, app_overrides, is_active, show_in_sidebar, permission_key";
 
 type AppRow = {
   id: string; key: string; label: string; label_en: string | null; icon: string | null; theme_color: string | null; sort_order: number | null;
   kind: string; status: string; draft: unknown; audience: unknown; published_version: number; published_at: string | null; deleted_at: string | null;
 };
-type MenuRow = { id: string; label: string; section: string | null; parent_id: string | null; sort_order: number; app_keys: string[] | null; app_overrides: unknown; is_active: boolean | null; show_in_sidebar: boolean | null };
+type MenuRow = { id: string; label: string; href: string; permission_key: string | null; section: string | null; parent_id: string | null; sort_order: number; app_keys: string[] | null; app_overrides: unknown; is_active: boolean | null; show_in_sidebar: boolean | null };
 
 const bad = (error: string, status = 400) => NextResponse.json({ error }, { status });
 
@@ -168,9 +169,18 @@ export async function POST(request: NextRequest) {
     const err = await applyMenuPatches(patches);
     if (err) return bad(`เขียนเมนูไม่สำเร็จ: ${err}`, 500);
     const version = (app.published_version ?? 0) + 1;
+    // 🔒 ล็อก (lib/app-lock) — สิทธิ์/หน้าที่คนถูกล็อกใช้ได้ คำนวณจากเมนูในแอป + ข้อยกเว้นดูอย่างเดียว
+    const [{ data: cat }, { data: groups }] = await Promise.all([
+      admin.from("erp_permissions").select("key, category, sort_order"),
+      admin.from("erp_app_groups").select("key, permission_key, kind"),
+    ]);
+    const lockIn = { menuIds: draft.menus.map((m) => m.menu_id), readOnlyIds: draft.exceptions ?? [], extraPerms: draft.extra_perms ?? [] };
     const appSet = {
       label: draft.label, label_en: draft.label_en ?? null, icon: draft.icon ?? app.icon ?? "📱", theme_color: draft.theme_color ?? null,
       audience: draft.audience ?? null, status: "published", published_version: version, published_at: now, updated_at: now,
+      lock: draft.lock ?? null,
+      allowed_perms: computeAllowedPerms(lockIn, menus, (cat ?? []) as { key: string }[], (groups ?? []) as { key: string; permission_key: string | null; kind: string }[]),
+      allowed_hrefs: computeAllowedHrefs(lockIn, menus),
     };
     const { data, error } = await admin.from("erp_app_groups").update(appSet).eq("id", id).select(APP_COLS).single();
     if (error) return bad(error.message, 500);

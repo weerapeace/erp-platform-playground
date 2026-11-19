@@ -20,15 +20,17 @@ import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 import type { UserPickerValue } from "@/components/pickers";
 import { cleanAudience, describeAudience, type MenuAudience } from "@/lib/menu-audience";
 import { cleanDraft, draftChanged, publishProblems, STAFF_APP_LIMITS, type StaffAppDraft, type StaffAppMenu } from "@/lib/staff-apps";
+import { MenuPermissionMatrix } from "@/components/menu-permissions";
+import { LockStep, ViewAsStep, type AppGroupLite } from "./lock-steps";
 
 export type StaffAppRow = {
   id: string; key: string; label: string; label_en: string | null; icon: string | null; theme_color: string | null;
   status: "draft" | "published"; draft: unknown; published_version: number; published_at: string | null; deleted_at: string | null; last_snapshot: unknown;
 };
-export type BuilderMenu = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; section?: string | null; app_keys?: string[] | null; is_active?: boolean | null; show_in_sidebar?: boolean | null; parent_id?: string | null };
+export type BuilderMenu = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; section?: string | null; app_keys?: string[] | null; is_active?: boolean | null; show_in_sidebar?: boolean | null; parent_id?: string | null; permission_key?: string | null; audience?: unknown };
 type Role = { key: string; label: string; active?: boolean };
 type Version = { id: string; version_no: number; note: string | null; created_by_name: string | null; created_at: string; snapshot: unknown };
-type Step = "info" | "menus" | "who" | "history";
+type Step = "info" | "menus" | "who" | "lock" | "perm" | "viewas" | "history";
 
 const COLORS = ["#2563eb", "#7c3aed", "#0891b2", "#059669", "#d97706", "#dc2626", "#db2777", "#475569"];
 
@@ -39,10 +41,12 @@ async function post(body: Record<string, unknown>) {
   return j;
 }
 
-export function StaffAppBuilder({ app, menus, appLabels, onChanged }: {
+export function StaffAppBuilder({ app, menus, appLabels, appGroups, onChanged }: {
   app: StaffAppRow;
   menus: BuilderMenu[];
   appLabels: Record<string, string>;
+  /** แอปหลัก (ไว้คิดสิทธิ์เข้าแอปของหน้าในแอปนี้ ตอนล็อก) */
+  appGroups: AppGroupLite[];
   onChanged: () => void;
 }) {
   const toast = useToast();
@@ -139,6 +143,9 @@ export function StaffAppBuilder({ app, menus, appLabels, onChanged }: {
         {stepBtn("info", "1", "ชื่อ + ไอคอน")}
         {stepBtn("menus", "2", `เมนู (${draft.menus.length})`)}
         {stepBtn("who", "3", "ใครเห็นแอป")}
+        {stepBtn("lock", "4", draft.lock ? "ล็อก (เปิดอยู่)" : "ล็อก + ข้อยกเว้น")}
+        {stepBtn("perm", "", "สิทธิ์ตามเมนู")}
+        {stepBtn("viewas", "", "ดูแทนพนักงาน")}
         {stepBtn("history", "", "ประวัติเวอร์ชัน")}
       </div>
 
@@ -150,6 +157,15 @@ export function StaffAppBuilder({ app, menus, appLabels, onChanged }: {
           {step === "info" && <InfoStep draft={draft} patch={patch} />}
           {step === "menus" && <MenusStep draft={draft} setDraft={setDraft} menus={menus} menuById={menuById} appLabels={appLabels} />}
           {step === "who" && <WhoStep audience={draft.audience ?? null} onChange={(a) => patch({ audience: a })} />}
+          {step === "lock" && <LockStep draft={draft} setDraft={setDraft} menus={menus} appGroups={appGroups} />}
+          {step === "perm" && (app.status === "published" || app.published_version > 0
+            ? <div className="space-y-2">
+                <p className="text-xs text-slate-500">ตั้งสิทธิ์ต่อตำแหน่ง / รายคน เฉพาะเมนูที่เผยแพร่อยู่ในแอปนี้ (ดู · แก้ · ลบ · เห็นราคา ฯลฯ) — สิทธิ์เป็นของกลาง ติ๊กแล้วมีผลทันทีทุกแอปที่ใช้สิทธิ์เดียวกัน</p>
+                {pending && <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">มีเมนูที่แก้ในร่างแต่ยังไม่เผยแพร่ — ตารางนี้แสดงเมนูที่เผยแพร่แล้ว</p>}
+                <MenuPermissionMatrix appKey={app.key} />
+              </div>
+            : <p className="py-8 text-center text-sm text-slate-500">เผยแพร่ครั้งแรกก่อน แล้วค่อยตั้งสิทธิ์ตามเมนูของแอปนี้ได้ (ใช้ “ดูแทนพนักงาน” เช็กก่อนเผยแพร่ได้)</p>)}
+          {step === "viewas" && <ViewAsStep draft={draft} menus={menus} appGroups={appGroups} />}
           {step === "history" && <HistoryStep app={app} onLoaded={() => { onChanged(); setStep("menus"); }} />}
 
           <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
@@ -180,6 +196,7 @@ export function StaffAppBuilder({ app, menus, appLabels, onChanged }: {
         title="เผยแพร่แอปนี้?" confirmText="เผยแพร่"
         message={<div className="space-y-2 text-sm">
           <p>พนักงานใน “{describeAudience(draft.audience)}” จะเห็นแอป <b>{draft.label}</b> ({draft.menus.length} เมนู) ทันที</p>
+          {draft.lock && <p className="rounded bg-rose-50 px-2 py-1 text-xs text-rose-800"><Icon name="lock" /> เปิดล็อกอยู่ — คนที่ถูกล็อกจะใช้ได้แค่เมนูในแอปนี้ทันทีหลังเผยแพร่</p>}
           <p className="text-xs text-slate-500">เก็บเป็นเวอร์ชันใหม่ ย้อนกลับได้ที่แท็บ “ประวัติเวอร์ชัน”</p>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="บันทึกสั้น ๆ ว่าแก้อะไร (ไม่ใส่ก็ได้)" className="h-9 w-full rounded-lg border border-slate-200 px-2 text-sm" />
         </div>} />

@@ -14,6 +14,7 @@
  */
 import { cleanAudience, menuVisibleTo, type MenuAudience } from "@/lib/menu-audience";
 import { appOverride, type AppMenuOverride, type AppOverrides } from "@/lib/app-menu-layout";
+import { cleanLock, type AppLock } from "@/lib/app-lock";
 
 export type StaffAppSection = { key: string; label: string; label_en?: string };
 export type StaffAppMenu = {
@@ -34,6 +35,12 @@ export type StaffAppDraft = {
   audience?: MenuAudience | null;
   sections: StaffAppSection[];
   menus: StaffAppMenu[];
+  /** 🔒 ล็อกคนกลุ่มนี้ให้อยู่ในแอป (รอบ 2 — lib/app-lock) · ไม่ตั้ง = ไม่ล็อกใคร */
+  lock?: AppLock | null;
+  /** เมนูนอกแอปที่เปิดดูได้แบบอ่านอย่างเดียว (menu id) — มีผลกับคนที่ถูกล็อก */
+  exceptions?: string[];
+  /** สิทธิ์ที่แอดมินเพิ่มให้คนถูกล็อกเอง (เผื่อหน้าในแอปเรียกใช้สิทธิ์อื่น) */
+  extra_perms?: string[];
 };
 
 export const STAFF_APP_LIMITS = { label: 40, menus: 60, sections: 12, sectionLabel: 30, menuLabel: 40 } as const;
@@ -80,6 +87,10 @@ export function cleanDraft(raw: unknown): StaffAppDraft {
   const en = str(r.label_en, STAFF_APP_LIMITS.label);
   const color = str(r.theme_color, 7);
   const audience = cleanAudience(r.audience);
+  const lock = cleanLock(r.lock);
+  const ids = (v: unknown, max: number) => (Array.isArray(v) ? [...new Set(v.map((x) => str(x, 80)).filter(Boolean))].slice(0, max) : []);
+  const exceptions = ids(r.exceptions, 40).filter((id) => !seen.has(id));
+  const extra = ids(r.extra_perms, 80);
   return {
     label: str(r.label, STAFF_APP_LIMITS.label),
     ...(en ? { label_en: en } : {}),
@@ -88,6 +99,9 @@ export function cleanDraft(raw: unknown): StaffAppDraft {
     ...(audience ? { audience } : {}),
     sections,
     menus,
+    ...(lock ? { lock } : {}),
+    ...(exceptions.length ? { exceptions } : {}),
+    ...(extra.length ? { extra_perms: extra } : {}),
   };
 }
 

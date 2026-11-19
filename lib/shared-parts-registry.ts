@@ -877,9 +877,9 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "fullscreen-stage.md",
   },
   {
-    key: "app-access-gate", label: "ด่านว่าใครเข้าแอปนี้ได้", code: "AppAccessGate", category: "layout",
+    key: "app-access-gate", label: "ด่านว่าใครเข้าแอปนี้ได้ + ล็อกพนักงานในแอป", code: "AppAccessGate · AppLockGate · lib/app-lock", category: "layout",
     source: { path: "components/app-access-gate" },
-    what: "กันคนที่ไม่มีสิทธิ์เข้าแอปแยก ใช้กฎเดียวกับเมนูหลัก",
+    what: "กันคนที่ไม่มีสิทธิ์เข้าแอปแยก ใช้กฎเดียวกับเมนูหลัก · AppLockGate (ครอบทั้งเว็บที่ root layout) = คนที่ถูกล็อกในแอปพนักงานเปิดหน้านอกแอป → หน้า “หน้านี้ไม่อยู่ในแอป X” + ขอสิทธิ์",
     when: "หน้าที่ใช้ StandaloneShell หรือเปลือกของตัวเอง (เปลือกหลักกันให้อยู่แล้ว)",
   },
   {

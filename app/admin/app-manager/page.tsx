@@ -177,7 +177,7 @@ export default function AppManagerPage() {
           ) : sel === STAFF_TRASH ? (
             <StaffAppTrash apps={trashedStaff} onChanged={() => setRev((n) => n + 1)} />
           ) : staffApp ? (
-            <StaffAppBuilder key={staffApp.id} app={staffApp} menus={rows} appLabels={appLabels} onChanged={() => setRev((n) => n + 1)} />
+            <StaffAppBuilder key={staffApp.id} app={staffApp} menus={rows} appLabels={appLabels} appGroups={apps} onChanged={() => setRev((n) => n + 1)} />
           ) : app ? (
             <AppSettingsPanel key={app.key} appKey={app.key} appLabel={app.label} appId={app.id ?? null} moreLabel={app.menu_more_label ?? null}
               defaultHref={app.default_href ?? null} items={items} inHub onSaved={() => setRev((n) => n + 1)} />

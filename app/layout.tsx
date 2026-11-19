@@ -10,6 +10,7 @@ import { BackgroundTasksHost } from "@/components/background-tasks-host";
 import { DatePickerOnClick } from "@/components/date-input/auto-picker";
 import { WorkPopupHost } from "@/components/work-popup";
 import { SilentBoundary } from "@/components/silent-boundary";
+import { AppLockGate } from "@/components/app-access-gate";
 import { BRAND } from "@/components/brand";
 
 export const metadata: Metadata = {
@@ -50,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <NavProgress />
         <NavTrailRecorder />
         <PageViewRecorder />
-        <AuthProvider><LanguageProvider><ToastProvider>{children}<SilentBoundary name="work-popup"><WorkPopupHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider><AppLockGate>{children}</AppLockGate><SilentBoundary name="work-popup"><WorkPopupHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
         <DatePickerOnClick />
       </body>
