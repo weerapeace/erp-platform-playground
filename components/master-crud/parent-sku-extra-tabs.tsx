@@ -41,6 +41,8 @@ const ParentPlatformsTab = dynamic(() => import("@/components/parent-platforms-t
 const ParentProductionTab = dynamic(() => import("@/components/parent-production-tab").then((m) => m.ParentProductionTab), { ssr: false });
 // แท็บ "ราคา" (ใหม่ 2026-11-11): ราคากลาง/เต็ม/เว็บ/ทุกร้าน + ต้นทุน/กำไร (เฉพาะคนมีสิทธิ์ต้นทุน)
 const ParentPriceTab = dynamic(() => import("@/components/parent-price-tab").then((m) => m.ParentPriceTab), { ssr: false });
+// แท็บ "แพ็ค" (ใหม่ 2026-11-19): บรรจุภัณฑ์ที่ต้องใส่ + ป้ายเตือน + โน้ตตอนแพ็ค — สถานีแพ็คโชว์ใต้สินค้า
+const ParentPackingTab = dynamic(() => import("@/components/packing-station/packaging").then((m) => m.ParentPackingTab), { ssr: false });
 // ป้าย "ต้องแก้ N อย่าง" ท้ายแถบเครื่องมือ (ใหม่ 2026-11-11) — กฎ lib/parent-health
 const ParentHealthBadge = dynamic(() => import("@/components/parent-health-badge").then((m) => m.ParentHealthBadge), { ssr: false });
 
@@ -58,5 +60,6 @@ export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]>
     { key: "prices", label: tr("ราคา", "Prices"), icon: "💰", after: "content", render: ({ recordId }) => <ParentPriceTab parentId={recordId} /> },
     // key ยังเป็น "issues" ตั้งใจ — ตำแหน่ง/การซ่อนแท็บที่ทีมตั้งไว้ในตัวออกแบบหน้า (x:issues) และที่แต่ละคนซ่อนไว้ ใช้ต่อได้ไม่ต้องย้ายข้อมูล
     { key: "issues", label: tr("ผลิต", "Production"), icon: "🏭", render: ({ recordId }) => <ParentProductionTab parentId={recordId} /> },
+    { key: "packing", label: tr("แพ็ค", "Packing"), icon: "📦", render: ({ recordId }) => (recordId ? <ParentPackingTab parentId={recordId} /> : <p className="p-3 text-sm text-slate-500">บันทึกรุ่นนี้ก่อน แล้วค่อยตั้งการแพ็ค</p>) },
   ];
 }

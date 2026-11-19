@@ -21,9 +21,10 @@ export type StationSettingsValue = {
   screenFlash: boolean;   // ไฟเต็มจอเขียว/แดง + สั่น (ข้อเสนอ 4 รอบมือถือ)
   wakeLock: boolean;      // จอไม่ดับระหว่างอยู่หน้าสถานี (ข้อเสนอ 2 รอบมือถือ)
   keepDays: number;       // เก็บคลิปในเครื่องกี่วัน
+  showPackaging: boolean; // โชว์บรรจุภัณฑ์ที่ต้องใส่ใต้สินค้า (รอบ 6 · สวิตช์ในหน้าเช็กของ)
 };
 
-export const DEFAULT_SETTINGS: StationSettingsValue = { station: "", deviceId: "", record: true, sound: true, soundVolume: 1, camScan: false, screenFlash: true, wakeLock: true, keepDays: 14 };
+export const DEFAULT_SETTINGS: StationSettingsValue = { station: "", deviceId: "", record: true, sound: true, soundVolume: 1, camScan: false, screenFlash: true, wakeLock: true, keepDays: 14, showPackaging: true };
 
 export function loadSettings(): StationSettingsValue {
   try {
@@ -34,7 +35,7 @@ export function loadSettings(): StationSettingsValue {
       station: typeof v.station === "string" ? v.station.slice(0, 40) : "",
       deviceId: typeof v.deviceId === "string" ? v.deviceId : "",
       record: v.record !== false, sound: v.sound !== false, camScan: v.camScan === true,
-      screenFlash: v.screenFlash !== false, wakeLock: v.wakeLock !== false,
+      screenFlash: v.screenFlash !== false, wakeLock: v.wakeLock !== false, showPackaging: v.showPackaging !== false,
       soundVolume: Number.isFinite(Number(v.soundVolume)) ? Math.min(1, Math.max(0, Number(v.soundVolume))) : 1,
       keepDays: [7, 14, 30, 60].includes(Number(v.keepDays)) ? Number(v.keepDays) : 14,
     };

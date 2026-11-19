@@ -21,7 +21,7 @@ import { useToast } from "@/components/toast";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
 import {
-  applyItemScan, allChecked, boxSizeText, checkProgress, itemCount, parsePackCommand, undoItemScan, isFreshLock, CLIP_MAX_SEC, MANUAL_REASONS, PACK_PROBLEMS,
+  applyItemScan, allChecked, boxSizeText, checkProgress, itemCount, parsePackCommand, undoItemScan, isFreshLock, CLIP_MAX_SEC, PACK_PROBLEMS,
   type CheckItem, type FinishMethod, type PackFinishStatus, type PackGate, type BoxSize,
 } from "@/lib/packing";
 import { useClipRecorder, type RecordedClip } from "./use-clip-recorder";
@@ -30,6 +30,10 @@ import { playPackSound, setPackMasterVolume, type PackSound } from "./sounds";
 import { usePackSoundBank } from "./sound-bank";
 import { ScreenFlash, vibrateFor, type FlashPulse } from "./screen-flash";
 import { useWakeLock } from "./use-wake-lock";
+import { PackagingTab, PackagingChip } from "./packaging";
+import { ManualTickModal } from "./manual-tick";
+import { HoverImage } from "@/components/hover-image";
+import { summarizePackaging } from "@/lib/packaging";
 import { packAlertSound } from "@/lib/packing-sound";
 import { LocalClipsPanel } from "./local-clips";
 import { StationSettings, loadSettings, saveSettings, type StationSettingsValue } from "./settings";
@@ -37,7 +41,7 @@ import { PackQueue, type QueueRow } from "./queue";
 import { TodayPacked, type TodaySession } from "./today-list";
 
 // ── ข้อมูลจาก /api/packing ──
-type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; box: string | null; codes: string[] };
+type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; box: string | null; codes: string[]; packaging?: { id: string; name: string; image_key: string | null; sort?: number }[] };
 type ApiOrder = { id: string; order_no: string | null; platform: string | null; platform_code: string | null; customer_name: string | null; status: string; platform_status: string | null; ship_by_at: string | null; tracking_no: string | null; package_no: string | null; carrier: string | null; cod_amount: number; packed_at: string | null; packed_by_name: string | null; buyer_note: string | null };
 type ApiSession = { id: string; status: string; packer_id: string | null; packer_name: string | null; started_at: string };
 type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
@@ -55,7 +59,7 @@ type Active = {
   checkedAt: string | null;
 };
 type Flash = { tone: "ok" | "error" | "warn" | "info"; text: string; at: number };
-type Tab = "station" | "clips" | "settings";
+type Tab = "station" | "clips" | "packaging" | "settings";
 type PhoneTab = "queue" | "pack" | "done";
 
 const toLines = (items: ApiItem[]): Line[] => items.map((it) => ({ key: it.id, qty: it.qty, codes: it.codes, scanned: 0, manual: 0, info: it, reason: null }));
@@ -92,6 +96,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
   const [lastScanAt, setLastScanAt] = useState<number | null>(null); // แถบสถานะ: เครื่องสแกนยิงล่าสุดเมื่อไหร่
   const [manualOpen, setManualOpen] = useState(false);               // มือถือ: ช่องพิมพ์เลขซ่อนหลังปุ่ม "พิมพ์เอง" (ไม่เด้งคีย์บอร์ด)
   const manualRef = useRef<HTMLInputElement>(null);
+  const [manualFor, setManualFor] = useState<string | null>(null);   // ป๊อปเลือกเหตุผลติ๊กมือ (รอบ 6) — key บรรทัด
   useEffect(() => { if (manualOpen) manualRef.current?.focus(); }, [manualOpen]);
   const awake = useWakeLock(settings.wakeLock && tab === "station"); // จอไม่ดับระหว่างแพ็ค
   usePageOwnsBottomBar(isPhone && !!active && tab === "station");   // มือถือ: แถบปุ่มจบของหน้านี้อยู่ล่างจอ แทนแถบเมนูแอป
@@ -455,7 +460,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
     <div className="flex flex-col gap-3 pb-28 lg:pb-4">
       <div className="flex flex-wrap items-center gap-2">
         <ScrollTabs activeKey={tab} className="min-w-0 flex-1">
-          {([["station", "สถานีแพ็ค"], ["clips", "คลิปในเครื่องนี้"], ["settings", "ตั้งค่าสถานี"]] as [Tab, string][]).map(([k, label]) => (
+          {([["station", "สถานีแพ็ค"], ["clips", "คลิปในเครื่องนี้"], ["packaging", "บรรจุภัณฑ์"], ["settings", "ตั้งค่าสถานี"]] as [Tab, string][]).map(([k, label]) => (
             <button key={k} data-tab-key={k} type="button" onClick={() => setTab(k)}
               className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium ${tab === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{label}</button>
           ))}
@@ -467,6 +472,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
       </div>
 
       {tab === "clips" && <LocalClipsPanel keepDays={settings.keepDays} />}
+      {tab === "packaging" && <PackagingTab />}
       {tab === "settings" && <StationSettings value={settings} onChange={updateSettings} devices={rec.devices} canDetect={rec.canDetect} mime={rec.mime} soundBank={soundBank} />}
 
       {tab === "station" && <StationStatus lastScanAt={lastScanAt} record={settings.record} camStatus={rec.status} recording={rec.recording} elapsed={rec.elapsed} awake={awake} station={settings.station} />}
@@ -546,7 +552,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
                   </div>
                 )}
 
-                {active && <OrderPanel a={active} boxes={boxes} onManual={manualTick} onMinus={minusLine} onBox={setBox} onUndoLast={undoLast} onClose={() => void handleScan("*PK-SKIP")} />}
+                {active && <OrderPanel a={active} boxes={boxes} showPack={settings.showPackaging} onTogglePack={(v) => updateSettings({ ...settings, showPackaging: v })} onManual={(key) => setManualFor(key)} onMinus={minusLine} onBox={setBox} onUndoLast={undoLast} onClose={() => void handleScan("*PK-SKIP")} />}
                 {active && isPhone && !manualOpen && (
                   <div className="grid grid-cols-2 gap-2">
                     <button type="button" onClick={undoLast} disabled={!active.history.length} className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white py-2.5 text-sm disabled:opacity-40"><Icon name="back" /> ย้อนการยิง</button>
@@ -579,6 +585,10 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
               </>
             )}
 
+            {active && manualFor && (() => {
+              const l = active.lines.find((x) => x.key === manualFor);
+              return l ? <ManualTickModal itemLabel={`${l.info.sku_code ?? l.info.shop_code ?? ""} ${l.info.name}`.trim()} onPick={(reason) => { setManualFor(null); manualTick(l.key, reason); }} onClose={() => setManualFor(null)} /> : null;
+            })()}
             {show("done") && <TodayPacked refreshKey={refreshKey} boxes={boxes} onRepack={(s) => void repack(s)} onChanged={bump} />}
             {savingCount > 0 && <p className="text-xs text-slate-400">กำลังบันทึก {savingCount} ออเดอร์…</p>}
           </div>
@@ -589,14 +599,17 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
 }
 
 // ── แผงออเดอร์ที่กำลังแพ็ค ──
-function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }: {
-  a: Active; boxes: BoxSize[]; onManual: (key: string, reason: string) => void; onMinus: (key: string) => void; onBox: (name: string) => void; onUndoLast: () => void; onClose: () => void;
+function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox, onUndoLast, onClose }: {
+  a: Active; boxes: BoxSize[]; showPack: boolean; onTogglePack: (v: boolean) => void; onManual: (key: string) => void; onMinus: (key: string) => void; onBox: (name: string) => void; onUndoLast: () => void; onClose: () => void;
 }) {
   const o = a.data.order;
   const p = checkProgress(a.lines);
   const boxName = a.boxUsed ?? a.data.box?.name ?? null;
   const boxInfo = useMemo(() => boxes.find((b) => b.name === boxName) ?? a.data.box, [boxes, boxName, a.data.box]);
   const [boxOpen, setBoxOpen] = useState(false);
+  const hasPack = a.lines.some((l) => l.info.packaging?.length);
+  const packSum = useMemo(() => summarizePackaging(a.lines.map((l) => ({ qty: l.qty, packaging: l.info.packaging ?? [] })), new Map(a.lines.flatMap((l) => l.info.packaging ?? []).map((p) => [p.id, p.sort ?? 0]))), [a.lines]);
+  const packImg = useMemo(() => new Map(a.lines.flatMap((l) => l.info.packaging ?? []).map((p) => [p.id, p.image_key])), [a.lines]);
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -642,22 +655,27 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
           <p className="font-semibold text-slate-800">เช็กของ <span className={`ml-1 text-sm ${p.done >= p.total ? "text-emerald-700" : "text-slate-500"}`}>{p.done}/{p.total} ชิ้น</span></p>
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {hasPack && <label className="inline-flex cursor-pointer items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={showPack} onChange={(e) => { onTogglePack(e.target.checked); e.target.blur(); }} /> แสดงบรรจุภัณฑ์</label>}
             <button type="button" onClick={onUndoLast} disabled={!a.history.length} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1 text-xs disabled:opacity-40" title="Ctrl+Z หรือการ์ด ย้อนการยิง">
               <Icon name="back" /> ย้อนการยิงล่าสุด
             </button>
             <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600">ปิดออเดอร์นี้ (ไม่บันทึก)</button>
           </div>
         </div>
+        {showPack && packSum.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 bg-violet-50/40 px-3 py-2 text-xs">
+            <span className="font-medium text-slate-700">บรรจุภัณฑ์ที่ต้องใส่:</span>
+            {packSum.map((s) => <PackagingChip key={s.id} name={`${s.name} ×${s.qty}`} imageKey={packImg.get(s.id) ?? null} />)}
+          </div>
+        )}
         <ul className="divide-y divide-slate-100">
           {a.lines.map((l) => {
             const n = itemCount(l), done = n >= l.qty;
             const img = r2ImageUrl(l.info.image_key, 160);
             return (
               <li key={l.key} className={`flex items-center gap-3 px-3 py-2 ${done ? "bg-emerald-50" : ""}`}>
-                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-100">
-                  {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : <div className="grid h-full place-items-center text-slate-300"><Icon name="image" /></div>}
-                </div>
+                <HoverImage url={img ? r2ImageUrl(l.info.image_key, 480) : null} size={56} previewSize={300} rounded="rounded-lg" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-900">{l.info.name}</p>
                   <p className="truncate text-xs text-slate-500">
@@ -666,6 +684,7 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
                     {l.info.level === "none" && <span className="ml-1 text-amber-700">(จับคู่สินค้าไม่ได้ — ติ๊กมือ)</span>}
                   </p>
                   {l.manual > 0 && <p className="text-xs text-slate-500">ติ๊กมือ {l.manual} · {l.reason}</p>}
+                  {showPack && !!l.info.packaging?.length && <div className="mt-1 flex flex-wrap gap-1">{l.info.packaging.map((pk) => <PackagingChip key={pk.id} name={pk.name} imageKey={pk.image_key} />)}</div>}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <div className="flex items-center gap-1.5">
@@ -673,10 +692,7 @@ function OrderPanel({ a, boxes, onManual, onMinus, onBox, onUndoLast, onClose }:
                     <span className={`min-w-[44px] text-center text-lg font-bold tabular-nums ${done ? "text-emerald-700" : "text-slate-700"}`}>{n}/{l.qty}</span>
                   </div>
                   {!done && (
-                    <select value="" onChange={(e) => { if (e.target.value) onManual(l.key, e.target.value); e.target.blur(); /* ปล่อยโฟกัส ไม่งั้นเครื่องสแกนยิงไม่ติด */ }} className="max-w-[130px] rounded border border-slate-200 px-1 py-0.5 text-xs text-slate-600">
-                      <option value="">ติ๊กมือ (ไม่ยิง)…</option>
-                      {MANUAL_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                    </select>
+                    <button type="button" onClick={(e) => { e.currentTarget.blur(); onManual(l.key); }} className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-slate-400">ติ๊กมือ</button>
                   )}
                 </div>
               </li>

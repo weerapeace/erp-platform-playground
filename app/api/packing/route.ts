@@ -93,11 +93,14 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
     ...[...skus.values()].map((s) => str(s.parent_sku_id)),
   ].filter((x): x is string => !!x))];
   const parentOnly = [...new Set(items.filter((i) => !i.matched_sku_id && i.matched_parent_sku_id).map((i) => String(i.matched_parent_sku_id)))];
-  const [{ data: parentRows }, { data: siblingRows }] = await Promise.all([
-    parentIds.length ? admin.from("parent_skus_v2").select("id, code, name_th, sku_name, cover_image_r2_key, parcel_size_id, pack_note, pack_flags").in("id", parentIds) : Promise.resolve({ data: [] }),
+  const [{ data: parentRows }, { data: siblingRows }, { data: packRows }] = await Promise.all([
+    parentIds.length ? admin.from("parent_skus_v2").select("id, code, name_th, sku_name, cover_image_r2_key, parcel_size_id, pack_note, pack_flags, pack_items").in("id", parentIds) : Promise.resolve({ data: [] }),
     // สินค้าระดับรุ่น (ไม่รู้สี) — ยิงสีไหนของรุ่นนั้นก็นับ
     parentOnly.length ? admin.from("skus_v2").select("code, barcode, parent_sku_id").in("parent_sku_id", parentOnly).limit(500) : Promise.resolve({ data: [] }),
+    // บรรจุภัณฑ์ที่ต้องใส่ (รอบ 6) — เฉพาะรายการที่ไม่อยู่ในถัง · เรียงตามลำดับกลาง
+    parentIds.length ? admin.from("packaging_items").select("id, name, image_r2_key, sort").eq("is_active", true).order("sort") : Promise.resolve({ data: [] }),
   ]);
+  const packList = (packRows ?? []) as { id: string; name: string; image_r2_key: string | null; sort: number }[];
   const parents = new Map(((parentRows ?? []) as Row[]).map((p) => [String(p.id), p]));
   const sizeIds = [...new Set([...parents.values()].map((p) => str(p.parcel_size_id)).filter((x): x is string => !!x))];
   const { data: sizeRows } = sizeIds.length ? await admin.from("parcel_sizes").select("id, name, width_cm, length_cm, height_cm").in("id", sizeIds) : { data: [] };
@@ -129,6 +132,7 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
       level: sku ? "sku" : parentId ? "parent" : "none",
       box: box ? box.name : null,
       codes: [...codes],
+      packaging: packList.filter((p) => ((parent?.pack_items as string[] | null) ?? []).includes(p.id)).map((p) => ({ id: p.id, name: p.name, image_key: p.image_r2_key, sort: p.sort })),
     };
   });
   const box = suggestBox(outItems.map((it) => {
