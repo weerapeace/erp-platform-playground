@@ -125,6 +125,7 @@ export default function SoOrdersPage() {
   // 🔄 "อัปเดตสถานะ" — ผูกใบขาย (บิล) เข้ารายการ อัปเดตใบสั่งขาย + ใบสั่งผลิตพร้อมกัน (./bill-match-modal)
   const [billMatch, setBillMatch] = useState<{ id: string; no: string | null } | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
+  const [unlinkMo, setUnlinkMo] = useState<{ id: string; mo_no: string } | null>(null);   // ยืนยัน "เลิกผูกใบสั่งผลิต"
   const [batchOpen, setBatchOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState("");
   const { groups: moGroups } = useMoGroups(canView);
@@ -582,7 +583,8 @@ export default function SoOrdersPage() {
             onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")}
             orphanMos={orphanMos}
             onLinkMo={canEdit && form.status !== "cancelled" ? (l) => setLinkFor({ tempId: l.tempId, sku: l.sku ?? null, name: l.product_name, mode: "read" }) : undefined}
-            onOpenLineMo={canEdit && form.status !== "cancelled" ? (l) => void lineAct({ action: "open_mo", line_id: l.tempId }, `เปิดใบสั่งผลิตให้ ${l.sku ?? l.product_name} แล้ว`) : undefined} />
+            onOpenLineMo={canEdit && form.status !== "cancelled" ? (l) => void lineAct({ action: "open_mo", line_id: l.tempId }, `เปิดใบสั่งผลิตให้ ${l.sku ?? l.product_name} แล้ว`) : undefined}
+            onUnlinkMo={canEdit && form.status === "confirmed" ? (mo) => setUnlinkMo(mo) : undefined} />
         )}
         {form && (!form.id || editing) && (
           <div className="space-y-3">
@@ -682,6 +684,11 @@ export default function SoOrdersPage() {
         onConfirm={() => askCancel && void act((askCancel as { id: string }).id, { action: "cancel" }, "ยกเลิกใบแล้ว")}
         title="ยกเลิกใบสั่งขาย?" variant="danger" confirmText="ยกเลิกใบ"
         message="ใบจะถูกทำเครื่องหมายว่ายกเลิก (ไม่ลบทิ้ง) · ใบสั่งผลิตที่เปิดไปแล้วจะไม่ถูกยกเลิกให้อัตโนมัติ — ต้องไปจัดการที่ใบสั่งผลิตเอง" />
+
+      <ConfirmDialog open={!!unlinkMo} onClose={() => !linkBusy && setUnlinkMo(null)} loading={linkBusy}
+        onConfirm={() => { const x = unlinkMo; if (x) void lineAct({ action: "unlink_mo", mo_id: x.id }, `เลิกผูก ${x.mo_no} แล้ว`).then((ok) => { if (ok) setUnlinkMo(null); }); }}
+        title={`เลิกผูก ${unlinkMo?.mo_no ?? ""} ออกจากใบนี้?`} variant="danger" confirmText="เลิกผูก"
+        message="ใบสั่งผลิตยังอยู่ (ไม่ถูกลบ/ยกเลิก) แค่ไม่นับเป็นของรายการนี้แล้ว · ผูกกลับได้ด้วยปุ่ม “ผูกใบที่มี” · ถ้าเป็นงานลูกค้า ควรผูกใบสั่งขายที่ถูกต้องให้ใบผลิตนั้นต่อ" />
     </div>
     </PlaygroundShell>
   );

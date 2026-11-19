@@ -142,3 +142,13 @@ export function soLineQtyText(p: SoLineProgress): string {
   if (st === "over") return `${base} · เกิน ${n(p.opened - p.ordered)}`;
   return base;
 }
+
+/** รายการใบสั่งขายที่ยังเปิดผลิตไม่ครบ — GET /api/mo/so-pending (ป๊อปสร้างใบสั่งผลิตหยิบไปสร้าง) */
+export type SoPendingLine = {
+  line_id: string; order_id: string; order_no: string | null; order_date: string | null;
+  customer_name: string | null; customer_po_no: string | null;
+  sku: string | null; product_name: string; note: string | null; unit: string | null;
+  /** สั่ง · เปิดผลิตแล้ว (ใบที่ยังใช้งาน) · เหลือต้องเปิด */
+  qty: number; opened: number; remaining: number; due_date: string | null;
+  image_key: string | null;
+};

@@ -52,7 +52,7 @@ const ORDER_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: "ยกเลิก", cls: "bg-rose-50 text-rose-700" },
 };
 
-export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo }: {
+export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo, onUnlinkMo }: {
   header: {
     companyName: string; customerName: string; orderDate: string; dueDate: string;
     poNo: string; salePerson: string; note: string; status: string;
@@ -67,6 +67,8 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   /** ปุ่มต่อรายการที่ยังไม่มีใบผลิต: ผูกใบที่มีอยู่ / เปิดใบใหม่เฉพาะรายการนี้ (ไม่ส่ง = ไม่มีสิทธิ์ → ไม่โชว์ปุ่ม) */
   onLinkMo?: (l: EditorLine) => void;
   onOpenLineMo?: (l: EditorLine) => void;
+  /** ปุ่ม "เลิกผูก" ใต้ใบผลิตของรายการ (หยิบผิด → ย้อนกลับ) · ไม่ส่ง = ไม่มีสิทธิ์ → ไม่โชว์ */
+  onUnlinkMo?: (mo: { id: string; mo_no: string }) => void;
 }) {
   const items = useMemo(() => lines.filter((l) => l.product_name.trim() || l.sku), [lines]);
   const main = useMemo(() => majorityGroup(items.map((l) => meta[l.tempId]?.group ?? null)), [items, meta]);
@@ -118,6 +120,16 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm font-medium tabular-nums text-slate-800">{baht(lineAmount(l))}</td>
         <td className="px-3 py-1.5">
           <StatusCell stage={stageOf(l)} moNo={m?.mo_no ?? null} p={m?.progress ?? null} qty={Number(l.qty) || 0} cancelled={cancelled} />
+          {onUnlinkMo && hasMo(l) && !cancelled && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {(m?.progress?.mos.length ? m.progress.mos.map((x) => ({ id: x.id, mo_no: x.mo_no })) : m?.mo_id && m.mo_no ? [{ id: m.mo_id, mo_no: m.mo_no }] : []).map((x) => (
+                <button key={x.id} type="button" onClick={() => onUnlinkMo(x)} title={`เลิกผูก ${x.mo_no} ออกจากรายการนี้ (ใบสั่งผลิตไม่ถูกลบ)`}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-500 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700">
+                  <Icon name="cancel" /> เลิกผูก{(m?.progress?.mos.length ?? 0) > 1 ? ` ${x.mo_no}` : ""}
+                </button>
+              ))}
+            </div>
+          )}
           {!hasMo(l) && !cancelled && (onLinkMo || onOpenLineMo) && (
             <div className="mt-1 flex flex-wrap gap-1">
               {onLinkMo && <button type="button" onClick={() => onLinkMo(l)} className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-1.5 py-0.5 text-[10px] text-rose-700 hover:bg-rose-50"><Icon name="link" /> ผูกใบที่มี</button>}

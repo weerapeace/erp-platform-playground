@@ -10,6 +10,8 @@
  *    ส่วน "แก้" ใบที่มีแล้ว ยังอยู่ที่หน้าใบสั่งผลิต (ฟอร์มใหญ่ที่มีวัตถุดิบ/ขอซื้อ/จ่ายงาน)
  * โหมด "เพิ่มหลายรายการ": กรอก/วางจาก Excel ได้ทีละหลายบรรทัด — ทุกบรรทัดใช้ค่าตั้งต้นจากฟอร์มด้านบน
  *    (วันที่สั่งงาน / กำหนดส่ง / สถานะ / หมายเหตุ) แล้วแก้รายบรรทัดทับได้
+ * ใบสั่งขายค้างเปิดผลิต (2026-11-19): ส่วน SoPendingPicker (./so-pending) ด้านบนป๊อป — ติ๊กรายการ = เติมสินค้า/จำนวนที่ขาด/กำหนดส่ง + ผูกรายการนั้น
+ *    ติ๊ก 1 = ใบเดียว · ติ๊ก 2 ขึ้นไป = สลับเป็นโหมดหลายรายการ (แต่ละบรรทัดผูกรายการใบสั่งขายของตัวเอง) · เลิกผูกทีหลังได้ที่หน้าใบสั่งขาย
  * ของกลางที่ใช้: ERPModal · useToast · apiFetch · ComponentPicker · WorkInstructionPanel · lib/paste-table · /api/skus/lookup
  * ใบสั่งขาย (2026-11-05): สินค้าแบรนด์ลูกค้าต้องผูกใบสั่งขาย — ส่วน MoSoLinkSection (components/mo-so-link)
  *    กติกา lib/mo-so-rule.ts · โหมดหลายรายการ: งานลูกค้าทุกบรรทัดผูกใบเดียวกัน (สร้างใหม่ = ใบแรกสร้าง ที่เหลือผูกตาม)
@@ -22,7 +24,9 @@ import { ERPModal } from "@/components/modal";
 import { ComponentPicker } from "@/components/material-picker";
 import { parsePastedTable, parseNumberCell, parseDateCell, looksLikeHeaderRow } from "@/lib/paste-table";
 import { MoSoLinkSection, emptySoLink, persistSoLinkExtras, soLinkInputOf, type MoSoLinkValue, type SoLinkState } from "@/components/mo-so-link";
-import { soLinkError, type BrandInfo, type MoSoLinkInput, type SoNeed } from "@/lib/mo-so-rule";
+import { soLinkError, type BrandInfo, type MoSoLinkInput, type SoNeed, type SoPendingLine } from "@/lib/mo-so-rule";
+import { Icon } from "@/components/icon";
+import { SoPendingPicker } from "./so-pending";
 
 // วิธีทำ/รูปสินค้า — โหลดตอนเลือกสินค้าแล้วเท่านั้น (หนัก ไม่ควรถ่วงหน้าที่เรียกใช้)
 const WorkInstructionPanel = dynamicImport(
@@ -38,7 +42,11 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 // วันนี้ตามเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString() ตรง ๆ เพราะ UTC ร่นไป 1 วันช่วงเช้า
 const todayLocal = () => { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); };
 // 1 บรรทัดในโหมดเพิ่มหลายรายการ
-type MultiRow = { code: string; qty: string; due: string; note: string; name?: string | null; image?: string | null; bad?: boolean };
+type MultiRow = { code: string; qty: string; due: string; note: string; name?: string | null; image?: string | null; bad?: boolean;
+  /** หยิบมาจากรายการใบสั่งขายค้างเปิดผลิต → ใบนี้ผูกรายการนั้น */
+  so?: { order_id: string; line_id: string; order_no: string | null } | null };
+const rowOfPend = (x: SoPendingLine): MultiRow => ({ code: x.sku ?? "", qty: String(x.remaining), due: x.due_date ? x.due_date.slice(0, 10) : "", note: "",
+  name: x.product_name, image: x.image_key, so: { order_id: x.order_id, line_id: x.line_id, order_no: x.order_no } });
 const emptyRow = (): MultiRow => ({ code: "", qty: "", due: "", note: "" });
 const lblCls = "text-[11px] text-slate-500";
 type MultiNeeds = Record<string, { need: SoNeed; brand: BrandInfo | null }>;
@@ -91,11 +99,13 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   const [soLink, setSoLink] = useState<MoSoLinkValue>(emptySoLink);
   const [soSt, setSoSt] = useState<SoLinkState | null>(null);
   const [multiNeeds, setMultiNeeds] = useState<Record<string, { need: SoNeed; brand: BrandInfo | null }>>({});
+  // รายการใบสั่งขายที่หยิบมา (โหมดใบเดียว) — โหมดหลายรายการเก็บใน rows[].so
+  const [pendOne, setPendOne] = useState<SoPendingLine | null>(null);
 
   // เปิดใหม่ = ล้างฟอร์ม (เผื่อสร้างต่อหลายใบ)
   useEffect(() => {
     if (!open) return;
-    setSoLink(emptySoLink()); setSoSt(null); setMultiNeeds({});
+    setSoLink(emptySoLink()); setSoSt(null); setMultiNeeds({}); setPendOne(null);
     setSku(defaultProductSku ?? ""); setName(defaultProductName ?? ""); setImage(defaultProductImage ?? null);
     setQty(1); setDue(""); setStatus("draft"); setNote("");
     setVersions([]); setVerId(""); setBomCode(null); setBomVersion(null); setSizes([]); setSizeQty({}); setErr(null);
@@ -181,11 +191,49 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   /** ให้มี "บรรทัดว่างท้ายตาราง" เสมอ 1 บรรทัด — กรอกบรรทัดสุดท้ายแล้วเด้งบรรทัดใหม่ให้เอง ไม่ต้องกดเพิ่มเอง */
   const withTrailingBlank = (list: MultiRow[]) => {
     const last = list[list.length - 1];
-    const blank = !!last && !last.code.trim() && !String(last.qty).trim() && !last.due && !last.note.trim();
+    const blank = !!last && !last.code.trim() && !String(last.qty).trim() && !last.due && !last.note.trim() && !last.so;
     return blank ? list : [...list, emptyRow()];
   };
   const setRow = (i: number, patch: Partial<MultiRow>) =>
     setRows((prev) => withTrailingBlank(prev.map((r, k) => (k === i ? { ...r, ...patch } : r))));
+
+  // ── หยิบรายการใบสั่งขายค้างเปิดผลิต ─────────────────────────────────
+  const pendSelected = multi ? rows.filter((r) => r.so).map((r) => r.so!.line_id) : pendOne ? [pendOne.line_id] : [];
+  /** ล้างของที่หยิบมาในโหมดใบเดียว (สินค้า/จำนวน/กำหนดส่ง/ใบสั่งขาย กลับเป็นค่าว่าง) */
+  const clearPendOne = () => {
+    setPendOne(null); setSku(""); setName(""); setImage(null); setQty(1); setDue("");
+    setVersions([]); setVerId(""); setBomCode(null); setBomVersion(null); setSizes([]); setSizeQty({});
+    setSoLink(emptySoLink()); setSoSt(null);
+  };
+  const applyPendOne = (x: SoPendingLine) => {
+    if (!x.sku) return;
+    setPendOne(x);
+    void pickProduct(x.sku, x.product_name, x.image_key);
+    setQty(x.remaining); setDue(x.due_date ? x.due_date.slice(0, 10) : "");
+    setSoLink({ ...emptySoLink(), mode: "pick", so_order_id: x.order_id, so_line_id: x.line_id, order_no: x.order_no });
+    setErr(null);
+  };
+  const filledOrLinked = (r: MultiRow) => !!(r.code.trim() || String(r.qty).trim() || r.so);
+  const togglePend = (x: SoPendingLine) => {
+    if (!x.sku) return;
+    if (multi) {
+      setRows((prev) => withTrailingBlank(prev.some((r) => r.so?.line_id === x.line_id)
+        ? prev.filter((r) => r.so?.line_id !== x.line_id)
+        : [...prev.filter(filledOrLinked), rowOfPend(x)]));
+      return;
+    }
+    if (pendOne?.line_id === x.line_id) { clearPendOne(); return; }
+    if (pendOne) {   // ติ๊กรายการที่ 2 → สร้างหลายใบ (แต่ละใบผูกรายการของตัวเอง)
+      setRows(withTrailingBlank([rowOfPend(pendOne), rowOfPend(x)]));
+      clearPendOne(); setMulti(true);
+      return;
+    }
+    applyPendOne(x);
+  };
+  const clearPendAll = () => {
+    if (multi) setRows((prev) => { const keep = prev.filter((r) => !r.so); return withTrailingBlank(keep.length ? keep : [emptyRow()]); });
+    else clearPendOne();
+  };
 
   /** วางจาก Excel: คอลัมน์ = รหัสสินค้า | จำนวน | กำหนดส่ง | หมายเหตุ (2 คอลัมน์แรกก็พอ) */
   const applyPaste = async (text: string, startIdx = 0) => {
@@ -247,7 +295,11 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     const t = setTimeout(() => { void loadMultiNeeds(multiCodesKey.split(",")).catch(() => {}); }, 400);
     return () => clearTimeout(t);
   }, [multiCodesKey, loadMultiNeeds]);
-  const multiInfo = multiPlan(multiCodesKey ? multiCodesKey.split(",") : [], multiNeeds, false);
+  // บรรทัดที่หยิบจากใบสั่งขาย (r.so) ผูกรายการของตัวเองแล้ว — ส่วน "ใบสั่งขาย" ด้านบนใช้กับบรรทัดที่เหลือเท่านั้น
+  const multiInfo = {
+    ...multiPlan(multi ? rows.filter((r) => !r.so).map((r) => r.code) : [], multiNeeds, false),
+    unknown: multiPlan(multiCodesKey ? multiCodesKey.split(",") : [], multiNeeds, false).unknown,
+  };
 
   const verifyRows = async () => {
     setMultiBusy(true);
@@ -276,15 +328,19 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     let needs: MultiNeeds;
     try { needs = await loadMultiNeeds(use.map((r) => r.code)); }
     catch { setMultiBusy(false); setErr("เช็กแบรนด์/ใบสั่งขายของสินค้าไม่สำเร็จ — ลองกดใหม่"); return; }
-    const plan = multiPlan(use.map((r) => r.code), needs, true);
-    const planErr = plan.unknown.length
-      ? "สินค้ายังไม่มีแบรนด์: " + plan.unknown.slice(0, 5).join(", ") + (plan.unknown.length > 5 ? "…" : "") + " — สลับไป “สร้างใบเดียว” เพื่อใส่แบรนด์ หรือใส่ที่หน้า Parent SKU"
+    // บรรทัดที่หยิบจากใบสั่งขายผูกรายการของตัวเองอยู่แล้ว — กติกา "ผูกใบเดียวกัน" คิดเฉพาะบรรทัดที่เหลือ
+    const planAll = multiPlan(use.map((r) => r.code), needs, true);
+    const plan = multiPlan(use.filter((r) => !r.so).map((r) => r.code), needs, true);
+    const planErr = planAll.unknown.length
+      ? "สินค้ายังไม่มีแบรนด์: " + planAll.unknown.slice(0, 5).join(", ") + (planAll.unknown.length > 5 ? "…" : "") + " — สลับไป “สร้างใบเดียว” เพื่อใส่แบรนด์ หรือใส่ที่หน้า Parent SKU"
       : plan.brands.length > 1 ? "มีงานลูกค้าหลายแบรนด์ (" + plan.brands.join(", ") + ") — แยกสร้างทีละแบรนด์ (คนละใบสั่งขาย)"
       : plan.required.length ? soLinkError("required", soLinkInputOf(soLink), plan.brands[0] ?? null) : null;
     if (planErr) { setMultiBusy(false); setErr(planErr); return; }
     const requiredSet = new Set(plan.required);
     let createdSo: string | null = null;     // "สร้างใหม่" → ใบแรกสร้าง ที่เหลือผูกใบนั้น
-    const linkFor = (code: string): MoSoLinkInput | null => {
+    const linkFor = (r: MultiRow): MoSoLinkInput | null => {
+      if (r.so) return { so_order_id: r.so.order_id, so_line_id: r.so.line_id };
+      const code = r.code;
       if (!requiredSet.has(code)) return null;
       if (createdSo) return { so_order_id: createdSo };
       const base = soLinkInputOf(soLink);
@@ -310,7 +366,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
             product_sku: r.code, product_name: r.name ?? null, qty: Number(r.qty) || 0,
             due_date: r.due || due || null, order_date: orderDate || null,
             bom_code: b.code, bom_version: b.version, status, note: r.note || note || null, fabric_calc_mode: fabricMode,
-            so_link: linkFor(r.code),
+            so_link: linkFor(r),
           }) });
         const j = await res.json();
         if (!res.ok || j?.error) throw new Error(j?.error || "สร้างไม่สำเร็จ");
@@ -331,13 +387,13 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   const filledRows = rows.filter((r) => r.code.trim() && Number(r.qty) > 0).length;
 
   return (
-    <ERPModal open={open} onClose={() => !saving && !multiBusy && onClose()} size="lg" storageKey="mo-create" title="🏭 สร้างใบสั่งผลิตใหม่"
+    <ERPModal open={open} onClose={() => !saving && !multiBusy && onClose()} size="lg" storageKey="mo-create" title="สร้างใบสั่งผลิตใหม่"
       footer={<>
         {multi && <span className="mr-auto text-[11px] text-slate-400">{progress || ("พร้อมสร้าง " + filledRows + " ใบ")}</span>}
         <button onClick={onClose} disabled={saving || multiBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
         {multi ? (
           <>
-            <button onClick={() => void verifyRows()} disabled={multiBusy} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">🔎 ตรวจรหัส</button>
+            <button onClick={() => void verifyRows()} disabled={multiBusy} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1"><Icon name="search" /> ตรวจรหัส</button>
             <button onClick={() => void saveMulti()} disabled={multiBusy || filledRows === 0}
               className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {multiBusy ? "กำลังสร้าง…" : "สร้าง " + filledRows + " ใบ"}
@@ -351,13 +407,15 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
         )}
       </>}>
       <div className="space-y-2">
-        {err && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {err}</div>}
+        {err && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 flex items-start gap-1.5"><Icon name="warning" className="mt-0.5 shrink-0" /> <span>{err}</span></div>}
+
+        {open && <SoPendingPicker selectedIds={pendSelected} onToggle={togglePend} onClear={clearPendAll} />}
 
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] text-slate-400">{multi ? "ค่าด้านล่างนี้เป็นค่าตั้งต้นของทุกบรรทัด (บรรทัดไหนกรอกเอง จะใช้ของบรรทัดนั้น)" : ""}</span>
-          <button type="button" onClick={() => setMulti((v) => !v)}
-            className={"h-8 px-3 text-xs font-medium rounded-lg border " + (multi ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600")}>
-            {multi ? "← กลับไปสร้างใบเดียว" : "➕ เพิ่มหลายรายการ"}
+          <button type="button" onClick={() => { if (!multi && pendOne) { setRows(withTrailingBlank([rowOfPend(pendOne)])); clearPendOne(); } setMulti((v) => !v); }}
+            className={"h-8 px-3 text-xs font-medium rounded-lg border inline-flex items-center gap-1 " + (multi ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600")}>
+            {multi ? <><Icon name="back" /> กลับไปสร้างใบเดียว</> : <><Icon name="add" /> เพิ่มหลายรายการ</>}
           </button>
         </div>
 
@@ -394,9 +452,9 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
         {multi ? (
           <div className="rounded-lg border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
-              <span>📋 รายการที่จะสร้าง</span>
+              <span className="inline-flex items-center gap-1"><Icon name="list" /> รายการที่จะสร้าง</span>
               <span className="flex items-center gap-2">
-                <button type="button" onClick={() => setPasteOpen((v) => !v)} className="text-[11px] text-blue-600 hover:underline">📥 วางจาก Excel</button>
+                <button type="button" onClick={() => setPasteOpen((v) => !v)} className="text-[11px] text-blue-600 hover:underline inline-flex items-center gap-1"><Icon name="import" /> วางจาก Excel</button>
                 <button type="button" onClick={() => setRows((p) => [...p, emptyRow(), emptyRow(), emptyRow()])} className="text-[11px] text-blue-600 hover:underline">+ เพิ่มบรรทัด</button>
               </span>
             </div>
@@ -422,7 +480,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
                 กำหนดส่ง
                 <button type="button" title="ลงวันกำหนดส่งด้านบนให้ทุกบรรทัด"
                   onClick={() => { if (!due) { toast.error("ใส่กำหนดส่งด้านบนก่อน"); return; } setRows((p) => p.map((r) => ({ ...r, due }))); toast.success("ลงกำหนดส่งให้ทุกบรรทัดแล้ว"); }}
-                  className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white text-blue-600 hover:bg-blue-50">⬇ ลงทั้งหมด</button>
+                  className="text-[10px] px-1.5 py-0.5 rounded border border-slate-200 bg-white text-blue-600 hover:bg-blue-50 inline-flex items-center gap-0.5"><Icon name="download" /> ลงทั้งหมด</button>
               </span>
               <span>หมายเหตุ</span>
               <span />
@@ -433,8 +491,14 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
                 <div key={i} className={"grid grid-cols-[minmax(11rem,1.7fr)_5.5rem_9.5rem_minmax(6rem,1fr)_2rem] gap-1.5 px-3 py-1 items-center " + (r.bad ? "bg-rose-50/60" : "")}>
                   <span className="min-w-0">
                     <ComponentPicker sku={r.code} name={r.name ?? ""} imageKey={r.image ?? null} placeholder="— เลือกสินค้า —"
-                      onPick={(c) => setRow(i, { code: c.code, name: c.name, image: c.image_key ?? null, bad: false })} />
+                      onPick={(c) => setRow(i, { code: c.code, name: c.name, image: c.image_key ?? null, bad: false, ...(r.so && c.code !== r.code ? { so: null } : {}) })} />
                     {r.bad && <span className="block text-[10px] text-rose-600">ไม่พบรหัส {r.code}</span>}
+                    {r.so && (
+                      <span className="mt-0.5 inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 text-[10px] text-blue-700" title="ใบนี้จะผูกรายการในใบสั่งขายนี้">
+                        <Icon name="receipt" /> ผูก {r.so.order_no ?? "ใบสั่งขาย"}
+                        <button type="button" onClick={() => setRow(i, { so: null })} title="ไม่ผูกรายการนี้ (ใบผลิตยังสร้างตามปกติ)" className="text-blue-400 hover:text-rose-600">✕</button>
+                      </span>
+                    )}
                   </span>
                   <input type="number" min={0} step="any" value={r.qty} onChange={(e) => setRow(i, { qty: e.target.value })} placeholder="0"
                     className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -443,7 +507,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
                   <input value={r.note} onChange={(e) => setRow(i, { note: e.target.value })} placeholder="—"
                     className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   <button type="button" onClick={() => setRows((p) => (p.length > 1 ? p.filter((_, k) => k !== i) : [emptyRow()]))}
-                    className="w-7 h-7 rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-xs">🗑</button>
+                    title="ลบบรรทัดนี้" className="w-7 h-7 rounded text-slate-300 hover:text-rose-600 hover:bg-rose-50 text-xs inline-flex items-center justify-center"><Icon name="delete" /></button>
                 </div>
               ))}
             </div>
@@ -456,11 +520,29 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
           <span className={lblCls}>สินค้าที่ผลิต</span>
           <div className="mt-0.5">
             <ComponentPicker sku={sku} name={name} imageKey={image} placeholder="— เลือกสินค้าที่ผลิต —"
-              onPick={(c) => void pickProduct(c.code, c.name, c.image_key ?? null)} />
+              onPick={(c) => { if (pendOne && c.code !== sku) setPendOne(null); void pickProduct(c.code, c.name, c.image_key ?? null); }} />
           </div>
         </div>
 
-        {sku && <MoSoLinkSection sku={sku} productName={name} value={soLink} onChange={setSoLink} onState={setSoSt} />}
+        {/* หยิบจากใบสั่งขาย → โชว์สรุปสั้น ๆ (ส่วนใบสั่งขายเต็มซ่อนไว้ แต่ยังเช็กแบรนด์/กติกาให้) · ยังไม่มีแบรนด์ = โชว์เต็มให้ใส่แบรนด์ */}
+        {sku && pendOne && soSt?.need !== "unknown_brand" && (
+          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50/50 px-3 py-2 text-xs">
+            <Icon name="receipt" className="mt-0.5 shrink-0 text-blue-600" />
+            <div className="min-w-0 flex-1">
+              <div className="text-slate-700">ผูกใบสั่งขาย <b className="font-mono font-medium">{pendOne.order_no ?? "—"}</b> · {pendOne.customer_name ?? ""}</div>
+              <div className="text-[11px] text-slate-500">
+                รายการ: {pendOne.product_name}{pendOne.note ? ` · ${pendOne.note}` : ""} · สั่ง {fmt(pendOne.qty)}{pendOne.opened > 0 ? ` · เปิดแล้ว ${fmt(pendOne.opened)}` : ""} · เหลือ <b className="font-medium text-emerald-700">{fmt(pendOne.remaining)}</b>
+                {sizes.length > 0 && <span className="text-amber-700"> · สูตรนี้แยกไซส์ กรอกจำนวนต่อไซส์ด้านล่างให้รวมได้ {fmt(pendOne.remaining)}</span>}
+              </div>
+            </div>
+            <button type="button" onClick={() => { setPendOne(null); setSoLink(emptySoLink()); }} title="เลือกใบสั่งขายเอง / ไม่ผูก" className="shrink-0 text-[11px] text-blue-600 hover:underline">เปลี่ยน</button>
+          </div>
+        )}
+        {sku && (
+          <div className={pendOne && soSt?.need !== "unknown_brand" ? "hidden" : undefined}>
+            <MoSoLinkSection sku={sku} productName={name} value={soLink} onChange={setSoLink} onState={setSoSt} />
+          </div>
+        )}
 
         <div className="grid grid-cols-3 gap-2">
           <label className="block">
@@ -484,10 +566,10 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
           </label>
           <div className="block">
             <span className={lblCls}>วิธีคิดผ้า</span>
-            <div className="flex h-8 mt-0.5 border border-slate-200 rounded-lg overflow-hidden text-xs" title="เปลี่ยนทีหลังได้ในใบ (ปุ่ม ✂/📐 ที่แท็บวัตถุดิบ)">
-              {([["lay", "✂ วางคุ้มสุด"], ["classic", "📐 สูตรเดิม+เผื่อเสีย"]] as const).map(([v, l]) => (
+            <div className="flex h-8 mt-0.5 border border-slate-200 rounded-lg overflow-hidden text-xs" title="เปลี่ยนทีหลังได้ในใบ (ปุ่มวิธีคิดผ้าที่แท็บวัตถุดิบ)">
+              {([["lay", "cut", "วางคุ้มสุด"], ["classic", "measure", "สูตรเดิม+เผื่อเสีย"]] as const).map(([v, ic, l]) => (
                 <button key={v} type="button" onClick={() => setFabricMode(v)}
-                  className={`flex-1 px-1 whitespace-nowrap ${fabricMode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+                  className={`flex-1 px-1 whitespace-nowrap inline-flex items-center justify-center gap-1 ${fabricMode === v ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}><Icon name={ic} /> {l}</button>
               ))}
             </div>
           </div>
@@ -495,14 +577,14 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
 
         {sku && versions.length === 0 && !loadingBom && (
           <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-            สินค้านี้ยังไม่มีสูตร — สร้างใบได้ แต่ระบบจะยังไม่รู้ว่าต้องเตรียม/ตัดอะไร (เสนอสูตรได้จากปุ่ม “⚠ ไม่มีสูตร” บนการ์ดในช้อปจ่ายงาน)
+            สินค้านี้ยังไม่มีสูตร — สร้างใบได้ แต่ระบบจะยังไม่รู้ว่าต้องเตรียม/ตัดอะไร (เสนอสูตรได้จากปุ่ม “ไม่มีสูตร” บนการ์ดในช้อปจ่ายงาน)
           </div>
         )}
 
         {/* จำนวนต่อไซส์ — เฉพาะสูตรที่มีไซส์ */}
         {sizes.length > 0 && (
           <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
-            <div className="text-[11px] font-medium text-slate-600 mb-1.5">📏 จำนวนต่อไซส์ <span className="text-slate-400 font-normal">(สูตรนี้มีไซส์ — กรอกจำนวนที่จะผลิตแต่ละไซส์)</span></div>
+            <div className="text-[11px] font-medium text-slate-600 mb-1.5 flex items-center gap-1"><Icon name="ruler" /> จำนวนต่อไซส์ <span className="text-slate-400 font-normal">(สูตรนี้มีไซส์ — กรอกจำนวนที่จะผลิตแต่ละไซส์)</span></div>
             <div className="flex flex-wrap gap-2">
               {sizes.map((s) => (
                 <label key={s.label} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">

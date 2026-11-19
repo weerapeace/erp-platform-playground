@@ -7,6 +7,7 @@
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
  *      open_mo  { group_id?, line_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด / เฉพาะรายการ) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
  *      link_mo  { line_id, mo_id } → ผูกใบสั่งผลิตที่มีอยู่เข้ารายการนี้ (รหัสสินค้าต้องตรง · ใบที่ผูกใบสั่งขายอื่นแล้วผูกไม่ได้)
+ *      unlink_mo { mo_id } → เลิกผูกใบสั่งผลิตออกจากใบนี้ (ย้อนกลับ link_mo/ป๊อปสร้างใบผลิต · ใบผลิตไม่ถูกลบ · audit so_order.unlink_mo + mo.so_unlink)
  *      save     → หลังบันทึก ผูกใบสั่งผลิตที่รายการอ้างไว้ให้ด้วย (ไม่เปิดใบใหม่ — open-mo linkOnly)
  *      ship     { create_invoice } → "ส่งแล้ว" · create_invoice=true = ออกใบขาย/บิลให้เลย
  *      cancel   { reason }         → ยกเลิกใบ
@@ -19,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditDiff } from "@/lib/audit";
 import { checkQuotePull, orderQuoteIds, quotePullProblems, syncQuoteConversions } from "@/lib/quote-convert";
 import { checkLineSkus, computeTotals, lineQuoteIds, lineRow, resolveLineGroups, writeBackQuoteLineSkus, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
@@ -237,6 +238,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await openMoForOrder(admin, id, user?.id ?? null, { onlyLineId: lineId, linkOnly: true });   // ผูกฝั่งใบสั่งผลิต + สถานะ/กำหนดส่ง กติกาเดียวกับเปิดใบ
     await writeAudit(admin, { action: "so_order.link_mo", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, mo_no: m.mo_no, line_id: lineId, from: "line_button" } });
     await writeAudit(admin, { action: "mo.so_link", entityType: "mo", entityId: m.id, ...actor, metadata: { mo_no: m.mo_no, so_order_no: order.order_no, line_id: lineId } });
+    return NextResponse.json({ ok: true, mo_no: m.mo_no, error: null });
+  }
+
+  // ── เลิกผูกใบสั่งผลิตออกจากใบนี้ (หยิบผิดใบ/ผิดรายการ — ย้อนกลับของ link_mo / ป๊อปสร้างใบสั่งผลิต) ──
+  if (action === "unlink_mo") {
+    if (order.status === "shipped") return NextResponse.json({ error: "ใบที่ส่งแล้ว เลิกผูกไม่ได้ — กด “เปิดใบกลับ” ก่อน" }, { status: 400 });
+    const moId = String(b.mo_id ?? "");
+    if (!moId) return NextResponse.json({ error: "ระบุใบสั่งผลิต" }, { status: 400 });
+    const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, so_order_id, so_order_no").eq("id", moId).maybeSingle();
+    const m = mo as { id: string; mo_no: string; so_order_id: string | null; so_order_no: string | null } | null;
+    const { data: refLines } = await admin.from("so_order_lines").select("id").eq("order_id", id).eq("mo_id", moId);
+    const lineIds = ((refLines ?? []) as { id: string }[]).map((r) => r.id);
+    if (!m || (m.so_order_id !== id && !lineIds.length)) return NextResponse.json({ error: "ใบสั่งผลิตนี้ไม่ได้ผูกกับใบนี้" }, { status: 400 });
+    if (lineIds.length) await admin.from("so_order_lines").update({ mo_id: null, mo_no: null }).in("id", lineIds);
+    if (m.so_order_id === id) await admin.from("manufacturing_orders").update({ so_order_id: null, so_order_no: null }).eq("id", moId);
+    await writeAudit(admin, { action: "so_order.unlink_mo", entityType: "so_order", entityId: id, ...actor,
+      metadata: { order_no: order.order_no, mo_no: m.mo_no, line_ids: lineIds } });
+    await writeAudit(admin, { action: "mo.so_unlink", entityType: "mo", entityId: m.id, ...actor,
+      metadata: { mo_no: m.mo_no, changes: auditDiff({ so_order_no: m.so_order_no }, { so_order_no: null }) } });
     return NextResponse.json({ ok: true, mo_no: m.mo_no, error: null });
   }
 
