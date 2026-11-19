@@ -36,6 +36,20 @@ describe("อ่านตัวเลือกจากร้าน", () => {
   it("Shopee ไฟล์ข้อมูลพื้นฐาน (basic_info) = ไม่มีข้อมูลตัวเลือก", () => {
     expect(shopVariantsOf("shopee", { basic_info: { name: "x" } })).toEqual([]);
   });
+  it("Shopee ผ่าน API (raw.shopee.models) = ราคาตั้ง + ราคาลด + สต๊อกต่อตัวเลือก", () => {
+    const vs = shopVariantsOf("shopee", { shopee: { item_id: "9", models: [
+      { sku: "MGW318-01", label: "สี: ดำ", price: 350, original_price: 390, stock: 4, model_id: "m1", image: null },
+      { sku: "MGW318-02", label: "สี: น้ำตาล", price: 390, original_price: 390, stock: 0, model_id: "m2" },
+    ] } });
+    expect(vs).toEqual([
+      { key: "m1", sku: "MGW318-01", label: "สี: ดำ", price: 390, sale_price: 350, stock: 4, image: null },
+      { key: "m2", sku: "MGW318-02", label: "สี: น้ำตาล", price: 390, sale_price: null, stock: 0, image: null },
+    ]);
+  });
+  it("Shopee ผ่าน API ไม่มีตัวเลือก = ตัวเลือกเดียวระดับสินค้า (item_sku)", () => {
+    const vs = shopVariantsOf("shopee", { shopee: { item_id: "9", item_sku: "LJRG32", price: 1400, original_price: 1400, stock: 2 } });
+    expect(vs).toEqual([{ key: "9", sku: "LJRG32", label: "LJRG32", price: 1400, sale_price: null, stock: 2, image: null }]);
+  });
   it("Shopee ไฟล์ราคา/สต๊อก (sales_info) = ราคาต่อตัวเลือก (ไม่มีราคาลด)", () => {
     const vs = shopVariantsOf("shopee", { sales_info: { variations: [
       { sku: "WK46-01", name: "ดำ", external_variation_id: "v1", price: 729, stock: 12 },

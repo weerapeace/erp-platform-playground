@@ -63,6 +63,22 @@ export function shopVariantsOf(platformCode: string, raw: unknown): ShopVariant[
       };
     });
   }
+  if (platformCode === "shopee" && obj(r.shopee)) {
+    // ดึงผ่าน API (raw.shopee — lib/shopee shopeeItemToCatalogItem · กฎราคาเดียวกับ summarizeShopee ใน lib/platform-listing-health)
+    //   original_price = ราคาตั้ง · price (current_price) ต่ำกว่า = ราคาลด · ไม่มีตัวเลือก = ตัวเลือกเดียวระดับสินค้า (item_sku)
+    const sp = obj(r.shopee) as Obj;
+    const models = arr(sp.models).map(obj).filter((v): v is Obj => !!v);
+    const toVariant = (v: Obj, i: number, sku: string | null, key: string | null, label: string | null): ShopVariant => {
+      const now = num(v.price); const list = num(v.original_price) ?? now;
+      return {
+        key: key ?? `#${i + 1}`, sku, label: label ?? sku ?? `ตัวเลือก ${i + 1}`,
+        price: list, sale_price: now != null && list != null && now < list ? now : null,
+        stock: num(v.stock), image: str(v.image),
+      };
+    };
+    if (models.length) return models.map((v, i) => toVariant(v, i, str(v.sku), str(v.model_id), str(v.label)));
+    return [toVariant(sp, 0, str(sp.item_sku), str(sp.item_id), null)];
+  }
   if (platformCode === "shopee") {
     // ไฟล์ "ราคา/สต๊อก" (mass_update_sales_info) ที่นำเข้าหน้าสินค้าบนแพลตฟอร์ม → raw.sales_info.variations
     //   (lib/platform-import-profiles · โปรไฟล์ shopee_sales_info) · ไฟล์ไม่มีราคาโปรโมชัน = ราคาปกติอย่างเดียว

@@ -49,6 +49,8 @@ const ProductPlatformManager = dynamic(() => import("@/components/product-platfo
 // ลิ้นชักสินค้าบนร้าน (LINE/Lazada แก้ได้ · หนัก) — เปิดเมื่อกดแถว/การ์ด → โหลดแยกจากหน้า (perf-check: หน้าโต 423→476KB เมื่อรวมไว้)
 const ShopCategoryPlanner = dynamic(() => import("@/components/platform-catalog/shop-category-planner").then((m) => m.ShopCategoryPlanner), { ssr: false, loading: () => <LoadingState label="กำลังเปิดหมวดในร้าน…" /> });
 const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
+// เช็กข้ามร้าน (สินค้าในระบบ × ทุกร้าน · สลับเรื่องตรวจ ราคา/ชื่อ/รายละเอียด/สต๊อก/ตัวเลือก) — โหลดเมื่อเปิดมุมมองนี้
+const CrossShopView = dynamic(() => import("@/components/platform-catalog/cross-shop-view").then((m) => m.CrossShopView), { ssr: false, loading: () => <LoadingState label="กำลังเปิดเช็กข้ามร้าน…" /> });
 // ตัวช่วยลงสินค้า (ของกลาง) — ปุ่ม "เพิ่มสินค้าขึ้นร้าน"
 const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 
@@ -90,12 +92,17 @@ const TOOL_TONE = {
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
 // มุมมอง: จับคู่ (เดิม · ค่าเริ่มต้นในแอปช่องทางขาย) / หน้าร้าน (แบบ Seller Center · เมนูในแอปจัดการงานเปิดด้วย ?view=shop)
-type PageView = "match" | "shop" | "cats";   // cats = หมวดในร้าน (components/platform-catalog/shop-category-planner)
+type PageView = "match" | "shop" | "cats" | "cross";   // cats = หมวดในร้าน (components/platform-catalog/shop-category-planner) · cross = เช็กข้ามร้าน (cross-shop-view)
 function readViewParam(): PageView {
   if (typeof window === "undefined") return "match";
   const v = new URLSearchParams(window.location.search).get("view");
-  return v === "shop" ? "shop" : v === "cats" ? "cats" : "match";
+  return v === "shop" ? "shop" : v === "cats" ? "cats" : v === "cross" ? "cross" : "match";
 }
+// มุมมองในแถบซ้าย/ปุ่มตัวกรองมือถือ (ชุดเดียวกันทั้งสองที่)
+const PAGE_VIEWS: { v: PageView; icon: string; label: string }[] = [
+  { v: "shop", icon: "store", label: "หน้าร้าน" }, { v: "match", icon: "link", label: "จับคู่ + ตั้งค่า" },
+  { v: "cats", icon: "folder", label: "หมวดในร้าน" }, { v: "cross", icon: "table-view", label: "เช็กข้ามร้าน" },
+];
 
 // ยืนยันทีเดียวเกินนี้ต้องพิมพ์คำยืนยัน (กฎ bulk ของระบบ)
 const TYPED_CONFIRM_OVER = 100;
@@ -970,7 +977,7 @@ export default function PlatformCatalogPage() {
   const matchedParents = new Set(listings.filter((l) => !isGoneStatus(l.status)).map((l) => l.matched_parent_sku_id).filter(Boolean)).size;
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
   // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
-  const gate = viewReady && (view === "shop" || view === "cats") && !brandId;   // หมวดในร้านผูกกับแบรนด์ × ร้าน → ต้องเลือกแบรนด์ก่อนเหมือนกัน
+  const gate = viewReady && (view === "shop" || view === "cats" || view === "cross") && !brandId;   // หมวดในร้านผูกกับแบรนด์ × ร้าน → ต้องเลือกแบรนด์ก่อนเหมือนกัน
   // เมนูตั้งค่าร้าน — จุดเตือนบนปุ่ม (Lazada ใกล้หมดอายุ/หมดแล้ว/ยังไม่เชื่อม) · วันที่ดึงข้อมูลล่าสุด · ราคาไม่ตรงระบบ (มีเมื่อโหลดสรุปแล้ว)
   const toolsAlert = (platformCode === "lazada" && !!brandId && !!lazStatus && (!lazStatus.connected || lazStatus.health === "expiring" || lazStatus.health === "expired"))
     || (platformCode === "tiktok" && !!brandId && !!ttsStatus && (!ttsStatus.connected || ttsStatus.health === "expiring" || ttsStatus.health === "expired"))
@@ -1043,8 +1050,8 @@ export default function PlatformCatalogPage() {
                 </select>
               )}
             </div>
-            {/* ร้าน */}
-            <div>
+            {/* ร้าน (เช็กข้ามร้าน = ทุกร้านในตารางเดียว → ไม่มีกล่องนี้) */}
+            <div className={view === "cross" ? "hidden" : ""}>
               {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">ร้าน</div>}
               <div className="space-y-0.5">
                 {platforms.map((p) => {
@@ -1062,7 +1069,7 @@ export default function PlatformCatalogPage() {
               </div>
             </div>
             {/* สถานะ (หน้าร้าน = รายการสถานะจากมุมมองหน้าร้าน · จับคู่ = หน้าย่อยของการจับคู่) · หมวดในร้าน = ไม่มีกล่องนี้ */}
-            <div className={view === "cats" ? "hidden" : ""}>
+            <div className={view === "cats" || view === "cross" ? "hidden" : ""}>
               {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">{view === "shop" ? "สถานะ" : "หน้า"}</div>}
               {view === "shop" ? <div ref={setStatusSlot} /> : (
                 <div className="space-y-0.5">
@@ -1088,7 +1095,7 @@ export default function PlatformCatalogPage() {
             <div>
               {!sideCollapsed && <div className="mb-1 px-1 text-[11px] font-medium text-slate-400">มุมมอง</div>}
               <div className="space-y-0.5">
-                {([{ v: "shop" as const, icon: "store", label: "หน้าร้าน" }, { v: "match" as const, icon: "link", label: "จับคู่ + ตั้งค่า" }, { v: "cats" as const, icon: "folder", label: "หมวดในร้าน" }]).map((o) => (
+                {PAGE_VIEWS.map((o) => (
                   <button key={o.v} type="button" onClick={() => setView(o.v)} aria-pressed={view === o.v} title={sideCollapsed ? o.label : undefined}
                     className={`flex w-full items-center gap-2 rounded-lg text-sm ${sideCollapsed ? "justify-center px-1 py-1.5" : "px-2 py-1.5"} ${view === o.v ? "bg-violet-50 font-medium text-violet-800" : "text-slate-600 hover:bg-slate-50"}`}>
                     <Icon name={o.icon} />{!sideCollapsed && <span className="truncate">{o.label}</span>}
@@ -1145,7 +1152,7 @@ export default function PlatformCatalogPage() {
       {!gate && (<>
       {/* จอเล็ก/แท็บเล็ต: ร้านเป็นชิปเลื่อนข้าง + ปุ่มตัวกรอง (แบรนด์ · มุมมอง) — จอใหญ่ใช้แถบซ้าย */}
       <div className="mb-3 flex items-center gap-2 lg:hidden">
-        <div className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+        <div className={`scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto ${view === "cross" ? "invisible" : ""}`}>
         {platforms.map((p) => {
           const on = p.id === platformId;
           const n = platformCounts[p.id];
@@ -1183,8 +1190,8 @@ export default function PlatformCatalogPage() {
           </div>
           <div>
             <div className="mb-1.5 text-xs font-medium text-slate-500">มุมมอง</div>
-            <div className="grid grid-cols-3 gap-2">
-              {([{ v: "shop" as const, icon: "store", label: "หน้าร้าน" }, { v: "match" as const, icon: "link", label: "จับคู่ + ตั้งค่า" }, { v: "cats" as const, icon: "folder", label: "หมวดในร้าน" }]).map((o) => (
+            <div className="grid grid-cols-2 gap-2">
+              {PAGE_VIEWS.map((o) => (
                 <button key={o.v} type="button" onClick={() => { setView(o.v); setFilterSheet(false); }} aria-pressed={view === o.v}
                   className={`h-10 rounded-lg border text-sm inline-flex items-center justify-center gap-1.5 ${view === o.v ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600"}`}>
                   <Icon name={o.icon} />{o.label}
@@ -1306,6 +1313,7 @@ export default function PlatformCatalogPage() {
 
       {!viewReady ? null
         : gate ? <BrandGate onPick={pickBrand} />
+        : view === "cross" ? <CrossShopView key={brandId} brandId={brandId} brandName={activeBrand?.name ?? null} />
         : view === "cats" ? (
           <ShopCategoryPlanner key={`${brandId}|${platformId}`} brandId={brandId} platformId={platformId} platformCode={platformCode} shopLabel={where} />
         )

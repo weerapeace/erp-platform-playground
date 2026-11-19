@@ -468,3 +468,17 @@ export async function loadNotListed(admin: Admin, platformId: string, brandId: s
     image_state: p.cover_image_r2_key ? "ok" as const : "none" as const, open_tasks: 0, category_id: p.platform_category_id,
   }));
 }
+
+/**
+ * รายการบนร้าน (ร้าน + แบรนด์) พร้อมข้อมูลดิบเฉพาะช่องที่ใช้ — ตัวอ่านเดียวกับมุมมองหน้าร้าน (platform_listings_slim)
+ * ใช้: เช็กข้ามร้าน (lib/platform-cross-shop-server) · รวมตัวที่ไม่อยู่บนร้านแล้วด้วย (ผู้เรียกกรองเอง)
+ */
+export async function loadListingsWithRaw(admin: Admin, platformId: string, brandId: string): Promise<{
+  id: string; title: string | null; status: string | null; price: number | null; matched_parent_sku_id: string | null; match_ignored: boolean; raw: Record<string, unknown>;
+}[]> {
+  const rows = await loadListings(admin, platformId, brandId);
+  return rows.map((r) => ({
+    id: r.id, title: r.title, status: r.status, price: r.price != null ? Number(r.price) : null,
+    matched_parent_sku_id: r.matched_parent_sku_id, match_ignored: !!r.match_ignored, raw: rawSlice(r),
+  }));
+}
