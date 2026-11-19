@@ -51,7 +51,7 @@ export function StatFilterCards({ cards, value, onChange, className = "", showZe
   const shown = showZero ? cards : cards.filter((c) => c.key === first || c.key === value || c.value == null || c.value !== 0 || c.keep);
   if (compact) {
     return (
-      <div className={`flex gap-2 overflow-x-auto pb-0.5 ${className}`}>
+      <div className={`scrollbar-hide flex gap-2 overflow-x-auto ${className}`}>
         {shown.map((c) => {
           const tone = TONE[c.tone ?? "neutral"];
           const on = c.key === value;

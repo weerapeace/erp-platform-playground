@@ -188,7 +188,8 @@ export default function PlatformCatalogPage() {
   lastPrefRef.current = lastPref;
   // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน · ค่าเดียวกับมุมมองหน้าร้าน) · พับแถบซ้าย = +1 ใบ
   const gallery = useGalleryColumns("platform-catalog-cards", 6, CARD_GAP);
-  const cardGrid = galleryTemplate(sideCollapsed && isWide ? gallery.cols + 1 : gallery.cols, CARD_GAP);
+  const isPhone = useMediaQuery("(max-width: 639px)");   // มือถือ: การ์ดกว้างอย่างน้อย 150px (≈2 ใบต่อแถว) อ่านชื่อ/ราคาได้
+  const cardGrid = galleryTemplate(sideCollapsed && isWide ? gallery.cols + 1 : gallery.cols, CARD_GAP, isPhone ? 150 : undefined);
   // เปิด/ปิดขายบน LINE (สวิตช์ในแถว/การ์ด/แถบเลือกหลายตัว) → อัปเดตสถานะในหน้าเลย ไม่ต้องโหลดใหม่
   const disp = useLineDisplay((results) => {
     setSumm((m) => {
@@ -1142,7 +1143,7 @@ export default function PlatformCatalogPage() {
       {!gate && (<>
       {/* จอเล็ก/แท็บเล็ต: ร้านเป็นชิปเลื่อนข้าง + ปุ่มตัวกรอง (แบรนด์ · มุมมอง) — จอใหญ่ใช้แถบซ้าย */}
       <div className="mb-3 flex items-center gap-2 lg:hidden">
-        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-0.5">
+        <div className="scrollbar-hide flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
         {platforms.map((p) => {
           const on = p.id === platformId;
           const n = platformCounts[p.id];
@@ -1293,7 +1294,7 @@ export default function PlatformCatalogPage() {
       <div className={`mb-3 flex flex-wrap items-center gap-2 lg:hidden ${view === "match" ? "" : "hidden"}`}>
         {/* สลับมุมมองอยู่ในแถบซ้าย (จอใหญ่) / ปุ่มตัวกรอง (จอเล็ก) · แถวนี้เหลือแท็บย่อยของการจับคู่บนจอเล็ก */}
         {view === "match" && (
-          <div className="flex max-w-full items-center gap-1 overflow-x-auto bg-slate-100 rounded-lg p-0.5 w-fit text-sm [&>button]:whitespace-nowrap">
+          <div className="scrollbar-hide flex max-w-full items-center gap-1 overflow-x-auto bg-slate-100 rounded-lg p-0.5 w-fit text-sm [&>button]:whitespace-nowrap">
             <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({listings.length.toLocaleString()})</button>
             <button onClick={() => setTab("fields")} className={`px-3 py-1 rounded ${tab === "fields" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ช่องข้อมูลของ {activePf?.name_th ?? "ร้าน"} ({fields.length})</button>
             <button onClick={() => setTab("mapping")} className={`px-3 py-1 rounded ${tab === "mapping" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ตั้งค่าส่งข้อมูล ({mappedCount}/{fields.length})</button>

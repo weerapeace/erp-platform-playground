@@ -37,6 +37,7 @@ import { AddToPlatformWizard, type AddWizardParent, type CopySourceRef } from "@
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
 import { COPY_MAX_ITEMS } from "@/lib/listing-copy-map";
 import { useUserPref } from "@/lib/use-user-pref";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { GalleryColumnsControl, galleryTemplate, useGalleryColumns } from "@/components/gallery-columns";
 
 /** สถานะที่เลือกไว้ จำต่อคน (เจ้าของ 2026-11-19) */
@@ -122,7 +123,8 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [layout, setLayout] = useMiniTableLayout("platform-shop-items");   // ตาราง / การ์ด (การ์ดใบเดียวกับแท็บจับคู่)
   // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน · ใช้ค่าเดียวกับแท็บจับคู่)
   const gallery = useGalleryColumns("platform-catalog-cards", 6, CARD_GAP);
-  const cardGrid = galleryTemplate(sidebarCollapsed ? gallery.cols + 1 : gallery.cols, CARD_GAP);
+  const isPhone = useMediaQuery("(max-width: 639px)");   // มือถือ: การ์ดกว้างอย่างน้อย 150px (≈2 ใบต่อแถว) อ่านชื่อ/ราคาได้
+  const cardGrid = galleryTemplate(sidebarCollapsed ? gallery.cols + 1 : gallery.cols, CARD_GAP, isPhone ? 150 : undefined);
   // ลิ้นชักสินค้าบนร้าน (กดแถว/การ์ด) + เปิด/ปิดขายบน LINE
   const canPublish = can("products.platforms.publish");
   const isLine = platformCode === "line_shopping";
@@ -375,7 +377,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
 
       {statusList}
       {data.categories.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
+        <div className="scrollbar-hide flex items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
           <span className="shrink-0 text-xs text-slate-500 mr-0.5">หมวด</span>
           {[{ id: "", name: "ทุกหมวด", n: allItems.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: allItems.filter((it) => it.category_id === c.id).length })),
             ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])]
