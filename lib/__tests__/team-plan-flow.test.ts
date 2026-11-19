@@ -19,6 +19,18 @@ describe("เดากล่องจากชื่องาน", () => {
     expect(suggestFlowNode("ไปธนาคารพรุ่งนี้เช้า")).toBeNull();
     expect(suggestFlowNode("")).toBeNull();
   });
+  it("งานค้างจริง (19 พ.ย.) — เดาได้ตามผังที่เปิด · เว็บไซต์ไม่มีกล่อง = ไม่เดา", () => {
+    const OV = ["ds", "qt", "mo", "so", "pr", "mat", "wo", "po", "pay", "sub", "bill", "gr", "qc", "bn", "raw", "wip", "fg"];
+    expect(suggestFlowNode("Program Nesting for Cutting", OV)).toBe("mo");
+    expect(suggestFlowNode("Program Nesting for Cutting", ["mat", "prep", "fg", "mo", "wo"])).toBe("prep");
+    expect(suggestFlowNode("APP โอนเงินจีน แบบผ่าน Wechat", OV)).toBe("po");
+    expect(suggestFlowNode("APP โอนเงินจีน แบบผ่าน Wechat", ["mat", "line", "ready", "paypo", "pr", "po"])).toBe("paypo");
+    expect(suggestFlowNode("Program Batch Files", OV)).toBe("ds");
+    expect(suggestFlowNode("Program Sort Files", OV)).toBe("ds");
+    expect(suggestFlowNode("Program: Louis Batch", OV)).toBe("ds");
+    expect(suggestFlowNode("Websites Louis Montini", OV)).toBeNull();
+    expect(suggestFlowNode("ซื้อ Domain Website ISGTrading", OV)).toBeNull();
+  });
   it("จำกัดเฉพาะกล่องในผังที่เปิด", () => {
     expect(suggestFlowNode("ระบบ Zort", ["po", "pr"])).toBeNull();
   });
