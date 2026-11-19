@@ -1299,6 +1299,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [wfMeta, setWfMeta] = useState<StatusMeta>(() => buildStatusMeta(null));
   const [statusMgr, setStatusMgr] = useState(false);   // ป๊อปอัปจัดการสถานะงาน
   const [skuWizard, setSkuWizard] = useState(false);   // Wizard สร้าง SKU
+  const [skuWizardCode, setSkuWizardCode] = useState("");   // กดจากแถว Parent ในกล่อง "สินค้าของงานนี้" → เลือกรหัสนั้นไว้
   const [planOpen, setPlanOpen] = useState(false);     // ป๊อปใส่แผนงาน (จากเมนู ส่งต่อ)
   // 💼 ราคากลางค่าใช้จ่ายเพิ่ม (ค่าแรงตัด / โสหุ้ย / ถุง / กล่อง / ลังส่ง / ต้นทุนอื่นๆ) — โหลดเฉพาะคนเห็นต้นทุน ตอนเปิดแท็บตีราคา
   const presetsApi = useCostPresets(canSeeCost && modalTab === "cost");
@@ -2147,7 +2148,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       <ParentSkuBox canEdit={canEdit} codes={form.parent_sku_codes} drafts={form.parent_sku_drafts} refs={parentRefs} linkedSkus={linkedSkus}
         input={skuInput} setInput={setSkuInput} check={skuCheck} checking={skuChecking}
         onAddTyped={addParentCode} onAddCode={addParentCodeValue} onRemoveCode={removeParentCode}
-        draftInput={draftInput} setDraftInput={setDraftInput} onAddDraft={addParentDraft} onRemoveDraft={removeParentDraft} />
+        draftInput={draftInput} setDraftInput={setDraftInput} onAddDraft={addParentDraft} onRemoveDraft={removeParentDraft}
+        onCreateSku={canCreate && form.id ? (code) => { setSkuWizardCode(code); setSkuWizard(true); } : undefined} />
     ),
     detail: (
       <div className="block">
@@ -3271,9 +3273,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             brand={form.brand_id ? { id: form.brand_id, name: brands.find((b) => b.id === form.brand_id)?.name ?? null } : null} />
         )}
       {form?.id && (
-        <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
+        <SkuWizard open={skuWizard} onClose={() => { setSkuWizard(false); setSkuWizardCode(""); }}
           sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}
-          parentCodeOptions={form.parent_sku_codes} parentCodeDefault={form.parent_sku_codes[0] || ""} defaultPrice={offeredPrice}
+          parentCodeOptions={form.parent_sku_codes} parentCodeDefault={skuWizardCode || form.parent_sku_codes[0] || ""} defaultPrice={offeredPrice}
           onDone={() => { patch({ status: "sku_created" }); refresh(); if (form.id) void reloadLinkedSkus(form.id); }} />
       )}
 

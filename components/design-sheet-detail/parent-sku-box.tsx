@@ -7,6 +7,7 @@
  *     (มี Parent ตัวเดียว = กางให้เลย · หลายตัว = พับไว้ก่อน)
  *   • SKU ใต้ Parent เดียวกันที่ไม่ได้สร้างจากใบนี้ = พับเป็นบรรทัดเดียว "+ อีก N ตัว"
  *   • ร่าง Parent (ยังไม่มีรหัส) = แถวเส้นประสีส้มในกล่องเดียวกัน
+ *   • Parent ที่ยังไม่ได้สร้างในระบบ = ปุ่ม "สร้าง SKU" ในแถว (เปิดตัวช่วยสร้าง SKU เลือกรหัสนี้ไว้ · เฉพาะคนมีสิทธิ์สร้างสินค้า) — เจ้าของขอ 2026-11-19
  *   • ปุ่มเดียว "+ เพิ่ม Parent SKU" → เลือก "มีรหัสแล้ว" (เช็กรหัสซ้ำ/ข้ามเลขเหมือนเดิม + ปุ่มลัด "ใช้ XXX (ถัดไป)") หรือ "ยังไม่มีรหัส (ร่าง)"
  * สถานะช่องพิมพ์รหัส/ผลเช็ก อยู่ที่หน้าแม่ (index.tsx) เพราะตอนบันทึกใบงานต้องรวมรหัสที่ค้างพิมพ์ด้วย
  */
@@ -25,7 +26,7 @@ const skuImg = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 export function ParentSkuBox({
   canEdit, codes, drafts, refs, linkedSkus,
   input, setInput, check, checking, onAddTyped, onAddCode, onRemoveCode,
-  draftInput, setDraftInput, onAddDraft, onRemoveDraft,
+  draftInput, setDraftInput, onAddDraft, onRemoveDraft, onCreateSku,
 }: {
   canEdit: boolean;
   codes: string[];
@@ -46,6 +47,8 @@ export function ParentSkuBox({
   setDraftInput: (v: string) => void;
   onAddDraft: () => void;
   onRemoveDraft: (label: string) => void;
+  /** แถว Parent ที่ยังไม่ได้สร้าง → ปุ่ม "สร้าง SKU" (ไม่ส่ง = ไม่มีปุ่ม เช่น ไม่มีสิทธิ์สร้างสินค้า) */
+  onCreateSku?: (code: string) => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -129,6 +132,12 @@ export function ParentSkuBox({
                 )}
                 <span className="text-[11px] text-slate-500">{mine.length > 0 ? t(`${mine.length} SKU`, `${mine.length} SKUs`) : pid ? t("ยังไม่มี SKU จากใบนี้", "No SKUs from this sheet yet") : t("ยังไม่ได้สร้าง", "Not created yet")}</span>
                 <span className="flex-1" />
+                {!pid && onCreateSku && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onCreateSku(c); }}
+                    title={t(`สร้าง Parent ${c} + SKU ลูก จากใบงานนี้`, `Create Parent ${c} + child SKUs from this sheet`)}
+                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700">
+                    <Icon name="wand" /> {t("สร้าง SKU", "Create SKU")}</button>
+                )}
                 {canEdit && (
                   <button type="button" onClick={(e) => { e.stopPropagation(); onRemoveCode(c); }} title={t("เอาออกจากใบงาน", "Remove from this sheet")}
                     className="h-6 w-6 shrink-0 rounded text-slate-300 hover:bg-rose-50 hover:text-rose-500">✕</button>
