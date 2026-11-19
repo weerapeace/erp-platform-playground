@@ -4,12 +4,12 @@
  *   เจ้าของสั่ง 2026-11-19 "ผังระบบไว้จัดการระบบ ไม่ต้องมีรายการงาน" → งานค้างทั้งหมด (แผน · งาน Task · ใบงาน) ย้ายไปโหมด
  *   "งานทั้งหมด" (./board-view · กรอบหมวดตามชนิดงาน) — ที่นี่ไม่มีชิปงาน/ถาด/ตัวกรองแล้ว
  *   - กล่อง/เส้นวาดจากทะเบียน lib/flow-map (ชั้นล็อก) · วาดเสริมทับได้ (entity team_plan_flow/<แท็บผัง>) · ปุ่ม ↗ บนกล่อง = เปิดหน้านั้นในแท็บใหม่
- *   - กดกล่อง/วงกลมเลขเส้น = ป๊อปเล็กบอกข้อมูลจากทะเบียน (กดซ้ำที่เดิม = ปิด · มือถือขึ้นล่างจอ) — เจ้าของสั่ง 2026-11-19
+ *   - กดกล่อง/วงกลมเลขเส้น = ป๊อปเล็กข้าง ๆ จุดที่กด บอกข้อมูลจากทะเบียน (กดซ้ำที่เดิม = ปิด · มือถือขึ้นล่างจอ) — เจ้าของสั่ง 2026-11-19
  *   - รายละเอียดเต็ม (ตัวเลขสด · ช่องโหว่ · โน้ต · อยากแก้อะไร) = /master/flow-map
  *   ตัวกระดาน = ของกลาง FlowchartBoard · เต็มจอ = FullscreenStage (หน้าแม่)
  * doc: docs/team-plan.md
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from "react";
 import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { FullscreenBar } from "@/components/fullscreen-stage";
@@ -38,9 +38,27 @@ export function PlanFlowBoard({ canEdit, fill = false }: {
   const view = PLAN_FLOW_VIEWS.find((v) => v.key === pref.view) ?? PLAN_FLOW_VIEWS[0];
   const drawn = useMemo(() => layoutFlowView(view), [view]);
   // ป๊อปข้อมูล: กล่อง (n) หรือเส้น (e) · กดซ้ำที่เดิม = ปิด · เปลี่ยนแท็บผัง = ปิด
-  const [sel, setSel] = useState<{ k: "n" | "e"; id: string; view: string } | null>(null);
+  // ป๊อปขึ้นข้าง ๆ จุดที่กด (เจ้าของสั่ง 2026-11-19 "อยากให้ pop ข้าง ๆ ที่กด") — จำจุดที่กดล่าสุดบนกระดาน · กดในป๊อป = ป๊อปอยู่ที่เดิม
+  type At = { x: number; y: number; w: number; h: number };
+  const [sel, setSel] = useState<{ k: "n" | "e"; id: string; view: string; at: At | null } | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
+  const lastPt = useRef<At | null>(null);
   const cur = sel && sel.view === view.key ? sel : null;
-  const toggle = (k: "n" | "e", id: string) => setSel((x) => (x && x.k === k && x.id === id && x.view === view.key ? null : { k, id, view: view.key }));
+  const toggle = (k: "n" | "e", id: string) => setSel((x) => (x && x.k === k && x.id === id && x.view === view.key ? null : { k, id, view: view.key, at: lastPt.current ?? x?.at ?? null }));
+  const onPointerDownCapture = (e: RPointerEvent) => {
+    if (popRef.current?.contains(e.target as Node)) return;   // กดปุ่มในป๊อป → ป๊อปไม่ย้าย
+    const r = wrapRef.current?.getBoundingClientRect(); if (!r) return;
+    lastPt.current = { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width, h: r.height };
+  };
+  /** ตำแหน่งป๊อป (จอกว้าง): ขวาของจุดที่กด · ล้นขวา = ไปซ้าย · ไม่ล้นบน/ล่าง · มือถือ = แผ่นล่างจอ (ไม่ใช้ค่านี้) */
+  const POP_W = 320;
+  const popStyle = (at: At | null): CSSProperties | undefined => {
+    if (!at || typeof window === "undefined" || window.innerWidth < 640) return undefined;
+    const left = at.x + 24 + POP_W <= at.w - 8 ? at.x + 24 : Math.max(8, at.x - 24 - POP_W);
+    const top = Math.min(Math.max(8, at.y - 40), Math.max(8, at.h - 280));
+    return { left, top, right: "auto", bottom: "auto", width: POP_W, maxHeight: at.h - top - 8 };
+  };
   const edgeNo = (id: string) => { const e = drawn.find((d) => d.id === id); return e ? e.i + 1 : null; };
   const nodeName = (id: string) => FLOW_NODES[id]?.label ?? id;
 
@@ -107,11 +125,11 @@ export function PlanFlowBoard({ canEdit, fill = false }: {
         </div>
       </FullscreenBar>
 
-      <div className={`relative min-w-0 rounded-xl border border-slate-200 bg-white p-1 ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+      <div ref={wrapRef} onPointerDownCapture={onPointerDownCapture} className={`relative min-w-0 rounded-xl border border-slate-200 bg-white p-1 ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
         <FlowchartBoard key={view.key} entityType="team_plan_flow" entityId={view.key} height={H} editable={canEdit}
           fileName={`แผนงาน-ผัง${view.label}`} locked={lockedLayer} />
         {cur && (
-          <div className="absolute inset-x-1 bottom-1 z-20 max-h-[55%] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-3 sm:top-14 sm:max-h-[70%] sm:w-80">
+          <div ref={popRef} style={popStyle(cur.at)} className="absolute inset-x-1 bottom-1 z-20 max-h-[55%] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-3 sm:top-14 sm:max-h-[70%] sm:w-80">
             <div className="mb-1.5 flex items-start gap-2">
               <span className="min-w-0 flex-1 text-sm font-semibold text-slate-800">
                 {cur.k === "n" ? nodeName(cur.id) : `เส้น ${edgeNo(cur.id) ?? ""} · ${nodeName(FLOW_EDGES[cur.id]?.from ?? "")} → ${nodeName(FLOW_EDGES[cur.id]?.to ?? "")}`}
