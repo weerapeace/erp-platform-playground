@@ -20,6 +20,7 @@ export type PackCommand =
   | { kind: "problem" }
   | { kind: "redo" }
   | { kind: "skip" }
+  | { kind: "undo" }
   | { kind: "box"; box: string };
 
 export const PACK_COMMANDS: { code: string; label: string; hint: string }[] = [
@@ -27,6 +28,7 @@ export const PACK_COMMANDS: { code: string; label: string; hint: string }[] = [
   { code: `${PACK_CMD_PREFIX}PROBLEM`, label: "มีปัญหา", hint: "จบแบบมีปัญหา (ของขาด/ผิด/เสีย)" },
   { code: `${PACK_CMD_PREFIX}REDO`, label: "อัดใหม่", hint: "ทิ้งคลิปนี้ เริ่มอัดออเดอร์เดิมใหม่" },
   { code: `${PACK_CMD_PREFIX}SKIP`, label: "ข้าม", hint: "ปิดออเดอร์นี้โดยไม่บันทึกว่าแพ็คแล้ว" },
+  { code: `${PACK_CMD_PREFIX}UNDO`, label: "ย้อนการยิง", hint: "ยิงสินค้าผิดชิ้น — ลบการยิงครั้งล่าสุด" },
 ];
 export const boxCommandCode = (box: string): string => `${PACK_CMD_PREFIX}BOX-${box}`;
 
@@ -39,6 +41,7 @@ export function parsePackCommand(raw: string): PackCommand | null {
   if (up === "PROBLEM") return { kind: "problem" };
   if (up === "REDO") return { kind: "redo" };
   if (up === "SKIP") return { kind: "skip" };
+  if (up === "UNDO") return { kind: "undo" };
   if (up.startsWith("BOX-") && rest.length > 4) return { kind: "box", box: rest.slice(4).trim() };
   return null;
 }
@@ -135,13 +138,53 @@ export function checkProgress(items: CheckItem[]): { done: number; total: number
 // ── บันทึก ─────────────────────────────────────────────────────────────
 export const PACK_FINISH_STATUSES = ["done", "problem", "abandoned"] as const;
 export type PackFinishStatus = (typeof PACK_FINISH_STATUSES)[number];
+
+// ── ย้อน / แก้ / ยกเลิกการแพ็ค (รอบ 3 · เจ้าของสั่ง 2026-11-19) ──────────
+/** สถานะที่แก้ทีหลังได้ · voided = ยกเลิกการแพ็ค (เก็บแถวไว้เป็นประวัติ ไม่ลบจริง) */
+export const PACK_EDIT_STATUSES = ["done", "problem", "voided"] as const;
+export type PackEditStatus = (typeof PACK_EDIT_STATUSES)[number];
+export const PACK_STATUS_LABEL: Record<string, string> = { packing: "กำลังแพ็ค", done: "เสร็จ", problem: "มีปัญหา", abandoned: "ข้าม", voided: "ยกเลิกการแพ็ค" };
+
+/** แถว "กำลังแพ็ค" ที่เก่ากว่านี้ = ทิ้งค้าง (ปิดแท็บ/เน็ตหลุด) ไม่นับว่ามีคนแพ็คอยู่ */
+export const PACK_LOCK_MINUTES = 15;
+export function isFreshLock(startedAt: string, now = Date.now()): boolean {
+  const t = new Date(startedAt).getTime();
+  return Number.isFinite(t) && now - t < PACK_LOCK_MINUTES * 60_000;
+}
+
+/** วันไทย (YYYY-MM-DD) ของเวลานี้ */
+export const bangkokDate = (iso: string | number | Date): string => new Date(new Date(iso).getTime() + 7 * 3600_000).toISOString().slice(0, 10);
+
+/** แก้บันทึกการแพ็คได้ไหม: หัวหน้า (packing.manage) แก้ได้ทุกใบ · คนแพ็คแก้ได้เฉพาะของตัวเอง ภายในวันเดียวกัน (เวลาไทย) */
+export function canEditPackSession(s: { packer_id: string | null; started_at: string; status: string }, me: { id: string | null; manager: boolean }, now = Date.now()): boolean {
+  if (s.status === "packing") return false;
+  if (me.manager) return true;
+  return !!me.id && s.packer_id === me.id && bangkokDate(s.started_at) === bangkokDate(now);
+}
+
+/** เวลา "แพ็คแล้ว" ของออเดอร์ = บันทึก "เสร็จ" ล่าสุดที่ยังไม่ถูกยกเลิก · ไม่มี = null (กลับไปอยู่คิวรอแพ็ค) */
+export function packedFromSessions(rows: { status: string; finished_at: string | null; packer_id: string | null }[]): { packed_at: string | null; packed_by: string | null } {
+  const done = rows.filter((r) => r.status === "done" && r.finished_at).sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)));
+  return done.length ? { packed_at: done[0].finished_at, packed_by: done[0].packer_id } : { packed_at: null, packed_by: null };
+}
+
+/** ย้อนการยิงล่าสุด: ลดชิ้นที่ยิง (หรือติ๊กมือ) ของบรรทัดนั้น 1 ชิ้น · คืนรายการใหม่ */
+export function undoItemScan<T extends CheckItem>(items: T[], key: string, kind: "scan" | "manual"): T[] {
+  return items.map((it) => {
+    if (it.key !== key) return it;
+    if (kind === "manual" && it.manual > 0) return { ...it, manual: it.manual - 1 };
+    if (it.scanned > 0) return { ...it, scanned: it.scanned - 1 };
+    if (it.manual > 0) return { ...it, manual: it.manual - 1 };
+    return it;
+  });
+}
 export const PACK_PROBLEMS: { key: string; label: string }[] = [
   { key: "missing", label: "ของขาด" },
   { key: "wrong", label: "ของผิด" },
   { key: "damaged", label: "ของเสีย/ชำรุด" },
   { key: "other", label: "อื่น ๆ" },
 ];
-export const MANUAL_REASONS = ["ไม่มีสติกเกอร์บาร์โค้ด", "สติกเกอร์อ่านไม่ออก", "สินค้าจับคู่ไม่ได้", "อื่น ๆ"];
+export const MANUAL_REASONS = ["ไม่มีสติกเกอร์บาร์โค้ด", "สติกเกอร์อ่านไม่ออก", "เครื่องยิงเสีย", "สินค้าจับคู่ไม่ได้", "อื่น ๆ"];
 export const FINISH_METHODS = ["next_label", "card", "pedal", "button"] as const;
 export type FinishMethod = (typeof FINISH_METHODS)[number];
 

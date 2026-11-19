@@ -24,7 +24,7 @@ export default function PackingPage() {
         </div>
         {!permsReady ? <LoadingState label="กำลังตรวจสิทธิ์…" />
           : !canPack ? <AccessDenied message="หน้านี้สำหรับผู้มีสิทธิ์แพ็คสินค้า (packing.pack)" />
-          : <PackingStation packerName={user?.name || user?.email || "ไม่ทราบชื่อ"} />}
+          : <PackingStation packerName={user?.name || user?.email || "ไม่ทราบชื่อ"} packerId={user?.id ?? null} />}
       </div>
     </PlaygroundShell>
   );

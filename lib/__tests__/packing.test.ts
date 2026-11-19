@@ -122,3 +122,41 @@ describe("typedChar — เครื่องยิงตอนเปิดแ�
     expect(typedChar({ key: "Enter", code: "Enter", shiftKey: false })).toBe("");
   });
 });
+
+import { canEditPackSession, packedFromSessions, undoItemScan, isFreshLock, bangkokDate } from "@/lib/packing";
+
+describe("รอบ 3 — ย้อน / แก้ / ล็อก", () => {
+  const now = Date.parse("2026-11-19T10:00:00Z");   // 17:00 เวลาไทย
+  it("การ์ดย้อนการยิง", () => {
+    expect(parsePackCommand("*PK-UNDO")).toEqual({ kind: "undo" });
+  });
+  it("แก้ได้: หัวหน้าทุกใบ · คนแพ็คเฉพาะของตัวเองวันนี้ · กำลังแพ็คอยู่แก้ไม่ได้", () => {
+    const mine = { packer_id: "u1", started_at: "2026-11-19T03:00:00Z", status: "done" };
+    expect(canEditPackSession(mine, { id: "u1", manager: false }, now)).toBe(true);
+    expect(canEditPackSession(mine, { id: "u2", manager: false }, now)).toBe(false);
+    expect(canEditPackSession({ ...mine, started_at: "2026-11-18T03:00:00Z" }, { id: "u1", manager: false }, now)).toBe(false);
+    expect(canEditPackSession({ ...mine, started_at: "2026-11-18T03:00:00Z" }, { id: "u9", manager: true }, now)).toBe(true);
+    expect(canEditPackSession({ ...mine, status: "packing" }, { id: "u1", manager: true }, now)).toBe(false);
+  });
+  it("วันไทย: 23:30 UTC = วันถัดไปของไทย", () => {
+    expect(bangkokDate("2026-11-18T17:30:00Z")).toBe("2026-11-19");
+  });
+  it("เวลาแพ็คแล้ว = เสร็จล่าสุดที่ไม่ถูกยกเลิก", () => {
+    expect(packedFromSessions([
+      { status: "voided", finished_at: "2026-11-19T05:00:00Z", packer_id: "a" },
+      { status: "done", finished_at: "2026-11-19T04:00:00Z", packer_id: "b" },
+      { status: "problem", finished_at: "2026-11-19T06:00:00Z", packer_id: "c" },
+    ])).toEqual({ packed_at: "2026-11-19T04:00:00Z", packed_by: "b" });
+    expect(packedFromSessions([{ status: "voided", finished_at: "x", packer_id: "a" }])).toEqual({ packed_at: null, packed_by: null });
+  });
+  it("ย้อนการยิงล่าสุด", () => {
+    const items = [{ key: "a", qty: 2, codes: [], scanned: 2, manual: 0 }, { key: "b", qty: 1, codes: [], scanned: 0, manual: 1 }];
+    expect(undoItemScan(items, "a", "scan")[0].scanned).toBe(1);
+    expect(undoItemScan(items, "b", "manual")[1].manual).toBe(0);
+    expect(undoItemScan(items, "b", "scan")[1].manual).toBe(0);   // ไม่มีชิ้นยิง = ลดชิ้นติ๊กมือแทน
+  });
+  it("ล็อก 'มีคนแพ็คอยู่' หมดอายุ 15 นาที", () => {
+    expect(isFreshLock("2026-11-19T09:50:00Z", now)).toBe(true);
+    expect(isFreshLock("2026-11-19T09:40:00Z", now)).toBe(false);
+  });
+});
