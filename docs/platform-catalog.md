@@ -282,3 +282,21 @@
 - **ซ่อนร้านทั้งแบรนด์** (เช่น Instagram ที่เชื่อมไว้แค่โพสต์): `ui_config(key='listing_hidden_platforms')` = `{ [brand_id]: platform_code[] }` (`lib/listing-hidden-platforms` pure + เทสต์ · ไม่แก้โครงตาราง) · เขียน PATCH `/api/product-platforms { set_platform_hidden, brand_id, platform_code, hidden }` (products.platforms.edit + audit `brand_listing_platforms`) · อ่านใน `loadListingContext` (`hiddenPlatformCodes`) · กฎแบ่งแถว `lib/platform-visibility` (`brandHidden` · สินค้าที่อยู่บนร้านนั้นแล้วยังโชว์) · ร้านที่ซ่อนไม่อยู่ใน "ลงทุกร้าน" (เฉพาะแท็บนี้ — ติ๊กหลายรุ่นในหน้า Parent SKU ยังติ๊กทุกร้านให้)
 - **ป้ายต่อแถว "พร้อมลง / ขาด N: …"**: GET `/api/product-platforms/create-readiness?parent_sku_id=&codes=` เรียกตัวประกอบข้อมูลของทุกร้านพร้อมกันในคำขอเดียว (LINE `buildLineCreate` · ร้านอื่น `load` ของ `/api/<ร้าน>/create-product`) — ไม่มีตัวตรวจตัวที่ 2 · นับแบบตัวช่วย (`lib/platform-create-readiness`) · ร้านช้าเกิน 15 วิ = "ตรวจไม่สำเร็จ" · ตรวจตอนเปิดแท็บ / หลังแก้ / กดรีเฟรช (ไม่ตรวจซ้ำตอนสลับหน้าต่าง) · แถวสรุป ชื่อ/หมวด/จำนวนรูป ใช้ค่าที่จะส่งจริงจากตัวประกอบ (แก้ "รูปที่เลือกส่ง 0 รูป" ทั้งที่ระบบดึงรูปสินค้าให้แล้ว)
 - ร้านใหม่ในทะเบียนตัวสร้าง → เพิ่มตัวอ่านใน `CHECKERS` ของ create-readiness + กิ่งใน draft-editor-modal
+
+## 📂 หมวดในร้าน (2026-11-19 · เจ้าของเลือก widget รอบ 2: แบบ A แยกต่อร้าน + ข้อเสนอ 1–4)
+หมวดในร้าน = หมวดที่ลูกค้าเห็นในหน้าร้าน เช่น "ขายดี" หรือ "กระเป๋าสตางค์" (ไม่ใช่หมวดสินค้าของแพลตฟอร์ม)
+- **ส่งขึ้นร้านเองไม่ได้:** Lazada / LINE / TikTok ไม่เปิด API · Shopee เปิด (`v2.shop_category`) แต่ร้าน IG ยังไม่ได้สิทธิ์ (memory `platform_shop_category_api`) → แอปจำแผน + ทำเช็กลิสต์ให้คนไปกดในหลังร้าน
+- **ทางเข้า:** หน้านี้ แถบซ้าย "มุมมอง" → **หมวดในร้าน** (`?view=cats` · จอเล็ก = ป๊อปตัวกรอง) · ต้องเลือกแบรนด์ก่อน (ร้าน = แบรนด์ × แพลตฟอร์ม)
+- **หน้าจอ** `components/platform-catalog/shop-category-planner.tsx` (โหลดเมื่อเปิดมุมมองนี้):
+  - รายการหมวด: จอใหญ่ = แถบซ้าย ลากเรียง · ดินสอ = เปลี่ยนชื่อ · ถังขยะ = ลบ · จอเล็ก = ชิปเลื่อนแนวนอน + ปุ่ม "จัดหมวด" (ป๊อป)
+  - สินค้าในหมวด: รูป + รหัส · กดค้างลากเรียง · กากบาท = เอาออก · ป้าย "ไม่อยู่บนร้าน" = รุ่นที่หยุดขาย/ยังไม่ลงร้านนี้
+  - ป๊อปเพิ่มสินค้า (MiniTable ติ๊กหลายตัว): แนะนำ / ยังไม่อยู่หมวดไหน / ทั้งร้าน (เฉพาะสินค้าที่มีบนร้านนี้) · ผูกหมวดกลางได้ (ช่วยแนะนำ)
+  - การ์ดเหลือง "ยังไม่อยู่หมวดไหน N" · ปุ่มคัดลอกรหัสทั้งหมวด · คัดลอกแผนจากร้านอื่นในแบรนด์เดียวกัน (หมวดชื่อซ้ำข้าม)
+  - **ย้อนกลับได้ทุกอย่าง** ผ่าน toast "ย้อนกลับ" (เพิ่ม/เปลี่ยนชื่อ/ลบ/เรียง/ใส่-เอาออกสินค้า/ผูกหมวดกลาง/ติ๊กเช็กลิสต์) · ลบ = ถังขยะ กู้คืนได้ · ลบถาวร = ConfirmDialog เฉพาะหมวดที่ไม่ค้างบนร้าน
+- **เช็กลิสต์ = ส่วนต่าง** ระหว่างแผน (name/sort_order/in_plan/deleted_at) กับ "ติ๊กว่าทำในหลังร้านแล้ว" (on_shop/shop_name/shop_sort) — `lib/shop-category-plan.ts` (pure + เทสต์ 10)
+  - ข้อ: สร้างหมวด (+ใส่สินค้า) · เปลี่ยนชื่อ · ใส่เพิ่ม · เอาออก · ลบในหลังร้าน · เรียงหมวดใหม่ · ติ๊ก = `stepEffect` · ยกเลิกติ๊ก = `undoOf`
+  - ปุ่ม: เปิดหลังร้าน (`sellerCenterHome` ใน lib/platform-links) · พิมพ์เช็กลิสต์ (`/print/shop-categories?brand=&platform=` · ListPrintPanel · `lib/shop-category-print.ts`) · คัดลอกเช็กลิสต์เป็นข้อความ
+  - ⚠️ "บนร้าน" = ตามที่คนติ๊ก แอปไม่รู้ถ้ามีคนไปแก้ในหลังร้านเอง
+- **API** `/api/platform-shop-categories` — GET (`products.platforms.view`) · POST actions (`products.platforms.edit`) create/rename/link_central/reorder/delete/restore/purge/set_items/copy_from/mark_done/revert · ประวัติ `entity_type platform_shop_category` ทุกครั้ง
+- **ตาราง** `platform_shop_categories` + `platform_shop_category_items` (`supabase/migrations/202611190100_platform_shop_categories.sql`) · RLS เปิด ไม่มี policy + ถอนสิทธิ์ anon/authenticated (เข้าผ่าน API เท่านั้น)
+- **ยังไม่ทำ:** Shopee ส่งหมวดขึ้นร้านเอง (รอสิทธิ์ API) · หมวด "ขายดี" อัปเดตเองตามยอดขาย (ข้อ 5 ไม่เลือก — ยอดขายบางร้านยังเข้าไม่ครบ)

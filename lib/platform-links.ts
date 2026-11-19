@@ -90,3 +90,13 @@ export function listingLinks(platformCode: string, externalProductId: string | n
   }
   return { ...none, storefrontHint: "ร้านนี้ยังไม่รองรับลิงก์สินค้า" };
 }
+
+/** หน้าแรกหลังร้านของแพลตฟอร์ม (ไม่ผูกสินค้า) — เช่น ปุ่ม "เปิดหลังร้าน" ในแท็บหมวดในร้าน · ไม่รู้จัก = null */
+export function sellerCenterHome(platformCode: string): { url: string; label: string } | null {
+  const code = (platformCode || "").toLowerCase();
+  if (code === "lazada") return { url: "https://sellercenter.lazada.co.th/", label: "Lazada Seller Center" };
+  if (code === "shopee") return { url: "https://seller.shopee.co.th/", label: "Shopee Seller Centre" };
+  if (code === "line_shopping" || code === "line") return { url: "https://oaplus.line.biz/", label: "หลังร้าน LINE (MyShop)" };
+  if (code === "tiktok_shop" || code === "tiktok") return { url: "https://seller-th.tiktok.com/", label: "TikTok Seller Center" };
+  return null;
+}
