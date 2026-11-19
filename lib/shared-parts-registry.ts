@@ -846,6 +846,14 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "หน้าทั่วไป ให้ใช้ PlaygroundShell",
   },
   {
+    key: "fullscreen-stage", label: "โหมดเต็มจอของกระดาน/ผัง", code: "FullscreenStage", category: "layout",
+    source: { path: "components/fullscreen-stage" },
+    what: "ปุ่ม + คีย์ F ทำให้กระดาน/ผังใช้พื้นที่เต็มจอ (ซ่อนหัวเว็บ เมนูแอป แถบปุ่มของหน้า) แบบ Miro · Esc ออก · จำต่อคน · มือถือเต็มจอเสมอ · ไม่โหลดกระดานใหม่ตอนสลับ",
+    when: "หน้ากระดานวาด / ผังงาน / canvas ที่อยากได้พื้นที่มากสุด (ตอนนี้ใช้ที่แท็บกระดานของแผนงานทีม)",
+    notWhen: "ป๊อปฝังหน้าอื่น ใช้ EmbedModal · ดูรูปเต็มจอ ใช้ ImageLightbox · ทั้งแอปไม่มีเมนูข้าง ใช้ StandaloneShell",
+    doc: "fullscreen-stage.md",
+  },
+  {
     key: "app-access-gate", label: "ด่านว่าใครเข้าแอปนี้ได้", code: "AppAccessGate", category: "layout",
     source: { path: "components/app-access-gate" },
     what: "กันคนที่ไม่มีสิทธิ์เข้าแอปแยก ใช้กฎเดียวกับเมนูหลัก",

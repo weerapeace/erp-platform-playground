@@ -69,6 +69,7 @@ export const ERP_ICONS: ErpIconDef[] = [
   { key: "menu-2", label: "เมนู", d: ["M4 6l16 0","M4 12l16 0","M4 18l16 0"] },
   { key: "grip-vertical", label: "ลาก", d: ["M9 5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0","M9 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0","M9 19m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0","M15 5m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0","M15 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0","M15 19m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"] },
   { key: "maximize", label: "ขยาย", d: ["M4 8v-2a2 2 0 0 1 2 -2h2","M4 16v2a2 2 0 0 0 2 2h2","M16 4h2a2 2 0 0 1 2 2v2","M16 20h2a2 2 0 0 0 2 -2v-2"] },
+  { key: "minimize", label: "ย่อ / ออกเต็มจอ", d: ["M15 19v-2a2 2 0 0 1 2 -2h2","M15 5v2a2 2 0 0 0 2 2h2","M5 15h2a2 2 0 0 1 2 2v2","M5 9h2a2 2 0 0 0 2 -2v-2"] },
   { key: "chevron-up", label: "ขึ้น เลื่อนขึ้น", d: ["M6 15l6 -6l6 6"] },
   { key: "chevron-down", label: "ลง เลื่อนลง", d: ["M6 9l6 6l6 -6"] },
   { key: "arrow-left", label: "กลับ ย้อน", d: ["M5 12l14 0","M5 12l6 6","M5 12l6 -6"] },

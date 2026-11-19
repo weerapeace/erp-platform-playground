@@ -69,7 +69,7 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false,
 }: {
   entityType: string;
   entityId:   string;
@@ -77,6 +77,8 @@ export function CanvasSketch({
   height?:    string;
   /** ทำแถบเครื่องมือ "ล็อกค้างบน" (sticky) ที่ระยะห่างจากบนจอ (px) — เว้นว่าง = ไม่ล็อก */
   stickyTop?: number;
+  /** เต็มพื้นที่หน้าแม่ (หน้าแม่เป็น flex column ที่สูงแน่นอน เช่น โหมดเต็มจอ FullscreenStage) — ไม่ใช้ height/stickyTop */
+  fill?: boolean;
   /** เปิด realtime หลายคนพร้อมกัน (ผ่าน Supabase Broadcast — ไม่กิน Cloudflare CPU) */
   collab?:    boolean;
   /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
@@ -638,7 +640,7 @@ export function CanvasSketch({
   // ทำเฉพาะโหมดกระดานเต็ม (stickyTop != null); โหมดฝังใน drawer ยังใช้ height ที่ส่งมา
   const [autoH, setAutoH] = useState<number | null>(null);
   useEffect(() => {
-    if (stickyTop == null || typeof window === "undefined") return;
+    if (fill || stickyTop == null || typeof window === "undefined") return;
     let raf = 0;
     const measure = () => {
       const el = wrapRef.current; if (!el) return;
@@ -665,7 +667,7 @@ export function CanvasSketch({
     }
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", schedule); ro?.disconnect(); };
     // วัดใหม่เมื่อสิ่งที่ทำให้แถบเครื่องมือด้านบน "สูงเปลี่ยน" เปลี่ยน (แถวขนาดอักษรตอนเลือกข้อความ / ป้ายเพื่อนออนไลน์ที่ wrap เป็น 2 บรรทัด)
-  }, [stickyTop, scene, selFont, serverCanEdit, peerList.length]);
+  }, [fill, stickyTop, scene, selFont, serverCanEdit, peerList.length]);
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
@@ -1024,9 +1026,9 @@ export function CanvasSketch({
   }
 
   return (
-    <div className="space-y-1.5">
-      <div className={`flex flex-wrap items-center gap-2${stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
-        style={stickyTop != null ? { top: stickyTop } : undefined}>
+    <div className={fill ? "flex h-full min-h-0 flex-col gap-1.5" : "space-y-1.5"}>
+      <div className={`flex flex-wrap items-center gap-2${!fill && stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
+        style={!fill && stickyTop != null ? { top: stickyTop } : undefined}>
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
           {t("🖼 วางรูป / ลิงก์ YouTube · Pinterest · TikTok = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image / YouTube · Pinterest · TikTok link = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
         </span>
@@ -1112,7 +1114,7 @@ export function CanvasSketch({
         )}
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">{t("👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)", "👁 Read-only (no edit permission)")}</span>}
       </div>
-      <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height: autoH != null ? autoH : height }}>
+      <div ref={wrapRef} className={`relative rounded-xl border border-slate-200 overflow-hidden bg-white${fill ? " min-h-0 flex-1" : ""}`} style={fill ? undefined : { height: autoH != null ? autoH : height }}>
         {/* tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip (เช่น การ์ดโฟลเดอร์) */}
         {tip && (
           <div className="absolute z-20 pointer-events-none px-2 py-1 rounded-md bg-slate-800 text-white text-[11px] shadow-lg whitespace-nowrap max-w-[260px] truncate" style={{ left: tip.x + 12, top: tip.y + 12 }}>{tip.text}</div>

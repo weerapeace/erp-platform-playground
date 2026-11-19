@@ -9,6 +9,7 @@
  */
 import { FLOW_NODES } from "@/lib/flow-map";
 import { isOverdue, isPlanDone, PRIORITIES, type PlanItem, type PlanLinkedRef } from "@/lib/team-plan";
+import { WORK_BOXES } from "@/lib/work-canvas";
 
 export const FLOW_PIN_KIND = "flow_node";
 
@@ -43,7 +44,9 @@ export const FLOW_NODE_WORDS: Record<string, string[]> = {
 };
 
 /** ชื่อกล่อง (ไม่มีในทะเบียน = id เดิม) */
-export const flowNodeLabel = (id: string) => FLOW_NODES[id]?.label ?? id;
+export const flowNodeLabel = (id: string) => FLOW_NODES[id]?.label ?? WORK_BOXES[id]?.label ?? id;
+/** กล่องที่งานเกาะได้ = กล่องในแผนผังการทำงาน + กล่องในแถบครีเอทีฟ/ออกแบบ (lib/work-canvas) */
+export const isPinnableNode = (id: string) => !!(FLOW_NODES[id] || WORK_BOXES[id]);
 
 const norm = (s: string) => ` ${s.toLowerCase().replace(/\s+/g, " ").trim()} `;
 
@@ -66,7 +69,7 @@ export function suggestFlowNode(title: string, allowed?: Iterable<string>): stri
 
 /** กล่องที่งานนี้เกาะอยู่ (เรียงตามที่เกาะ) */
 export const flowPinsOf = (t: { plan: { linked: PlanLinkedRef[] } }): string[] =>
-  t.plan.linked.filter((r) => r.kind === FLOW_PIN_KIND && FLOW_NODES[r.id]).map((r) => r.id);
+  t.plan.linked.filter((r) => r.kind === FLOW_PIN_KIND && isPinnableNode(r.id)).map((r) => r.id);
 
 /** รายการผูกใหม่ เมื่อเกาะงานกับกล่อง (multi=false = ย้ายจากกล่องเดิมทั้งหมด) · เกาะอยู่แล้ว = คืนชุดเดิม */
 export function withFlowPin(linked: PlanLinkedRef[], nodeId: string, multi = true): PlanLinkedRef[] {
@@ -110,8 +113,9 @@ export const initialOf = (name: string | null | undefined) => ([...(name ?? "").
 
 /** เรียงงานในถาด: กำหนดใกล้สุดก่อน (ไม่มีกำหนดไว้ท้าย) / ความด่วน */
 export type TraySort = "due" | "priority";
-const dueMs = (t: PlanItem) => (t.due_at ? Date.parse(t.due_at) : Number.POSITIVE_INFINITY);
-export function sortTray(list: PlanItem[], by: TraySort): PlanItem[] {
+type Sortable = { due_at: string | null; priority: PlanItem["priority"] };
+const dueMs = (t: Sortable) => (t.due_at ? Date.parse(t.due_at.length === 10 ? `${t.due_at}T00:00:00+07:00` : t.due_at) : Number.POSITIVE_INFINITY);
+export function sortTray<T extends Sortable>(list: T[], by: TraySort): T[] {
   return [...list].sort((a, b) => by === "due"
     ? dueMs(a) - dueMs(b) || PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority)
     : PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority) || dueMs(a) - dueMs(b));

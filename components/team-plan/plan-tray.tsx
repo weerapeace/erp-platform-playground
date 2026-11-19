@@ -8,19 +8,27 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Icon } from "@/components/icon";
-import { dueLabel, isOverdue, PRIORITY_META, type PlanItem } from "@/lib/team-plan";
+import { dueLabel, isOverdue, PRIORITY_META, type Priority } from "@/lib/team-plan";
 import { sortTray, type TraySort } from "@/lib/team-plan-flow";
 
-export type TrayTab = { key: string; label: string; filter: (t: PlanItem) => boolean };
+/** ของที่ถาดโชว์ได้ (งานในแผน หรืองานจากระบบอื่นที่แปลงรูปแล้ว เช่น WorkItem ใน lib/work-canvas) */
+export type TrayItem = { id: string; title: string; due_at: string | null; assigned_name?: string | null; priority: Priority; due_text?: string; overdue?: boolean };
+export type TrayTab<T extends TrayItem = TrayItem> = { key: string; label: string; filter: (t: T) => boolean };
 const FOLD_KEY = "team-plan-tray-fold";
 
-export function PlanTray({ items, tabs, title = "งานในแผน", selectedId, onPick, renderExtra, footer, mobileOpen, onMobileClose, emptyText, height }: {
-  items: PlanItem[];
-  tabs: TrayTab[];
+export function PlanTray<T extends TrayItem>({ items, tabs, title = "งานในแผน", selectedId, onPick, renderExtra, renderLead, keyOf = (t) => t.id, canDrag, footer, mobileOpen, onMobileClose, emptyText, height }: {
+  items: T[];
+  tabs: TrayTab<T>[];
   title?: string;
+  /** คีย์ของการ์ดที่เลือกอยู่ (ตาม keyOf) */
   selectedId?: string | null;
-  onPick?: (t: PlanItem) => void;
-  renderExtra?: (t: PlanItem) => ReactNode;
+  onPick?: (t: T) => void;
+  renderExtra?: (t: T) => ReactNode;
+  /** ของหน้าชื่อ (เช่น ป้ายชนิดงาน / รูปปก) */
+  renderLead?: (t: T) => ReactNode;
+  keyOf?: (t: T) => string;
+  /** ลากได้ไหม (ไม่ส่ง = ลากได้ทุกใบ) — ลาก = dataTransfer "text/plan-id" */
+  canDrag?: (t: T) => boolean;
   footer?: ReactNode;
   mobileOpen: boolean;
   onMobileClose: () => void;
@@ -73,16 +81,21 @@ export function PlanTray({ items, tabs, title = "งานในแผน", sele
         {list.length === 0
           ? <p className="py-2 text-xs text-slate-400">{q ? "ไม่พบงานที่ค้นหา" : emptyText ?? "ไม่มีงานในแท็บนี้"}</p>
           : list.map((t) => {
-            const over = isOverdue(t.due_at);
+            const over = t.overdue ?? isOverdue(t.due_at);
+            const drag = canDrag ? canDrag(t) : true;
+            const k = keyOf(t);
             return (
-              <div key={t.id} draggable onClick={() => onPick?.(t)}
-                onDragStart={(e) => { e.dataTransfer.setData("text/plan-id", t.id); e.dataTransfer.effectAllowed = "copy"; }}
+              <div key={k} draggable={drag} onClick={() => onPick?.(t)}
+                onDragStart={drag ? (e) => { e.dataTransfer.setData("text/plan-id", t.id); e.dataTransfer.effectAllowed = "copy"; } : undefined}
                 title={`${t.title}${t.assigned_name ? ` — ${t.assigned_name}` : ""}`}
-                className={`cursor-grab rounded-lg border border-l-4 bg-white px-2 py-1.5 text-left hover:border-violet-300 active:cursor-grabbing ${selectedId === t.id ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200"}`}
+                className={`${drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} rounded-lg border border-l-4 bg-white px-2 py-1.5 text-left hover:border-violet-300 ${selectedId === k ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200"}`}
                 style={{ borderLeftColor: over ? "#dc2626" : PRIORITY_META[t.priority].color }}>
-                <span className="line-clamp-2 text-xs text-slate-800">{t.title}</span>
+                <span className="flex items-start gap-1.5">
+                  {renderLead?.(t)}
+                  <span className="line-clamp-2 min-w-0 flex-1 text-xs text-slate-800">{t.title}</span>
+                </span>
                 <span className={`block text-[11px] ${over ? "text-rose-600" : "text-slate-400"}`}>
-                  {t.due_at ? dueLabel(t.due_at) : "ไม่มีกำหนด"}{t.assigned_name ? ` · ${t.assigned_name}` : ""}
+                  {t.due_text ?? (t.due_at ? dueLabel(t.due_at) : "ไม่มีกำหนด")}{t.assigned_name ? ` · ${t.assigned_name}` : ""}
                 </span>
                 {renderExtra?.(t)}
               </div>
@@ -106,7 +119,7 @@ export function PlanTray({ items, tabs, title = "งานในแผน", sele
       )}
       {/* มือถือ: ลิ้นชักจากขวา */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-50 md:hidden">
           <button type="button" aria-label="ปิดถาดงาน" className="absolute inset-0 bg-black/30" onClick={onMobileClose} />
           <aside className="absolute inset-y-0 right-0 w-[85vw] max-w-xs bg-white shadow-xl">{body}</aside>
         </div>

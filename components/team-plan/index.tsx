@@ -37,6 +37,7 @@ import { PlanTagChip } from "./tag-input";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 import { AiSplitModal } from "./ai-split-modal";
 import type { PlanBoardHandle } from "./board-view";
+import { FullscreenStage, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
 
 // กระดาน (Excalidraw ก้อนใหญ่) — โหลดเฉพาะตอนกดแท็บ "กระดาน" ไม่ถ่วงมุมมองอื่น
 const PlanCanvasBoard = dynamic(() => import("./board-view").then((m) => m.PlanCanvasBoard), {
@@ -72,6 +73,8 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const scopePref = useViewPref<(typeof SCOPES)[number]>("team_plan_scope", SCOPES, "all");
   const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode", BOARD_MODES, "flow");
   const view = forcedView ?? viewPref.view, scope = scopePref.view;
+  // ⛶ เต็มจอแบบ Miro (ของกลาง FullscreenStage · จำต่อคน · มือถือเต็มจอเสมอ) — เฉพาะแท็บกระดาน
+  const boardFs = useFullscreenStage("team_plan_board_fullscreen", { active: view === "board" && !!items && !err });
   const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
   const [filter, setFilter] = useState<Filter>("");
   const [tagFilter, setTagFilter] = useState("");   // 🏷 กรองตามแท็ก (ว่าง = ทุกงาน)
@@ -228,18 +231,27 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
       {err ? <ErrorState title="โหลดแผนงานไม่สำเร็จ" hint={err} onRetry={() => void load()} />
         : !items ? <LoadingState />
         : view === "board" ? (
-          <div className="space-y-2">
+          <FullscreenStage fs={boardFs}>
+            <div className="flex flex-wrap items-center gap-2">
+            {boardFs.on && (
+              <button type="button" onClick={() => boardFs.set(false)} className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 hover:bg-slate-50" title="กลับหน้าแผนงาน">
+                <Icon value="i:arrow-left" /> แผนงาน
+              </button>
+            )}
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
               <button type="button" className={seg(boardModePref.view === "flow")} onClick={() => { boardModePref.setView("flow"); void boardModePref.saveDefault("flow"); }}
                 title="แผนผังการทำงาน (ซื้อ · ผลิต · จ่ายงาน · ขาย) + เอางานไปเกาะกล่องของระบบ"><Icon name="map" /> ผังระบบ</button>
               <button type="button" className={seg(boardModePref.view === "draw")} onClick={() => { boardModePref.setView("draw"); void boardModePref.saveDefault("draw"); }}
                 title="กระดานวาดอิสระ วางงานคู่ใบงาน / SKU / งาน / คอนเทนต์"><Icon name="magnet" /> กระดานวาด</button>
             </div>
+            <span className="flex-1" />
+            <FullscreenToggle fs={boardFs} />
+            </div>
             {boardModePref.view === "flow"
-              ? <PlanFlowBoard items={all} canEdit={canEdit} onOpen={setEditing} onUpsert={upsert} />
+              ? <PlanFlowBoard items={all} canEdit={canEdit} onOpen={setEditing} onUpsert={upsert} fill={boardFs.on} />
               : <PlanCanvasBoard items={all} trayItems={shown} canEdit={canEdit} tagNames={planTagCounts(all).map((x) => x.tag)}
-                  onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} />}
-          </div>
+                  onOpen={setEditing} onUpsert={upsert} onReload={load} handleRef={boardRef} fill={boardFs.on} />}
+          </FullscreenStage>
         )
         : all.length === 0 ? <EmptyState title="ยังไม่มีงานในแผน" hint="พิมพ์งานแรกในช่องด้านบน แล้วกด Enter — เลือกความด่วน กำหนด และคนรับผิดชอบได้" />
         : view === "calendar" ? (

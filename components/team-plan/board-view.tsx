@@ -44,7 +44,9 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
 /** ให้หน้าแผนงานสั่งกระดานได้ (เช่น ลบงานในป๊อป → เอาการ์ดออกจากกระดาน) */
 export type PlanBoardHandle = { removePlanCard: (id: string) => void };
 
-export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, onUpsert, onReload, handleRef }: {
+export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, onUpsert, onReload, handleRef, fill = false }: {
+  /** โหมดเต็มจอ (FullscreenStage) — กระดาน+ถาดยืดเต็มพื้นที่ที่เหลือ */
+  fill?: boolean;
   /** งานทั้งหมดที่หน้าแผนงานโหลดไว้ (ยังไม่เสร็จ + เสร็จใน 7 วัน) — ใช้เติมข้อมูลบนการ์ด */
   items: PlanItem[];
   /** งานที่โชว์ในถาด (ยังไม่เสร็จ ตามตัวกรองทั้งทีม/ของฉัน/แท็ก) — ตัดตัวที่อยู่บนกระดานแล้วออกเอง */
@@ -230,8 +232,9 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
     { ...k.cards, icon: ic("list") },
   ];
 
+  const H = fill ? "100%" : "calc(100vh - 260px)";
   return (
-    <div className="space-y-2">
+    <div className={fill ? "flex min-h-0 flex-1 flex-col gap-2" : "space-y-2"}>
       <div className="flex flex-wrap items-center gap-2">
         {canEdit && <ToolMenu label="เพิ่มการ์ด" icon={ic("add")} tone="violet" items={addItems} />}
         {canEdit && <ToolMenu label="เครื่องมือ" icon={ic("tool")} tone="teal" items={toolItems} />}
@@ -246,21 +249,21 @@ export function PlanCanvasBoard({ items, trayItems, canEdit, tagNames, onOpen, o
             <Icon name="list" /> งาน {tray.length}
           </button>
         )}
-        <span className="text-[11px] text-slate-400">ดับเบิลคลิกการ์ด = เปิดดู/แก้ · ลากเส้นจากการ์ดงานไปการ์ดอื่น = ผูกงาน (ลบเส้น = เลิกผูก) · เลือกการ์ดแล้วกด "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด · ล้อเมาส์ = ซูม</span>
+        <span className={`text-[11px] text-slate-400${fill ? " hidden xl:inline" : ""}`}>ดับเบิลคลิกการ์ด = เปิดดู/แก้ · ลากเส้นจากการ์ดงานไปการ์ดอื่น = ผูกงาน (ลบเส้น = เลิกผูก) · เลือกการ์ดแล้วกด "แตกเช็กลิสต์" = กล่องรายการข้างการ์ด · ล้อเมาส์ = ซูม</span>
       </div>
 
-      <div className="flex gap-2">
+      <div className={fill ? "flex min-h-0 flex-1 gap-2" : "flex gap-2"}>
       <div className={`relative min-w-0 flex-1 rounded-xl ${dragOver ? "ring-2 ring-violet-300" : ""}`}
         onDragOver={(e) => { if (e.dataTransfer.types.includes("text/plan-id")) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
-        <CanvasSketch entityType={TEAM_PLAN_BOARD.entityType} entityId={TEAM_PLAN_BOARD.entityId} editable={canEdit} height="calc(100vh - 260px)"
-          controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onReady} onSaved={onSaved} onSelectionChange={checklist.onSelectionChange} collab stickyTop={56} />
+        <CanvasSketch entityType={TEAM_PLAN_BOARD.entityType} entityId={TEAM_PLAN_BOARD.entityId} editable={canEdit} height={H} fill={fill}
+          controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={onReady} onSaved={onSaved} onSelectionChange={checklist.onSelectionChange} collab stickyTop={fill ? undefined : 56} />
       </div>
       {/* ถาดงานด้านขวา (ของกลางในโมดูล PlanTray · ใช้ร่วมกับโหมดผังระบบ) — กด = วางกลางจอ · ลากลงกระดาน = วางตรงที่ปล่อย */}
       {canEdit && ready && (
         <PlanTray items={trayItems} tabs={trayTabs} title="งานในแผน" onPick={(t) => { if (!onBoard.has(t.id)) { placePlan(t); setTrayOpen(false); } }}
           emptyText="ทุกงานในแผน (ตามตัวกรองตอนนี้) อยู่บนกระดานแล้ว" footer="กด = วางกลางจอ · ลากลงกระดาน = วางตรงนั้น"
-          mobileOpen={trayOpen} onMobileClose={() => setTrayOpen(false)} height="calc(100vh - 260px)" />
+          mobileOpen={trayOpen} onMobileClose={() => setTrayOpen(false)} height={H} />
       )}
       </div>
 
