@@ -194,6 +194,31 @@ describe("quotation print", () => {
     expect(hidden).toContain("QT-202606-0003");   // ซ่อนลูกค้าแล้วยังเหลือเลขที่ใบ
   });
 
+  it("card redesign: header A, price without unit, font adjust, hide card no / approval, terms (2026-11-19)", () => {
+    const html = buildQuotationHtml(quote, "", { lineStyle: "cards", cardsPerRow: 3 });
+    expect(html).toContain("class=\"qh\"");                       // หัวกระดาษแบบ A
+    expect(html).toContain("<td>เลขที่</td><td>QT-202606-0003</td>");
+    expect(html).not.toMatch(/บาท \/ /);                            // เอา "/ ชิ้น" ออก
+    expect(html).toContain("class=\"qc-no\"");
+    expect(html).toContain("ลูกค้าอนุมัติ");
+    expect(html).toContain(".qc-name { font-size: 14px;");          // 3 ต่อแถว = 14px อัตโนมัติ
+
+    const tuned = buildQuotationHtml(quote, "", { lineStyle: "cards", cardsPerRow: 3, cardNameAdjPx: 4, showCardNo: false, showCustomerApproval: false, showTerms: true, termsText: "ยืนราคา 30 วัน\nส่งฟรี" });
+    expect(tuned).toContain(".qc-name { font-size: 18px;");
+    expect(tuned).not.toContain("class=\"qc-no\"");
+    expect(tuned).not.toContain("ลูกค้าอนุมัติ");
+    expect(tuned).toContain("signatures-single");
+    expect(tuned).toContain("<div>• ยืนราคา 30 วัน</div><div>• ส่งฟรี</div>");
+  });
+
+  it("manual order reorders lines only when it covers every line", () => {
+    const two = { ...quote, lines: [{ ...quote.lines[0], product_name: "AAA" }, { ...quote.lines[0], product_name: "BBB" }] };
+    const html = buildQuotationHtml(two, "", { lineStyle: "cards", manualOrder: [1, 0] });
+    expect(html.indexOf("BBB")).toBeLessThan(html.indexOf("AAA"));
+    const stale = buildQuotationHtml(two, "", { lineStyle: "cards", manualOrder: [2, 0, 1] });   // รายการเปลี่ยนแล้ว → ใช้ลำดับเดิม
+    expect(stale.indexOf("AAA")).toBeLessThan(stale.indexOf("BBB"));
+  });
+
   it("hides the customer in table style too", () => {
     const html = buildQuotationHtml(quote, "", { showCustomer: false });
     expect(html).toContain("class=\"items\"");

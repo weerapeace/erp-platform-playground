@@ -113,12 +113,23 @@ export function imageSrc(line: QuoteLinePrint, origin: string): string {
 }
 
 /**
+ * ลำดับที่ลากสลับเอง (เลขตำแหน่งเดิม) — ใช้ได้เฉพาะเมื่อครบทุกบรรทัดพอดี
+ * ถ้าจำนวนบรรทัดเปลี่ยน (เพิ่ม/ลบรายการในใบ) → ทิ้งลำดับที่ลากไว้ กลับไปใช้ลำดับที่บันทึก (ไม่เดา)
+ */
+export function applyManualOrder<T>(lines: T[], order: number[] | null | undefined): T[] {
+  if (!order || order.length !== lines.length) return lines;
+  const seen = new Set<number>();
+  for (const i of order) { if (!Number.isInteger(i) || i < 0 || i >= lines.length || seen.has(i)) return lines; seen.add(i); }
+  return order.map(i => lines[i]);
+}
+
+/**
  * เรียงบรรทัดสำหรับพิมพ์ (ไม่แตะข้อมูลจริง) — ค่าเท่ากันคงลำดับเดิม
  * sortGroupByNote: จัดกลุ่มตามตัวเลือก (note) ก่อน กลุ่มเรียงตามที่เจอก่อน แล้วค่อยเรียงในกลุ่ม
  */
 export function sortQuoteLines<T extends QuoteLinePrint>(lines: T[], layoutInput: Partial<ReportLayoutSettings> = {}): T[] {
   const layout = normalizeReportLayout(layoutInput);
-  if (layout.sortBy === "none") return lines;
+  if (layout.sortBy === "none") return applyManualOrder(lines, layout.manualOrder);
   const dir = layout.sortDesc ? -1 : 1;
   const groupOrder = new Map<string, number>();
   for (const line of lines) {
@@ -200,7 +211,14 @@ const CARD_SIZES: Record<number, { price: number; name: number; sub: number; img
 /** แบบการ์ดรูปใหญ่ — แต่ละรายการเป็นการ์ด รูปใหญ่ ราคาตัวใหญ่ (ผู้ใหญ่อ่านง่าย · เจ้าของขอ 2026-11-19) */
 export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout: ReportLayoutSettings): string {
   const n = layout.cardsPerRow;
-  const z = CARD_SIZES[n] ?? CARD_SIZES[2];
+  const base = CARD_SIZES[n] ?? CARD_SIZES[2];
+  // ขนาดตัวหนังสือแยกส่วน = ขนาดอัตโนมัติตามจำนวนต่อแถว + ที่ผู้ใช้ปรับ (2026-11-19)
+  const z = {
+    ...base,
+    name: Math.max(8, base.name + layout.cardNameAdjPx),
+    sub: Math.max(8, base.sub + layout.cardNoteAdjPx),
+    price: Math.max(9, base.price + layout.cardPriceAdjPx),
+  };
   const lines = sortQuoteLines(quote.lines, layout);
   if (!lines.length) return `<div class="center" style="border:1px solid #000;padding:6mm">ไม่มีรายการสินค้า</div>`;
   const cards = lines.map((line, index) => {
@@ -211,14 +229,15 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
     const totalHtml = layout.showLineTotal ? `<span class="qc-total">รวม ${formatMoney(quoteLinePrintAmount(line))} บาท</span>` : "";
     const img = !layout.showImage ? ""
       : `<div class="qc-img">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : `<span class="qc-noimg">ไม่มีรูป</span>`}</div>`;
+    // ราคา: เอา "/ ชิ้น" ออกตามที่เจ้าของขอ (2026-11-19) — เหลือ "850.00 บาท" ชิดขวา มีเส้นคั่นด้านบน
     return `<div class="qc">
-      <span class="qc-no">${index + 1}</span>
+      ${layout.showCardNo ? `<span class="qc-no">${index + 1}</span>` : ""}
       ${img}
       <div class="qc-body">
         ${sku ? `<div class="qc-sku">${escapeHtml(sku)}</div>` : ""}
         <div class="qc-name">${escapeHtml(line.product_name)}</div>
         ${line.note ? `<div class="qc-note">${escapeHtml(line.note)}</div>` : ""}
-        <div class="qc-price">${formatMoney(line.unit_price)} <small>บาท / ${unit}</small></div>
+        <div class="qc-price"><span class="qc-price-label">ราคา</span><span><b>${formatMoney(line.unit_price)}</b> <small>บาท</small></span></div>
         ${(layout.showQty || layout.showLineTotal) ? `<div class="qc-foot">${qtyHtml}${totalHtml}</div>` : ""}
       </div>
     </div>`;
@@ -227,18 +246,19 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
   const wide = n === 1;
   const css = `<style>
     .qc-grid { display: grid; grid-template-columns: repeat(${n}, minmax(0, 1fr)); gap: 4mm; }
-    .qc { position: relative; border: 0.3mm solid #444; border-radius: 3mm; padding: 3mm; display: flex; ${wide ? "flex-direction: row; gap: 5mm; align-items: center;" : "flex-direction: column; gap: 2mm;"} break-inside: avoid; page-break-inside: avoid; }
-    .qc-no { position: absolute; top: 2mm; left: 2mm; z-index: 1; background: #111; color: #fff; border-radius: 99px; min-width: 7mm; padding: 0.5mm 2mm; text-align: center; font-size: ${Math.max(11, z.sub - 1)}px; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .qc-img { ${wide ? `width: ${z.imgMm}mm; flex: none;` : ""} height: ${z.imgMm}mm; display: flex; align-items: center; justify-content: center; background: #f6f6f6; border-radius: 2mm; overflow: hidden; }
+    .qc { position: relative; border: 0.3mm solid #d4d4d4; border-radius: 3mm; padding: 2.5mm; display: flex; ${wide ? "flex-direction: row; gap: 5mm; align-items: center;" : "flex-direction: column; gap: 2mm;"} break-inside: avoid; page-break-inside: avoid; }
+    .qc-no { position: absolute; top: 2mm; left: 2mm; z-index: 1; background: #111; color: #fff; border-radius: 99px; min-width: 6mm; padding: 0.3mm 1.8mm; text-align: center; font-size: ${Math.max(10, base.sub - 2)}px; font-weight: 700; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .qc-img { ${wide ? `width: ${z.imgMm}mm; flex: none;` : ""} height: ${z.imgMm}mm; display: flex; align-items: center; justify-content: center; background: #f4f4f4; border-radius: 2mm; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .qc-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .qc-noimg { color: #999; font-size: ${z.sub}px; }
-    .qc-body { display: flex; flex-direction: column; gap: 1mm; min-width: 0; flex: 1; }
-    .qc-sku { font-size: ${Math.max(10, z.sub - 2)}px; color: #555; }
+    .qc-body { display: flex; flex-direction: column; gap: 0.8mm; min-width: 0; flex: 1; padding: 0 0.5mm; }
+    .qc-sku { font-size: ${Math.max(9, z.sub - 2)}px; color: #666; }
     .qc-name { font-size: ${z.name}px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
-    .qc-note { font-size: ${z.sub}px; color: #333; }
-    .qc-price { font-size: ${z.price}px; font-weight: 700; line-height: 1.15; margin-top: 1mm; }
-    .qc-price small { font-size: ${z.sub}px; font-weight: 400; }
-    .qc-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1mm 3mm; font-size: ${z.sub}px; border-top: 0.3mm dashed #999; padding-top: 1.5mm; margin-top: auto; }
+    .qc-note { font-size: ${z.sub}px; color: #555; }
+    .qc-price { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; border-top: 0.3mm solid #e5e5e5; padding-top: 1.5mm; margin-top: auto; }
+    .qc-price b { font-size: ${z.price}px; font-weight: 700; line-height: 1.15; }
+    .qc-price small, .qc-price-label { font-size: ${Math.max(9, z.sub - 1)}px; font-weight: 400; color: #666; }
+    .qc-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1mm 3mm; font-size: ${z.sub}px; border-top: 0.3mm dashed #bbb; padding-top: 1.5mm; }
     .qc-total { font-weight: 700; }
   </style>`;
   return `${css}<div class="qc-grid">${cards}</div>`;
@@ -285,6 +305,28 @@ export function buildQuotationHtml(
       <div class="grand-main"><span class="g-label">จำนวนเงินทั้งสิ้น</span><span class="g-amount">${formatMoney(quote.grand_total)} บาท</span></div>
       <div class="grand-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>
     </section>` : "";
+  // กล่องเงื่อนไขท้ายใบ (ข้อความแก้เองได้ · ขึ้นบรรทัดใหม่ได้)
+  const termsHtml = layout.showTerms && layout.termsText.trim()
+    ? `<div class="terms-box"><div class="label">เงื่อนไข</div>${layout.termsText.trim().split(/\r?\n/).filter(Boolean).map(t => `<div>• ${escapeHtml(t)}</div>`).join("")}</div>` : "";
+  // หัวกระดาษแบบ A (เฉพาะแบบการ์ด · เจ้าของเลือก 2026-11-19): ชื่อบริษัท+"ใบเสนอราคา" ซ้าย · กล่องเลขที่/วันที่ขวา ป้ายกับค่าตรงกันทุกบรรทัด
+  const h = layout.headerAdjPx;
+  const cardsHeader = `<header class="qh">
+      <div class="qh-left">
+        <div class="qh-company">${escapeHtml(COMPANY_NAME)}</div>
+        <div class="qh-address">${escapeHtml(COMPANY_ADDRESS)}</div>
+        <div class="qh-title">ใบเสนอราคา</div>
+      </div>
+      <table class="qh-meta">
+        <tr><td>เลขที่</td><td>${escapeHtml(quote.quote_number || "-")}</td></tr>
+        <tr><td>วันที่</td><td>${escapeHtml(thaiDate(quote.quote_date))}</td></tr>
+        ${layout.showResponsible ? `<tr><td>ผู้รับผิดชอบ</td><td>${escapeHtml(quote.sale_person_name || "-")}</td></tr>` : ""}
+      </table>
+    </header>
+    ${layout.showCustomer ? `<section class="qh-customer">
+      <div><span class="label">ลูกค้า:</span> ${escapeHtml(quote.customer_name || "-")}</div>
+      ${quote.customer_address ? `<div><span class="label">ที่อยู่:</span> ${escapeHtml(quote.customer_address)}</div>` : ""}
+      ${layout.showPhone && quote.customer_phone ? `<div><span class="label">เบอร์โทร:</span> ${escapeHtml(quote.customer_phone)}</div>` : ""}
+    </section>` : ""}`;
   const signatureMarginTop = layout.signatureToBottom ? "auto" : `${layout.signatureGapMm}mm`;
   const authorizedSignatureImage = layout.showAuthorizedSignature && layout.authorizedSignatureUrl
     ? `<img class="signature-image" src="${escapeHtml(layout.authorizedSignatureUrl)}" alt="authorized signature" style="width: ${layout.authorizedSignatureWidthMm}mm; transform: translate(calc(-50% + ${layout.authorizedSignatureOffsetXMm}mm), ${layout.authorizedSignatureOffsetYMm}mm);">`
@@ -354,6 +396,18 @@ export function buildQuotationHtml(
     .stamp-image { opacity: 0.9; }
     .sig-line { border-top: 1px solid #000; padding-top: 2mm; font-weight: 700; }
     .sig-date { font-size: 10px; margin-top: 1mm; }
+    .signatures-single { grid-template-columns: minmax(0, 0.5fr); justify-content: end; }
+    .terms-box { margin-top: 4mm; border: 1px solid #bbb; border-radius: 2mm; padding: 2mm 3mm; font-size: 11px; line-height: 1.5; break-inside: avoid; page-break-inside: avoid; }
+    .qh { display: flex; justify-content: space-between; align-items: flex-start; gap: 6mm; border-bottom: 0.6mm solid #111; padding-bottom: 3mm; margin-bottom: 4mm; }
+    .qh-left { min-width: 0; }
+    .qh-company { font-size: ${15 + h}px; font-weight: 700; line-height: 1.25; }
+    .qh-address { font-size: ${Math.max(8, 10 + h)}px; color: #444; }
+    .qh-title { font-size: ${24 + h}px; font-weight: 700; margin-top: 2mm; }
+    .qh-meta { flex: none; border: 0.3mm solid #ccc; border-radius: 2mm; border-collapse: separate; padding: 1.5mm 3mm; font-size: ${12 + h}px; }
+    .qh-meta td { padding: 0.6mm 0; white-space: nowrap; }
+    .qh-meta td:first-child { color: #666; padding-right: 6mm; }
+    .qh-meta td:last-child { font-weight: 700; text-align: right; }
+    .qh-customer { border: 0.3mm solid #ccc; border-radius: 2mm; padding: 2mm 3mm; margin-bottom: 4mm; line-height: 1.5; }
     @media print {
       body { background: #fff; }
       /* ขอบกระดาษ = padding ของ .page (ดู @page ข้างบน) → หน้าเอกสารสูงเกือบเท่ากระดาษ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่านั้นขึ้นหน้าใหม่เอง) */
@@ -363,7 +417,7 @@ export function buildQuotationHtml(
 </head>
 <body>
   <main class="page">
-    <div class="company">
+    ${isCards ? cardsHeader : `<div class="company">
       <div class="company-name">${escapeHtml(COMPANY_NAME)}</div>
       <div class="company-address">${escapeHtml(COMPANY_ADDRESS)}</div>
     </div>
@@ -381,7 +435,7 @@ export function buildQuotationHtml(
         <div><span class="label">เลขที่ใบเสนอราคา:</span> ${escapeHtml(quote.quote_number || "-")}</div>
         ${layout.showResponsible ? `<div><span class="label">ผู้รับผิดชอบ:</span> ${escapeHtml(quote.sale_person_name || "-")}</div>` : ""}
       </div>
-    </section>
+    </section>`}
 
     ${isCards ? buildQuoteCards(quote, origin, layout) : `<table class="items">
       <colgroup>
@@ -430,12 +484,13 @@ export function buildQuotationHtml(
 
     <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>`
     : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
+    ${termsHtml}
 
     <div class="closing">
-    <section class="signatures">
-      <div class="signature">
+    <section class="signatures${layout.showCustomerApproval ? "" : " signatures-single"}">
+      ${layout.showCustomerApproval ? `<div class="signature">
         <div class="sig-line">ลูกค้าอนุมัติ</div>
-      </div>
+      </div>` : ""}
       <div class="signature authorized-signature">
         ${(authorizedSignatureImage || companyStampImage) ? `<div class="signature-assets">${authorizedSignatureImage}${companyStampImage}</div>` : ""}
         <div class="sig-line">ลายเซ็นผู้มีอำนาจ</div>

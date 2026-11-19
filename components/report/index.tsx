@@ -8,11 +8,14 @@ import {
   compactReportLayout,
   DEFAULT_REPORT_LAYOUT,
   normalizeReportLayout,
+  REPORT_FONT_ADJ_MAX,
+  REPORT_FONT_ADJ_MIN,
   REPORT_IMAGE_SIZE_MAX_MM,
   REPORT_IMAGE_SIZE_MIN_MM,
   withReportImageSize,
   type ReportLayoutSettings,
 } from "@/lib/report-layout";
+import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 
 // ============================================================
 // PrintDocument — เอกสารสำหรับพิมพ์/บันทึก PDF (component กลาง)
@@ -478,6 +481,7 @@ export function ReportLayoutControls({
   onUseDefault,
   savingDefault = false,
   defaultMessage,
+  lines,
 }: {
   value: ReportLayoutSettings;
   onChange: (next: ReportLayoutSettings) => void;
@@ -485,15 +489,27 @@ export function ReportLayoutControls({
   onUseDefault?: () => void;
   savingDefault?: boolean;
   defaultMessage?: string | null;
+  /** รายการในเอกสาร (ตามลำดับที่บันทึก) — ส่งมา = มีปุ่ม "สลับรายการ" ลากเรียงเองได้ */
+  lines?: { label: string; sub?: string | null }[];
 }) {
   const [open, setOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
+  const [orderOpen, setOrderOpen] = useState(false);
+  const [fontOpen, setFontOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const layout = normalizeReportLayout(value);
   const patch = (next: Partial<ReportLayoutSettings>) => onChange(normalizeReportLayout({ ...layout, ...next }));
   const setImageSize = (mm: number) => onChange(withReportImageSize(layout, mm));
   const [hideOpen, setHideOpen] = useState(false);
-  // ซ่อนข้อมูล — จำนวน/ราคารวมรายการ มีเฉพาะแบบการ์ด (ตารางขาดไม่ได้)
-  type ShowKey = "showSku" | "showCustomer" | "showImage" | "showQty" | "showLineTotal" | "showNote" | "showTotals";
+  // ลำดับที่ลากเอง: ใช้ได้เมื่อครบทุกบรรทัด (รายการในใบเปลี่ยน = กลับไปตามที่บันทึก)
+  const lineCount = lines?.length ?? 0;
+  const identity = Array.from({ length: lineCount }, (_, i) => i);
+  const orderValid = layout.manualOrder.length === lineCount && layout.manualOrder.every(i => i < lineCount);
+  const currentOrder = orderValid ? layout.manualOrder : identity;
+  const orderChanged = orderValid && currentOrder.some((v, i) => v !== i);
+  const drag = useDragReorder((from, to) => patch({ manualOrder: moveItem(currentOrder, from, to), sortBy: "none" }));
+  // ซ่อนข้อมูล — จำนวน/ราคารวมรายการ/เลขลำดับ มีเฉพาะแบบการ์ด (ตารางขาดไม่ได้)
+  type ShowKey = "showSku" | "showCustomer" | "showImage" | "showQty" | "showLineTotal" | "showCardNo" | "showNote" | "showTotals" | "showCustomerApproval";
   const hideItems: { key: ShowKey; label: string }[] = [
     { key: "showSku", label: "รหัสสินค้า" },
     { key: "showCustomer", label: "ลูกค้า" },
@@ -501,11 +517,22 @@ export function ReportLayoutControls({
     ...(layout.lineStyle === "cards" ? [
       { key: "showQty" as const, label: "จำนวน" },
       { key: "showLineTotal" as const, label: "ราคารวมรายการ" },
+      { key: "showCardNo" as const, label: "เลขลำดับมุมการ์ด" },
     ] : []),
     { key: "showNote", label: "หมายเหตุ" },
     { key: "showTotals", label: "ยอดรวมท้ายใบ" },
+    { key: "showCustomerApproval", label: "ช่องลูกค้าอนุมัติ" },
   ];
   const hiddenCount = hideItems.filter(item => !layout[item.key]).length;
+  type AdjKey = "cardNameAdjPx" | "cardNoteAdjPx" | "cardPriceAdjPx" | "headerAdjPx";
+  const fontItems: { key: AdjKey; label: string }[] = [
+    { key: "cardNameAdjPx", label: "ชื่อสินค้า" },
+    { key: "cardNoteAdjPx", label: "หมายเหตุ / รุ่น" },
+    { key: "cardPriceAdjPx", label: "ราคา" },
+    { key: "headerAdjPx", label: "หัวกระดาษ" },
+  ];
+  const fontAdjusted = fontItems.some(item => layout[item.key] !== 0);
+  const tabBtn = (on: boolean, active = false) => `h-9 rounded-lg border px-4 text-sm font-medium ${on ? "border-slate-900 bg-slate-900 text-white" : active ? "border-sky-300 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`;
 
   return (
     <div className="no-print mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -576,6 +603,22 @@ export function ReportLayoutControls({
         >
           ซ่อนข้อมูล{hiddenCount ? ` (${hiddenCount})` : ""}
         </button>
+        {lineCount > 1 && (
+          <button type="button" onClick={() => setOrderOpen(current => !current)} className={tabBtn(orderOpen, orderChanged)}
+            title="ลากสลับลำดับรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
+            สลับรายการ{orderChanged ? " •" : ""}
+          </button>
+        )}
+        {layout.lineStyle === "cards" && (
+          <button type="button" onClick={() => setFontOpen(current => !current)} className={tabBtn(fontOpen, fontAdjusted)}
+            title="ปรับขนาดตัวหนังสือแยกส่วน: ชื่อสินค้า / หมายเหตุ / ราคา / หัวกระดาษ">
+            ตัวหนังสือ{fontAdjusted ? " •" : ""}
+          </button>
+        )}
+        <button type="button" onClick={() => setTermsOpen(current => !current)} className={tabBtn(termsOpen, layout.showTerms)}
+          title="กล่องเงื่อนไขท้ายใบ เช่น ยืนราคา 30 วัน — แก้ข้อความเองได้">
+          เงื่อนไขท้ายใบ{layout.showTerms ? " •" : ""}
+        </button>
         {layout.showImage && layout.lineStyle === "table" && (
           <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.imageSizeMm === DEFAULT_REPORT_LAYOUT.imageSizeMm ? "border-slate-200 bg-white text-slate-700" : "border-sky-300 bg-sky-50 text-sky-800"}`}
             title="ขนาดรูปสินค้าในตาราง — แถวสูง/เตี้ยตามรูปอัตโนมัติ">
@@ -637,6 +680,70 @@ export function ReportLayoutControls({
               ซ่อน{item.label}
             </label>
           ))}
+        </div>
+      )}
+
+      {orderOpen && lines && lineCount > 1 && (
+        <div className="border-t border-slate-100 px-4 py-3">
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>ลากที่หูจับ ⠿ เพื่อสลับลำดับ — เปลี่ยนเฉพาะตอนพิมพ์ ใบเสนอราคาจริงไม่เปลี่ยน · จำไว้ต่อใบ</span>
+            {layout.sortBy !== "none" && <span className="text-amber-700">ตอนนี้เรียงตาม &ldquo;เรียง&rdquo; อยู่ — ลากแล้วจะเปลี่ยนเป็นเรียงตามที่ลาก</span>}
+            {orderChanged && (
+              <button type="button" onClick={() => patch({ manualOrder: [] })} className="ml-auto h-7 rounded-lg border border-slate-200 px-3 font-medium text-slate-600 hover:bg-slate-50">กลับลำดับเดิม</button>
+            )}
+          </div>
+          <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+            {currentOrder.map((lineIdx, pos) => {
+              const line = lines[lineIdx];
+              return (
+                <div key={lineIdx} {...drag.rowProps(pos)} className={`flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm ${drag.rowCls(pos)}`}>
+                  <DragHandle {...drag.handleProps(pos)} title="ลากเพื่อสลับลำดับ" />
+                  <span className="w-5 shrink-0 text-center text-xs font-semibold text-slate-400">{pos + 1}</span>
+                  <span className="min-w-0 flex-1 truncate" title={`${line?.label ?? ""}${line?.sub ? ` · ${line.sub}` : ""}`}>
+                    {line?.label}{line?.sub ? <span className="text-slate-400"> · {line.sub}</span> : null}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {fontOpen && layout.lineStyle === "cards" && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-700">
+          {fontItems.map(item => {
+            const v = layout[item.key];
+            return (
+              <div key={item.key} className="flex items-center gap-1.5">
+                <span className="font-medium">{item.label}</span>
+                <button type="button" onClick={() => patch({ [item.key]: v - 1 } as Partial<ReportLayoutSettings>)} disabled={v <= REPORT_FONT_ADJ_MIN}
+                  aria-label={`ลดขนาด${item.label}`} className="h-7 w-8 rounded border border-slate-200 text-xs font-semibold hover:bg-slate-50 disabled:opacity-30">A−</button>
+                <span className={`w-12 text-center font-mono text-xs ${v ? "text-sky-700" : "text-slate-400"}`}>{v === 0 ? "ปกติ" : `${v > 0 ? "+" : ""}${v}px`}</span>
+                <button type="button" onClick={() => patch({ [item.key]: v + 1 } as Partial<ReportLayoutSettings>)} disabled={v >= REPORT_FONT_ADJ_MAX}
+                  aria-label={`เพิ่มขนาด${item.label}`} className="h-7 w-8 rounded border border-slate-200 text-sm font-semibold hover:bg-slate-50 disabled:opacity-30">A+</button>
+              </div>
+            );
+          })}
+          {fontAdjusted && (
+            <button type="button" onClick={() => patch({ cardNameAdjPx: 0, cardNoteAdjPx: 0, cardPriceAdjPx: 0, headerAdjPx: 0 })}
+              className="h-7 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">รีเซ็ตขนาดตัวหนังสือ</button>
+          )}
+        </div>
+      )}
+
+      {termsOpen && (
+        <div className="grid gap-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-700">
+          <label className="flex w-fit cursor-pointer items-center gap-2 font-medium">
+            <input type="checkbox" checked={layout.showTerms} onChange={(e) => patch({ showTerms: e.target.checked })} className="h-4 w-4 cursor-pointer" />
+            แสดงกล่องเงื่อนไขท้ายใบ
+          </label>
+          <textarea value={layout.termsText} onChange={(e) => patch({ termsText: e.target.value })} rows={3} maxLength={800}
+            placeholder="1 บรรทัด = 1 ข้อ เช่น ยืนราคา 30 วัน"
+            className="w-full max-w-2xl rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <div className="flex items-center gap-3 text-xs text-slate-500">
+            <span>1 บรรทัด = 1 ข้อ · กด &ldquo;บันทึกเป็นค่าเริ่มต้น&rdquo; เพื่อใช้ทุกใบ</span>
+            <button type="button" onClick={() => patch({ termsText: DEFAULT_REPORT_LAYOUT.termsText })} className="h-7 rounded-lg border border-slate-200 px-3 font-medium text-slate-600 hover:bg-slate-50">ใช้ข้อความตัวอย่าง</button>
+          </div>
         </div>
       )}
 

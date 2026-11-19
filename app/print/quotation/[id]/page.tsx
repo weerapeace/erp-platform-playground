@@ -65,7 +65,9 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 
 // จำค่าที่ตั้งรายใบ (ต่อ browser): "ไม่รวมยอดทั้งหมด" + การเรียงรายการ — เปิดพิมพ์ใบเดิมซ้ำไม่ต้องตั้งใหม่
 type PerQuoteView = Partial<Pick<ReportLayoutSettings, (typeof PER_QUOTE_FIELDS)[number]>>;
-const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote", "lineStyle", "cardsPerRow", "showCustomer", "showQty", "showLineTotal"] as const;
+const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote", "lineStyle", "cardsPerRow", "showCustomer", "showQty", "showLineTotal",
+  "manualOrder", "showCardNo", "showCustomerApproval", "cardNameAdjPx", "cardNoteAdjPx", "cardPriceAdjPx", "headerAdjPx"] as const;
+const sameValue = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b);
 const viewKey = (id: string) => `qt-print-view:${id}`;
 const legacyHideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
 const readPerQuoteView = (id: string): PerQuoteView | null => {
@@ -78,7 +80,7 @@ const readPerQuoteView = (id: string): PerQuoteView | null => {
 const writePerQuoteView = (id: string, layout: ReportLayoutSettings) => {
   try {
     const v: PerQuoteView = {};
-    for (const k of PER_QUOTE_FIELDS) if (layout[k] !== DEFAULT_REPORT_LAYOUT[k]) (v as Record<string, unknown>)[k] = layout[k];
+    for (const k of PER_QUOTE_FIELDS) if (!sameValue(layout[k], DEFAULT_REPORT_LAYOUT[k])) (v as Record<string, unknown>)[k] = layout[k];
     if (Object.keys(v).length) localStorage.setItem(viewKey(id), JSON.stringify(v)); else localStorage.removeItem(viewKey(id));
     localStorage.removeItem(legacyHideTotalsKey(id));
   } catch { /* ไม่มี storage ก็แค่ไม่จำ */ }
@@ -158,8 +160,14 @@ export default function PrintQuotationPage() {
     return buildPrintableQuotationHtml(quote, origin, layout);
   }, [fileName, layout, origin, quote, template, useStandardLayout]);
 
+  // รายการสำหรับแผง "สลับรายการ" (ชื่อ · ตัวเลือก/รุ่น · ราคา) — ตามลำดับที่บันทึก
+  const printLines = useMemo(() => (quote?.lines ?? []).map(line => ({
+    label: line.product_name,
+    sub: [line.note, line.unit_price != null ? `${Number(line.unit_price).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท` : null].filter(Boolean).join(" · ") || null,
+  })), [quote]);
+
   const updateLayout = (next: ReportLayoutSettings) => {
-    if (PER_QUOTE_FIELDS.some(k => next[k] !== layout[k])) writePerQuoteView(id, next);
+    if (PER_QUOTE_FIELDS.some(k => !sameValue(next[k], layout[k]))) writePerQuoteView(id, next);
     setLayout(next);
     setUseStandardLayout(true);
     setLayoutDefaultMessage(null);
@@ -221,6 +229,7 @@ export default function PrintQuotationPage() {
               onUseDefault={loadDefaultLayout}
               savingDefault={savingLayoutDefault}
               defaultMessage={layoutDefaultMessage}
+              lines={printLines}
             />
             <PrintFrame html={html} fileName={fileName} />
           </>

@@ -8,6 +8,10 @@ export const REPORT_LINE_STYLES: ReportLineStyle[] = ["table", "cards"];
 export const REPORT_CARDS_PER_ROW_MIN = 1;
 export const REPORT_CARDS_PER_ROW_MAX = 4;
 
+/** ช่วงปรับขนาดตัวหนังสือแยกส่วน (px จากขนาดอัตโนมัติ) */
+export const REPORT_FONT_ADJ_MIN = -8;
+export const REPORT_FONT_ADJ_MAX = 16;
+
 export const REPORT_IMAGE_SIZE_MIN_MM = 10;
 export const REPORT_IMAGE_SIZE_MAX_MM = 45;
 
@@ -38,6 +42,21 @@ export type ReportLayoutSettings = {
   showQty: boolean;
   /** (การ์ด) แสดงราคารวมของรายการ */
   showLineTotal: boolean;
+  /** (การ์ด) แสดงเลขลำดับมุมการ์ด */
+  showCardNo: boolean;
+  /** (การ์ด) ปรับขนาดตัวหนังสือแยกส่วน — บวก/ลบ px จากขนาดอัตโนมัติตามจำนวนต่อแถว (0 = อัตโนมัติ) */
+  cardNameAdjPx: number;
+  cardNoteAdjPx: number;
+  cardPriceAdjPx: number;
+  /** (การ์ด) ปรับขนาดหัวกระดาษ (ชื่อบริษัท/ชื่อเอกสาร/เลขที่-วันที่) */
+  headerAdjPx: number;
+  /** แสดงช่องเซ็น "ลูกค้าอนุมัติ" — ปิดแล้วเหลือช่องผู้มีอำนาจช่องเดียวชิดขวา */
+  showCustomerApproval: boolean;
+  /** กล่องเงื่อนไขท้ายใบ (แก้ข้อความเองได้ · ขึ้นบรรทัดใหม่ได้) */
+  showTerms: boolean;
+  termsText: string;
+  /** ลำดับรายการที่ลากสลับเอง (เลขตำแหน่งเดิมของแต่ละบรรทัด) — ว่าง = ตามที่บันทึก · ใช้เมื่อ sortBy = none เท่านั้น */
+  manualOrder: number[];
   /** เรียงรายการตาม จำนวน/ราคา/รหัส (เฉพาะตอนพิมพ์ ไม่แก้ลำดับในเอกสารจริง) */
   sortBy: ReportLineSort;
   sortDesc: boolean;
@@ -75,6 +94,15 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   cardsPerRow: 2,
   showQty: true,
   showLineTotal: true,
+  showCardNo: true,
+  cardNameAdjPx: 0,
+  cardNoteAdjPx: 0,
+  cardPriceAdjPx: 0,
+  headerAdjPx: 0,
+  showCustomerApproval: true,
+  showTerms: false,
+  termsText: "ยืนราคา 30 วัน นับจากวันที่ในใบเสนอราคา\nราคาข้างต้นยังไม่รวมภาษีมูลค่าเพิ่ม",
+  manualOrder: [],
   sortBy: "none",
   sortDesc: false,
   sortGroupByNote: true,
@@ -105,6 +133,17 @@ const safeAssetUrl = (value: unknown): string => {
   return url;
 };
 
+/** ลำดับที่ลากเอง: ต้องเป็นเลขตำแหน่งจำนวนเต็มไม่ซ้ำ (อย่างอื่นทิ้ง) */
+function cleanManualOrder(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const out: number[] = [];
+  for (const v of value.slice(0, 1000)) {
+    const n = Number(v);
+    if (Number.isInteger(n) && n >= 0 && n < 1000 && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
 export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {}): ReportLayoutSettings {
   return {
     topMarginMm: clamp(input.topMarginMm, 0, 30, DEFAULT_REPORT_LAYOUT.topMarginMm),
@@ -126,6 +165,15 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     cardsPerRow: Math.round(clamp(input.cardsPerRow, REPORT_CARDS_PER_ROW_MIN, REPORT_CARDS_PER_ROW_MAX, DEFAULT_REPORT_LAYOUT.cardsPerRow)),
     showQty: input.showQty ?? DEFAULT_REPORT_LAYOUT.showQty,
     showLineTotal: input.showLineTotal ?? DEFAULT_REPORT_LAYOUT.showLineTotal,
+    showCardNo: input.showCardNo ?? DEFAULT_REPORT_LAYOUT.showCardNo,
+    cardNameAdjPx: Math.round(clamp(input.cardNameAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
+    cardNoteAdjPx: Math.round(clamp(input.cardNoteAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
+    cardPriceAdjPx: Math.round(clamp(input.cardPriceAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
+    headerAdjPx: Math.round(clamp(input.headerAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
+    showCustomerApproval: input.showCustomerApproval ?? DEFAULT_REPORT_LAYOUT.showCustomerApproval,
+    showTerms: input.showTerms ?? DEFAULT_REPORT_LAYOUT.showTerms,
+    termsText: typeof input.termsText === "string" ? input.termsText.slice(0, 800) : DEFAULT_REPORT_LAYOUT.termsText,
+    manualOrder: cleanManualOrder(input.manualOrder),
     sortBy: REPORT_LINE_SORTS.includes(input.sortBy as ReportLineSort) ? (input.sortBy as ReportLineSort) : DEFAULT_REPORT_LAYOUT.sortBy,
     sortDesc: input.sortDesc ?? DEFAULT_REPORT_LAYOUT.sortDesc,
     sortGroupByNote: input.sortGroupByNote ?? DEFAULT_REPORT_LAYOUT.sortGroupByNote,
