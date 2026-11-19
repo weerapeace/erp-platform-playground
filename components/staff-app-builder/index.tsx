@@ -22,6 +22,9 @@ import { cleanAudience, describeAudience, type MenuAudience } from "@/lib/menu-a
 import { cleanDraft, draftChanged, publishProblems, STAFF_APP_LIMITS, type StaffAppDraft, type StaffAppMenu } from "@/lib/staff-apps";
 import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { LockStep, ViewAsStep, type AppGroupLite } from "./lock-steps";
+import { UsageStep } from "./usage-step";
+import { AppAnnouncements } from "@/components/staff-app-home/announcements";
+import { BADGE_COUNTERS } from "@/lib/staff-app-counters";
 
 export type StaffAppRow = {
   id: string; key: string; label: string; label_en: string | null; icon: string | null; theme_color: string | null;
@@ -30,7 +33,7 @@ export type StaffAppRow = {
 export type BuilderMenu = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; section?: string | null; app_keys?: string[] | null; is_active?: boolean | null; show_in_sidebar?: boolean | null; parent_id?: string | null; permission_key?: string | null; audience?: unknown };
 type Role = { key: string; label: string; active?: boolean };
 type Version = { id: string; version_no: number; note: string | null; created_by_name: string | null; created_at: string; snapshot: unknown };
-type Step = "info" | "menus" | "who" | "lock" | "perm" | "viewas" | "history";
+type Step = "info" | "menus" | "who" | "lock" | "perm" | "viewas" | "news" | "usage" | "history";
 
 const COLORS = ["#2563eb", "#7c3aed", "#0891b2", "#059669", "#d97706", "#dc2626", "#db2777", "#475569"];
 
@@ -146,6 +149,8 @@ export function StaffAppBuilder({ app, menus, appLabels, appGroups, onChanged }:
         {stepBtn("lock", "4", draft.lock ? "ล็อก (เปิดอยู่)" : "ล็อก + ข้อยกเว้น")}
         {stepBtn("perm", "", "สิทธิ์ตามเมนู")}
         {stepBtn("viewas", "", "ดูแทนพนักงาน")}
+        {stepBtn("news", "", "ประกาศ")}
+        {stepBtn("usage", "", "สถิติการใช้")}
         {stepBtn("history", "", "ประวัติเวอร์ชัน")}
       </div>
 
@@ -166,6 +171,11 @@ export function StaffAppBuilder({ app, menus, appLabels, appGroups, onChanged }:
               </div>
             : <p className="py-8 text-center text-sm text-slate-500">เผยแพร่ครั้งแรกก่อน แล้วค่อยตั้งสิทธิ์ตามเมนูของแอปนี้ได้ (ใช้ “ดูแทนพนักงาน” เช็กก่อนเผยแพร่ได้)</p>)}
           {step === "viewas" && <ViewAsStep draft={draft} menus={menus} appGroups={appGroups} />}
+          {step === "news" && <div className="max-w-2xl space-y-2">
+            <p className="text-xs text-slate-500">ประกาศโชว์บนหน้าแรกของแอปนี้ทันที (ไม่ต้องกดเผยแพร่) · ให้หัวหน้าเขียนได้ด้วยสิทธิ์ “เขียน/แก้/ลบ ประกาศในแอปพนักงาน”</p>
+            <AppAnnouncements appKey={app.key} manage />
+          </div>}
+          {step === "usage" && <UsageStep appId={app.id} draft={draft} menus={menus} />}
           {step === "history" && <HistoryStep app={app} onLoaded={() => { onChanged(); setStep("menus"); }} />}
 
           <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
@@ -313,7 +323,7 @@ function MenusStep({ draft, setDraft, menus, menuById, appLabels }: {
                   <button type="button" onClick={() => setOpen(isOpen ? null : m.menu_id)} className="min-w-0 flex-1 text-left">
                     <div className="truncate text-sm text-slate-800">{m.label || src?.label || <span className="text-rose-600">(เมนูถูกลบจากระบบ)</span>}</div>
                     <div className="truncate text-[11px] text-slate-400">
-                      {m.label && src ? `ชื่อกลาง: ${src.label} · ` : ""}{draft.sections.find((s) => s.key === m.section)?.label ?? "ไม่มีหัวข้อ"}{m.label_en ? ` · EN: ${m.label_en}` : ""}
+                      {m.label && src ? `ชื่อกลาง: ${src.label} · ` : ""}{draft.sections.find((s) => s.key === m.section)?.label ?? "ไม่มีหัวข้อ"}{m.label_en ? ` · EN: ${m.label_en}` : ""}{m.counter ? " · มีตัวเลขงานค้าง" : ""}
                     </div>
                   </button>
                   <button type="button" onClick={() => setOpen(isOpen ? null : m.menu_id)} className="h-8 rounded-md px-2 text-xs text-violet-700 hover:bg-violet-50"><Icon name="edit" /> <span className="hidden sm:inline">ตั้งชื่อ/หัวข้อ</span></button>
@@ -331,6 +341,12 @@ function MenusStep({ draft, setDraft, menus, menuById, appLabels }: {
                       <select value={m.section ?? ""} onChange={(e) => setMenu(m.menu_id, { section: e.target.value || undefined })} className={`${input} mt-0.5 bg-white`}>
                         <option value="">— ไม่มีหัวข้อ —</option>
                         {draft.sections.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs text-slate-500 sm:col-span-3">ตัวเลขงานค้างบนปุ่ม
+                      <select value={m.counter ?? ""} onChange={(e) => setMenu(m.menu_id, { counter: e.target.value || undefined })} className={`${input} mt-0.5 bg-white`}>
+                        <option value="">— ไม่โชว์ตัวเลข —</option>
+                        {BADGE_COUNTERS.map((c) => <option key={c.key} value={c.key}>{c.label}{c.finance ? " (ผังการเงิน)" : ""}</option>)}
                       </select>
                     </label>
                     <p className="text-[11px] text-slate-500 sm:col-span-3">ชื่อที่ตั้งตรงนี้ใช้เฉพาะแอปนี้ — เมนูกลางและแอปอื่นไม่เปลี่ยน · ลิงก์: <span className="font-mono">{src?.href}</span></p>

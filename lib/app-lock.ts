@@ -20,7 +20,7 @@ export type AppLock = { roles?: string[]; users?: string[] };
 export type AllowedHref = { href: string; ro?: boolean };
 
 /** สิทธิ์ที่คนถูกล็อกใช้ได้เสมอ (ของพื้นฐานทั้งระบบ) */
-export const BASE_PERMS = ["notifications.view"] as const;
+export const BASE_PERMS = ["notifications.view", "staff_apps.announce"] as const;
 
 /** หน้าเปิดได้เสมอ (ล็อกอิน/ออก) */
 export const ALWAYS_OPEN_PATHS = ["/login", "/logout", "/auth", "/reset-password", "/offline"] as const;

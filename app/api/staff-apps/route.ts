@@ -4,6 +4,7 @@
  *
  * GET                    → { apps: แอปพนักงานทั้งหมด (รวมร่าง + ถังขยะ) + last_snapshot, templates }
  * GET ?versions=<id>     → { versions: [...] } ประวัติเวอร์ชันของแอป
+ * GET ?usage=<id>&days=30 → { usage: [{menu_id, views, users, last_at}], people, since } สถิติการใช้ (page_view_daily · นับเฉพาะคนที่เห็นแอป)
  * POST { action, ... }
  *   create        { label, template?: <appKey แอปหลัก>, copy_from?: <id แอปพนักงาน> } → แอปร่างใหม่
  *   save_draft    { id, draft }                 → บันทึกร่าง (พนักงานยังไม่เห็น)
@@ -24,7 +25,9 @@ import {
   cleanDraft, draftFromMenus, newStaffAppKey, planDetachAll, planPublish, publishProblems,
   STAFF_APP_TEMPLATES, type StaffAppDraft, type MenuPublishPatch,
 } from "@/lib/staff-apps";
-import { computeAllowedHrefs, computeAllowedPerms } from "@/lib/app-lock";
+import { computeAllowedHrefs, computeAllowedPerms, lockIncludes } from "@/lib/app-lock";
+import { usageByMenu, type ViewRow } from "@/lib/staff-app-extras";
+import { menuVisibleTo } from "@/lib/menu-audience";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,6 +80,25 @@ export async function GET(request: NextRequest) {
   const deny = await guardApi(request, PERM);
   if (deny) return deny;
   const admin = supabaseAdmin();
+  const uid = request.nextUrl.searchParams.get("usage");
+  if (uid) {
+    const app = await loadApp(uid);
+    if (!app) return bad("ไม่พบแอปพนักงานนี้", 404);
+    const days = Math.min(180, Math.max(1, Number(request.nextUrl.searchParams.get("days")) || 30));
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const draft = cleanDraft(app.draft);
+    const menus = (await loadMenus()).filter((m) => draft.menus.some((d) => d.menu_id === m.id));
+    const [{ data: views, error: vErr }, { data: people }] = await Promise.all([
+      admin.from("page_view_daily").select("path, user_id, views, last_at").gte("day", since).limit(20000),
+      admin.from("user_profiles").select("id, role, active"),
+    ]);
+    if (vErr) return bad(vErr.message, 500);
+    // นับเฉพาะคนที่เห็นแอปนี้ (หน้าเดียวกันอาจใช้ผ่านแอปอื่นด้วย) — แอดมินไม่นับ
+    const who = new Set(((people ?? []) as { id: string; role: string | null; active: boolean | null }[])
+      .filter((u) => u.active !== false && u.role !== "admin" && (menuVisibleTo(draft.audience ?? null, u) || lockIncludes(draft.lock, u)))
+      .map((u) => u.id));
+    return NextResponse.json({ usage: usageByMenu((views ?? []) as ViewRow[], menus, who), people: who.size, since, error: null }, { headers: { "Cache-Control": "no-store" } });
+  }
   const vid = request.nextUrl.searchParams.get("versions");
   if (vid) {
     const { data, error } = await admin.from("erp_app_versions")

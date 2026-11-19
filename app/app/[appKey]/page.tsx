@@ -20,6 +20,7 @@ import { appIconSrc } from "@/components/device-view";
 import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle, useLang } from "@/components/i18n";
 import { StaffAppHome, useStaffAppPrefs } from "@/components/staff-app-home";
+import { AppAnnouncements } from "@/components/staff-app-home/announcements";
 import { appLabelFor, appMenuLabel, appMenuSection } from "@/lib/staff-apps";
 import { Icon } from "@/components/icon";
 import { AccountMenu } from "@/components/account-menu";
@@ -77,6 +78,8 @@ export default function StandaloneApp() {
   // 📱 แอปพนักงาน: หน้าแรกเป็นปุ่มเมนูใหญ่ (components/staff-app-home) — กดเมนูแล้วเปิดหน้า · ปุ่ม 🏠 กลับหน้าแรก
   const [home, setHome] = useState(true);
   const staffPrefs = useStaffAppPrefs(appKey);
+  // ตัวเลขงานค้างบนปุ่ม (แอปพนักงาน · /api/staff-apps/counters ใช้ตัวนับของแผนผังการทำงาน) — โหลดตอนอยู่หน้าแรก ทุกครั้งที่กลับมาหน้าแรก
+  const [badges, setBadges] = useState<Record<string, number>>({});
   // คงหน้าที่เปิดอยู่ไว้ตาม id ตอนรายการเมนูคำนวณใหม่ (สิทธิ์จริงมาทีหลัง / บันทึกตั้งค่า)
   const itemsRef = useRef<MenuItem[]>([]);
   itemsRef.current = items;
@@ -184,6 +187,13 @@ export default function StandaloneApp() {
     // ใช้ ready / permsKnown / permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ · user?.id = login/สลับบัญชีแล้วถามใหม่
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [appKey, ready, permsKnown, permsReady, menuRev, user?.id]);
+
+  useEffect(() => {
+    if (app?.kind !== "staff" || !home) return;
+    let alive = true;
+    apiFetch(`/api/staff-apps/counters?app=${encodeURIComponent(appKey)}`).then((r) => r.json()).then((j) => { if (alive && j?.counts) setBadges(j.counts as Record<string, number>); }).catch(() => { /* ไม่มีตัวเลข = ไม่โชว์ป้าย */ });
+    return () => { alive = false; };
+  }, [app?.kind, appKey, home]);
 
   // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
   useEffect(() => {
@@ -452,7 +462,8 @@ export default function StandaloneApp() {
           const content = (<>
         {showHome ? (
           <StaffAppHome
-            items={items.map((it) => ({ id: it.id, label: it.label, section: it.section ?? "", icon: it.icon, icon_url: it.icon_url }))}
+            items={items.map((it) => ({ id: it.id, label: it.label, section: it.section ?? "", icon: it.icon, icon_url: it.icon_url, badge: badges[it.id] ?? null }))}
+            notice={<AppAnnouncements appKey={appKey} />}
             onOpen={(id) => { const i = items.findIndex((m) => m.id === id); if (i >= 0) goto(i); }}
             favs={staffPrefs.favs} recent={staffPrefs.recent} onToggleFav={staffPrefs.toggleFav} />
         ) : moduleKey ? (

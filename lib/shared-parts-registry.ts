@@ -883,9 +883,9 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่ใช้ StandaloneShell หรือเปลือกของตัวเอง (เปลือกหลักกันให้อยู่แล้ว)",
   },
   {
-    key: "staff-app-home", label: "หน้าแรกแอปพนักงาน (ปุ่มเมนูใหญ่)", code: "StaffAppHome · useStaffAppPrefs", category: "layout",
+    key: "staff-app-home", label: "หน้าแรกแอปพนักงาน (ปุ่มเมนูใหญ่)", code: "StaffAppHome · useStaffAppPrefs · AppAnnouncements", category: "layout",
     source: { path: "components/staff-app-home" },
-    what: "หน้าแรกของแอปพนักงาน: ปุ่มเมนูใหญ่จัดตามหัวข้อ (มือถือ 2 คอลัมน์) · ค้นหาเมนู · ปักโปรด/ใช้ล่าสุดรายคน · TH/EN",
+    what: "หน้าแรกของแอปพนักงาน: ปุ่มเมนูใหญ่จัดตามหัวข้อ (มือถือ 2 คอลัมน์) · ตัวเลขงานค้างบนปุ่ม · กล่องประกาศจากหัวหน้า · ค้นหาเมนู · ปักโปรด/ใช้ล่าสุดรายคน · TH/EN",
     when: "แอปเดี่ยว /app/<key> ที่เป็นแอปพนักงาน + ตัวอย่างหน้าจอในตัวช่วยสร้างแอป",
     notWhen: "หน้ารวมทุกแอป (/apps launcher) · แถบเมนูของแอปหลัก (เชลล์แอปเดี่ยวจัดให้แล้ว)",
     doc: "staff-apps.md",
