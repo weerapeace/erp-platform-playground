@@ -3,7 +3,7 @@
 // กล่อง + เส้นของกระดาน flowchart กลาง (ใช้ภายใน components/flowchart-board เท่านั้น)
 // สี/ขนาด/ชนิด อ่านจาก lib/flowchart (FLOW_PALETTE / FLOW_KIND_META) — ที่เดียวกับตอนบันทึกเป็นรูป
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { flowEdgePath } from "./edge-path";
 import { Icon } from "@/components/icon";
@@ -31,6 +31,8 @@ export type FlowBoardActions = {
   readOnly: boolean;
   t: (th: string, en: string) => string;
   updateData: (id: string, patch: Partial<FlowNodeData>) => void;
+  /** ขยายกล่องให้อย่างน้อยเท่านี้ (ไม่หดกล่องที่ใหญ่อยู่แล้ว) — ใช้หลังพิมพ์ข้อความยาวกว่ากล่อง */
+  growNode: (id: string, w: number, h: number) => void;
   /** กล่อง "ไฟล์" (และไฟล์ที่เก็บในกล่อง "ที่เก็บ"): เปิดป๊อปเลือกประเภทไฟล์ */
   editFileTypes: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปเลือกไอคอนที่เก็บ (Google Drive · R2 · NAS ...) */
@@ -84,23 +86,40 @@ function LabelText({ label, color, align = "center" }: { label: string; color: F
 }
 
 /** แก้ข้อความในกล่อง (ดับเบิลคลิก) — Enter = ขึ้นบรรทัด · Ctrl+Enter หรือคลิกข้างนอก = เสร็จ · Esc = ยกเลิก */
-function InlineEditor({ initial, onDone, folder, zone }: { initial: FlowNodeData; onDone: (patch: Partial<FlowNodeData> | null) => void; folder?: boolean; zone?: boolean }) {
+/** ช่องพิมพ์ในกล่อง — ยืดสูงตามข้อความเอง + ลากมุมขวาล่างขยายได้ (เจ้าของสั่ง 2026-11-19 "อยากให้ปรับขนาดได้ ตอนพิมพ์")
+ *  boxW/boxH = ขนาดกล่องตอนนี้ (ช่องพิมพ์เริ่มเท่ากล่อง) · พิมพ์เสร็จ = onDone(patch, ขนาดช่องพิมพ์) → กระดานขยายกล่องให้พอดี */
+function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: FlowNodeData; onDone: (patch: Partial<FlowNodeData> | null, size?: { w: number; h: number }) => void; folder?: boolean; zone?: boolean; boxW?: number; boxH?: number }) {
   const { t } = useBoard();
   const [label, setLabel] = useState(initial.label);
   const [path, setPath] = useState(initial.path ?? "");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const grow = !zone && !folder;
   useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
-  const commit = () => onDone(folder ? { label: label.trim() || t("โฟลเดอร์", "Folder"), path: path.trim() } : { label });
+  // ยืดความสูงตามข้อความ (ไม่หดต่ำกว่าขนาดกล่อง / ขนาดที่ลากขยายไว้)
+  useLayoutEffect(() => {
+    const ta = ref.current; if (!ta || !grow) return;
+    const min = Math.max(40, (boxH ?? 0) - 8, ta.offsetHeight);   // ไม่หดต่ำกว่าที่ลากขยายไว้
+    ta.style.height = "auto";
+    ta.style.height = `${Math.max(min, ta.scrollHeight + 2)}px`;
+  }, [label, grow, boxH]);
+  const commit = () => {
+    const el = wrapRef.current;
+    const size = grow && el ? { w: el.offsetWidth + 8, h: el.offsetHeight + 8 } : undefined;
+    onDone(folder ? { label: label.trim() || t("โฟลเดอร์", "Folder"), path: path.trim() } : { label }, size);
+  };
   const key = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); onDone(null); }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); }
   };
   return (
-    <div className={`nodrag nowheel nopan absolute z-10 flex flex-col gap-1 ${zone ? "left-2 top-1.5 h-9 w-[min(320px,90%)] pointer-events-auto" : "inset-1"}`}
+    <div ref={wrapRef} className={`nodrag nowheel nopan absolute z-10 flex flex-col gap-1 ${zone ? "left-2 top-1.5 h-9 w-[min(320px,90%)] pointer-events-auto" : grow ? "left-1 top-1 w-max" : "inset-1"}`}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) commit(); }}>
       <textarea ref={ref} value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { key(e); if (zone && e.key === "Enter") { e.preventDefault(); commit(); } }} rows={folder || zone ? 1 : 3}
         placeholder={t("บรรทัดแรก = หัวข้อ · บรรทัดถัดไป = คำอธิบาย", "First line = title · next lines = details")}
-        className="min-h-0 w-full flex-1 resize-none rounded-md border border-violet-300 bg-white px-1.5 py-1 text-[12px] text-slate-800 outline-none focus:ring-2 focus:ring-violet-200" />
+        title={grow ? t("ลากมุมขวาล่าง = ขยายช่อง · Ctrl+Enter = บันทึก", "Drag the bottom-right corner to resize · Ctrl+Enter to save") : undefined}
+        style={grow ? { width: Math.max(140, (boxW ?? 0) - 8), minWidth: 120, overflow: "hidden" } : undefined}
+        className={`min-h-0 rounded-md border border-violet-300 bg-white px-1.5 py-1 text-[12px] text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-violet-200 ${grow ? "resize" : "w-full flex-1 resize-none"}`} />
       {folder && (
         <input value={path} onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => { key(e); if (e.key === "Enter") { e.preventDefault(); commit(); } }}
           placeholder="Z:\Work In Process\..." className="h-7 w-full rounded-md border border-violet-300 bg-white px-1.5 text-[11px] text-slate-700 outline-none" />
@@ -193,7 +212,7 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule } = useBoard();
+  const { readOnly, t, updateData, growNode, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
@@ -336,8 +355,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
         {editing && (
-          <InlineEditor initial={data} folder={kind === "folder"}
-            onDone={(patch) => { setEditing(false); if (patch) updateData(id, patch); }} />
+          <InlineEditor initial={data} folder={kind === "folder"} boxW={width} boxH={height}
+            onDone={(patch, size) => { setEditing(false); if (patch) updateData(id, patch); if (patch && size) growNode(id, size.w, size.h); }} />
         )}
       </div>
       {HANDLE_POS.map(([hid, pos]) => (

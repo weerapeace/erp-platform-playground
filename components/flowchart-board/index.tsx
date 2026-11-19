@@ -578,6 +578,11 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       }));
     },
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
+    growNode: (id, w, h) => setNodes((ns) => ns.map((n) => {
+      if (n.id !== id) return n;
+      const b = boxOf(n), nw = Math.max(b.width, Math.round(w)), nh = Math.max(b.height, Math.round(h));
+      return nw === b.width && nh === b.height ? n : { ...n, width: nw, height: nh };
+    })),
     setEdgeLabel: (id, label) => setEdges((es) => es.map((e) => (e.id === id ? { ...e, label } : e))),
     setEdgeShape: (ids, shape) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withShape(e, shape) : e))); },
     editEdgeLabel: (id) => {
