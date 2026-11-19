@@ -42,9 +42,10 @@ import {
   EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText, splitFlowLabel,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
   flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
-  FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, edgeShapeOf, isEdgeShape, type FlowEdgeShape,
+  FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
 } from "@/lib/flowchart";
+import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
 import { planRuleCheck } from "@/lib/storage-policy";
 import {
@@ -578,6 +579,20 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       }));
     },
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
+    formatNodes: (ids, op) => {
+      const set = new Set(ids);
+      setNodes((ns) => ns.map((n) => {
+        if (!set.has(n.id)) return n;
+        const d: FlowNodeData = { ...n.data };
+        const pal = FLOW_PALETTE[nodeColor(n.type as FlowKind, d)];
+        if (op.clear) { delete d.rich; delete d.align; }
+        if (op.wrap) d.rich = wrapRich(d.rich || plainToRich(d.label, pal.sub), op.wrap);
+        if (op.align) d.align = op.align;
+        if (op.fill !== undefined) { if (op.fill) d.fill = op.fill; else delete d.fill; }
+        if (op.stroke !== undefined) { if (op.stroke) d.stroke = op.stroke; else delete d.stroke; }
+        return { ...n, data: d };
+      }));
+    },
     growNode: (id, w, h) => setNodes((ns) => ns.map((n) => {
       if (n.id !== id) return n;
       const b = boxOf(n), nw = Math.max(b.width, Math.round(w)), nh = Math.max(b.height, Math.round(h));

@@ -7,6 +7,7 @@ import { Position } from "@xyflow/react";
 import { flowEdgePath } from "./edge-path";
 import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
+import { sanitizeRich } from "@/lib/flowchart-rich";
 import { FLOW_PALETTE, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -35,7 +36,11 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
   const frameless = n.type === "file" || n.type === "text" || !!place;
-  const labelHtml = `<div style="width:100%;text-align:${n.type === "note" || n.type === "page" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
+  const fillC = n.data.fill ?? p.fill, strokeC = n.data.stroke ?? p.stroke;   // สีพื้น/เส้นกำหนดเอง
+  const tAlign = n.data.align ?? (n.type === "note" || n.type === "page" ? "left" : "center");
+  const labelHtml = n.data.rich
+    ? `<div style="width:100%;text-align:${tAlign};font-size:12px;color:${p.text};word-break:break-word;line-height:1.35">${sanitizeRich(n.data.rich)}</div>`
+    : `<div style="width:100%;text-align:${tAlign};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
   const col = (inner: string, gap = 4) => `<div style="display:flex;flex-direction:column;align-items:center;gap:${gap}px;width:100%">${inner}</div>`;
   const icons = flowIconSizes(n);   // ไอคอนโตตามกล่อง — สูตรเดียวกับบนจอ
   let text: string;
@@ -60,14 +65,14 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
     text = labelHtml;
   }
   let shape = "";
-  let box = frameless ? "" : `background:${p.fill};border:2px solid ${p.stroke};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : 10}px;`;
+  let box = frameless ? "" : `background:${fillC};border:2px solid ${strokeC};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : 10}px;`;
   let pad = frameless ? "4px 6px" : n.type === "note" ? "10px 12px" : "6px 12px";
   if (n.type === "question") {
     box = ""; pad = `${Math.round(h * 0.18)}px ${Math.round(w * 0.22)}px`;
-    shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><polygon points="50,1 99,50 50,99 1,50" fill="${p.fill}" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+    shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><polygon points="50,1 99,50 50,99 1,50" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   } else if (n.type === "storage" && !place) {
     box = ""; pad = `${Math.round(h * 0.22)}px ${Math.round(w * 0.1)}px ${Math.round(h * 0.1)}px`;
-    shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${p.fill}" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+    shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
   const align = n.type === "note" ? "flex-start" : "center";
   return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;

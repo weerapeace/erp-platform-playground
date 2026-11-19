@@ -10,6 +10,8 @@ import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { FLOW_COLORS, FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, edgeShapeOf, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowEdgeShape, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
+import { plainToRich, richToPlain, sanitizeRich } from "@/lib/flowchart-rich";
+import { BoxFormatBar, RichEditor, RichText, type BoxFormatOp } from "./rich-text";
 import type { PlanRuleCheck } from "@/lib/storage-policy";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
@@ -33,6 +35,8 @@ export type FlowBoardActions = {
   updateData: (id: string, patch: Partial<FlowNodeData>) => void;
   /** ขยายกล่องให้อย่างน้อยเท่านี้ (ไม่หดกล่องที่ใหญ่อยู่แล้ว) — ใช้หลังพิมพ์ข้อความยาวกว่ากล่อง */
   growNode: (id: string, w: number, h: number) => void;
+  /** จัดรูปแบบทั้งกล่อง (หลายกล่องพร้อมกันได้) + สีพื้น/เส้นขอบกำหนดเอง — ./rich-text BoxFormatBar */
+  formatNodes: (ids: string[], op: BoxFormatOp) => void;
   /** กล่อง "ไฟล์" (และไฟล์ที่เก็บในกล่อง "ที่เก็บ"): เปิดป๊อปเลือกประเภทไฟล์ */
   editFileTypes: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปเลือกไอคอนที่เก็บ (Google Drive · R2 · NAS ...) */
@@ -74,7 +78,7 @@ const useBoard = () => {
 const HANDLE_POS: [string, Position][] = [["t", Position.Top], ["r", Position.Right], ["b", Position.Bottom], ["l", Position.Left]];
 
 /** ข้อความในกล่อง: บรรทัดแรกตัวหนา · ที่เหลือตัวเล็ก */
-function LabelText({ label, color, align = "center" }: { label: string; color: FlowColor; align?: "center" | "left" }) {
+function LabelText({ label, color, align = "center" }: { label: string; color: FlowColor; align?: "center" | "left" | "right" }) {
   const { title, sub } = splitFlowLabel(label);
   const pal = FLOW_PALETTE[color];
   return (
@@ -133,12 +137,21 @@ function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: 
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes } = useBoard();
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const iconScale = iconScaleOf(ids);
+  const [fmt, setFmt] = useState(false);
+  const pal = FLOW_PALETTE[cur ?? "slate"];
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
   return (
+    <div className="relative">
     <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
+      {single?.kind !== "zone" && (
+        <button type="button" className={`${btn} ${fmt ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => setFmt((v) => !v)}
+          title={t("จัดข้อความ / สีพื้น / สีเส้นขอบ ทั้งกล่อง" + (single ? "" : " (ทุกกล่องที่เลือก)") + " · จัดเฉพาะคำ = ดับเบิลคลิกกล่อง", "Format text / fill / border for the whole box · double-click to format words")}>
+          <Icon value="i:typography" />
+        </button>
+      )}
       {!single && <span className="px-1.5 text-[11px] font-medium text-violet-700">{t(`เลือก ${ids.length} กล่อง`, `${ids.length} selected`)}</span>}
       {FLOW_COLORS.map((c) => (
         <button key={c} type="button" title={t(FLOW_PALETTE[c].th, FLOW_PALETTE[c].en)} onClick={() => setColor(ids, c)}
@@ -175,6 +188,13 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
       {single?.kind === "page" && single.data.href && <button type="button" className={btn} onClick={() => openPage(single.data.href!)} title={t("เปิดหน้านี้ในแท็บใหม่", "Open this page in a new tab")}><Icon value="i:external-link" />{t("เปิด", "Open")}</button>}
       <button type="button" className={`${btn} hover:bg-rose-50 hover:text-rose-600`} onClick={() => removeNodes(ids)} title={t("ลบ (หรือกด Delete)", "Delete (or press Delete)")}><Icon value="i:trash" /></button>
     </div>
+    {fmt && (
+      <div className="absolute left-0 top-full z-20 mt-1">
+        <BoxFormatBar t={t} onApply={(op) => formatNodes(ids, op)}
+          fill={single?.data.fill ?? pal.fill} stroke={single?.data.stroke ?? pal.stroke} textColor={pal.text} />
+      </div>
+    )}
+    </div>
   );
 }
 
@@ -193,8 +213,9 @@ function RuleChip({ check, onClick }: { check: PlanRuleCheck | "loading" | null;
 }
 
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
-function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
-  const p = FLOW_PALETTE[color];
+function ShapeBg({ kind, color, fill, stroke }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string }) {
+  const p0 = FLOW_PALETTE[color];
+  const p = { ...p0, fill: fill ?? p0.fill, stroke: stroke ?? p0.stroke };
   const common = { fill: p.fill, stroke: p.stroke, strokeWidth: 2, vectorEffect: "non-scaling-stroke" as const };
   if (kind === "question") return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -254,7 +275,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
   const frameless = kind === "file" || kind === "text" || !!place;
   const boxStyle: React.CSSProperties =
     kind === "question" || kind === "storage" || frameless ? {}
-    : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
+    : { background: data.fill ?? pal.fill, border: `2px solid ${data.stroke ?? pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
   const pad = frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
@@ -326,7 +347,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
       </div>
     );
   } else {
-    content = <LabelText label={data.label} color={color} align={kind === "note" ? "left" : "center"} />;
+    const align = data.align ?? (kind === "note" ? "left" : "center");
+    content = data.rich ? <RichText html={data.rich} align={align} color={pal.text} /> : <LabelText label={data.label} color={color} align={align} />;
   }
 
   return (
@@ -351,12 +373,23 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           e.stopPropagation(); startEdit();
         }}
       >
-        {!frameless && <ShapeBg kind={kind} color={color} />}
+        {!frameless && <ShapeBg kind={kind} color={color} fill={data.fill} stroke={data.stroke} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
         {editing && (
-          <InlineEditor initial={data} folder={kind === "folder"} boxW={width} boxH={height}
-            onDone={(patch, size) => { setEditing(false); if (patch) updateData(id, patch); if (patch && size) growNode(id, size.w, size.h); }} />
+          kind === "folder" || kind === "file"
+            ? <InlineEditor initial={data} folder={kind === "folder"} boxW={width} boxH={height}
+                onDone={(patch, size) => { setEditing(false); if (patch) updateData(id, patch); if (patch && size) growNode(id, size.w, size.h); }} />
+            // ข้อความจัดรูปแบบ (เจ้าของเลือก 2026-11-19 แบบ B) — ไม่ได้จัดอะไร = เก็บเป็นข้อความล้วนเหมือนเดิม
+            : <RichEditor t={t} boxW={width} boxH={height} textColor={pal.text} initialHtml={data.rich || plainToRich(data.label, pal.sub)}
+                onDone={(html, size) => {
+                  setEditing(false);
+                  if (html === null) return;
+                  const rich = sanitizeRich(html), label = richToPlain(rich);
+                  const plainOnly = rich === plainToRich(label, pal.sub);
+                  updateData(id, { label, rich: plainOnly ? undefined : rich });
+                  if (size) growNode(id, size.w, size.h);
+                }} />
         )}
       </div>
       {HANDLE_POS.map(([hid, pos]) => (

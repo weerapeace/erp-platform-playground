@@ -9,6 +9,7 @@
 import { cleanExtList } from "./file-types";
 import { isPlaceKey, storagePlaceOf } from "./storage-places";
 import { isAppKey, isErpPageHref } from "./menu-pages";
+import { isFlowAlign, isHexColor, sanitizeRich, type FlowAlign } from "./flowchart-rich";
 
 /** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
 export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "zone"] as const;
@@ -46,7 +47,8 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** place = ที่เก็บของกล่อง "ที่เก็บ" (drive · r2 · supabase · nas ...) — ไอคอน/ชื่อจาก lib/storage-places · ไม่มี = ทรงกระบอกเดิม */
 /** href/app/appName/icon = กล่อง "หน้าใน ERP": ลิงก์หน้าในระบบ (ขึ้นต้น "/") · รหัสแอป · ชื่อแอปตอนเลือก · ไอคอนเมนู — เลือกจากเมนูจริง (lib/menu-pages) */
 /** rule = กล่อง "ที่เก็บ" ผูกกับกฎที่เก็บจริง (erp_storage_rules.rule_key · หน้า /master/storage-rules) → กระดานเตือนเมื่อแผนไม่ตรงกฎ */
-export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string };
+/** rich = ข้อความจัดรูปแบบ (HTML ชุดเล็ก ผ่าน sanitizeRich เสมอ · label = ข้อความล้วนคู่กัน) · align = จัดชิดทั้งกล่อง · fill/stroke = สีพื้น/เส้นขอบกำหนดเอง #rrggbb (ทับสีชุด) — lib/flowchart-rich */
+export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -131,6 +133,11 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (isPlaceKey(d.place)) data.place = d.place;
     if (o.type === "page") Object.assign(data, cleanPageData(d));
     if (o.type === "storage" && isRuleKey(d.rule)) data.rule = d.rule;
+    const rich = sanitizeRich(d.rich);
+    if (rich) data.rich = rich;
+    if (isFlowAlign(d.align)) data.align = d.align;
+    if (isHexColor(d.fill)) data.fill = d.fill;
+    if (isHexColor(d.stroke)) data.stroke = d.stroke;
     nodes.push({ id, type: o.type, position: { x: num(pos.x, 0), y: num(pos.y, 0) }, width: Math.max(40, num(o.width, meta.w)), height: Math.max(30, num(o.height, meta.h)), data });
     ids.add(id);
   }
