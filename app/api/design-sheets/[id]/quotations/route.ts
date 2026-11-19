@@ -13,6 +13,9 @@
  *     → คืน existing_order (งานนี้มีใบสั่งขายแล้ว) หรือ order_payload ให้หน้าจอส่งต่อ POST /api/so-orders (ใช้เลขที่/ยอด/"แปลงแล้ว" ของกลางเดิม)
  *   - fail   = ใบนี้ไม่ผ่าน (ร่าง → ยกเลิก · ส่งแล้ว/ตอบรับ → ปฏิเสธ ต้องมีเหตุผล)
  *   - revise = ไม่ผ่าน + คัดลอกเป็นใบร่างใหม่ ผูกกับทุกใบงานที่ใบเก่าผูกอยู่ (จด "แทนใบเก่า")
+ *   body { action: "unlink", quotation_id, chain? }  ← เอาออกจากงานนี้ (เจ้าของขอ 2026-11-19: ระบบเก่าเดาผูกผิด)
+ *     ตัดแค่การผูกกับใบงานนี้ — ตัวใบเสนอราคา/ใบงานอื่นไม่ถูกแตะ · chain = เอาใบที่เปิดแทนกันทั้งสายออกด้วย · คืน removed (ไว้ย้อนกลับ)
+ *   body { action: "relink", rows }  ← ย้อนกลับหลังเอาออก (ผูกคืนด้วยค่าเดิม · เฉพาะแถวของใบงานนี้)
  *   สถานะเปลี่ยนผ่าน workflow กลาง 'qt' (RPC erp_playground_quote_transition) ด้วยสิทธิ์ของผู้ใช้เอง — RPC บันทึกประวัติฝั่งใบเสนอราคาให้
  *   ลำดับ revise: สร้างใบใหม่ก่อน → เปลี่ยนสถานะใบเก่า (พลาด = ยกเลิกใบใหม่คืน ใบเก่าไม่ถูกแตะ) → ผูก → ประวัติฝั่งใบงาน
  *
@@ -24,8 +27,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi, apiCan } from "@/lib/api-auth";
 import { auditDiff, writeAudit, writeAuditMany } from "@/lib/audit";
 import { quoteCopyPayload } from "@/lib/quote-copy";
-import { type QuoteLineSkuMap, quoteChosenReason, quoteConfirmSteps, quoteFailAction, quoteOrderPayload, sortSheetQuotations, QUOTE_STATUS_TH, QUOTE_STEP_PERM, type SheetQuotation } from "@/lib/design-sheet-quotations";
-import { loadSheetQuotations, linkSheetQuotations } from "@/lib/design-sheet-quotations-db";
+import { quoteChainIds, type QuoteLineSkuMap, quoteChosenReason, quoteConfirmSteps, quoteFailAction, quoteOrderPayload, sortSheetQuotations, QUOTE_STATUS_TH, QUOTE_STEP_PERM, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { loadSheetQuotations, linkSheetQuotations, withNameCheck, unlinkSheetQuotations, relinkSheetQuotations, type SheetQuoteLinkRow } from "@/lib/design-sheet-quotations-db";
 import type { QuoteDetail } from "../../../quotations/route";
 
 export const dynamic = "force-dynamic";
@@ -40,14 +43,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!(await apiCan(request, "qt.view"))) return NextResponse.json({ data: [], restricted: true, error: null });
   try {
     const admin = supabaseAdmin();
-    const data = await withOrders(admin, sortSheetQuotations(await loadSheetQuotations(admin, id)));
+    const data = await withNameCheck(admin, id, await withOrders(admin, sortSheetQuotations(await loadSheetQuotations(admin, id))));
     return NextResponse.json({ data, error: null }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "โหลดใบเสนอราคาไม่สำเร็จ" }, { status: 500 });
   }
 }
 
-type Body = { action?: string; quotation_id?: string; reason?: string | null; close_ids?: string[]; line_map?: QuoteLineSkuMap[] };
+type Body = { action?: string; quotation_id?: string; reason?: string | null; close_ids?: string[]; line_map?: QuoteLineSkuMap[]; chain?: boolean; rows?: SheetQuoteLinkRow[] };
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 /** เติมใบสั่งขาย (so_orders ที่ยังไม่ยกเลิก) ที่ดึงแต่ละใบเสนอราคาไปแล้ว — ผ่าน so_order_lines.quote_id */
@@ -63,6 +66,42 @@ async function withOrders(admin: Admin, rows: SheetQuotation[]): Promise<SheetQu
   const byQuote = new Map<string, { id: string; no: string | null }>();
   for (const l of lines) if (open.has(l.order_id) && !byQuote.has(l.quote_id)) byQuote.set(l.quote_id, { id: l.order_id, no: open.get(l.order_id) ?? null });
   return rows.map((r) => { const o = byQuote.get(r.quotation_id); return o ? { ...r, order_id: o.id, order_no: o.no } : r; });
+}
+
+/** เอาใบเสนอราคาออกจากใบงานนี้ (+ ทั้งสาย) — จดประวัติฝั่งใบงาน · คืนแถวที่เอาออกให้หน้าจอกดย้อนกลับ */
+async function unlinkQuote(request: NextRequest, sheetId: string, qid: unknown, chain: boolean): Promise<NextResponse> {
+  if (!isUuid(qid)) return NextResponse.json({ error: "รหัสไม่ถูกต้อง" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const linked = await loadSheetQuotations(admin, sheetId);
+  if (!linked.some((r) => r.quotation_id === qid)) return NextResponse.json({ error: "ใบเสนอราคานี้ไม่ได้ผูกกับใบงานนี้แล้ว" }, { status: 404 });
+  const ids = chain ? quoteChainIds(linked, qid) : [qid];
+  let removed: SheetQuoteLinkRow[];
+  try { removed = await unlinkSheetQuotations(admin, sheetId, ids); }
+  catch (e) { return NextResponse.json({ error: `เอาออกไม่สำเร็จ: ${e instanceof Error ? e.message : e}` }, { status: 500 }); }
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const numbers = removed.map((r) => linked.find((x) => x.quotation_id === r.quotation_id)?.quote_number ?? null);
+  await writeAudit(admin, { action: "quote_unlink", entityType: "design_sheet", entityId: sheetId, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { quotation_ids: removed.map((r) => r.quotation_id), quote_numbers: numbers, chain, code: numbers.filter(Boolean).join(", ") || undefined,
+      changes: auditDiff({ quotations: numbers.join(", ") }, { quotations: null }) } });
+  return NextResponse.json({ ok: true, removed, quote_numbers: numbers, error: null });
+}
+
+/** ย้อนกลับการเอาออก — ผูกคืนด้วยค่าเดิม (รับเฉพาะแถวของใบงานนี้) */
+async function relinkQuotes(request: NextRequest, sheetId: string, rows: SheetQuoteLinkRow[]): Promise<NextResponse> {
+  const ok = rows.filter((r) => r && r.design_sheet_id === sheetId && isUuid(r.id) && isUuid(r.quotation_id) && (r.replaces_quotation_id == null || isUuid(r.replaces_quotation_id)))
+    .map((r) => ({ id: r.id, design_sheet_id: sheetId, quotation_id: r.quotation_id, replaces_quotation_id: r.replaces_quotation_id ?? null,
+      source: String(r.source || "send"), created_by: isUuid(r.created_by) ? r.created_by : null, created_by_name: r.created_by_name ?? null, created_at: r.created_at }));
+  if (!ok.length) return NextResponse.json({ error: "ไม่มีรายการให้ย้อนกลับ" }, { status: 400 });
+  const admin = supabaseAdmin();
+  try { await relinkSheetQuotations(admin, ok); }
+  catch (e) { return NextResponse.json({ error: `ย้อนกลับไม่สำเร็จ: ${e instanceof Error ? e.message : e}` }, { status: 500 }); }
+  const { data: qs } = await admin.from("erp_playground_quotations").select("quote_number").in("id", ok.map((r) => r.quotation_id));
+  const numbers = ((qs ?? []) as { quote_number: string | null }[]).map((q) => q.quote_number);
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "quote_relink", entityType: "design_sheet", entityId: sheetId, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { quotation_ids: ok.map((r) => r.quotation_id), quote_numbers: numbers, code: numbers.filter(Boolean).join(", ") || undefined,
+      changes: auditDiff({ quotations: null }, { quotations: numbers.join(", ") }) } });
+  return NextResponse.json({ ok: true, restored: ok.length, error: null });
 }
 
 /** ยืนยันใบนี้ "ผ่าน" + ปิดใบอื่นที่ติ๊ก — คืนข้อมูลให้หน้าจอเปิดใบสั่งขายต่อ (ถ้างานนี้ยังไม่มี) */
@@ -162,7 +201,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const action = body.action;
   const qid = body.quotation_id;
-  if (action !== "fail" && action !== "revise" && action !== "confirm") return NextResponse.json({ error: "action ต้องเป็น fail / revise / confirm" }, { status: 400 });
+  if (action === "unlink" || action === "relink") {
+    if (!isUuid(id)) return NextResponse.json({ error: "รหัสไม่ถูกต้อง" }, { status: 400 });
+    if (!(await apiCan(request, "qt.view"))) return NextResponse.json({ error: "ไม่มีสิทธิ์ดูใบเสนอราคา" }, { status: 403 });
+    return action === "unlink" ? unlinkQuote(request, id, qid, !!body.chain) : relinkQuotes(request, id, Array.isArray(body.rows) ? body.rows : []);
+  }
+  if (action !== "fail" && action !== "revise" && action !== "confirm") return NextResponse.json({ error: "action ต้องเป็น fail / revise / confirm / unlink / relink" }, { status: 400 });
   if (!isUuid(id) || !isUuid(qid)) return NextResponse.json({ error: "รหัสไม่ถูกต้อง" }, { status: 400 });
   if (action === "confirm") return confirmQuote(request, id, qid, Array.isArray(body.close_ids) ? body.close_ids.filter(isUuid) : [], Array.isArray(body.line_map) ? body.line_map : []);
 

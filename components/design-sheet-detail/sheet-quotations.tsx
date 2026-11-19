@@ -10,6 +10,8 @@
  * แบบกะทัดรัด (เจ้าของเลือกแบบ A 2026-11-10): แถวละปุ่มหลักปุ่มเดียว (ยืนยัน · ผ่าน / เปิดใบสั่งขาย / ลิงก์ใบสั่งขาย)
  *   ที่เหลือ (พิมพ์ · ทำต่อในตะกร้า · ไม่ผ่าน · ไม่ผ่าน+เปิดใบใหม่) อยู่ในปุ่ม ⋮ (ของกลาง Popover) · คำเตือนเป็นป้ายเล็กที่หัวแผง
  *
+ * เอาออกจากงานนี้ (เจ้าของขอ 2026-11-19 · ระบบเก่าเดาผูกผิด): ⋮ → "เอาออกจากงานนี้" / "เอาออกทั้งสาย" (ใบที่เปิดแทนกัน)
+ *   ตัดแค่การผูก ตัวใบไม่ถูกลบ · ถามยืนยันก่อน · แจ้งผลมีปุ่ม "ย้อนกลับ" · ป้าย "ชื่อไม่ตรงงาน" = ชื่อสินค้าในใบไม่ตรงชื่อใบงาน
  * ข้อมูล: GET/POST /api/design-sheets/[id]/quotations · กติกา lib/design-sheet-quotations.ts
  * ของกลาง: MiniTable · Popover (เมนู ⋮) · askText (ถามเหตุผล) · useToast · state-views · apiFetch · openLink
  */
@@ -18,14 +20,14 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Popover } from "@/components/popover";
-import { askText } from "@/components/modal/ask-dialog";
+import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { LoadingState, ErrorState } from "@/components/state-views";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { openLink } from "@/lib/open-link";
-import { guessSkuForLine, isQuoteOpen, quoteConfirmPlan, quoteFailAction, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type QuoteConfirmPlan, type QuoteLineSkuMap, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { guessSkuForLine, isQuoteOpen, quoteChainIds, quoteConfirmPlan, quoteFailAction, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type QuoteConfirmPlan, type QuoteLineSkuMap, type SheetQuotation } from "@/lib/design-sheet-quotations";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
@@ -71,6 +73,41 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
     } catch (e) { setErr(e instanceof Error ? e.message : tr("โหลดใบเสนอราคาไม่สำเร็จ", "Failed to load quotations")); setRows([]); }
   }, [sheetId]);
   useEffect(() => { void load(); }, [load, refreshKey]);
+
+  // เอาออกจากงานนี้ (+ ทั้งสาย) — ย้อนกลับได้จากแจ้งผลมุมจอ
+  const unlink = async (q: SheetQuotation, chain: boolean) => {
+    const ids = chain ? quoteChainIds(rows ?? [], q.quotation_id) : [q.quotation_id];
+    const nos = (rows ?? []).filter((r) => ids.includes(r.quotation_id)).map((r) => r.quote_number ?? tr("ร่าง", "Draft"));
+    const others = q.other_sheets.map((x) => x.code).filter(Boolean).join(", ");
+    const ok = await askConfirm({
+      title: chain ? tr(`เอาออกทั้งสาย ${ids.length} ใบ?`, `Remove the whole chain (${ids.length})?`) : tr(`เอา ${nos[0]} ออกจากงานนี้?`, `Remove ${nos[0]} from this job?`),
+      message: (
+        <div className="space-y-1.5 text-sm">
+          {chain && <div className="font-medium text-slate-700">{nos.join(" · ")}</div>}
+          <div>{tr("ตัดแค่การผูกกับใบงานนี้ — ตัวใบเสนอราคาไม่ถูกลบ ยังอยู่ในระบบขายตามเดิม", "Only the link to this job is removed — the quotation itself stays in sales")}</div>
+          {others && <div className="text-slate-500">{tr(`ยังผูกกับ ${others} ตามเดิม`, `Still linked to ${others}`)}</div>}
+          <div className="text-slate-500">{tr("พลาดกด \"ย้อนกลับ\" ที่แจ้งผลมุมจอได้", "Press \"Undo\" on the notice if this was a mistake")}</div>
+        </div>
+      ),
+      variant: "danger", confirmText: tr("เอาออก", "Remove"), cancelText: tr("ไม่เอาออก", "Keep"),
+    });
+    if (!ok) return;
+    setBusy(q.quotation_id);
+    try {
+      const j = await apiFetch(`/api/design-sheets/${sheetId}/quotations`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "unlink", quotation_id: q.quotation_id, chain }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const removed = j.removed ?? [];
+      toast.undo(tr(`เอาออกจากงานนี้แล้ว ${removed.length} ใบ`, `Removed ${removed.length} from this job`), async () => {
+        const u = await apiFetch(`/api/design-sheets/${sheetId}/quotations`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "relink", rows: removed }) }).then((r) => r.json()).catch(() => ({ error: tr("ย้อนกลับไม่สำเร็จ", "Undo failed") }));
+        if (u.error) toast.error(u.error); else { toast.success(tr("ผูกคืนแล้ว", "Restored")); onChanged?.(); await load(); }
+      }, { ms: 10000 });
+      onChanged?.();
+      await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("เอาออกไม่สำเร็จ", "Remove failed")); }
+    finally { setBusy(null); }
+  };
 
   const fail = async (q: SheetQuotation, revise: boolean) => {
     const fa = quoteFailAction(q.status); if (!fa) return;
@@ -162,6 +199,13 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
               q.replaced_by_quote_number ? t(`→ เปิดใบใหม่แล้ว ${q.replaced_by_quote_number}`, `→ Replaced by ${q.replaced_by_quote_number}`) : null,
               q.other_sheets.length ? `${t("รวมกับ", "With")} ${q.other_sheets.map((s) => s.code).filter(Boolean).join(", ")}` : null,
             ].filter(Boolean).join(" · ");
+            const warn = q.name_mismatch ? (
+              <span className="mr-1 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 text-[11px] font-medium text-amber-800"
+                title={[t(`ชื่อสินค้าในใบนี้ไม่ตรงกับชื่องาน — อาจผูกผิด (ระบบเก่าเดาให้) · กด ⋮ → "เอาออกจากงานนี้"`, `Item names don't match this job — may be linked by mistake · ⋮ → "Remove from this job"`), ...(q.line_names ?? [])].join("\n")}>
+                <Icon value="i:alert-triangle" className="text-[11px]" />{t("ชื่อไม่ตรงงาน", "Name mismatch")}{q.line_names?.[0] ? `: ${q.line_names[0]}` : ""}
+              </span>
+            ) : null;
+            if (warn) return <div className="truncate text-[11px] text-slate-400">{warn}{sub}</div>;
             return sub ? <div className="truncate text-[11px] text-slate-400" title={[sub, ...q.other_sheets.map((s) => `${s.code ?? ""} ${s.name ?? ""}`)].join("\n")}>{sub}</div> : null;
           })()}
         </div>
@@ -183,6 +227,7 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
         // ยืนยัน · ผ่าน (ร่าง/ส่งแล้ว) · ตอบรับแล้วแต่ยังไม่มีใบสั่งขาย = "เปิดใบสั่งขาย" (ลองใหม่)
         const canConfirm = canEdit && !q.order_id && (q.status === "draft" || q.status === "sent" || q.status === "accepted");
         const canCart = canEdit && q.status === "draft" && q.quotation_id !== cartId;
+        const chainLen = quoteChainIds(rows, q.quotation_id).length;
         return (
           <div className="flex items-center justify-end gap-1">
             {working && <span className="text-[11px] text-slate-400">{t("กำลังทำ...", "Working...")}</span>}
@@ -199,7 +244,7 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
             ) : null}
             <Popover align="right" panelClassName="w-60 py-1"
               trigger={(toggle, open) => (
-                <button type="button" onClick={toggle} aria-label={t("คำสั่งอื่น", "More actions")} title={t("พิมพ์ · ทำต่อ · ไม่ผ่าน", "Print · continue · not passed")}
+                <button type="button" onClick={toggle} aria-label={t("คำสั่งอื่น", "More actions")} title={t("พิมพ์ · ทำต่อ · ไม่ผ่าน · เอาออก", "Print · continue · not passed · remove")}
                   className={`inline-flex h-7 w-7 items-center justify-center rounded-md border text-slate-500 hover:bg-slate-50 ${open ? "border-slate-400 bg-slate-50" : "border-slate-200"}`}>
                   <Icon value="i:dots-vertical" className="text-[15px]" />
                 </button>
@@ -219,6 +264,17 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
                         <Icon value="i:refresh" className="text-[15px]" />{t("ไม่ผ่าน · เปิดใบใหม่แทน", "Not passed · open a new one")}</button>
                       <button type="button" disabled={!!busy} className={`${menuItem} text-red-600`} onClick={() => { close(); void fail(q, false); }}>
                         <Icon value="i:circle-x" className="text-[15px]" />{t("ไม่ผ่าน", "Not passed")}</button>
+                    </>
+                  )}
+                  {canEdit && (
+                    <>
+                      <div className="my-1 border-t border-slate-100" />
+                      <button type="button" disabled={!!busy} className={`${menuItem} text-red-600`} onClick={() => { close(); void unlink(q, false); }}>
+                        <Icon value="i:x" className="text-[15px]" />{t("เอาออกจากงานนี้", "Remove from this job")}</button>
+                      {chainLen > 1 && (
+                        <button type="button" disabled={!!busy} className={`${menuItem} text-red-600`} onClick={() => { close(); void unlink(q, true); }}>
+                          <Icon value="i:x" className="text-[15px]" />{t(`เอาออกทั้งสาย (${chainLen} ใบ)`, `Remove whole chain (${chainLen})`)}</button>
+                      )}
                     </>
                   )}
                 </>

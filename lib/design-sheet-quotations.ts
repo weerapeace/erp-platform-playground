@@ -59,6 +59,10 @@ export type SheetQuotation = {
   /** ใบสั่งขาย (so_orders · ยังไม่ยกเลิก) ที่ดึงใบนี้ไปแล้ว — GET เติมให้ */
   order_id?: string | null;
   order_no?: string | null;
+  /** ชื่อสินค้าในใบไม่ตรงกับชื่อใบงานเลย (น่าจะผูกผิด · ระบบเก่าเดาให้) — GET เติมให้ (quoteNameMismatch) */
+  name_mismatch?: boolean;
+  /** ชื่อสินค้าในใบ (ไม่ซ้ำ) — ไว้โชว์ในป้ายเตือน */
+  line_names?: string[];
 };
 
 /** เรียง: ใบที่ยังเปิดก่อน แล้วใหม่ → เก่า */
@@ -175,4 +179,45 @@ export function guessSkuForLine<T extends SkuGuessable>(productName: string, sku
     if (sc > bestScore) { best = s; bestScore = sc; tie = false; } else if (sc > 0 && sc === bestScore) tie = true;
   }
   return bestScore > 0 && !tie ? best : null;
+}
+
+// ---- ใบที่ผูกผิด (เจ้าของขอ 2026-11-19: ระบบเก่าเดาผูกใบเสนอราคากับใบงานผิด → เตือน + เอาออกได้) ----
+
+/** คำทั่วไปที่ไม่ใช้ตัดสินว่า "ตรงงาน" */
+const NAME_STOP = new Set(["กระเป๋า", "ใบ", "ผ้า", "size", "ไซส์", "ขนาด", "the", "of", "and", "x", "งาน", "ของ", "คุณ", "ทรง", "cm", "cm.", "ละ", "สี"]);
+const nameTokens = (s: string): string[] =>
+  s.toLowerCase().split(/[\s,()/|·+\-]+/).map((w) => w.replace(/^กระเป๋า(?=.)/, "")).filter((w) => w.length >= 2 && !NAME_STOP.has(w) && !/^[\d.]+$/.test(w));
+
+/**
+ * ชื่อสินค้าในใบเสนอราคา "ไม่ตรง" กับชื่อใบงานเลยไหม
+ * ตรง = คำสำคัญของชื่อใบงานอยู่ในชื่อสินค้า หรือคำของชื่อสินค้า (3 ตัวอักษรขึ้นไป) อยู่ในชื่อใบงาน
+ * ไม่มีคำให้เทียบ / ไม่มีบรรทัด = ไม่เตือน (false)
+ */
+export function quoteNameMismatch(sheetName: string | null | undefined, lineNames: (string | null | undefined)[]): boolean {
+  const sheet = (sheetName ?? "").toLowerCase();
+  const lines = lineNames.map((x) => (x ?? "").toLowerCase()).filter(Boolean);
+  const keys = nameTokens(sheet);
+  if (!keys.length || !lines.length) return false;
+  const joined = lines.join(" | ");
+  if (keys.some((k) => joined.includes(k))) return false;
+  if (lines.flatMap(nameTokens).some((w) => w.length >= 3 && sheet.includes(w))) return false;
+  return true;
+}
+
+/** ใบทั้งสายที่เปิดแทนกัน (ใบเก่า ↔ ใบใหม่) ในใบงานเดียวกัน — รวมใบตั้งต้น */
+export function quoteChainIds(rows: Pick<SheetQuotation, "quotation_id" | "replaces_quotation_id">[], qid: string): string[] {
+  const ids = new Set(rows.map((r) => r.quotation_id));
+  if (!ids.has(qid)) return [];
+  const out = new Set<string>([qid]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const r of rows) {
+      const prev = r.replaces_quotation_id && ids.has(r.replaces_quotation_id) ? r.replaces_quotation_id : null;
+      if (!prev) continue;
+      if (out.has(r.quotation_id) && !out.has(prev)) { out.add(prev); grew = true; }
+      if (out.has(prev) && !out.has(r.quotation_id)) { out.add(r.quotation_id); grew = true; }
+    }
+  }
+  return [...out];
 }

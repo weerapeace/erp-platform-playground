@@ -3,7 +3,7 @@
  * กติกา pure + ชนิดข้อมูล: lib/design-sheet-quotations.ts
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { isQuoteOpen, type SheetQuotation } from "@/lib/design-sheet-quotations";
+import { isQuoteOpen, quoteNameMismatch, type SheetQuotation } from "@/lib/design-sheet-quotations";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -102,4 +102,49 @@ export async function sheetQuoteBadges(admin: Admin, sheetIds: string[]): Promis
     out.set(r.design_sheet_id, b);
   }
   return out;
+}
+
+/** เติมป้าย "ชื่อไม่ตรงงาน" — เทียบชื่อสินค้าในใบกับชื่อใบงาน (quoteNameMismatch) */
+export async function withNameCheck(admin: Admin, sheetId: string, rows: SheetQuotation[]): Promise<SheetQuotation[]> {
+  if (!rows.length) return rows;
+  const [{ data: ds }, { data: ls }] = await Promise.all([
+    admin.from("design_sheets").select("name").eq("id", sheetId).maybeSingle(),
+    admin.from("erp_playground_quote_lines").select("quote_id, product_name").in("quote_id", rows.map((r) => r.quotation_id)),
+  ]);
+  const sheetName = (ds as { name: string | null } | null)?.name ?? "";
+  const names = new Map<string, Set<string>>();
+  for (const l of (ls ?? []) as { quote_id: string; product_name: string | null }[]) {
+    const n = (l.product_name ?? "").trim(); if (!n) continue;
+    (names.get(l.quote_id) ?? names.set(l.quote_id, new Set()).get(l.quote_id)!).add(n);
+  }
+  return rows.map((r) => {
+    const ln = [...(names.get(r.quotation_id) ?? [])];
+    return { ...r, line_names: ln, name_mismatch: quoteNameMismatch(sheetName, ln) };
+  });
+}
+
+/** แถวผูกเต็ม ๆ — ไว้คืนค่าเดิมตอน "ย้อนกลับ" หลังเอาออก */
+export type SheetQuoteLinkRow = {
+  id: string; design_sheet_id: string; quotation_id: string; replaces_quotation_id: string | null;
+  source: string; created_by: string | null; created_by_name: string | null; created_at: string;
+};
+const LINK_COLS = "id, design_sheet_id, quotation_id, replaces_quotation_id, source, created_by, created_by_name, created_at";
+
+/** เอาใบเสนอราคาออกจากใบงานนี้ (ตัดแค่การผูก · ตัวใบไม่ถูกแตะ) — คืนแถวที่เอาออก */
+export async function unlinkSheetQuotations(admin: Admin, sheetId: string, quotationIds: string[]): Promise<SheetQuoteLinkRow[]> {
+  if (!quotationIds.length) return [];
+  const { data, error } = await admin.from("design_sheet_quotations").select(LINK_COLS).eq("design_sheet_id", sheetId).in("quotation_id", quotationIds);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as SheetQuoteLinkRow[];
+  if (!rows.length) return [];
+  const { error: dErr } = await admin.from("design_sheet_quotations").delete().in("id", rows.map((r) => r.id));
+  if (dErr) throw new Error(dErr.message);
+  return rows;
+}
+
+/** ย้อนกลับ: ผูกคืนด้วยค่าเดิมทุกช่อง (ผูกอยู่แล้ว = ข้าม) */
+export async function relinkSheetQuotations(admin: Admin, rows: SheetQuoteLinkRow[]): Promise<void> {
+  if (!rows.length) return;
+  const { error } = await admin.from("design_sheet_quotations").upsert(rows, { onConflict: "design_sheet_id,quotation_id", ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
 }
