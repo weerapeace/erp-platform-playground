@@ -103,7 +103,7 @@ export function PromoCoversPage() {
         {/* รายการชุดโปร — มือถือซ่อนเมื่อเปิดชุด */}
         <div className={`${selId ? "hidden lg:block" : ""} space-y-2`}>
           {listErr ? <ErrorState title="โหลดชุดโปรไม่สำเร็จ" hint={listErr} onRetry={() => void loadList()} /> : !list ? <LoadingState rows={4} /> : list.length === 0 ? (
-            <EmptyState icon="image" title={trash ? "ถังขยะว่าง" : "ยังไม่มีชุดโปร"} hint={trash ? undefined : "สร้างชุดโปรแรก แล้วตั้งเวลาให้ระบบเปลี่ยนปกทุกร้านให้"} onCreate={canPublish && !trash ? () => void create() : undefined} createLabel="สร้างชุดโปรใหม่" />
+            <EmptyState icon={<Icon name="image" size={36} />}title={trash ? "ถังขยะว่าง" : "ยังไม่มีชุดโปร"} hint={trash ? undefined : "สร้างชุดโปรแรก แล้วตั้งเวลาให้ระบบเปลี่ยนปกทุกร้านให้"} onCreate={canPublish && !trash ? () => void create() : undefined} createLabel="สร้างชุดโปรใหม่" />
           ) : (
             <ul className="space-y-1.5">
               {list.map((c) => {
