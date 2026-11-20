@@ -43,6 +43,8 @@ export function CalendarTabs({ height = 620, fill = false, extraTabs = [] }: { h
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const pathname = usePathname();
   const selfHref = (key: string) => `${pathname}?cal=${key}`;
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([tab]));
+  useEffect(() => { setVisited((v) => (v.has(tab) ? v : new Set(v).add(tab))); }, [tab]);
   const extra = extraTabs.find((t) => t.key === tab);
   const cal = CALENDARS.find((c) => c.key === tab) ?? CALENDARS[0];
   const btn = (on: boolean) => `px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
@@ -65,12 +67,14 @@ export function CalendarTabs({ height = 620, fill = false, extraTabs = [] }: { h
         </div>
         {!extra && <button onClick={() => setBig(true)} className="ml-auto text-xs text-blue-600 hover:underline">⤢ เปิดใหญ่</button>}
       </div>
-      {extra ? (
-        <div className={`overflow-y-auto bg-slate-50 ${bodySize}`} style={bodyStyle}>{extra.content}</div>
-      ) : (
-        <EmbedFrame key={cal.key} url={cal.url} title={cal.label} className={bodySize}
+      {/* แท็บที่เคยเปิดแล้ว "ค้างไว้" (ซ่อนเฉย ๆ) → สลับกลับขึ้นทันที ไม่โหลดหน้าใหม่ (เจ้าของ 2026-11-20: สลับแท็บนาน) */}
+      {extraTabs.filter((t) => visited.has(t.key)).map((t) => (
+        <div key={t.key} className={`overflow-y-auto bg-slate-50 ${bodySize} ${t.key === tab ? "" : "hidden"}`} style={bodyStyle}>{t.content}</div>
+      ))}
+      {CALENDARS.filter((c) => visited.has(c.key)).map((c) => (
+        <EmbedFrame key={c.key} url={c.url} title={c.label} className={`${bodySize} ${c.key === tab ? "" : "hidden"}`}
           height={fill ? null : height} minHeight={MIN_HEIGHT} />
-      )}
+      ))}
       {big && !extra && <EmbedModal url={cal.url} title={cal.label} onClose={() => setBig(false)} />}
     </div>
   );

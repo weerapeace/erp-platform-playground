@@ -856,7 +856,7 @@ export function ContentCalendarView() {
                     </div>
                     <div className="space-y-1">
                       {list.slice(0, 4).map((e) => <Chip key={e.id} e={e} />)}
-                      {list.length > 4 && <div className="text-[10px] text-slate-400 pl-0.5">+{list.length - 4} {t("อื่น ๆ", "more")}</div>}
+                      {list.length > 4 && <button type="button" onClick={(ev) => { ev.stopPropagation(); setDayPick(key); }} className="w-full rounded px-0.5 text-left text-[10px] text-violet-600 hover:bg-violet-50 hover:underline">+{list.length - 4} {t("อื่น ๆ", "more")}</button>}
                     </div>
                     {/* 📖 แถบ Story ของวัน: มีแล้ว = จุดสีแบรนด์ (✓ ถ้าโพสต์แล้ว) · ยังไม่มี = ปุ่ม ＋ สร้าง Story ลงวันนี้ · วันที่ผ่านมาแล้วและไม่มี = ขีดแดงจาง */}
                     {mode === "content" && storyMode && (() => {

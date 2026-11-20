@@ -48,7 +48,7 @@ import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
 import { TaskTypeChip } from "./task-type-chip";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
-import { usePushToast } from "@/components/toast";
+import { usePushToast, useToast } from "@/components/toast";
 import { subStatusDot, subStatusLabel } from "./subtask-status";
 import { EmptyState } from "@/components/state-views";
 import { BrandFilterChip, useBrandParam } from "@/components/brand-hub/brand-filter";
@@ -251,6 +251,27 @@ export default function TasksPage() {
     if (ok) await reload();
   }, [pushToast, reload]);
 
+  // ปฏิทิน: เปลี่ยนวันส่ง (ทีละงาน / ทั้งชุด) — จอเปลี่ยนทันที · บันทึกผ่าน updateTask (API เดิม มี audit) · แจ้งผลมีปุ่มย้อนกลับ
+  const toastApi = useToast();
+  const setDueBatch = useCallback(async (moves: { task: CreativeTask; to: string | null }[]) => {
+    const list = moves.filter((m) => (m.task.due_date ? String(m.task.due_date).slice(0, 10) : null) !== m.to);
+    if (!list.length) return;
+    const before = allTasks;
+    const apply = (pairs: { id: string; to: string | null }[]) => tasksSWR.mutate((tasksSWR.data ?? []).map((x) => { const p = pairs.find((q) => q.id === x.id); return p ? { ...x, due_date: p.to } : x; }));
+    apply(list.map((m) => ({ id: m.task.id, to: m.to })));
+    const res = await Promise.allSettled(list.map((m) => updateTask(m.task.id, { due_date: m.to })));
+    const failed = res.filter((r) => r.status === "rejected").length;
+    await reload();
+    if (failed) { pushToast("error", t(`เปลี่ยนวันไม่สำเร็จ ${failed} งาน`, `${failed} failed`)); if (failed === list.length) { tasksSWR.mutate(before); return; } }
+    const label = list.length === 1 ? `"${list[0].task.title}"` : `${list.length} งาน`;
+    toastApi.undo(t(`เปลี่ยนวันส่ง ${label} แล้ว`, `Moved ${label}`), async () => {
+      apply(list.map((m) => ({ id: m.task.id, to: m.task.due_date ? String(m.task.due_date).slice(0, 10) : null })));
+      await Promise.allSettled(list.map((m) => updateTask(m.task.id, { due_date: m.task.due_date ? String(m.task.due_date).slice(0, 10) : null })));
+      await reload();
+    }, { ms: 8000 });
+  }, [allTasks, tasksSWR, reload, pushToast, toastApi, t]);
+  const shiftYmd = (s: string, n: number) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); const x = new Date(y, m - 1, d + n); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; };
+
   const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   return (
@@ -335,10 +356,10 @@ export default function TasksPage() {
             {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} mySubView={mySubView} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
 
             {view === "calendar" && (
-              <div>
-                <p className="text-xs text-slate-400 mb-2">💡 {t("งานเรียงตามกำหนดส่ง · คลิกงานเพื่อดูรายละเอียด", "Tasks by due date · click a task to view details")}</p>
-                <CalendarBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} />
-              </div>
+              <CalendarBoard tasks={tasks} onCardClick={(id) => setDetailId(id)}
+                onSetDue={can("tasks.edit" as never) ? (task, d) => void setDueBatch([{ task, to: d }]) : undefined}
+                onSetDueMany={can("tasks.edit" as never) ? (list, delta) => void setDueBatch(list.map((task) => ({ task, to: delta === null || !task.due_date ? null : shiftYmd(String(task.due_date), delta) }))) : undefined}
+                onStatus={(task, to) => void applyMove(task, to)} />
             )}
 
             {view === "workload" && <WorkloadBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} />}

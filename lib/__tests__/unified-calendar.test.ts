@@ -41,3 +41,13 @@ describe("ปฏิทินรวม — กรอง", () => {
     expect(filterCalItems(items, new Set(), "none").map((i) => i.id)).toEqual(["2"]);
   });
 });
+
+import { thaiHolidayOf } from "@/lib/thai-holidays";
+describe("วันหยุดราชการไทย", () => {
+  it("วันตายตัวทุกปี + จันทรคติปีที่ใส่ไว้", () => {
+    expect(thaiHolidayOf("2027-12-05")).toBe("วันพ่อแห่งชาติ");
+    expect(thaiHolidayOf("2026-03-03")).toBe("วันมาฆบูชา");
+    expect(thaiHolidayOf("2027-03-03")).toBeUndefined();
+    expect(thaiHolidayOf("2026-11-20")).toBeUndefined();
+  });
+});

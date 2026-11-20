@@ -2,129 +2,93 @@
 
 // ============================================================
 // CalendarBoard — มุมมองปฏิทิน (งานเรียงตามกำหนดส่ง) สำหรับโมดูลงาน Creative
-// ใช้ข้อมูล tasks ที่หน้า /tasks โหลดอยู่แล้ว (ไม่ยิง API เพิ่ม) · กดงาน = เปิดรายละเอียด
+// ใช้ข้อมูล tasks ที่หน้า /tasks โหลดอยู่แล้ว (ไม่ยิง API เพิ่ม)
+// 2026-11-20: ย้ายมาใช้ปฏิทินกลาง ScheduleBoard (เต็มจอ · กล่อง "ยังไม่ลงวัน" ขวา · ลากเปลี่ยนวัน · +N กดได้
+//   · เดือน/สัปดาห์/รายการ · ค้นหา · ความแน่น · เลือกหลายงาน · วันหยุด · พิมพ์) + ป๊อปดูงาน (เลื่อนวัน/เปลี่ยนสถานะ/เปิดเต็ม)
 // ============================================================
-
-import { useMemo, useState } from "react";
-import { useT } from "@/components/i18n";
-import { statusMeta, isTerminal } from "./use-statuses";
+import { ScheduleBoard } from "@/components/schedule-board";
+import { useViewportLayout } from "@/components/device-view";
+import { statusMeta, isTerminal, transitionsFrom } from "./use-statuses";
 import { isOverdue, type CreativeTask } from "./data";
 
-const DOW_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
-const DOW_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_TH = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-
-function pad(n: number) { return String(n).padStart(2, "0"); }
-
-export function CalendarBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; onCardClick: (id: string) => void }) {
-  const t = useT();
-  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
-
-  // งานตามวันกำหนดส่ง (YYYY-MM-DD)
-  const byDate = useMemo(() => {
-    const map = new Map<string, CreativeTask[]>();
-    for (const tk of tasks) {
-      if (!tk.due_date) continue;
-      const k = String(tk.due_date).slice(0, 10);
-      const arr = map.get(k) ?? []; arr.push(tk); map.set(k, arr);
-    }
-    return map;
-  }, [tasks]);
-  const noDue = useMemo(() => tasks.filter((tk) => !tk.due_date && !isTerminal(tk.status)).length, [tasks]);
-
-  const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
-  const startDow = new Date(cursor.y, cursor.m, 1).getDay();
-  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate();
-  const cells: (number | null)[] = [...Array(startDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const prev = () => setCursor((c) => (c.m === 0 ? { y: c.y - 1, m: 11 } : { y: c.y, m: c.m - 1 }));
-  const next = () => setCursor((c) => (c.m === 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m: c.m + 1 }));
-  const goToday = () => { const d = new Date(); setCursor({ y: d.getFullYear(), m: d.getMonth() }); };
-
-  const monthLabel = t(`${MONTH_TH[cursor.m]} ${cursor.y + 543}`, `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][cursor.m]} ${cursor.y}`);
+export function CalendarBoard({ tasks, onCardClick, onSetDue, onSetDueMany, onStatus }: {
+  tasks: CreativeTask[];
+  onCardClick: (id: string) => void;
+  onSetDue?: (task: CreativeTask, date: string | null) => void;
+  onSetDueMany?: (tasks: CreativeTask[], deltaDays: number | null) => void;
+  onStatus?: (task: CreativeTask, toKey: string) => void;
+}) {
+  const layout = useViewportLayout();
+  // งานที่ปิดแล้วและไม่มีวัน ไม่ต้องรกกล่อง "ยังไม่ลงวัน"
+  const items = tasks.filter((t) => t.due_date || !isTerminal(t.status));
+  const chipCls = (t: CreativeTask) => isOverdue(t) ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-violet-50 hover:border-violet-200";
+  const who = (t: CreativeTask) => (t.assignees?.length ? t.assignees.map((a) => a.label).join(", ") : t.assignee_label) || "ยังไม่มีผู้รับผิดชอบ";
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-      {/* แถบเดือน */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <button onClick={prev} className="h-8 w-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
-          <span className="text-base font-semibold text-slate-800 min-w-[150px] text-center">{monthLabel}</span>
-          <button onClick={next} className="h-8 w-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
-          <button onClick={goToday} className="ml-1 h-8 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">{t("วันนี้", "Today")}</button>
-        </div>
-        {noDue > 0 && <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{t("ยังไม่กำหนดส่ง", "No due date")}: {noDue}</span>}
-      </div>
-
-      {/* 📱 มือถือ (จอแคบ) — แสดงเป็นรายการตามวัน แทนตาราง 7 ช่องที่แคบจนอ่านชื่องานไม่ออก */}
-      <div className="sm:hidden divide-y divide-slate-100">
-        {(() => {
-          const days = Array.from({ length: daysInMonth }, (_, i) => i + 1)
-            .map((day) => ({ day, dateStr: `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}` }))
-            .filter((d) => (byDate.get(d.dateStr) ?? []).length > 0);
-          if (!days.length) return <p className="px-4 py-8 text-center text-sm text-slate-400">{t("เดือนนี้ไม่มีงานที่ครบกำหนด", "No tasks due this month")}</p>;
-          return days.map(({ day, dateStr }) => {
-            const dow = (startDow + day - 1) % 7;
-            return (
-              <div key={dateStr} className="px-3 py-2">
-                <div className={`mb-1 text-xs font-semibold ${dateStr === todayStr ? "text-violet-700" : dow === 0 || dow === 6 ? "text-rose-400" : "text-slate-500"}`}>
-                  {(t("th", "en") === "th" ? DOW_TH : DOW_EN)[dow]} {day}{dateStr === todayStr ? ` · ${t("วันนี้", "Today")}` : ""}
-                </div>
-                <div className="space-y-1">
-                  {(byDate.get(dateStr) ?? []).map((tk) => {
-                    const m = statusMeta(tk.status);
-                    const od = isOverdue(tk);
-                    return (
-                      <button key={tk.id} onClick={() => onCardClick(tk.id)}
-                        className={`w-full text-left text-sm leading-snug rounded-lg px-2 py-1.5 border ${od ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
-                        <span className={`inline-block h-2 w-2 rounded-full mr-1.5 align-middle ${m.dot}`} />
-                        {tk.task_no ? <span className="mr-1 font-mono text-[11px] text-slate-400">{tk.task_no}</span> : null}{tk.title}
-                      </button>
-                    );
-                  })}
-                </div>
+    <ScheduleBoard<CreativeTask>
+      items={items}
+      layout={layout}
+      maxPerDay={4}
+      backlogTitle="ยังไม่ลงวันส่ง"
+      printTitle="ปฏิทินงาน"
+      getDate={(t) => (t.due_date ? String(t.due_date).slice(0, 10) : null)}
+      onSchedule={(t, d) => onSetDue?.(t, d)}
+      onScheduleMany={onSetDueMany}
+      getSearchText={(t) => `${t.task_no ?? ""} ${t.title} ${t.product_name ?? ""} ${who(t)}`}
+      getDotColor={(t) => (isOverdue(t) ? "#ef4444" : "#8b5cf6")}
+      hint={onSetDue ? "ลากงานไปวันอื่นเพื่อเปลี่ยนวันส่ง · ลากเข้ากล่องขวา = ไม่กำหนดวัน · กดงานเพื่อดู/จัดการ" : "กดงานเพื่อดูรายละเอียด"}
+      renderChip={(t) => (
+        <button type="button" onClick={() => onCardClick(t.id)} title={`${t.task_no ?? ""} ${t.title}`}
+          className={`block w-full truncate rounded border px-1.5 py-0.5 text-left text-[11px] leading-tight ${chipCls(t)}`}>
+          <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${statusMeta(t.status).dot}`} />{t.title}
+        </button>
+      )}
+      renderCard={(t) => (
+        <button type="button" onClick={() => onCardClick(t.id)}
+          className={`block w-full rounded-lg border px-2 py-1.5 text-left text-xs ${chipCls(t)}`}>
+          <div className="flex items-center gap-1 text-[10px] text-slate-400">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${statusMeta(t.status).dot}`} />{statusMeta(t.status).label}
+            {t.task_no && <span className="ml-auto font-mono">{t.task_no}</span>}
+          </div>
+          <div className="truncate">{t.title}</div>
+        </button>
+      )}
+      renderPopView={(t, close) => {
+        const m = statusMeta(t.status);
+        const next = transitionsFrom(t.status);
+        return (
+          <div className="space-y-2 text-xs">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0">
+                {t.task_no && <div className="font-mono text-[10px] text-slate-400">{t.task_no}</div>}
+                <div className="text-sm font-semibold leading-snug text-slate-800">{t.title}</div>
               </div>
-            );
-          });
-        })()}
-      </div>
-
-      {/* หัวคอลัมน์วัน */}
-      <div className="hidden sm:grid grid-cols-7 border-b border-slate-100">
-        {(t("th", "en") === "th" ? DOW_TH : DOW_EN).map((d, i) => (
-          <div key={i} className={`text-center text-xs font-medium py-1.5 ${i === 0 || i === 6 ? "text-rose-400" : "text-slate-400"}`}>{d}</div>
-        ))}
-      </div>
-
-      {/* ช่องวัน */}
-      <div className="hidden sm:grid grid-cols-7">
-        {cells.map((day, idx) => {
-          if (day === null) return <div key={idx} className="min-h-[96px] border-b border-r border-slate-50 bg-slate-50/40" />;
-          const dateStr = `${cursor.y}-${pad(cursor.m + 1)}-${pad(day)}`;
-          const list = byDate.get(dateStr) ?? [];
-          const isToday = dateStr === todayStr;
-          const dow = (startDow + day - 1) % 7;
-          return (
-            <div key={idx} className={`min-h-[96px] border-b border-r border-slate-50 p-1 ${dow === 0 || dow === 6 ? "bg-slate-50/30" : ""}`}>
-              <div className={`text-xs mb-1 px-1 ${isToday ? "inline-flex items-center justify-center h-5 w-5 rounded-full bg-violet-600 text-white font-semibold" : "text-slate-400"}`}>{day}</div>
-              <div className="space-y-0.5">
-                {list.slice(0, 4).map((tk) => {
-                  const m = statusMeta(tk.status);
-                  const od = isOverdue(tk);
-                  return (
-                    <button key={tk.id} onClick={() => onCardClick(tk.id)} title={`${tk.task_no ?? ""} ${tk.title}`}
-                      className={`w-full text-left text-[11px] leading-tight rounded px-1.5 py-0.5 truncate border ${od ? "bg-red-50 border-red-200 text-red-700" : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-violet-50 hover:border-violet-200"}`}>
-                      <span className={`inline-block h-1.5 w-1.5 rounded-full mr-1 align-middle ${m.dot}`} />{tk.title}
-                    </button>
-                  );
-                })}
-                {list.length > 4 && <div className="text-[10px] text-slate-400 px-1">+{list.length - 4} {t("งาน", "more")}</div>}
-              </div>
+              <button type="button" onClick={close} aria-label="ปิด" className="ml-auto shrink-0 text-slate-400 hover:text-slate-600">✕</button>
             </div>
-          );
-        })}
-      </div>
-    </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-slate-600">
+              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>
+              <span>👤 {who(t)}</span>
+              {t.product_name && <span className="truncate">📦 {t.product_name}</span>}
+            </div>
+            {onSetDue && (
+              <label className="flex items-center gap-1.5">
+                <span className="shrink-0 text-slate-500">📅 วันส่ง</span>
+                <input type="date" value={t.due_date ? String(t.due_date).slice(0, 10) : ""} onChange={(e) => onSetDue(t, e.target.value || null)}
+                  className="h-8 flex-1 rounded-lg border border-slate-200 px-2 text-xs" />
+              </label>
+            )}
+            {onStatus && next.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {next.map((tr) => (
+                  <button key={tr.to_key} type="button" onClick={() => { onStatus(t, tr.to_key); close(); }}
+                    className="h-7 rounded-md border border-slate-200 px-2 hover:bg-violet-50 hover:border-violet-200">{tr.label || statusMeta(tr.to_key).label}</button>
+                ))}
+              </div>
+            )}
+            <button type="button" onClick={() => { close(); onCardClick(t.id); }} className="h-8 w-full rounded-lg bg-violet-600 text-white hover:bg-violet-700">เปิดรายละเอียดเต็ม ↗</button>
+          </div>
+        );
+      }}
+    />
   );
 }

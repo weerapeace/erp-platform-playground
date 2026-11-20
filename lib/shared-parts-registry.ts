@@ -1144,7 +1144,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "schedule-board", label: "ปฏิทินลากวางตั้งวัน", code: "ScheduleBoard", category: "table",
     source: { path: "components/schedule-board" },
-    what: "ปฏิทินเดือน + กล่องยังไม่ลงวันที่ ลากการ์ดไปวางเพื่อตั้งวัน",
+    what: "ปฏิทิน + กล่องยังไม่ลงวันที่ ลากการ์ดไปวางเพื่อตั้งวัน · มีในตัว: เดือน/สัปดาห์/รายการ · ค้นหา · ความแน่น · +N กดได้ · ป๊อปดูงาน (renderPopView) · เลือกหลายงานเลื่อนทั้งชุด · วันหยุดไทย · พิมพ์",
     notWhen: "ถ้าแค่โชว์เอกสารตามวัน ให้ใช้ DocCalendar",
   },
 

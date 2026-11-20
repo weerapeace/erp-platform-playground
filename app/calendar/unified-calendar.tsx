@@ -21,7 +21,11 @@ import {
   type CalItem, type CalSourceKey, type UnifiedCalendarResponse,
 } from "@/lib/unified-calendar";
 
-const HIDDEN_KEY = "erp_unified_cal_hidden";   // แหล่งที่ปิดไว้ (จำในเครื่อง — แค่ความสะดวก)
+const HIDDEN_KEY = "erp_unified_cal_hidden";
+// ผลล่าสุดต่อช่วงวัน (ในหน่วยความจำ) → กลับมาแท็บนี้/เดือนเดิม ขึ้นทันที แล้วค่อยโหลดใหม่เงียบ ๆ
+const CACHE = new Map<string, UnifiedCalendarResponse>();
+
+const shiftYmd = (s: string, n: number) => { const [y, m, d] = s.split("-").map(Number); const x = new Date(Date.UTC(y, m - 1, d + n)); return x.toISOString().slice(0, 10); };
 
 function readHidden(): Set<CalSourceKey> {
   try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]") as CalSourceKey[]); } catch { return new Set(); }
@@ -51,12 +55,16 @@ export function UnifiedCalendar() {
 
   const load = useCallback(async (r: { from: string; to: string }) => {
     const my = ++seq.current;
+    const ck = `${r.from}|${r.to}`;
+    const hit = CACHE.get(ck);
+    if (hit) { setRes(hit); setItems(hit.data); setErr(null); }
     setLoading(true);
     try {
       const resp = await apiFetch(`/api/calendar/unified?from=${r.from}&to=${r.to}`, { cache: "no-store" });
       const j = (await resp.json()) as UnifiedCalendarResponse;
       if (my !== seq.current) return;
       if (!resp.ok) throw new Error(j.error ?? "โหลดปฏิทินไม่สำเร็จ");
+      CACHE.set(ck, j);
       setRes(j); setItems(j.data); setErr(null);
       if (j.error) toast.warning(j.error);
     } catch (e) {
@@ -85,20 +93,33 @@ export function UnifiedCalendar() {
   const setLocal = (id: string, date: string | null, raw: string | null) =>
     setItems((cur) => cur.map((x) => (x.id === id ? { ...x, date, raw } : x)));
 
-  const onSchedule = useCallback(async (it: CalItem, date: string | null) => {
-    if (date === it.date) return;
-    if (!it.canMove) { toast.info(`${CAL_SOURCE[it.src].label} เลื่อนวันจากที่นี่ไม่ได้ — กดรายการเพื่อเปิดไปแก้ที่หน้าเดิม`); return; }
-    const prev = { date: it.date, raw: it.raw };
-    const value = nextValue(it.src, it.raw, date);
-    setLocal(it.id, date, value);                               // จอเปลี่ยนทันที
-    if (!(await save(it, value))) { setLocal(it.id, prev.date, prev.raw); return; }
-    const label = date ? new Date(`${date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "ยังไม่กำหนดวัน";
-    toast.undo(`ย้าย "${it.title}" ไป ${label}`, async () => {
-      setLocal(it.id, prev.date, prev.raw);
-      if (!(await save({ ...it, raw: value }, prev.raw))) setLocal(it.id, date, value);
-      else toast.success("ย้อนกลับแล้ว");
+  // เลื่อนวัน (ทีละรายการ / ทั้งชุด) → แจ้งผลครั้งเดียวพร้อมปุ่มย้อนกลับ
+  const moveMany = useCallback(async (moves: { it: CalItem; date: string | null }[]) => {
+    const locked = moves.filter((m) => !m.it.canMove);
+    if (locked.length) toast.info(`${[...new Set(locked.map((m) => CAL_SOURCE[m.it.src].label))].join(", ")} เลื่อนวันจากที่นี่ไม่ได้ — กดรายการเพื่อเปิดไปแก้ที่หน้าเดิม`);
+    const list = moves.filter((m) => m.it.canMove && m.date !== m.it.date)
+      .map((m) => ({ ...m, prev: { date: m.it.date, raw: m.it.raw }, value: nextValue(m.it.src, m.it.raw, m.date) }));
+    if (!list.length) return;
+    for (const m of list) setLocal(m.it.id, m.date, m.value);          // จอเปลี่ยนทันที
+    const ok = await Promise.all(list.map((m) => save(m.it, m.value)));
+    list.forEach((m, i) => { if (!ok[i]) setLocal(m.it.id, m.prev.date, m.prev.raw); });
+    const done = list.filter((_, i) => ok[i]);
+    if (!done.length) return;
+    const label = done.length === 1
+      ? `"${done[0].it.title}" ไป ${done[0].date ? new Date(`${done[0].date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "ยังไม่กำหนดวัน"}`
+      : `${done.length} รายการ`;
+    toast.undo(`ย้าย ${label}`, async () => {
+      for (const m of done) setLocal(m.it.id, m.prev.date, m.prev.raw);
+      const back = await Promise.all(done.map((m) => save({ ...m.it, raw: m.value }, m.prev.raw)));
+      done.forEach((m, i) => { if (!back[i]) setLocal(m.it.id, m.date, m.value); });
+      if (back.every(Boolean)) toast.success("ย้อนกลับแล้ว");
     }, { ms: 8000 });
   }, [save, toast]);
+  const onSchedule = useCallback((it: CalItem, date: string | null) => moveMany([{ it, date }]), [moveMany]);
+  const onScheduleMany = useCallback((list: CalItem[], delta: number | null) => {
+    void moveMany(list.map((it) => ({ it, date: delta === null || !it.date ? null : shiftYmd(it.date, delta) })));
+  }, [moveMany]);
+  const nameOf = useMemo(() => new Map((res?.people ?? []).map((p) => [p.id, p.name])), [res]);
 
   const visibleSources = useMemo(() => {
     const keys = new Set(res?.sources.map((x) => x.key) ?? []);
@@ -166,6 +187,30 @@ export function UnifiedCalendar() {
               <div className="text-[10px] text-slate-400">{CAL_SOURCE[i.src].label}{!i.canMove && " · ดูอย่างเดียว"}</div>
               <div className="truncate text-xs text-slate-700">{i.title}</div>
             </button>
+          )}
+          onScheduleMany={onScheduleMany}
+          printTitle="ปฏิทินรวมทุกแผนก"
+          renderPopView={(i, close) => (
+            <div className="space-y-2 text-xs">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400"><span className="h-2 w-2 rounded-full" style={{ background: CAL_SOURCE[i.src].color }} />{CAL_SOURCE[i.src].label}{!i.canMove && " · ดูอย่างเดียว"}</div>
+                  <div className="text-sm font-semibold leading-snug text-slate-800">{i.title}</div>
+                </div>
+                <button type="button" onClick={close} aria-label="ปิด" className="ml-auto shrink-0 text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+              <div className="text-slate-600">👤 {i.who.length ? i.who.map((w) => nameOf.get(w) ?? "ผู้ใช้").join(", ") : "ยังไม่มีผู้รับผิดชอบ"}</div>
+              {i.canMove ? (
+                <label className="flex items-center gap-1.5">
+                  <span className="shrink-0 text-slate-500">📅 วันที่</span>
+                  <input type="date" value={i.date ?? ""} onChange={(e) => { void onSchedule(i, e.target.value || null); close(); }}
+                    className="h-8 flex-1 rounded-lg border border-slate-200 px-2 text-xs" />
+                </label>
+              ) : (
+                <div className="text-slate-500">📅 {i.date ? new Date(`${i.date}T00:00:00`).toLocaleDateString("th-TH", { weekday: "short", day: "numeric", month: "short" }) : "ยังไม่กำหนดวัน"} · แก้วันที่หน้าเดิม</div>
+              )}
+              <button type="button" onClick={() => { close(); setOpen(i); }} className="h-8 w-full rounded-lg bg-slate-800 text-white hover:bg-slate-700">เปิดหน้าเดิม (จัดการเต็ม) ↗</button>
+            </div>
           )}
         />
       )}
