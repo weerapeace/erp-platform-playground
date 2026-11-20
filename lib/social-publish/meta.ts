@@ -77,6 +77,8 @@ async function markContent(admin: SupabaseClient, contentId: string, platform: s
  */
 export async function publishMeta(admin: SupabaseClient, input: {
   contentId: string; platform: string; caption: string; media: PostMedia[]; format?: string | null; scheduledTime?: number; actor: Actor; via: "manual" | "queue";
+  /** คีย์ที่บันทึกผลใน post_status (ไม่ส่ง = ชื่อแพลตฟอร์ม) · ปุ่ม "ลง Story เพิ่ม" ใช้ "<platform>_story" → ไม่ทับสถานะโพสต์ปกติ */
+  statusKey?: string;
 }): Promise<PublishResult> {
   const { contentId, platform, caption, actor, via } = input;
   const format = (input.format ?? "").trim();
@@ -94,7 +96,7 @@ export async function publishMeta(admin: SupabaseClient, input: {
   if ("error" in r) return { ok: false, error: r.error ?? "", status: r.status };
   const { token, pageId, pageName, igId } = r.conn;
   const done = async (state: "posted" | "scheduled", url: string, extra: Record<string, unknown> = {}): Promise<PublishResult> => {
-    await markContent(admin, contentId, platform, state, url, actor, { page: pageName, via, format: format || null, ...extra });
+    await markContent(admin, contentId, input.statusKey || platform, state, url, actor, { page: pageName, via, format: format || null, ...extra });
     return { ok: true, state, url, ...(extra.story ? { story: true } : {}) };
   };
 

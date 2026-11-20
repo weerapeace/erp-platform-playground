@@ -24,8 +24,9 @@ export function useWaitingAlbums(brandFilter: string) {
   return { albums, available: all !== null, reload };
 }
 
-export function CalendarAlbumsBox({ albums, platformLabel, onDragStart, onDragEnd }: {
+export function CalendarAlbumsBox({ albums, platformLabel, onDragStart, onDragEnd, onOpen }: {
   albums: ContentAlbum[];
+  onOpen?: (a: ContentAlbum) => void;   // กดอัลบั้ม = เปิดป๊อปในหน้า (ไม่ส่ง = ลิงก์ไปคลังไฟล์แท็บใหม่ แบบเดิม)
   platformLabel: (code: string) => string;
   onDragStart: (a: ContentAlbum) => void;
   onDragEnd: () => void;
@@ -53,7 +54,9 @@ export function CalendarAlbumsBox({ albums, platformLabel, onDragStart, onDragEn
                   <span className="text-slate-300 shrink-0" title={t("ลากเพื่อลงวัน", "Drag to a day")}>⠿</span>
                   <FileThumb r2Key={a.cover_key} type="image" width={96} className="w-10 h-10 rounded shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <a href={albumLink(a.id)} target="_blank" rel="noreferrer" className="block text-xs font-medium text-slate-700 truncate hover:text-violet-700 hover:underline">{a.name}</a>
+                    {onOpen
+                      ? <button type="button" onClick={() => onOpen(a)} className="block w-full text-left text-xs font-medium text-slate-700 truncate hover:text-violet-700 hover:underline">{a.name}</button>
+                      : <a href={albumLink(a.id)} target="_blank" rel="noreferrer" className="block text-xs font-medium text-slate-700 truncate hover:text-violet-700 hover:underline">{a.name}</a>}
                     <div className="flex flex-wrap items-center gap-1 mt-0.5">
                       <StageBadge stage={a.status.stage} className="!h-5 !text-[10px]" />
                       {a.status.platforms.slice(0, 4).map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platformLabel(p.code)} compact />)}

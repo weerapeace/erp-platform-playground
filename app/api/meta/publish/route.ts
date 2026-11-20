@@ -1,6 +1,7 @@
 /**
  * โพสต์คอนเทนต์ขึ้น Facebook / Instagram จริง (ปุ่ม "โพสต์เลย") — /api/meta/publish
- * POST { content_id, platform:'facebook'|'instagram', caption_text, media:[{key,type}], scheduled_time, format }
+ * POST { content_id, platform:'facebook'|'instagram', caption_text, media:[{key,type}], scheduled_time, format, extra_story? }
+ *  - extra_story = ปุ่ม "ลง Story" (ลงเพิ่มจากโพสต์ปกติ) → ผลเก็บที่ post_status["<platform>_story"]
  *  - Facebook: รูป(อัลบั้ม) / วิดีโอ / Reels / Story · scheduled_time = ให้ FB จัดคิวเอง (ทางเดิม)
  *  - Instagram: รูป(เดี่ยว/อัลบั้ม) / Story เผยแพร่เลย · Reels = คืน creation_id (ไปตามเช็กที่ ig-finalize)
  * ตัวยิงจริงอยู่ที่ของกลาง lib/social-publish/meta (คิวโพสต์ตามเวลาใช้ตัวเดียวกัน)
@@ -20,7 +21,7 @@ export const maxDuration = 60;   // เผื่อ IG รอ container รู�
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { content_id?: string; platform?: string; caption_text?: string; media?: PostMedia[]; image_keys?: string[]; scheduled_time?: number; format?: string | null };
+  let body: { content_id?: string; platform?: string; caption_text?: string; media?: PostMedia[]; image_keys?: string[]; scheduled_time?: number; format?: string | null; extra_story?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const contentId = (body.content_id ?? "").trim();
   if (!contentId) return NextResponse.json({ error: "ต้องมี content_id" }, { status: 400 });
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const res = await publishMeta(supabaseAdmin(), {
     contentId, platform: (body.platform ?? "").trim(), caption: (body.caption_text ?? "").trim(), media, format, scheduledTime,
     actor: { id: user?.id ?? null, name: user?.email ?? null }, via: "manual",
+    // ปุ่ม "ลง Story" (ลงเพิ่มจากโพสต์ปกติ) → เก็บผลแยกคีย์ facebook_story / instagram_story
+    statusKey: format === "story" && body.extra_story ? `${(body.platform ?? "").trim()}_story` : undefined,
   });
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: res.status ?? 400 });
   if (res.state === "processing") return NextResponse.json({ ok: true, processing: true, creation_id: res.creationId, error: null });

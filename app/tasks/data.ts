@@ -667,8 +667,8 @@ export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
 // fit = ปรับรูปให้พอดีแพลตฟอร์ม (เติมขอบ/ครอป · lib/social-publish/fit) — ไม่ใส่ = ตามค่าตั้งต้นของตัวยิง
 export type PostMediaRef = { key: string; type: "image" | "video"; fit?: FitSpec | null; fallback?: string | null };   // fallback = รูปย่อ R2 เมื่อ key เป็นต้นฉบับ Drive
 export type PublishResult = { url: string; scheduled: boolean; processing: boolean; creationId?: string };
-export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number, format?: string): Promise<PublishResult> {
-  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0, format: format ?? null }) }));
+export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number, format?: string, opts?: { extraStory?: boolean }): Promise<PublishResult> {
+  const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0, format: format ?? null, extra_story: !!opts?.extraStory }) }));
   const r = j as { url?: string; scheduled?: boolean; processing?: boolean; creation_id?: string };
   return { url: String(r.url ?? ""), scheduled: !!r.scheduled, processing: !!r.processing, creationId: r.creation_id };
 }

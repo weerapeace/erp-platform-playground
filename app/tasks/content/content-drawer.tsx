@@ -20,6 +20,8 @@ import { PostConfirmModal, loadPostFit, type PostImage } from "./post-confirm-mo
 import { AddPathForm, isLocalPath, type PathItem } from "@/components/copy-path-button";
 import { buildCaptionVars, captionsForDetail, assembleCaption } from "./caption-assemble";
 import { PublishQueueBox, QueueAllModal, type QueuePlatformOption } from "./publish-queue";
+import { StoryPostModal } from "./story-post-modal";
+import { LineBroadcastModal } from "./line-broadcast-modal";
 import type { FitSpec } from "@/lib/social-publish/fit";
 import { CopyButton } from "@/components/copy-button";
 import { apiFetch } from "@/lib/api";
@@ -73,6 +75,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [scheduledAt, setScheduledAt] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
   // สถานะ/ลิงก์การโพสต์ต่อแพลตฟอร์ม (บันทึกทันทีที่กด — ไม่ต้องรอปุ่มบันทึก)
+  const [storyOpen, setStoryOpen] = useState(false);
+  const [lineOpen, setLineOpen] = useState(false);   // ป๊อป "ร่าง LINE Broadcast"   // ป๊อป "ลง Story" (FB + IG)
   const [postStatus, setPostStatus] = useState<Record<string, string>>({});   // platform → 'posted' | 'skip' (ไม่มี = ยังไม่โพสต์)
   const [postedLinks, setPostedLinks] = useState<Record<string, string>>({});   // platform → ลิงก์โพสต์ที่ลงแล้ว
   const [platformFormats, setPlatformFormats] = useState<Record<string, string>>({});   // platform → รูปแบบโพสต์ (โพสต์เดี่ยว/อัลบั้ม/Reels/Story)
@@ -931,6 +935,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <PublishQueueBox jobs={jobs} latestCaptions={latestCaptions} canEdit={can("tasks.edit")} canQueueAll={queueOptions.some((o) => !o.blocked)}
                 onChanged={() => { void loadJobs(); void getContent(contentId).then((dd) => setPostStatus((dd.post_status ?? {}) as Record<string, string>)).catch(() => {}); }}
                 onQueueAll={() => setQueueAllOpen(true)} pushToast={pushToast} />
+              {/* 📲 ลง Story เพิ่ม (FB + IG) — แยกจากโพสต์ปกติ · ผลเก็บ post_status.<platform>_story · 💬 ร่าง LINE Broadcast */}
+              {can("tasks.edit") && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => setLineOpen(true)} title={t("ระบบร่างข้อความ+รูปให้ แล้วคัดลอกไปส่งเองใน LINE OA", "Draft text + images to send in LINE OA")}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100">💬 {t("ร่าง LINE Broadcast", "Draft LINE broadcast")}</button>
+                  {(autoConnected("facebook") || autoConnected("instagram")) && <button type="button" onClick={() => setStoryOpen(true)}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-pink-200 bg-pink-50 px-3 text-xs font-medium text-pink-700 hover:bg-pink-100">📲 {t("ลง Story (Facebook + Instagram)", "Post Story (Facebook + Instagram)")}</button>}
+                  {(["facebook", "instagram"] as const).filter((pp) => postStatus[`${pp}_story`] === "posted").map((pp) => (
+                    <a key={pp} href={postedLinks[`${pp}_story`] || undefined} target="_blank" rel="noreferrer" className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700">✓ {pp === "facebook" ? "FB" : "IG"} Story</a>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ───── การ์ดรูป/วิดีโอ: คลังเดียว (รูปจากงาน + อัปเอง + วิดีโอ) · กด ＋ เพื่อเพิ่ม/จัดการ ───── */}
@@ -1182,6 +1198,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           busy={aiAllBusy}
           onClose={() => setAiModal(null)}
           onRun={(extra, overwrite) => aiWriteAll(aiModal.platforms, extra, overwrite)} />
+      )}
+      {lineOpen && (
+        <LineBroadcastModal open title={d?.title ?? ""} captions={latestCaptions} media={postImages}
+          link={postedLinks.facebook || postedLinks.website || null} pushToast={pushToast} onClose={() => setLineOpen(false)} />
+      )}
+      {storyOpen && (
+        <StoryPostModal open contentId={contentId} media={postImages}
+          canPost={{ facebook: autoConnected("facebook"), instagram: autoConnected("instagram") }}
+          storyStatus={postStatus} pushToast={pushToast} onClose={() => setStoryOpen(false)}
+          onDone={() => { void getContent(contentId).then((dd) => { setPostStatus((dd.post_status ?? {}) as Record<string, string>); setPostedLinks((dd.posted_links ?? {}) as Record<string, string>); }).catch(() => {}); onChanged?.(); }} />
       )}
       {queueAllOpen && (
         <QueueAllModal options={queueOptions} defaultRunAt={scheduledAt} busy={posting === "queue"} onClose={() => setQueueAllOpen(false)}

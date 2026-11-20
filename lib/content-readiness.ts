@@ -20,7 +20,11 @@ export type PlatReady = {
   images: string[];        // รูปที่จะลง (ตัวอย่าง ≤4)
   captionOff: boolean;     // ไม่ต้องมีแคปชั่น (ตั้ง "ไม่ใช้แคปชั่น" หรือ ลงเป็น Story)
   isStory: boolean;        // แพลตฟอร์มนี้ลงเป็น Story
+  manual: boolean;         // ระบบยังโพสต์ให้ไม่ได้ ต้องกดลงเองในแอป (ทุกแพลตฟอร์มยกเว้น Facebook/Instagram)
 };
+
+/** แพลตฟอร์มที่ระบบโพสต์ให้ได้ (ต้องเชื่อมบัญชีแล้ว) — ตรงกับ lib/social-publish (isMetaAutoPlatform) */
+export const AUTO_POST_PLATFORMS = ["facebook", "instagram"];
 
 export type ReadinessInput = {
   platforms: string[];                          // แพลตฟอร์มที่จะลง
@@ -50,6 +54,6 @@ export function platformReadiness(e: ReadinessInput, settings?: CaptionSettings 
     if (!captionOff && !e.captionPlatforms.includes(code)) missing.push("caption");
     if (!imgs.length) missing.push("image");
     const state: ReadyState = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "failed" ? "failed" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
-    return { code, state, missing, images: imgs.slice(0, 4), captionOff, isStory };
+    return { code, state, missing, images: imgs.slice(0, 4), captionOff, isStory, manual: !AUTO_POST_PLATFORMS.includes(code) };
   });
 }

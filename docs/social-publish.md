@@ -68,3 +68,9 @@ pg_cron ทุก 5 นาที (เรียกเว็บเฉพาะต�
 - IG: รูปต้องสัดส่วน 4:5–1.91:1 (Story/Reels 9:16) · วิดีโอ MP4/MOV · ~50–100 โพสต์/วัน/บัญชี
 - FB Reels: แนวตั้ง ≥540p 3–90 วิ · ≤30 Reels/วัน/เพจ
 - ตัวเชื่อม Meta ใช้ Graph API `v25.0` (เปลี่ยนที่ `lib/meta-graph.ts` ที่เดียว · แต่ละเวอร์ชันใช้ได้ ~2 ปี)
+
+## 2026-11-20 — ปุ่มลง Story + ร่าง LINE Broadcast + ป้ายผลในปฏิทิน
+- **📲 ลง Story (FB + IG)** ในลิ้นชักโพสต์ (`app/tasks/content/story-post-modal.tsx`) — เลือก 1 ไฟล์ + ติ๊กแพลตฟอร์ม → `/api/meta/publish` format `story` + `extra_story: true` → ผลเก็บที่ `post_status["facebook_story" | "instagram_story"]` (ไม่ทับโพสต์ปกติ · `publishMeta({ statusKey })`) · ลงแล้วดึงกลับไม่ได้ (ป๊อป = หน้ายืนยัน)
+- **💬 ร่าง LINE Broadcast** (`line-broadcast-modal.tsx`) — ระบบไม่ส่งเอง (โควตา LINE นับตามจำนวนเพื่อน) ร่างข้อความจากแคปชั่น line_oa → facebook → ตัวแรก + รูป ให้คัดลอกไปส่งใน LINE OA Manager
+- ปฏิทินคอนเทนต์: การ์ดมีป้าย ✓ลงแล้ว/ทั้งหมด (! = โพสต์อัตโนมัติล้ม) · ป๊อปดูเร็วบอก "🤖 ระบบลงให้ / ✋ ต้องกดเอง" (`PlatReady.manual`, `AUTO_POST_PLATFORMS` ใน lib/content-readiness) · กดโพสต์ในกล่อง "ยังไม่ลงวันที่" = ป๊อปดูเร็วค้างไว้ (+ เปิดแก้เต็ม) · กดอัลบั้มในกล่อง "อัลบั้มรอลง" = AlbumDetailModal ในหน้า
+- คู่มือเปิดแอป Meta เป็น Live (แก้โพสต์แล้วคนอื่นไม่เห็น): `_exports/คู่มือเปิดแอป-Meta-เป็น-Live.md` (โฟลเดอร์โปรเจกต์บน Drive)
