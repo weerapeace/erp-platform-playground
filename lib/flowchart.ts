@@ -10,9 +10,10 @@ import { cleanExtList } from "./file-types";
 import { isPlaceKey, storagePlaceOf } from "./storage-places";
 import { isAppKey, isErpPageHref } from "./menu-pages";
 import { isFlowAlign, isHexColor, sanitizeRich, type FlowAlign } from "./flowchart-rich";
+import { cleanAuto, type FlowAuto } from "./flow-automation";
 
 /** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
-export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "zone"] as const;
+export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "auto", "zone"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -40,6 +41,7 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
   folder:   { w: 220, h: 64,  color: "cyan",    th: "โฟลเดอร์",     en: "Folder",      hintTh: "ทางลัด ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง", hintEn: "Shortcut — double-click opens a local folder", icon: "i:folder" },
   page:     { w: 220, h: 80,  color: "emerald", th: "หน้าใน ERP",   en: "ERP page",    hintTh: "บอกว่าดูไฟล์ได้ที่หน้าไหนในระบบ — เลือกจากเมนูจริง · กด เปิด ↗ บนกล่อง = ไปหน้านั้น", hintEn: "Shows which ERP page has these files — picked from the real menu · click Open ↗ to go there", icon: "i:apps" },
   todo:     { w: 260, h: 150, color: "amber",   th: "รายการงาน",    en: "To-do list",  hintTh: "สิ่งที่ต้องทำหลายข้อ ติ๊กเมื่อเสร็จ — ครบทุกข้อกล่องเป็นสีเขียว", hintEn: "Several tasks with check boxes — turns green when all are done", icon: "i:list-check" },
+  auto:     { w: 290, h: 160, color: "violet",  th: "อัตโนมัติ",     en: "Automation",  hintTh: "กฎ เมื่อ… ถ้า… ให้… (จดแผน + สถานะ — ระบบยังไม่ทำงานเอง)", hintEn: "When… if… then… rule (a plan with status — the system doesn't run it yet)", icon: "i:bolt" },
   note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
   zone:     { w: 480, h: 320, color: "blue",    th: "กรอบโซน",      en: "Zone",        hintTh: "กรอบใหญ่ครอบหลายกล่อง เช่น ในออฟฟิศ / บนคลาวด์ — ลากหัวกรอบ = ย้ายทั้งกลุ่ม", hintEn: "Big frame around boxes, e.g. Office / Cloud — drag its title to move everything inside", icon: "i:circle-dashed" },
 };
@@ -52,7 +54,7 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** ข้อในกล่อง "รายการงาน" · by/at = ใครติ๊กเสร็จ เมื่อไหร่ (ISO) — เอาติ๊กออก = ลบ by/at */
 export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; at?: string };
 /** items = ข้อของกล่อง "รายการงาน" */
-export type FlowNodeData = { items?: FlowTodo[]; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+export type FlowNodeData = { items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -158,6 +160,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (o.type === "page") Object.assign(data, cleanPageData(d));
     if (o.type === "storage" && isRuleKey(d.rule)) data.rule = d.rule;
     if (o.type === "todo") { const items = cleanTodos(d.items); if (items.length) data.items = items; }
+    if (o.type === "auto") data.auto = cleanAuto(d.auto);
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
     if (isFlowAlign(d.align)) data.align = d.align;
@@ -360,6 +363,7 @@ export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (t
       label: data?.label ?? defLabel, ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}), ...(place ? { place } : {}),
       ...(kind === "page" && data ? cleanPageData(data as Record<string, unknown>) : {}),
       ...(kind === "todo" ? { label: data?.label ?? t("สิ่งที่ต้องทำ", "To do"), items: cleanTodos(data?.items) } : {}),
+      ...(kind === "auto" ? { label: data?.label ?? t("กฎอัตโนมัติ", "Automation rule"), auto: cleanAuto(data?.auto) } : {}),
     },
   };
 }

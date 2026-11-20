@@ -48,6 +48,7 @@ import {
   OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
   openTodos,
 } from "@/lib/flowchart";
+import { AUTO_STATUS_META, listAutos } from "@/lib/flow-automation";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
 import { planRuleCheck } from "@/lib/storage-policy";
@@ -737,8 +738,11 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [todoOpen, setTodoOpen] = useState(false);
   const hasTodoBox = !(locked && hideOwn) && nodes.some((n) => n.type === "todo");
   const pending = useMemo(() => (hasTodoBox ? openTodos(nodes) : []), [hasTodoBox, nodes]);
+  // ── อัตโนมัติ N: ทุกกฎบนกระดาน แยกตามสถานะ (เจ้าของสั่ง 2026-11-20 ข้อ 4) ──
+  const [autoOpen, setAutoOpen] = useState(false);
+  const autos = useMemo(() => (locked && hideOwn ? [] : listAutos(nodes)), [locked, hideOwn, nodes]);
   const goTo = (id: string) => {
-    setFindQ(""); setTodoOpen(false);
+    setFindQ(""); setTodoOpen(false); setAutoOpen(false);
     void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.4, duration: 400 });
     if (!isSysId(id)) setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
   };
@@ -861,6 +865,26 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
                       <span className="w-full truncate text-[10.5px] text-slate-400"><Icon value="i:list-check" /> {p.box || t("สิ่งที่ต้องทำ", "To do")}</span>
                     </button>
                   )) : <span className="block px-2 py-1.5 text-[12px] text-emerald-700">{t("ทุกข้อติ๊กเสร็จแล้ว", "Every item is checked")}</span>}
+                </span>
+              )}
+            </span>
+          )}
+          {autos.length > 0 && (
+            <span className="relative">
+              <button type="button" className={`${tb} text-violet-700`} onClick={() => setAutoOpen((v) => !v)} aria-expanded={autoOpen}
+                title={t("ทุกกฎอัตโนมัติบนกระดาน — กดเพื่อไปที่กล่อง (จดแผนอย่างเดียว ระบบยังไม่ทำงานเอง)", "Every automation rule on the board — click to jump (plans only, not running yet)")}>
+                <Icon value="i:bolt" />{t(`อัตโนมัติ ${autos.length}`, `${autos.length} automations`)}
+              </button>
+              {autoOpen && (
+                <span className="absolute left-0 top-9 z-20 block max-h-80 w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  {autos.map((a) => (
+                    <button key={a.nodeId} type="button" onClick={() => goTo(a.nodeId)}
+                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left hover:bg-slate-50">
+                      <span className={`shrink-0 rounded-full border px-1.5 text-[10px] leading-4 ${AUTO_STATUS_META[a.status].cls}`}>{t(AUTO_STATUS_META[a.status].th, AUTO_STATUS_META[a.status].en)}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-slate-800">{a.title || t("กฎอัตโนมัติ", "Automation rule")}</span>
+                      {!a.complete && <span className="shrink-0 text-[10.5px] text-amber-600" title={t("ยังขาด เมื่อ หรือ ให้", "Missing a trigger or an action")}><Icon value="i:alert-triangle" /></span>}
+                    </button>
+                  ))}
                 </span>
               )}
             </span>

@@ -8,6 +8,7 @@ import { flowEdgePath } from "./edge-path";
 import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { sanitizeRich } from "@/lib/flowchart-rich";
+import { AUTO_STATUS_META, autoPickLabel } from "@/lib/flow-automation";
 import { FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -61,6 +62,15 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
       + `</div>`;
   } else if (n.type === "folder") {
     text = `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`;
+  } else if (n.type === "auto") {
+    const a = n.data.auto ?? { acts: [], status: "plan" as const };
+    const th = (x: string) => x;
+    const row = (k: string, bg: string, fg: string, v: string) => v ? `<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.35;margin-top:4px"><span style="flex:none;width:30px;text-align:center;border-radius:4px;background:${bg};color:${fg};font-size:11px;font-weight:700">${k}</span><span style="color:${p.text};word-break:break-word">${esc(v)}</span></div>` : "";
+    text = `<div style="width:100%;text-align:left"><div style="display:flex;justify-content:space-between;gap:6px;font-size:13px;font-weight:700;color:${p.text}"><span>${esc(title) || "&nbsp;"}</span><span style="font-weight:400;font-size:11px;color:${p.sub}">${AUTO_STATUS_META[a.status].th}</span></div>`
+      + row("เมื่อ", "#dbeafe", "#1e40af", autoPickLabel(a.when, "when", th))
+      + row("ถ้า", "#fef3c7", "#92400e", a.cond ?? "")
+      + row("ให้", "#d1fae5", "#065f46", a.acts.map((x) => autoPickLabel(x, "act", th)).join(" + "))
+      + `</div>`;
   } else if (n.type === "todo") {
     const pr = todoProgress(n.data.items);
     const rows = (n.data.items ?? []).filter((i) => i.text.trim()).map((i) =>
@@ -81,7 +91,7 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
     box = ""; pad = `${Math.round(h * 0.22)}px ${Math.round(w * 0.1)}px ${Math.round(h * 0.1)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
-  const align = n.type === "note" || n.type === "todo" ? "flex-start" : "center";
+  const align = n.type === "note" || n.type === "todo" || n.type === "auto" ? "flex-start" : "center";
   return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;
 }
 

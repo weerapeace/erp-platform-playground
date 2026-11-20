@@ -13,6 +13,7 @@ import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { plainToRich, richToPlain, sanitizeRich } from "@/lib/flowchart-rich";
 import { BoxFormatBar, RichEditor, RichText, type BoxFormatOp } from "./rich-text";
 import type { PlanRuleCheck } from "@/lib/storage-policy";
+import { AUTO_ACTIONS, AUTO_ACTS_MAX, AUTO_STATUSES, AUTO_STATUS_META, AUTO_TRIGGERS, autoAction, autoTrigger, type AutoPick, type AutoRef, type FlowAuto } from "@/lib/flow-automation";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
 function PlaceIcon({ place, size }: { place: string; size: number }) {
@@ -303,6 +304,130 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
   );
 }
 
+/** ตัวเลือก เมื่อ/ให้: รายการจากทะเบียน (จัดกลุ่ม) + "พิมพ์เอง" + ช่องรายละเอียด — Enter/คลิกนอก = เสร็จ · Esc = ยกเลิก */
+function AutoPickEditor({ refs, initial, onDone }: { refs: AutoRef[]; initial?: AutoPick; onDone: (p: AutoPick | null | undefined) => void }) {
+  const { t } = useBoard();
+  const [key, setKey] = useState(initial?.key ?? (initial?.text ? "" : refs[0].key));
+  const [text, setText] = useState(initial?.text ?? "");
+  const groups = [...new Set(refs.map((r) => r.group))];
+  const done = () => { const tx = text.trim(); onDone(key || tx ? { ...(key ? { key } : {}), ...(tx ? { text: tx } : {}) } : null); };
+  const cls = "nodrag nopan nowheel w-full rounded border border-violet-300 bg-white px-1 py-0.5 text-[12px] text-slate-800 outline-none focus:ring-2 focus:ring-violet-200";
+  return (
+    <div className="flex w-full flex-col gap-1" {...stopAll}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) done(); }}
+      onKeyDown={(e) => { if (e.key === "Escape") onDone(undefined); if (e.key === "Enter") done(); }}>
+      <select autoFocus value={key} onChange={(e) => setKey(e.target.value)} className={cls}>
+        {groups.map((g) => <optgroup key={g} label={g}>{refs.filter((r) => r.group === g).map((r) => <option key={r.key} value={r.key}>{t(r.th, r.en)}</option>)}</optgroup>)}
+        <option value="">{t("— พิมพ์เอง —", "— Type my own —")}</option>
+      </select>
+      <input value={text} onChange={(e) => setText(e.target.value)} className={cls}
+        placeholder={key ? t("รายละเอียดเพิ่ม (ไม่ใส่ก็ได้) เช่น ฝ่ายขาย", "Extra detail (optional), e.g. sales team") : t("พิมพ์เอง", "Type it")} />
+    </div>
+  );
+}
+
+/** ชิปของ เมื่อ/ให้ 1 อัน: ไอคอน + ชื่อจากทะเบียน + รายละเอียด */
+function AutoChip({ p, refOf }: { p: AutoPick; refOf: (k?: string) => AutoRef | undefined }) {
+  const { t } = useBoard();
+  const r = refOf(p.key);
+  return (
+    <span className="mb-0.5 mr-1 inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-px text-[11.5px] text-slate-700">
+      {r && <Icon value={r.icon} className="shrink-0" />}
+      <span className="min-w-0 break-words">{[r ? t(r.th, r.en) : "", p.text].filter(Boolean).join(" · ")}</span>
+    </span>
+  );
+}
+
+/** กล่อง "อัตโนมัติ" (เจ้าของสั่ง 2026-11-20 แบบ A): หัว (ชื่อ + สถานะ) · เมื่อ · ถ้า · ให้ (หลายอย่าง) — กดแถวไหนแก้แถวนั้น
+ *  ⚠️ จดกฎอย่างเดียว ระบบยังไม่ทำงานเอง · ทะเบียน เมื่อ/ให้ = lib/flow-automation */
+function AutoCard({ id, data, color, width, height, editingTitle, onTitleDone }: { id: string; data: FlowNodeData; color: FlowColor; width?: number; height?: number; editingTitle: boolean; onTitleDone: () => void }) {
+  const { readOnly, t, updateData, growNode } = useBoard();
+  const pal = FLOW_PALETTE[color];
+  const a: FlowAuto = data.auto ?? { acts: [], status: "plan" };
+  const [edit, setEdit] = useState<"when" | "cond" | number | "add" | null>(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [title, setTitle] = useState(data.label);
+  const [cond, setCond] = useState(a.cond ?? "");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (editingTitle) setTitle(data.label); }, [editingTitle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || !height) return;
+    const need = el.scrollHeight + 4;
+    if (need > height) growNode(id, width ?? 0, need);
+  }, [edit, a.acts.length, a.when, a.cond, data.label, statusOpen, height]); // eslint-disable-line react-hooks/exhaustive-deps
+  const set = (patch: Partial<FlowAuto>) => updateData(id, { auto: { ...a, ...patch } });
+  const off = a.status === "off";
+  const st = AUTO_STATUS_META[a.status];
+  const rowBtn = `min-w-0 flex-1 text-left ${readOnly ? "cursor-default" : "nodrag cursor-pointer rounded hover:bg-violet-50/70"}`;
+  const open = (v: typeof edit) => (e: React.MouseEvent) => { if (readOnly) return; e.stopPropagation(); if (v === "cond") setCond(a.cond ?? ""); setEdit(v); };
+  const empty = (th: string, en: string) => <span className="text-[11.5px] text-slate-400">{readOnly ? "—" : t(th, en)}</span>;
+  const tag = (txt: string, cls: string) => <span className={`mt-px w-8 shrink-0 rounded text-center text-[10.5px] font-semibold leading-[18px] ${cls}`}>{txt}</span>;
+  const input = "nodrag nopan nowheel w-full rounded border border-violet-300 bg-white px-1.5 py-0.5 text-[12px] text-slate-800 outline-none focus:ring-2 focus:ring-violet-200";
+  return (
+    <div ref={ref} className={`flex w-full flex-col pb-2 text-left ${off ? "opacity-60" : ""}`}>
+      <div className="relative flex items-center gap-1.5 border-b px-2.5 py-1.5 text-[13px] font-semibold" style={{ color: pal.text, borderColor: `${pal.stroke}33` }}>
+        <span className="shrink-0" style={{ color: pal.stroke }}><Icon value="i:bolt" /></span>
+        {editingTitle
+          ? <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} {...stopAll} className={input}
+              onBlur={() => { updateData(id, { label: title.trim() || t("กฎอัตโนมัติ", "Automation rule") }); onTitleDone(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitle(data.label); onTitleDone(); } }} />
+          : <span className="min-w-0 flex-1 truncate" title={data.label}>{splitFlowLabel(data.label).title || t("กฎอัตโนมัติ", "Automation rule")}</span>}
+        <button type="button" {...stopAll} disabled={readOnly} onClick={(e) => { e.stopPropagation(); setStatusOpen((v) => !v); }}
+          title={t("สถานะของกฎ — กดเพื่อเปลี่ยน", "Rule status — click to change")}
+          className={`nodrag nopan shrink-0 rounded-full border px-2 text-[10.5px] font-medium leading-5 ${st.cls} ${readOnly ? "cursor-default" : ""}`}>{t(st.th, st.en)}</button>
+        {statusOpen && !readOnly && (
+          <div className="nodrag nopan absolute right-1.5 top-full z-20 mt-1 flex flex-col rounded-lg border border-slate-200 bg-white p-1 shadow-lg" {...stopAll}>
+            {AUTO_STATUSES.map((s) => (
+              <button key={s} type="button" onClick={(e) => { e.stopPropagation(); set({ status: s }); setStatusOpen(false); }}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left text-[12px] hover:bg-slate-50 ${s === a.status ? "font-semibold" : "font-normal"}`}>
+                <span className={`h-2.5 w-2.5 rounded-full border ${AUTO_STATUS_META[s].cls}`} />{t(AUTO_STATUS_META[s].th, AUTO_STATUS_META[s].en)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* เมื่อ */}
+      <div className="flex items-start gap-2 px-2.5 pt-1.5">
+        {tag(t("เมื่อ", "When"), "bg-blue-50 text-blue-700")}
+        {edit === "when"
+          ? <AutoPickEditor refs={AUTO_TRIGGERS} initial={a.when} onDone={(p) => { setEdit(null); if (p !== undefined) set({ when: p ?? undefined }); }} />
+          : <div className={rowBtn} onClick={open("when")} onDoubleClick={(e) => e.stopPropagation()}>{a.when ? <AutoChip p={a.when} refOf={autoTrigger} /> : empty("+ เลือกเหตุการณ์", "+ Pick an event")}</div>}
+      </div>
+      {/* ถ้า */}
+      <div className="flex items-start gap-2 px-2.5 pt-1">
+        {tag(t("ถ้า", "If"), "bg-amber-50 text-amber-700")}
+        {edit === "cond"
+          ? <input autoFocus value={cond} onChange={(e) => setCond(e.target.value)} {...stopAll} className={input}
+              placeholder={t("เช่น ยอดเกิน 10,000 · ลูกค้า VIP (ไม่ใส่ก็ได้)", "e.g. total over 10,000 · VIP customer (optional)")}
+              onBlur={() => { setEdit(null); set({ cond: cond.trim() || undefined }); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEdit(null); }} />
+          : <div className={`${rowBtn} break-words text-[12px] text-slate-700`} onClick={open("cond")} onDoubleClick={(e) => e.stopPropagation()}>{a.cond || empty("ทุกครั้ง (กดเพื่อใส่เงื่อนไข)", "Always (click to add a condition)")}</div>}
+      </div>
+      {/* ให้ */}
+      <div className="flex items-start gap-2 px-2.5 pt-1">
+        {tag(t("ให้", "Then"), "bg-emerald-50 text-emerald-700")}
+        <div className="min-w-0 flex-1">
+          {a.acts.map((p, i) => edit === i
+            ? <AutoPickEditor key={i} refs={AUTO_ACTIONS} initial={p} onDone={(np) => { setEdit(null); if (np === undefined) return; set({ acts: np ? a.acts.map((x, j) => (j === i ? np : x)) : a.acts.filter((_, j) => j !== i) }); }} />
+            : (
+              <div key={i} className="group flex items-start">
+                <div className={rowBtn} onClick={open(i)} onDoubleClick={(e) => e.stopPropagation()}><AutoChip p={p} refOf={autoAction} /></div>
+                {!readOnly && <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); set({ acts: a.acts.filter((_, j) => j !== i) }); }}
+                  title={t("เอาออก (ย้อนกลับได้ Ctrl+Z)", "Remove (Ctrl+Z to undo)")}
+                  className="nodrag nopan invisible shrink-0 px-0.5 text-slate-400 hover:text-rose-600 group-hover:visible"><Icon value="i:x" /></button>}
+              </div>
+            ))}
+          {edit === "add"
+            ? <AutoPickEditor refs={AUTO_ACTIONS} onDone={(np) => { setEdit(null); if (np) set({ acts: [...a.acts, np] }); }} />
+            : !readOnly && a.acts.length < AUTO_ACTS_MAX
+              ? <button type="button" {...stopAll} onClick={open("add")} className="nodrag nopan text-[11.5px] text-violet-600 hover:underline">{a.acts.length ? t("+ เพิ่มอีก", "+ Add another") : t("+ เลือกสิ่งที่จะให้ทำ", "+ Pick an action")}</button>
+              : !a.acts.length && empty("—", "—")}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
 function ShapeBg({ kind, color, fill, stroke }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string }) {
   const p0 = FLOW_PALETTE[color];
@@ -369,7 +494,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
     kind === "question" || kind === "storage" || frameless ? {}
     : { background: data.fill ?? pal.fill, border: `2px solid ${data.stroke ?? pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
-  const pad = kind === "todo" ? "0" : frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
+  const pad = kind === "todo" || kind === "auto" ? "0" : frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
   // ไอคอนโตตามกล่อง (lib/flowchart flowIconSizes — สูตรเดียวกับตอนบันทึกเป็นรูป)
   const iconBase = iconBoxBaseSize({ type: kind, data });
@@ -429,6 +554,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           : info?.missing && <div className="text-[10.5px] text-amber-700" title={data.href}><Icon value="i:alert-triangle" /> {t("หน้านี้ไม่อยู่ในเมนูแล้ว", "This page is no longer in the menu")}</div>}
       </div>
     );
+  } else if (kind === "auto") {
+    content = <AutoCard id={id} data={data} color={color} width={width} height={height} editingTitle={editing} onTitleDone={() => setEditing(false)} />;
   } else if (kind === "todo") {
     content = <TodoList id={id} data={data} color={color} width={width} height={height} editingTitle={editing} onTitleDone={() => setEditing(false)} />;
   } else if (kind === "file") {
@@ -457,7 +584,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         </NodeToolbar>
       )}
       <div
-        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" || kind === "todo" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
+        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" || kind === "todo" || kind === "auto" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
         style={{ ...boxStyle, padding: pad }}
         title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : kind === "page" && data.href ? t(`ดับเบิลคลิก = เปิดหน้า ${data.href}`, `Double-click to open ${data.href}`) : undefined}
         onDoubleClick={(e) => {
@@ -470,7 +597,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         {!frameless && <ShapeBg kind={kind} color={color} fill={data.fill} stroke={data.stroke} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
-        {editing && kind !== "todo" && (
+        {editing && kind !== "todo" && kind !== "auto" && (
           kind === "folder" || kind === "file"
             ? <InlineEditor initial={data} folder={kind === "folder"} boxW={width} boxH={height}
                 onDone={(patch, size) => { setEditing(false); if (patch) updateData(id, patch); if (patch && size) growNode(id, size.w, size.h); }} />
