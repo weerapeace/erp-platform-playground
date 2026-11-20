@@ -845,6 +845,8 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = fals
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fit]);
   const onLoad = () => {
+    const ld = ref.current?.contentDocument as (Document & { __pfLoaded?: boolean }) | null | undefined;
+    if (ld) { if (ld.__pfLoaded) return; ld.__pfLoaded = true; }
     measure(); setTimeout(measure, 120); setTimeout(measure, 400);
     // กด Ctrl/Cmd+P ขณะโฟกัสอยู่ใน iframe → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่าง)
     const doc = ref.current?.contentDocument;
@@ -860,6 +862,15 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = fals
       });
     }
   };
+  // กันพลาดเหตุการณ์โหลด: iframe โหลดเสร็จก่อน React ติดตัวฟัง (เจอตอน dev / html พร้อมตั้งแต่แรก) → เรียกเองครั้งเดียว
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const d = ref.current?.contentDocument as (Document & { __pfLoaded?: boolean }) | null | undefined;
+      if (d && d.readyState === "complete" && d.body?.childElementCount && !d.__pfLoaded) onLoad();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html]);
   return (
     <div ref={boxRef} className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
       <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no" data-report-print-frame="true"

@@ -664,6 +664,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "เลือกแม่แบบ + ติ๊กคอลัมน์ที่จะโชว์ บนหน้าพิมพ์เอกสาร + สวิตช์พิมพ์ต้นฉบับ+สำเนา (CopiesSwitch · withCopies · ช่อง {{copy_label}} ในแม่แบบ · หลายใบเรียงทีละใบ) · ตัวเลือกเฉพาะเอกสาร (DOC_OPTIONS — ติ๊ก/ปุ่มเลือก · แผงวาดให้เอง เก็บใน prefs.options) · แถวหัวกลุ่มในตาราง ({ __group, __sum })",
   },
   {
+    key: "print-part-style", label: "กดกล่องในใบพิมพ์แล้วแก้หน้าตา", code: "usePrintPartEditor · lib/print-part-style", category: "print",
+    source: { path: "components/print-part-style" },
+    what: "กดกล่องในพรีวิวเอกสารพิมพ์ (data-pp) → แผงแก้ ซ่อน (ทุกการ์ด/เฉพาะการ์ด) · ขนาด · ฟอนต์ · ตัวหนา · ตำแหน่ง · สีตัวอักษร/พื้น · รูปสูง/พอดี-เต็มกรอบ · ย้อนกลับ Ctrl+Z · คัดลอก/วางสไตล์ · คืนค่าทีละกล่อง/ทั้งใบ · กรอบเลือกโชว์แค่บนจอ ไม่ติดตอนพิมพ์",
+    when: "เอกสารพิมพ์ที่สร้างจากโค้ดแล้วอยากให้ผู้ใช้ปรับหน้าตาเองทีละส่วน (ใช้แล้ว: ใบเสนอราคาแบบการ์ดรูปใหญ่) — เอกสารประกาศกล่องด้วย data-pp + ทะเบียนกล่อง (PrintPartDef)",
+    notWhen: "แม่แบบในฐานข้อมูล (แบบตาราง) ให้ใช้ตัวออกแบบแม่แบบ · หน้าเว็บร้าน ให้ใช้ PartStyleEditor (website-part-style-editor)",
+    doc: "print-part-style.md",
+  },
+  {
     key: "print-setup-dialog", label: "หน้าปรับก่อนพิมพ์", code: "PrintSetupDialog", category: "print",
     source: { path: "components/print-setup-dialog" },
     what: "กดพิมพ์แล้วเปิดหน้าปรับก่อน ปรับแล้วเห็นผลทันที",

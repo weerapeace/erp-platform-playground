@@ -4,10 +4,13 @@ import { LoadingState } from "@/components/state-views";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame, ReportLayoutControls } from "@/components/report";
+import { usePrintPartEditor } from "@/components/print-part-style";
+import { QUOTE_CARD_PARTS, stripPerCardStyles } from "@/lib/print-part-style";
 import { apiFetch } from "@/lib/api";
 import {
   buildQuotationHtml as buildPrintableQuotationHtml,
   buildQuoteTemplateData as buildPrintableQuoteTemplateData,
+  quoteCardImgMm,
 } from "@/lib/quotation-print";
 import { DEFAULT_REPORT_LAYOUT, reportLayoutFromStoredValue, type ReportLayoutSettings } from "@/lib/report-layout";
 import { docFileName } from "@/lib/print-filename";
@@ -66,8 +69,9 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 // จำค่าที่ตั้งรายใบ (ต่อ browser): "ไม่รวมยอดทั้งหมด" + การเรียงรายการ — เปิดพิมพ์ใบเดิมซ้ำไม่ต้องตั้งใหม่
 type PerQuoteView = Partial<Pick<ReportLayoutSettings, (typeof PER_QUOTE_FIELDS)[number]>>;
 const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote", "lineStyle", "cardsPerRow", "showCustomer", "showQty", "showLineTotal",
-  "manualOrder", "showCardNo", "showCustomerApproval", "cardNameAdjPx", "cardNoteAdjPx", "cardPriceAdjPx", "headerAdjPx"] as const;
-const sameValue = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((v, i) => v === b[i]) : a === b);
+  "manualOrder", "showCardNo", "showCustomerApproval", "cardNameAdjPx", "cardNoteAdjPx", "cardPriceAdjPx", "headerAdjPx", "partStyles"] as const;
+const sameValue = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((v, i) => v === b[i])
+  : a && b && typeof a === "object" && typeof b === "object" ? JSON.stringify(a) === JSON.stringify(b) : a === b);
 const viewKey = (id: string) => `qt-print-view:${id}`;
 const legacyHideTotalsKey = (id: string) => `qt-print-hide-totals:${id}`;
 const readPerQuoteView = (id: string): PerQuoteView | null => {
@@ -173,6 +177,15 @@ export default function PrintQuotationPage() {
     setLayoutDefaultMessage(null);
   };
 
+  // กดกล่องในใบแล้วแก้หน้าตา (แบบการ์ดเท่านั้น · ของกลาง components/print-part-style · เจ้าของขอ 2026-11-20)
+  const partEditor = usePrintPartEditor({
+    parts: QUOTE_CARD_PARTS,
+    value: layout.partStyles,
+    onChange: (partStyles) => updateLayout({ ...layout, partStyles }),
+    enabled: layout.lineStyle === "cards",
+    defaultImgMm: quoteCardImgMm(layout.cardsPerRow),
+  });
+
   const loadDefaultLayout = async () => {
     setLayoutDefaultMessage("กำลังโหลดค่าเริ่มต้น...");
     try {
@@ -198,11 +211,12 @@ export default function PrintQuotationPage() {
       const res = await apiFetch("/api/admin/report-layout-defaults", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity_type: "qt", layout_settings: layout }),
+        body: JSON.stringify({ entity_type: "qt", layout_settings: { ...layout, partStyles: stripPerCardStyles(layout.partStyles) } }),
       });
       const json = await res.json() as ReportLayoutDefaultResponse;
       if (!res.ok || json.error) throw new Error(json.error ?? "บันทึกค่าเริ่มต้นไม่สำเร็จ");
-      if (json.data?.layout_settings) setLayout(reportLayoutFromStoredValue(json.data.layout_settings));
+      // ค่าเฉพาะการ์ดของใบนี้ยังอยู่ (ไม่ได้บันทึกเป็นค่าเริ่มต้น)
+      if (json.data?.layout_settings) setLayout(cur => ({ ...reportLayoutFromStoredValue(json.data!.layout_settings), partStyles: { ...reportLayoutFromStoredValue(json.data!.layout_settings).partStyles, ...Object.fromEntries(Object.entries(cur.partStyles).filter(([k]) => k.includes("#"))) } }));
       setUseStandardLayout(true);
       setLayoutDefaultMessage("บันทึกค่าเริ่มต้นแล้ว");
     } catch (err) {
@@ -231,7 +245,9 @@ export default function PrintQuotationPage() {
               defaultMessage={layoutDefaultMessage}
               lines={printLines}
             />
-            <PrintFrame html={html} fileName={fileName} />
+            {partEditor.bar}
+            <PrintFrame html={html} fileName={fileName} onDocLoad={partEditor.onDocLoad} />
+            {partEditor.panel}
           </>
         )}
       </div>

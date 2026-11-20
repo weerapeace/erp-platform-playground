@@ -12,6 +12,8 @@ export const REPORT_CARDS_PER_ROW_MAX = 4;
 export const REPORT_FONT_ADJ_MIN = -8;
 export const REPORT_FONT_ADJ_MAX = 16;
 
+import { normalizePrintPartStyles, type PrintPartStyles } from "@/lib/print-part-style";
+
 export const REPORT_IMAGE_SIZE_MIN_MM = 10;
 export const REPORT_IMAGE_SIZE_MAX_MM = 45;
 
@@ -50,6 +52,8 @@ export type ReportLayoutSettings = {
   cardPriceAdjPx: number;
   /** (การ์ด) ปรับขนาดหัวกระดาษ (ชื่อบริษัท/ชื่อเอกสาร/เลขที่-วันที่) */
   headerAdjPx: number;
+  /** (การ์ด) ปรับหน้าตาทีละกล่อง — กดกล่องในพรีวิว (ของกลาง lib/print-part-style · เจ้าของขอ 2026-11-20) */
+  partStyles: PrintPartStyles;
   /** แสดงช่องเซ็น "ลูกค้าอนุมัติ" — ปิดแล้วเหลือช่องผู้มีอำนาจช่องเดียวชิดขวา */
   showCustomerApproval: boolean;
   /** กล่องเงื่อนไขท้ายใบ (แก้ข้อความเองได้ · ขึ้นบรรทัดใหม่ได้) */
@@ -99,6 +103,7 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   cardNoteAdjPx: 0,
   cardPriceAdjPx: 0,
   headerAdjPx: 0,
+  partStyles: {},
   showCustomerApproval: true,
   showTerms: false,
   termsText: "ยืนราคา 30 วัน นับจากวันที่ในใบเสนอราคา\nราคาข้างต้นยังไม่รวมภาษีมูลค่าเพิ่ม",
@@ -170,6 +175,7 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     cardNoteAdjPx: Math.round(clamp(input.cardNoteAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
     cardPriceAdjPx: Math.round(clamp(input.cardPriceAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
     headerAdjPx: Math.round(clamp(input.headerAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
+    partStyles: normalizePrintPartStyles(input.partStyles),
     showCustomerApproval: input.showCustomerApproval ?? DEFAULT_REPORT_LAYOUT.showCustomerApproval,
     showTerms: input.showTerms ?? DEFAULT_REPORT_LAYOUT.showTerms,
     termsText: typeof input.termsText === "string" ? input.termsText.slice(0, 800) : DEFAULT_REPORT_LAYOUT.termsText,

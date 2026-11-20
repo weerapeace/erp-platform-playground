@@ -1,5 +1,6 @@
 import { normalizeReportLayout, type ReportLayoutSettings } from "@/lib/report-layout";
 import { docFileName } from "@/lib/print-filename";
+import { printPartCss, printPartFontLinks, QUOTE_CARD_PARTS } from "@/lib/print-part-style";
 
 export type QuoteLinePrint = {
   sku?: string | null;
@@ -208,6 +209,9 @@ const CARD_SIZES: Record<number, { price: number; name: number; sub: number; img
   4: { price: 17, name: 12, sub: 11, imgMm: 34 },
 };
 
+/** ความสูงรูปในการ์ดตอนยังไม่ปรับ (mm) — ตั้งแถบเลื่อนในตัวแก้ทีละกล่อง */
+export const quoteCardImgMm = (cardsPerRow: number) => (CARD_SIZES[cardsPerRow] ?? CARD_SIZES[2]).imgMm;
+
 /** แบบการ์ดรูปใหญ่ — แต่ละรายการเป็นการ์ด รูปใหญ่ ราคาตัวใหญ่ (ผู้ใหญ่อ่านง่าย · เจ้าของขอ 2026-11-19) */
 export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout: ReportLayoutSettings): string {
   const n = layout.cardsPerRow;
@@ -228,17 +232,18 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
     const qtyHtml = layout.showQty ? `<span>จำนวน <b>${formatQtyPlain(line.qty)}</b> ${unit}</span>` : "<span></span>";
     const totalHtml = layout.showLineTotal ? `<span class="qc-total">รวม ${formatMoney(quoteLinePrintAmount(line))} บาท</span>` : "";
     const img = !layout.showImage ? ""
-      : `<div class="qc-img">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : `<span class="qc-noimg">ไม่มีรูป</span>`}</div>`;
+      : `<div class="qc-img" data-pp="img">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : `<span class="qc-noimg">ไม่มีรูป</span>`}</div>`;
     // ราคา: เอา "/ ชิ้น" ออกตามที่เจ้าของขอ (2026-11-19) — เหลือ "850.00 บาท" ชิดขวา มีเส้นคั่นด้านบน
-    return `<div class="qc">
-      ${layout.showCardNo ? `<span class="qc-no">${index + 1}</span>` : ""}
+    // data-pp = กล่องที่กดแก้หน้าตาได้ · data-ci = ลำดับการ์ด (ซ่อนเฉพาะการ์ด) — lib/print-part-style
+    return `<div class="qc" data-pp="card" data-ci="${index}">
+      ${layout.showCardNo ? `<span class="qc-no" data-pp="no">${index + 1}</span>` : ""}
       ${img}
       <div class="qc-body">
-        ${sku ? `<div class="qc-sku">${escapeHtml(sku)}</div>` : ""}
-        <div class="qc-name">${escapeHtml(line.product_name)}</div>
-        ${line.note ? `<div class="qc-note">${escapeHtml(line.note)}</div>` : ""}
-        <div class="qc-price"><span class="qc-price-label">ราคา</span><span><b>${formatMoney(line.unit_price)}</b> <small>บาท</small></span></div>
-        ${(layout.showQty || layout.showLineTotal) ? `<div class="qc-foot">${qtyHtml}${totalHtml}</div>` : ""}
+        ${sku ? `<div class="qc-sku" data-pp="sku">${escapeHtml(sku)}</div>` : ""}
+        <div class="qc-name" data-pp="name">${escapeHtml(line.product_name)}</div>
+        ${line.note ? `<div class="qc-note" data-pp="note">${escapeHtml(line.note)}</div>` : ""}
+        <div class="qc-price" data-pp="price"><span class="qc-price-label">ราคา</span><span><b>${formatMoney(line.unit_price)}</b> <small>บาท</small></span></div>
+        ${(layout.showQty || layout.showLineTotal) ? `<div class="qc-foot" data-pp="foot">${qtyHtml}${totalHtml}</div>` : ""}
       </div>
     </div>`;
   }).join("");
@@ -299,30 +304,30 @@ export function buildQuotationHtml(
   const isCards = layout.lineStyle === "cards";
   // แบบการ์ด: หมายเหตุ + กล่องยอดรวมตัวใหญ่ท้ายใบ (แทนตารางรวมเงินเล็ก)
   const cardsNote = layout.showNote && quote.note
-    ? `<div class="card-note"><span class="label">หมายเหตุ :</span> ${escapeHtml(quote.note)}</div>` : "";
-  const cardsGrand = layout.showTotals ? `<section class="grand-box">
+    ? `<div class="card-note" data-pp="cardnote"><span class="label">หมายเหตุ :</span> ${escapeHtml(quote.note)}</div>` : "";
+  const cardsGrand = layout.showTotals ? `<section class="grand-box" data-pp="grand">
       <div class="grand-sub"><span>รวมเงิน ${formatMoney(subtotal)}</span><span>${escapeHtml(vatLabel)} ${formatMoney(quote.total_vat)}</span></div>
       <div class="grand-main"><span class="g-label">จำนวนเงินทั้งสิ้น</span><span class="g-amount">${formatMoney(quote.grand_total)} บาท</span></div>
       <div class="grand-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>
     </section>` : "";
   // กล่องเงื่อนไขท้ายใบ (ข้อความแก้เองได้ · ขึ้นบรรทัดใหม่ได้)
   const termsHtml = layout.showTerms && layout.termsText.trim()
-    ? `<div class="terms-box"><div class="label">เงื่อนไข</div>${layout.termsText.trim().split(/\r?\n/).filter(Boolean).map(t => `<div>• ${escapeHtml(t)}</div>`).join("")}</div>` : "";
+    ? `<div class="terms-box"${isCards ? ` data-pp="terms"` : ""}><div class="label">เงื่อนไข</div>${layout.termsText.trim().split(/\r?\n/).filter(Boolean).map(t => `<div>• ${escapeHtml(t)}</div>`).join("")}</div>` : "";
   // หัวกระดาษแบบ A (เฉพาะแบบการ์ด · เจ้าของเลือก 2026-11-19): ชื่อบริษัท+"ใบเสนอราคา" ซ้าย · กล่องเลขที่/วันที่ขวา ป้ายกับค่าตรงกันทุกบรรทัด
   const h = layout.headerAdjPx;
   const cardsHeader = `<header class="qh">
       <div class="qh-left">
-        <div class="qh-company">${escapeHtml(COMPANY_NAME)}</div>
-        <div class="qh-address">${escapeHtml(COMPANY_ADDRESS)}</div>
-        <div class="qh-title">ใบเสนอราคา</div>
+        <div class="qh-company" data-pp="company">${escapeHtml(COMPANY_NAME)}</div>
+        <div class="qh-address" data-pp="address">${escapeHtml(COMPANY_ADDRESS)}</div>
+        <div class="qh-title" data-pp="title">ใบเสนอราคา</div>
       </div>
-      <table class="qh-meta">
+      <table class="qh-meta" data-pp="meta">
         <tr><td>เลขที่</td><td>${escapeHtml(quote.quote_number || "-")}</td></tr>
         <tr><td>วันที่</td><td>${escapeHtml(thaiDate(quote.quote_date))}</td></tr>
         ${layout.showResponsible ? `<tr><td>ผู้รับผิดชอบ</td><td>${escapeHtml(quote.sale_person_name || "-")}</td></tr>` : ""}
       </table>
     </header>
-    ${layout.showCustomer ? `<section class="qh-customer">
+    ${layout.showCustomer ? `<section class="qh-customer" data-pp="customer">
       <div><span class="label">ลูกค้า:</span> ${escapeHtml(quote.customer_name || "-")}</div>
       ${quote.customer_address ? `<div><span class="label">ที่อยู่:</span> ${escapeHtml(quote.customer_address)}</div>` : ""}
       ${layout.showPhone && quote.customer_phone ? `<div><span class="label">เบอร์โทร:</span> ${escapeHtml(quote.customer_phone)}</div>` : ""}
@@ -341,6 +346,7 @@ export function buildQuotationHtml(
   <meta charset="utf-8">
   <title>${escapeHtml(docFileName("ใบเสนอราคา", quote.quote_number))}</title>
   <base href="${escapeHtml(origin || "/")}">
+  ${isCards ? printPartFontLinks(layout.partStyles) : ""}
   <style>
     /* ขอบกระดาษอยู่ "ในตัวเอกสาร" (padding ของ .page) ไม่ใช่ที่ @page — เพราะ Chrome จำค่า Margins ล่าสุดไว้
        ถ้าผู้ใช้เคยตั้ง None (เช่น ตอนพิมพ์สติกเกอร์/บาร์โค้ด) ค่าขอบใน @page จะถูกทิ้ง → เนื้อหาชิดขอบกระดาษ เส้นกรอบซ้าย-ขวาหาย
@@ -408,6 +414,7 @@ export function buildQuotationHtml(
     .qh-meta td:first-child { color: #666; padding-right: 6mm; }
     .qh-meta td:last-child { font-weight: 700; text-align: right; }
     .qh-customer { border: 0.3mm solid #ccc; border-radius: 2mm; padding: 2mm 3mm; margin-bottom: 4mm; line-height: 1.5; }
+    ${isCards ? printPartCss(layout.partStyles, QUOTE_CARD_PARTS) : ""}
     @media print {
       body { background: #fff; }
       /* ขอบกระดาษ = padding ของ .page (ดู @page ข้างบน) → หน้าเอกสารสูงเกือบเท่ากระดาษ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่านั้นขึ้นหน้าใหม่เอง) */
@@ -486,7 +493,7 @@ export function buildQuotationHtml(
     : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
     ${termsHtml}
 
-    <div class="closing">
+    <div class="closing"${isCards ? ` data-pp="sign"` : ""}>
     <section class="signatures${layout.showCustomerApproval ? "" : " signatures-single"}">
       ${layout.showCustomerApproval ? `<div class="signature">
         <div class="sig-line">ลูกค้าอนุมัติ</div>
