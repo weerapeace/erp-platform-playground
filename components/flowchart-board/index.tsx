@@ -19,7 +19,7 @@ import "@xyflow/react/dist/style.css";
 import "./flowchart.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position,
+  ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position, SelectionMode,
   addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow,
   type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
@@ -157,6 +157,10 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const pushToast = usePushToast();
   const rf = useReactFlow();
   const meName = useAuth().user?.name ?? "";
+  // ลากที่ว่าง = ลากกรอบเลือกกล่อง (เจ้าของสั่ง 2026-11-20) · เลื่อนกระดาน = Space ค้าง+ลาก / ลากคลิกขวา / ปุ่มกลาง
+  //   จอสัมผัส (นิ้ว) = ลากเลื่อนเหมือนเดิม (ไม่มีเมาส์ขวา/Space ให้ใช้)
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => { try { setCoarse(window.matchMedia("(pointer: coarse)").matches); } catch { /* เบราว์เซอร์เก่า */ } }, []);
   const wrapRef = useRef<HTMLDivElement>(null);    // พื้นที่วาด (ใช้หาจุดวาง/กลางจอ)
   const boardRef = useRef<HTMLDivElement>(null);   // ทั้งกระดานรวมแถบเครื่องมือ (คีย์ลัดทำงานเมื่อเมาส์/โฟกัสอยู่ในนี้)
 
@@ -931,6 +935,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable
             multiSelectionKeyCode={["Shift", "Control", "Meta"]}
             deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
+            selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} selectionMode={SelectionMode.Partial} panActivationKeyCode="Space"
+            onPaneContextMenu={(e) => { if (!coarse) e.preventDefault(); }}
             minZoom={0.2} maxZoom={2.5}
             zoomOnDoubleClick={false}
           >
