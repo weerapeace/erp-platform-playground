@@ -156,7 +156,7 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "bulk-action-bar", label: "แถบคำสั่งหลายรายการ", code: "BulkActionBar", category: "table",
     source: { path: "components/bulk-action-bar" },
     what: "แถบลอยล่างจอเมื่อติ๊กหลายแถว: แก้หลายรายการ ส่งออก ลบ เปลี่ยนสถานะ",
-    when: "ทุกตารางที่ติ๊กเลือกหลายแถวได้",
+    when: "ทุกตาราง/กริดที่ติ๊กเลือกหลายรายการได้ · ในป๊อปอัปใช้ placement=\"inline\" (ติดขอบล่างกล่องเลื่อนของป๊อป ไม่จมใต้ป๊อป/ไม่บังปุ่มท้ายป๊อป)",
     notWhen: "ห้ามทำแถบปุ่มหลายรายการเองในหน้า",
     doc: "bulk-action-bar.md",
   },

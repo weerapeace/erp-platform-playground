@@ -51,6 +51,11 @@ export async function removeAlbumFile(id: string, assetId: string, trashDrive: b
   return (await json<{ data: { drive_trashed: boolean } }>(await send(`/api/content-albums/${id}/files?asset_id=${assetId}${trashDrive ? "&drive=1" : ""}`, "DELETE"))).data;
 }
 
+/** ย้อนกลับการเอาไฟล์ออก — ใส่ไฟล์กลับเข้าอัลบั้ม (กู้จากถังขยะคลังถ้าถูกพาไป) */
+export async function restoreAlbumFile(id: string, assetId: string): Promise<void> {
+  await json(await send(`/api/content-albums/${id}/files`, "POST", { asset_id: assetId, restore: true }));
+}
+
 /** ดึงไฟล์ที่ใส่เองในโฟลเดอร์ Drive ของอัลบั้ม + ตรวจไฟล์ที่หายจาก Drive (เรียกซ้ำจน remaining = 0) */
 export async function syncAlbumDrive(id: string): Promise<{ added: number; remaining: number; missing: number; restored: number; skipped: number }> {
   return (await json<{ data: { added: number; remaining: number; missing: number; restored: number; skipped: number } }>(await send(`/api/content-albums/${id}/drive-sync`, "POST"))).data;

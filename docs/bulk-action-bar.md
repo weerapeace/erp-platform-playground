@@ -38,3 +38,14 @@
 - `/marketing/skus` (SKU การตลาด) — เปลี่ยนป้ายหลายรุ่น
 - `/master/mo-backlog` (จัดการใบสั่งผลิตค้าง) — ผ่าน DataTable `bulkBarPosition="bottom"` · ดู `docs/mo-backlog.md`
 - ผู้สมัครย้ายมาใช้: Design Dashboard (`components/design-dashboard` มีแถบล่างเขียนเองแบบเดียวกัน)
+
+## ใช้ในป๊อปอัป (placement="inline") — 2026-11-20
+
+แถบลอยปกติ (z-40) จมอยู่ใต้ป๊อปอัป (z-50) และถ้ายกขึ้นก็บังปุ่มท้ายป๊อป → ในป๊อปให้ใส่ `placement="inline"`
+แถบจะติดขอบล่างของกล่องเลื่อนในป๊อป (sticky) หน้าตาเหมือนเดิม ไม่มี portal / spacer
+
+```tsx
+<BulkActionBar placement="inline" count={picked} unit="ไฟล์" onClear={clear}>…ปุ่ม…</BulkActionBar>
+```
+
+ตัวแรกที่ใช้: ป๊อปอัลบั้ม Contents (`components/asset-library/contents/album-detail.tsx`)

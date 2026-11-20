@@ -9,7 +9,10 @@
  *   ส่งเข้าปฏิทิน: เลือกวันก่อน (ปฏิทินกลาง DocCalendar · เห็นโพสต์เดิมของแบรนด์แต่ละวัน) → ป๊อปสร้างโพสต์กลาง ContentCreateModal ที่ใส่วัน + ข้อมูลจากอัลบั้มให้แล้ว
  *     (แบรนด์ · ชื่อ · แพลตฟอร์ม · ประเภท · ไฟล์ที่เลือก · แคปชั่นร่าง · สินค้าที่แท็ก — ไม่ได้แท็ก = เดาจากรหัสในชื่ออัลบั้ม)
  *   ช่วยคัดรูป (เบลอ/คล้าย · ./cull) · ดาวน์โหลดทั้งอัลบั้มเป็น zip (lib/zip)
- * ใช้ของกลาง: ERPModal · ConfirmDialog · UploadProgress · runBackgroundTask · ContentCreateModal · DocCalendar · useDragReorder · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
+ * หน้าตาแบบ B (เจ้าของเลือก 2026-11-20): รูปซ้าย · ข้อมูล/แคปชั่น/Reference/ลงแล้ว แถบขวา (จอเล็กย้ายไปใต้รูป) · ลบ/ปิดอัลบั้มอยู่ในเมนู "เพิ่มเติม"
+ *   ติ๊กมุมรูป = เลือกใช้ → แถบคำสั่ง BulkActionBar (inline) · แตะรูป = ImageLightbox · ขนาดรูป gallery-columns · วิธีใช้ = InfoHint
+ *   เอาไฟล์ออก / ล้างที่เลือก / ตั้งปก → ปุ่ม "ย้อนกลับ" ในแจ้งเตือน (toast.undo · ไฟล์ใส่กลับผ่าน POST files restore)
+ * ใช้ของกลาง: ERPModal · ConfirmDialog · BulkActionBar · ImageLightbox · useGalleryColumns · InfoHint · Popover · UploadProgress · runBackgroundTask · ContentCreateModal · DocCalendar · useDragReorder · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
  * สิทธิ์: แก้/อัป assets.upload · ลบไฟล์ assets.delete · ลบอัลบั้ม assets.manage · สร้างโพสต์ tasks.create
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +41,12 @@ import { codeLike } from "@/lib/website-image-match";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
 import { useFileDrop } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
-import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption, setAlbumFileCover,
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";
+import { InfoHint } from "@/components/info-hint";
+import { Popover } from "@/components/popover";
+import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, restoreAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption, setAlbumFileCover,
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
 import { StageBadge, PlatChip, FileThumb, PickMediaButtons, isAlbumMedia, ALBUM_ACCEPT } from "./album-bits";
@@ -283,9 +291,8 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   };
   const reorder = useDragReorder(moveFile, { group: `album-files:${albumId}` });
 
-  // ── เลือกรูปที่จะใช้ · โหมดเลือกรูป = แตะตรงไหนของรูปก็ติ๊ก (ปิดการเปิดรูปใหญ่/ลากเรียงชั่วคราว) ──
+  // ── เลือกรูปที่จะใช้ · ติ๊กมุมซ้ายบนของรูป (แตะตัวรูป = ดูรูปใหญ่) · เลือกแล้วแถบคำสั่งโผล่ล่างกริด (BulkActionBar) ──
   // กดรัว ๆ ได้: อัปเดตบนจอทันที แล้วบันทึกรวดเดียวหลังหยุดแตะ (ไม่โหลดอัลบั้มใหม่ทับระหว่างแตะ)
-  const [pickMode, setPickMode] = useState(false);
   const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pickIds = useRef<string[] | null>(null);
   const flushPicks = useCallback(() => {
@@ -307,26 +314,62 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   };
   const togglePick = (f: AlbumFile) => setPicks((cur) => { if (cur.has(f.id)) cur.delete(f.id); else cur.add(f.id); return cur; });
   const pickAll = (on: boolean) => setPicks(() => new Set(on ? (album?.files ?? []).map((x) => x.id) : []));
-  const exitPickMode = useCallback(() => { setPickMode(false); flushPicks(); }, [flushPicks]);
-  // Esc = ออกจากโหมดเลือก (ไม่ปิดหน้าอัลบั้ม) · ปิดหน้าไปก่อนบันทึก = บันทึกให้
-  useEffect(() => {
-    if (!pickMode) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); exitPickMode(); } };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [pickMode, exitPickMode]);
+  // ✕ ล้างที่เลือก — ย้อนกลับได้ในแจ้งเตือนมุมจอ
+  const clearPicks = () => {
+    const before = album?.picked_asset_ids ?? [];
+    if (!before.length) return;
+    pickAll(false);
+    toast.undo(t(`ล้างที่เลือกแล้ว ${before.length} ไฟล์`, `Cleared ${before.length} pick(s)`), () => setPicks(() => new Set(before)));
+  };
+  // ปิดหน้าไปก่อนบันทึก = บันทึกให้
   useEffect(() => () => flushPicks(), [flushPicks]);
-  const setCover = (f: AlbumFile) => void patch({ cover_asset_id: album?.cover_asset_id === f.id ? null : f.id }, t("ตั้งปกอัลบั้มแล้ว", "Cover set"));
+  const setCover = (f: AlbumFile) => {
+    const prev = album?.cover_asset_id ?? null;
+    const next = prev === f.id ? null : f.id;
+    void patch({ cover_asset_id: next }).then(() => toast.undo(next ? t("ตั้งปกอัลบั้มแล้ว", "Cover set") : t("เอาปกออกแล้ว", "Cover removed"), () => patch({ cover_asset_id: prev })));
+  };
 
+  // ── เอาไฟล์ออก (ทีละไฟล์ / ที่เลือกไว้) · ย้อนกลับได้: ใส่ไฟล์กลับ + คืนลำดับ/ที่เลือก/ปก ──
+  type RemoveSnap = { ids: string[]; order: string[]; picked: string[]; cover: string | null };
+  const snapFor = (ids: string[]): RemoveSnap => ({ ids, order: (album?.files ?? []).map((x) => x.id), picked: album?.picked_asset_ids ?? [], cover: album?.cover_asset_id ?? null });
+  const undoRemove = async (s: RemoveSnap) => {
+    try {
+      for (const id of s.ids) await restoreAlbumFile(albumId, id);
+      await updateContentAlbum(albumId, { file_order: s.order, picked_asset_ids: s.picked, cover_asset_id: s.cover });
+      toast.success(t(`ใส่กลับแล้ว ${s.ids.length} ไฟล์`, `${s.ids.length} file(s) restored`));
+    } catch (e) { toast.error((e as Error).message); }
+    await load(true); onChanged();
+  };
   const doDeleteFile = async () => {
     if (!delFile) return;
     setBusy(true);
+    const snap = snapFor([delFile.id]);
     try {
+      flushPicks();
       const r = await removeAlbumFile(albumId, delFile.id, delDrive);
-      toast.success(r.drive_trashed ? t("เอาออกแล้ว · ไฟล์ใน Drive ไปถังขยะ (กู้คืนได้ใน Drive)", "Removed · Drive file moved to trash") : t("เอาออกจากอัลบั้มแล้ว · ไฟล์ใน Drive ยังอยู่", "Removed · Drive file kept"));
+      // ลบใน Drive แล้ว = ย้อนจากที่นี่ไม่ได้ (กู้ใน Drive ได้ 30 วัน แล้วกด "ดึงไฟล์ใหม่จาก Drive")
+      if (r.drive_trashed) toast.success(t("เอาออกแล้ว · ไฟล์ใน Drive ไปถังขยะ (กู้คืนได้ใน Drive)", "Removed · Drive file moved to trash"));
+      else toast.undo(t("เอาออกจากอัลบั้มแล้ว · ไฟล์ใน Drive ยังอยู่", "Removed · Drive file kept"), () => undoRemove(snap));
       setDelFile(null); setDelDrive(false); await load(true); onChanged();
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(false); }
+  };
+  const removePicked = async () => {
+    if (!album) return;
+    const ids = [...album.picked_asset_ids];
+    if (!ids.length) return;
+    if (!(await askConfirm({ title: t(`เอา ${ids.length} ไฟล์ที่เลือกออกจากอัลบั้ม?`, `Remove ${ids.length} picked file(s)?`), variant: "danger", confirmText: t("เอาออก", "Remove"),
+      message: t("ไฟล์ใน Google Drive ยังอยู่ · โพสต์ที่ใช้ไฟล์ไปแล้วยังใช้ได้ · กด “ย้อนกลับ” ในแจ้งเตือนมุมจอได้", "Drive files are kept · existing posts keep working · undo from the notice") }))) return;
+    const snap = snapFor(ids);
+    flushPicks();
+    setBusy(true);
+    const done: string[] = [];
+    try {
+      for (const id of ids) { await removeAlbumFile(albumId, id, false); done.push(id); }
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+    if (done.length) toast.undo(t(`เอาออกแล้ว ${done.length} ไฟล์`, `${done.length} file(s) removed`), () => undoRemove({ ...snap, ids: done }), { ms: 10000 });
+    await load(true); onChanged();
   };
   const doTrashAlbum = async () => {
     setBusy(true);
@@ -426,55 +469,84 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
 
   const files = album?.files ?? [];
   const pickedCount = album?.picked_asset_ids.length ?? 0;
+  // ขนาดรูปในกริด (ของกลาง gallery-columns · จำรายคน · Ctrl+ลูกกลิ้งบนกริด = ย่อ/ขยาย)
+  const gallery = useGalleryColumns("content-album-files", 4, "0.5rem");
+  // ดูรูปใหญ่ (ของกลาง ImageLightbox · เลื่อนซ้าย-ขวา) — เฉพาะรูป · คลิปเปิดตัวเล่นวิดีโอ (ตั้งปกคลิปจากเฟรมได้)
+  const photos = useMemo(() => files.filter((f) => f.asset_type !== "video"), [files]);
+  const [lightIdx, setLightIdx] = useState(-1);
+  const lightImages = useMemo<LightboxImage[]>(() => photos.map((f) => ({
+    url: (f.drive_file_id ? r2ImageUrl(`drive:${f.drive_file_id}`, 2000) : r2ImageUrl(f.r2_key, 1600)) ?? "",
+    thumbUrl: r2ImageUrl(f.r2_key, 240) ?? null,
+    label: f.file_name,
+  })), [photos]);
+  const openFile = (f: AlbumFile) => { if (f.asset_type === "video") setViewFile(f); else setLightIdx(photos.findIndex((x) => x.id === f.id)); };
+  const lightFile = lightIdx >= 0 ? photos[lightIdx] ?? null : null;
+  const linkBtn = "inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-60";
+  const toolBtn = "inline-flex items-center gap-1 h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60";
+  const darkBtn = "h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-white/20 text-xs font-medium text-white hover:bg-white/10 disabled:opacity-50";
   return (
     <ERPModal open onClose={closeAll} title={album?.name || t("อัลบั้ม", "Album")} size="xl" storageKey="content-album-detail"
       footer={album ? (
         <div className="flex flex-wrap items-center gap-2 w-full">
-          {can("assets.manage") && <button onClick={() => setTrashOpen(true)} className="h-9 px-3 inline-flex items-center gap-1.5 text-sm text-red-600 rounded-lg hover:bg-red-50"><Icon name="delete" />{t("ลบอัลบั้ม", "Delete album")}</button>}
-          {canEdit && (
-            <button onClick={() => void patch({ closed: !album.closed_at }, album.closed_at ? t("เปิดอัลบั้มอีกครั้งแล้ว", "Album reopened") : t("ปิดอัลบั้มแล้ว", "Album closed"))}
-              className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{album.closed_at ? t("เปิดอัลบั้มอีกครั้ง", "Reopen") : t("ปิดอัลบั้ม (จบแล้ว)", "Close album")}</button>
+          {/* ลบ / ปิดอัลบั้ม อยู่ในเมนู ⋯ (กันกดโดนพลาด) */}
+          {(canEdit || can("assets.manage")) && (
+            <Popover panelClassName="w-60 p-1"
+              trigger={(toggle) => (
+                <button onClick={toggle} aria-label={t("เมนูเพิ่มเติม", "More")} title={t("ปิดอัลบั้ม / ลบอัลบั้ม", "Close / delete album")}
+                  className="h-9 px-3 inline-flex items-center gap-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon name="more" />{t("เพิ่มเติม", "More")}</button>
+              )}>
+              {(close) => (
+                <div className="flex flex-col text-sm">
+                  {canEdit && (
+                    <button onClick={() => { close(); void patch({ closed: !album.closed_at }, album.closed_at ? t("เปิดอัลบั้มอีกครั้งแล้ว", "Album reopened") : t("ปิดอัลบั้มแล้ว", "Album closed")); }}
+                      className="flex items-center gap-2 px-3 py-2 rounded-md text-left text-slate-700 hover:bg-slate-50">
+                      <Icon name={album.closed_at ? "refresh" : "done"} />{album.closed_at ? t("เปิดอัลบั้มอีกครั้ง", "Reopen album") : t("ปิดอัลบั้ม (จบแล้ว)", "Close album (done)")}
+                    </button>
+                  )}
+                  {can("assets.manage") && (
+                    <button onClick={() => { close(); setTrashOpen(true); }} className="flex items-center gap-2 px-3 py-2 rounded-md text-left text-red-600 hover:bg-red-50">
+                      <Icon name="delete" />{t("ลบอัลบั้ม (ไปถังขยะ)", "Delete album (to trash)")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </Popover>
           )}
+          {album.closed_at && <span className="text-xs text-slate-500">{t("อัลบั้มนี้ปิดแล้ว", "This album is closed")}</span>}
           <span className="flex-1" />
           <button onClick={closeAll} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           {can("tasks.create") && (
             <button onClick={openPost} disabled={!files.length}
               title={!files.length ? t("ยังไม่มีไฟล์ในอัลบั้ม", "No files yet") : undefined}
               className="h-9 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-              <Icon name="calendar" />{pickedCount ? t(`ส่งเข้าปฏิทิน (${pickedCount} ไฟล์ที่เลือก)`, `Send to calendar (${pickedCount} picked)`) : t("ส่งเข้าปฏิทิน", "Send to calendar")}
+              <Icon name="calendar" />{pickedCount ? t(`ส่งเข้าปฏิทิน (${pickedCount})`, `Send to calendar (${pickedCount})`) : t("ส่งเข้าปฏิทิน", "Send to calendar")}
             </button>
           )}
         </div>
       ) : undefined}>
       {loading && !album ? <LoadingState /> : error && !album ? <ErrorState hint={error} onRetry={() => void load()} /> : album && (
-        <div className="space-y-5" {...drop.guard}>
-          {/* หัว: สถานะ · ข้อมูลอื่นแก้ที่ "ข้อมูลอัลบั้ม" ด้านล่าง */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+        <div className="space-y-3" {...drop.guard}>
+          {/* หัวแถวเดียว: สถานะ · แบรนด์ · ที่อยู่ใน Drive · ปุ่ม Drive · บันทึกแล้ว */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
             <StageBadge stage={album.status.stage} />
             {album.brand_name && <span className="inline-flex items-center gap-1.5 text-slate-600"><span className="w-2.5 h-2.5 rounded-full" style={{ background: album.brand_color || "#94a3b8" }} />{album.brand_name}</span>}
-            {saveState !== "idle" && (
-              <span className={`ml-auto inline-flex items-center gap-1 text-xs ${saveState === "error" ? "text-red-600" : saveState === "saving" ? "text-slate-500" : "text-emerald-600"}`}>
-                <Icon name={saveState === "error" ? "warning" : saveState === "saving" ? "waiting" : "done"} />
-                {saveState === "error" ? t("บันทึกไม่สำเร็จ", "Save failed") : saveState === "saving" ? t("กำลังบันทึก…", "Saving…") : t("บันทึกแล้ว", "Saved")}
-              </span>
-            )}
-          </div>
-
-          {/* ที่อยู่ใน Drive */}
-          <div className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border text-sm ${drive && !drive.ok ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-slate-50 border-slate-200 text-slate-600"}`}>
-            <Icon name={drive && !drive.ok ? "warning" : "folder"} />
-            {!drive ? t("กำลังดูโฟลเดอร์ Drive...", "Checking Drive folder...") : drive.ok ? (
-              <>
-                <span className="min-w-0 break-words">Google Drive › {drive.label}{drive.pending ? t(" (สร้างให้ตอนอัปไฟล์แรก)", " (created on first upload)") : ""}</span>
-                <span className="ml-auto flex flex-wrap items-center gap-3">
-                  {canEdit && drive.folder_url && (
-                    <button onClick={() => void syncDrive()} disabled={!!syncing} title={t("ไฟล์ที่อัปเองผ่านแอป Google Drive เข้าโฟลเดอร์นี้ + ตรวจไฟล์ที่ถูกลบใน Drive", "Files added straight to this Drive folder + check for files deleted in Drive")}
-                      className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-60"><Icon name="refresh" />{syncing ?? t("ดึงไฟล์ใหม่จาก Drive", "Pull new files from Drive")}</button>
-                  )}
-                  {drive.folder_url && <a href={drive.folder_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-violet-700 hover:underline"><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
+            {!drive ? <span className="text-xs text-slate-400">{t("กำลังดูโฟลเดอร์ Drive...", "Checking Drive folder...")}</span>
+              : drive.ok ? (
+                <span className="inline-flex min-w-0 items-center gap-1 text-xs text-slate-500"><Icon name="folder" size={14} /><span className="min-w-0 break-words">Google Drive › {drive.label}{drive.pending ? t(" (สร้างให้ตอนอัปไฟล์แรก)", " (created on first upload)") : ""}</span></span>
+              ) : <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-xs text-amber-800"><Icon name="warning" size={14} />{drive.reason}</span>}
+            <span className="ml-auto flex flex-wrap items-center gap-3 text-xs">
+              {saveState !== "idle" && (
+                <span className={`inline-flex items-center gap-1 ${saveState === "error" ? "text-red-600" : saveState === "saving" ? "text-slate-500" : "text-emerald-600"}`}>
+                  <Icon name={saveState === "error" ? "warning" : saveState === "saving" ? "waiting" : "done"} />
+                  {saveState === "error" ? t("บันทึกไม่สำเร็จ", "Save failed") : saveState === "saving" ? t("กำลังบันทึก…", "Saving…") : t("บันทึกแล้ว", "Saved")}
                 </span>
-              </>
-            ) : <span>{drive.reason}</span>}
+              )}
+              {drive?.ok && canEdit && drive.folder_url && (
+                <button onClick={() => void syncDrive()} disabled={!!syncing} title={t("ไฟล์ที่อัปเองผ่านแอป Google Drive เข้าโฟลเดอร์นี้ + ตรวจไฟล์ที่ถูกลบใน Drive", "Files added straight to this Drive folder + check for files deleted in Drive")}
+                  className={linkBtn}><Icon name="refresh" />{syncing ?? t("ดึงไฟล์ใหม่จาก Drive", "Pull from Drive")}</button>
+              )}
+              {drive?.ok && drive.folder_url && <a href={drive.folder_url} target="_blank" rel="noreferrer" className={linkBtn}><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
+            </span>
           </div>
           {files.some((f) => f.drive_missing) && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
@@ -489,187 +561,215 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             </div>
           )}
 
-          {/* ไฟล์ในอัลบั้ม */}
-          <section className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ในอัลบั้ม (${files.length})`, `Files (${files.length})`)}</h3>
-              {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount} ไฟล์`, `${pickedCount} picked`)}</span>}
-              {canEdit && files.length > 0 && !pickMode && <span className="text-xs text-slate-400">{t("แตะรูป = ดูรูปใหญ่ (คลิป = เลือกปกคลิปได้) · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tap = view (videos: pick the cover) · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
-              {files.length > 0 && (
-                <span className="ml-auto flex flex-wrap gap-2">
-                  {canEdit && !pickMode && (
-                    <button onClick={() => setPickMode(true)} title={t("เข้าโหมดเลือกรูป: แตะตรงไหนของรูปก็ติ๊กได้ (รูปที่เลือก = ส่งเข้าโพสต์/ดาวน์โหลด/AI เฉพาะที่เลือก)", "Pick mode: tap anywhere on a photo to tick it")}
-                      className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50"><Icon name="done" />{t("เลือกรูป", "Pick photos")}</button>
-                  )}
-                  {canEdit && files.some((f) => f.asset_type !== "video") && (
-                    <button onClick={() => void runCull()} disabled={!!cullMsg} title={t("หารูปที่อาจเบลอ + รูปคล้ายกันที่ถ่ายรัว แล้วแนะนำรูปที่ควรเก็บ (ไม่มีค่าใช้จ่าย)", "Find blurry and burst look-alike photos, suggest which to keep (free)")}
-                      className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60"><Icon name="inspect" />{cullMsg ?? t("ช่วยคัดรูป", "Help me cull")}</button>
-                  )}
-                  <button onClick={() => void downloadZip()} disabled={!!zipMsg} title={t("รูปต้นฉบับทั้งอัลบั้ม (หรือเฉพาะที่เลือกใช้) เป็นไฟล์ zip · วิดีโอเปิดจาก Drive", "All photos (or picked ones) as a zip · videos stay in Drive")}
-                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60"><Icon name="download" />{zipMsg ?? (pickedCount ? t("ดาวน์โหลดที่เลือก (zip)", "Download picked (zip)") : t("ดาวน์โหลดทั้งอัลบั้ม (zip)", "Download all (zip)"))}</button>
-                </span>
-              )}
-            </div>
-            {pickMode && (
-              <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 bg-violet-50 text-sm text-violet-800">
-                <Icon name="done" />
-                <span className="min-w-0 flex-1">{t(`โหมดเลือกรูป — แตะตรงไหนของรูปก็ติ๊ก/เลิกติ๊ก · เลือกแล้ว ${pickedCount} จาก ${files.length} · บันทึกให้เอง`, `Pick mode — tap a photo to tick/untick · ${pickedCount} of ${files.length} picked · saves automatically`)}</span>
-                <button onClick={() => pickAll(true)} className="h-7 px-2.5 rounded-lg border border-violet-200 bg-white text-xs hover:bg-violet-100">{t("เลือกทั้งหมด", "Select all")}</button>
-                <button onClick={() => pickAll(false)} className="h-7 px-2.5 rounded-lg border border-violet-200 bg-white text-xs hover:bg-violet-100">{t("ล้าง", "Clear")}</button>
-                <button onClick={exitPickMode} className="h-7 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">{t("เสร็จ", "Done")}</button>
-              </div>
-            )}
-            {cull && (cull.blurry.size > 0 || cull.groups > 0) && (
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-sky-200 bg-sky-50 text-sm text-sky-800">
-                <Icon name="inspect" />
-                <span className="min-w-0 flex-1">{t(`ดู ${cull.checked} รูป · อาจเบลอ ${cull.blurry.size} รูป · รูปคล้ายกัน ${cull.groups} ชุด → แนะนำเก็บ ${cull.keep.length} รูป (ชุดคล้ายเก็บรูปที่คมสุด)`, `${cull.checked} checked · ${cull.blurry.size} maybe blurry · ${cull.groups} look-alike sets → keep ${cull.keep.length}`)}</span>
-                {canEdit && <button onClick={() => void applyCull()} className="h-7 px-2.5 rounded-lg bg-sky-600 text-white text-xs font-medium hover:bg-sky-700">{t("เลือกใช้ตามที่แนะนำ", "Pick suggested")}</button>}
-                <button onClick={() => setCull(null)} className="text-xs text-sky-700 hover:underline">{t("ปิด", "Dismiss")}</button>
-              </div>
-            )}
-            {files.length === 0 ? (
-              <p className="text-sm text-slate-500 py-6 text-center">{t("ยังไม่มีไฟล์ — ลากรูป/วิดีโอมาวางที่ช่องด้านล่าง", "No files yet — drop photos/videos below")}</p>
-            ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                {files.map((f, i) => {
-                  const cover = album.cover_asset_id === f.id;
-                  return (
-                    <div key={f.id} {...(canEdit && !pickMode ? reorder.rowProps(i) : {})} className={`group relative rounded-lg overflow-hidden border ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"} ${canEdit && !pickMode ? reorder.rowCls(i) : ""}`}>
-                      {pickMode ? (
-                        <button onClick={() => togglePick(f)} aria-pressed={f.picked} className="relative block w-full cursor-pointer select-none" title={f.file_name}>
-                          <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
-                          {!f.picked && <span className="absolute inset-0 bg-white/45" />}
-                          <span className={`absolute top-2 left-2 w-8 h-8 grid place-items-center rounded-full border-2 ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-black/25 border-white text-transparent"}`}><Icon name="done" size={18} /></span>
-                        </button>
-                      ) : (
-                      <button onClick={() => setViewFile(f)} {...(canEdit ? reorder.handleProps(i) : {})} className={`block w-full ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`} title={canEdit ? t(`${f.file_name} · กดค้างแล้วลาก = เรียงลำดับ`, `${f.file_name} · hold and drag to reorder`) : f.file_name}>
-                        <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
-                      </button>
-                      )}
-                      {canEdit && !pickMode && (
-                        <>
-                          <button onClick={() => { setPickMode(true); togglePick(f); }} aria-pressed={f.picked} title={f.picked ? t("เลิกเลือก (เข้าโหมดเลือกรูป)", "Unpick (enters pick mode)") : t("เลือกใช้ (เข้าโหมดเลือกรูป)", "Pick (enters pick mode)")}
-                            className={`absolute top-1 left-1 w-6 h-6 grid place-items-center rounded-md border ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-400"}`}><Icon name="done" size={14} /></button>
-                          <button onClick={() => setCover(f)} title={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")}
-                            className={`absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
-                        </>
-                      )}
-                      {canEdit && !pickMode && files.length > 1 && (
-                        <>
-                          {i > 0 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i - 1)} aria-label={t("เลื่อนไปก่อนหน้า", "Move earlier")}
-                            className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
-                          {i < files.length - 1 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i + 1)} aria-label={t("เลื่อนไปถัดไป", "Move later")}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">›</button>}
-                        </>
-                      )}
-                      {can("assets.delete") && !pickMode && (
-                        <button onClick={() => { setDelFile(f); setDelDrive(false); }} title={t("เอาออก", "Remove")}
-                          className="absolute bottom-1 right-1 w-6 h-6 grid place-items-center rounded-md bg-white/90 text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><Icon name="delete" size={14} /></button>
-                      )}
-                      <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-0.5 p-1 pointer-events-none pr-8">
-                        {f.drive_missing && <span className="px-1 rounded bg-red-600 text-white text-[10px]">{t("หายจาก Drive", "Missing in Drive")}</span>}
-                        {cull?.blurry.has(f.id) && <span className="px-1 rounded bg-amber-500 text-white text-[10px]">{t("อาจเบลอ", "Blurry?")}</span>}
-                        {cull?.groupOf.has(f.id) && <span className={`px-1 rounded text-white text-[10px] ${cull.keep.includes(f.id) ? "bg-sky-600" : "bg-slate-500"}`}>{t(`คล้าย #${cull.groupOf.get(f.id)}`, `Alike #${cull.groupOf.get(f.id)}`)}{cull.keep.includes(f.id) ? " ★" : ""}</span>}
-                        {f.used_in.length > 0 && <span className="px-1 rounded bg-emerald-600 text-white text-[10px]" title={f.used_in.map((u) => u.label).filter(Boolean).join(", ")}>{t(`ใช้แล้ว ${f.used_in.length}`, `Used ${f.used_in.length}`)}</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* ลากไฟล์มาวาง */}
-          {canEdit && drive?.ok && !album.closed_at && (
-            <div {...drop.zone("album")}
-              className={`rounded-xl border-2 border-dashed p-5 text-center transition ${drop.over === "album" ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white"}`}>
-              <p className="text-sm text-slate-600 flex items-center justify-center gap-2"><Icon name="upload" />{t("ลากรูป/วิดีโอ หรือทั้งโฟลเดอร์ มาวางที่นี่", "Drop photos/videos or whole folders here")}</p>
-              <PickMediaButtons onFiles={startUpload} className="mt-2 justify-center" />
-              <p className="text-xs text-slate-400 mt-1">{t("ไฟล์ตัวจริงขึ้น Google Drive (ไม่เกิน 5GB ต่อไฟล์) · ระบบเก็บแค่รูปย่อไว้โชว์ · อัปเบื้องหลัง ปิดหน้าต่างนี้ได้ · ถ้าเผลอปิดแท็บกลางคัน ลากไฟล์เดิมมาวางใหม่ = ส่งต่อจากที่ค้าง (เครื่องเดิม ภายใน 6 วัน)", "Originals go to Google Drive (≤5GB each) · only small previews stay here · runs in the background · closed the tab midway? drop the same files again to resume (same device, within 6 days)")}</p>
-              {step && <UploadProgress name={step.name} size={step.size} pct={step.pct} label={step.label} count={{ current: step.current, total: step.total }} className="mt-3 text-left" />}
-            </div>
-          )}
-
-          {/* ข้อมูลอัลบั้ม — แก้ตรงนี้ได้เลย ไม่ต้องกดปุ่ม (ชุดช่องเดียวกับป๊อปสร้างอัลบั้ม) */}
-          {info && (
-            <section className="space-y-2">
+          {/* แบบ B: รูปซ้าย · ข้อมูล/แคปชั่น/Reference/ลงแล้ว แถบขวา (จอเล็ก = แถบขวาย้ายไปใต้รูป) */}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+            {/* ── ซ้าย: ไฟล์ในอัลบั้ม ── */}
+            <section className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold text-slate-700">{t("ข้อมูลอัลบั้ม", "Album info")}</h3>
-                {canEdit && <span className="text-xs text-slate-400">{t("แก้ตรงนี้ได้เลย · ตัวเลือกบันทึกทันที · ข้อความบันทึกตอนออกจากช่อง", "Edit here · choices save instantly · text saves when you leave the box")}</span>}
+                <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ (${files.length})`, `Files (${files.length})`)}</h3>
+                {canEdit && files.length > 0 && (
+                  <InfoHint label={t("วิธีใช้", "How to")}>
+                    <span className="block space-y-1 text-xs">
+                      <span className="block">{t("ติ๊กมุมซ้ายบน = เลือกรูปที่จะใช้ (ส่งเข้าปฏิทิน / ดาวน์โหลด / AI ใช้เฉพาะที่เลือก)", "Tick the top-left box = pick (calendar / download / AI use picks only)")}</span>
+                      <span className="block">{t("แตะรูป = ดูรูปใหญ่ เลื่อนซ้าย-ขวาได้ · คลิป = เล่น + ตั้งปกคลิปจากเฟรม", "Tap = view large, swipe left/right · videos: play + set cover from a frame")}</span>
+                      <span className="block">{t("ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Star = album cover · hold and drag (or ‹ ›) = reorder")}</span>
+                      <span className="block">{t("Ctrl + หมุนลูกกลิ้งบนรูป = ย่อ/ขยายรูป", "Ctrl + scroll on the grid = resize")}</span>
+                    </span>
+                  </InfoHint>
+                )}
+                {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount}`, `${pickedCount} picked`)}</span>}
+                {files.length > 0 && (
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
+                    {canEdit && pickedCount < files.length && (
+                      <button onClick={() => pickAll(true)} className={toolBtn}><Icon name="done" />{t("เลือกทั้งหมด", "Pick all")}</button>
+                    )}
+                    {canEdit && files.some((f) => f.asset_type !== "video") && (
+                      <button onClick={() => void runCull()} disabled={!!cullMsg} title={t("หารูปที่อาจเบลอ + รูปคล้ายกันที่ถ่ายรัว แล้วแนะนำรูปที่ควรเก็บ (ไม่มีค่าใช้จ่าย)", "Find blurry and burst look-alike photos, suggest which to keep (free)")}
+                        className={toolBtn}><Icon name="inspect" />{cullMsg ?? t("ช่วยคัดรูป", "Help me cull")}</button>
+                    )}
+                    <button onClick={() => void downloadZip()} disabled={!!zipMsg} title={t("รูปต้นฉบับทั้งอัลบั้ม (หรือเฉพาะที่เลือกใช้) เป็นไฟล์ zip · วิดีโอเปิดจาก Drive", "All photos (or picked ones) as a zip · videos stay in Drive")}
+                      className={toolBtn}><Icon name="download" />{zipMsg ?? (pickedCount ? t("zip ที่เลือก", "Zip picked") : t("zip ทั้งอัลบั้ม", "Zip all"))}</button>
+                    <GalleryColumnsControl cols={gallery.cols} onChange={gallery.setCols} as="stepper" className="hidden sm:inline-flex" />
+                  </span>
+                )}
               </div>
-              <AlbumInfoFields form={info} onChange={changeInfo} onBlurText={commitText} brands={brands} brandLocked={!!album.drive_folder_id} disabled={!canEdit} showCaption={false} />
-            </section>
-          )}
-
-          {/* แคปชั่นตามแพลตฟอร์ม — การ์ดเดียวกับหน้าลงโพสต์ (CaptionCard โหมด draft) */}
-          <section className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นตามแพลตฟอร์ม", "Captions by platform")}</h3>
-              <span className="text-xs text-slate-400">{t("พิมพ์แล้วบันทึกให้เอง · ตอนส่งเข้าปฏิทิน แคปชั่นแต่ละแพลตฟอร์มไปกับโพสต์เลย", "Saves as you type · each platform's caption goes into the post")}</span>
-              {canEdit && can("ai.caption") && capPlatforms.length > 0 && (
-                <button onClick={() => void aiAll()} disabled={!!aiPlat || !files.length} title={t("AI ดูรูปที่เลือกใช้ (สูงสุด 4 รูป) + การ์ดรู้จักแบรนด์ แล้วเขียนให้ทีละแพลตฟอร์ม · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "AI looks at up to 4 picked photos + the brand card, one call per platform")}
-                  className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"><Icon name="ai" />{aiPlat === "*" ? t("AI กำลังเขียน…", "AI writing…") : t("AI เขียนทุกแพลตฟอร์ม", "AI write all")}</button>
+              {cull && (cull.blurry.size > 0 || cull.groups > 0) && (
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-sky-200 bg-sky-50 text-sm text-sky-800">
+                  <Icon name="inspect" />
+                  <span className="min-w-0 flex-1">{t(`ดู ${cull.checked} รูป · อาจเบลอ ${cull.blurry.size} รูป · รูปคล้ายกัน ${cull.groups} ชุด → แนะนำเก็บ ${cull.keep.length} รูป (ชุดคล้ายเก็บรูปที่คมสุด)`, `${cull.checked} checked · ${cull.blurry.size} maybe blurry · ${cull.groups} look-alike sets → keep ${cull.keep.length}`)}</span>
+                  {canEdit && <button onClick={() => void applyCull()} className="h-7 px-2.5 rounded-lg bg-sky-600 text-white text-xs font-medium hover:bg-sky-700">{t("เลือกใช้ตามที่แนะนำ", "Pick suggested")}</button>}
+                  <button onClick={() => setCull(null)} className="text-xs text-sky-700 hover:underline">{t("ปิด", "Dismiss")}</button>
+                </div>
               )}
-            </div>
-            {capPlatforms.length === 0 ? (
-              <p className="text-sm text-slate-500">{t("เลือก “ตั้งใจลงที่ไหน” ด้านบนก่อน แล้วจะมีช่องแคปชั่นของแต่ละแพลตฟอร์ม", "Pick “Planned platforms” above to get a caption box per platform")}</p>
-            ) : (
-              <div className="space-y-2">
-                {capPlatforms.map((p) => (
-                  <CaptionCard key={p} draft open={openPlats.has(p)} onToggle={() => togglePlat(p)} cap={capOf(p)} templates={capTpl.templates}
-                    sharedVars={{ shop: capTpl.shop, fake_price: null, real_price: null, price: null, color: null, sku: null, product: album.products[0]?.name ?? null, link: null }}
-                    brandId={album.brand_id} setting={pset[p]} onChange={canEdit ? (change) => setCap(p, change) : () => {}}
-                    canAi={canEdit && can("ai.caption")} aiBusy={aiPlat === p || aiPlat === "*"} onAiWrite={() => void aiFor(p)}
-                    onApplyAll={canEdit && capPlatforms.length > 1 ? (from) => void applyAll(from) : undefined}
-                    onPullFrom={canEdit && capPlatforms.length > 1 ? () => setPullTo(p) : undefined}
-                    pushToast={(type, m) => toast.show(m, type)} />
-                ))}
-              </div>
-            )}
-          </section>
+              {files.length === 0 ? (
+                <p className="text-sm text-slate-500 py-6 text-center">{t("ยังไม่มีไฟล์ — ลากรูป/วิดีโอมาวางที่ช่องด้านล่าง", "No files yet — drop photos/videos below")}</p>
+              ) : (
+                <div ref={gallery.wheelRef} style={gallery.gridStyle}>
+                  {files.map((f, i) => {
+                    const cover = album.cover_asset_id === f.id;
+                    return (
+                      <div key={f.id} {...(canEdit ? reorder.rowProps(i) : {})} className={`group relative rounded-lg overflow-hidden border bg-white ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"} ${canEdit ? reorder.rowCls(i) : ""}`}>
+                        <button onClick={() => openFile(f)} {...(canEdit ? reorder.handleProps(i) : {})} className={`block w-full ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`} title={canEdit ? t(`${f.file_name} · แตะ = ดูรูปใหญ่ · กดค้างแล้วลาก = เรียงลำดับ`, `${f.file_name} · tap to view · hold and drag to reorder`) : f.file_name}>
+                          <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
+                        </button>
+                        {canEdit && (
+                          <>
+                            <button onPointerDown={(e) => e.stopPropagation()} onClick={() => togglePick(f)} aria-pressed={f.picked} aria-label={f.picked ? t("เลิกเลือก", "Unpick") : t("เลือกใช้", "Pick")} title={f.picked ? t("เลิกเลือก", "Unpick") : t("เลือกใช้รูปนี้", "Pick this")}
+                              className={`absolute top-1 left-1 w-7 h-7 grid place-items-center rounded-full border-2 shadow-sm ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/80 border-white text-transparent hover:text-slate-400"}`}><Icon name="done" size={15} /></button>
+                            <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setCover(f)} aria-label={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")} title={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")}
+                              className={`absolute top-1 right-1 w-7 h-7 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
+                          </>
+                        )}
+                        {canEdit && files.length > 1 && (
+                          <>
+                            {i > 0 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i - 1)} aria-label={t("เลื่อนไปก่อนหน้า", "Move earlier")}
+                              className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
+                            {i < files.length - 1 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i + 1)} aria-label={t("เลื่อนไปถัดไป", "Move later")}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">›</button>}
+                          </>
+                        )}
+                        {can("assets.delete") && (
+                          <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setDelFile(f); setDelDrive(false); }} aria-label={t("เอาออก", "Remove")} title={t("เอาออก", "Remove")}
+                            className="absolute bottom-1 right-1 w-6 h-6 grid place-items-center rounded-md bg-white/90 text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><Icon name="delete" size={14} /></button>
+                        )}
+                        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-0.5 p-1 pointer-events-none pr-8">
+                          {f.drive_missing && <span className="px-1 rounded bg-red-600 text-white text-[10px]">{t("หายจาก Drive", "Missing in Drive")}</span>}
+                          {cull?.blurry.has(f.id) && <span className="px-1 rounded bg-amber-500 text-white text-[10px]">{t("อาจเบลอ", "Blurry?")}</span>}
+                          {cull?.groupOf.has(f.id) && <span className={`px-1 rounded text-white text-[10px] ${cull.keep.includes(f.id) ? "bg-sky-600" : "bg-slate-500"}`}>{t(`คล้าย #${cull.groupOf.get(f.id)}`, `Alike #${cull.groupOf.get(f.id)}`)}{cull.keep.includes(f.id) ? " ★" : ""}</span>}
+                          {f.used_in.length > 0 && <span className="px-1 rounded bg-emerald-600 text-white text-[10px]" title={f.used_in.map((u) => u.label).filter(Boolean).join(", ")}>{t(`ใช้แล้ว ${f.used_in.length}`, `Used ${f.used_in.length}`)}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-          {/* Reference ที่ขอไว้ (ติดมาจากรายการที่อยากได้) — เทียบตอนคัดรูป */}
-          {album.refs.length > 0 || showRefs ? (
-            <section className="space-y-2">
-              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Icon name="pin" />{t("Reference ที่ขอไว้", "References")} <span className="text-slate-400 font-normal">{album.refs.length}</span></h3>
-              <RefBoard albumId={albumId} brandId={album.brand_id} refs={album.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} compact />
+              {/* ลากไฟล์มาวาง */}
+              {canEdit && drive?.ok && !album.closed_at && (
+                <div {...drop.zone("album")}
+                  className={`rounded-xl border-2 border-dashed px-4 py-3 text-center transition ${drop.over === "album" ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white"}`}>
+                  <p className="text-sm text-slate-600 flex flex-wrap items-center justify-center gap-2">
+                    <Icon name="upload" />{t("ลากรูป/วิดีโอ หรือทั้งโฟลเดอร์ มาวางที่นี่", "Drop photos/videos or whole folders here")}
+                    <InfoHint label={t("เกี่ยวกับการอัป", "About uploads")}>{t("ไฟล์ตัวจริงขึ้น Google Drive (ไม่เกิน 5GB ต่อไฟล์) · ระบบเก็บแค่รูปย่อไว้โชว์ · อัปเบื้องหลัง ปิดหน้าต่างนี้ได้ · ถ้าเผลอปิดแท็บกลางคัน ลากไฟล์เดิมมาวางใหม่ = ส่งต่อจากที่ค้าง (เครื่องเดิม ภายใน 6 วัน)", "Originals go to Google Drive (≤5GB each) · only small previews stay here · runs in the background · closed the tab midway? drop the same files again to resume (same device, within 6 days)")}</InfoHint>
+                  </p>
+                  <PickMediaButtons onFiles={startUpload} className="mt-2 justify-center" />
+                  {step && <UploadProgress name={step.name} size={step.size} pct={step.pct} label={step.label} count={{ current: step.current, total: step.total }} className="mt-3 text-left" />}
+                </div>
+              )}
+
+              {/* แถบคำสั่งเมื่อเลือกรูป (ของกลาง BulkActionBar โหมดในป๊อป) */}
+              {canEdit && (
+                <BulkActionBar placement="inline" count={pickedCount} unit={t("ไฟล์", "file(s)")} onClear={clearPicks}
+                  extra={pickedCount < files.length ? <button onClick={() => pickAll(true)} className="underline hover:text-white">{t(`เลือกทั้งหมด ${files.length}`, `Pick all ${files.length}`)}</button> : undefined}>
+                  <button onClick={() => void downloadZip()} disabled={!!zipMsg} className={darkBtn}><Icon name="download" />{zipMsg ?? t("ดาวน์โหลด", "Download")}</button>
+                  {pickedCount === 1 && (() => {
+                    const only = files.find((x) => x.picked);
+                    return only ? <button onClick={() => setCover(only)} className={darkBtn}><Icon name="star" />{album.cover_asset_id === only.id ? t("เอาปกออก", "Unset cover") : t("ตั้งเป็นปก", "Set cover")}</button> : null;
+                  })()}
+                  {can("assets.delete") && <button onClick={() => void removePicked()} disabled={busy} className={`${darkBtn} text-red-300`}><Icon name="delete" />{t("เอาออก", "Remove")}</button>}
+                  {can("tasks.create") && <button onClick={openPost} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-violet-500 text-xs font-medium text-white hover:bg-violet-400"><Icon name="calendar" />{t("ส่งเข้าปฏิทิน", "Send to calendar")}</button>}
+                </BulkActionBar>
+              )}
             </section>
-          ) : canEdit && (
-            <button onClick={() => setShowRefs(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-dashed border-slate-300 text-sm text-slate-600 hover:bg-slate-50"><Icon name="pin" />{t("+ เพิ่ม Reference", "+ Add references")}</button>
-          )}
 
-          {/* สถานะต่อแพลตฟอร์ม + โพสต์ */}
-          <section className="space-y-2">
-            <h3 className="text-sm font-semibold text-slate-700">{t("ลงที่ไหนแล้วบ้าง", "Where it's posted")}</h3>
-            {album.status.platforms.length === 0 ? (
-              <p className="text-sm text-slate-500">{t("ยังไม่มีโพสต์ — เลือก “ตั้งใจลงที่ไหน” ด้านบน แล้วกด “ส่งเข้าปฏิทิน”", "No posts yet — pick platforms above, then Send to calendar")}</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {album.status.platforms.map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platMeta.get(p.code)?.label} iconKey={platMeta.get(p.code)?.icon_key} />)}
-              </div>
-            )}
-            {album.posts.length > 0 && (
-              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-                {album.posts.map((p) => (
-                  <li key={p.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 text-sm ${!p.is_active || p.status === "cancelled" ? "opacity-50" : ""}`}>
-                    <a href={`/tasks/content-calendar?content=${p.id}`} target="_blank" rel="noreferrer" className="font-medium text-violet-700 hover:underline">{p.content_no ?? "—"}</a>
-                    <span className="min-w-0 flex-1 truncate text-slate-700">{p.title}</span>
-                    {p.scheduled_at && <span className="text-xs text-slate-500">{new Date(p.scheduled_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</span>}
-                    <span className="flex gap-1">{p.platforms.map((code) => {
-                      const st = p.post_status[code];
-                      if (st === "skip") return null;
-                      return <PlatChip key={code} code={code} state={st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "failed" ? "failed" : "ready"} label={platMeta.get(code)?.label} iconKey={platMeta.get(code)?.icon_key} compact />;
-                    })}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+            {/* ── ขวา: ข้อมูล · แคปชั่น · Reference · ลงแล้ว (PC ติดอยู่ข้างรูป เลื่อนในแถบได้) ── */}
+            <aside className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3 lg:sticky lg:top-0 lg:max-h-[calc(100dvh-13rem)] lg:overflow-y-auto">
+              {info && (
+                <section className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold text-slate-700">{t("ข้อมูลอัลบั้ม", "Album info")}</h3>
+                    {canEdit && <InfoHint side="right">{t("แก้ตรงนี้ได้เลย · ตัวเลือกบันทึกทันที · ข้อความบันทึกตอนออกจากช่อง", "Edit here · choices save instantly · text saves when you leave the field")}</InfoHint>}
+                  </div>
+                  <AlbumInfoFields form={info} onChange={changeInfo} onBlurText={commitText} brands={brands} brandLocked={!!album.drive_folder_id} disabled={!canEdit} showCaption={false} columns={1} />
+                </section>
+              )}
 
+              {/* แคปชั่นตามแพลตฟอร์ม — การ์ดเดียวกับหน้าลงโพสต์ (CaptionCard โหมด draft) */}
+              <section className="space-y-2 border-t border-slate-200 pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นตามแพลตฟอร์ม", "Captions by platform")}</h3>
+                  <InfoHint side="right">{t("พิมพ์แล้วบันทึกให้เอง · ตอนส่งเข้าปฏิทิน แคปชั่นแต่ละแพลตฟอร์มติดไปกับโพสต์ให้", "Saves as you type · each platform's caption goes into the post")}</InfoHint>
+                  {canEdit && can("ai.caption") && capPlatforms.length > 0 && (
+                    <button onClick={() => void aiAll()} disabled={!!aiPlat || !files.length} title={t("AI ดูรูปที่เลือกใช้ (สูงสุด 4 รูป) + การ์ดรู้จักแบรนด์ แล้วเขียนให้ทีละแพลตฟอร์ม · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "AI looks at up to 4 picked photos + the brand card, one call per platform")}
+                      className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 bg-white text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"><Icon name="ai" />{aiPlat === "*" ? t("AI กำลังเขียน…", "AI writing…") : t("AI เขียนทุกแพลตฟอร์ม", "AI write all")}</button>
+                  )}
+                </div>
+                {capPlatforms.length === 0 ? (
+                  <p className="text-sm text-slate-500">{t("เลือก “ตั้งใจลงที่ไหน” ด้านบนก่อน แล้วจะมีช่องแคปชั่นของแต่ละแพลตฟอร์ม", "Pick “Planned platforms” above first")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {capPlatforms.map((p) => (
+                      <CaptionCard key={p} draft open={openPlats.has(p)} onToggle={() => togglePlat(p)} cap={capOf(p)} templates={capTpl.templates}
+                        sharedVars={{ shop: capTpl.shop, fake_price: null, real_price: null, price: null, color: null, sku: null, product: album.products[0]?.name ?? null, link: null }}
+                        brandId={album.brand_id} setting={pset[p]} onChange={canEdit ? (change) => setCap(p, change) : () => {}}
+                        canAi={canEdit && can("ai.caption")} aiBusy={aiPlat === p || aiPlat === "*"} onAiWrite={() => void aiFor(p)}
+                        onApplyAll={canEdit && capPlatforms.length > 1 ? (from) => void applyAll(from) : undefined}
+                        onPullFrom={canEdit && capPlatforms.length > 1 ? () => setPullTo(p) : undefined}
+                        pushToast={(type, m) => toast.show(m, type)} />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Reference ที่ขอไว้ (ติดมาจากรายการที่อยากได้) — เทียบตอนคัดรูป */}
+              <section className="space-y-2 border-t border-slate-200 pt-3">
+                {album.refs.length > 0 || showRefs ? (
+                  <>
+                    <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Icon name="pin" />{t("Reference ที่ขอไว้", "References")} <span className="text-slate-400 font-normal">{album.refs.length}</span></h3>
+                    <RefBoard albumId={albumId} brandId={album.brand_id} refs={album.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} compact />
+                  </>
+                ) : canEdit ? (
+                  <button onClick={() => setShowRefs(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-dashed border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50"><Icon name="pin" />{t("+ เพิ่ม Reference", "+ Add references")}</button>
+                ) : <p className="text-sm text-slate-400">{t("ไม่มี Reference", "No references")}</p>}
+              </section>
+
+              {/* สถานะต่อแพลตฟอร์ม + โพสต์ */}
+              <section className="space-y-2 border-t border-slate-200 pt-3">
+                <h3 className="text-sm font-semibold text-slate-700">{t("ลงที่ไหนแล้วบ้าง", "Where it's posted")}</h3>
+                {album.status.platforms.length === 0 ? (
+                  <p className="text-sm text-slate-500">{t("ยังไม่มีโพสต์ — เลือก “ตั้งใจลงที่ไหน” แล้วกด “ส่งเข้าปฏิทิน”", "No posts yet — pick platforms, then “Send to calendar”")}</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {album.status.platforms.map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platMeta.get(p.code)?.label} iconKey={platMeta.get(p.code)?.icon_key} />)}
+                  </div>
+                )}
+                {album.posts.length > 0 && (
+                  <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+                    {album.posts.map((p) => (
+                      <li key={p.id} className={`flex flex-wrap items-center gap-2 px-3 py-2 text-sm ${!p.is_active || p.status === "cancelled" ? "opacity-50" : ""}`}>
+                        <a href={`/tasks/content-calendar?content=${p.id}`} target="_blank" rel="noreferrer" className="font-medium text-violet-700 hover:underline">{p.content_no ?? "—"}</a>
+                        <span className="min-w-0 flex-1 truncate text-slate-700">{p.title}</span>
+                        {p.scheduled_at && <span className="text-xs text-slate-500">{new Date(p.scheduled_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false })}</span>}
+                        <span className="flex gap-1">{p.platforms.map((code) => {
+                          const st = p.post_status[code];
+                          if (st === "skip") return null;
+                          return <PlatChip key={code} code={code} state={st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "failed" ? "failed" : "ready"} label={platMeta.get(code)?.label} iconKey={platMeta.get(code)?.icon_key} compact />;
+                        })}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </aside>
+          </div>
         </div>
       )}
 
-      {/* ดูไฟล์ใหญ่ */}
+      {/* ดูรูปใหญ่ (ของกลาง ImageLightbox) — เลื่อนซ้าย-ขวา · ติ๊กเลือก/ตั้งปก/เปิด Drive ได้จากในนี้ */}
+      <ImageLightbox images={lightImages} index={lightIdx} onIndex={setLightIdx} onClose={() => setLightIdx(-1)} thumbnails
+        footer={() => lightFile && (
+          <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-white/90">
+            <span className="max-w-[40ch] truncate">{lightFile.file_name}</span>
+            <span className="text-white/60">{[lightFile.width && lightFile.height ? `${lightFile.width}×${lightFile.height}` : null, lightFile.size_bytes ? formatBytes(lightFile.size_bytes) : null].filter(Boolean).join(" · ")}</span>
+            {canEdit && <button onClick={() => togglePick(lightFile)} className={`h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium ${lightFile.picked ? "bg-violet-600 border-violet-600" : "border-white/30 hover:bg-white/10"}`}><Icon name="done" />{lightFile.picked ? t("เลือกแล้ว", "Picked") : t("เลือกใช้", "Pick")}</button>}
+            {canEdit && <button onClick={() => setCover(lightFile)} className={`h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border text-xs font-medium ${album?.cover_asset_id === lightFile.id ? "bg-amber-500 border-amber-500" : "border-white/30 hover:bg-white/10"}`}><Icon name="star" />{album?.cover_asset_id === lightFile.id ? t("ปกอัลบั้ม", "Cover") : t("ตั้งเป็นปก", "Set cover")}</button>}
+            {lightFile.drive_file_id && <a href={driveFileUrl(lightFile.drive_file_id)} target="_blank" rel="noreferrer" className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-white/30 text-xs hover:bg-white/10"><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
+            {lightFile.drive_file_id && <a href={`/api/drive-video/${lightFile.drive_file_id}?dl=1`} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-white/30 text-xs hover:bg-white/10"><Icon name="download" />{t("ต้นฉบับ", "Original")}</a>}
+            {lightFile.used_in.length > 0 && <span className="text-xs text-emerald-300">{t("ใช้ในโพสต์:", "Used in:")} {lightFile.used_in.map((u) => u.label).filter(Boolean).join(", ")}</span>}
+          </div>
+        )} />
+
+      {/* ดูคลิป (เล่นวิดีโอ + ตั้งปกคลิปจากเฟรม / อัปรูปเอง) */}
       {viewFile && (
         <ERPModal open onClose={() => setViewFile(null)} title={viewFile.file_name} size="xl" storageKey="content-album-file" zIndex={60}
           footer={<div className="flex flex-wrap items-center gap-2 w-full text-sm text-slate-500">

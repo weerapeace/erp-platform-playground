@@ -4,6 +4,7 @@
  *        body = { drive_file_id, preview_key?, file_name, mime, size, width?, height?, duration_sec?, checksum?, phash?, phash_color? }
  *               → ลงทะเบียนไฟล์ที่เพิ่งอัปขึ้น Drive (assets source "content") แล้วใส่อัลบั้ม
  *        body = { asset_id } → ใส่ไฟล์ที่มีในคลังอยู่แล้วเข้าอัลบั้ม (เลือก "ใช้รูปเดิม" ตอนเจอรูปซ้ำ)
+ *        body = { asset_id, restore: true } → "ย้อนกลับ" หลังเอาไฟล์ออก (ไฟล์ของอัลบั้มเองที่ไปถังขยะคลัง กู้กลับ active) · audit file_restore
  * PATCH  /api/content-albums/[id]/files  body = { asset_id, preview_key } → เปลี่ยนปกคลิป (รูปย่อใน R2 ที่อัปจาก /api/admin/upload folder content-albums) ของวิดีโอในอัลบั้ม
  * DELETE /api/content-albums/[id]/files?asset_id=&drive=1
  *        → เอาออกจากอัลบั้ม · ไฟล์ของอัลบั้มเอง (source content ไม่อยู่ที่อื่น) ไปถังขยะคลัง · drive=1 = ต้นฉบับใน Drive ไปถังขยะด้วย (กู้คืนได้ใน Drive)
@@ -41,11 +42,20 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   // ใช้ไฟล์เดิมในคลัง
   if (body.asset_id !== undefined) {
     if (!isUuid(body.asset_id)) return NextResponse.json({ error: "ไฟล์ไม่ถูกต้อง" }, { status: 400 });
-    const { data: a } = await admin.from("assets").select("id, file_name, status").eq("id", body.asset_id).maybeSingle();
-    if (!a || (a as { status: string }).status !== "active") return NextResponse.json({ error: "ไม่พบไฟล์ในคลัง" }, { status: 404 });
+    const { data: a } = await admin.from("assets").select("id, file_name, status, source").eq("id", body.asset_id).maybeSingle();
+    const asset = a as { file_name: string; status: string; source: string } | null;
+    // restore = กด "ย้อนกลับ" หลังเอาไฟล์ออก → ไฟล์ของอัลบั้มเองที่ถูกพาไปถังขยะคลังตอนเอาออก กู้กลับมาได้
+    const restore = body.restore === true;
+    const canRestore = restore && asset?.status === "trashed" && asset.source === "content";
+    if (!asset || (asset.status !== "active" && !canRestore)) return NextResponse.json({ error: "ไม่พบไฟล์ในคลัง" }, { status: 404 });
+    if (canRestore) {
+      const { error: rErr } = await admin.from("assets").update({ status: "active", trashed_at: null }).eq("id", body.asset_id);
+      if (rErr) return NextResponse.json({ error: `กู้ไฟล์ไม่สำเร็จ: ${rErr.message}` }, { status: 500 });
+    }
     const { error } = await admin.from("asset_collection_map").upsert({ asset_id: body.asset_id, collection_id: id }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
     if (error) return NextResponse.json({ error: `เพิ่มไฟล์ไม่สำเร็จ: ${error.message}` }, { status: 500 });
-    await writeAudit(admin, { action: "file_add", entityType: "content_album", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { asset_id: body.asset_id, reused: true, file_name: (a as { file_name: string }).file_name } });
+    await writeAudit(admin, { action: restore ? "file_restore" : "file_add", entityType: "content_album", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { asset_id: body.asset_id, reused: !restore, file_name: asset.file_name, ...(restore ? { changes: { in_album: { old: false, new: true }, ...(canRestore ? { status: { old: "trashed", new: "active" } } : {}) } } : {}) } });
     return NextResponse.json({ data: { asset_id: body.asset_id, reused: true }, error: null });
   }
 
