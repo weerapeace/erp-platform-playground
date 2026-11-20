@@ -75,6 +75,11 @@ const SHOP_FILTERS: { key: Exclude<ShopFilter, "">; label: string; tip: string }
   { key: "price", label: "ราคาผิดปกติ", tip: "ลูกค้าจ่ายต่ำกว่า 10฿ · ลดเกิน 80% · หรือราคาที่ลูกค้าจ่ายบนร้านไม่ตรงกับที่ระบบจะส่ง (LINE ที่จับคู่แล้ว · แค่ราคาเต็มไม่ตรงไม่นับ)" },
 ];
 // ผลป้าย "ไม่อยู่บนร้านแล้ว" หลังกดดึงสินค้า (lib/platform-catalog-sync) → ข้อความต่อท้าย
+type WebSyncRes = { error?: string | null; fetched?: number; created?: number; updated?: number; newly_matched?: number; removed?: number; restored?: number; removed_skipped?: number; complete?: boolean; shops?: { name: string; count: number }[] };
+const webSyncNote = (j: WebSyncRes) => {
+  const shops = (j.shops ?? []).length > 1 ? ` (${(j.shops ?? []).map((s) => `${s.name} ${s.count}`).join(" · ")})` : "";
+  return `ดึงจากเว็บแล้ว: ${(j.fetched ?? 0).toLocaleString()} สินค้า${shops} · เพิ่มใหม่ ${j.created ?? 0} · จับคู่อัตโนมัติ ${j.newly_matched ?? 0}${goneNote(j)}`;
+};
 const goneNote = (j: { removed?: number; restored?: number; removed_skipped?: number; complete?: boolean }) => [
   j.removed ? ` · ไม่อยู่บนร้านแล้ว ${j.removed} รายการ (ดูการ์ด "ไม่อยู่บนร้านแล้ว")` : "",
   j.restored ? ` · กลับมาบนร้าน ${j.restored} รายการ` : "",
@@ -291,6 +296,8 @@ export default function PlatformCatalogPage() {
   // โหลดสินค้าของร้าน+แบรนด์ที่เลือก → แล้วค่อยเดาคู่ตามหลัง (ช้ากว่า) — ตารางขึ้นก่อน
   // เลขรอบ (reqSeq): สลับร้าน/แบรนด์ระหว่างโหลด → คำตอบของรอบเก่าถูกทิ้ง ไม่มาทับร้านที่เลือกอยู่
   const reqSeq = useRef(0);
+  // ร้าน Website = เว็บของเราเอง → เปิดแท็บแล้วดึงสินค้าล่าสุดจากเว็บให้เองก่อนโหลดตาราง (ครั้งเดียวต่อแบรนด์ต่อการเปิดหน้า · ต้องมีสิทธิ์แก้)
+  const webSynced = useRef<string>("");
   const load = useCallback(async () => {
     if (!platformId) return;
     const my = ++reqSeq.current;
@@ -299,6 +306,15 @@ export default function PlatformCatalogPage() {
     setSuggestions({}); setHigh(new Set()); setSuggestError(false); setExpanded(new Set()); setSelected(new Set());
     setSumm({}); setShopFilter("");
     let unmatched = 0;
+    if (platforms.find((p) => p.id === platformId)?.code === "website" && brandId && canEdit && webSynced.current !== brandId) {
+      webSynced.current = brandId;
+      try {
+        const j = (await apiFetch("/api/platform-catalog/website-sync", { method: "POST", body: JSON.stringify({ brand_id: brandId }) }).then((r) => r.json())) as WebSyncRes;
+        if (my !== reqSeq.current) return;
+        if (j.error) setNote(`⚠️ ดึงสินค้าล่าสุดจากเว็บไม่สำเร็จ: ${j.error} — ตารางด้านล่างเป็นข้อมูลรอบก่อน`);
+        else if (j.created || j.newly_matched || j.removed || j.restored) setNote(webSyncNote(j));
+      } catch { if (my !== reqSeq.current) return; webSynced.current = ""; }
+    }
     try {
       const q = new URLSearchParams({ platform_id: platformId, with_counts: "1" }); if (brandId) q.set("brand_id", brandId);
       const [j, mj] = await Promise.all([
@@ -321,7 +337,7 @@ export default function PlatformCatalogPage() {
     // รูป/สต๊อก/สถานะบนร้าน — โหลดคู่กับตัวเดา ไม่บังตาราง · เฉพาะร้านที่ส่งข้อมูลพวกนี้มา (LINE/Lazada/TikTok — ไฟล์ export ของ Shopee ไม่มี · ลืม TikTok = การ์ดขึ้น "ไม่มีรูป" ทุกใบ เจอ 2026-11-12)
     const pfCode = platforms.find((p) => p.id === platformId)?.code ?? "";
     // Shopee: เฉพาะตัวที่ดึงผ่าน API (raw.shopee) มีข้อมูล — ตัวจากไฟล์ export ได้ "nodata" → ไม่ใส่ (หน้าตาเหมือนเดิมสำหรับร้านที่ใช้ไฟล์)
-    if (pfCode === "line_shopping" || pfCode === "lazada" || pfCode === "tiktok" || pfCode === "shopee") {
+    if (pfCode === "line_shopping" || pfCode === "lazada" || pfCode === "tiktok" || pfCode === "shopee" || pfCode === "website") {
     setSummLoading(true);
     const smq = new URLSearchParams({ platform_id: platformId, view: "summary" }); if (brandId) smq.set("brand_id", brandId);
     void apiFetch(`/api/platform-catalog?${smq}`).then((r) => r.json())
@@ -345,7 +361,7 @@ export default function PlatformCatalogPage() {
       setHigh(new Set((sj.high ?? []) as string[]));
     } catch { if (my === reqSeq.current) setSuggestError(true); }
     finally { if (my === reqSeq.current) setSuggestLoading(false); }
-  }, [platformId, brandId, platforms]);
+  }, [platformId, brandId, platforms, canEdit]);
   // มุมมองหน้าร้านโหลดข้อมูลของตัวเอง (สรุปสต๊อก/สถานะ) → ไม่ต้องโหลดตารางจับคู่ + เดาคู่ (หนัก) ซ้ำ
   useEffect(() => { if (viewReady && view === "match") load(); }, [load, view, viewReady]);
   /** หลังดึงสินค้าจากร้าน → โหลดมุมมองที่เปิดอยู่ใหม่ */
@@ -818,6 +834,21 @@ export default function PlatformCatalogPage() {
     finally { setImporting(false); }
   };
 
+  // ดึงสินค้าจากเว็บของเราเอง (ร้าน Website) — อ่านจากฐานข้อมูลเว็บ ไม่ต้องนำเข้าไฟล์ · ไม่แตะการตั้งค่าเว็บจริง
+  const syncWebsite = async () => {
+    if (!brandId) { setNote("เลือกแบรนด์ก่อน (สินค้าบนเว็บแยกตามแบรนด์ของสินค้า)"); return; }
+    setImporting(true); setNote("กำลังดึงสินค้าจากเว็บ...");
+    try {
+      const r = await apiFetch("/api/platform-catalog/website-sync", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = (await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }))) as WebSyncRes;
+      if (j.error) throw new Error(j.error);
+      webSynced.current = brandId;
+      setNote(webSyncNote(j));
+      await reloadCurrent();
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); }
+  };
+
   // นำเข้ารายการหมวดหมู่แพลตฟอร์มจากไฟล์ (ชีต "ตัวเลือกหมวดสินค้า" — คอลัมน์ id/en/th)
   const importCategoryFile = async (file: File) => {
     if (!platformId) { setNote("เลือกร้านก่อน"); return; }
@@ -1117,7 +1148,9 @@ export default function PlatformCatalogPage() {
             <button type="button" onClick={() => setAddPick(true)} disabled={!canEdit || !platformId || !brandId}
               title={!brandId ? "เลือกแบรนด์ก่อน" : `เลือกสินค้าในระบบที่ยังไม่ได้ลง ${activePf?.name_th ?? "ร้านนี้"} แล้วลงขึ้นร้าน`}
               className="h-9 px-3 text-sm text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="add" /><span className="hidden sm:inline">เพิ่มสินค้าขึ้นร้าน</span><span className="sm:hidden">เพิ่ม</span></button>
-            <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="import" mode="line" />{importing ? "กำลังนำเข้า..." : <><span className="hidden sm:inline">นำเข้าสินค้าจากไฟล์</span><span className="sm:hidden">นำเข้า</span></>}</button>
+            {platformCode === "website" ? (
+              <button onClick={() => void syncWebsite()} disabled={!canEdit || importing || !brandId} title={!canEdit ? "ไม่มีสิทธิ์" : !brandId ? "เลือกแบรนด์ก่อน" : "อ่านสินค้าล่าสุดจากเว็บของเรา (ชื่อ ราคา รูป ซ่อน/แสดง) — ไม่แก้อะไรบนเว็บ"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="refresh" mode="line" />{importing ? "กำลังดึง..." : <><span className="hidden sm:inline">ดึงสินค้าจากเว็บ</span><span className="sm:hidden">ดึง</span></>}</button>
+            ) : <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap inline-flex items-center gap-1.5"><Icon name="import" mode="line" />{importing ? "กำลังนำเข้า..." : <><span className="hidden sm:inline">นำเข้าสินค้าจากไฟล์</span><span className="sm:hidden">นำเข้า</span></>}</button>}
             <input ref={catFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importCategoryFile(f); }} />
             <button ref={toolsRef} type="button" onClick={() => setToolsOpen((o) => !o)} disabled={!platformId} aria-expanded={toolsOpen}
               title="ตั้งค่าร้าน: ดึงสินค้าจากร้าน · ส่งราคา · นำเข้าหมวด · ชนิดไฟล์นำเข้า · บัญชีร้าน"
@@ -1230,7 +1263,8 @@ export default function PlatformCatalogPage() {
                 : <span className="shrink-0 text-[11px] text-slate-400">{shpStatus.health === "expired" ? "หมดอายุ" : "ยังไม่เชื่อม API"}</span>
             )}
           </div>
-          {(platformCode === "line_shopping" || platformCode === "lazada" || platformCode === "tiktok" || platformCode === "shopee") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
+          {(platformCode === "line_shopping" || platformCode === "lazada" || platformCode === "tiktok" || platformCode === "shopee" || platformCode === "website") && <div className="px-1.5 pb-1 pt-2 text-[11px] text-slate-400">ข้อมูลจากร้าน</div>}
+          {platformCode === "website" && toolItem({ icon: "refresh", tone: "emerald", title: importing ? "กำลังดึง…" : "ดึงสินค้าจากเว็บ", sub: brandId ? "อ่านชื่อ ราคา รูป ซ่อน/แสดง จากเว็บของเรา (ดึงให้เองตอนเปิดแท็บนี้ · ไม่แก้อะไรบนเว็บ)" : "เลือกแบรนด์ก่อน", disabled: !canEdit || importing || !brandId, onClick: () => void syncWebsite() })}
           {platformCode === "line_shopping" && toolItem({ icon: "refresh", tone: "emerald", title: importing ? "กำลังดึง…" : "ดึงสินค้าจาก LINE", sub: brandId ? "อัปเดตชื่อ ราคา สต๊อก รูป จากร้าน" : "เลือกแบรนด์ก่อน", disabled: !canEdit || importing || !brandId, onClick: () => void syncLine() })}
           {platformCode === "line_shopping" && toolItem({ icon: "folder", tone: "amber", title: "นำเข้าหมวดหมู่ LINE", sub: "จากไฟล์ template (ชีตตัวเลือกหมวด) · ใช้ครั้งเดียว", disabled: !canEdit || importing, onClick: () => catFileRef.current?.click() })}
           {platformCode === "lazada" && toolItem({
@@ -1333,8 +1367,10 @@ export default function PlatformCatalogPage() {
                 : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "tiktok" ? "กด ดึงสินค้าจาก TikTok (ต้องเชื่อมร้านก่อนที่หน้าบัญชีแพลตฟอร์ม) แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "shopee" && shpStatus?.connected ? "กด ดึงสินค้าจาก Shopee แล้วระบบจะช่วยจับคู่ให้"
+                : platformCode === "website" ? (brandId ? "ยังไม่มีสินค้าของแบรนด์นี้บนเว็บของเรา — เพิ่มสินค้าเข้าเว็บที่หน้าเว็บไซต์ แล้วกด ดึงสินค้าจากเว็บ" : "เลือกแบรนด์ก่อน แล้วระบบจะดึงสินค้าจากเว็บของเราให้เอง")
                 : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
-              action={canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
+              action={canEdit && platformCode === "website" ? (brandId ? { label: "ดึงสินค้าจากเว็บ", onClick: () => void syncWebsite() } : undefined)
+                : canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
                 : canEdit && platformCode === "tiktok" && ttsStatus?.connected ? { label: "ดึงสินค้าจาก TikTok", onClick: () => void syncTiktok() }
                 : canEdit && platformCode === "shopee" && shpStatus?.connected ? { label: "ดึงสินค้าจาก Shopee", onClick: () => void syncShopee() }
                 : canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />

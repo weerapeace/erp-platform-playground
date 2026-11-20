@@ -327,3 +327,13 @@
 - **พร้อมลงล่วงหน้า** — ตัวตรวจย้ายเป็นของกลาง `lib/platform-create-readiness-server` · ผลจดใน `platform_create_readiness` (`lib/platform-readiness-store`) · cron `/api/cron/platform-readiness` 00:00-04:30 (ทุก 30 นาที · ตัวเก่าสุดก่อน · ข้ามที่ตรวจใน 20 ชม. · ทีละ 2 รุ่น · รอบละ ~4 นาที) · ตรวจสดในหน้าก็จดทับ · ป้ายขึ้นทันที กดป้าย = ตรวจใหม่ · ตัวกรอง "พร้อมลงเลย"
 - **สรุปทุกเช้า** — cron `/api/cron/platform-cross-daily` 09:10 → กระดิ่ง `platform.cross_daily` เฉพาะวันที่ขาดเพิ่ม/ราคาไม่ตรงเพิ่ม (เทียบ ui_config `platform_cross_daily:<brand>`) · คนรับตามกฎแจ้งเตือน (ไม่มีกฎ = แอดมิน)
 - **ลงซ้ำ** — ตัวกรอง "ลงซ้ำ" + กดช่อง ×N → ป๊อปรายการทั้งหมด เปิดทีละตัว
+
+## ร้าน Website = ดึงจากเว็บของเราเอง (2026-11-20)
+
+- ร้าน Website ไม่ต้องนำเข้าไฟล์ — ระบบอ่านสินค้าบนเว็บของเรา (`store_listings`) มาเป็นรายการสินค้าของร้าน Website เอง
+- **ดึงให้เองตอนเปิดแท็บ Website** (ครั้งเดียวต่อแบรนด์ต่อการเปิดหน้า · ต้องมีสิทธิ์ products.platforms.edit) + ปุ่ม "ดึงสินค้าจากเว็บ" (หัวหน้า / เมนูตั้งค่า / หน้าว่าง)
+- 1 สินค้าบนเว็บ (ร้านเว็บ × Parent SKU) = 1 รายการ · แบรนด์ = แบรนด์ของ Parent SKU · ร้านเว็บที่ปิดไม่นับ
+- ชื่อ/ราคา/รูป = ที่ลูกค้าเห็นจริง (`resolveProduct` ตัวเดียวกับหน้าเว็บ) · ราคาขีดฆ่า = `resolveComparePrice` · ซ่อนไว้ = ปิดขาย
+- จับคู่ด้วยรหัส Parent ตรงอัตโนมัติ (ของกลาง `lib/platform-catalog-sync`) · เอาออกจากเว็บ = ป้าย "ไม่อยู่บนร้านแล้ว"
+- อ่านอย่างเดียว — ไม่แตะการตั้งค่า/ซ่อน-แสดงของเว็บจริง
+- โค้ด: `lib/website-catalog-sync.ts` · `/api/platform-catalog/website-sync` · สรุปการ์ด `summarizeWebsite` ใน `lib/platform-listing-health.ts` (raw.website เติมผ่าน `attachWebsiteRaw` ใน `lib/platform-shop-view-server.ts`)

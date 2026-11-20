@@ -205,6 +205,23 @@ function summarizeShopee(raw: Obj, fallbackPrice: number | null): ListingShopSum
 }
 
 /**
+ * Website (เว็บของเราเอง · lib/website-catalog-sync): raw.website — ราคา/รูปที่ลูกค้าเห็นจริง · ซ่อนไว้ = ปิดขาย · ไม่มีสต๊อกบนเว็บ (null)
+ */
+function summarizeWebsite(raw: Obj, fallbackPrice: number | null): ListingShopSummary {
+  const w = obj(raw.website) ?? {};
+  const now = num(w.price) ?? fallbackPrice;
+  const compare = num(w.compare);
+  const display = typeof w.published === "boolean" ? w.published : null;
+  return {
+    image: str(w.image), imageKnown: "image" in w, stock: null, display,
+    price: compare != null && now != null && compare > now ? compare : now,
+    salePrice: compare != null && now != null && compare > now ? now : null,
+    variants: num(w.variants) ?? 0, category: str(w.category),
+    state: shopStateOf(display, null, true),
+  };
+}
+
+/**
  * สรุปสินค้า 1 รายการบนร้าน
  * @param platformCode code ใน erp_platforms (line_shopping / lazada / tiktok / shopee / …)
  * @param raw          platform_catalog_listings.raw (หรือชิ้นส่วนที่ select มาเฉพาะช่องที่ใช้)
@@ -219,7 +236,8 @@ function summarizeRaw(platformCode: string, r: Obj, fallbackPrice: number | null
   if (platformCode === "line_shopping") return summarizeLine(r, fallbackPrice);
   if (platformCode === "lazada" && obj(r.lazada)) return summarizeLazada(r, fallbackPrice);
   if (platformCode === "tiktok" && obj(r.tiktok)) return summarizeTiktok(r, fallbackPrice);
-  if (platformCode === "shopee" && obj(r.shopee)) return summarizeShopee(r, fallbackPrice);   // เฉพาะที่ดึงผ่าน API · ไฟล์นำเข้าไม่มี raw.shopee = ไม่รู้สถานะเหมือนเดิม
+  if (platformCode === "shopee" && obj(r.shopee)) return summarizeShopee(r, fallbackPrice);
+  if (platformCode === "website" && obj(r.website)) return summarizeWebsite(r, fallbackPrice);   // เฉพาะที่ดึงผ่าน API · ไฟล์นำเข้าไม่มี raw.shopee = ไม่รู้สถานะเหมือนเดิม
   return { image: null, imageKnown: false, stock: null, display: null, price: fallbackPrice, salePrice: null, variants: 0, category: null, state: "nodata" };
 }
 

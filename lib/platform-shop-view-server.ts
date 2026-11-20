@@ -31,6 +31,8 @@ type ListingRow = {
   tiktok?: unknown;
   /** ข้อมูลย่อ Shopee จาก API (raw.shopee — lib/shopee) · ไฟล์นำเข้าไม่มี · ฟังก์ชัน DB รุ่นก่อน 202612080100 ยังไม่มีช่องนี้ = undefined */
   shopee?: unknown;
+  /** ข้อมูลย่อเว็บของเราเอง (raw.website — lib/website-catalog-sync) · เติมเฉพาะร้าน Website (attachWebsiteRaw) */
+  website?: unknown;
 };
 type LegacyListingRow = Omit<ListingRow, "line"> & { line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown; line_gift: unknown };
 
@@ -46,7 +48,21 @@ const PAGE = 1000;   // เพดาน PostgREST — หน้าละเต�
  * รายการบนร้าน (ร้าน + แบรนด์) + ช่องจากข้อมูลดิบเฉพาะที่ใช้สรุป · เรียงใหม่สุดก่อน
  * อ่านผ่านฟังก์ชัน DB platform_listings_slim (migration 202611280100) · ฟังก์ชันใช้ไม่ได้ (เช่น ยังไม่ได้ลง) → ถอยไปวิธีเดิม (ช้าแต่ได้ข้อมูลครบ)
  */
-async function loadListings(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
+async function loadListings(admin: Admin, platformId: string, brandId: string, platformCode?: string): Promise<ListingRow[]> {
+  const rows = await loadListingsSlim(admin, platformId, brandId);
+  return platformCode === "website" ? attachWebsiteRaw(admin, rows) : rows;
+}
+
+/** ร้าน Website: เติม raw.website (ฟังก์ชัน DB ไม่มีช่องนี้ · ร้านเว็บมีไม่กี่ร้อยแถว ถามตรงได้) */
+async function attachWebsiteRaw(admin: Admin, rows: ListingRow[]): Promise<ListingRow[]> {
+  const byId = new Map<string, unknown>();
+  const parts = await Promise.all(chunks(rows.map((r) => r.id)).map((ids) =>
+    admin.from("platform_catalog_listings").select("id, website:raw->website").in("id", ids)));
+  for (const p of parts) for (const r of (p.data ?? []) as { id: string; website: unknown }[]) byId.set(r.id, r.website);
+  return rows.map((r) => ({ ...r, website: byId.get(r.id) ?? null }));
+}
+
+async function loadListingsSlim(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
   const out: ListingRow[] = [];
   for (let from = 0; from < 100_000; from += PAGE) {
     const { data, error } = await admin.rpc("platform_listings_slim", { p_platform_id: platformId, p_brand_id: brandId || null, p_limit: PAGE, p_offset: from });
@@ -83,6 +99,7 @@ function rawSlice(r: ListingRow): Record<string, unknown> {
   if (r.lazada != null) out.lazada = r.lazada;
   if (r.tiktok != null) out.tiktok = r.tiktok;
   if (r.shopee != null) out.shopee = r.shopee;
+  if (r.website != null) out.website = r.website;
   return out;
 }
 
@@ -174,7 +191,7 @@ async function loadSkuLookup(admin: Admin, codes: string[]): Promise<{ byCode: M
  * LINE ที่จับคู่แล้ว: นับตัวเลือกที่ราคาจ่ายไม่ตรง (erpPriceDiff) / แค่ราคาเต็มไม่ตรง (erpFullDiff) กับที่ระบบจะส่ง — กฎเดียวกับปุ่มส่งราคา
  */
 export async function loadListingSummaries(admin: Admin, platformId: string, platformCode: string, brandId: string): Promise<Record<string, ListingCardSummary>> {
-  const rows = await loadListings(admin, platformId, brandId);
+  const rows = await loadListings(admin, platformId, brandId, platformCode);
   const out: Record<string, ListingCardSummary> = {};
   for (const r of rows) {
     const s = summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null, r.status);
@@ -210,7 +227,7 @@ export type ShopViewData = {
  */
 export async function loadShopView(admin: Admin, platformId: string, platformCode: string, brandId: string): Promise<ShopViewData> {
   const [rows, brandParents] = await Promise.all([
-    loadListings(admin, platformId, brandId),
+    loadListings(admin, platformId, brandId, platformCode),
     brandId
       ? fetchAllPages<ParentRow>((from, to) => admin.from("parent_skus_v2").select(PARENT_COLS)
           .eq("brand_id", brandId).eq("is_active", true).order("code", { ascending: true }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: ParentRow[] | null; error: unknown }>)

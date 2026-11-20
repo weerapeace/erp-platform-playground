@@ -81,6 +81,20 @@ describe("summarizeListing · ร้านอื่น", () => {
   });
 });
 
+describe("summarizeListing · Website (เว็บของเราเอง)", () => {
+  it("มีราคาขีดฆ่า = ราคาเต็ม + ราคาลด · ซ่อนไว้ = ปิดขาย · ไม่มีสต๊อก", () => {
+    const s = summarizeListing("website", { website: { published: false, price: 590, compare: 890, image: "/x.jpg", variants: 3, category: "bag" } }, null);
+    expect(s).toMatchObject({ price: 890, salePrice: 590, display: false, stock: null, image: "/x.jpg", imageKnown: true, variants: 3, state: "hidden" });
+  });
+  it("ไม่มีขีดฆ่า = ราคาเดียว · เปิดขาย", () => {
+    const s = summarizeListing("website", { website: { published: true, price: 590, compare: null, image: null } }, null);
+    expect(s).toMatchObject({ price: 590, salePrice: null, display: true, state: "selling" });
+  });
+  it("ไม่มี raw.website = ไม่รู้ข้อมูล", () => {
+    expect(summarizeListing("website", {}, 100).state).toBe("nodata");
+  });
+});
+
 describe("ชื่อ+รหัสซ้ำ", () => {
   it("ชื่อ+รหัสเหมือนกันทุกตัว = ซ้ำ (ไม่สนช่องว่าง/ตัวพิมพ์)", () => {
     expect(duplicateKey(" JEAN08  กระเป๋า ", "JEAN08")).toBe(duplicateKey("jean08 กระเป๋า", "jean08"));
