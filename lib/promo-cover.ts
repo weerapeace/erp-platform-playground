@@ -54,6 +54,13 @@ export const TARGET_STATUS: Record<TargetStatus, { label: string; tone: Tone }> 
 export const ON_SHOP: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["applied", "review", "revert_failed"]);
 /** สถานะที่ต้องแจ้งเตือน (ข้อเสนอ 3) */
 export const ALERT_STATUS: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["failed", "revert_failed", "conflict"]);
+/** ย้อนตอนร้าน (TikTok/Lazada) ยังตรวจปกโปรไม่เสร็จ — บนร้านยังเป็นปกเดิม ถ้าถือว่า "ย้อนแล้ว" ปกโปรจะขึ้นค้างหลังตรวจเสร็จ → รอแล้วลองใหม่ */
+export const STILL_IN_REVIEW = "ร้านยังตรวจปกโปรไม่เสร็จ (บนร้านยังเป็นปกเดิม) — ระบบจะลองย้อนใหม่ทุก 15 นาทีจนร้านตรวจเสร็จ · ถ้าร้านไม่ผ่านปกโปร กด \"ย้อนทับเลย\"";
+/** ร้านยังตรวจไม่เสร็จไหม: สถานะ review + รูปแรกบนร้านยังเป็นปกเดิม (ไม่ใช่ปกโปร) */
+export function stillInReview(status: TargetStatus, current: string | null | undefined, applied: string | null | undefined, original: string | null | undefined, same: (a: string, b: string) => boolean = (a, b) => sameImageRef(a, b)): boolean {
+  if (status !== "review" || !current || !original) return false;
+  return same(current, original) && !(applied && same(current, applied));
+}
 
 export type CampaignTiming = {
   status: CampaignStatus;

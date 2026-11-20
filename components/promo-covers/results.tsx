@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { CAMPAIGN_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, TARGET_STATUS, applyDueAt, countTargets, thTime, type TargetStatus } from "@/lib/promo-cover";
+import { CAMPAIGN_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, STILL_IN_REVIEW, TARGET_STATUS, applyDueAt, countTargets, thTime, type TargetStatus } from "@/lib/promo-cover";
 import { confirmCampaign, imgUrl, runUntilDone, type Full, type RunResult, type Target } from "./api";
 import { Pill, Thumb } from "./parts";
 
@@ -126,8 +126,10 @@ export function PromoResults({ full, canRun, onReload }: { full: Full; canRun: b
                 {canRun && (t.status === "failed" || t.status === "revert_failed") && (
                   <button type="button" className={btnSm} disabled={!!busy} onClick={() => confirmRun({ title: "ลองใหม่รายการนี้", message: `${it?.code ?? ""} · ${t.label ?? ""} — ลองอีกครั้งบนร้านจริง`, confirm: "ลองใหม่", run: () => doRun("retry", `retry:${t.id}`, [t.id]) })}>ลองใหม่</button>
                 )}
-                {canRun && t.status === "conflict" && (
-                  <button type="button" className={`${btnSm} text-rose-700`} disabled={!!busy} onClick={() => confirmRun({ title: "ย้อนทับเลย", message: `${it?.code ?? ""} · ${t.label ?? ""} — รูปแรกบนร้านถูกเปลี่ยนไปแล้ว (ไม่ใช่ปกโปรของเรา) · ย้อนทับ = เอาปกเดิมก่อนโปรใส่เป็นรูปแรก แทนรูปที่คนเปลี่ยนไว้`, confirm: "ย้อนทับเลย", danger: true, run: () => doRun("force_revert", `force:${t.id}`, [t.id]) })}>ย้อนทับเลย</button>
+                {canRun && (t.status === "conflict" || (t.status === "review" && t.error === STILL_IN_REVIEW)) && (
+                  <button type="button" className={`${btnSm} text-rose-700`} disabled={!!busy} onClick={() => confirmRun({ title: "ย้อนทับเลย", message: t.status === "review"
+                    ? `${it?.code ?? ""} · ${t.label ?? ""} — ร้านยังตรวจปกโปรไม่เสร็จ · ย้อนทับ = ส่งชุดรูปเดิมก่อนโปรให้ร้านอีกรอบ (ใช้เมื่อร้านไม่ผ่านปกโปร หรือไม่อยากรอ)`
+                    : `${it?.code ?? ""} · ${t.label ?? ""} — รูปแรกบนร้านถูกเปลี่ยนไปแล้ว (ไม่ใช่ปกโปรของเรา) · ย้อนทับ = เอาปกเดิมก่อนโปรใส่เป็นรูปแรก แทนรูปที่คนเปลี่ยนไว้`, confirm: "ย้อนทับเลย", danger: true, run: () => doRun("force_revert", `force:${t.id}`, [t.id]) })}>ย้อนทับเลย</button>
                 )}
               </li>
             );

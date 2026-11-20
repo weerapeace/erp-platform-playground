@@ -17,7 +17,7 @@ import { ruleRecipients } from "@/lib/notify-recipients";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import {
   ALERT_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, backupKeyOf, coverFromRaw, framedKeyOf, isApplyDue, isPromoPlatform, isRevertDue, listingOnSale,
-  nextCampaignStatus, restoreCover, sameImageRef, swapCover, type CampaignStatus, type CampaignTiming, type PromoPlatform, type TargetStatus,
+  nextCampaignStatus, restoreCover, sameImageRef, stillInReview, STILL_IN_REVIEW, swapCover, type CampaignStatus, type CampaignTiming, type PromoPlatform, type TargetStatus,
 } from "@/lib/promo-cover";
 // ร้านตลาด — ตัวช่วยเดียวกับลิ้นชักสินค้าบนร้าน
 import { shopeeUpdateItem, shopeeErrorText } from "@/lib/shopee";
@@ -299,9 +299,10 @@ async function lazadaRevert(admin: Admin, t: TargetRow, force: boolean): Promise
   const view = lazadaListingView(live.item);
   if (!view) return { status: "revert_failed", error: "Lazada ส่งข้อมูลสินค้ามาไม่ครบ — ลองใหม่อีกครั้ง" };
   const orig = strList((t.before_refs as { images?: unknown } | null)?.images)[0] ?? null;
+  if (!force && stillInReview(t.status, view.images[0], t.applied_ref, orig)) return { status: "review", error: STILL_IN_REVIEW };
   const plan = restoreCover(view.images, t.applied_ref, orig, { force });
   if (!plan.ok) return { status: force ? "revert_failed" : "conflict", error: plan.reason };
-  if (plan.already) return { status: "reverted", note: "ปกบนร้านเป็นปกเดิมอยู่แล้ว" };
+  if (plan.already && !(force && t.status === "review")) return { status: "reverted", note: "ปกบนร้านเป็นปกเดิมอยู่แล้ว" };
   try { await lazUpdateProduct(live.gateway, live.accessToken, lazUpdateProductXml(live.itemId, view.skus.map((s) => ({ skuId: s.skuId, sellerSku: s.sellerSku, status: s.status })), { images: plan.list })); }
   catch (e) { return { status: "revert_failed", error: `ย้อนปกบน Lazada ไม่สำเร็จ: ${lazErrorText(e)}` }; }
   return { status: "reverted", note: "Lazada อาจตรวจรูปอีกรอบ" };
@@ -334,9 +335,10 @@ async function tiktokRevert(admin: Admin, t: TargetRow, force: boolean): Promise
   if (!view) return { status: "revert_failed", error: "TikTok ส่งข้อมูลสินค้ามาไม่ครบ — ลองใหม่อีกครั้ง" };
   const cur = tiktokMediaBase(view).images.map((x) => x.uri).filter(Boolean);
   const orig = strList((t.before_refs as { uris?: unknown } | null)?.uris)[0] ?? null;
+  if (!force && stillInReview(t.status, cur[0], t.applied_ref, orig, (a, b) => a === b)) return { status: "review", error: STILL_IN_REVIEW };
   const plan = restoreCover(cur, t.applied_ref, orig, { force, same: (a, b) => a === b });
   if (!plan.ok) return { status: force ? "revert_failed" : "conflict", error: plan.reason };
-  if (plan.already) return { status: "reverted", note: "ปกบนร้านเป็นปกเดิมอยู่แล้ว" };
+  if (plan.already && !(force && t.status === "review")) return { status: "reverted", note: "ปกบนร้านเป็นปกเดิมอยู่แล้ว" };
   const isDraft = (view.status ?? view.productStatus) === "DRAFT";
   const send = (list: string[]) => ttsPartialEdit(live.accessToken, live.cipher, live.productId, { main_images: list.map((u) => ({ uri: tiktokUriOfRef(u) ?? u })) }, isDraft ? { saveMode: "AS_DRAFT" } : {});
   try { await send(plan.list); }

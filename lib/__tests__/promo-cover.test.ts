@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyDueAt, countTargets, coverFromRaw, isApplyDue, isRevertDue, listingOnSale, nextCampaignStatus, restoreCover, sameImageRef, swapCover, validateCampaign,
+  applyDueAt, countTargets, coverFromRaw, isApplyDue, isRevertDue, listingOnSale, nextCampaignStatus, restoreCover, sameImageRef, stillInReview, swapCover, validateCampaign,
   type CampaignTiming,
 } from "@/lib/promo-cover";
 
@@ -105,5 +105,12 @@ describe("ตรวจค่า + สถานะชุด", () => {
     expect(nextCampaignStatus(camp({ status: "live" }), [{ status: "reverted" }, { status: "conflict" }, { status: "skipped" }], END + H)).toBe("ended");
     expect(nextCampaignStatus(camp({ status: "live" }), [{ status: "reverted" }, { status: "applied" }], END + H)).toBe("live");
     expect(countTargets([{ status: "applied" }, { status: "applied" }, { status: "failed" }])).toMatchObject({ total: 3, applied: 2, failed: 1 });
+  });
+
+  it("ย้อนตอนร้านยังตรวจไม่เสร็จ = รอก่อน (ไม่ถือว่าย้อนแล้ว)", () => {
+    expect(stillInReview("review", "https://th-live.slatic.net/p/old.jpg", "https://sg-test-11.slatic.net/p/promo.jpg", "https://th-live-01.slatic.net/p/old.jpg")).toBe(true);
+    expect(stillInReview("review", "https://th-live.slatic.net/p/promo.jpg", "https://sg-test-11.slatic.net/p/promo.jpg", "https://th-live.slatic.net/p/old.jpg")).toBe(false);
+    expect(stillInReview("applied", "old", "promo", "old")).toBe(false);
+    expect(stillInReview("review", "other", "promo", "old")).toBe(false);
   });
 });

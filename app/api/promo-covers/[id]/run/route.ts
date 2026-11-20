@@ -43,7 +43,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     if (!ids?.length) return NextResponse.json({ error: "เลือกรายการที่จะย้อนทับก่อน" }, { status: 400 });
     const res: RunResult = { applied: 0, reverted: 0, failed: 0, conflict: 0, remaining: 0, campaigns: 1, timedOut: false };
     const started = Date.now();
-    for (const t of full.targets.filter((x) => ids.includes(x.id) && (x.status === "conflict" || x.status === "revert_failed"))) {
+    for (const t of full.targets.filter((x) => ids.includes(x.id) && (x.status === "conflict" || x.status === "revert_failed" || x.status === "review"))) {
       if (Date.now() - started > BUDGET) { res.timedOut = true; res.remaining++; continue; }
       const o = await revertTarget(admin, t, actor, true);
       if (o.status === "reverted") res.reverted++; else res.failed++;
