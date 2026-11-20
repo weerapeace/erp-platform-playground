@@ -431,7 +431,9 @@ async function websiteRevert(admin: Admin, t: TargetRow, force: boolean): Promis
   // ไม่มีใครแตะรูปอื่น = คืนค่าเดิมทั้งช่อง (รวม "ใช้รูปอัตโนมัติ" = ว่าง) · มีคนแก้รูปอื่นระหว่างโปร = เปลี่ยนเฉพาะรูปแรกกลับ
   const origList = strList(before.web_images);
   const base = strList(before.base);
-  const untouched = cur.slice(1).join("\n") === base.slice(1).join("\n");
+  // เทียบกับชุดที่เราบันทึกจริง (ช่องรูปเว็บเก็บได้ 12 รูป — รูปอัตโนมัติอาจมีมากกว่า เลยถูกตัดตอนส่ง)
+  const wrote = strList(listingPatchToRow({ webImages: swapCover(base, String(t.applied_ref ?? "")) }).web_images);
+  const untouched = cur.join("\n") === wrote.join("\n");
   let next: string[] | null;
   if (untouched) next = origList.length ? origList : null;
   else next = base[0] ? [base[0], ...cur.slice(1).filter((k) => k !== base[0])] : cur.slice(1);
