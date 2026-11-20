@@ -18,10 +18,11 @@ import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 export type PlanSource = { label: string; href: string };
 
 /** onCreated = ได้งานที่สร้างกลับไป (เช่น กระดานแผนงานวางการ์ดให้ทันที) · ไม่ส่ง = แจ้ง "ใส่แผนงานแล้ว" อย่างเดียว */
-export function AddToPlanModal({ open, defaultTitle, source, onClose, onCreated }: { open: boolean; defaultTitle: string; source?: PlanSource | null; onClose: () => void; onCreated?: (item: PlanItem) => void }) {
+/** defaultDue = "YYYY-MM-DD" ตั้งกำหนดวันนั้น 18:00 ไว้ก่อน (เช่น กด + ในช่องวันของปฏิทินรวม) · ใช้ตอน mount ครั้งแรก → เปลี่ยนวันให้ใส่ key ใหม่ */
+export function AddToPlanModal({ open, defaultTitle, source, onClose, onCreated, defaultDue }: { open: boolean; defaultTitle: string; source?: PlanSource | null; onClose: () => void; onCreated?: (item: PlanItem) => void; defaultDue?: string | null }) {
   const { user } = useAuth();
   const toast = useToast();
-  const draft = usePlanDraft();
+  const draft = usePlanDraft(defaultDue ? { dueKind: "pick", dueCustom: `${defaultDue}T18:00` } : {});
   const [title, setTitle] = useState(defaultTitle);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);

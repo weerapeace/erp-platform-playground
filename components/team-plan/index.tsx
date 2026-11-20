@@ -172,11 +172,12 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
     <div className="space-y-3">
       {/* แถบเครื่องมือ */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
-          <button type="button" className={seg(view === "priority")} onClick={() => pickView("priority")}>ตามความด่วน</button>
-          <button type="button" className={seg(view === "matrix")} onClick={() => pickView("matrix")}>ตาราง 4 ช่อง</button>
-          <button type="button" className={seg(view === "calendar")} onClick={() => pickView("calendar")}><Icon name="calendar" /> ปฏิทิน</button>
-          <button type="button" className={seg(view === "board")} onClick={() => pickView("board")} title="กระดานวางงานคู่กับใบงาน / SKU / งาน / คอนเทนต์ · ลากเส้นผูกงาน"><Icon name="magnet" /> กระดาน</button>
+        {/* role=tab + data-split-href → Ctrl+คลิก / Ctrl+ลาก แท็บ = แบ่งจอ เช่น ปฏิทินซ้าย กระดานขวา (components/split-screen) */}
+        <div role="tablist" className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+          <button type="button" role="tab" aria-selected={view === "priority"} data-split-href="/tasks/plan?view=priority" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "priority")} onClick={() => pickView("priority")}>ตามความด่วน</button>
+          <button type="button" role="tab" aria-selected={view === "matrix"} data-split-href="/tasks/plan?view=matrix" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "matrix")} onClick={() => pickView("matrix")}>ตาราง 4 ช่อง</button>
+          <button type="button" role="tab" aria-selected={view === "calendar"} data-split-href="/tasks/plan?view=calendar" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "calendar")} onClick={() => pickView("calendar")}><Icon name="calendar" /> ปฏิทิน</button>
+          <button type="button" role="tab" aria-selected={view === "board"} data-split-href="/tasks/plan?view=board" className={seg(view === "board")} onClick={() => pickView("board")} title="กระดานวางงานคู่กับใบงาน / SKU / งาน / คอนเทนต์ · ลากเส้นผูกงาน · Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)"><Icon name="magnet" /> กระดาน</button>
         </div>
         <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
           <button type="button" className={seg(scope === "all")} onClick={() => { scopePref.setView("all"); void scopePref.saveDefault("all"); }}>ทั้งทีม</button>
@@ -185,7 +186,9 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         {filterChip("star", <><Icon name="star" /> งานหลักวันนี้</>, open.filter((t) => isStarredToday(t.plan)).length)}
         {filterChip("waiting", <><Icon name="waiting" /> รอคนอื่น</>, open.filter((t) => t.plan.waiting).length)}
         {filterChip("overdue", <><Icon name="warning" /> เกินกำหนด</>, open.filter((t) => isOverdue(t.due_at)).length)}
-        <button type="button" onClick={() => void load()} title="โหลดใหม่" className="ml-auto h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
+        <a href="/calendar" title="ปฏิทินรวมทุกแผนก — งานทีม · Task · คอนเทนต์ · ผลิต · ใบงานออกแบบ · บิล ในปฏิทินเดียว ลากเปลี่ยนวันได้"
+          className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"><Icon name="calendar" /> ปฏิทินรวม</a>
+        <button type="button" onClick={() => void load()} title="โหลดใหม่" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
       </div>
       {/* 🏷 กรองตามแท็ก (โชว์เมื่อมีงานที่ใส่แท็ก) */}
       {tagCounts.length > 0 && (

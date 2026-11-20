@@ -7,12 +7,15 @@
  * เพิ่มปฏิทินแผนกใหม่ = เติม 1 บรรทัดใน CALENDARS ที่เดียว ได้ทุกหน้าที่ใช้
  *   - height: ความสูงกรอบปฏิทิน (ค่าเริ่มต้น 620)
  *   - fill: โหมดเต็มหน้า — ไม่มีกรอบ/ขอบมน สูงเต็มจอที่เหลือจากแถบของ shell (ใช้กับหน้าที่มีปฏิทินอย่างเดียว)
- *   - extraTabs: แท็บเสริมต่อท้าย (เนื้อหาเป็น component ปกติ ไม่ใช่ iframe)
+ *   - extraTabs: แท็บเสริมต่อท้าย (เนื้อหาเป็น component ปกติ ไม่ใช่ iframe) · lead: true = วางหน้าสุด + เป็นแท็บเริ่มต้น
+ *   - แท็บทุกอันมี role=tab + data-split-href → Ctrl+คลิก/ลาก = แบ่งจอ (components/split-screen) · ?cal=<key> เปิดแท็บนั้นก่อน
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { EmbedFrame, EmbedModal } from "@/components/embed-modal";
 
-export type CalendarExtraTab = { key: string; label: string; content: ReactNode };
+/** lead = วางหน้าสุดและเป็นแท็บเริ่มต้น (เช่น "รวมทุกปฏิทิน" ของ /calendar) · ไม่ใส่ = ต่อท้าย */
+export type CalendarExtraTab = { key: string; label: string; content: ReactNode; lead?: boolean };
 
 // ปฏิทินที่ฝังได้ — url = หน้าเต็มของปฏิทินนั้น (ระบบเติม embed=1 ให้เองตอนฝัง)
 const CALENDARS: { key: string; icon: string; label: string; url: string }[] = [
@@ -29,8 +32,17 @@ const MIN_HEIGHT = 520;
 const FILL_HEIGHT = "h-[calc(100dvh-160px)] xl:h-[calc(100dvh-88px)]";
 
 export function CalendarTabs({ height = 620, fill = false, extraTabs = [] }: { height?: number | string; fill?: boolean; extraTabs?: CalendarExtraTab[] }) {
-  const [tab, setTab] = useState<string>(CALENDARS[0].key);
+  const leadTabs = extraTabs.filter((t) => t.lead), tailTabs = extraTabs.filter((t) => !t.lead);
+  const allKeys = [...extraTabs.map((t) => t.key), ...CALENDARS.map((c) => c.key)];
+  const [tab, setTab] = useState<string>(leadTabs[0]?.key ?? CALENDARS[0].key);
   const [big, setBig] = useState(false);
+  // ?cal=<key> เปิดแท็บนั้นก่อน (ใช้ตอนแบ่งจอแท็บเสริมของหน้านี้ไปฝั่งขวา)
+  useEffect(() => {
+    const k = new URLSearchParams(window.location.search).get("cal");
+    if (k && allKeys.includes(k)) setTab(k);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const pathname = usePathname();
+  const selfHref = (key: string) => `${pathname}?cal=${key}`;
   const extra = extraTabs.find((t) => t.key === tab);
   const cal = CALENDARS.find((c) => c.key === tab) ?? CALENDARS[0];
   const btn = (on: boolean) => `px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${on ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
@@ -39,12 +51,16 @@ export function CalendarTabs({ height = 620, fill = false, extraTabs = [] }: { h
   return (
     <div className={fill ? "bg-white" : "bg-white border border-slate-200 rounded-xl overflow-hidden"}>
       <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-b border-slate-100">
-        <div className="inline-flex flex-wrap bg-slate-100 rounded-lg p-0.5">
-          {CALENDARS.map((c) => (
-            <button key={c.key} onClick={() => setTab(c.key)} className={btn(tab === c.key)}>{c.icon} {c.label}</button>
+        {/* role=tab + data-split-href → Ctrl+คลิก / Ctrl+ลาก แท็บ = แบ่งจอ (ของกลาง split-screen) */}
+        <div role="tablist" className="inline-flex flex-wrap bg-slate-100 rounded-lg p-0.5">
+          {leadTabs.map((t) => (
+            <button key={t.key} role="tab" aria-selected={tab === t.key} data-split-href={selfHref(t.key)} onClick={() => setTab(t.key)} className={btn(tab === t.key)}>{t.label}</button>
           ))}
-          {extraTabs.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} className={btn(tab === t.key)}>{t.label}</button>
+          {CALENDARS.map((c) => (
+            <button key={c.key} role="tab" aria-selected={tab === c.key} data-split-href={c.url} onClick={() => setTab(c.key)} className={btn(tab === c.key)}>{c.icon} {c.label}</button>
+          ))}
+          {tailTabs.map((t) => (
+            <button key={t.key} role="tab" aria-selected={tab === t.key} data-split-href={selfHref(t.key)} onClick={() => setTab(t.key)} className={btn(tab === t.key)}>{t.label}</button>
           ))}
         </div>
         {!extra && <button onClick={() => setBig(true)} className="ml-auto text-xs text-blue-600 hover:underline">⤢ เปิดใหญ่</button>}

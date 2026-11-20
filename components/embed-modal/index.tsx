@@ -10,14 +10,10 @@
  */
 import { useEffect, useState } from "react";
 import { ResizableModal } from "@/components/resizable-modal";
+import { embedUrl } from "@/lib/embed-url";
 
-/** เติม embed=1 ให้ลิงก์ภายใน (รักษา query/hash เดิม) · ลิงก์ภายนอกคืนค่าเดิม */
-export function embedUrl(u: string): string {
-  if (!u || !u.startsWith("/")) return u;
-  const [path, hash] = u.split("#");
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}embed=1${hash ? "#" + hash : ""}`;
-}
+/** เติม embed=1 ให้ลิงก์ภายใน — ตัวจริงอยู่ lib/embed-url (ของกลางเบา ๆ อย่าง split-screen ใช้ได้โดยไม่ลากป๊อปมาด้วย) */
+export { embedUrl };
 
 export function EmbedFrame({ url, title, height = "80vh", minHeight = 560, className = "" }: {
   /** height = null → ให้ className เป็นคนกำหนดความสูง (เช่น h-[calc(100dvh-88px)]) */

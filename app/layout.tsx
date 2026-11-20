@@ -12,6 +12,7 @@ import { WorkPopupHostLazy } from "@/components/work-popup/lazy-host";
 import { SilentBoundary } from "@/components/silent-boundary";
 import { AppLockGate } from "@/components/app-access-gate";
 import { BRAND } from "@/components/brand";
+import { SplitScreenHost } from "@/components/split-screen";
 
 export const metadata: Metadata = {
   title: {
@@ -51,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <NavProgress />
         <NavTrailRecorder />
         <PageViewRecorder />
-        <AuthProvider><LanguageProvider><ToastProvider><AppLockGate>{children}</AppLockGate><SilentBoundary name="work-popup"><WorkPopupHostLazy /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider><SplitScreenHost><AppLockGate>{children}</AppLockGate></SplitScreenHost><SilentBoundary name="work-popup"><WorkPopupHostLazy /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
         <DatePickerOnClick />
       </body>

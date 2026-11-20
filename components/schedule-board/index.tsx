@@ -12,7 +12,7 @@
 //   tablet   = ปฏิทินบน กล่องล่าง (การ์ด 2 ต่อแถว) · ตั้งวันด้วยช่อง 📅 ใต้การ์ด (จอสัมผัสลากไม่ได้)
 //   phone    = ช่องวันเป็น "จุด + จำนวน" แตะวัน = ดูรายการ · กล่องยังไม่ลงวันพับไว้ก่อน
 // ============================================================
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const WEEK = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 const dkey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -26,7 +26,7 @@ export type SchedLayout = "desktop" | "tablet" | "phone";
 export function ScheduleBoard<T extends { id: string }>({
   items, getDate, onSchedule, renderCard, renderChip,
   filters, getFilter, getSearchText, dayFooter, backlogTitle = "ยังไม่ลงวันที่", hint, maxPerDay = 3,
-  layout, getDotColor,
+  layout, getDotColor, onMonthChange, onAddOnDay,
 }: {
   items: T[];
   getDate: (i: T) => string | null;
@@ -42,6 +42,8 @@ export function ScheduleBoard<T extends { id: string }>({
   maxPerDay?: number;
   layout?: SchedLayout;
   getDotColor?: (i: T) => string | undefined;    // สีจุดในช่องวัน (โหมดมือถือ)
+  onMonthChange?: (y: number, m: number) => void;   // เลื่อนเดือน → ให้หน้าโหลดข้อมูลช่วงนั้น (m = 0-11)
+  onAddOnDay?: (date: string) => void;              // ปุ่ม + มุมช่องวัน (จอ PC) / ในแผงวันที่เลือก → เพิ่มรายการวันนั้น
 }) {
   const today = new Date();
   const [ym, setYm] = useState<{ y: number; m: number }>({ y: today.getFullYear(), m: today.getMonth() });
@@ -52,6 +54,7 @@ export function ScheduleBoard<T extends { id: string }>({
   const [backlogOpen, setBacklogOpen] = useState<boolean | null>(null);   // null = ค่าเริ่มต้นตาม layout
   const [backlogLimit, setBacklogLimit] = useState(BACKLOG_PAGE);
   const dragRef = useRef<T | null>(null);
+  useEffect(() => { onMonthChange?.(ym.y, ym.m); }, [ym.y, ym.m]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const isPhone = layout === "phone";
   const touch = layout === "phone" || layout === "tablet";   // ตั้งวันด้วยช่องวันที่แทนการลาก
@@ -173,7 +176,11 @@ export function ScheduleBoard<T extends { id: string }>({
                     </>}
                   </div>
                 ) : (<>
-                  <div className={`text-[11px] mb-0.5 ${isToday(d) ? "text-blue-700 font-semibold" : "text-slate-400"}`}>{d.getDate()}</div>
+                  <div className={`group/day flex items-center text-[11px] mb-0.5 ${isToday(d) ? "text-blue-700 font-semibold" : "text-slate-400"}`}>
+                    {d.getDate()}
+                    {onAddOnDay && <button type="button" title="เพิ่มรายการวันนี้" onClick={(e) => { e.stopPropagation(); onAddOnDay(key); }}
+                      className="ml-auto h-4 w-4 rounded leading-none text-slate-400 opacity-0 group-hover/day:opacity-100 hover:bg-blue-100 hover:text-blue-700">+</button>}
+                  </div>
                   <div className="space-y-0.5">
                     {dayItems.slice(0, maxPerDay).map((it) => <div key={it.id} {...dragProps(it)} onClick={(e) => e.stopPropagation()}>{renderChip(it)}</div>)}
                     {dayItems.length > maxPerDay && <div className="text-[10px] text-slate-400 px-1">+{dayItems.length - maxPerDay} อื่น ๆ</div>}
@@ -191,7 +198,10 @@ export function ScheduleBoard<T extends { id: string }>({
           <div className="mt-4 border-t border-slate-100 pt-3">
             <div className="flex items-center justify-between gap-2 mb-2">
               <h4 className="text-sm font-bold text-slate-700">📅 {(() => { const [yy, mm, dd] = selDay.split("-").map(Number); return new Date(yy, mm, dd).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); })()} · {selDayItems.length} รายการ</h4>
-              <button onClick={() => setSelDay(null)} className="text-xs text-slate-400 hover:text-slate-600 shrink-0">ปิด ✕</button>
+              <div className="flex items-center gap-2 shrink-0">
+                {onAddOnDay && <button onClick={() => { const [yy, mm, dd] = selDay.split("-").map(Number); onAddOnDay(ymd(new Date(yy, mm, dd))); }} className="text-xs text-blue-600 hover:underline">+ เพิ่มวันนี้</button>}
+                <button onClick={() => setSelDay(null)} className="text-xs text-slate-400 hover:text-slate-600">ปิด ✕</button>
+              </div>
             </div>
             {selDayItems.length === 0
               ? <p className="text-sm text-slate-400">ไม่มีรายการวันนี้</p>
