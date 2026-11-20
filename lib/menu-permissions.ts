@@ -48,6 +48,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/design-library", prefixes: ["design_library."] },
   // หน้าแบรนด์ (เลือกแบรนด์ → หน้าจัดการรวมทุกอย่างของแบรนด์) — ตัวเลขใช้สิทธิ์ดูสินค้าบนแพลตฟอร์ม · ลิงก์ข้างในกรองตามสิทธิ์ของแต่ละหน้า
   { href: "/brand-hub", keys: ["products.platforms.view"] },
+  { href: "/master/promo-covers", keys: ["products.platforms.view", "products.platforms.publish"] },   // เปลี่ยนปกโปรทุกร้าน — ดู / ตั้งชุดโปร+ส่งขึ้นร้าน
   // สตูดิโอแพทเทิร์น (แอปหลัก) — ดู / สร้าง-แก้ / ลบแพทเทิร์น
   { href: "/pattern-studio", prefixes: ["pattern_studio."] },
   // 📦 แพ็คสินค้า — แพ็ค / ดูคลิป / แดชบอร์ดคนแพ็ค / ตั้งค่า (docs/packing-station.md · 2026-11-17)

@@ -49,6 +49,10 @@
     {
       "path": "/api/cron/perf-watch",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/cron/promo-covers",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -11,7 +11,7 @@
  */
 import sharp from "sharp";
 import { writeAudit } from "@/lib/audit";
-import { r2PutObject } from "@/lib/r2";
+import { r2GetObject, r2PutObject } from "@/lib/r2";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { ruleRecipients } from "@/lib/notify-recipients";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
@@ -170,12 +170,21 @@ async function fetchBytes(url: string, label: string): Promise<Buffer> {
   return buf;
 }
 
+/** อ่านไฟล์ทั้งไฟล์ตรงจากคลังรูป (อ่านจนจบ — ไม่ยกเลิกกลางทาง) */
+async function readR2(key: string): Promise<Buffer> {
+  const obj = await r2GetObject(key);
+  if (!obj) throw new Error("ไม่พบไฟล์ในคลังรูป");
+  const buf = Buffer.from(await new Response(obj.body).arrayBuffer());
+  if (!buf.byteLength) throw new Error("ไฟล์ว่างเปล่า");
+  return buf;
+}
+
 /** แปะกรอบโปร (PNG พื้นใส) ทับปกของรุ่น → JPG จัตุรัส 1500px ในคลังรูปเรา · คืน r2 key */
 export async function composeFramedCover(baseKey: string, frameKey: string, outKey: string): Promise<string> {
   const SIZE = 1500;
   const [base, frame] = await Promise.all([
     fetchBytes(`${publicImageUrl(baseKey)}&w=${SIZE}&sq=1`, "ปกของรุ่น"),
-    fetchBytes(publicImageUrl(frameKey), "รูปกรอบโปร"),
+    readR2(frameKey).catch(() => fetchBytes(publicImageUrl(frameKey), "รูปกรอบโปร")),   // อ่านไฟล์ตรงจากคลัง = พื้นใสครบ (ไม่ผ่านตัวย่อรูป)
   ]);
   const baseSq = await sharp(base).rotate().resize(SIZE, SIZE, { fit: "contain", background: "#ffffff" }).flatten({ background: "#ffffff" }).toBuffer();
   const frameSq = await sharp(frame).resize(SIZE, SIZE, { fit: "fill" }).png().toBuffer();
