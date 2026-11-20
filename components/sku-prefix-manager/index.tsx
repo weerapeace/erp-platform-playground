@@ -44,7 +44,7 @@ export function SkuPrefixManager({ onClose }: { onClose: () => void }) {
 
   // โหลดหน่วยทั้งหมด (สำหรับ dropdown หน่วย default)
   useEffect(() => {
-    apiFetch("/api/admin/picker?table=uoms&label=name&limit=500").then((r) => r.json())
+    apiFetch("/api/admin/picker?table=uoms&label=display_name&limit=100").then((r) => r.json())
       .then((j) => setUomOpts(((j.data ?? []) as { id: string; label: string }[]).map((o) => ({ value: o.id, label: o.label }))))
       .catch(() => {});
   }, []);

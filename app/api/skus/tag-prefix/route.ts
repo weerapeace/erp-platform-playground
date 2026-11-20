@@ -31,8 +31,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const uomMap = new Map<string, string>();
   if (uomIds.size) {
-    const { data: u } = await admin.from("uoms").select("id, name").in("id", [...uomIds]);
-    for (const x of (u ?? []) as { id: string; name: string }[]) uomMap.set(x.id, x.name);
+    const { data: u } = await admin.from("uoms").select("id, name, display_name").in("id", [...uomIds]);   // โชว์ "หลา · Yard"
+    for (const x of (u ?? []) as { id: string; name: string; display_name: string | null }[]) uomMap.set(x.id, x.display_name || x.name);
   }
 
   const rows = (data ?? []).map((t) => {

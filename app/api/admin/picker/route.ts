@@ -19,6 +19,8 @@ export type PickerOption = {
   label:      string;
   secondary?: string;
   active?:    boolean;
+  /** เฉพาะหน่วยนับ: ชื่ออื่น (คั่นด้วย ,) */
+  aliases?:   string;
 };
 
 const SAFE_TABLE = /^[a-z_][a-z0-9_]*$/i;
@@ -45,7 +47,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = supabaseFromRequest(request);
 
   // ฟิลด์ที่ใช้ค้น + แตกคำค้นเป็น token (ค้นกลางคำ/ข้ามตัวคั่นได้)
-  const searchFields = (searchIn && searchIn.length > 0 ? searchIn : [label]).filter((f) => SAFE_FIELD.test(f));
+  // หน่วยนับ (uoms): ค้นได้ทั้งชื่อหลัก/ไทย/อังกฤษ/ชื่ออื่น (พิมพ์ yard เจอ หลา) — lib/uom-names
+  const isUoms = table === "uoms";
+  const searchFields = (searchIn && searchIn.length > 0 ? searchIn : isUoms ? [label, "name", "name_th", "name_en", "aliases"] : [label])
+    .filter((f, i, a) => SAFE_FIELD.test(f) && a.indexOf(f) === i);
   const tokens = search ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6) : [];
   const searching = tokens.length > 0 && searchFields.length > 0;
 
@@ -59,6 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const buildQuery = (withActive: boolean) => {
     let q = supabase.from(table).select([...(withActive ? [...selectCols, "is_active"] : selectCols)].join(", ")).limit(cap);
     if (hasFilter) q = q.eq(filterCol, filterVal);
+    if (isUoms) q = q.eq("active", true);   // หน่วยที่ถูกรวม/ลบแล้ว (ถังขยะ) ไม่โชว์ให้เลือก · ค่าปัจจุบันยังโชว์ผ่าน include_ids
     if (searching) for (const t of tokens) q = q.or(searchFields.map((f) => `${f}.ilike.%${t}%`).join(","));
     return q;
   };
@@ -107,6 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     label:     String(r[label] ?? ""),
     secondary: secondary ? (r[secondary] != null ? String(r[secondary]) : undefined) : undefined,
     active:    typeof r.is_active === "boolean" ? r.is_active : undefined,
+    ...(isUoms ? { aliases: r.aliases != null ? String(r.aliases) : undefined } : {}),
   }));
 
   return NextResponse.json({ data: opts, error: null });

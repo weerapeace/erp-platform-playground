@@ -738,7 +738,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill, taobao }: {
                 </div>
               )}</label>
             <label className="block"><span className="text-xs text-slate-500">{t("หน่วย (Uom)", "Unit (UoM)")}</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => { autoUomRef.current = null; setSV("uom_id", id, lbl); }} placeholder={t("เลือกหน่วย", "Select unit")} quickCreate={{ entity: "uoms", field: "name", label: t("เพิ่มหน่วยใหม่", "Add new unit") }} /></div>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="display_name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => { autoUomRef.current = null; setSV("uom_id", id, lbl); }} placeholder={t("เลือกหน่วย", "Select unit")} quickCreate={{ entity: "uoms", field: "name", label: t("เพิ่มหน่วยใหม่", "Add new unit") }} /></div>
               {(() => {
                 // หน่วยตามประเภท: ตั้งที่ ⚙️ จัดการรหัสนำหน้า (หน่วย default ต่อประเภท / ต่อตระกูลรหัส)
                 const tg = sTag ? tags.find((x) => x.id === sTag) : undefined;

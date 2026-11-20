@@ -420,7 +420,7 @@ export function BomLineEditor({
 }) {
   const toast = useToast();
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
-  const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
+  const [uoms, setUoms] = useState<{ id: string; name: string; disp: string }[]>([]);
   // ป๊อป "รายละเอียดวัตถุดิบ" — เก็บเป็น key แล้วหาแถวจริงจาก lines ทุกครั้ง
   // (ถ้าเก็บทั้งแถวไว้ ค่าที่แก้ในป๊อปจะไม่อัปเดตตาม เพราะเป็นสำเนาแช่แข็ง)
   const [detailKey, setDetailKey] = useState<string | null>(null);
@@ -429,8 +429,9 @@ export function BomLineEditor({
   const [editUom, setEditUom] = useState<Set<string>>(new Set());
   useEffect(() => {
     apiFetch("/api/bom/material-groups").then((r) => r.json()).then((j) => setGroups((j.data ?? []) as MaterialGroup[])).catch(() => {});
-    apiFetch("/api/admin/picker?table=uoms&label=name&limit=100").then((r) => r.json())
-      .then((j) => setUoms(((j.data ?? []) as { id: string; label: string }[]).map((o) => ({ id: o.id, name: o.label })))).catch(() => {});
+    // หน่วยที่ยังใช้ (ไม่เอาตัวที่รวมแล้ว) · โชว์ "หลา · Yard" แต่เก็บชื่อหลัก (name) ลงบรรทัดเหมือนเดิม
+    apiFetch("/api/admin/picker?table=uoms&label=name&secondary=display_name&limit=100").then((r) => r.json())
+      .then((j) => setUoms(((j.data ?? []) as { id: string; label: string; secondary?: string }[]).map((o) => ({ id: o.id, name: o.label, disp: o.secondary || o.label })))).catch(() => {});
   }, []);
   const toggleSet = (set: Set<string>, key: string, on: boolean) => { const n = new Set(set); if (on) n.add(key); else n.delete(key); return n; };
 
@@ -891,7 +892,7 @@ export function BomLineEditor({
             onChange={(e) => { const o = uoms.find((x) => x.id === e.target.value); if (o) saveUomToSku(l, o.id, o.name, u); }}
             className={inputCls} title="เลือกหน่วย แล้วบันทึกกลับ SKU">
             <option value="">— เลือก —</option>
-            {uoms.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {uoms.map((o) => <option key={o.id} value={o.id}>{o.disp}</option>)}
           </select>
         ) : (
           <div className="flex items-center gap-1">
