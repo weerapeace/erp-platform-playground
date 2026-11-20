@@ -102,8 +102,10 @@ function ReadinessBadge({ parentId, codes, names, stored }: { parentId: string; 
   useEffect(() => {
     if (useStored) return;
     const el = ref.current; if (!el || seen) return;
+    // ดูทั้ง "แถว" ไม่ใช่ตัวป้าย — คอลัมน์นี้อยู่ขวาสุด จอแคบตารางเลื่อนแนวนอน ป้ายพ้นจอ = ไม่เคยตรวจ (เจอตอน recheck 2026-11-20)
+    const target = el.closest<HTMLElement>(".divide-y > *") ?? el;
     const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { setSeen(true); io.disconnect(); } }, { rootMargin: "100px" });
-    io.observe(el);
+    io.observe(target);
     return () => io.disconnect();
   }, [seen, useStored]);
   useEffect(() => {
@@ -610,6 +612,17 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
         message={
           <div className="space-y-2 text-sm">
             <p className="text-slate-600">ราคาที่ลูกค้าเห็นบน LINE จะเปลี่ยนทันที (ราคาต่อสี/ไซซ์ ระบบคำนวณจริงตอนส่ง ตามสูตรเดียวกับปุ่มส่งราคาเดิม)</p>
+            {(() => {
+              const rows = lineConfirm ?? [];
+              const loseStrike = rows.filter((r) => r.cells.line_shopping?.sale != null && !r.our.full).length;
+              const up = rows.filter((r) => { const c = r.cells.line_shopping; const now = c?.sale ?? c?.price; return now != null && r.our.sale != null && r.our.sale > now + 0.5; }).length;
+              return (loseStrike > 0 || up > 0) && (
+                <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-800">
+                  {loseStrike > 0 && <div className="flex items-start gap-1"><Icon value="i:alert-triangle" className="mt-0.5 shrink-0" /><span>{loseStrike.toLocaleString()} รุ่น ระบบยังไม่มีราคาเต็ม → ราคาขีดฆ่าบน LINE จะหาย (ใส่ราคาเต็มก่อนด้วยปุ่ม &quot;ใส่ราคาเต็ม&quot;)</span></div>}
+                  {up > 0 && <div className="flex items-start gap-1"><Icon value="i:alert-triangle" className="mt-0.5 shrink-0" /><span>{up.toLocaleString()} รุ่น ราคาที่ลูกค้าจ่ายจะแพงขึ้น — เช็กก่อนว่าราคาในระบบเป็นปัจจุบัน (ร้านอาจตั้งโปรไว้)</span></div>}
+                </div>
+              );
+            })()}
             <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-2 py-1 text-left">รุ่น</th><th className="px-2 py-1 text-right">บน LINE ตอนนี้</th><th className="px-2 py-1 text-right">ตามระบบ</th></tr></thead>
@@ -618,7 +631,11 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
                     <tr key={r.id} className="border-t border-slate-100">
                       <td className="px-2 py-1 font-mono">{r.code}</td>
                       <td className="px-2 py-1 text-right">จ่าย {baht(c?.sale ?? c?.price)}{c?.sale != null ? <span className="ml-1 text-slate-400 line-through">{baht(c.price)}</span> : null}</td>
-                      <td className="px-2 py-1 text-right font-medium text-violet-800">จ่าย {baht(r.our.sale)}{r.our.full ? <span className="ml-1 text-slate-400 line-through">{baht(r.our.full)}</span> : null}</td>
+                      <td className="px-2 py-1 text-right font-medium text-violet-800">
+                        จ่าย {baht(r.our.sale)}{r.our.full ? <span className="ml-1 text-slate-400 line-through">{baht(r.our.full)}</span> : null}
+                        {(() => { const now = c?.sale ?? c?.price; if (now == null || r.our.sale == null || Math.abs(r.our.sale - now) < 0.5) return c?.sale != null && !r.our.full ? <div className="text-[10px] font-normal text-amber-700">ขีดฆ่าจะหาย</div> : null;
+                          return <div className={`text-[10px] font-normal ${r.our.sale > now ? "text-rose-600" : "text-emerald-700"}`}>{r.our.sale > now ? "แพงขึ้น" : "ถูกลง"} {baht(Math.abs(r.our.sale - now))}</div>; })()}
+                      </td>
                     </tr>); })}
                 </tbody>
               </table>
