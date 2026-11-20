@@ -420,13 +420,15 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
 // ป๊อปอัปกลาง "ให้ AI เขียนแคปชั่น" — ใช้ทั้งปุ่มเขียนทั้งหมด / ปุ่ม ✨ ของแต่ละช่อง / สั่งรวบจากหน้ารายการ
 // ใส่คำสั่งเพิ่มครั้งนี้ได้ (ไม่กระทบ prompt ที่ตั้งไว้) · เลือกได้ว่าทับของเดิมหรือเขียนเฉพาะช่องว่าง
 // บอกค่าใช้จ่ายคร่าว ๆ ก่อนกด เพราะกดแล้วมีค่าใช้จ่ายจริง
-export function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, busy, onClose, onRun }: {
+export function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, busy, onClose, onRun, showCost = false }: {
   platformLabels: string[];
   filledCount: number;                 // จำนวนช่องที่มีข้อความอยู่แล้ว
   contentCount?: number;               // จำนวนคอนเทนต์ (สั่งรวบจากหน้ารายการ)
   busy: boolean;
   onClose: () => void;
   onRun: (extra: string, overwrite: boolean) => void;
+  /** โชว์ราคาประมาณ — เฉพาะผู้ดูแล (admin.paid_services) · พนักงานไม่เห็นเงิน (กติกาศูนย์ AI) */
+  showCost?: boolean;
 }) {
   const t = useT();
   const [extra, setExtra] = useState("");
@@ -441,7 +443,7 @@ export function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, 
         : t("ใช้ prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม + อ่านรูปที่แนบ", "Uses each platform's prompt + reads attached images")}
       footer={
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] text-slate-400">{t("ค่าใช้จ่ายประมาณ", "Approx. cost")} ~{estBaht < 0.1 ? estBaht.toFixed(2) : estBaht.toFixed(1)} {t("บาท", "THB")}</span>
+          <span className="text-[11px] text-slate-400">{showCost ? <>{t("ค่าใช้จ่ายประมาณ", "Approx. cost")} ~{estBaht < 0.1 ? estBaht.toFixed(2) : estBaht.toFixed(1)} {t("บาท", "THB")}</> : null}</span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => onRun(extra, overwrite)} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700 disabled:opacity-50">

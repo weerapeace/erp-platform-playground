@@ -28,7 +28,9 @@ import {
 } from "@/lib/paid-services";
 
 export type ServiceSetting = { key: string; enabled: boolean; model: string | null; provider: string | null };
-export type UseCtx = { request?: Request | null; userId?: string | null; place?: string | null };
+export type UseCtx = { request?: Request | null; userId?: string | null; place?: string | null;
+  /** รุ่นที่ "ผู้ดูแล" เลือกเองเฉพาะครั้งนี้ (ชนะค่าที่ตั้งในศูนย์) — route ต้องเช็กสิทธิ์ admin.paid_services + รุ่นอยู่ใน AI_MODEL_CHOICES ก่อนส่ง */
+  forceModel?: string | null };
 
 const TTL_MS = 30_000;
 let cache: { at: number; map: Map<string, ServiceSetting> } | null = null;
@@ -309,10 +311,10 @@ async function guardedGpt<T>(
   if (!(await serviceAccess(key, ctx))) throw new AccessDeniedError(key);
   const over = await overBudgetMessage(key, budget, userId);
   if (over) throw new BudgetExceededError(over);
-  // โมเดล: ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
+  // โมเดล: ผู้ดูแลเลือกเองครั้งนี้ → ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
   const settings = await loadServiceSettings();
   const place = resolvePlace(key, ctx?.place);
-  const useModel = (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || model;
+  const useModel = ctx?.forceModel || (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || model;
   try {
     const r = await run(useModel);
     const cost = Math.round((estimateCostThb(r.model, r.tokensIn, r.tokensOut) + r.extraThb) * 10000) / 10000;

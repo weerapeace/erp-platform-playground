@@ -12,6 +12,11 @@
  */
 
 export const DESC_AI_MEMORY_KEY = "desc_ai_memory";
+/** ความจำชุดเดียวกันนี้ใช้กับ AI เขียนแคปชั่นด้วย (เก็บแยกคีย์ · กติกา/หน้าตาเดียวกัน) — เจ้าของสั่ง 2026-11-20 */
+export const CAPTION_AI_MEMORY_KEY = "caption_ai_memory";
+export const AI_MEMORY_KINDS = { desc: { key: DESC_AI_MEMORY_KEY, feature: "ai.desc_highlights" }, caption: { key: CAPTION_AI_MEMORY_KEY, feature: "ai.caption" } } as const;
+export type AiMemoryKind = keyof typeof AI_MEMORY_KINDS;
+export const aiMemoryKind = (v: unknown): AiMemoryKind => (v === "caption" ? "caption" : "desc");
 export const ALL_SCOPE = "*";
 export const MEMORY_LISTS = ["liked", "disliked", "rules"] as const;
 export type MemoryList = (typeof MEMORY_LISTS)[number];

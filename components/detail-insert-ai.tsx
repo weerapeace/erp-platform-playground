@@ -9,6 +9,7 @@
  * API: /api/ai/desc-highlights (ศูนย์ AI key ai.desc_highlights · โควตาครั้งต่อคน) · /api/ai/desc-memory
  */
 import { useEffect, useState } from "react";
+import { AiMemoryPanel } from "@/components/ai-memory";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
@@ -53,11 +54,8 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
   const [err, setErr] = useState("");
   const [mem, setMem] = useState<Mem>({ liked: [], disliked: [], rules: [] });
   const [canManage, setCanManage] = useState(false);
-  const [memOpen, setMemOpen] = useState(false);
   const [undo, setUndo] = useState<{ item: AiItem; at: number } | null>(null);
   const [own, setOwn] = useState("");
-  const [rule, setRule] = useState("");
-  const [ruleAll, setRuleAll] = useState(false);
   const [extra, setExtra] = useState("");
 
   const loadStatus = async () => {
@@ -272,44 +270,8 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
       )}
       {err && <p className="rounded-md bg-rose-50 px-2 py-1 text-[11.5px] text-rose-700" data-ai-error>{err}</p>}
 
-      {/* 🧠 ความจำ AI — ชอบ / ไม่ชอบ / กฎ (แบรนด์นี้ + ทุกแบรนด์) */}
-      <div className="rounded-lg border border-slate-200" data-ai-memory>
-        <button type="button" onClick={() => setMemOpen((v) => !v)} className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-[12px] text-slate-600 hover:bg-slate-50">
-          <Icon name="library" /> {t("ความจำ AI", "AI memory")}
-          <span className="text-slate-400">{t(`ชอบ ${mem.liked.length} · ไม่ชอบ ${mem.disliked.length} · กฎ ${mem.rules.length}`, `liked ${mem.liked.length} · disliked ${mem.disliked.length} · rules ${mem.rules.length}`)}</span>
-          <span className="ml-auto text-slate-400">{memOpen ? "▴" : "▾"}</span>
-        </button>
-        {memOpen && (
-          <div className="space-y-2 border-t border-slate-100 px-2.5 py-2">
-            {(["liked", "disliked", "rules"] as const).map((l) => (
-              <div key={l}>
-                <div className="mb-1 text-[11px] font-medium text-slate-500">
-                  {l === "liked" ? t("ชอบ — ใส่เมื่อเหมาะกับสินค้า", "Liked — used when it fits") : l === "disliked" ? t("ไม่ชอบ — AI จะไม่เขียนแบบนี้อีก", "Disliked — never written again") : t("กฎที่พิมพ์เอง", "Your rules")}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {mem[l].length ? mem[l].map((m) => (
-                    <span key={`${m.scope}:${m.text}`} className={`inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] ${l === "liked" ? "bg-amber-50 text-amber-800" : l === "disliked" ? "bg-rose-50 text-rose-700" : "bg-sky-50 text-sky-800"}`}>
-                      <span className="truncate">{m.text}</span>
-                      <span className="shrink-0 text-[10px] opacity-60">{m.scope === "*" ? t("ทุกแบรนด์", "all brands") : t("แบรนด์นี้", "this brand")}</span>
-                      {(canManage || !m.by || m.by === user?.id) && (
-                        <button type="button" onClick={() => void memCall("remove", l, m.text, m.scope === "*" ? "all" : "brand")} aria-label={t("เอาออก", "Remove")} className="shrink-0 opacity-60 hover:opacity-100"><Icon name="cancel" /></button>
-                      )}
-                    </span>
-                  )) : <span className="text-[11px] text-slate-400">{t("ยังไม่มี", "None yet")}</span>}
-                </div>
-              </div>
-            ))}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <input value={rule} onChange={(e) => setRule(e.target.value)} placeholder={t("กฎใหม่ เช่น ห้ามเขียนว่ากันน้ำ ถ้าไม่ได้ระบุวัสดุกันน้ำ", "New rule, e.g. never say waterproof unless stated")} aria-label={t("กฎใหม่", "New rule")}
-                className="h-8 min-w-[12rem] flex-1 rounded-md border border-slate-200 px-2 text-[12px] focus:outline-none focus:ring-1 focus:ring-orange-400" />
-              <label className="flex items-center gap-1 text-[11.5px] text-slate-600"><input type="checkbox" checked={ruleAll} onChange={(e) => setRuleAll(e.target.checked)} className="h-3.5 w-3.5 accent-orange-500" />{t("ทุกแบรนด์", "All brands")}</label>
-              <button type="button" onClick={() => { const v = rule.trim(); if (!v) return; void memCall("add", "rules", v, ruleAll ? "all" : "brand").then((ok) => { if (ok) setRule(""); }); }}
-                className="h-8 rounded-md border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50">{t("เพิ่มกฎ", "Add rule")}</button>
-            </div>
-            <p className="text-[10.5px] text-slate-400">{t("ทุกคนกดชอบ/ไม่ชอบได้ · ลบของคนอื่นได้เฉพาะผู้ดูแล · ทุกการแก้บันทึกประวัติ", "Anyone can like/dislike · only admins remove others' entries · every change is logged")}</p>
-          </div>
-        )}
-      </div>
+      {/* 🧠 ความจำ AI — ชอบ / ไม่ชอบ / กฎ (แบรนด์นี้ + ทุกแบรนด์) · ของกลาง components/ai-memory */}
+      <AiMemoryPanel mem={mem} canManage={canManage} userId={user?.id} onCall={memCall} />
     </div>
   );
 }

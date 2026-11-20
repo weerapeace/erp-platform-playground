@@ -40,7 +40,8 @@ import { subStatusDot, subStatusLabel } from "../subtask-status";
 import { BrandSelect } from "@/components/brand-select";
 import { RowMenu, CSection } from "./content-ui";
 import { HashtagLibraryModal, RecommendedTimesModal, PlatformSettingsModal, CaptionTemplateSettings, CaptionConfigModal } from "./content-settings-modals";
-import { CaptionToolbar, CaptionCard, AiCaptionModal, PullCaptionModal } from "./caption-card";
+import { CaptionToolbar, CaptionCard, PullCaptionModal } from "./caption-card";
+import { AiCaptionStudio } from "./ai-caption-studio";
 import { ContentAttachments } from "./content-attachments";
 import { ContentBriefCard } from "./content-brief";
 import { ShopLinkChips, useShopLinks } from "./shop-link-chips";
@@ -110,7 +111,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
   // แพลตฟอร์มที่กางอยู่ (แบบพับเก็บ) — เริ่มต้นกางตัวแรกที่ยังไม่ได้โพสต์
-  const [aiAllBusy, setAiAllBusy] = useState(false);   // กำลังให้ AI เขียนทุกแพลตฟอร์ม
+  const [aiAllBusy] = useState(false);   // (ป๊อป AI ใหม่จัดการสถานะเอง — คงไว้ให้ปุ่ม/การ์ดเดิม)
   const [aiModal, setAiModal] = useState<{ platforms: string[] } | null>(null);
   // ปุ่มบนหัวคอลัมน์แคปชั่นที่ "โชว์" (สูงสุด 3) — จำรายคนที่ user_ui_prefs
   const [pinnedTools, setPinnedTools] = useState<string[]>(["ai", "expand", "copy_prompt"]);
@@ -612,32 +613,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
   };
 
-  // ✨ ให้ AI เขียนแคปชั่นทุกแพลตฟอร์มรอบเดียว — ประหยัด token เพราะอ่านรูปครั้งเดียวต่อชุดรูป
-  // (ฝั่ง server จับกลุ่มแพลตฟอร์มที่ใช้รูปชุดเดียวกัน แล้วยิง OpenAI ครั้งเดียวต่อกลุ่ม)
-  const aiWriteAll = async (platforms: string[], extra: string, overwrite: boolean) => {
-    if (!contentId) { pushToast("error", t("บันทึกคอนเทนต์ก่อน แล้วค่อยให้ AI เขียน", "Save the content first")); return; }
-    if (platforms.length === 0) { pushToast("info", t("ไม่มีแพลตฟอร์มที่เปิดใช้แคปชั่น", "No platform has captions enabled")); return; }
-    setAiAllBusy(true);
-    try {
-      const r = await apiFetch("/api/ai/caption-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_id: contentId, platforms, overwrite, extra }) });
-      const j = await r.json();
-      if (j.error) throw new Error(j.error);
-      const results = (j.results ?? []) as { platform: string; caption: string; hashtags: string[] }[];
-      for (const res of results) {
-        const cur = caps.find((c) => c.platform === res.platform);
-        const old = (cur?.hashtags ?? "").trim();
-        const have = new Set(old.split(/\s+/).filter(Boolean).map((x) => x.toLowerCase()));
-        const add = (res.hashtags ?? []).filter((h) => !have.has(h.toLowerCase()));
-        setCap(res.platform, { caption: res.caption, ...(add.length ? { hashtags: [old, ...add].filter(Boolean).join(" ") } : {}) });
-        setTouchedCaps((s) => { const n = new Set(s); n.add(`${res.platform}|caption`); if (add.length) n.add(`${res.platform}|hashtags`); return n; });
-      }
-      const skip = ((j.skipped ?? []) as { platform: string; reason: string }[]).length;
-      pushToast(results.length ? "success" : "info", t(
-        `AI เขียนให้ ${results.length} แพลตฟอร์ม (ยิง AI ${j.calls} ครั้ง · อ่าน ${j.images_used ?? 0} รูป)${skip ? ` · ข้าม ${skip}` : ""} — กด “บันทึก” เพื่อเก็บ`,
-        `AI wrote ${results.length} platform(s) in ${j.calls} call(s), ${j.images_used ?? 0} image(s)${skip ? `, skipped ${skip}` : ""} — press Save to keep`));
-      if (j.warning) pushToast("error", String(j.warning));
-      setAiModal(null);
-    } catch (e) { pushToast("error", (e as Error).message); } finally { setAiAllBusy(false); }
+  // ✨ ใส่แคปชั่นที่เลือกจากป๊อป AI (AiCaptionStudio) — แฮชแท็กที่ AI แนะนำต่อท้ายเฉพาะที่ยังไม่มี · คืนตัวย้อนกลับ (ป๊อปโชว์ปุ่ม "ย้อนกลับ")
+  const applyAiCaptions = (items: { platform: string; caption: string; hashtags: string[] }[]) => {
+    const before = caps.map((c) => ({ ...c }));
+    for (const it of items) {
+      const cur = caps.find((c) => c.platform === it.platform);
+      const old = (cur?.hashtags ?? "").trim();
+      const have = new Set(old.split(/\s+/).filter(Boolean).map((x) => x.toLowerCase()));
+      const add = it.hashtags.filter((h) => !have.has(h.toLowerCase()));
+      setCap(it.platform, { caption: it.caption, ...(add.length ? { hashtags: [old, ...add].filter(Boolean).join(" ") } : {}) });
+      setTouchedCaps((s) => { const n = new Set(s); n.add(`${it.platform}|caption`); if (add.length) n.add(`${it.platform}|hashtags`); return n; });
+    }
+    return () => { for (const c of before) if (items.some((it) => it.platform === c.platform)) setCap(c.platform, { caption: c.caption, hashtags: c.hashtags }); };
   };
 
   // เปลี่ยนชุดแพลตฟอร์มของคอนเทนต์ (บันทึกทันที): เพิ่ม = สร้างช่องแคปชั่น+แฮชแท็กเริ่มต้น · เอาออก = ลบช่องแคปชั่น
@@ -1211,13 +1198,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {recOpen && <RecommendedTimesModal initial={recTimes} onClose={() => setRecOpen(false)} onSaved={(v) => { setRecTimes(v); setRecOpen(false); }} pushToast={pushToast} />}
       {hashOpen && <HashtagLibraryModal brandId={brandId} onClose={() => setHashOpen(false)} pushToast={pushToast} />}
       {/* ป๊อป AI เขียนแคปชั่น (ใส่คำสั่งเพิ่มได้) — เปิดจากปุ่มหัวคอลัมน์ หรือปุ่ม ✨ ของช่องใดช่องหนึ่ง */}
-      {aiModal && (
-        <AiCaptionModal
-          platformLabels={aiModal.platforms.map((p) => platformLabel(p))}
-          filledCount={aiModal.platforms.filter((p) => (caps.find((c) => c.platform === p)?.caption ?? "").trim()).length}
-          busy={aiAllBusy}
+      {aiModal && contentId && (
+        <AiCaptionStudio contentId={contentId} brandId={brandId}
+          platforms={aiModal.platforms.map((p) => ({ code: p, label: platformLabel(p) }))}
           onClose={() => setAiModal(null)}
-          onRun={(extra, overwrite) => aiWriteAll(aiModal.platforms, extra, overwrite)} />
+          onApply={applyAiCaptions} />
       )}
       {lineOpen && (
         <LineBroadcastModal open title={d?.title ?? ""} captions={latestCaptions} media={postImages}

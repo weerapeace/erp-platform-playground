@@ -84,11 +84,12 @@ export const PAID_SERVICES: PaidService[] = [
   // ── คอนเทนต์ / การตลาด
   { key: "ai.caption", th: "เขียนแคปชั่น AI", en: "AI captions", group: "คอนเทนต์ / การตลาด",
     usedAt: "คอนเทนต์ (ทีละช่อง / ทั้งใบ) · อัลบั้มคอนเทนต์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,
-    files: ["app/api/ai/caption/route.ts", "app/api/ai/caption-all/route.ts", "app/api/content-albums/[id]/ai-caption/route.ts"],
+    files: ["app/api/ai/caption/route.ts", "app/api/ai/caption-all/route.ts", "app/api/ai/caption-options/route.ts", "app/api/content-albums/[id]/ai-caption/route.ts"],
     places: [
       { key: "single", th: "คอนเทนต์ — เขียนทีละช่อง", files: ["app/api/ai/caption/route.ts"] },
       { key: "all", th: "คอนเทนต์ — เขียนทั้งใบ (ทุกแพลตฟอร์ม)", files: ["app/api/ai/caption-all/route.ts"] },
       { key: "album", th: "อัลบั้มคอนเทนต์", files: ["app/api/content-albums/[id]/ai-caption/route.ts"] },
+      { key: "options", th: "คอนเทนต์ — เขียนหลายแบบให้เลือก", files: ["app/api/ai/caption-options/route.ts"] },
     ] },
   { key: "ai.mass_plan", th: "วางแผนคอนเทนต์ทั้งชุด", en: "Mass content plan", group: "คอนเทนต์ / การตลาด",
     usedAt: "แผนคอนเทนต์ (ร่างทีละหลายโพสต์)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/mass-plan/route.ts"] },

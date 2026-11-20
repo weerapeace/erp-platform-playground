@@ -84,3 +84,10 @@
 - อ่านรูป (สลิป / ใบเสร็จ): `readImageText(key, …)` — GPT (ค่าเริ่ม) หรือ Cloudflare · ตัวที่เลือกยังไม่ตั้งรหัส = ลองอีกตัวให้เอง
   (Cloudflare บน Vercel ต้องมี env `CF_ACCOUNT_ID` + `CF_AI_API_TOKEN` — ยังไม่ได้ตั้ง)
 - อีเมล: อัตโนมัติ / Resend / Gmail
+
+## AI เขียนแคปชั่นแบบเลือกได้ (2026-11-20)
+
+- ป๊อปใน drawer โพสต์ = `app/tasks/content/ai-caption-studio.tsx` · API `/api/ai/caption-options` (key `ai.caption` · place `options`)
+- พนักงานเห็นแค่ "ใช้ได้อีก N ครั้ง" (usageAllowance) · ผู้ดูแล (admin.paid_services) เห็นราคาต่อรุ่น + เลือกรุ่นเองได้ครั้งนั้น → `aiChat(..., { forceModel })` (ชนะค่าที่ตั้งในศูนย์ · route ต้องเช็กสิทธิ์ + รุ่นอยู่ใน AI_MODEL_CHOICES)
+- ความจำ AI แคปชั่น = `/api/ai/desc-memory?kind=caption` (ui_config `caption_ai_memory`) · แผงของกลาง `components/ai-memory`
+- คำสั่งประจำ = `/api/ai/caption-presets` (ui_config `caption_prompt_presets` · lib/caption-presets)

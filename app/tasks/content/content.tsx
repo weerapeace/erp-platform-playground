@@ -278,7 +278,7 @@ export function ContentPageView() {
 
       {/* ✨ AI เขียนแคปชั่นให้รายการที่เลือก (บันทึกให้เลย) */}
       {bulkAi && (
-        <AiCaptionModal platformLabels={[]} filledCount={0} contentCount={selected.size} busy={bulkAiBusy}
+        <AiCaptionModal platformLabels={[]} filledCount={0} contentCount={selected.size} busy={bulkAiBusy} showCost={can("admin.paid_services")}
           onClose={() => setBulkAi(false)} onRun={(extra, overwrite) => bulkAiWrite(extra, overwrite)} />
       )}
 

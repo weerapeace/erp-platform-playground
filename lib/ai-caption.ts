@@ -214,7 +214,7 @@ export async function resolveImageKeys(
   return { keys: [], source: "none" };
 }
 
-/** ต่อรูปเป็น content ของ OpenAI (detail low = ถูกที่สุด) */
-export function imageParts(urls: string[]): Record<string, unknown>[] {
-  return urls.map((url) => ({ type: "image_url", image_url: { url, detail: "low" } }));
+/** ต่อรูปเป็น content ของ OpenAI (detail low = ถูกที่สุด · high = ดูละเอียด อ่านตัวหนังสือบนรูปได้ แพงขึ้นราว 3 เท่า) */
+export function imageParts(urls: string[], detail: "low" | "high" = "low"): Record<string, unknown>[] {
+  return urls.map((url) => ({ type: "image_url", image_url: { url, detail } }));
 }
