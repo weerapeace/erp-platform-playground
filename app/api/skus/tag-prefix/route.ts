@@ -49,6 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       default_uom_label: t.default_uom_id ? (uomMap.get(t.default_uom_id as string) ?? "") : "",
       prefix_defaults,
       group_name: (t.product_family_groups as { name?: string } | null)?.name ?? null,
+      group_id: (t.group_id as string | null) ?? null,
     };
   });
   return NextResponse.json({ data: rows, error: null });

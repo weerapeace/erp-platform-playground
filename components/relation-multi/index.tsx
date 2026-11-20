@@ -17,6 +17,7 @@ import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { ancestorTagsOf } from "@/lib/tag-hierarchy";
 import { askAndNestTag } from "@/lib/tag-nest";
+import { TagColumns } from "@/components/tag-columns";
 import type { NewItemTagSuggestion } from "@/lib/tag-suggest-rules";
 import { useToast } from "@/components/toast";
 import { BomEditorModal } from "@/components/bom-editor-modal";
@@ -309,11 +310,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange,
   const exact = opts.some((o) => o.label.trim().toLowerCase() === ql);
 
   // จัดโครงสร้างกลุ่มสำหรับ popup (กลุ่ม → กลุ่มย่อย → แท็ก)
-  const byOrder = (a: Grp, b: Grp) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "th");
-  const topGroups = groups.filter((g) => !g.parent_group_id).sort(byOrder);
-  const subsOf = (gid: string) => groups.filter((g) => g.parent_group_id === gid).sort(byOrder);
   const byTagOrder = (a: Opt, b: Opt) => (a.sort_order ?? 100) - (b.sort_order ?? 100) || a.label.localeCompare(b.label, "th");
-  const tagsOf = (gid: string) => filteredOpts.filter((o) => o.group_id === gid).sort(byTagOrder);
   const ungrouped = filteredOpts.filter((o) => !o.group_id || !groupById.has(o.group_id)).sort(byTagOrder);
 
   // แถวแท็ก 1 อันใน popup (single = อยู่ในกลุ่มเลือกเดียว → วงกลม, ปกติ → ติ๊กถูก)
@@ -378,7 +375,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange,
       {/* POPUP เลือกแท็ก แบ่งกลุ่ม → กลุ่มย่อย */}
       {pickerOpen && createPortal(
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={() => setPickerOpen(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-[480px] max-w-[94vw] max-h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div className={`bg-white rounded-xl shadow-2xl ${usesGroups ? "w-[680px]" : "w-[480px]"} max-w-[94vw] max-h-[86vh] flex flex-col`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <div>
                 <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
@@ -391,39 +388,17 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange,
                 className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {usesGroups && topGroups.map((g) => {
-                const direct = tagsOf(g.id);
-                const subs = subsOf(g.id).map((s) => ({ s, tags: tagsOf(s.id) }));
-                const anySub = subs.some((x) => x.tags.length > 0);
-                if (direct.length === 0 && !anySub) return null;
-                return (
-                  <div key={g.id} className="border border-slate-100 rounded-lg">
-                    <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-                      <span className="text-sm font-medium text-slate-700">{g.name}</span>
-                      {g.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">{t("เลือกได้ 1", "Pick 1")}</span>}
-                    </div>
-                    <div className="p-1">
-                      {direct.map((o) => tagRow(o))}
-                      {subs.filter((x) => x.tags.length > 0).map(({ s, tags }) => (
-                        <div key={s.id} className="mt-1">
-                          <div className="px-2 py-1 flex items-center gap-2">
-                            <span className="text-xs font-medium text-slate-500">↳ {s.name}</span>
-                            {s.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">{t("เลือกได้ 1", "Pick 1")}</span>}
-                          </div>
-                          {tags.map((o) => tagRow(o))}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              {ungrouped.length > 0 && (
+              {/* แท็กมีกลุ่ม → หมวดซ้าย · แท็กขวา (ของกลาง TagColumns — หน้าตาเดียวกับเมนูหน้าเว็บ) */}
+              {usesGroups && (
+                <TagColumns groups={groups} tags={opts} query={q} renderTag={(o) => tagRow(o as Opt)} selectedIds={linked} storageKey="relation-multi" />
+              )}
+              {!usesGroups && ungrouped.length > 0 && (
                 <div className="border border-slate-100 rounded-lg">
-                  <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-500">{usesGroups ? t("ไม่มีกลุ่ม", "No group") : t("แท็กทั้งหมด", "All tags")}</div>
+                  <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-500">{t("แท็กทั้งหมด", "All tags")}</div>
                   <div className="p-1">{ungrouped.map((o) => tagRow(o))}</div>
                 </div>
               )}
-              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">{usesGroups ? t("— ยังไม่มีแท็ก —", "— No tags yet —") : t("— ไม่มีข้อมูลให้เลือก —", "— Nothing to select —")}</div>}
+              {!usesGroups && filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">{t("— ไม่มีข้อมูลให้เลือก —", "— Nothing to select —")}</div>}
               {allowCreate && ql && !exact && (
                 <button type="button" onClick={createNew} disabled={busy}
                   className="flex items-center gap-2 w-full px-2 py-2 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border border-dashed border-blue-200">

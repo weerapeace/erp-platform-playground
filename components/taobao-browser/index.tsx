@@ -422,6 +422,11 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             rmb_cost: wizardRow.price_rmb ?? undefined,
             purchase_link: wizardRow.taobao_url ?? "",
           }}
+          // โหมด Taobao: สีจากตัวเลือกของการ์ด · แท็กที่ติดบนการ์ด = ชิปแนะนำประเภท · ผู้ขาย Taobao · ราคาคร่าว ๆ
+          taobao={{
+            colors: wizardRow.variants.map((v) => (v.translatedName || v.originalName || "").trim()).filter(Boolean),
+            tagIds: wizardRow.family_tag_ids ?? [],
+          }}
           onCreated={async (res) => {
             const newId = res?.ids?.[0] ?? null;
             try {

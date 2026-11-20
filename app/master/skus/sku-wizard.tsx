@@ -17,6 +17,8 @@ import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { TagColumns, type TagColGroup } from "@/components/tag-columns";
+import type { NewItemTagSuggestion } from "@/lib/tag-suggest-rules";
 
 // ป้ายชื่อคอลัมน์ที่ override จากทะเบียน (ให้ตรงภาษาคน) — ใช้ทั้งเดี่ยว/ชุด
 const LABEL_OVERRIDE: Record<string, string> = {
@@ -51,7 +53,7 @@ type TagCtx = { fabric_widths: number[]; sellers: { id: string; name: string | n
 
 type PickerOpt = { id: string; label: string; secondary?: string };
 type PrefixDefault = { name?: string; uom_id?: string | null; uom_label?: string };
-type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string; prefix_defaults?: Record<string, PrefixDefault> };
+type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null; group_id?: string | null; default_name?: string; default_uom_id?: string | null; default_uom_label?: string; prefix_defaults?: Record<string, PrefixDefault> };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
 type TagCode = { prefix: string; latest_code: string; suggested: string; count: number;
   latest_name?: string; latest_seller_id?: string | null; latest_seller_name?: string;
@@ -189,19 +191,26 @@ const blankRow = (): Row => ({ values: {}, labels: {} });
 /** ผลลัพธ์หลังสร้างเสร็จ — ส่งกลับให้ผู้เรียกใช้ต่อได้ (เช่น กล่องพัก Taobao ใช้ผูก id ที่เพิ่งสร้าง) */
 export type SkuWizardResult = { created: number; ids: string[]; skus: { id: string; code: string }[] };
 
-export function SkuWizard({ open, onClose, onCreated, prefill }: {
+/** ข้อมูลจากการ์ด Taobao — มี = ป๊อปเข้าโหมด Taobao (สี/ผู้ขาย Taobao/ราคาหยวน×เรต) · ไม่มี = ฟอร์มปกติ ไม่มีส่วน Taobao */
+export type SkuWizardTaobao = { colors?: string[]; tagIds?: string[] };
+
+export function SkuWizard({ open, onClose, onCreated, prefill, taobao }: {
   open: boolean;
   onClose: () => void;
   onCreated: (result?: SkuWizardResult) => void;
   /** ค่าเริ่มต้นของฟอร์ม "เพิ่มทีละตัว" (เช่น name_th / rmb_cost / purchase_link) — มีค่า = ข้ามหน้าเลือกโหมด ไปโหมดเดี่ยวเลย */
   prefill?: Record<string, unknown>;
+  taobao?: SkuWizardTaobao;
 }) {
   const t = useT();
   const toast = useToast();
   // key เสถียรของ prefill (ผู้เรียกส่ง object ใหม่ทุก render) — กัน effect ด้านล่างรันซ้ำไม่รู้จบ
   const prefillKey = useMemo(() => (prefill ? JSON.stringify(prefill) : ""), [prefill]);
+  const isTaobao = !!taobao;
+  const taobaoKey = useMemo(() => (taobao ? JSON.stringify(taobao) : ""), [taobao]);
   const [step, setStep] = useState<"choose" | "single" | "batch">("choose");
   const [tags, setTags] = useState<TagOpt[]>([]);
+  const [tagGroups, setTagGroups] = useState<TagColGroup[]>([]);   // กลุ่มแท็ก → ตัวเลือกแบบหมวดซ้าย·แท็กขวา (TagColumns)
   const [catalog, setCatalog] = useState<ColDef[]>([]);
   const [prefixMgr, setPrefixMgr] = useState(false);   // ป๊อปจัดการรหัสนำหน้า
   const [saving, setSaving] = useState(false);
@@ -234,6 +243,10 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   // โหลดประเภท(แท็ก) ทั้งหมด (รวมที่ยังไม่ตั้ง prefix) — ใช้ tag-prefix
   const loadTags = useCallback(() => {
     apiFetch("/api/skus/tag-prefix").then((r) => r.json()).then((j) => setTags((j.data ?? []) as TagOpt[])).catch(() => {});
+    apiFetch("/api/master-v2/product_family_groups?limit=500").then((r) => r.json()).then((j) => setTagGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
+      id: String(g.id), name: String(g.name ?? ""), parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
+      single_select: g.single_select === true, sort_order: g.sort_order != null ? Number(g.sort_order) : null,
+    })))).catch(() => {});
   }, []);
 
   // โหลดประเภท + คอลัมน์จากทะเบียน field
@@ -281,36 +294,50 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   const [sug, setSug] = useState<Suggest | null>(null);
   const [tagCodes, setTagCodes] = useState<TagCode[]>([]);   // ทุกตระกูลรหัสที่ใช้กับแท็กนี้ (tooltip)
   const [single, setSingle] = useState<Row>(blankRow());
+  // ราคาซื้อมาจาก "หยวน × เรต" (ยังไม่ได้แก้มือ) → ป้าย "ราคาคร่าว ๆ" + บันทึก standard_price_is_estimate · แก้ราคาเอง = ราคาจริง
+  const [priceEst, setPriceEst] = useState(false);
+  const autoUomRef = useRef<string | null>(null);    // หน่วยที่ระบบใส่ให้ตามประเภท (เปลี่ยนประเภท = เปลี่ยนตาม · เลือกเองแล้วไม่ทับ)
+  const autoCodeRef = useRef<string | null>(null);   // รหัสที่ระบบเสนอให้ (เปลี่ยนประเภท = เสนอใหม่ · พิมพ์เองแล้วไม่ทับ)
+  const [tagErr, setTagErr] = useState(false);
   // เติมค่าตั้งต้นจากผู้เรียก (เช่นกล่องพัก Taobao ส่งชื่อไทย/ราคาหยวน/ลิงก์มาให้) — ตอนเปิดป๊อป
   useEffect(() => {
     if (!open || !prefillKey) return;
     const values = JSON.parse(prefillKey) as Record<string, unknown>;
-    setSingle({ values: Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined && v !== null && v !== "")), labels: {} });
-  }, [open, prefillKey]);
+    const clean = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined && v !== null && v !== ""));
+    setSingle({ values: clean, labels: {} });
+    // มาจาก Taobao + มีราคาหยวน + ยังไม่มีราคาบาท → คำนวณให้ (effect ด้านล่าง) และติดป้ายราคาคร่าว ๆ
+    setPriceEst(isTaobao && clean.rmb_cost != null && clean.standard_price == null);
+  }, [open, prefillKey, isTaobao]);
+  // ราคาคร่าว ๆ = หยวน × เรต — คำนวณใหม่เมื่อหยวน/เรตเปลี่ยน (เฉพาะตอนยังไม่ได้แก้ราคาเอง)
+  const rmbNow = String(single.values.rmb_cost ?? "");
+  useEffect(() => {
+    if (!priceEst) return;
+    const n = Number(rmbNow);
+    if (rmbNow.trim() === "" || !Number.isFinite(n) || rmbRate <= 0) return;
+    const price = String(Math.round(n * rmbRate * 100) / 100);
+    setSingle((s) => (s.values.standard_price === price ? s : { ...s, values: { ...s.values, standard_price: price } }));
+  }, [priceEst, rmbNow, rmbRate]);
   const setSV = (k: string, v: unknown, lbl?: string) => setSingle((s) => ({ values: { ...s.values, [k]: v }, labels: lbl !== undefined ? { ...s.labels, [k]: lbl } : s.labels }));
-  // กรอกราคาซื้อหยวน (rmb_cost) → คำนวณราคาซื้อ (standard_price) = หยวน × เรต อัตโนมัติ (แก้ทับเองได้)
-  const onRmbChange = (v: string) => setSingle((s) => {
-    const values: Record<string, unknown> = { ...s.values, rmb_cost: v };
-    if (v.trim() !== "" && rmbRate > 0 && Number.isFinite(Number(v))) values.standard_price = String(Math.round(Number(v) * rmbRate * 100) / 100);
-    return { ...s, values };
-  });
-  // บันทึกเรต (global) + คำนวณราคาซื้อใหม่ถ้ามีราคาหยวนอยู่
+  // กรอกราคาซื้อหยวน (rmb_cost) → ราคาซื้อ (standard_price) = หยวน × เรต อัตโนมัติ (ติดป้ายราคาคร่าว ๆ · แก้ทับเองได้)
+  const onRmbChange = (v: string) => { setSV("rmb_cost", v); if (v.trim() !== "") setPriceEst(true); };
+  // บันทึกเรต (global) — ราคาคร่าว ๆ คำนวณใหม่เองผ่าน effect
   const saveRate = async () => {
     try { await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "rmb_to_thb_rate", value: { rate: rmbRate } }) }); } catch { /* ไม่ขัดจังหวะผู้ใช้ */ }
-    setSingle((s) => {
-      const rmb = s.values.rmb_cost;
-      if (rmb != null && String(rmb).trim() !== "" && rmbRate > 0 && Number.isFinite(Number(rmb)))
-        return { ...s, values: { ...s.values, standard_price: String(Math.round(Number(rmb) * rmbRate * 100) / 100) } };
-      return s;
-    });
   };
-  // เติมชื่อ/หน่วย default ของประเภทให้อัตโนมัติ (เฉพาะช่องที่ยังว่าง — ไม่ทับที่พิมพ์ไว้)
+  // ใส่หน่วยตามประเภท — ทับได้เฉพาะตอนช่องว่าง หรือหน่วยเดิมระบบใส่ให้เอง (ไม่ทับที่ผู้ใช้เลือกเอง)
+  const applyAutoUom = (values: Record<string, unknown>, labels: Record<string, string>, uomId: string | null | undefined, uomLabel: string) => {
+    const mine = !values.uom_id || values.uom_id === autoUomRef.current;
+    if (!mine) return;
+    if (uomId) { values.uom_id = uomId; labels.uom_id = uomLabel; autoUomRef.current = uomId; }
+    else if (autoUomRef.current) { delete values.uom_id; delete labels.uom_id; autoUomRef.current = null; }
+  };
+  // เติมชื่อ/หน่วย default ของประเภทให้อัตโนมัติ (ชื่อ: เฉพาะช่องที่ยังว่าง — ไม่ทับที่พิมพ์ไว้)
   const prefillFromTag = (tagId: string) => {
     const t = tags.find((x) => x.id === tagId); if (!t) return;
     setSingle((s) => {
       const values = { ...s.values }; const labels = { ...s.labels };
       if (t.default_name && !String(values.name_th ?? "").trim()) values.name_th = t.default_name;
-      if (t.default_uom_id && !values.uom_id) { values.uom_id = t.default_uom_id; labels.uom_id = t.default_uom_label || ""; }
+      applyAutoUom(values, labels, t.default_uom_id, t.default_uom_label || "");
       return { values, labels };
     });
   };
@@ -323,9 +350,9 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
     const uomLabel = pd?.uom_id ? (pd?.uom_label || "") : (t?.default_uom_label || "");
     setSingle((s) => {
       const values = { ...s.values }; const labels = { ...s.labels };
-      values.code = c.suggested;
+      values.code = c.suggested; autoCodeRef.current = c.suggested;
       if (name && !String(values.name_th ?? "").trim()) values.name_th = name;
-      if (uomId && !values.uom_id) { values.uom_id = uomId; labels.uom_id = uomLabel; }
+      if (uomId) applyAutoUom(values, labels, uomId, uomLabel);
       // C: ดึงค่าจาก SKU ตัวก่อนหน้า (ล่าสุดในตระกูล) — เฉพาะช่องที่ยังว่าง
       if (c.latest_seller_id && !values.seller_partner_id) { values.seller_partner_id = c.latest_seller_id; labels.seller_partner_id = c.latest_seller_name || ""; }
       if (c.latest_standard_price != null && !String(values.standard_price ?? "").trim()) values.standard_price = String(c.latest_standard_price);
@@ -337,12 +364,84 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
   const loadSuggest = useCallback((tagId: string) => {
     apiFetch(`/api/skus/code-suggest?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => {
       setSug(j as Suggest);
-      if (j.this_suggested) setSingle((s) => (s.values.code ? s : { ...s, values: { ...s.values, code: j.this_suggested } }));
+      // เสนอรหัสใหม่ — ทับได้เฉพาะช่องว่าง หรือรหัสเดิมที่ระบบเสนอเอง (พิมพ์เองแล้วไม่ทับ)
+      if (j.this_suggested) setSingle((s) => (s.values.code && s.values.code !== autoCodeRef.current ? s : (autoCodeRef.current = j.this_suggested, { ...s, values: { ...s.values, code: j.this_suggested } })));
     }).catch(() => {});
     // ดึงทุกตระกูลรหัสจริงที่ผูกแท็กนี้ (สำหรับ tooltip)
     setTagCodes([]);
     apiFetch(`/api/skus/tag-codes?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => setTagCodes((j.prefixes ?? []) as TagCode[])).catch(() => {});
   }, []);
+
+  // เลือกประเภท (เดี่ยว) — ใช้ร่วม: ตัวเลือกหมวดซ้าย·แท็กขวา + ชิปแนะนำ
+  const pickSingleTag = (nv: string | null) => {
+    setSTag(nv); setTagErr(false); setTagPanel(false);
+    if (nv) { loadSuggest(nv); prefillFromTag(nv); loadContext(nv); } else { setSug(null); setTagCodes([]); setCtx({ fabric_widths: [], sellers: [] }); }
+  };
+  const [tagPanel, setTagPanel] = useState(false);   // เปิดตัวเลือกประเภท (หมวดซ้าย·แท็กขวา)
+  const [tagQ, setTagQ] = useState("");
+  const tagColTags = useMemo(() => tags.map((x) => ({ id: x.id, label: x.name, group_id: x.group_id ?? null })), [tags]);
+  const tagPath = (id: string | null) => {
+    const x = id ? tags.find((y) => y.id === id) : undefined; if (!x) return "";
+    const g = x.group_id ? tagGroups.find((y) => y.id === x.group_id) : undefined;
+    const pg = g?.parent_group_id ? tagGroups.find((y) => y.id === g.parent_group_id) : undefined;
+    return [pg?.name, g?.name, x.name].filter(Boolean).join(" › ");
+  };
+
+  // 💡 ชิปแนะนำประเภท: แท็กที่ติดไว้บนการ์ด Taobao (แน่นอน) + ตัวเดาแท็กจากชื่อ/รหัส (กฎกลาง lib/tag-suggest-rules)
+  const [nameSug, setNameSug] = useState<NewItemTagSuggestion[]>([]);
+  const sugName = String(single.values.name_th ?? ""), sugCode = String(single.values.code ?? "");
+  useEffect(() => {
+    if (!open || step !== "single" || (!sugName.trim() && !sugCode.trim())) { setNameSug([]); return; }
+    let alive = true;
+    const tm = setTimeout(() => {
+      apiFetch(`/api/product-tags/suggest/new?${new URLSearchParams({ name: sugName, code: sugCode })}`).then((r) => r.json())
+        .then((j) => { if (alive) setNameSug((j.data ?? []) as NewItemTagSuggestion[]); }).catch(() => {});
+    }, 600);
+    return () => { alive = false; clearTimeout(tm); };
+  }, [open, step, sugName, sugCode]);
+  const tagChips = useMemo(() => {
+    const out: { id: string; name: string; why: string }[] = [];
+    const seen = new Set<string>();
+    for (const id of taobao?.tagIds ?? []) { const x = tags.find((y) => y.id === id); if (x && !seen.has(id)) { seen.add(id); out.push({ id, name: x.name, why: tr("ติดไว้บนการ์ด Taobao", "Tagged on the Taobao card") }); } }
+    for (const s of nameSug) if (!seen.has(s.tagId) && tags.some((y) => y.id === s.tagId)) { seen.add(s.tagId); out.push({ id: s.tagId, name: s.name, why: s.reason }); }
+    return out.filter((x) => x.id !== sTag).slice(0, 8);
+  }, [taobao?.tagIds, nameSug, tags, sTag]);
+
+  // 🛒 โหมด Taobao: ผู้ขาย = Taobao ให้เอง (ค้นจากทะเบียนคู่ค้า · เปลี่ยนเองได้)
+  useEffect(() => {
+    if (!open || !isTaobao) return;
+    apiFetch(`/api/admin/picker?table=partners_v2&label=name_th&search=Taobao&limit=10`).then((r) => r.json()).then((j) => {
+      const hit = ((j.data ?? []) as PickerOpt[]).find((p) => p.label.trim().toLowerCase() === "taobao");
+      if (hit) setSingle((s) => (s.values.seller_partner_id ? s : { values: { ...s.values, seller_partner_id: hit.id }, labels: { ...s.labels, seller_partner_id: hit.label } }));
+    }).catch(() => {});
+  }, [open, isTaobao, prefillKey]);
+
+  // 🎨 สีจาก Taobao — ติ๊กได้หลายสี: 1 สี = กรอกช่องสี · หลายสี = สร้างหลาย SKU (1 สี = 1 SKU รหัสรันต่อกัน)
+  const [extraColors, setExtraColors] = useState<string[]>([]);
+  const [colorPicks, setColorPicks] = useState<string[]>([]);
+  const [colorDraft, setColorDraft] = useState("");
+  const taobaoColors = useMemo(() => {
+    const list = [...(taobao?.colors ?? []), ...extraColors].map((c) => c.trim()).filter(Boolean);
+    return [...new Set(list)];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taobaoKey, extraColors]);
+  const setPicks = (next: string[]) => { setColorPicks(next); setSV("color", next.length === 1 ? next[0] : next.length === 0 ? "" : next.join(", ")); };
+  const togglePick = (c: string) => setPicks(colorPicks.includes(c) ? colorPicks.filter((x) => x !== c) : [...colorPicks, c]);
+  const addDraftColor = () => { const c = colorDraft.trim(); if (!c) return; setExtraColors((l) => (l.includes(c) ? l : [...l, c])); if (!colorPicks.includes(c)) setPicks([...colorPicks, c]); setColorDraft(""); };
+  // แถวที่จะสร้างจริง (โหมดเดี่ยว) — หลายสี = แตกเป็นหลายแถว รหัสรันต่อจากรหัสที่กรอก
+  const multiColor = isTaobao && colorPicks.length > 1;
+  const singleRows = (): Row[] | string => {
+    const est = isTaobao && priceEst;
+    const base: Row = { values: { ...single.values, standard_price_is_estimate: est }, labels: single.labels };
+    if (!multiColor) return [base];
+    const cb = splitCode(String(single.values.code ?? "").trim());
+    if (cb.pad === 0) return tr("หลายสีต้องใช้รหัสที่ลงท้ายด้วยตัวเลข (เช่น JEW-001) เพื่อรันรหัสต่อให้แต่ละสี", "Multiple colors need a code ending in a number (e.g. JEW-001) so each color gets the next code");
+    const nm = String(single.values.name_th ?? "");
+    return colorPicks.map((c, i) => ({
+      values: { ...base.values, code: codeAt(cb, cb.num + i), color: c, name_th: PLACEHOLDER_RE.test(nm) || !nm.trim() ? nm : `${nm} ${c}` },
+      labels: base.labels,
+    }));
+  };
 
   // ---------- โหมดชุด ----------
   const [lines, setLines] = useState<Row[]>([blankRow(), blankRow(), blankRow()]);
@@ -420,7 +519,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
     return l.map((x, i) => i === 0 ? x : ({ values: { ...x.values, [k]: v }, labels: { ...x.labels, [k]: lbl } }));
   });
 
-  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); setCtx({ fabric_widths: [], sellers: [] }); setBatchBase(null); setBatchCodes([]); setBCodePrefix(null); };
+  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); setCtx({ fabric_widths: [], sellers: [] }); setBatchBase(null); setBatchCodes([]); setBCodePrefix(null); setPriceEst(false); setTagErr(false); setTagPanel(false); setTagQ(""); setColorPicks([]); setExtraColors([]); setColorDraft(""); autoUomRef.current = null; autoCodeRef.current = null; };
   const close = () => { if (saving) return; reset(); onClose(); };
 
   const submit = async (rows: Row[], tagId: string | null) => {
@@ -448,6 +547,14 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
     finally { setSaving(false); }
   };
 
+  // เดี่ยว: ต้องเลือกประเภท (Tag) ก่อน (เจ้าของสั่ง 2026-11-20) · หลายสีจาก Taobao = แตกเป็นหลายแถว
+  const submitSingle = () => {
+    if (!sTag) { setTagErr(true); setTagPanel(true); toast.error(t("เลือกประเภท (Tag) ก่อน ถึงจะสร้าง SKU ได้", "Pick a type (Tag) before creating the SKU")); return; }
+    const rows = singleRows();
+    if (typeof rows === "string") { toast.error(rows); return; }
+    void submit(rows, sTag);
+  };
+
   // ---- render cell ตามชนิดคอลัมน์ ----
   const cell = (col: ColDef, val: unknown, lbl: string | undefined, onVal: (v: unknown, lbl?: string) => void) => {
     if (col.type === "relation" && col.rel)
@@ -471,7 +578,7 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
           <div className="flex gap-2">
             {step === "batch" && <button onClick={addBatchRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ {t("เพิ่มแถว", "Add row")}</button>}
             <button onClick={close} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-            <button onClick={() => step === "single" ? submit([single], sTag) : submit(lines, bTag)} disabled={saving}
+            <button onClick={() => step === "single" ? submitSingle() : submit(lines, bTag)} disabled={saving}
               className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังสร้าง...", "Creating...") : t("สร้าง SKU", "Create SKU")}</button>
           </div>
         </div>
@@ -497,10 +604,15 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
       {step === "single" && (
         <div className="space-y-3">
           <div>
-            <span className="text-xs text-slate-500">{t("ประเภท (Tag) — ใช้เสนอรหัสให้", "Type (Tag) — used to suggest a code")}</span>
-            <div className="mt-0.5 flex gap-1.5">
-              <div className="flex-1"><SearchableSelect value={sTag ?? ""} options={tagOptions} placeholder={t("— เลือกประเภท (พิมพ์ค้นหาได้) —", "— Select a type (type to search) —")}
-                onChange={(v) => { const nv = v || null; setSTag(nv); if (nv) { loadSuggest(nv); prefillFromTag(nv); loadContext(nv); } else { setSug(null); setTagCodes([]); setCtx({ fabric_widths: [], sellers: [] }); } }} /></div>
+            <span className="text-xs text-slate-500">{t("ประเภท (Tag)", "Type (Tag)")} <span className="text-rose-500">*</span> {t("— ใช้เสนอรหัสให้", "— used to suggest a code")}</span>
+            <div className="mt-0.5 flex flex-wrap sm:flex-nowrap gap-1.5">
+              {/* ตัวเลือกประเภท: กด = เปิดหมวดซ้าย·แท็กขวา (ของกลาง TagColumns) */}
+              <button type="button" onClick={() => { setTagPanel((v) => !v); setTagQ(""); }}
+                className={`flex-1 min-w-0 basis-full sm:basis-auto h-9 px-2.5 flex items-center gap-2 text-sm text-left border rounded-lg bg-white hover:bg-slate-50 ${tagErr ? "border-rose-400 ring-1 ring-rose-200" : "border-slate-200"}`}>
+                <span className={`flex-1 truncate ${sTag ? "text-slate-800" : "text-slate-400"}`}>{sTag ? tagPath(sTag) : t("กดเพื่อเลือกประเภท", "Tap to pick a type")}</span>
+                {sTag && <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); pickSingleTag(null); }} className="text-slate-300 hover:text-rose-500" title={t("ล้างประเภท", "Clear type")}>✕</span>}
+                <span className="text-slate-400 text-xs">{tagPanel ? "▴" : "▾"}</span>
+              </button>
               {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
               {tagCodes.length > 0 && (
                 <div className="relative group flex items-center">
@@ -529,6 +641,34 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
               <button type="button" onClick={() => setPrefixMgr(true)} title={t("ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท", "Set/edit the code prefix for each type")}
                 className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ {t("จัดการรหัสนำหน้า", "Manage code prefixes")}</button>
             </div>
+            {tagErr && !sTag && <div className="text-xs text-rose-600 mt-1">{t("ต้องเลือกประเภทก่อน ถึงจะสร้าง SKU ได้", "Pick a type before creating the SKU")}</div>}
+            {tagChips.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                <span className="text-[11px] text-slate-400">{t("แนะนำ (กดเพื่อเลือก):", "Suggested (tap to pick):")}</span>
+                {tagChips.map((c) => (
+                  <button key={c.id} type="button" onClick={() => pickSingleTag(c.id)} title={c.why}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100">＋ {c.name}</button>
+                ))}
+              </div>
+            )}
+            {tagPanel && (
+              <div className="mt-2 space-y-2">
+                <input value={tagQ} onChange={(e) => setTagQ(e.target.value)} autoFocus placeholder={t("ค้นหาแท็กทุกหมวด…", "Search tags in all groups…")}
+                  className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" />
+                <TagColumns groups={tagGroups} tags={tagColTags} query={tagQ} selectedIds={sTag ? [sTag] : []} storageKey="sku-wizard"
+                  renderTag={(o) => {
+                    const on = sTag === o.id; const opt = tags.find((x) => x.id === o.id);
+                    return (
+                      <button type="button" onClick={() => pickSingleTag(o.id)}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-left rounded border ${on ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-100 hover:border-blue-300 hover:bg-blue-50/40"}`}>
+                        <span className={`inline-flex w-4 h-4 rounded-full border ${on ? "border-blue-600 bg-blue-600" : "border-slate-300"}`} />
+                        <span className="flex-1 truncate">{o.label}</span>
+                        <span className="text-[10px] font-mono text-slate-400">{opt?.code_prefix || ""}</span>
+                      </button>
+                    );
+                  }} />
+              </div>
+            )}
           </div>
 
           {sug && (
@@ -544,8 +684,8 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block"><span className="text-xs text-slate-500">{t("รหัส SKU", "SKU code")} *</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <label className="block"><span className="text-xs text-slate-500">{t("รหัส SKU", "SKU code")} *{multiColor ? t(" (ตัวแรก — สีถัดไปรันต่อ)", " (first — next colors continue)") : ""}</span>
               <input value={(single.values.code as string) ?? ""} onChange={(e) => setSV("code", e.target.value)} placeholder={t("เช่น LEA-SAF-028", "e.g. LEA-SAF-028")} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
             <label className="block"><span className="text-xs text-slate-500">{t("ชื่อ (ไทย)", "Name (Thai)")} <span className="text-[10px] text-slate-400">{t("— ใส่ [สี] [รหัส] เป็นตัวแปรได้", "— [สี] (color) and [รหัส] (code) work as variables")}</span></span>
               <input value={(single.values.name_th as string) ?? ""} onChange={(e) => setSV("name_th", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" />
@@ -556,8 +696,36 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                 const left = PLACEHOLDER_RE.test(preview);
                 return <span className={`block text-[10px] mt-0.5 ${left ? "text-amber-600" : "text-emerald-600"}`}>→ {preview}{left ? t(" · ยังไม่ครบ (กรอกสี/รหัส)", " · incomplete (fill in color/code)") : ""}</span>;
               })()}</label>
-            <label className="block"><span className="text-xs text-slate-500">{t("สี", "Color")}</span>
-              <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder={t("ดำ/แดง...", "Black/Red...")} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+            {isTaobao ? (
+              <div className="sm:col-span-2">
+                <span className="text-xs text-slate-500">{t("สี", "Color")} <span className="text-[10px] text-blue-600">{t("ดึงจาก Taobao — ติ๊กได้หลายสี (1 สี = 1 SKU)", "From Taobao — pick several (1 color = 1 SKU)")}</span></span>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  {taobaoColors.map((c) => {
+                    const on = colorPicks.includes(c);
+                    return <button key={c} type="button" onClick={() => togglePick(c)}
+                      className={`px-2.5 py-1 text-xs rounded-full border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-blue-300"}`}>{on ? "✓ " : ""}{c}</button>;
+                  })}
+                  {taobaoColors.length === 0 && <span className="text-[11px] text-slate-400">{t("การ์ดนี้ไม่มีตัวเลือกสี — พิมพ์เองได้", "This card has no color options — type your own")}</span>}
+                  <span className="inline-flex items-center gap-1">
+                    <input value={colorDraft} onChange={(e) => setColorDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDraftColor(); } }}
+                      placeholder={t("+ พิมพ์สีเอง", "+ Type a color")} className="w-28 h-7 px-2 text-xs border border-slate-200 rounded-full" />
+                    {colorDraft.trim() && <button type="button" onClick={addDraftColor} className="h-7 px-2 text-xs rounded-full bg-blue-600 text-white">{t("เพิ่ม", "Add")}</button>}
+                  </span>
+                </div>
+                {multiColor && (() => {
+                  const rows = singleRows();
+                  return typeof rows === "string"
+                    ? <div className="mt-1 text-[11px] text-amber-600">⚠ {rows}</div>
+                    : <div className="mt-1.5 rounded-lg border border-blue-100 bg-blue-50/50 p-2 text-[11px] text-slate-600 space-y-0.5">
+                        <div className="font-medium text-blue-700">{t(`จะสร้าง ${rows.length} SKU:`, `Will create ${rows.length} SKUs:`)}</div>
+                        {rows.map((r) => <div key={String(r.values.code)} className="truncate"><span className="font-mono">{String(r.values.code)}</span> · {applyNameTemplate(String(r.values.name_th ?? ""), String(r.values.color ?? ""), String(r.values.code ?? ""))}</div>)}
+                      </div>;
+                })()}
+              </div>
+            ) : (
+              <label className="block"><span className="text-xs text-slate-500">{t("สี", "Color")}</span>
+                <input value={(single.values.color as string) ?? ""} onChange={(e) => setSV("color", e.target.value)} placeholder={t("ดำ/แดง...", "Black/Red...")} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+            )}
             <label className="block"><span className="text-xs text-slate-500">{t("หน้ากว้าง (ซม. — กรณีผ้า)", "Width (cm — for fabric)")}</span>
               <input type="number" step="any" value={(single.values.fabric_width_cm as string) ?? ""} onChange={(e) => setSV("fabric_width_cm", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
               {ctx.fabric_widths.length > 0 && (
@@ -570,22 +738,37 @@ export function SkuWizard({ open, onClose, onCreated, prefill }: {
                 </div>
               )}</label>
             <label className="block"><span className="text-xs text-slate-500">{t("หน่วย (Uom)", "Unit (UoM)")}</span>
-              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => setSV("uom_id", id, lbl)} placeholder={t("เลือกหน่วย", "Select unit")} quickCreate={{ entity: "uoms", field: "name", label: t("เพิ่มหน่วยใหม่", "Add new unit") }} /></div></label>
+              <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="uoms" label="name" value={(single.values.uom_id as string) ?? null} valueLabel={single.labels.uom_id} onChange={(id, lbl) => { autoUomRef.current = null; setSV("uom_id", id, lbl); }} placeholder={t("เลือกหน่วย", "Select unit")} quickCreate={{ entity: "uoms", field: "name", label: t("เพิ่มหน่วยใหม่", "Add new unit") }} /></div>
+              {(() => {
+                // หน่วยตามประเภท: ตั้งที่ ⚙️ จัดการรหัสนำหน้า (หน่วย default ต่อประเภท / ต่อตระกูลรหัส)
+                const tg = sTag ? tags.find((x) => x.id === sTag) : undefined;
+                if (!tg) return null;
+                if (single.values.uom_id && single.values.uom_id === autoUomRef.current)
+                  return <span className="block text-[10px] text-emerald-600 mt-0.5">{t("ใส่ให้ตามประเภทนี้ · ", "Filled from this type · ")}<button type="button" onClick={() => setPrefixMgr(true)} className="underline">{t("ตั้งค่า", "Settings")}</button></span>;
+                if (!tg.default_uom_id)
+                  return <span className="block text-[10px] text-slate-400 mt-0.5">{t("ประเภทนี้ยังไม่ได้ตั้งหน่วย — ", "No unit set for this type — ")}<button type="button" onClick={() => setPrefixMgr(true)} className="underline text-blue-600">{t("ตั้งหน่วยตามประเภท", "Set unit by type")}</button></span>;
+                return null;
+              })()}</label>
             <label className="block"><span className="text-xs text-slate-500">{t("ผู้ขาย", "Supplier")}</span>
               <div className="mt-0.5 border border-slate-200 rounded-lg"><AsyncPick table="partners_v2" label="name_th" secondary="code" pinned={sellerPins} value={(single.values.seller_partner_id as string) ?? null} valueLabel={single.labels.seller_partner_id} onChange={(id, lbl) => setSV("seller_partner_id", id, lbl)} placeholder={t("เลือกผู้ขาย", "Select supplier")}
                 addNewLabel={t("เพิ่มผู้ขายใหม่", "Add new supplier")}
                 onAddNew={(typed: string) => setNewSupplier({ name: typed, apply: (id: string, lbl: string) => setSV("seller_partner_id", id, lbl) })} /></div></label>
-            <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ", "Purchase price")}</span>
-              <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => setSV("standard_price", e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
-              <span className="block text-[10px] text-slate-400 mt-0.5">{t(`คำนวณจาก ราคาซื้อหยวน × ${rmbRate} (แก้ทับเองได้)`, `Calculated as RMB price × ${rmbRate} (you can override it)`)}</span></label>
-            <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ (หยวน) RMB", "Purchase price (RMB)")}</span>
-              <input type="number" step="any" value={(single.values.rmb_cost as string) ?? ""} onChange={(e) => onRmbChange(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
-            <div className="col-span-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+            <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ (บาท)", "Purchase price (THB)")}</span>
+              {isTaobao && priceEst && String(single.values.standard_price ?? "").trim() !== "" && (
+                <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700" title={t("คำนวณจากหยวน × เรต — แก้ตัวเลขเองเมื่อรู้ราคาจริง", "Calculated from RMB × rate — edit it when you know the real price")}>{t("ราคาคร่าว ๆ", "Estimate")}</span>
+              )}
+              <input type="number" step="any" value={(single.values.standard_price as string) ?? ""} onChange={(e) => { setPriceEst(false); setSV("standard_price", e.target.value); }} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" />
+              {isTaobao && (priceEst
+                ? <span className="block text-[10px] text-slate-400 mt-0.5">{t(`= ราคาหยวน × ${rmbRate} · แก้ตัวเลขเอง = เป็นราคาจริง`, `= RMB price × ${rmbRate} · edit it yourself = real price`)}</span>
+                : String(single.values.rmb_cost ?? "").trim() !== "" && <button type="button" onClick={() => setPriceEst(true)} className="block text-[10px] text-blue-600 underline mt-0.5">{t(`คำนวณใหม่จากหยวน × ${rmbRate}`, `Recalculate from RMB × ${rmbRate}`)}</button>)}</label>
+            {isTaobao && <label className="block"><span className="text-xs text-slate-500">{t("ราคาซื้อ (หยวน) RMB", "Purchase price (RMB)")}</span>
+              <input type="number" step="any" value={(single.values.rmb_cost as string) ?? ""} onChange={(e) => onRmbChange(e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>}
+            {isTaobao && <div className="sm:col-span-2 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
               <span>{t("เรตหยวน→บาท:", "RMB→THB rate:")}</span>
               <input type="number" step="any" value={rmbRate} onChange={(e) => setRmbRate(Number(e.target.value) || 0)} onBlur={saveRate}
                 title={t("ตั้งเรตแปลงหยวนเป็นบาท (ใช้ร่วมทั้งระบบ) · บันทึกเมื่อออกจากช่อง", "Set the RMB to THB rate (shared system-wide) · saved when you leave the field")} className="w-16 h-7 px-1.5 text-right border border-slate-200 rounded" />
               <span>{t("× ราคาซื้อหยวน = ราคาซื้อ (บาท)", "× RMB price = purchase price (THB)")}</span>
-            </div>
+            </div>}
           </div>
           <p className="text-[11px] text-slate-400">{t("Barcode จะตั้งให้เท่ากับรหัส SKU อัตโนมัติ", "Barcode is set to the SKU code automatically")}</p>
         </div>

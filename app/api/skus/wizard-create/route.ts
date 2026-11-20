@@ -20,7 +20,7 @@ export const revalidate = 0;
 
 // คอลัมน์ skus_v2 ที่ Wizard เขียนได้ (whitelist กันยัดคอลัมน์มั่ว)
 const SAFE_COLS = new Set([
-  "code", "name_th", "barcode", "description", "purchase_description",
+  "code", "name_th", "barcode", "description", "purchase_description", "standard_price_is_estimate",
   "parent_sku_id", "uom_id", "purchase_uom_id", "seller_partner_id", "material_group_id", "product_group",
   "list_price", "standard_price", "fake_price", "rmb_cost", "moq",
   "color", "color_th", "color_index", "fabric_width_cm", "product_type",
@@ -36,7 +36,7 @@ type Row = { values?: Record<string, unknown>; family_tag_ids?: string[]; images
 function coerce(col: string, v: unknown): unknown {
   if (v == null || v === "") return UUID_COLS.has(col) ? null : undefined;
   if (NUMERIC_COLS.has(col)) { const n = Number(v); return Number.isFinite(n) ? n : undefined; }
-  if (col === "ig_sell" || col === "is_active" || col === "sale_ok" || col === "purchase_ok") return !!v;
+  if (col === "ig_sell" || col === "is_active" || col === "sale_ok" || col === "purchase_ok" || col === "standard_price_is_estimate") return v === true || v === "true";
   return typeof v === "string" ? v.trim() : v;
 }
 
