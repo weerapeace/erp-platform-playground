@@ -16,6 +16,9 @@ import {
   type JobVerdict, type PartCategory, type PartFlag, type PartRow, type SharedPartsUsage, type UnitUsage, type UsagePlace,
 } from "@/lib/shared-parts-registry";
 import { LegacyPluginsTab } from "./legacy-tab";
+import nextDynamic from "next/dynamic";
+// ตัวอย่างลองเล่นของของกลาง — โหลดเฉพาะตอนเปิด drawer (ไม่ถ่วงหน้ารายการ)
+const PartPreview = nextDynamic(() => import("./part-previews").then((m) => m.PartPreview), { ssr: false });
 
 type Data = Pick<SharedPartsUsage, "units" | "totals" | "handMade" | "generatedAt" | "commit"> & { rows: PartRow[] };
 type Tab = "parts" | "groups" | "unregistered" | "legacy";
@@ -322,6 +325,7 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
         )}
 
         <Section label="ใช้ทำอะไร">{row.what}</Section>
+        <PartPreview partKey={row.key} />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Section label="ใช้เมื่อไหร่">{row.when ?? missing}</Section>
           <Section label="ห้ามใช้เมื่อไหร่ / ใช้ตัวไหนแทน">{row.notWhen ?? missing}</Section>

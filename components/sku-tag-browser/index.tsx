@@ -22,6 +22,8 @@ import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
+import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง ย่อ/ขยาย)
+import { EmptyState } from "@/components/state-views";
 import { useStepHistory, readStep, patchStep } from "@/lib/use-step-history";   // ปุ่ม Back ย้อนทีละก้าว (ของกลาง)
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { MaterialRequestButton } from "@/components/material-request";
@@ -195,6 +197,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
     return "card";
   });
   const setViewPersist = (v: "card" | "table") => { setView(v); try { localStorage.setItem("sku-browser-view", v); } catch { /* ignore */ } };
+  // ขนาดการ์ด (ของกลาง) — จำรายคน · โหมดเลือก (ป๊อปอัป) จำแยก เพราะกล่องแคบกว่าหน้าเต็ม
+  const gallery = useGalleryColumns(pick ? "sku-browser-pick" : "sku-browser", 6);
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -545,25 +549,24 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
 
       {/* body */}
       {cardsMode ? (
-        loadingCards ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
-        : cards.length === 0 ? <div className="text-center py-16 text-slate-400 text-sm">ไม่พบ SKU</div>
+        loadingCards ? (view === "table"
+          ? <div className="text-center py-16 text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
+          : <CardGrid gallery={gallery} loading />)
+        : cards.length === 0 ? <EmptyState icon="🏷️" title={t("ไม่พบ SKU", "No SKUs found")} hint={t("ลองเปลี่ยนคำค้นหรือตัวกรองแท็ก", "Try another search or tag filter")} />
         : <>
             {total > LIMIT && (
               <div className="mb-2 pb-2 border-b border-slate-100">
                 <Pager page={page} pageSize={LIMIT} total={total} onPage={goPage} unitLabel={entity === "parent-skus" ? "Parent SKU" : "SKU"} />
               </div>
             )}
-            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
-              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ{onlyIncomplete ? ` · ข้อมูลไม่ครบในหน้านี้ ${shown.length.toLocaleString("th-TH")}` : ""}</p>
-              <div className="flex items-center gap-2 flex-wrap">
+            {/* แถบเครื่องมือการ์ดกลาง: จำนวน · ปุ่มของหน้า · สลับการ์ด/ตาราง · ขนาดการ์ด (− N +) */}
+            <CardViewBar gallery={gallery}
+              count={<>{total.toLocaleString("th-TH")} รายการ{onlyIncomplete ? ` · ข้อมูลไม่ครบในหน้านี้ ${shown.length.toLocaleString("th-TH")}` : ""}</>}
+              view={view === "table" ? "table" : "cards"} onView={(v) => setViewPersist(v === "table" ? "table" : "card")}>
                 {!pick && <button onClick={allShownSelected ? clearSel : selectAllShown}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                   {allShownSelected ? `☑ ${t("เลือกแล้ว", "Selected")}` : `☐ ${t("เลือกทั้งหมด", "Select all")}`}
                 </button>}
-                <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
-                  <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ {t("การ์ด", "Cards")}</button>
-                  <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ {t("ตาราง", "Table")}</button>
-                </div>
                 <button onClick={() => setOnlyIncomplete((v) => !v)}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ {t("เฉพาะข้อมูลไม่ครบ", "Incomplete only")}</button>
                 <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
@@ -572,8 +575,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
                     {SORTS.map((s) => <option key={s.key} value={s.key}>{t(s.label, s.en)}</option>)}
                   </select>
                 </div>
-              </div>
-            </div>
+            </CardViewBar>
             {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">{t(`กรองเฉพาะในหน้านี้ (${cards.length.toLocaleString("th-TH")} ตัว) — เลื่อนหน้าด้านล่างเพื่อตรวจหน้าถัดไป`, `Filtered within this page only (${cards.length.toLocaleString("en-US")}) — go to the next page to check more`)}</p>}
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
@@ -582,9 +584,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
-                : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+                : <CardGrid gallery={gallery} className="select-none">
                     {shown.map((c) => (
-                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} onOpenParent={(id) => setParentPeekId(id)}
+                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} thumbW={gallery.thumbW(320)} onOpenParent={(id) => setParentPeekId(id)}
                         // pick: ติ๊กตามที่ผู้เรียกเลือกไว้ · manage: ติ๊กตามระบบ bulk
                         selected={pick ? pickedSet.has(c.id) : selected.has(c.id)} selectMode={pick ? true : selectMode}
                         onClick={() => { if (justDragged.current) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } if (selectMode) return; setPeekId(c.id); }}
@@ -592,7 +594,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
                         onPointerDownHandle={() => { if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } beginDrag(c.id, selected.has(c.id)); }}
                         onPointerEnter={() => dragOver(c.id)} />
                     ))}
-                  </div>}
+                  </CardGrid>}
             {total > LIMIT && (
               <div className="mt-4 pt-3 border-t border-slate-100">
                 <Pager page={page} pageSize={LIMIT} total={total} onPage={goPage} unitLabel={entity === "parent-skus" ? "Parent SKU" : "SKU"} />
@@ -723,8 +725,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   );
 }
 
-function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter, onOpenParent }: {
+function SkuCardView({ c, fields, extraDefs, thumbW = 320, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter, onOpenParent }: {
   c: SkuCard; fields: string[]; extraDefs: FieldDef[]; selected: boolean; selectMode: boolean;
+  /** ความกว้างรูปที่ขอ — การ์ดเล็ก (ซูมออก) ขอรูปเล็ก โหลดเร็ว */
+  thumbW?: number;
   onClick: () => void; onPointerDownCard: () => void; onPointerDownHandle: () => void; onPointerEnter: () => void;
   /** กดชิป "📦 Parent" → เปิด drawer Parent (ไม่เปิดการ์ด SKU) */
   onOpenParent?: (parentId: string) => void;
@@ -734,7 +738,7 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
   const showPriceRow = has("price") || has("stock");
   const warns = cardWarnings(c);
   return (
-    <div role="button" tabIndex={0}
+    <div role="button" tabIndex={0} title={c.name ? `${c.code} · ${c.name}` : c.code}
       onClick={onClick}
       onPointerDown={(e) => { if (e.button === 0) onPointerDownCard(); }}
       onPointerEnter={onPointerEnter}
@@ -746,16 +750,16 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
         title="เลือก / ลากคลุมเพื่อเลือกหลายรายการ"
         className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : selectMode ? "bg-white border-slate-300 text-slate-300" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
       {has("image") && (
-        <div className="relative h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
+        <div className="relative aspect-[5/4] bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
-            ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" draggable={false} className="w-full h-full object-contain" />
+            ? <img src={withImageWidth(c.image, thumbW) ?? c.image} alt={c.code} loading="lazy" draggable={false} className="w-full h-full object-contain" />
             : <span className="text-3xl text-slate-300">🏷️</span>}
-          {c.image_from_child && <span className="absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white" title="Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก">ตัวอย่างจากลูก</span>}
+          {c.image_from_child && <span className={`${GALLERY_LABEL} absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white`} title="Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก">ตัวอย่างจากลูก</span>}
         </div>
       )}
       <div className="p-2.5">
         {warns.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-1.5">
+          <div className={`${GALLERY_LABEL} flex flex-wrap gap-1 mb-1.5`}>
             {warns.map((x) => <span key={x} className="text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">⚠ {x}</span>)}
           </div>
         )}
@@ -766,12 +770,12 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
           </div>
         )}
         {/* การ์ดจำกัด 2 บรรทัดเพื่อให้สูงเท่ากัน — ชี้ที่ชื่อเพื่อดูเต็ม (มุมมองตารางแสดงเต็มอยู่แล้ว) */}
-        {has("name") && <p title={c.name || ""} className="text-[12px] text-slate-700 mt-1" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
+        {has("name") && <p title={c.name || ""} className={`${GALLERY_LABEL} text-[12px] text-slate-700 mt-1`} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
         {/* 📦 Parent SKU ของตัวนี้ — กดเปิด drawer Parent (stopPropagation ไม่ให้เปิดการ์ด SKU) */}
         {c.parent && (
           <button type="button" onClick={(e) => { e.stopPropagation(); onOpenParent?.(c.parent!.id); }} onPointerDown={(e) => e.stopPropagation()}
             title={`Parent SKU: ${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด`}
-            className="mt-1 inline-flex items-center gap-1 max-w-full text-[10px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">
+            className={`${GALLERY_LABEL} mt-1 inline-flex items-center gap-1 max-w-full text-[10px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100`}>
             <span className="shrink-0">📦</span><span className="font-mono truncate">{c.parent.code}</span>
           </button>
         )}
@@ -784,16 +788,16 @@ function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPo
           </div>
         ) : null}
         {c.variant_count == null && has("buy_price") && c.buy_price !== undefined && (
-          <div className="mt-0.5 text-[11px] text-slate-500" title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>ซื้อ {fmtBuy(c.buy_price)}</div>
+          <div className={`${GALLERY_LABEL} mt-0.5 text-[11px] text-slate-500`} title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>ซื้อ {fmtBuy(c.buy_price)}</div>
         )}
         {has("tags") && c.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
+          <div className={`${GALLERY_LABEL} flex flex-wrap gap-1 mt-1.5`}>
             {c.tags.slice(0, 3).map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}
             {c.tags.length > 3 && <span className="text-[10px] text-slate-400">+{c.tags.length - 3}</span>}
           </div>
         )}
         {extraDefs.length > 0 && (
-          <div className="mt-1.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5">
+          <div className={`${GALLERY_LABEL} mt-1.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5`}>
             {extraDefs.map((d) => <p key={d.key} className="text-[10px] text-slate-500 truncate"><span className="text-slate-400">{d.label}:</span> {fmtCell(c.extra?.[d.key])}</p>)}
           </div>
         )}

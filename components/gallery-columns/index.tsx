@@ -93,18 +93,41 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctrlWheel, optionsKey, setCols]);
 
-  return { cols, setCols, gridStyle, wheelRef, compact, compactAttr, thumbW };
+  return { cols, setCols, gridStyle, wheelRef, compact, compactAttr, thumbW, options };
 }
 
-/** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented · หรือ as="select" = dropdown กะทัดรัด) — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้
+/** ค่าที่ useGalleryColumns คืน — ส่งต่อให้ CardGrid / CardViewBar */
+export type GalleryState = ReturnType<typeof useGalleryColumns>;
+
+// มุมมองการ์ดกลาง (กริด + สถานะ + แถบเครื่องมือ) — ต่อยอดจากตัวนี้ (2026-11-20)
+export { CardGrid, CardViewBar } from "./card-grid";
+
+/** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented · as="select" = dropdown กะทัดรัด · as="stepper" = − N ต่อแถว + ใช้ได้ทั้ง PC/มือถือ)
+ *  — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้
  *  wheelHint = บอกในป้ายชี้ว่า Ctrl + ลูกกลิ้งบนกริดใช้ได้ (ใส่เมื่อเปิด ctrlWheel) */
 export function GalleryColumnsControl({ cols, onChange, options = GALLERY_COL_OPTIONS, className = "", as = "buttons", wheelHint = true }: {
-  cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string; as?: "buttons" | "select"; wheelHint?: boolean;
+  cols: number; onChange: (n: GalleryCols) => void; options?: readonly GalleryCols[]; className?: string; as?: "buttons" | "select" | "stepper"; wheelHint?: boolean;
 }) {
   const t = useT();
   const title = wheelHint
-    ? t("จำนวนการ์ดต่อแถว · Ctrl + หมุนลูกกลิ้งบนตาราง = ย่อ/ขยาย", "Cards per row · Ctrl + scroll on the grid to resize")
+    ? t("จำนวนการ์ดต่อแถว · Ctrl + หมุนลูกกลิ้งบนการ์ด = ย่อ/ขยาย", "Cards per row · Ctrl + scroll on the grid to resize")
     : t("จำนวนการ์ดต่อแถว", "Cards per row");
+  if (as === "stepper") {
+    const i = Math.max(0, options.indexOf(cols as GalleryCols));
+    const go = (d: 1 | -1) => { const n = options[Math.max(0, Math.min(options.length - 1, i + d))]; if (n !== cols) onChange(n); };
+    const stepBtn = "h-7 w-7 rounded text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:text-slate-300 disabled:hover:bg-transparent";
+    return (
+      <div className={`inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 ${className}`} title={title}>
+        {/* − = การ์ดเล็กลง (ต่อแถวมากขึ้น) · + = ใหญ่ขึ้น — ทิศเดียวกับ Ctrl+ลูกกลิ้ง */}
+        <button type="button" onClick={() => go(1)} disabled={i >= options.length - 1} aria-label={t("ย่อการ์ด", "Smaller cards")} className={stepBtn}>−</button>
+        <select value={cols} onChange={(e) => onChange(Number(e.target.value) as GalleryCols)} aria-label={t("จำนวนการ์ดต่อแถว", "Cards per row")}
+          className="h-7 cursor-pointer appearance-none rounded bg-transparent px-1.5 text-center text-xs text-slate-700 hover:bg-slate-50">
+          {options.map((n) => <option key={n} value={n}>{t(`${n} ต่อแถว`, `${n} per row`)}</option>)}
+        </select>
+        <button type="button" onClick={() => go(-1)} disabled={i <= 0} aria-label={t("ขยายการ์ด", "Bigger cards")} className={stepBtn}>+</button>
+      </div>
+    );
+  }
   if (as === "select") {
     return (
       <label className={`inline-flex items-center gap-1.5 text-xs text-slate-500 ${className}`} title={title}>
