@@ -68,7 +68,7 @@ export type FlowLockedLayer = {
   onBoxClick?: (id: string) => void;
   onLineClick?: (id: string) => void;
   /** สั่งให้กระดานเลื่อน/ซูมไปหากล่องระบบ (n เปลี่ยน = ไปใหม่ แม้ id เดิม) — เช่น กดงานในถาดแล้วพาไปกล่องที่งานเกาะ */
-  focus?: { id: string; n: number } | null;
+  focus?: { id: string; n: number; ids?: string[] } | null;   // ids = ไปหาหลายกล่องพร้อมกัน (เช่น ทั้งส่วนของผังรวม)
 };
 type BoardNode = FlowRFNode | SysRFNode | SysBgRFNode;
 const SYS_BG = "sys-bg";
@@ -134,6 +134,8 @@ export type FlowchartBoardProps = {
   height?: string;
   /** แม่แบบเริ่มต้น — กระดานว่าง + แก้ได้ = วางให้ครั้งแรก · มีปุ่ม "วางแม่แบบ" ให้วางเพิ่มด้วย */
   starter?: (t: (th: string, en: string) => string) => FlowScene;
+  /** ฉากตั้งต้นครั้งแรก (ยังไม่เคยบันทึกเลย) แบบโหลดช้าได้ เช่น ย้ายของจากกระดานเก่า — ไม่มีปุ่มวางซ้ำ · คืน null = เริ่มว่าง */
+  seed?: () => Promise<FlowScene | null>;
   /** ชื่อไฟล์ตอนบันทึกเป็นรูป */
   fileName?: string;
   /** แจ้งหน้าแม่ว่าผู้ใช้มีสิทธิ์แก้ไหม (ไว้ซ่อน/โชว์ปุ่มของหน้า) */
@@ -148,7 +150,7 @@ export function FlowchartBoard(props: FlowchartBoardProps) {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-function Board({ entityType, entityId, editable = true, height = "70vh", starter, fileName = "flowchart", onCanEdit, locked }: FlowchartBoardProps) {
+function Board({ entityType, entityId, editable = true, height = "70vh", starter, seed, fileName = "flowchart", onCanEdit, locked }: FlowchartBoardProps) {
   const t = useT();
   const pushToast = usePushToast();
   const rf = useReactFlow();
@@ -231,7 +233,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         revRef.current = Number(j.data?.rev ?? 0) || 0;
         baseRef.current = saved;
         savedSigRef.current = flowSceneSig(saved);
-        const first = !saved.nodes.length && can && starter ? starter(t) : saved;   // กระดานว่าง → วางแม่แบบให้ (บันทึกอัตโนมัติตามมา)
+        let first = !saved.nodes.length && can && starter ? starter(t) : saved;   // กระดานว่าง → วางแม่แบบให้ (บันทึกอัตโนมัติตามมา)
+        if (!saved.nodes.length && can && seed && !j.data?.scene) { const s = await seed().catch(() => null); if (!alive) return; if (s) first = s; }   // ยังไม่เคยมีกระดานนี้ → ฉากตั้งต้น
         stableRef.current = { sig: flowSceneSig(first), scene: first };
         pastRef.current = []; futureRef.current = [];
         applyScene(first);
@@ -708,8 +711,10 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
 
   // หน้าแม่สั่งไปหากล่องระบบ (locked.focus)
   const focusN = locked?.focus?.n ?? 0, focusId = locked?.focus?.id ?? "";
+  const focusIds = locked?.focus?.ids;
   useEffect(() => {
     if (!focusN || !focusId) return;
+    if (focusIds?.length) { void rf.fitView({ nodes: focusIds.map((id) => ({ id: sysId(id) })), padding: 0.12, maxZoom: 1.2, duration: 400 }); return; }
     void rf.fitView({ nodes: [{ id: sysId(focusId) }], padding: 0.8, maxZoom: 1.2, duration: 400 });
   }, [focusN, focusId, rf]);
 

@@ -27,6 +27,7 @@ const FlowchartBoard = dynamic(() => import("@/components/flowchart-board").then
   editable={editing}                               // false = บังคับดูอย่างเดียว (ปุ่มของหน้า)
   height="calc(100vh - 170px)"
   starter={(t) => scene}                           // กระดานว่าง + แก้ได้ → วางให้ครั้งแรก + มีปุ่ม "วางแม่แบบ"
+  seed={async () => scene | null}                 // ฉากตั้งต้นแบบโหลดช้า (เช่น ย้ายจากกระดานเก่า) — เฉพาะกระดานที่ยังไม่เคยบันทึก · ไม่มีปุ่มวางซ้ำ
   fileName="แผนผังการเก็บไฟล์"                       // ชื่อไฟล์ตอนบันทึกเป็นรูป
   onCanEdit={setCanEdit}                           // รู้ว่าผู้ใช้มีสิทธิ์แก้ไหม (ไว้ซ่อนปุ่มของหน้า)
 />
