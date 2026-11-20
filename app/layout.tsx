@@ -8,7 +8,7 @@ import { NavTrailRecorder } from "@/components/nav-trail-recorder";
 import { PageViewRecorder } from "@/components/page-view-recorder";
 import { BackgroundTasksHost } from "@/components/background-tasks-host";
 import { DatePickerOnClick } from "@/components/date-input/auto-picker";
-import { WorkPopupHost } from "@/components/work-popup";
+import { WorkPopupHostLazy } from "@/components/work-popup/lazy-host";
 import { SilentBoundary } from "@/components/silent-boundary";
 import { AppLockGate } from "@/components/app-access-gate";
 import { BRAND } from "@/components/brand";
@@ -51,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <NavProgress />
         <NavTrailRecorder />
         <PageViewRecorder />
-        <AuthProvider><LanguageProvider><ToastProvider><AppLockGate>{children}</AppLockGate><SilentBoundary name="work-popup"><WorkPopupHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider><AppLockGate>{children}</AppLockGate><SilentBoundary name="work-popup"><WorkPopupHostLazy /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
         <DatePickerOnClick />
       </body>

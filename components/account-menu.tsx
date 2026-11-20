@@ -28,7 +28,9 @@ import { HOVER_DELAY_CHOICES, readHoverDelay, setHoverDelay } from "@/lib/hover-
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, useCanPreviewDevice, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { DevicePreviewModal } from "@/components/device-preview";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
-import { WorkPopupFloatToggle } from "@/components/work-popup/float";
+import dynamic from "next/dynamic";
+// สวิตช์ตัว Pet อยู่ในเมนูที่กดเปิด → โหลดตอนเปิดเมนู (ไม่ถ่วงทุกหน้า · ลดขนาดโครงแอป 2026-11-20)
+const WorkPopupFloatToggle = dynamic(() => import("@/components/work-popup/float").then((m) => m.WorkPopupFloatToggle), { ssr: false });
 import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
 import { InstallAppMenuItem, InstallAppModal, SoloInstallSection } from "@/components/install-app";
