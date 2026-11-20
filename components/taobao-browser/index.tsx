@@ -31,6 +31,8 @@ import { r2ImageUrl } from "@/lib/r2-image";
 
 // จอรายละเอียดสินค้าของกลาง — กด "เปิดหน้า SKU" จากการ์ด/จอรายละเอียดแล้วดูได้ในหน้าเดียวกัน
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// ป๊อปอัป "ส่งเข้า Bundle" ของกลาง — ส่งได้เฉพาะชิ้นที่จับคู่ SKU แล้ว (Bundle เก็บ SKU จริงเท่านั้น)
+const BundleAddModal = nextDynamic(() => import("@/components/bundle-add-modal").then((m) => ({ default: m.BundleAddModal })), { ssr: false });
 
 type Variant = { originalName?: string; translatedName?: string };
 type Card = {
@@ -90,6 +92,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [bundleAddOpen, setBundleAddOpen] = useState(false);   // ป๊อปอัปส่งชิ้นที่จับคู่แล้วเข้า Bundle
   const [rate, setRate] = useState(5.2);            // เรตหยวน→บาท (ui_config rmb_to_thb_rate)
   const [matchRow, setMatchRow] = useState<Card | null>(null);
   const [wizardRow, setWizardRow] = useState<Card | null>(null);
@@ -258,6 +261,17 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             <button onClick={() => patchStatus([...sel], "new")}
               className="h-8 px-3 text-[12px] bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">↩️ กู้คืน</button>
           )}
+          {(() => {
+            // ส่งเข้า Bundle — เฉพาะชิ้นที่จับคู่ SKU แล้ว · ที่ยังไม่จับคู่ ข้ามให้และบอกจำนวน
+            const picked = cards.filter((c) => sel.has(c.id));
+            const matchedN = new Set(picked.map((c) => c.matched_sku_id).filter(Boolean)).size;
+            const skipped = picked.filter((c) => !c.matched_sku_id).length;
+            return (
+              <button onClick={() => { if (matchedN === 0) { toast.error("ยังไม่มีชิ้นที่จับคู่ SKU — จับคู่หรือสร้าง SKU ก่อน แล้วค่อยส่งเข้า Bundle"); return; } if (skipped > 0) toast.info(`ข้าม ${skipped} ชิ้นที่ยังไม่จับคู่ SKU`); setBundleAddOpen(true); }}
+                title={skipped > 0 ? `ส่งได้ ${matchedN} ชิ้น (ข้าม ${skipped} ชิ้นที่ยังไม่จับคู่ SKU)` : undefined}
+                className="h-8 px-3 text-[12px] bg-white border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">📦 ส่งเข้า Bundle{skipped > 0 ? ` (${matchedN})` : ""}</button>
+            );
+          })()}
           <button onClick={() => removeRows([...sel])}
             className="h-8 px-3 text-[12px] bg-white border border-rose-200 rounded-lg text-rose-600 hover:bg-rose-50">🗑 ลบ</button>
           <button onClick={() => setSel(new Set())} className="h-8 px-2 text-[12px] text-slate-500 hover:text-slate-700 ml-auto">ยกเลิกเลือก</button>
@@ -373,6 +387,18 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             behind={!!skuDrawerId} />
         );
       })()}
+
+      {bundleAddOpen && (
+        <BundleAddModal
+          items={[...new Map(cards.filter((c) => sel.has(c.id) && c.matched_sku_id).map((c) => [c.matched_sku_id as string, {
+            sku_id: c.matched_sku_id as string,
+            code: c.matched_label ?? c.translated_name ?? "…",
+            name: c.translated_name ?? c.original_name ?? "",
+            image: imgSrc(c.image_url, 120),
+          }])).values()]}
+          onClose={() => setBundleAddOpen(false)}
+          onDone={() => setSel(new Set())} />
+      )}
 
       {/* จอรายละเอียด SKU ที่จับคู่ไว้ — ของกลางตัวเดียวกับหน้า /master/skus */}
       {skuDrawerId && (

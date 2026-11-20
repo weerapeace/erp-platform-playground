@@ -7,7 +7,10 @@
  * แต่ละ SKU ใน bundle มีลิงก์ Taobao ของตัวเอง — ลิงก์เก็บที่ SKU กลาง (skus_v2.purchase_link)
  * ใส่/แก้จากในนี้ได้เลย → ทุกหน้าที่ใช้ SKU นั้นเห็นลิงก์เดียวกัน
  *
- * ของกลางที่ใช้: SkuMultiPickerModal · HoverImage · ERPModal · ConfirmDialog · MasterRecordDrawer · useToast · apiFetch · formatAmount
+ * ขอซื้อทั้งชุด: ปุ่มในเดรเวอร์ → ป๊อปตรวจ (ซื้อกี่ชุด · ติ๊กเอาออก · แก้จำนวน · เตือนไม่มีราคา/ลิงก์) → ใส่ตะกร้าขอซื้อกลาง (lib/pr-cart) แล้วไปยืนยันที่หน้า "ขอซื้อ"
+ * ลบ = ย้ายไปถังขยะ (กู้คืนได้ + ปุ่มย้อนกลับในแจ้งผล) · ลบถาวรได้เฉพาะในถังขยะ (พิมพ์ยืนยัน)
+ *
+ * ของกลางที่ใช้: SkuMultiPickerModal · HoverImage · ERPModal · ConfirmDialog · MasterRecordDrawer · useToast · apiFetch · formatAmount · addToPrCart · usePermission
  * API: /api/sku-bundles (GET/POST/PATCH/DELETE) · ลิงก์ → PATCH /api/master-v2/skus/<id> {purchase_link}
  */
 
@@ -16,6 +19,8 @@ import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { formatAmount } from "@/lib/money";
+import { addToPrCart } from "@/lib/pr-cart";
+import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { HoverImage } from "@/components/hover-image";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -30,6 +35,12 @@ const bundleTitle = (b: Bundle) => b.name?.trim() || `Bundle #${b.seq}`;
 const isTaobaoLink = (u: string | null) => !!u && /taobao|tmall|1688/i.test(u);
 /** ราคาซื้อของ SKU (จากฟิลด์ต้นทุนใน SKU: หยวนก่อน ไม่มีค่อยบาท) */
 const buyText = (it: BundleItem) => it.rmb_cost && it.rmb_cost > 0 ? formatAmount(it.rmb_cost, "RMB") : it.standard_price && it.standard_price > 0 ? formatAmount(it.standard_price, "THB") : "—";
+/** ราคา + สกุลเงินสำหรับตะกร้าขอซื้อ (กติกาเดียวกับ buyText) */
+const buyPrice = (it: BundleItem): { price: number; currency: string } =>
+  it.rmb_cost && it.rmb_cost > 0 ? { price: it.rmb_cost, currency: "YUAN" } : { price: it.standard_price && it.standard_price > 0 ? it.standard_price : 0, currency: "THB" };
+/** r2 key จาก URL รูป (/api/r2-image?key=...) — ตะกร้าขอซื้อเก็บเป็น key */
+const imageKeyOf = (url: string | null) => { if (!url) return null; try { return new URL(url, "http://x").searchParams.get("key"); } catch { return null; } };
+const fmtDate = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export function BundleBrowser() {
   const toast = useToast();
@@ -40,6 +51,10 @@ export function BundleBrowser() {
   const [q, setQ] = useState("");                      // คำค้นที่ debounce แล้ว
   const [createOpen, setCreateOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [trash, setTrash] = useState(false);            // ดูถังขยะ
+  const [trashCount, setTrashCount] = useState(0);
+  const [purgeTarget, setPurgeTarget] = useState<Bundle | null>(null);   // ลบถาวร (ยืนยันก่อน)
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setQ(search.trim()), 250); return () => clearTimeout(t); }, [search]);
 
@@ -48,17 +63,48 @@ export function BundleBrowser() {
     try {
       const p = new URLSearchParams({ limit: String(PAGE), offset: String(append ? bundles.length : 0) });
       if (q) p.set("search", q);
+      if (trash) p.set("trash", "1");
       const j = await apiFetch(`/api/sku-bundles?${p}`).then((r) => r.json());
       if (j.error) { toast.error(j.error); return; }
       setBundles((prev) => append ? [...prev, ...(j.bundles as Bundle[])] : (j.bundles as Bundle[]));
       setTotal(Number(j.total ?? 0));
+      setTrashCount(Number(j.trash_count ?? 0));
     } catch { toast.error("โหลด bundle ไม่สำเร็จ"); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, trash]);
   useEffect(() => { void load(false); }, [load]);
 
   const open = useMemo(() => bundles.find((b) => b.id === openId) ?? null, [bundles, openId]);
+
+  // กู้คืนจากถังขยะ (ใช้ทั้งปุ่มในถังขยะ และปุ่ม "ย้อนกลับ" ในแจ้งผลหลังลบ)
+  const restore = useCallback(async (b: Bundle, quiet = false) => {
+    setBusyId(b.id);
+    try {
+      const j = await apiFetch("/api/sku-bundles", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.id, restore: true }) }).then((r) => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      if (!quiet) toast.success(`กู้คืน “${bundleTitle(b)}” แล้ว`);
+      void load(false);
+    } finally { setBusyId(null); }
+  }, [load, toast]);
+  // ย้ายไปถังขยะ → แจ้งผลพร้อมปุ่มย้อนกลับ
+  const moveToTrash = useCallback(async (b: Bundle) => {
+    const j = await apiFetch(`/api/sku-bundles?id=${b.id}`, { method: "DELETE" }).then((r) => r.json());
+    if (j.error) { toast.error(j.error); return false; }
+    toast.undo(`ย้าย “${bundleTitle(b)}” ไปถังขยะแล้ว (SKU ข้างในไม่ถูกลบ)`, () => restore(b, true), { ms: 8000 });
+    setOpenId(null); void load(false);
+    return true;
+  }, [load, restore, toast]);
+  const purge = async () => {
+    if (!purgeTarget) return;
+    setBusyId(purgeTarget.id);
+    try {
+      const j = await apiFetch(`/api/sku-bundles?id=${purgeTarget.id}&permanent=1`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      toast.success(`ลบ “${bundleTitle(purgeTarget)}” ถาวรแล้ว`);
+      setPurgeTarget(null); void load(false);
+    } finally { setBusyId(null); }
+  };
 
   return (
     <div>
@@ -69,9 +115,14 @@ export function BundleBrowser() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา bundle (ชื่อ bundle / รหัสหรือชื่อ SKU ข้างใน)"
             className="w-full h-9 pl-9 pr-3 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200" />
         </div>
-        <button onClick={() => setCreateOpen(true)} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shrink-0">+ สร้าง Bundle</button>
+        <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0 text-sm">
+          <button onClick={() => setTrash(false)} className={`h-9 px-3 ${!trash ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>ใช้อยู่</button>
+          <button onClick={() => setTrash(true)} className={`h-9 px-3 border-l border-slate-200 ${trash ? "bg-rose-50 text-rose-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🗑 ถังขยะ{trashCount > 0 ? ` ${trashCount.toLocaleString("th-TH")}` : ""}</button>
+        </div>
+        {!trash && <button onClick={() => setCreateOpen(true)} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shrink-0">+ สร้าง Bundle</button>}
         <span className="text-xs text-slate-400">{total.toLocaleString("th-TH")} bundle</span>
       </div>
+      {trash && <div className="mb-3 px-3 py-2 rounded-lg bg-rose-50 border border-rose-100 text-xs text-rose-700">Bundle ที่ลบแล้วอยู่ที่นี่ — กด “กู้คืน” เพื่อเอากลับมาใช้ · “ลบถาวร” แล้วเอากลับไม่ได้ (SKU ข้างในไม่ถูกลบทั้งสองแบบ)</div>}
 
       {/* กริดการ์ด */}
       {loading && bundles.length === 0 ? (
@@ -80,12 +131,14 @@ export function BundleBrowser() {
         </div>
       ) : bundles.length === 0 ? (
         <div className="text-center py-16 text-slate-400 text-sm">
-          {q ? "ไม่พบ bundle ที่ตรงกับคำค้น" : <>ยังไม่มี bundle — กด <b>+ สร้าง Bundle</b> แล้วเลือก SKU ที่ต้องการจับกลุ่ม</>}
+          {q ? "ไม่พบ bundle ที่ตรงกับคำค้น" : trash ? "ถังขยะว่าง" : <>ยังไม่มี bundle — กด <b>+ สร้าง Bundle</b> แล้วเลือก SKU ที่ต้องการจับกลุ่ม · หรือติ๊กการ์ดในแท็บ SKU / จาก Taobao แล้วกด “📦 ส่งเข้า Bundle”</>}
         </div>
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {bundles.map((b) => <BundleCard key={b.id} b={b} onOpen={() => setOpenId(b.id)} />)}
+            {bundles.map((b) => trash
+              ? <TrashCard key={b.id} b={b} busy={busyId === b.id} onRestore={() => void restore(b)} onPurge={() => setPurgeTarget(b)} />
+              : <BundleCard key={b.id} b={b} onOpen={() => setOpenId(b.id)} />)}
           </div>
           {bundles.length < total && (
             <div className="text-center mt-4">
@@ -96,7 +149,32 @@ export function BundleBrowser() {
       )}
 
       {createOpen && <CreateBundleModal onClose={() => setCreateOpen(false)} onCreated={async (id) => { setCreateOpen(false); await load(false); setOpenId(id); }} />}
-      {open && <BundleDrawer b={open} onClose={() => setOpenId(null)} onChanged={() => void load(false)} onDeleted={() => { setOpenId(null); void load(false); }} />}
+      {open && <BundleDrawer b={open} onClose={() => setOpenId(null)} onChanged={() => void load(false)} onTrash={() => moveToTrash(open)} />}
+      <ConfirmDialog open={!!purgeTarget} onClose={() => setPurgeTarget(null)} onConfirm={() => void purge()} loading={!!busyId} variant="danger"
+        title="ลบ bundle นี้ถาวร?" requireTyped="ลบ" confirmText="ลบถาวร"
+        message={purgeTarget ? `“${bundleTitle(purgeTarget)}” จะหายไปถาวร เอากลับไม่ได้ — SKU ${purgeTarget.items.length} ตัวข้างในยังอยู่ตามเดิม · พิมพ์คำว่า ลบ เพื่อยืนยัน` : ""} />
+    </div>
+  );
+}
+
+// ───────────────────────────── การ์ดในถังขยะ ─────────────────────────────
+function TrashCard({ b, busy, onRestore, onPurge }: { b: Bundle; busy: boolean; onRestore: () => void; onPurge: () => void }) {
+  const imgs = b.items.filter((i) => i.image).slice(0, 4);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-1 aspect-square rounded-lg overflow-hidden bg-slate-50 opacity-60 grayscale">
+        {imgs.length === 0
+          ? <div className="col-span-2 flex items-center justify-center text-3xl text-slate-300">📦</div>
+          : imgs.map((i) => <img key={i.id} src={`${i.image}&w=200`} alt="" className={`w-full h-full object-cover ${imgs.length === 1 ? "col-span-2" : ""}`} loading="lazy" />)}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[13px] font-medium text-slate-700 truncate" title={bundleTitle(b)}>{bundleTitle(b)}</div>
+        <div className="text-[11px] text-slate-400">{b.items.length} SKU · ลบเมื่อ {fmtDate(b.updated_at)}</div>
+      </div>
+      <div className="flex gap-1.5">
+        <button onClick={onRestore} disabled={busy} className="flex-1 h-8 text-xs rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">↩ กู้คืน</button>
+        <button onClick={onPurge} disabled={busy} className="h-8 px-2 text-xs rounded-lg border border-rose-200 text-rose-600 bg-white hover:bg-rose-50 disabled:opacity-50">ลบถาวร</button>
+      </div>
     </div>
   );
 }
@@ -176,19 +254,20 @@ function CreateBundleModal({ onClose, onCreated }: { onClose: () => void; onCrea
 }
 
 // ───────────────────────────── Drawer รายละเอียด ─────────────────────────────
-function BundleDrawer({ b, onClose, onChanged, onDeleted }: { b: Bundle; onClose: () => void; onChanged: () => void; onDeleted: () => void }) {
+function BundleDrawer({ b, onClose, onChanged, onTrash }: { b: Bundle; onClose: () => void; onChanged: () => void; onTrash: () => Promise<boolean> }) {
   const toast = useToast();
+  const canEdit = usePermission("products.edit");
   const [editName, setEditName] = useState(false);
   const [name, setName] = useState(b.name ?? "");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
+  const [buyOpen, setBuyOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [skuDrawer, setSkuDrawer] = useState<string | null>(null);
   useEffect(() => { setName(b.name ?? ""); }, [b.name]);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !skuDrawer && !pickerOpen && !confirmDel) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !skuDrawer && !pickerOpen && !buyOpen) onClose(); };
     document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, skuDrawer, pickerOpen, confirmDel]);
+  }, [onClose, skuDrawer, pickerOpen, buyOpen]);
 
   const patch = async (body: Record<string, unknown>, okMsg?: string) => {
     setBusy(true);
@@ -199,15 +278,9 @@ function BundleDrawer({ b, onClose, onChanged, onDeleted }: { b: Bundle; onClose
       onChanged(); return true;
     } finally { setBusy(false); }
   };
-  const del = async () => {
-    setBusy(true);
-    try {
-      const j = await apiFetch(`/api/sku-bundles?id=${b.id}`, { method: "DELETE" }).then((r) => r.json());
-      if (j.error) { toast.error(j.error); return; }
-      toast.success("ลบ bundle แล้ว (SKU ข้างในไม่ถูกลบ)"); onDeleted();
-    } finally { setBusy(false); setConfirmDel(false); }
-  };
-  const behind = !!skuDrawer || pickerOpen || confirmDel;   // เปิดหน้า SKU ซ้อน → ถอย drawer นี้ไปข้างหลัง
+  // ลบ = ย้ายไปถังขยะ (กู้คืนได้ + ปุ่มย้อนกลับในแจ้งผล) — ไม่ต้องถามยืนยันซ้ำ
+  const del = async () => { setBusy(true); try { await onTrash(); } finally { setBusy(false); } };
+  const behind = !!skuDrawer || pickerOpen || buyOpen;   // เปิดหน้า SKU ซ้อน → ถอย drawer นี้ไปข้างหลัง
 
   return createPortal(
     <>
@@ -248,20 +321,105 @@ function BundleDrawer({ b, onClose, onChanged, onDeleted }: { b: Bundle; onClose
 
           {/* ท้าย */}
           <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-200 bg-slate-50">
-            <button onClick={() => setPickerOpen(true)} disabled={busy} className="h-9 px-3 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">+ เพิ่ม SKU</button>
+            {canEdit && b.items.length > 0 && (
+              <button onClick={() => setBuyOpen(true)} disabled={busy} className="h-9 px-3 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">🛒 ขอซื้อทั้งชุด</button>
+            )}
+            <button onClick={() => setPickerOpen(true)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50 disabled:opacity-50">+ เพิ่ม SKU</button>
             <span className="flex-1" />
-            <button onClick={() => setConfirmDel(true)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-rose-200 text-rose-600 bg-white hover:bg-rose-50 disabled:opacity-50">🗑 ลบ Bundle</button>
+            <button onClick={() => void del()} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-rose-200 text-rose-600 bg-white hover:bg-rose-50 disabled:opacity-50" title="ย้ายไปถังขยะ (กู้คืนได้)">🗑 ลบ</button>
           </div>
         </div>
       </div>
 
       <SkuMultiPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} excludeIds={b.items.map((i) => i.sku_id)}
         onConfirm={async (skus) => { setPickerOpen(false); if (skus.length) await patch({ add_sku_ids: skus.map((s) => s.id) }, `เพิ่ม ${skus.length} SKU แล้ว`); }} />
-      <ConfirmDialog open={confirmDel} onClose={() => setConfirmDel(false)} onConfirm={() => void del()} loading={busy} variant="danger"
-        title="ลบ bundle นี้?" message={`"${bundleTitle(b)}" จะถูกลบออกจากรายการ bundle — SKU ${b.items.length} ตัวข้างในยังอยู่ตามเดิม ไม่ถูกลบ`} confirmText="ลบ bundle" />
+      {buyOpen && <BuyBundleModal b={b} onClose={() => setBuyOpen(false)} />}
       {skuDrawer && <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" title="SKU" recordId={skuDrawer} onClose={() => setSkuDrawer(null)} onChanged={onChanged} />}
     </>,
     document.body,
+  );
+}
+
+// ───────────────────────────── ขอซื้อทั้งชุด → ตะกร้าขอซื้อ ─────────────────────────────
+function BuyBundleModal({ b, onClose }: { b: Bundle; onClose: () => void }) {
+  const toast = useToast();
+  const [sets, setSets] = useState(1);
+  const [skip, setSkip] = useState<Set<string>>(new Set());              // sku_id ที่ติ๊กออก
+  const [qtyEdit, setQtyEdit] = useState<Record<string, string>>({});    // จำนวนที่แก้เอง (ทับค่า qty × ชุด)
+  const qtyOf = (it: BundleItem) => {
+    const raw = qtyEdit[it.sku_id];
+    if (raw !== undefined) { const n = Number(raw); return Number.isFinite(n) && n > 0 ? n : 0; }
+    return Math.round(it.qty * sets * 100) / 100;
+  };
+  const chosen = b.items.filter((it) => !skip.has(it.sku_id) && qtyOf(it) > 0);
+  const noPrice = chosen.filter((it) => buyPrice(it).price <= 0).length;
+  const noLink = chosen.filter((it) => !it.purchase_link).length;
+  const dirty = sets !== 1 || skip.size > 0 || Object.keys(qtyEdit).length > 0;
+
+  const submit = () => {
+    if (chosen.length === 0) { toast.error("ยังไม่ได้เลือกรายการ"); return; }
+    const title = bundleTitle(b);
+    const n = addToPrCart(chosen.map((it) => {
+      const { price, currency } = buyPrice(it);
+      return {
+        label: it.name || it.code, qty: qtyOf(it), uom: it.uom || "ชิ้น", seller: it.seller || "—",
+        price, currency, image: imageKeyOf(it.image), variationId: null, skuRef: it.code, skuId: it.sku_id,
+        note: `จาก Bundle: ${title}${sets > 1 ? ` (${sets} ชุด)` : ""}`,
+      };
+    }));
+    toast.action(`ใส่ตะกร้าขอซื้อแล้ว ${chosen.length} รายการ (ตะกร้ามี ${n} รายการ) — ไปกดยืนยันที่หน้า “ขอซื้อ”`, "ไปหน้าขอซื้อ", () => { window.location.href = "/purchasing"; });
+    onClose();
+  };
+
+  return (
+    <ERPModal open onClose={onClose} size="md" title={`🛒 ขอซื้อทั้งชุด — ${bundleTitle(b)}`} hasUnsavedChanges={dirty} storageKey="bundle-buy-modal"
+      footer={<div className="flex justify-end gap-2 w-full">
+        <button onClick={onClose} className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={submit} disabled={chosen.length === 0} className="h-9 px-4 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">ใส่ตะกร้า {chosen.length} รายการ</button>
+      </div>}>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-600">ซื้อกี่ชุด</span>
+          <button onClick={() => { setSets((s) => Math.max(1, s - 1)); setQtyEdit({}); }} className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" aria-label="ลดจำนวนชุด">−</button>
+          <input type="number" min={1} step={1} value={sets} onChange={(e) => { const n = Math.floor(Number(e.target.value)); setSets(Number.isFinite(n) && n > 0 ? n : 1); setQtyEdit({}); }}
+            className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+          <button onClick={() => { setSets((s) => s + 1); setQtyEdit({}); }} className="w-8 h-8 rounded-lg border border-slate-200 hover:bg-slate-50" aria-label="เพิ่มจำนวนชุด">+</button>
+          <span className="text-xs text-slate-400">จำนวนแต่ละชิ้น = จำนวนใน bundle × ชุด (แก้รายชิ้นได้)</span>
+        </div>
+        <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg max-h-[50vh] overflow-y-auto">
+          {b.items.map((it) => {
+            const off = skip.has(it.sku_id);
+            const { price } = buyPrice(it);
+            return (
+              <li key={it.id} className={`flex items-center gap-2 px-2 py-2 ${off ? "opacity-50" : ""}`}>
+                <input type="checkbox" checked={!off} onChange={() => setSkip((s) => { const n = new Set(s); n.has(it.sku_id) ? n.delete(it.sku_id) : n.add(it.sku_id); return n; })} className="w-4 h-4 shrink-0" aria-label={`เลือก ${it.code}`} />
+                <HoverImage url={it.image} size={36} rounded="rounded-md" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-800 truncate">{it.name || it.code}</div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                    <span className="font-mono">{it.code}</span>
+                    <span>{buyText(it)}</span>
+                    {it.seller && <span className="truncate max-w-[10rem]">· {it.seller}</span>}
+                    {price <= 0 && <span className="px-1.5 rounded bg-amber-50 text-amber-700">ยังไม่มีราคา</span>}
+                    {!it.purchase_link && <span className="px-1.5 rounded bg-amber-50 text-amber-700">ยังไม่มีลิงก์</span>}
+                  </div>
+                </div>
+                <input type="number" min={0} step="any" disabled={off} value={qtyEdit[it.sku_id] ?? String(qtyOf(it))}
+                  onChange={(e) => setQtyEdit((m) => ({ ...m, [it.sku_id]: e.target.value }))}
+                  className="w-16 h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg shrink-0" aria-label={`จำนวน ${it.code}`} />
+                <span className="text-[11px] text-slate-500 w-10 shrink-0 truncate">{it.uom || "ชิ้น"}</span>
+              </li>
+            );
+          })}
+        </ul>
+        {(noPrice > 0 || noLink > 0) && (
+          <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            {noPrice > 0 && <div>{noPrice} รายการยังไม่มีราคา — ส่งได้ ไปใส่ราคาที่ตะกร้าก่อนยืนยัน</div>}
+            {noLink > 0 && <div>{noLink} รายการยังไม่มีลิงก์ Taobao — ใส่ได้ในหน้า Bundle นี้</div>}
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
 

@@ -1,10 +1,12 @@
 /**
  * /api/sku-bundles — Bundle = กลุ่ม SKU ที่จับรวมกัน (แท็บ 📦 Bundle ในหน้า /master/skus)
  *
- *   GET    ?search=&limit=&offset=      → รายการ bundle + รายการ SKU ข้างใน (รูป/รหัส/ชื่อ/ราคา/ลิงก์ Taobao)
+ *   GET    ?search=&limit=&offset=&trash=1 → รายการ bundle + รายการ SKU ข้างใน (รูป/รหัส/ชื่อ/ราคา/ลิงก์ Taobao/ร้าน/หน่วย)
+ *                                          trash=1 = ดูถังขยะ (bundle ที่ลบแล้ว is_active=false)
  *   POST   { name?, note?, sku_ids[] }  → สร้าง bundle ใหม่ (ชื่อไม่ใส่ก็ได้ → หน้าจอโชว์ "Bundle #n")
- *   PATCH  { id, name?, note?, add_sku_ids?, remove_sku_ids?, qty?: {sku_id: qty} } → แก้ชื่อ/เพิ่ม-ลด SKU/จำนวน
- *   DELETE ?id=                          → ลบ bundle (ลบจริง — items ลบตาม cascade; SKU ไม่กระทบ)
+ *   PATCH  { id, name?, note?, add_sku_ids?, remove_sku_ids?, qty?: {sku_id: qty}, restore?: true } → แก้ชื่อ/เพิ่ม-ลด SKU/จำนวน/กู้คืนจากถังขยะ
+ *   DELETE ?id=                          → ย้ายไปถังขยะ (is_active=false — กู้คืนได้)
+ *   DELETE ?id=&permanent=1              → ลบถาวร (ได้เฉพาะ bundle ที่อยู่ในถังขยะแล้ว — items ลบตาม cascade; SKU ไม่กระทบ)
  *
  * ลิงก์ Taobao ของแต่ละ SKU = skus_v2.purchase_link (ของกลาง) — แก้ผ่าน PATCH /api/master-v2/skus/<id> จากหน้าจอ
  * สิทธิ์: products.view (อ่าน) / products.edit (เขียน) + audit log ของกลาง
@@ -13,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditDiff } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,15 +25,17 @@ export type BundleItem = {
   code: string; name: string; image: string | null;
   list_price: number | null; standard_price: number | null; rmb_cost: number | null;
   purchase_link: string | null; is_active: boolean;
+  seller: string | null; uom: string | null;   // ชื่อร้าน + หน่วยนับ (ใช้ตอน "ขอซื้อทั้งชุด" ใส่ตะกร้า)
 };
 export type Bundle = {
   id: string; name: string | null; note: string | null; seq: number;
   created_at: string; updated_at: string; items: BundleItem[];
 };
 
-const SKU_COLS = "id, code, name_th, cover_image_r2_key, list_price, standard_price, rmb_cost, purchase_link, is_active";
-type SkuRow = { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; standard_price: number | null; rmb_cost: number | null; purchase_link: string | null; is_active: boolean | null };
+const SKU_COLS = "id, code, name_th, cover_image_r2_key, list_price, standard_price, rmb_cost, purchase_link, is_active, seller_partner_id, uom_id";
+type SkuRow = { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; standard_price: number | null; rmb_cost: number | null; purchase_link: string | null; is_active: boolean | null; seller_partner_id: string | null; uom_id: string | null };
 type ItemRow = { id: string; bundle_id: string; sku_id: string; qty: number | string; sort_order: number; note: string | null };
+type BundleRow = { id: string; name: string | null; note: string | null; created_at: string; updated_at: string; is_active: boolean | null };
 
 async function actorOf(request: NextRequest) {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -39,7 +43,7 @@ async function actorOf(request: NextRequest) {
 }
 
 /** ประกอบ bundle + items + ข้อมูล SKU (ยิง 2 query รวม ไม่ยิงต่อ bundle) */
-async function loadBundles(admin: ReturnType<typeof supabaseAdmin>, bundleRows: { id: string; name: string | null; note: string | null; created_at: string; updated_at: string }[], seqBase: Map<string, number>): Promise<Bundle[]> {
+async function loadBundles(admin: ReturnType<typeof supabaseAdmin>, bundleRows: BundleRow[], seqBase: Map<string, number>): Promise<Bundle[]> {
   const ids = bundleRows.map((b) => b.id);
   if (ids.length === 0) return [];
   const { data: items } = await admin.from("sku_bundle_items").select("id, bundle_id, sku_id, qty, sort_order, note").in("bundle_id", ids).order("sort_order").order("created_at");
@@ -50,6 +54,16 @@ async function loadBundles(admin: ReturnType<typeof supabaseAdmin>, bundleRows: 
     const { data: skus } = await admin.from("skus_v2").select(SKU_COLS).in("id", skuIds);
     for (const s of (skus ?? []) as SkuRow[]) skuMap.set(s.id, s);
   }
+  // ชื่อร้าน + หน่วยนับ (ยิงรวมทีเดียว)
+  const sellerIds = [...new Set([...skuMap.values()].map((s) => s.seller_partner_id).filter((x): x is string => !!x))];
+  const uomIds = [...new Set([...skuMap.values()].map((s) => s.uom_id).filter((x): x is string => !!x))];
+  const sellerMap = new Map<string, string>(); const uomMap = new Map<string, string>();
+  const [sellersRes, uomsRes] = await Promise.all([
+    sellerIds.length ? admin.from("partners_v2").select("id, display_name, name_th, name_en").in("id", sellerIds) : Promise.resolve({ data: [] }),
+    uomIds.length ? admin.from("uoms").select("id, name, display_name").in("id", uomIds) : Promise.resolve({ data: [] }),
+  ]);
+  for (const p of (sellersRes.data ?? []) as { id: string; display_name: string | null; name_th: string | null; name_en: string | null }[]) sellerMap.set(p.id, p.display_name || p.name_th || p.name_en || "");
+  for (const u of (uomsRes.data ?? []) as { id: string; name: string | null; display_name: string | null }[]) uomMap.set(u.id, u.name || u.display_name || "");
   const byBundle = new Map<string, BundleItem[]>();
   for (const it of itemRows) {
     const s = skuMap.get(it.sku_id);
@@ -59,10 +73,12 @@ async function loadBundles(admin: ReturnType<typeof supabaseAdmin>, bundleRows: 
       id: it.id, sku_id: it.sku_id, qty: Number(it.qty ?? 1), sort_order: it.sort_order, note: it.note,
       code: s.code, name: s.name_th ?? "", image: s.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(s.cover_image_r2_key)}` : null,
       list_price: s.list_price, standard_price: s.standard_price, rmb_cost: s.rmb_cost, purchase_link: s.purchase_link, is_active: s.is_active !== false,
+      seller: s.seller_partner_id ? (sellerMap.get(s.seller_partner_id) || null) : null,
+      uom: s.uom_id ? (uomMap.get(s.uom_id) || null) : null,
     });
     byBundle.set(it.bundle_id, arr);
   }
-  return bundleRows.map((b) => ({ ...b, seq: seqBase.get(b.id) ?? 0, items: byBundle.get(b.id) ?? [] }));
+  return bundleRows.map((b) => ({ id: b.id, name: b.name, note: b.note, created_at: b.created_at, updated_at: b.updated_at, seq: seqBase.get(b.id) ?? 0, items: byBundle.get(b.id) ?? [] }));
 }
 
 export async function GET(request: NextRequest) {
@@ -71,15 +87,20 @@ export async function GET(request: NextRequest) {
   const search = (sp.get("search") ?? "").trim();
   const limit = Math.min(200, Math.max(1, Number(sp.get("limit") ?? 60)));
   const offset = Math.max(0, Number(sp.get("offset") ?? 0));
+  const trash = sp.get("trash") === "1";
   const admin = supabaseAdmin();
 
-  // ลำดับ "Bundle #n" = ลำดับที่สร้าง (เก่าสุด = #1) — คำนวณจากรายการทั้งหมด (จำนวน bundle ไม่เยอะ)
-  const { data: all, error: allErr } = await admin.from("sku_bundles").select("id, name, note, created_at, updated_at").eq("is_active", true).order("created_at", { ascending: true });
+  // ลำดับ "Bundle #n" = ลำดับที่สร้าง (เก่าสุด = #1) — นับรวมตัวที่อยู่ในถังขยะด้วย (ลบ/กู้คืนแล้วเลขไม่เลื่อน)
+  const { data: all, error: allErr } = await admin.from("sku_bundles").select("id, name, note, created_at, updated_at, is_active").order("created_at", { ascending: true });
   if (allErr) return NextResponse.json({ error: allErr.message }, { status: 500 });
-  const allRows = (all ?? []) as { id: string; name: string | null; note: string | null; created_at: string; updated_at: string }[];
+  const allRows = (all ?? []) as BundleRow[];
   const seq = new Map<string, number>(); allRows.forEach((b, i) => seq.set(b.id, i + 1));
+  const trashCount = allRows.filter((b) => b.is_active === false).length;
 
-  let rows = [...allRows].reverse();   // ใหม่สุดก่อน
+  // ถังขยะ = ลบล่าสุดก่อน (updated_at = เวลาที่ย้ายเข้าถัง) · ปกติ = ใหม่สุดก่อน
+  let rows = trash
+    ? allRows.filter((b) => b.is_active === false).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    : allRows.filter((b) => b.is_active !== false).reverse();
   if (search) {
     // ค้นจากชื่อ bundle หรือ รหัส/ชื่อ SKU ที่อยู่ข้างใน
     const s = search.toLowerCase();
@@ -95,7 +116,7 @@ export async function GET(request: NextRequest) {
   const total = rows.length;
   const page = rows.slice(offset, offset + limit);
   const bundles = await loadBundles(admin, page, seq);
-  return NextResponse.json({ bundles, total, error: null });
+  return NextResponse.json({ bundles, total, trash_count: trashCount, error: null });
 }
 
 export async function POST(request: NextRequest) {
@@ -118,10 +139,17 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
-  let body: { id?: string; name?: string | null; note?: string | null; add_sku_ids?: string[]; remove_sku_ids?: string[]; qty?: Record<string, number> };
+  let body: { id?: string; name?: string | null; note?: string | null; add_sku_ids?: string[]; remove_sku_ids?: string[]; qty?: Record<string, number>; restore?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
   const admin = supabaseAdmin();
+  // กู้คืนจากถังขยะ
+  if (body.restore) {
+    const { error } = await admin.from("sku_bundles").update({ is_active: true, updated_at: new Date().toISOString() }).eq("id", body.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin, { action: "restore", entityType: "sku_bundles", entityId: body.id, actorId: actor.id, actorName: actor.name, metadata: { changes: auditDiff({ is_active: false }, { is_active: true }) } });
+    return NextResponse.json({ ok: true, error: null });
+  }
   const changes: Record<string, unknown> = {};
   if (body.name !== undefined) changes.name = (body.name ?? "").trim() || null;
   if (body.note !== undefined) changes.note = (body.note ?? "").trim() || null;
@@ -155,12 +183,23 @@ export async function DELETE(request: NextRequest) {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
   const id = request.nextUrl.searchParams.get("id");
+  const permanent = request.nextUrl.searchParams.get("permanent") === "1";
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
   const admin = supabaseAdmin();
+  const { data: b } = await admin.from("sku_bundles").select("name, is_active").eq("id", id).maybeSingle();
+  if (!b) return NextResponse.json({ error: "ไม่พบ bundle นี้" }, { status: 404 });
+  if (!permanent) {
+    // ค่าเริ่มต้น = ย้ายไปถังขยะ (กู้คืนได้)
+    const { error } = await admin.from("sku_bundles").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin, { action: "archive", entityType: "sku_bundles", entityId: id, actorId: actor.id, actorName: actor.name, metadata: { name: b.name ?? null, changes: auditDiff({ is_active: true }, { is_active: false }) } });
+    return NextResponse.json({ ok: true, error: null });
+  }
+  // ลบถาวร — ต้องอยู่ในถังขยะก่อน กันกดพลาดลบของที่ใช้อยู่
+  if (b.is_active !== false) return NextResponse.json({ error: "ย้าย bundle ไปถังขยะก่อน แล้วค่อยลบถาวร" }, { status: 400 });
   const { data: snap } = await admin.from("sku_bundle_items").select("sku_id, qty").eq("bundle_id", id);
-  const { data: b } = await admin.from("sku_bundles").select("name").eq("id", id).maybeSingle();
   const { error } = await admin.from("sku_bundles").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "delete", entityType: "sku_bundles", entityId: id, actorId: actor.id, actorName: actor.name, metadata: { name: b?.name ?? null, items: snap ?? [] } });
+  await writeAudit(admin, { action: "delete", entityType: "sku_bundles", entityId: id, actorId: actor.id, actorName: actor.name, metadata: { name: b.name ?? null, items: snap ?? [], permanent: true } });
   return NextResponse.json({ ok: true, error: null });
 }

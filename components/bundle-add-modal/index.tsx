@@ -8,7 +8,7 @@
  *
  * API: /api/sku-bundles (POST สร้าง · PATCH add_sku_ids) — guard products.edit + audit ที่ฝั่ง server
  * ของกลางที่ใช้: ERPModal · HoverImage · usePermission · useToast · apiFetch
- * ใช้ที่: แท็บ 🎨 Swatch (โหมดเลือกหลายรายการ)
+ * ใช้ที่: แท็บ 🎨 Swatch · แท็บ 🏷️ SKU · แท็บ 🛒 จาก Taobao (เฉพาะชิ้นที่จับคู่ SKU แล้ว) — โหมดเลือกหลายรายการ
  */
 
 import { useEffect, useState } from "react";
