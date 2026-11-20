@@ -205,7 +205,7 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
               onSave={(v) => void patch({ description: v.trim() || null }, "บันทึกรายละเอียดแล้ว", { description: pv.description.value || null })}
               note={<><Icon name="image" /> รูปในรายละเอียด: {pv.description.imagesAllowed === true ? "ร้านนี้ได้สิทธิ์ใส่รูปจาก Shopee แล้ว — ตอนนี้ยังส่งเป็นข้อความอย่างเดียว"
                 : pv.description.imagesAllowed === false ? "สินค้าบนร้านเป็นรายละเอียดแบบข้อความ — ยังไม่พบว่าร้านได้สิทธิ์ใส่รูปในรายละเอียด (Shopee เปิดให้บางร้าน) · ส่งเป็นข้อความ"
-                : "ส่งเป็นข้อความอย่างเดียว"}</>} />
+                : "ส่งเป็นข้อความอย่างเดียว"}{pv.description.parentImages > 0 ? ` · Parent SKU มีรูป Description ${pv.description.parentImages} รูป (ส่งได้เมื่อร้านได้สิทธิ์)` : ""}</>} />
           </div>
         </div>
       </div>

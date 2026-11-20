@@ -9,6 +9,8 @@ import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { attrRulesOf, listingAttrDefaultsKey } from "@/lib/listing-attr-defaults";
+import { loadParentComputedTexts } from "@/lib/spec-export-server";
+import { loadDescriptionImageKeys } from "@/lib/description-images";
 import { shopeeCategoryRecommend, shopeeErrorText, shopeeGetAttributeTree, shopeeGetCategoryLimit, shopeeGetChannelList, shopeeGetItemBaseInfo } from "@/lib/shopee";
 import {
   planShopeeCreate, shopeeAttrFieldsOf, shopeeCategoryIdOf, shopeeChannelsOf, shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories,
@@ -101,6 +103,9 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
   const rulesP = brandId
     ? Promise.resolve(admin.from("ui_config").select("value").eq("key", listingAttrDefaultsKey("shopee", brandId)).maybeSingle()).then((r) => attrRulesOf((r.data as Row | null)?.value), () => null)
     : Promise.resolve(null);
+  // Platform Description ที่ Parent SKU โชว์ (คำนวณสด — คอลัมน์เป็นค่าเก่า) + รูป Description · พลาด = ใช้ค่าเดิม (ไม่ล้มทั้งหน้า)
+  const liveDescP = loadParentComputedTexts(admin, [parentId], "platform_description").then((m) => m[parentId]?.th ?? null, (e) => { console.warn("[shopee create] platform description", (e as Error).message); return null; });
+  const descImgsP = loadDescriptionImageKeys(admin, [parentId]).then((m) => m[parentId] ?? [], (e) => { console.warn("[shopee create] desc images", (e as Error).message); return [] as string[]; });
   const d = it.draft as Row | null;
   const draft = d ? {
     title: d.title == null ? null : String(d.title), description: d.description == null ? null : String(d.description),
@@ -170,7 +175,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
   }
 
   const exOnShop = ((onShop ?? []) as Row[])[0];
-  const attrRules = await rulesP;
+  const [attrRules, liveDesc, descImgs] = await Promise.all([rulesP, liveDescP, descImgsP]);
   const numOr = (v: unknown) => (v == null || v === "" ? null : Number(v) || null);
   const { preview, payload } = planShopeeCreate({
     parent: {
@@ -178,6 +183,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height }, brand_name: p.brand_name,
       warranty: pr.warranty == null ? null : String(pr.warranty), size: { l: numOr(pr.size_length_cm), w: numOr(pr.size_thickness_cm), h: numOr(pr.size_height_cm) },
+      platform_description_live: liveDesc, desc_image_count: descImgs.length,
     },
     skus: ((skus ?? []) as Row[]).map((s): ShopeeCreateSku => ({
       id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,

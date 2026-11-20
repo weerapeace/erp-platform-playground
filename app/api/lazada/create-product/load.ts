@@ -11,6 +11,8 @@ import { lazAttrDefsWithExtras } from "@/lib/lazada-listing-edit";
 import { planLazadaCreate, lazCategoryIdOf, type LazCreatePreview, type LazCreateSku } from "@/lib/lazada-create-plan";
 import { loadSkuGalleryKeys } from "@/lib/sku-gallery-images";
 import { attrRulesOf, listingAttrDefaultsKey } from "@/lib/listing-attr-defaults";
+import { loadParentComputedTexts } from "@/lib/spec-export-server";
+import { loadDescriptionImageKeys } from "@/lib/description-images";
 import { getPlatformId, lazCategoryAttrsCached, lazTokenOrReason } from "../shared";
 
 type Row = Record<string, unknown>;
@@ -47,6 +49,9 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
     ? Promise.resolve(admin.from("ui_config").select("value").eq("key", listingAttrDefaultsKey("lazada", brandId)).maybeSingle()).then((r) => attrRulesOf((r.data as Row | null)?.value), () => null)
     : Promise.resolve(null);
   const numOr = (v: unknown) => (v == null || v === "" ? null : Number(v) || null);
+  // Platform Description ที่ Parent SKU โชว์ (คำนวณสด — คอลัมน์เป็นค่าเก่า) + รูป Description · พลาด = ใช้ค่าเดิม (ไม่ล้มทั้งหน้า)
+  const liveDescP = loadParentComputedTexts(admin, [parentId], "platform_description").then((m) => m[parentId]?.th ?? null, (e) => { console.warn("[lazada create] platform description", (e as Error).message); return null; });
+  const descImgsP = loadDescriptionImageKeys(admin, [parentId]).then((m) => m[parentId] ?? [], (e) => { console.warn("[lazada create] desc images", (e as Error).message); return [] as string[]; });
   const d = it.draft as Row | null;
   const draft = d ? {
     title: d.title == null ? null : String(d.title), description: d.description == null ? null : String(d.description),
@@ -76,13 +81,14 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
   }
   const p = it.parent;
   const exOnShop = ((onShop ?? []) as Row[])[0];
-  const attrRules = await rulesP;
+  const [attrRules, liveDesc, descImgs] = await Promise.all([rulesP, liveDescP, descImgsP]);
   const { preview, payload } = planLazadaCreate({
     parent: {
       id: parentId, code: str(p.code), name_th: str(p.name_th) || null, name_platform: str(p.name_platform) || null,
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height },
       warranty: pr.warranty == null ? null : String(pr.warranty), size: { l: numOr(pr.size_length_cm), w: numOr(pr.size_thickness_cm), h: numOr(pr.size_height_cm) },
+      platform_description_live: liveDesc, desc_image_keys: descImgs,
     },
     skus: skuRows.map((s): LazCreateSku => ({
       id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,

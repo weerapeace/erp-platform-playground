@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planLazadaCreate, lazCreateImageRefs, lazCreateResolveImages, lazDescriptionHtml, lazCategoryIdOf, isLazadaImage, type LazCreateSku, type LazCreateParent } from "@/lib/lazada-create-plan";
+import { planLazadaCreate, pickListingDescription, lazCreateImageRefs, lazCreateResolveImages, lazDescriptionHtml, lazCategoryIdOf, isLazadaImage, type LazCreateSku, type LazCreateParent } from "@/lib/lazada-create-plan";
 import type { LazadaAttrDef } from "@/lib/lazada-listing-edit";
 
 const parent = (over: Partial<LazCreateParent> = {}): LazCreateParent => ({
@@ -173,6 +173,25 @@ describe("รอบ LY22 — เหมือน Shopee", () => {
     expect((none.payload.Request as { Product: Record<string, any> }).Product.Attributes.description).not.toContain("<img");
     const picked = planLazadaCreate({ ...base, parent: parent(), skus, draft: draftWith({ lazada_desc_images: ["r2:g/9.jpg"] }) }).preview;
     expect(picked.descImages.refs).toEqual(["r2:g/9.jpg"]);
+  });
+});
+
+describe("รายละเอียดจาก Parent SKU (เจ้าของบอก 2026-11-20)", () => {
+  const draftWith = (extra: Record<string, unknown>, description: string | null = null) => ({ title: null, description, category_path: null, image_keys: null, extra, platform_product_id: null });
+  it("Platform Description สด มาก่อนคอลัมน์เก่า · ร่างที่เป็นสำเนาคอลัมน์เก่า = ไม่นับ · ร่างที่แก้เอง = ใช้", () => {
+    const pr = parent({ platform_description: "ข้อความเก่า Larkspur", platform_description_live: "Fleur De Juillet ใหม่\n- วัสดุ: PU" });
+    expect(pickListingDescription("ข้อความเก่า  Larkspur", pr, "Lazada")).toEqual({ text: "Fleur De Juillet ใหม่\n- วัสดุ: PU", src: "Platform Description ของ Parent SKU" });
+    expect(pickListingDescription("พิมพ์เองสำหรับร้าน", pr, "Lazada")).toEqual({ text: "พิมพ์เองสำหรับร้าน", src: "แก้ไว้สำหรับ Lazada" });
+    expect(pickListingDescription("", parent({ platform_description: "เก่า" }), "Shopee").src).toBe("รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)");
+    const { preview: p } = planLazadaCreate({ ...base, parent: pr, skus: [sku("A-01", "ดำ", 100)], draft: draftWith({}, "ข้อความเก่า Larkspur") });
+    expect(p.description.value).toContain("Fleur De Juillet ใหม่");
+    expect(p.description.src).toBe("Platform Description ของ Parent SKU");
+  });
+  it("รูปในรายละเอียดอัตโนมัติ = รูป Description ของ Parent SKU (ไม่มี = รูปสินค้า)", () => {
+    const { preview: p } = planLazadaCreate({ ...base, parent: parent({ desc_image_keys: ["library/1.jpeg", "library/2.jpeg"] }), skus: [sku("A-01", "ดำ", 100)], galleryKeys: ["g/1.jpg"] });
+    expect(p.descImages).toMatchObject({ refs: ["r2:library/1.jpeg", "r2:library/2.jpeg"], custom: false, src: "รูป Description ของ Parent SKU (2 รูป)" });
+    const none = planLazadaCreate({ ...base, parent: parent(), skus: [sku("A-01", "ดำ", 100)], galleryKeys: ["g/1.jpg"] }).preview;
+    expect(none.descImages.src).toBe("รูปสินค้าทั้งหมด (สินค้านี้ยังไม่มีรูป Description)");
   });
 });
 

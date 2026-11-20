@@ -38,6 +38,22 @@ export async function linkDescriptionImage(
   return { ok: true, already: false, sortOrder: next };
 }
 
+/** รูป Description ของหลาย Parent → { parentId: [r2 key] } เรียงตามที่จัดไว้ (หน้าลงสินค้าใส่ต่อท้ายรายละเอียด) */
+export async function loadDescriptionImageKeys(admin: Admin, parentIds: string[]): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  if (!parentIds.length) return out;
+  const { data, error } = await admin.from("asset_usages").select("record_id, sort_order, assets ( r2_key )")
+    .eq("module", DESCRIPTION_MODULE).in("record_id", parentIds).is("field", null)
+    .order("sort_order", { ascending: true, nullsFirst: false });
+  if (error) throw new Error(error.message);
+  for (const r of (data ?? []) as unknown as { record_id: string; assets: { r2_key?: string | null } | { r2_key?: string | null }[] | null }[]) {
+    const a = Array.isArray(r.assets) ? r.assets[0] : r.assets;
+    const k = a?.r2_key; if (!k) continue;
+    (out[r.record_id] ??= []).includes(k) || out[r.record_id].push(k);
+  }
+  return out;
+}
+
 export async function removeDescriptionImage(
   admin: Admin,
   args: { parentId: string; assetId: string; source?: "description_image_remove"; auditMeta?: Record<string, unknown> } & VersionActor,

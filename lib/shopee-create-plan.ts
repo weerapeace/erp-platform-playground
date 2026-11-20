@@ -23,7 +23,7 @@
  *   ช่องบังคับของหมวด = ร่าง extra.shopee_attrs → ค่าจากสินค้าแบบหมวดเดียวกัน (เฉพาะช่องบังคับ) · น้ำหนัก = ร่าง extra.shopee_weight → น้ำหนักสินค้า
  */
 import { noteToText } from "@/lib/rich-note";
-import { splitSkus } from "@/lib/lazada-create-plan";
+import { pickListingDescription, splitSkus } from "@/lib/lazada-create-plan";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
@@ -61,6 +61,10 @@ export type ShopeeCreateParent = {
   brand_name: string | null;
   /** ช่องรับประกันของสินค้า + ขนาดสินค้า (ยาว/กว้าง/สูง ซม.) — ใช้กับค่าเริ่มต้นช่องคุณลักษณะ (lib/listing-attr-defaults) */
   warranty?: string | null;
+  /** Platform Description ที่ป๊อป Parent SKU โชว์ (คำนวณสด · loadParentComputedTexts) — มาก่อนคอลัมน์ platform_description ที่เป็นค่าเก่า */
+  platform_description_live?: string | null;
+  /** จำนวนรูป Description ของ Parent (Shopee ยังส่งไม่ได้ — บอกเฉย ๆ) */
+  desc_image_count?: number;
   size?: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type ShopeeCreateDraft = {
@@ -262,7 +266,7 @@ export type ShopeeCreateField<T> = { value: T; src: string };
 export type ShopeeCreatePreview = {
   parent_id: string; parent_code: string;
   name: ShopeeCreateField<string>;
-  description: ShopeeCreateField<string> & { /** ร้านใส่รูปในรายละเอียดได้ไหม (Shopee เปิดสิทธิ์ extended description): true = สินค้าแบบใช้รูปในรายละเอียด · false = สินค้าแบบเป็นข้อความ (ยังไม่พบสิทธิ์) · null = ไม่มีสินค้าแบบ */ imagesAllowed: boolean | null };
+  description: ShopeeCreateField<string> & { /** จำนวนรูป Description ของ Parent SKU (Shopee ยังส่งไม่ได้) */ parentImages: number; /** ร้านใส่รูปในรายละเอียดได้ไหม (Shopee เปิดสิทธิ์ extended description): true = สินค้าแบบใช้รูปในรายละเอียด · false = สินค้าแบบเป็นข้อความ (ยังไม่พบสิทธิ์) · null = ไม่มีสินค้าแบบ */ imagesAllowed: boolean | null };
   /** ชื่อสีที่เลือกได้ (Color Platform [TH] ของ SKU ในสินค้านี้ → ชื่อสีปกติ) */
   colorChoices: string[];
   category: { id: string | null; label: string | null; kind: ShopeeCategoryKind | null; src: string; candidates: ShopeeCategoryPick[] };
@@ -318,16 +322,16 @@ export function planShopeeCreate(input: {
   else if (L?.nameMax != null && nLen > L.nameMax) missing.push(`ชื่อยาว ${nLen} ตัวอักษร (Shopee รับไม่เกิน ${L.nameMax})`);
 
   // ---------- รายละเอียด (ข้อความธรรมดา) ----------
-  const dDesc = String(d?.description ?? ""), descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? "");
-  const descRaw = dDesc.trim() ? dDesc : descPf.trim() ? descPf : descMain;
-  const desc = noteToText(descRaw).replace(/\n{3,}/g, "\n\n").trim();
-  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : dDesc.trim() && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ Shopee" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
+  // ร่างที่แก้เอง → Platform Description สด (ตัวเดียวกับป๊อป Parent SKU) → คอลัมน์เดิม (ค่าเก่า) — ตัวเลือกกลาง pickListingDescription
+  const pick = pickListingDescription(String(d?.description ?? ""), p, "Shopee");
+  const desc = noteToText(pick.text).replace(/\n{3,}/g, "\n\n").trim();
+  const descSrc = pick.src;
   const dLen = shopeeTextLength(desc);
   const descMax = L?.descMax ?? DEFAULT_DESC_MAX;
   if (!desc) missing.push("รายละเอียดสินค้า");
   else if (L?.descMin != null && dLen < L.descMin) missing.push(`รายละเอียดสั้นไป ${dLen} ตัวอักษร (Shopee ต้องอย่างน้อย ${L.descMin})`);
   else if (dLen > descMax) missing.push(`รายละเอียดยาว ${dLen.toLocaleString()} ตัวอักษร (Shopee รับไม่เกิน ${descMax.toLocaleString()})`);
-  if (/<img\b/i.test(descRaw)) warnings.push("รูปในรายละเอียดไม่ได้ส่ง (Shopee แบบข้อความรับเฉพาะตัวอักษร) — เพิ่มรูปในรูปสินค้าแทน");
+  if (/<img\b/i.test(pick.text)) warnings.push("รูปในรายละเอียดไม่ได้ส่ง (Shopee แบบข้อความรับเฉพาะตัวอักษร) — เพิ่มรูปในรูปสินค้าแทน");
 
   // ---------- หมวด ----------
   const cat = input.category;
@@ -505,7 +509,7 @@ export function planShopeeCreate(input: {
     preview: {
       parent_id: p.id, parent_code: p.code,
       name: { value: name, src: nameSrc },
-      description: { value: desc, src: descSrc, imagesAllowed: input.template?.descType === "extended" ? true : input.template?.descType === "normal" ? false : null },
+      description: { value: desc, src: descSrc, parentImages: p.desc_image_count ?? 0, imagesAllowed: input.template?.descType === "extended" ? true : input.template?.descType === "normal" ? false : null },
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },

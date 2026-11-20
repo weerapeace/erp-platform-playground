@@ -127,6 +127,22 @@ function valuesFor(
 }
 
 /**
+ * ข้อความคำนวณของ Parent (เช่น "platform_description" = Platform Description ที่ป๊อป Parent SKU โชว์) — ฝั่ง server · ของกลาง
+ * ทำไม: ช่องนี้ "คำนวณสด" ตอนเปิดป๊อป (lib/computed-text + บล็อก ⚙) ไม่ได้เขียนกลับคอลัมน์ → คอลัมน์ platform_description เป็นค่าเก่า (นำเข้าจาก Odoo)
+ *   เจอ 2026-11-20: หน้าลงสินค้า Shopee/Lazada ดึงคอลัมน์ = รายละเอียดเก่า ไม่ตรงกับที่เห็นใน Parent SKU
+ * คืน { id: { th, en } } · ไม่มีช่องในทะเบียน/คำนวณไม่ได้ = ไม่มีคีย์ (ผู้เรียกใช้คอลัมน์เดิมแทน)
+ */
+export async function loadParentComputedTexts(admin: Admin, ids: string[], computeName: string): Promise<Record<string, { th: string | null; en: string | null }>> {
+  if (!ids.length) return {};
+  const catalog = buildSpecCatalog(await registryRows(admin, "parent_skus_v2"), [], () => true);
+  const f = catalog.find((x) => x.level === "parent" && x.kind === "computed" && x.compute?.name === computeName);
+  if (!f) return {};
+  const prods = await loadSpecProducts(admin, catalog, ids, [f.key], "th");
+  const txt = (v: unknown) => (v == null ? null : String(v).trim() ? String(v) : null);
+  return Object.fromEntries(prods.map((p) => [p.id, { th: txt(p.values[f.column]), en: f.enColumn ? txt(p.values[f.enColumn]) : null }]));
+}
+
+/**
  * ค่าจริงของหลายรุ่น + SKU ลูก (เฉพาะช่องที่เลือกและมีสิทธิ์ — catalog ต้องมาจาก loadSpecCatalog)
  * คืนเรียงตามลำดับ ids ที่ส่งมา
  */
