@@ -240,11 +240,12 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const manual = cfg.wipSort === "manual";
   const bigCfg: KanbanTheme = { ...cfg, sku: false };   // WIP ไม่โชว์บรรทัดสินค้า (เจ้าของเลือก)
   // ช่องเล็ก (รอตรวจ/ต้องแก้) = การ์ดย่อแบบเดิมเสมอ ไม่ตามหน้าตาสำเร็จรูป
-  const smallCfg: KanbanTheme = { ...cfg, cardLook: "std", sku: false, cover: false, progress: false, brand: false, taskNo: false, taskType: false, compact: true };
+  // รูปเล็กด้านซ้าย เห็นทั้งรูป (เจ้าของเลือกแบบ B 2026-11-20 · เดิมไม่มีรูป) · งานไม่มีรูป = การ์ดข้อความเหมือนเดิม (ไม่มีกล่องรูปว่าง)
+  const smallCfg: KanbanTheme = { ...cfg, cardLook: "std", sku: false, cover: true, coverPos: "side", coverSize: "sm", coverFit: "contain", progress: false, brand: false, taskNo: false, taskType: false, compact: true };
   // การ์ดช่องใหญ่: ไม่มีรูป = ไม่โชว์กล่องรูปว่าง (เจ้าของขอ 2026-10-26 เดิมกินที่) · ยืดเต็มความสูงแถว
   const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400, placeholder: false, fill: true };
   const group: WipGroup = cfg.wipGroup ?? "status";
-  const smallExtra: CardExtra = { relDue: true, fill: true };
+  const smallExtra: CardExtra = { relDue: true, fill: true, imgW: 160, placeholder: false };
   const gap = cardGapPx(cfg);
   // สีแถบหัวช่อง = สีสถานะที่ผู้ใช้ตั้งเอง (ถ้ามี)
   const barOf = (key: string) => statusColors?.[key]?.c1 || undefined;

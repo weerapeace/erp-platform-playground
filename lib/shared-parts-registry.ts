@@ -1052,7 +1052,7 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "หน้าที่ไม่มีแถบล่างเอง (ไม่ต้องเรียก)",
   },
   {
-    key: "gallery-columns", label: "มุมมองการ์ดกลาง (ขนาดการ์ด · Ctrl+ลูกกลิ้ง · โหลด/ว่าง/พลาด)", code: "GalleryColumns · CardGrid · CardViewBar · CardZoom", category: "layout",
+    key: "gallery-columns", label: "มุมมองการ์ดกลาง (ขนาดการ์ด · Ctrl+ลูกกลิ้ง · โหลด/ว่าง/พลาด)", code: "GalleryColumns · CardGrid · CardViewBar · CardZoom · useCtrlWheel", category: "layout",
     source: { path: "components/gallery-columns" },
     what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว สูงสุด 16 (จำค่าไว้แยกต่อหน้า) · จอแคบลดจำนวนเอง (การ์ดไม่เล็กกว่า 70px) · Ctrl + หมุนลูกกลิ้งบนกริดย่อ/ขยาย (เปิดเป็นค่าเริ่มต้น ผูก wheelRef ที่กริด) · {...compactAttr} + class GALLERY_LABEL = 12 ใบขึ้นไปซ่อนชื่อใต้การ์ด · thumbW(base) = ขนาดรูปย่อตามขนาดการ์ด · กริดที่ทำเองด้วย CSS var ใช้ galleryTemplate(cols, gap) · options GALLERY_COL_CHOICES มี 2 ต่อแถวสำหรับการ์ดใหญ่",
     when: "ทุกหน้าที่โชว์การ์ด/รูปเป็นกริด → CardGrid (กริด + สถานะ โหลด/ว่าง/พลาด + Ctrl+ลูกกลิ้ง) + CardViewBar (จำนวน · ปุ่มของหน้า · สลับการ์ด/ตาราง · ขนาด − N +) · ของกลางที่มีหลายกริด/ป๊อปอัป → CardZoom หรือ useGalleryColumns({ enabled: open }) · MiniTable ใส่ cardZoom · DataTable โหมดการ์ดได้เองทุกตาราง · ห้ามเขียน grid-template auto-fill เองในหน้า (2026-11-20) · ลองเล่นได้ที่ drawer หน้า /admin/plugins",

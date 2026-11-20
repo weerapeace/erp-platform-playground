@@ -6,7 +6,8 @@
 // ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว + DataTable กลาง · ธีมต่อคนจาก user_ui_prefs
 // ============================================================
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCtrlWheel } from "@/components/gallery-columns";
 import Link from "next/link";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
@@ -87,6 +88,37 @@ export function OverviewDashboard({
   const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
   const [kanbanSearch, setKanbanSearch] = useState(""); // ค้นหาในบอร์ด Kanban
   const setKanbanView = (v: KanbanView) => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
+  // 🔍 Ctrl + ลูกกลิ้ง บนบอร์ด (เจ้าของขอ 2026-11-20 · ของกลาง useCtrlWheel)
+  //   WIP = จำนวนการ์ดต่อแถวในช่องใหญ่ (1–6 · ค่าเดียวกับ ⚙️ คอลัมน์) · การ์ด = ขนาดการ์ด เล็ก/กลาง/ใหญ่ · จำต่อคนในธีมเดิม
+  //   หมุนลง = ย่อ (เห็นมากขึ้น) · หมุนขึ้น = ขยาย · ป้ายบอกค่าแล้วหายเอง
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  const [zoomMsg, setZoomMsg] = useState<string | null>(null);
+  const zoomTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (zoomTimer.current) clearTimeout(zoomTimer.current); }, []);
+  const flashZoom = (msg: string) => {
+    setZoomMsg(msg);
+    if (zoomTimer.current) clearTimeout(zoomTimer.current);
+    zoomTimer.current = setTimeout(() => setZoomMsg(null), 900);
+  };
+  const boardWheelRef = useCtrlWheel((dir) => {
+    const th = themeRef.current, k = th.kanban;
+    if (k.view === "wip") {
+      const cur = k.wipCols ?? 2;
+      const next = Math.max(1, Math.min(6, cur + dir)) as NonNullable<typeof k.wipCols>;
+      flashZoom(t(`${next} ต่อแถว`, `${next} per row`));
+      if (next !== cur) onThemeChange({ ...th, kanban: { ...k, wipCols: next } });
+    } else if (k.view === "kanban") {
+      const order = ["sm", "md", "lg"] as const;
+      const i = Math.max(0, order.indexOf((k.cardScale ?? "md") as (typeof order)[number]));
+      const next = order[Math.max(0, Math.min(2, i - dir))];
+      flashZoom(t(`การ์ด${({ sm: "เล็ก", md: "กลาง", lg: "ใหญ่" } as const)[next]}`, `${({ sm: "Small", md: "Medium", lg: "Large" } as const)[next]} cards`));
+      if (next !== (k.cardScale ?? "md")) onThemeChange({ ...th, kanban: { ...k, cardScale: next } });
+    }
+  });
+  const zoomBadge = zoomMsg && (
+    <div className="pointer-events-none absolute right-3 top-3 z-20 rounded-full bg-slate-900/85 px-2.5 py-1 text-xs font-medium text-white shadow" aria-live="polite">{zoomMsg}</div>
+  );
 
   // งานของฉัน = งานหลักของฉัน ∪ งานที่มีงานย่อย (subtask) ของฉัน
   const myTaskIds = useMemo(() => {
@@ -476,12 +508,14 @@ export function OverviewDashboard({
             </div>
           </div>
           {theme.kanban.view === "wip" ? (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div ref={boardWheelRef} title={t("Ctrl + ลูกกลิ้ง = ย่อ/ขยายการ์ด", "Ctrl + wheel = zoom cards")} className="relative bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              {zoomBadge}
               <WipBoard tasks={kanbanTasks} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
                 onMoveStatus={onMoveStatus} onCardClick={onOpenTask} onCfgChange={(k) => onThemeChange({ ...theme, kanban: k })} />
             </div>
           ) : theme.kanban.view === "kanban" ? (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div ref={boardWheelRef} className="relative bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              {zoomBadge}
               <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent} statusColors={theme.statusColors} anim={theme.anim}
                 onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask}
                 onShowAllStatus={(k) => { onStatusFilter?.(k); onThemeChange({ ...theme, kanban: { ...theme.kanban, view: "table" } }); }} />

@@ -56,3 +56,12 @@ const gallery = useGalleryColumns("my-page", 6);           // scope ไม่ซ
 
 ## ยังทำกริดเอง (รอย้ายทีละกลุ่ม · เจ้าของติ๊กก่อนทุกรอบ)
 หา: `grep -rl "auto-fill, minmax" app components | xargs grep -L gallery-columns`
+
+## useCtrlWheel (2026-11-20)
+ตัวจับ Ctrl (⌘) + ลูกกลิ้งแยกออกมาเป็นของกลาง — ใช้เมื่อหน้าเก็บ "จำนวนต่อแถว/ขนาด" เองที่อื่น (ไม่ได้ใช้ useGalleryColumns)
+```tsx
+const wheelRef = useCtrlWheel((dir) => { /* dir 1 = หมุนลง (ย่อ) · -1 = หมุนขึ้น (ขยาย) */ });
+<div ref={wheelRef}>…</div>
+```
+- useGalleryColumns ใช้ตัวนี้ข้างใน (wheelRef เดิมทำงานเหมือนเดิม)
+- ใช้แล้วที่: บอร์ดงาน /tasks (WIP = จำนวนต่อแถว 1–6 · การ์ด = ขนาดการ์ด เล็ก/กลาง/ใหญ่ · ป้ายบอกค่าแล้วหายเอง)

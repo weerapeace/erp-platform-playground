@@ -76,29 +76,42 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
   // Ctrl (⌘) + ลูกกลิ้ง — ฟังที่ตัวกริดเอง (passive:false เพื่อกันเบราว์เซอร์ซูมทั้งหน้า)
   const colsRef = useRef(cols);
   colsRef.current = cols;
+  const wheelRef = useCtrlWheel((dir) => {
+    const next = stepGalleryCols(colsRef.current, dir, options) as GalleryCols;
+    if (next !== colsRef.current) setCols(next);
+  }, opts?.ctrlWheel ?? true);
+
+  return { cols, setCols, gridStyle, wheelRef, compact, compactAttr, thumbW, options };
+}
+
+/**
+ * ตัวจับ Ctrl (⌘) + ลูกกลิ้ง (ของกลาง) — ใช้เมื่อหน้าเก็บ "จำนวนต่อแถว/ขนาด" เองที่อื่น (เช่น ธีมบอร์ดงาน /tasks)
+ *   const wheelRef = useCtrlWheel((dir) => …);   // dir 1 = หมุนลง (ย่อ = เห็นมากขึ้น) · -1 = หมุนขึ้น (ขยาย)
+ *   <div ref={wheelRef}>…</div>
+ * ฟังที่กล่องเอง passive:false กันเบราว์เซอร์ซูมทั้งหน้า · ทัชแพดบีบนิ้วส่งถี่ → ขั้นละครั้งทุก 140ms
+ * ถ้าหน้าใช้ useGalleryColumns อยู่แล้ว ใช้ wheelRef ของตัวนั้น ไม่ต้องเรียกตัวนี้ซ้ำ
+ */
+export function useCtrlWheel(onStep: (dir: 1 | -1) => void, enabled = true) {
+  const stepRef = useRef(onStep);
+  stepRef.current = onStep;
   const detach = useRef<(() => void) | null>(null);
-  const ctrlWheel = opts?.ctrlWheel ?? true;
-  const optionsKey = options.join(",");
-  const wheelRef = useCallback((el: HTMLElement | null) => {
+  useEffect(() => () => detach.current?.(), []);
+  return useCallback((el: HTMLElement | null) => {
     detach.current?.();
     detach.current = null;
-    if (!el || !ctrlWheel) return;
+    if (!el || !enabled) return;
     let last = 0;
     const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey) || !e.deltaY) return;
       e.preventDefault();
       const now = Date.now();
-      if (now - last < 140) return;   // ทัชแพด (บีบนิ้ว) ส่งมาถี่มาก — ขั้นละครั้ง
+      if (now - last < 140) return;
       last = now;
-      const next = stepGalleryCols(colsRef.current, e.deltaY > 0 ? 1 : -1, options) as GalleryCols;
-      if (next !== colsRef.current) setCols(next);
+      stepRef.current(e.deltaY > 0 ? 1 : -1);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     detach.current = () => el.removeEventListener("wheel", onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctrlWheel, optionsKey, setCols]);
-
-  return { cols, setCols, gridStyle, wheelRef, compact, compactAttr, thumbW, options };
+  }, [enabled]);
 }
 
 /** ค่าที่ useGalleryColumns คืน — ส่งต่อให้ CardGrid / CardViewBar */
