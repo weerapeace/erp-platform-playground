@@ -10,6 +10,8 @@
  *   - "รอแพ็ค/ยืนยัน · รอส่ง" นับใบจากเมล (ส่งแล้ว สถานะ new ตลอด) เป็นพัน → ใช้ needsAction (ตัวเดียวกับศูนย์ออเดอร์)
  *   - กรองวันที่ด้วย created_at (เวลาที่ระบบบันทึก — ใบที่ดึงย้อนหลังวันเดียวกันหมด) + ขอบวันแบบ UTC → ใช้ ordered_at ขอบวันเวลาไทย
  *   - สินค้าขายดีส่ง id 5,000 ตัวในคำขอเดียว (ยาวเกิน/ตัดที่พัน) → ถามทีละชุด
+ * ➕ 2026-11-20 (หน้าใหม่แบบนิตยสาร): byDay (ยอดรายวันตามวันไทย) · prev (ยอดช่วงก่อนหน้ายาวเท่ากัน เมื่อเลือกทั้ง from+to)
+ *   · topProducts[].image (รูปสินค้าที่จับคู่ ERP แล้ว) · byPlatform[].id — สูตรตัวเลขเดิมไม่เปลี่ยน
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -17,6 +19,7 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { countsAsSale, isReportOnly, needsAction } from "@/lib/platform-order-status";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,7 +34,20 @@ function bkkDayStart(d: string, addDays = 0): string | null {
   return Number.isFinite(ms) ? new Date(ms + addDays * 86_400_000).toISOString() : null;
 }
 
-type OrderLite = { id: string; platform_id: string | null; status: string; platform_status: string | null; source: string | null; total: number | null };
+/** วันไทย "YYYY-MM-DD" ของเวลา ISO */
+function bkkDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? new Date(ms + 7 * 3_600_000).toISOString().slice(0, 10) : null;
+}
+/** บวก/ลบวันของ "YYYY-MM-DD" (คิดแบบ UTC ล้วน กันเวลาไทยร่นวัน) */
+function shiftDay(d: string, n: number): string {
+  return new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+}
+const isYmd = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+const MAX_DAILY = 120;   // ช่วงยาวกว่านี้ → รวมเป็นรายเดือน
+
+type OrderLite = { id: string; platform_id: string | null; status: string; platform_status: string | null; source: string | null; total: number | null; ordered_at?: string | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
@@ -54,7 +70,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const fromIso = from ? bkkDayStart(from) : null;
   const toIso = to ? bkkDayStart(to, 1) : null;   // ถึงสิ้นวัน "to" (เวลาไทย) = ก่อนเริ่มวันถัดไป
   const orders = await fetchAllPages<OrderLite>((a, b) => {
-    let oq = admin.from("platform_orders").select("id, platform_id, status, platform_status, source, total");
+    let oq = admin.from("platform_orders").select("id, platform_id, status, platform_status, source, total, ordered_at");
     if (platformId) oq = oq.eq("platform_id", platformId);
     if (brandId) oq = oq.eq("brand_id", brandId);
     if (fromIso) oq = oq.gte("ordered_at", fromIso);
@@ -92,7 +108,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const os = orders.filter((o) => o.platform_id === p.id);
     const cs = catalog.filter((c) => c.platform_id === p.id);
     return {
-      code: p.code, name_th: p.name_th, icon_key: p.icon_key,
+      id: p.id, code: p.code, name_th: p.name_th, icon_key: p.icon_key,
       orders: os.length, sales: sum(os.filter(countsAsSale)),
       catalog: cs.length, matched: cs.filter((c) => c.matched_parent_sku_id).length,
     };
@@ -104,7 +120,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const byStatus = STATUS_ORDER.map((s) => ({ status: s, count: orders.filter((o) => effStatus(o) === s).length }));
 
   // สินค้าขายดี (จาก order items ของออเดอร์ที่นับเป็นยอดขาย) — ถามทีละชุด พร้อมกันทีละ 4
-  let topProducts: { key: string; name: string; sku: string | null; qty: number; sales: number }[] = [];
+  let topProducts: { key: string; name: string; sku: string | null; qty: number; sales: number; image?: string | null }[] = [];
   const orderIds = sales.map((o) => o.id);
   if (orderIds.length) {
     type ItemLite = { matched_sku_id: string | null; sku_code: string | null; name: string | null; qty: number | null; price: number | null };
@@ -124,6 +140,62 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       map.set(key, g);
     }
     topProducts = [...map.values()].sort((a, b) => b.qty - a.qty).slice(0, 10);
+    // รูป: เฉพาะตัวที่จับคู่ ERP แล้ว (key = matched_sku_id) · SKU ไม่มีรูป → ใช้รูปสินค้าแม่
+    const matchedIds = new Set(items.filter((it) => it.matched_sku_id).map((it) => it.matched_sku_id as string));
+    const skuIds = topProducts.map((t) => t.key).filter((k) => matchedIds.has(k));
+    if (skuIds.length) {
+      const { data: imgRows } = await admin.from("skus_v2").select("id, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("id", skuIds);
+      const imgMap = new Map<string, string | null>();
+      for (const r of ((imgRows ?? []) as Record<string, unknown>[])) {
+        const parent = r.parent_skus_v2 as { cover_image_r2_key?: string | null } | { cover_image_r2_key?: string | null }[] | null;
+        const parentKey = Array.isArray(parent) ? parent[0]?.cover_image_r2_key : parent?.cover_image_r2_key;
+        imgMap.set(String(r.id), r2ImageUrl(((r.cover_image_r2_key as string | null) || parentKey) ?? null, 160));
+      }
+      topProducts = topProducts.map((t) => ({ ...t, image: imgMap.get(t.key) ?? null }));
+    }
+  }
+
+  // ยอดรายวัน (วันไทย ตาม ordered_at · นับเฉพาะใบที่นับเป็นยอดขาย กติกาเดียวกับยอดขายรวม)
+  //   ไม่เลือกช่วง = 30 วันล่าสุด · เลือกช่วง = ทุกวันในช่วง · ยาวเกิน 120 วัน = รายเดือน
+  const today = bkkDate(new Date().toISOString()) as string;
+  const dayTo = isYmd(to) ? (to > today ? today : to) : today;   // ไม่นับวันในอนาคต (เช่น "เดือนนี้" ถึงสิ้นเดือน) — ช่วงก่อนหน้าจะยาวเท่าวันที่ผ่านมาจริง
+  const dayFrom = isYmd(from) ? from : shiftDay(dayTo, -29);
+  const spanDays = Math.round((Date.parse(`${dayTo}T00:00:00Z`) - Date.parse(`${dayFrom}T00:00:00Z`)) / 86_400_000) + 1;
+  const monthly = spanDays > MAX_DAILY;
+  const dayMap = new Map<string, { sales: number; orders: number }>();
+  if (spanDays > 0) {
+    if (monthly) {
+      for (let m = dayFrom.slice(0, 7); m <= dayTo.slice(0, 7);) {
+        dayMap.set(m, { sales: 0, orders: 0 });
+        const [y, mo] = m.split("-").map(Number);
+        m = mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
+      }
+    } else {
+      for (let i = 0; i < spanDays; i++) dayMap.set(shiftDay(dayFrom, i), { sales: 0, orders: 0 });
+    }
+    for (const o of sales) {
+      const d = bkkDate(o.ordered_at ?? null);
+      if (!d || d < dayFrom || d > dayTo) continue;
+      const g = dayMap.get(monthly ? d.slice(0, 7) : d);
+      if (g) { g.sales += Number(o.total) || 0; g.orders += 1; }
+    }
+  }
+  const byDay = { unit: monthly ? "month" : "day", from: dayFrom, to: dayTo, points: [...dayMap.entries()].map(([date, v]) => ({ date, ...v })) };
+
+  // ช่วงก่อนหน้า (ยาวเท่ากัน ต่อท้ายก่อน from) — เฉพาะเมื่อเลือกทั้ง from และ to · ช่วงยาวเกิน 120 วันไม่เทียบ (โหลดหนัก)
+  let prev: { from: string; to: string; salesTotal: number; ordersCount: number } | null = null;
+  if (fromIso && toIso && spanDays > 0 && !monthly) {
+    const pFrom = shiftDay(from, -spanDays), pTo = shiftDay(from, -1);
+    const pFromIso = bkkDayStart(pFrom), pToIso = bkkDayStart(pTo, 1);
+    if (pFromIso && pToIso) {
+      const pOrders = await fetchAllPages<OrderLite>((a, b) => {
+        let oq = admin.from("platform_orders").select("id, platform_id, status, platform_status, source, total");
+        if (platformId) oq = oq.eq("platform_id", platformId);
+        if (brandId) oq = oq.eq("brand_id", brandId);
+        return oq.gte("ordered_at", pFromIso).lt("ordered_at", pToIso).order("id", { ascending: true }).range(a, b);
+      });
+      prev = { from: pFrom, to: pTo, salesTotal: sum(pOrders.filter(countsAsSale)), ordersCount: pOrders.length };
+    }
   }
 
   // สต๊อกใกล้หมด (คงเหลือพร้อมขาย = on_hand - reserved <= 5)
@@ -139,5 +211,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     lowStock = lowBals.map((b) => ({ code: skuMap.get(b.product_id)?.code ?? "—", name: skuMap.get(b.product_id)?.name ?? "", available: b.available, warehouse: b.warehouse_id })).sort((a, b) => a.available - b.available).slice(0, 20);
   }
 
-  return NextResponse.json({ filters: { platforms, brands }, kpi, byPlatform, byStatus, topProducts, lowStock, error: null });
+  return NextResponse.json({ filters: { platforms, brands }, kpi, byPlatform, byStatus, topProducts, lowStock, byDay, prev, error: null });
 }

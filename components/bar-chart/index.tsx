@@ -5,18 +5,21 @@
  *   ใช้ดูยอดรายวัน/รายเดือน เช่น ค่า AI ย้อนหลัง (ศูนย์ AI / API ที่เสียเงิน)
  *   ชี้/แตะแท่ง = กล่องบอกค่า · แท่งที่ค่า = 0 วาดเป็นขีดบาง ๆ · ป้ายแกนล่างเว้นระยะอัตโนมัติไม่ให้ทับกัน
  *
+ *   สีแท่ง: barColor / barHoverColor (ไม่ส่ง = ฟ้าเดิม)
  *   <SimpleBarChart data={[{ key: "2026-11-06", label: "6 พ.ย.", value: 12.5, hint: "40 ครั้ง" }]} format={(v) => `฿${v}`} />
  */
 import { useState } from "react";
 
 export type BarDatum = { key: string; label: string; value: number; hint?: string };
 
-export function SimpleBarChart({ data, format = (v) => String(v), height = 200, emptyText = "ยังไม่มีข้อมูล", ariaLabel = "กราฟแท่ง" }: {
+export function SimpleBarChart({ data, format = (v) => String(v), height = 200, emptyText = "ยังไม่มีข้อมูล", ariaLabel = "กราฟแท่ง", barColor = "#60a5fa", barHoverColor = "#2563eb" }: {
   data: BarDatum[];
   format?: (v: number) => string;
   height?: number;
   emptyText?: string;
   ariaLabel?: string;
+  barColor?: string;
+  barHoverColor?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   if (!data.length) return <p className="py-8 text-center text-sm text-slate-400">{emptyText}</p>;
@@ -47,7 +50,7 @@ export function SimpleBarChart({ data, format = (v) => String(v), height = 200, 
             <g key={d.key} onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} style={{ cursor: "pointer" }}>
               <rect x={L + slot * i} y={T} width={slot} height={H - T - B} fill="transparent" />
               <rect x={cx - bw / 2} y={H - B - hgt} width={bw} height={hgt} rx={2}
-                fill={d.value > 0 ? (hover === i ? "#2563eb" : "#60a5fa") : "#cbd5e1"} />
+                fill={d.value > 0 ? (hover === i ? barHoverColor : barColor) : "#cbd5e1"} />
               {i % every === 0 && <text x={cx} y={H - 9} textAnchor="middle" fontSize={11} fill="#64748b">{d.label}</text>}
             </g>
           );
