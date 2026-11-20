@@ -42,6 +42,9 @@ export function friendlyMetaError(platform: string, raw: string, code?: number, 
     return `${label(platform)}: สิทธิ์ไม่พอหรือการเชื่อมต่อหมดอายุ — ไปกด “เชื่อมต่อใหม่” ที่หน้าบัญชีแพลตฟอร์ม (${m})`;
   if (/aspect ratio/i.test(m)) return `${label(platform)}: สัดส่วนรูปไม่ผ่าน (IG รับ 4:5 ถึง 1.91:1 · Story/Reels = แนวตั้ง 9:16) — ${m}`;
   if (/(rate|request) limit|too many/i.test(m)) return `${label(platform)}: โพสต์ถี่เกินที่แพลตฟอร์มกำหนด — ลองใหม่ภายหลัง (${m})`;
+  // IG ยังเตรียมรูป/อัลบั้มไม่เสร็จตอนสั่งเผยแพร่ (9007 / 2207027) — ไม่ใช่ไฟล์เสีย (ต้องเช็กก่อนกฎ "media" ด้านล่าง)
+  if (code === 9007 || subcode === 2207027 || /media id is not available|not ready to (be )?publish/i.test(m))
+    return `${label(platform)}: ยังเตรียมรูปไม่เสร็จตอนสั่งโพสต์ — รอสักครู่แล้วกดโพสต์อีกครั้ง (${m})`;
   if (/media|video|image|download|fetch/i.test(m)) return `${label(platform)}: ดึงไฟล์ไม่สำเร็จ — ตรวจชนิด/ขนาดไฟล์ (วิดีโอ MP4/MOV) และการแชร์ไฟล์ Drive (${m})`;
   return `${label(platform)} ปฏิเสธ: ${m}`;
 }

@@ -179,7 +179,17 @@ async function igWaitReady(token: string, creationId: string, tries = 6, delayMs
 // เผยแพร่ container ที่พร้อมแล้ว → คืน media id + ลิงก์
 export async function igPublish(igId: string, token: string, creationId: string): Promise<{ url: string; id: string }> {
   const b = new URLSearchParams({ creation_id: creationId, access_token: token });
-  const j = await graph(`${META_API}/${igId}/media_publish`, { method: "POST", body: b });
+  // IG ตอบ "ยังไม่พร้อม" (9007 / 2207027) ได้ถ้า container เพิ่งเสร็จ → รอแล้วลองใหม่สั้น ๆ (สูงสุด 4 ครั้ง)
+  let j: Record<string, unknown> = {};
+  for (let attempt = 0; ; attempt++) {
+    try { j = await graph(`${META_API}/${igId}/media_publish`, { method: "POST", body: b }); break; }
+    catch (e) {
+      const me = e instanceof MetaApiError ? e : null;
+      const notReady = me?.code === 9007 || me?.subcode === 2207027 || /not (yet )?(available|ready)/i.test((e as Error).message);
+      if (!notReady || attempt >= 3) throw e;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
   const id = String(j.id ?? "");
   return { id, url: id ? `https://www.instagram.com/` : "" };   // permalink จริงต้องดึงเพิ่ม — คืนลิงก์ IG ทั่วไปพอ
 }
@@ -192,14 +202,15 @@ export async function igPublishImages(igId: string, token: string, caption: stri
     await igWaitReady(token, cid);
     return igPublish(igId, token, cid);
   }
-  // อัลบั้ม (สูงสุด 10 รูป): สร้าง child ทุกใบ → container พาเรนต์ CAROUSEL → เผยแพร่
-  const children: string[] = [];
-  for (const url of imageUrls.slice(0, 10)) children.push(await igImageContainer(igId, token, url, undefined, true));
-  for (const cid of children) await igWaitReady(token, cid);
+  // อัลบั้ม (สูงสุด 10 รูป): สร้าง child ทุกใบพร้อมกัน (ทีละใบ ~6 วิ/ใบ เกือบชนเวลา 60 วิ) → container พาเรนต์ CAROUSEL
+  //   → รอพาเรนต์พร้อมก่อนเผยแพร่ (เดิมเผยแพร่ทันที = IG ตอบว่ายังไม่พร้อม · เจอจริงโพสต์ LY22 2026-11-20)
+  const children = await Promise.all(imageUrls.slice(0, 10).map((url) => igImageContainer(igId, token, url, undefined, true)));
+  await Promise.all(children.map((cid) => igWaitReady(token, cid)));
   const b = new URLSearchParams({ media_type: "CAROUSEL", caption, access_token: token });
   children.forEach((cid, i) => b.set(`children[${i}]`, cid));
   const j = await graph(`${META_API}/${igId}/media`, { method: "POST", body: b });
   const parent = String(j.id ?? "");
+  await igWaitReady(token, parent, 8, 2000);
   return igPublish(igId, token, parent);
 }
 

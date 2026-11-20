@@ -30,6 +30,8 @@ export type PublishResult =
 // error ใด ๆ → ข้อความภาษาคน (ใช้รหัสของ Meta ถ้ามี)
 const metaErr = (platform: string, e: unknown): string => {
   const me = e instanceof MetaApiError ? e : null;
+  // เก็บข้อความดิบของ Meta ไว้ใน log ของ Vercel (ไม่มี token) — ไว้สืบเวลาโพสต์ล้ม
+  console.error(`[social-publish] ${platform} failed`, JSON.stringify({ code: me?.code ?? null, subcode: me?.subcode ?? null, message: (e as Error)?.message ?? String(e) }));
   return friendlyMetaError(platform, (e as Error)?.message ?? String(e), me?.code, me?.subcode);
 };
 
