@@ -1,0 +1,37 @@
+/**
+ * /api/cron/promo-covers — ตัวตั้งเวลาเปลี่ยนปกโปร (vercel.json ทุก 15 นาที)
+ *   ส่งปกโปรของชุดที่ถึงเวลาเริ่ม (TikTok/Lazada ล่วงหน้าตามที่ตั้ง) · ย้อนปกเดิมของชุดที่ถึงเวลาจบ · แจ้งกระดิ่งรายการที่ล้มเหลว
+ *   ไม่มีงานถึงเวลา = อ่านฐานข้อมูล 1 ครั้งแล้วจบ (ไม่แตะร้าน)
+ *   คนกดเอง (products.platforms.view) = ดูว่ามีงานรอกี่ชุด ไม่ทำจริง
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
+import { isTrustedCron } from "@/lib/cron-auth";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
+import { runPromoCovers } from "@/lib/promo-cover-server";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const maxDuration = 300;
+
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  const cron = isTrustedCron(request);
+  const admin = supabaseAdmin();
+  if (!cron) {
+    const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
+    const { data } = await admin.from("promo_cover_campaigns").select("id, name, status, starts_at, ends_at").in("status", ["scheduled", "live"]).is("deleted_at", null);
+    return NextResponse.json({ dry: true, campaigns: data ?? [] }, { headers: { "Cache-Control": "no-store" } });
+  }
+  try {
+    const r = await runPromoCovers(admin, { budgetMs: 270_000, actor: { id: null, name: "ตัวตั้งเวลาเปลี่ยนปกโปร" } });
+    const busy = r.applied + r.reverted + r.failed + r.conflict;
+    const summary = busy ? `ส่งปกโปร ${r.applied} · ย้อนปกเดิม ${r.reverted} · ไม่ผ่าน ${r.failed} · มีคนเปลี่ยนปกเอง ${r.conflict}${r.remaining ? ` · ค้าง ${r.remaining} (ทำต่อรอบหน้า)` : ""}` : `ไม่มีงานถึงเวลา (${r.campaigns} ชุดที่รอ/กำลังใช้)`;
+    await recordWorkerRun(admin, "promo-covers", { ok: true, summary, warn: r.failed > 0 || r.conflict > 0 });
+    return NextResponse.json({ ok: true, ...r, summary });
+  } catch (e) {
+    const error = e instanceof Error ? e.message : "cron failed";
+    await recordWorkerRun(admin, "promo-covers", { ok: false, error });
+    return NextResponse.json({ ok: false, error }, { status: 500 });
+  }
+}
