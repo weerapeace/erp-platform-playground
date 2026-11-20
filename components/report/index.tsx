@@ -3,7 +3,9 @@
 import { SendPdfButton } from "./send-pdf";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { PRINT_EVENT, type PrintHow } from "@/lib/print-log";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import { Popover } from "@/components/popover";
+import { Icon } from "@/components/icon";
 import {
   compactReportLayout,
   DEFAULT_REPORT_LAYOUT,
@@ -482,6 +484,8 @@ export function ReportLayoutControls({
   savingDefault = false,
   defaultMessage,
   lines,
+  leading,
+  trailing,
 }: {
   value: ReportLayoutSettings;
   onChange: (next: ReportLayoutSettings) => void;
@@ -491,6 +495,10 @@ export function ReportLayoutControls({
   defaultMessage?: string | null;
   /** รายการในเอกสาร (ตามลำดับที่บันทึก) — ส่งมา = มีปุ่ม "สลับรายการ" ลากเรียงเองได้ */
   lines?: { label: string; sub?: string | null }[];
+  /** ซ้ายสุดของแถบ เช่น เมนู "แบบ" (PrintPresetMenu) — ส่งมา = ปุ่มค่าเริ่มต้นย้ายไปอยู่ในเมนูนั้น ไม่โชว์ปุ่มแยก */
+  leading?: ReactNode;
+  /** ขวาสุดของแถบ เช่น ปุ่ม "แก้ใบเสนอราคา" */
+  trailing?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
@@ -532,144 +540,119 @@ export function ReportLayoutControls({
     { key: "headerAdjPx", label: "หัวกระดาษ" },
   ];
   const fontAdjusted = fontItems.some(item => layout[item.key] !== 0);
+  const menuRow = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-slate-700 hover:bg-slate-50";
+  const menuIcon = "shrink-0 text-[15px] text-slate-400";
   const tabBtn = (on: boolean, active = false) => `h-9 rounded-lg border px-4 text-sm font-medium ${on ? "border-slate-900 bg-slate-900 text-white" : active ? "border-sky-300 bg-sky-50 text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`;
 
   return (
-    <div className="no-print mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-        <button
-          type="button"
-          onClick={() => setOpen(current => !current)}
-          className={`h-9 rounded-lg border px-4 text-sm font-medium ${open ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-        >
-          จัดหน้า
-        </button>
-        <button
-          type="button"
-          onClick={() => setSignatureOpen(current => !current)}
-          className={`h-9 rounded-lg border px-4 text-sm font-medium ${signatureOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-        >
-          ลายเซ็น / ตรา
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange(compactReportLayout(layout))}
-          className="h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
-        >
-          บีบให้ 1 หน้า
-        </button>
-        <button
-          type="button"
-          onClick={() => patch({ signatureToBottom: true })}
-          className="h-9 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-700 hover:bg-blue-100"
-        >
-          ลายเซ็นชิดล่าง
-        </button>
-        <button
-          type="button"
-          onClick={() => onChange(DEFAULT_REPORT_LAYOUT)}
-          className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          รีเซ็ต
-        </button>
-        <label
-          title="ติ๊ก = ไม่พิมพ์ยอดรวมท้ายใบ (แถวรวม, รวมเงิน, VAT, จำนวนเงินทั้งสิ้น) — เหมาะกับใบที่เสนอหลายราคาตามจำนวน"
-          className={`flex h-9 cursor-pointer items-center gap-2 rounded-lg border px-3 text-sm font-medium ${layout.showTotals ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50" : "border-amber-300 bg-amber-50 text-amber-800"}`}
-        >
-          <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />
-          ไม่รวมยอดทั้งหมด
-        </label>
-        {/* แบบรายการ: ตาราง / การ์ดรูปใหญ่ (เจ้าของขอ 2026-11-19) */}
-        <div className="flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 text-sm" title="แบบการแสดงรายการสินค้า">
-          <span className="px-1 font-medium text-slate-700">แบบ</span>
-          {([["table", "ตาราง"], ["cards", "การ์ดรูปใหญ่"]] as const).map(([v, label]) => (
+    // แถบจัดกลุ่มใหม่ (เจ้าของขอ 2026-11-20 "เมนูข้างบนดูใช้ยาก"): แบบ ▾ · ตาราง/การ์ด · ต่อแถว · หน้าตา ▾ · ข้อมูล ▾ · (ปุ่มขวา)
+    // ติดใต้แถบพิมพ์ตอนเลื่อนดูใบยาว ๆ · แผงรายละเอียด (จัดหน้า/ลายเซ็น/ซ่อน/สลับ/ตัวหนังสือ/เงื่อนไข) เปิดใต้แถบเหมือนเดิม
+    <div className="no-print sticky top-[61px] z-[9] mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
+        {leading}
+        {/* แบบรายการ: ตาราง / การ์ดรูปใหญ่ */}
+        <div className="flex h-9 items-center gap-0.5 rounded-lg bg-slate-100 p-1 text-sm" title="แบบการแสดงรายการสินค้า">
+          {([["table", "ตาราง"], ["cards", "การ์ด"]] as const).map(([v, label]) => (
             <button key={v} type="button" onClick={() => patch({ lineStyle: v })} aria-pressed={layout.lineStyle === v}
-              className={`h-7 rounded px-2.5 text-sm font-medium ${layout.lineStyle === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}>{label}</button>
+              className={`h-7 rounded-md px-3 text-sm font-medium ${layout.lineStyle === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{label}</button>
           ))}
         </div>
         {layout.lineStyle === "cards" && (
-          <div className={`flex h-9 items-center gap-1 rounded-lg border px-1.5 text-sm ${layout.cardsPerRow === DEFAULT_REPORT_LAYOUT.cardsPerRow ? "border-slate-200 bg-white" : "border-sky-300 bg-sky-50"}`} title="จำนวนการ์ดต่อแถว — น้อย = รูปและตัวหนังสือใหญ่ขึ้น">
-            <span className="px-1 font-medium text-slate-700">ต่อแถว</span>
+          <div className="flex h-9 items-center gap-0.5 rounded-lg bg-slate-100 p-1 text-sm" title="จำนวนการ์ดต่อแถว — น้อย = รูปและตัวหนังสือใหญ่ขึ้น">
+            <span className="px-1.5 text-xs text-slate-500">ต่อแถว</span>
             {[1, 2, 3, 4].map(n => (
               <button key={n} type="button" onClick={() => patch({ cardsPerRow: n })} aria-pressed={layout.cardsPerRow === n}
-                className={`h-7 w-7 rounded text-sm font-semibold ${layout.cardsPerRow === n ? "bg-sky-600 text-white" : "text-slate-600 hover:bg-white"}`}>{n}</button>
+                className={`h-7 w-7 rounded-md text-sm font-semibold ${layout.cardsPerRow === n ? "bg-white text-sky-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{n}</button>
             ))}
           </div>
         )}
-        <button
-          type="button"
-          onClick={() => setHideOpen(current => !current)}
-          className={`h-9 rounded-lg border px-4 text-sm font-medium ${hideOpen ? "border-slate-900 bg-slate-900 text-white" : hiddenCount ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-        >
-          ซ่อนข้อมูล{hiddenCount ? ` (${hiddenCount})` : ""}
-        </button>
-        {lineCount > 1 && (
-          <button type="button" onClick={() => setOrderOpen(current => !current)} className={tabBtn(orderOpen, orderChanged)}
-            title="ลากสลับลำดับรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
-            สลับรายการ{orderChanged ? " •" : ""}
-          </button>
+        {/* หน้าตา ▾ */}
+        <Popover align="left" panelClassName="w-64 py-1"
+          trigger={(toggle, isOpen) => (
+            <button type="button" onClick={toggle} className={tabBtn(isOpen || open || signatureOpen || fontOpen, fontAdjusted)}>
+              <span className="inline-flex items-center gap-1.5"><Icon value="i:adjustments-horizontal" className="text-[15px]" />หน้าตา<Icon value="i:chevron-down" className="text-[12px] opacity-60" /></span>
+            </button>
+          )}>
+          {(close) => (
+            <>
+              <button type="button" className={menuRow} onClick={() => { close(); setOpen(c => !c); }}><Icon value="i:ruler" className={menuIcon} />จัดหน้า (ขอบ · ขนาดตัวอักษร){open ? " ✓" : ""}</button>
+              {layout.lineStyle === "cards" && (
+                <button type="button" className={menuRow} onClick={() => { close(); setFontOpen(c => !c); }}><Icon value="i:typography" className={menuIcon} />ตัวหนังสือแยกส่วน{fontAdjusted ? " •" : ""}</button>
+              )}
+              {layout.showImage && layout.lineStyle === "table" && (
+                <div className="flex items-center gap-1 px-3 py-1.5 text-[13px] text-slate-700" title="ขนาดรูปสินค้าในตาราง — แถวสูง/เตี้ยตามรูปอัตโนมัติ">
+                  <Icon value="i:photo" className={menuIcon} /><span className="flex-1">ขนาดรูป</span>
+                  <button type="button" onClick={() => setImageSize(layout.imageSizeMm - 2)} disabled={layout.imageSizeMm <= REPORT_IMAGE_SIZE_MIN_MM}
+                    aria-label="ลดขนาดรูป" className="h-7 w-7 rounded border border-slate-200 text-base font-semibold hover:bg-slate-50 disabled:opacity-30">−</button>
+                  <span className="w-11 text-center font-mono text-xs">{layout.imageSizeMm}mm</span>
+                  <button type="button" onClick={() => setImageSize(layout.imageSizeMm + 2)} disabled={layout.imageSizeMm >= REPORT_IMAGE_SIZE_MAX_MM}
+                    aria-label="เพิ่มขนาดรูป" className="h-7 w-7 rounded border border-slate-200 text-base font-semibold hover:bg-slate-50 disabled:opacity-30">+</button>
+                </div>
+              )}
+              <button type="button" className={menuRow} onClick={() => { close(); onChange(compactReportLayout(layout)); }}><Icon value="i:minimize" className={menuIcon} />บีบให้ 1 หน้า</button>
+              <div className="my-1 border-t border-slate-100" />
+              <button type="button" className={menuRow} onClick={() => { close(); setSignatureOpen(c => !c); }}><Icon value="i:signature" className={menuIcon} />ลายเซ็น / ตรา{signatureOpen ? " ✓" : ""}</button>
+              <button type="button" className={menuRow} onClick={() => { close(); patch({ signatureToBottom: true }); }}><Icon value="i:chevron-down" className={menuIcon} />ลายเซ็นชิดล่าง{layout.signatureToBottom ? " ✓" : ""}</button>
+              <div className="my-1 border-t border-slate-100" />
+              <button type="button" className={`${menuRow} text-slate-500`} onClick={() => { close(); onChange(DEFAULT_REPORT_LAYOUT); }}><Icon value="i:refresh" className={menuIcon} />รีเซ็ตหน้าตาทั้งหมด</button>
+            </>
+          )}
+        </Popover>
+        {/* ข้อมูล ▾ */}
+        <Popover align="left" panelClassName="w-72 py-1"
+          trigger={(toggle, isOpen) => (
+            <button type="button" onClick={toggle} className={tabBtn(isOpen || hideOpen || orderOpen || termsOpen, hiddenCount > 0 || !layout.showTotals || layout.sortBy !== "none" || orderChanged)}>
+              <span className="inline-flex items-center gap-1.5"><Icon value="i:list" className="text-[15px]" />ข้อมูล
+                {hiddenCount + (layout.showTotals ? 0 : 1) > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800">ซ่อน {hiddenCount + (layout.showTotals ? 0 : 1)}</span>}
+                <Icon value="i:chevron-down" className="text-[12px] opacity-60" /></span>
+            </button>
+          )}>
+          {(close) => (
+            <>
+              <button type="button" className={menuRow} onClick={() => { close(); setHideOpen(c => !c); }}><Icon value="i:eye-off" className={menuIcon} />ซ่อนข้อมูล{hiddenCount ? ` (${hiddenCount})` : ""}</button>
+              <label className={`${menuRow} cursor-pointer`} title="ไม่พิมพ์ยอดรวมท้ายใบ (แถวรวม, รวมเงิน, VAT, จำนวนเงินทั้งสิ้น) — เหมาะกับใบที่เสนอหลายราคาตามจำนวน">
+                <input type="checkbox" checked={!layout.showTotals} onChange={(e) => patch({ showTotals: !e.target.checked })} className="h-4 w-4 cursor-pointer" />ไม่รวมยอดทั้งหมด
+              </label>
+              <div className="my-1 border-t border-slate-100" />
+              <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 text-[13px] text-slate-700" title="เรียงรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
+                <Icon value="i:arrows-sort" className={menuIcon} /><span>เรียง</span>
+                <select value={layout.sortBy} onChange={(e) => patch({ sortBy: e.target.value as ReportLayoutSettings["sortBy"] })}
+                  className="h-7 flex-1 cursor-pointer rounded border border-slate-200 bg-white px-1 text-[13px] focus:outline-none">
+                  <option value="none">ตามที่บันทึก</option>
+                  <option value="qty">จำนวน</option>
+                  <option value="price">ราคา/หน่วย</option>
+                  <option value="sku">รหัสสินค้า</option>
+                </select>
+                {layout.sortBy !== "none" && (<>
+                  <button type="button" onClick={() => patch({ sortDesc: !layout.sortDesc })}
+                    className="h-7 rounded border border-slate-200 px-1.5 text-xs font-medium hover:bg-slate-50">{layout.sortDesc ? "มาก→น้อย ↓" : "น้อย→มาก ↑"}</button>
+                  <label className="flex w-full cursor-pointer items-center gap-1 pl-6 text-xs" title="เรียงแยกเป็นกลุ่มตามตัวเลือก (สี/ไซส์)">
+                    <input type="checkbox" checked={layout.sortGroupByNote} onChange={(e) => patch({ sortGroupByNote: e.target.checked })} className="h-3.5 w-3.5 cursor-pointer" />
+                    แยกตามตัวเลือก
+                  </label>
+                </>)}
+              </div>
+              {lineCount > 1 && (
+                <button type="button" className={menuRow} onClick={() => { close(); setOrderOpen(c => !c); }} title="ลากสลับลำดับรายการเฉพาะตอนพิมพ์">
+                  <Icon value="i:grip-vertical" className={menuIcon} />สลับรายการ (ลากเรียงเอง){orderChanged ? " •" : ""}</button>
+              )}
+              <div className="my-1 border-t border-slate-100" />
+              <button type="button" className={menuRow} onClick={() => { close(); setTermsOpen(c => !c); }}><Icon value="i:file-text" className={menuIcon} />เงื่อนไขท้ายใบ{layout.showTerms ? " •" : ""}</button>
+            </>
+          )}
+        </Popover>
+        {!leading && onUseDefault && (
+          <button type="button" onClick={onUseDefault} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">ใช้ค่าเริ่มต้น</button>
         )}
-        {layout.lineStyle === "cards" && (
-          <button type="button" onClick={() => setFontOpen(current => !current)} className={tabBtn(fontOpen, fontAdjusted)}
-            title="ปรับขนาดตัวหนังสือแยกส่วน: ชื่อสินค้า / หมายเหตุ / ราคา / หัวกระดาษ">
-            ตัวหนังสือ{fontAdjusted ? " •" : ""}
-          </button>
-        )}
-        <button type="button" onClick={() => setTermsOpen(current => !current)} className={tabBtn(termsOpen, layout.showTerms)}
-          title="กล่องเงื่อนไขท้ายใบ เช่น ยืนราคา 30 วัน — แก้ข้อความเองได้">
-          เงื่อนไขท้ายใบ{layout.showTerms ? " •" : ""}
-        </button>
-        {layout.showImage && layout.lineStyle === "table" && (
-          <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.imageSizeMm === DEFAULT_REPORT_LAYOUT.imageSizeMm ? "border-slate-200 bg-white text-slate-700" : "border-sky-300 bg-sky-50 text-sky-800"}`}
-            title="ขนาดรูปสินค้าในตาราง — แถวสูง/เตี้ยตามรูปอัตโนมัติ">
-            <span className="font-medium">ขนาดรูป</span>
-            <button type="button" onClick={() => setImageSize(layout.imageSizeMm - 2)} disabled={layout.imageSizeMm <= REPORT_IMAGE_SIZE_MIN_MM}
-              aria-label="ลดขนาดรูป" className="h-7 w-7 rounded text-base font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-30">−</button>
-            <span className="w-11 text-center font-mono text-xs">{layout.imageSizeMm}mm</span>
-            <button type="button" onClick={() => setImageSize(layout.imageSizeMm + 2)} disabled={layout.imageSizeMm >= REPORT_IMAGE_SIZE_MAX_MM}
-              aria-label="เพิ่มขนาดรูป" className="h-7 w-7 rounded text-base font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-30">+</button>
-          </div>
-        )}
-        <div className={`flex h-9 items-center gap-1 rounded-lg border px-2 text-sm ${layout.sortBy === "none" ? "border-slate-200 bg-white text-slate-700" : "border-indigo-300 bg-indigo-50 text-indigo-800"}`}
-          title="เรียงรายการเฉพาะตอนพิมพ์ — ลำดับในเอกสารจริงไม่เปลี่ยน">
-          <span className="font-medium">เรียง</span>
-          <select value={layout.sortBy} onChange={(e) => patch({ sortBy: e.target.value as ReportLayoutSettings["sortBy"] })}
-            className="h-7 cursor-pointer rounded border-0 bg-transparent pr-1 text-sm font-medium focus:outline-none">
-            <option value="none">ตามที่บันทึก</option>
-            <option value="qty">จำนวน</option>
-            <option value="price">ราคา/หน่วย</option>
-            <option value="sku">รหัสสินค้า</option>
-          </select>
-          {layout.sortBy !== "none" && (<>
-            <button type="button" onClick={() => patch({ sortDesc: !layout.sortDesc })}
-              title={layout.sortDesc ? "มาก → น้อย (กดสลับ)" : "น้อย → มาก (กดสลับ)"}
-              className="h-7 rounded px-1.5 text-xs font-medium hover:bg-white">{layout.sortDesc ? "มาก→น้อย ↓" : "น้อย→มาก ↑"}</button>
-            <label className="flex cursor-pointer items-center gap-1 whitespace-nowrap pl-1 text-xs" title="เรียงแยกเป็นกลุ่มตามตัวเลือก (สี/ไซส์) — กลุ่มเรียงตามที่เจอก่อน">
-              <input type="checkbox" checked={layout.sortGroupByNote} onChange={(e) => patch({ sortGroupByNote: e.target.checked })} className="h-3.5 w-3.5 cursor-pointer" />
-              แยกตามตัวเลือก
-            </label>
-          </>)}
-        </div>
-        {onUseDefault && (
-          <button
-            type="button"
-            onClick={onUseDefault}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            ใช้ค่าเริ่มต้น
-          </button>
-        )}
-        {onSaveDefault && (
-          <button
-            type="button"
-            onClick={onSaveDefault}
-            disabled={savingDefault}
-            className="h-9 rounded-lg border border-slate-900 bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+        {!leading && onSaveDefault && (
+          <button type="button" onClick={onSaveDefault} disabled={savingDefault}
+            className="h-9 rounded-lg border border-slate-900 bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
             {savingDefault ? "กำลังบันทึก..." : "บันทึกเป็นค่าเริ่มต้น"}
           </button>
         )}
         {defaultMessage && <span className="text-xs text-slate-500">{defaultMessage}</span>}
+        <span className="flex-1" />
+        {trailing}
       </div>
 
       {hideOpen && (

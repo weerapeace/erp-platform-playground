@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame, ReportLayoutControls } from "@/components/report";
 import { usePrintPartEditor } from "@/components/print-part-style";
+import { PrintPresetMenu } from "@/components/print-presets";
+import { QuotationFormModal } from "@/components/quotation-form-modal";
+import { useAuth } from "@/components/auth";
+import { Icon } from "@/components/icon";
 import { QUOTE_CARD_PARTS, stripPerCardStyles } from "@/lib/print-part-style";
 import { apiFetch } from "@/lib/api";
 import {
@@ -103,6 +107,8 @@ export default function PrintQuotationPage() {
   const [layoutDefaultMessage, setLayoutDefaultMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -186,6 +192,25 @@ export default function PrintQuotationPage() {
     defaultImgMm: quoteCardImgMm(layout.cardsPerRow),
   });
 
+  // แบบที่บันทึก (เมนู "แบบ" · ของกลาง PrintPresetMenu ในระบบมุมมองที่บันทึก) — ไม่พาค่าเฉพาะใบนี้ (ลำดับที่ลากเอง · ซ่อนเฉพาะการ์ด)
+  const presetConfig = (): Record<string, unknown> => {
+    const { manualOrder: _order, ...rest } = layout;
+    return { ...rest, partStyles: stripPerCardStyles(layout.partStyles) };
+  };
+  const applyPreset = (cfg: Record<string, unknown>) => {
+    const perCard = Object.fromEntries(Object.entries(layout.partStyles).filter(([k]) => k.includes("#")));
+    const next = reportLayoutFromStoredValue({ ...cfg, manualOrder: layout.manualOrder });
+    updateLayout({ ...next, partStyles: { ...next.partStyles, ...perCard } });
+  };
+
+  // แก้ใบเสนอราคาจากหน้าพิมพ์ (ป๊อปฟอร์มกลางตัวเดียวกับหน้าใบเสนอราคา) → บันทึกแล้วโหลดใบใหม่ ใบพิมพ์อัปเดตตาม
+  const reloadQuote = async () => {
+    const json = await apiFetch(`/api/quotations/${id}`).then(res => res.json());
+    if (json.error) throw new Error(json.error);
+    setQuote(await enrichQuoteImages(json.data as QuoteDetail));
+  };
+  const isDraft = quote?.status === "draft";
+
   const loadDefaultLayout = async () => {
     setLayoutDefaultMessage("กำลังโหลดค่าเริ่มต้น...");
     try {
@@ -244,10 +269,22 @@ export default function PrintQuotationPage() {
               savingDefault={savingLayoutDefault}
               defaultMessage={layoutDefaultMessage}
               lines={printLines}
+              leading={<PrintPresetMenu tableId="print:qt" storageKey={`qt-print-preset:${id}`} getConfig={presetConfig} onApply={applyPreset}
+                onSetDefault={saveDefaultLayout} onUseDefault={loadDefaultLayout} savingDefault={savingLayoutDefault} />}
+              trailing={(
+                <button type="button" onClick={() => isDraft && setEditOpen(true)} disabled={!isDraft}
+                  title={isDraft ? "แก้ลูกค้า รายการ ราคา ในใบนี้" : "ใบที่ส่งลูกค้าแล้ว/ปิดแล้ว แก้ไม่ได้ — แก้ได้เฉพาะใบร่าง (ใบที่ส่งแล้วใช้ \"ไม่ผ่าน · เปิดใบใหม่แทน\" ในใบงาน)"}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 text-sm font-medium text-sky-700 hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400">
+                  <Icon value="i:edit" className="text-[15px]" />แก้ใบเสนอราคา
+                </button>
+              )}
             />
             {partEditor.bar}
             <PrintFrame html={html} fileName={fileName} onDocLoad={partEditor.onDocLoad} />
             {partEditor.panel}
+            <QuotationFormModal open={editOpen} quote={editOpen ? quote : null} defaultSalePerson={user?.name ?? ""} actor={user?.name}
+              onClose={() => setEditOpen(false)}
+              onSaved={async () => { setEditOpen(false); try { await reloadQuote(); } catch (e) { setError(e instanceof Error ? e.message : "โหลดใบใหม่ไม่สำเร็จ"); } }} />
           </>
         )}
       </div>

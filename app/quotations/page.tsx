@@ -6,9 +6,6 @@ import { DataTable } from "@/components/data-table";
 import { RecordFilesField } from "@/components/record-files";
 import { ERPModal } from "@/components/modal";
 import { DeleteDraftButton } from "@/components/delete-draft-doc";
-import { CustomerPicker, UserPicker, RecordPeekLink } from "@/components/pickers";
-import type { CustomerPickerValue, UserPickerValue } from "@/components/pickers";
-import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { useNewParam, useOpenParam, openLink } from "@/lib/open-param";
@@ -16,7 +13,8 @@ import { formatDate } from "@/lib/date";
 import { QUOTATION_ROW_ACTIONS } from "@/components/data-table/row-actions";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { QuoteListItem, QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
-import { SOLineEditor, SalesLineCompactTable, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
+import { SOLineEditor, SalesLineCompactTable } from "@/components/sales-line-items";
+import { QuotationFormModal, quoteLinesToEditor } from "@/components/quotation-form-modal";
 
 // ---- helpers ----
 
@@ -34,28 +32,6 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-red-50 text-red-500",
 };
 
-const addDays = (iso: string, days: number) => {
-  const d = new Date(iso); d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-};
-
-// ---- Form state ----
-
-type FormState = {
-  customer: CustomerPickerValue | null;
-  sale_person_name: string;
-  quote_date: string;
-  valid_until: string;
-  vat_rate: number;
-  vat_included: boolean;
-  wht_rate: number;
-  header_discount_type: "percent" | "amount";
-  header_discount_value: number;
-  shipping_fee: number;
-  note: string;
-  lines: EditorLine[];
-};
-
 type QuoteLineView = QuoteLine & {
   image_url?: string | null;
   image_key?: string | null;
@@ -70,33 +46,6 @@ type SkuPickerItem = {
   image_url?: string | null;
   image_key?: string | null;
 };
-
-const makeEmpty = (salePersonName = ""): FormState => {
-  const today = new Date().toISOString().slice(0, 10);
-  return {
-    customer: null, sale_person_name: salePersonName,
-    quote_date: today, valid_until: addDays(today, 30),
-    vat_rate: 7, vat_included: false, wht_rate: 0,
-    header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
-    note: "", lines: [emptyLine()],
-  };
-};
-
-const quoteLinesToEditor = (lines: QuoteLineView[]): EditorLine[] => lines.map((l, index) => ({
-  tempId: l.id ?? `${l.sku ?? "line"}-${index}`,
-  product_id: l.product_id ?? null,
-  sku: l.sku ?? null,
-  product_name: l.product_name,
-  image_url: l.image_url ?? null,
-  image_key: l.image_key ?? null,
-  qty: l.qty,
-  unit: l.unit,
-  unit_price: l.unit_price,
-  discount_type: l.discount_type ?? "percent",
-  discount_value: l.discount_value ?? 0,
-  tax_code: l.tax_code ?? null,
-  note: l.note ?? "",
-}));
 
 // ============================================================
 // Page
@@ -116,11 +65,9 @@ export default function QuotationsPage() {
   const [error,   setError]   = useState<string | null>(null);
 
   // create/edit
-  const [editingId, setEditingId] = useState<string | null>(null);
+  // ฟอร์มสร้าง/แก้ = ของกลาง QuotationFormModal (components/quotation-form-modal · ใช้ร่วมกับหน้าพิมพ์)
+  const [editing,   setEditing]   = useState<QuoteDetailView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [form,      setForm]      = useState<FormState>(makeEmpty);
-  const [formErr,   setFormErr]   = useState<string | null>(null);
-  const [saving,    setSaving]    = useState(false);
 
   // detail drawer
   const [detail,        setDetail]        = useState<QuoteDetailView | null>(null);
@@ -202,25 +149,11 @@ export default function QuotationsPage() {
 
   // ---- Open edit (draft only) ----
   const openEdit = (q: QuoteDetailView) => {
-    setEditingId(q.id);
-    setForm({
-      customer: q.customer_id ? {
-        id: q.customer_id, code: q.customer_code, name: q.customer_name ?? "",
-      } as CustomerPickerValue : null,
-      sale_person_name: q.sale_person_name ?? "",
-      quote_date: q.quote_date,
-      valid_until: q.valid_until ?? addDays(q.quote_date, 30),
-      vat_rate: q.vat_rate, vat_included: q.vat_included, wht_rate: q.wht_rate,
-      header_discount_type: q.header_discount_type, header_discount_value: q.header_discount_value,
-      shipping_fee: q.shipping_fee,
-      note: q.note ?? "",
-      lines: quoteLinesToEditor(q.lines),
-    });
-    setFormErr(null); setDetailOpen(false); setModalOpen(true);
+    setEditing(q); setDetailOpen(false); setModalOpen(true);
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm(makeEmpty(user?.name ?? "")); setFormErr(null); setModalOpen(true);
+    setEditing(null); setModalOpen(true);
   };
   useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
   useOpenParam(true, (id) => { void openDetail(id); });   // ลิงก์ `?open=<id>` (เช่น จากใบงานออกแบบ) → เปิดรายละเอียดใบนั้นให้เลย
@@ -229,56 +162,21 @@ export default function QuotationsPage() {
     window.open(`/print/quotation/${id}`, "_blank", "noopener,noreferrer");
   }, []);
 
-  // ---- Save ----
-  const save = async () => {
-    if (!form.customer) { setFormErr("กรุณาเลือกลูกค้า"); return; }
-    if (form.lines.length === 0 || form.lines.some(l => !l.product_name.trim())) {
-      setFormErr("ต้องมีรายการสินค้าอย่างน้อย 1 รายการ"); return;
+  // ---- หลังบันทึกในฟอร์มกลาง ----
+  const onFormSaved = async (savedId: string | null, isNew: boolean) => {
+    flash(isNew ? "สร้างใบเสนอราคาใหม่" : "บันทึกแล้ว");
+    setModalOpen(false);
+    // ⚠️ ต้องล้าง/โหลดรายละเอียดใหม่ด้วย — หน้านี้แคช detail ไว้ใน expandedDetails
+    // ถ้าไม่ล้าง เปิดดู/กดแก้ซ้ำจะเห็นค่าเดิม (เคสจริง: แก้ราคาแล้วเหมือนบันทึกไม่ติด)
+    if (savedId) {
+      setExpandedDetails(prev => { const next = { ...prev }; delete next[savedId]; return next; });
+      try {
+        const fresh = await fetchDetail(savedId);
+        setExpandedDetails(prev => ({ ...prev, [savedId]: fresh }));
+        setDetail(prev => (prev && prev.id === savedId ? fresh : prev));
+      } catch { /* โหลดสดไม่ได้ก็ไม่เป็นไร — แคชถูกล้างแล้ว ครั้งหน้าดึงใหม่เอง */ }
     }
-    setSaving(true); setFormErr(null);
-    try {
-      const header = {
-        customer_id: form.customer.id, customer_name: form.customer.name, customer_code: form.customer.code,
-        sale_person_name: form.sale_person_name || null,
-        quote_date: form.quote_date,
-        valid_until: form.valid_until || null,
-        vat_rate: form.vat_rate, vat_included: form.vat_included, wht_rate: form.wht_rate,
-        header_discount_type: form.header_discount_type,
-        header_discount_value: form.header_discount_value,
-        shipping_fee: form.shipping_fee,
-        note: form.note || null,
-      };
-      const lines = form.lines.map(l => ({
-        product_id: l.product_id, sku: l.sku, product_name: l.product_name,
-        qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-        discount_type: l.discount_type, discount_value: l.discount_value,
-        tax_code: l.tax_code, note: l.note,
-        image_key: l.image_key ?? null,   // รูปที่แนบเอง (ติดไปกับใบพิมพ์)
-      }));
-      const url = editingId ? `/api/quotations/${editingId}` : "/api/quotations";
-      const method = editingId ? "PATCH" : "POST";
-      const res = await apiFetch(url, {
-        method, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ header, lines, actor: user?.name }),
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      flash(editingId ? "บันทึกแล้ว" : "สร้างใบเสนอราคาใหม่");
-      setModalOpen(false);
-      // ⚠️ ต้องล้าง/โหลดรายละเอียดใหม่ด้วย — หน้านี้แคช detail ไว้ใน expandedDetails
-      // ถ้าไม่ล้าง เปิดดู/กดแก้ซ้ำจะเห็นค่าเดิม (เคสจริง: แก้ราคาแล้วเหมือนบันทึกไม่ติด)
-      const savedId = editingId ?? (json.id ? String(json.id) : null);
-      if (savedId) {
-        setExpandedDetails(prev => { const next = { ...prev }; delete next[savedId]; return next; });
-        try {
-          const fresh = await fetchDetail(savedId);
-          setExpandedDetails(prev => ({ ...prev, [savedId]: fresh }));
-          setDetail(prev => (prev && prev.id === savedId ? fresh : prev));
-        } catch { /* โหลดสดไม่ได้ก็ไม่เป็นไร — แคชถูกล้างแล้ว ครั้งหน้าดึงใหม่เอง */ }
-      }
-      await fetchList();
-    } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
-    finally { setSaving(false); }
+    await fetchList();
   };
 
   // ---- Transition ----
@@ -532,22 +430,6 @@ export default function QuotationsPage() {
     ];
   }, [user?.name]);
 
-  const previewTotals = useMemo(() => calculateEditorTotals(form.lines, {
-    vatRate: form.vat_rate,
-    vatIncluded: form.vat_included,
-    whtRate: form.wht_rate,
-    headerDiscountType: form.header_discount_type,
-    headerDiscountValue: form.header_discount_value,
-    shippingFee: form.shipping_fee,
-  }), [
-    form.lines,
-    form.vat_rate,
-    form.vat_included,
-    form.wht_rate,
-    form.header_discount_type,
-    form.header_discount_value,
-    form.shipping_fee,
-  ]);
 
   // early return หลัง hooks ทั้งหมด
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
@@ -770,114 +652,9 @@ export default function QuotationsPage() {
         )}
       </ERPModal>
 
-      {/* Create / Edit modal */}
-      <ERPModal open={modalOpen} onClose={() => !saving && setModalOpen(false)} size="xl"
-        title={editingId ? "แก้ใบเสนอราคา" : "สร้างใบเสนอราคาใหม่"}
-        footer={
-          <>
-            <button onClick={() => setModalOpen(false)} disabled={saving}
-              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-            <button onClick={save} disabled={saving}
-              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "..." : "บันทึก"}
-            </button>
-          </>
-        }>
-        <div className="space-y-4">
-          {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <span className="text-xs font-medium text-slate-600">ลูกค้า *</span>
-              <div className="mt-0.5">
-                <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
-              </div>
-              {form.customer && (
-                <RecordPeekLink
-                  moduleKey="partners-v2"
-                  recordId={form.customer.id}
-                  label={form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}
-                />
-              )}
-            </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(ผู้ใช้ระบบ — ไม่บังคับ)</span></span>
-              <div className="mt-0.5">
-                {/* เซลส์ = ผู้ใช้ระบบ (ของกลาง UserPicker · user_profiles) — เดิม EmployeePicker อ่านตารางทดลอง 6 คนสมมติ · ค่ายังเก็บเป็นชื่อเหมือนเดิม */}
-                <UserPicker
-                  value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as UserPickerValue : null}
-                  onChange={(v: UserPickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
-                />
-              </div>
-              {user?.name && (
-                <p className="mt-1 text-[11px] text-slate-400">
-                  ค่าเริ่มต้นคือ user ที่ login: {user.name}
-                </p>
-              )}
-            </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">วันที่เสนอราคา</span>
-              <div className="mt-0.5">
-                <DateInput value={form.quote_date} onChange={(iso) => setForm({ ...form, quote_date: iso })} />
-              </div>
-            </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">ยืนราคาถึงวันที่ <span className="text-slate-400">(default 30 วัน)</span></span>
-              <div className="mt-0.5">
-                <DateInput value={form.valid_until} onChange={(iso) => setForm({ ...form, valid_until: iso })} />
-              </div>
-            </div>
-          </div>
-
-          <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} />
-
-          <div className="grid grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">VAT %</span>
-              <input type="number" value={form.vat_rate} onChange={e => setForm({ ...form, vat_rate: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">รวม VAT</span>
-              <div className="h-8 mt-0.5 flex items-center">
-                <input type="checkbox" checked={form.vat_included} onChange={e => setForm({ ...form, vat_included: e.target.checked })}
-                  className="rounded border-slate-300" />
-                <span className="ml-2 text-xs">{form.vat_included ? "Included" : "Excluded"}</span>
-              </div>
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">WHT %</span>
-              <input type="number" value={form.wht_rate} onChange={e => setForm({ ...form, wht_rate: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">ค่าจัดส่ง</span>
-              <input type="number" value={form.shipping_fee} onChange={e => setForm({ ...form, shipping_fee: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <div className="block col-span-2">
-              <span className="text-xs font-medium text-slate-600">ส่วนลดท้ายบิล</span>
-              <div className="flex gap-1 mt-0.5">
-                <input type="number" value={form.header_discount_value}
-                  onChange={e => setForm({ ...form, header_discount_value: parseFloat(e.target.value) || 0 })}
-                  className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded" />
-                <select value={form.header_discount_type}
-                  onChange={e => setForm({ ...form, header_discount_type: e.target.value as "percent" | "amount" })}
-                  className="w-16 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
-                  <option value="percent">%</option><option value="amount">฿</option>
-                </select>
-              </div>
-            </div>
-            <label className="block col-span-2">
-              <span className="text-xs font-medium text-slate-600">หมายเหตุ</span>
-              <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-          </div>
-
-          <SalesTotalsPreview result={previewTotals} />
-        </div>
-      </ERPModal>
+      {/* Create / Edit modal — ของกลาง */}
+      <QuotationFormModal open={modalOpen} quote={editing} defaultSalePerson={user?.name ?? ""} actor={user?.name}
+        onClose={() => setModalOpen(false)} onSaved={onFormSaved} />
 
       {/* Reject confirm */}
       <ERPModal open={rejectTarget !== null} onClose={() => setRejectTarget(null)} size="md"

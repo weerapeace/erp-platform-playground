@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { apiCan } from "@/lib/api-auth";
+import { auditDiff, writeAudit } from "@/lib/audit";
 
 export type SavedView = {
   id:          string;
@@ -72,6 +74,19 @@ export async function PATCH(request: NextRequest) {
 
   const admin = supabaseAdmin();
 
+  // แก้ได้เฉพาะเจ้าของ หรือ admin.saved_views (กติกาเดียวกับลบ · 2026-11-20 — เดิมใครล็อกอินก็แก้ของคนอื่นได้)
+  const { data: cur } = await admin.from("erp_playground_saved_views").select("id, table_id, owner_id, label, visibility, is_default, description, config").eq("id", id).maybeSingle();
+  if (!cur) return NextResponse.json({ error: "ไม่พบ view" }, { status: 404 });
+  if (cur.owner_id !== user.id && !(await apiCan(request, "admin.saved_views"))) {
+    return NextResponse.json({ error: "แก้ได้เฉพาะ view ของตัวเอง" }, { status: 403 });
+  }
+  if (body.visibility === "team" && cur.visibility !== "team" && !(await apiCan(request, "saved_views.share"))) {
+    return NextResponse.json({ error: "แชร์ให้ทีมต้องมีสิทธิ์ saved_views.share" }, { status: 403 });
+  }
+  if (body.visibility === "system" && cur.visibility !== "system" && !(await apiCan(request, "admin.saved_views"))) {
+    return NextResponse.json({ error: "system view ตั้งได้เฉพาะ admin" }, { status: 403 });
+  }
+
   // ถ้า set is_default=true — clear default ของ view อื่นในตารางเดียวกันของ owner เดียวกัน
   if (body.is_default === true) {
     const { data: target } = await admin
@@ -104,6 +119,11 @@ export async function PATCH(request: NextRequest) {
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const before: Record<string, unknown> = { label: cur.label, visibility: cur.visibility, is_default: cur.is_default, description: cur.description };
+  const after: Record<string, unknown> = { ...patch };
+  if ("config" in after) { before.config = "(ค่าเดิม)"; after.config = JSON.stringify(cur.config) === JSON.stringify(patch.config) ? "(ค่าเดิม)" : "(ปรับใหม่)"; }
+  await writeAudit(admin, { action: "update", entityType: "erp_saved_view", entityId: id, actorId: user.id, actorName: user.email ?? null,
+    metadata: { table_id: cur.table_id, label: (patch.label as string | undefined) ?? cur.label, changes: auditDiff(before, after) } });
   return NextResponse.json({ data, error: null });
 }
 

@@ -664,6 +664,21 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "เลือกแม่แบบ + ติ๊กคอลัมน์ที่จะโชว์ บนหน้าพิมพ์เอกสาร + สวิตช์พิมพ์ต้นฉบับ+สำเนา (CopiesSwitch · withCopies · ช่อง {{copy_label}} ในแม่แบบ · หลายใบเรียงทีละใบ) · ตัวเลือกเฉพาะเอกสาร (DOC_OPTIONS — ติ๊ก/ปุ่มเลือก · แผงวาดให้เอง เก็บใน prefs.options) · แถวหัวกลุ่มในตาราง ({ __group, __sum })",
   },
   {
+    key: "print-presets", label: "เมนูแบบที่บันทึกของหน้าพิมพ์", code: "PrintPresetMenu", category: "print",
+    source: { path: "components/print-presets" },
+    what: "บันทึกหน้าตาการพิมพ์เป็นแบบหลายชุด ตั้งชื่อได้ (ของทีม/ของฉัน) · เลือกโหลด · บันทึกทับ · เปลี่ยนชื่อ · ลบ (ย้อนกลับได้) · ตั้ง/ใช้ค่าเริ่มต้น · เก็บในระบบมุมมองที่บันทึก (/api/saved-views · table_id print:<เอกสาร>) ไม่มีที่เก็บแยก",
+    when: "หน้าพิมพ์ที่ผู้ใช้ปรับหน้าตาได้แล้วอยากเก็บไว้ใช้ซ้ำ (ใช้แล้ว: ใบเสนอราคา) — ส่งเป็น leading ของ ReportLayoutControls",
+    notWhen: "มุมมองตาราง (DataTable มีของตัวเอง) · แม่แบบในฐานข้อมูล ใช้ตัวออกแบบแม่แบบ",
+    doc: "print-part-style.md",
+  },
+  {
+    key: "quotation-form-modal", label: "ป๊อปฟอร์มใบเสนอราคา", code: "QuotationFormModal", category: "popup",
+    source: { path: "components/quotation-form-modal" },
+    what: "ฟอร์มสร้าง/แก้ใบเสนอราคา (ลูกค้า เซลส์ วันที่ รายการ VAT ส่วนลด หมายเหตุ ยอดรวม) · ถามก่อนปิดเมื่อยังไม่บันทึก · บันทึกผ่าน /api/quotations",
+    when: "ทุกที่ที่ต้องสร้าง/แก้ใบเสนอราคา (ใช้แล้ว: หน้าใบเสนอราคา · หน้าพิมพ์ใบเสนอราคา)",
+    notWhen: "ส่งจากใบงานออกแบบเข้าใบเสนอราคา ใช้ตะกร้าในใบงาน",
+  },
+  {
     key: "print-part-style", label: "กดกล่องในใบพิมพ์แล้วแก้หน้าตา", code: "usePrintPartEditor · lib/print-part-style", category: "print",
     source: { path: "components/print-part-style" },
     what: "กดกล่องในพรีวิวเอกสารพิมพ์ (data-pp) → แผงแก้ ซ่อน (ทุกการ์ด/เฉพาะการ์ด) · ขนาด · ฟอนต์ · ตัวหนา · ตำแหน่ง · สีตัวอักษร/พื้น · รูปสูง/พอดี-เต็มกรอบ · ย้อนกลับ Ctrl+Z · คัดลอก/วางสไตล์ · คืนค่าทีละกล่อง/ทั้งใบ · กรอบเลือกโชว์แค่บนจอ ไม่ติดตอนพิมพ์",
