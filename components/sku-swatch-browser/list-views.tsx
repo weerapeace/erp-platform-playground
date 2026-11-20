@@ -103,12 +103,13 @@ export function SwatchCardItem({ s, canEdit, selecting, checked, onOpen, onToggl
   );
 }
 
-export function SwatchCardGrid({ children }: { children: ReactNode }) {
-  return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">{children}</div>;
+/** กริดการ์ดแผงผ้า — ขนาดจากของกลาง มุมมองการ์ดกลาง (ส่ง template จาก SwatchBrowser · ไม่ส่ง = ขนาดเดิม 220px) */
+export function SwatchCardGrid({ children, template }: { children: ReactNode; template?: string }) {
+  return <div className="grid gap-3" style={{ gridTemplateColumns: template ?? "repeat(auto-fill, minmax(220px, 1fr))" }}>{children}</div>;
 }
 
 /** จับกลุ่มตามแท็ก (แผ่นที่ติดหลายแท็กโผล่ทุกกลุ่มของมัน) · "ยังไม่ติดแท็ก" อยู่บนสุด */
-export function SwatchGroupView({ rows, render }: { rows: SwatchCard[]; render: (s: SwatchCard) => ReactNode }) {
+export function SwatchGroupView({ rows, render, template }: { rows: SwatchCard[]; render: (s: SwatchCard) => ReactNode; template?: string }) {
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const groups = useMemo(() => {
     const m = new Map<string, { name: string; rows: SwatchCard[] }>();
@@ -130,7 +131,7 @@ export function SwatchGroupView({ rows, render }: { rows: SwatchCard[]; render: 
               <span className="text-[13px] font-semibold">{g.name}</span>
               <span className="text-[11.5px] opacity-70">{g.rows.length} แผ่น</span>
             </button>
-            {!isClosed && <SwatchCardGrid>{g.rows.map((s) => <div key={`${id}:${s.id}`} className="contents">{render(s)}</div>)}</SwatchCardGrid>}
+            {!isClosed && <SwatchCardGrid template={template}>{g.rows.map((s) => <div key={`${id}:${s.id}`} className="contents">{render(s)}</div>)}</SwatchCardGrid>}
           </section>
         );
       })}

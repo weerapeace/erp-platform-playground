@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
+import { CardZoom } from "@/components/gallery-columns";
 import { TemplateFormModal } from "./template-form";
 import { ChoicesManager } from "./choices-manager";
 import { bagTypeOf, type Choice } from "@/lib/design-library";
@@ -91,10 +92,11 @@ export function DesignLibrary() {
             hint={rows.length ? "ลองเปลี่ยนคำค้นหรือเลือก “ทั้งหมด”" : canManage ? "กด “เพิ่มแม่แบบ” แล้วอัปโหลดรูปกระเป๋า" : "ทีมออกแบบยังไม่ได้เพิ่มแม่แบบ"}
             action={!rows.length && canManage ? { label: "เพิ่มแม่แบบ", onClick: () => setForm({ open: true, t: null }) } : undefined} />
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+<CardZoom scope="design-library-templates" initial={6} gap="0.75rem" minPx={220}>{(z) => (
+          <div className="grid gap-3" style={{ gridTemplateColumns: z.template }}>
             {shown.map((t) => (
               <button key={t.id} type="button" onClick={() => router.push(tplHref(t.id))} className="text-left rounded-xl border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md transition overflow-hidden flex flex-col">
-                <div className="h-52 bg-white flex items-center justify-center overflow-hidden border-b border-slate-100">
+                <div className="aspect-square bg-white flex items-center justify-center overflow-hidden border-b border-slate-100">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   {t.image_key ? <img src={img(t.image_key, 480)} alt={t.name} loading="lazy" className="w-full h-full object-contain" /> : <Icon value="i:photo" className="text-3xl text-slate-300" />}
                 </div>
@@ -106,6 +108,7 @@ export function DesignLibrary() {
               </button>
             ))}
           </div>
+          )}</CardZoom>
         )}
       <TemplateFormModal open={form.open} initial={form.t} onClose={() => setForm({ open: false, t: null })} onSaved={(t) => { setForm({ open: false, t: null }); void load(); router.push(tplHref(t.id)); }} />
       <ChoicesManager open={choicesOpen} onClose={() => setChoicesOpen(false)} onChanged={() => undefined} />
@@ -174,10 +177,11 @@ export function TemplateView({ id }: { id: string }) {
           {data.recipes.length === 0 ? (
             <EmptyState icon={<Icon value="i:sparkles" />} title="ยังไม่มีสูตรของแม่แบบนี้" hint="กด “สร้างสูตรใหม่” แล้วกดบนรูปเพื่อเลือกว่าจะเปลี่ยนอะไร" />
           ) : (
-            <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">
+<CardZoom scope="design-library-recipes" initial={6} gap="0.75rem" minPx={200}>{(z) => (
+          <div className="grid gap-3" style={{ gridTemplateColumns: z.template }}>
               {data.recipes.map((r) => (
                 <div key={r.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col">
-                  <Link href={recipeHref(r.id)} className="block h-44 bg-white border-b border-slate-100">
+                  <Link href={recipeHref(r.id)} className="block aspect-[8/7] bg-white border-b border-slate-100">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={img(r.cover_key ?? t.image_key, 420)} alt="" loading="lazy" className="w-full h-full object-contain" />
                   </Link>
@@ -196,6 +200,7 @@ export function TemplateView({ id }: { id: string }) {
                 </div>
               ))}
             </div>
+            )}</CardZoom>
           )}
         </div>
       </div>

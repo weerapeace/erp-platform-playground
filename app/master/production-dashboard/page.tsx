@@ -21,6 +21,7 @@ import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
 import { MoStatusModal } from "@/components/mo-status-modal";
 import { MissingBrandModal } from "@/components/missing-brand-modal";
 import { MO_STATUS_TONE_CLASS, type MoStatusTone } from "@/lib/mo-status";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, type DeviceLayout } from "@/components/device-view";
 
 type CatKey = "all" | ProdJobCategory;
@@ -245,6 +246,9 @@ function ProductionDashboardInner() {
   const isDesktop = layout === "desktop";
   const isPhone = layout === "phone";
   const [cardDir, setCardDir] = useState<"h" | "v">("h");   // การ์ดแนวนอน/แนวตั้ง (โหมดจัดกลุ่ม)
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง · ปุ่ม − + · จำกับบัญชี) — การ์ดไม่เล็กกว่าเดิม (แนวตั้ง 150px · แนวนอน 260px)
+  const gallery = useGalleryColumns("production-dashboard", 6, "0.625rem");
+  const cardTpl = galleryTemplate(gallery.cols, "0.625rem", cardDir === "v" ? 150 : 260);
   const [statusMoId, setStatusMoId] = useState<string | null>(null);   // Popup สถานะงาน
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
   const [brandOpen, setBrandOpen] = useState(false);                    // ป๊อปอัปใส่แบรนด์ให้สินค้าที่ยังไม่มี
@@ -441,6 +445,7 @@ function ProductionDashboardInner() {
                 <button onClick={() => setCardDir("h")} className={`h-8 px-2.5 text-sm ${cardDir === "h" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▭ แนวนอน</button>
                 <button onClick={() => setCardDir("v")} className={`h-8 px-2.5 text-sm border-l border-slate-200 ${cardDir === "v" ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▯ แนวตั้ง</button>
               </div>
+              <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
             </>}
             {!grouped && <span className="text-[11px] text-slate-400">ติ๊ก “จัดกลุ่ม” เพื่อดูการ์ดแยกกลุ่ม · หรือใช้ปุ่มสลับ ตาราง/การ์ด + ค้นหาในตารางด้านล่าง</span>}
           </div>
@@ -448,7 +453,7 @@ function ProductionDashboardInner() {
           {grouped ? (
             loading ? <LoadingState />
             : groups.length === 0 ? <div className="py-16 text-center text-slate-400">{cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}</div>
-            : <div className="space-y-3">
+            : <div ref={gallery.wheelRef} className="space-y-3">
                 {groups.map(([label, items]) => {
                   const open = !collapsed.has(label);
                   return (
@@ -469,7 +474,7 @@ function ProductionDashboardInner() {
                       )}
                     </div>
                     {open && (
-                      <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardDir === "v" ? "150px" : "260px"}, 1fr))` }}>
+                      <div className="grid gap-2.5" style={{ gridTemplateColumns: cardTpl }}>
                         {items.map((j) => <JobCard key={j.id} j={j} onClick={() => openJob(j)} vertical={cardDir === "v"} />)}
                       </div>
                     )}

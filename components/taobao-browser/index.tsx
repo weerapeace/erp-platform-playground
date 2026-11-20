@@ -28,6 +28,7 @@ import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picke
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";
 
 // จอรายละเอียดสินค้าของกลาง — กด "เปิดหน้า SKU" จากการ์ด/จอรายละเอียดแล้วดูได้ในหน้าเดียวกัน
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -80,6 +81,9 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
   initialStatus?: StatusKey;
 } = {}) {
   const toast = useToast();
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง · ปุ่ม − + · จำกับบัญชี) — การ์ดไม่เล็กกว่า 210px เหมือนเดิม
+  const gallery = useGalleryColumns("taobao-browser", 6, "0.75rem");
+  const cardTpl = galleryTemplate(gallery.cols, "0.75rem", 210);
   const [status, setStatus] = useState<StatusKey>(initialStatus ?? "new");
   const [search, setSearch] = useState("");
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);   // กรองแท็ก (ของกลางตัวเดียวกับหน้า SKU)
@@ -299,6 +303,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
             className={`h-8 px-2.5 text-[12px] rounded-lg border ${allSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
             {allSelected ? "☑ เลือกแล้ว" : "☐ เลือกทั้งหมด"}
           </button>
+          <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
         </div>
       )}
 
@@ -308,7 +313,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
       ) : cards.length === 0 ? (
         <EmptyBox status={status} hasSearch={!!search.trim()} />
       ) : (
-        <>
+        <div ref={gallery.wheelRef}>
           {(() => {
             const renderCard = (c: Card) => (
               <TaobaoCardView key={c.id} card={c} rate={rate} selected={sel.has(c.id)}
@@ -343,12 +348,12 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
                         className="ml-auto h-7 px-2 text-[11px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">{allSel ? "☑ เลือกทั้งกลุ่ม" : "☐ เลือกทั้งกลุ่ม"}</button>
                       {k !== NO_GROUP && <button onClick={() => setGroupTarget(list.map((c) => c.id))} className="h-7 px-2 text-[11px] rounded-lg border border-amber-300 bg-white text-amber-700 hover:bg-amber-100" title="เปลี่ยนชื่อกลุ่ม / ย้ายทั้งกลุ่ม">✏️ เปลี่ยนชื่อ</button>}
                     </div>
-                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">{list.map(renderCard)}</div>
+                    <div className="grid gap-3" style={{ gridTemplateColumns: cardTpl }}>{list.map(renderCard)}</div>
                   </section>
                 );
               });
             }
-            return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(210px,1fr))]">{cards.map(renderCard)}</div>;
+            return <div className="grid gap-3" style={{ gridTemplateColumns: cardTpl }}>{cards.map(renderCard)}</div>;
           })()}
           {cards.length < total && (
             <div className="text-center mt-4">
@@ -358,7 +363,7 @@ export function TaobaoBrowser({ focusId, initialStatus }: {
               </button>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* 📁 ป๊อปตั้งกลุ่มใน wishlist */}

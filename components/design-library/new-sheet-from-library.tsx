@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
+import { CardZoom } from "@/components/gallery-columns";
 import { usePermission } from "@/components/auth";
 import { SendToSheetModal, type LinkedSheet } from "./send-to-sheet";
 import { api, img, LIB_HREF } from "./shared";
@@ -80,14 +81,15 @@ export function NewSheetFromLibraryModal({ open, onClose, defaultBrandId, onCrea
             <EmptyState icon={<Icon value="i:shopping-bag" />} title={rows.length ? "ไม่พบสูตรที่ตรงกับคำค้น" : "ยังไม่มีสูตรใน Design Library"}
               hint={rows.length ? "ลองเปลี่ยนคำค้น" : "สร้างสูตรจากแม่แบบใน Design Library ก่อน แล้วกลับมาเพิ่มงานที่นี่"} />
           ) : (
-            <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
+<CardZoom scope="design-library-pick-recipe" initial={6} gap="0.5rem" minPx={160}>{(z) => (
+          <div className="grid gap-2" style={{ gridTemplateColumns: z.template }}>
               {shown.map((r) => {
                 const on = picked?.id === r.id;
                 const cover = r.cover_key ?? r.template.image_key;
                 return (
                   <button key={r.id} type="button" onClick={() => setPicked(r)} onDoubleClick={() => { setPicked(r); setSending(true); }} aria-pressed={on}
                     className={`text-left rounded-xl border bg-white overflow-hidden flex flex-col transition ${on ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
-                    <div className="h-32 flex items-center justify-center overflow-hidden border-b border-slate-100 bg-white">
+                    <div className="aspect-[5/4] flex items-center justify-center overflow-hidden border-b border-slate-100 bg-white">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       {cover ? <img src={img(cover, 360)} alt="" loading="lazy" className="w-full h-full object-contain" /> : <Icon value="i:photo" className="text-2xl text-slate-300" />}
                     </div>
@@ -103,6 +105,7 @@ export function NewSheetFromLibraryModal({ open, onClose, defaultBrandId, onCrea
                 );
               })}
             </div>
+            )}</CardZoom>
           )}
       </ERPModal>
       {picked && (

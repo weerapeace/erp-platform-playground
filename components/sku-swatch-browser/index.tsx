@@ -39,6 +39,7 @@ import { SwatchViewer, swatchTitle } from "./viewer";
 import { SwatchCardGrid, SwatchCardItem, SwatchGroupView, SwatchTableView, type SwatchView } from "./list-views";
 import { SwatchCompare } from "./compare";
 import { swatchLabelUrl } from "@/lib/sku-swatch";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";
 
 const PAGE = 60;
 const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
@@ -79,6 +80,9 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot, ini
   const toast = useToast();
   const { can } = useAuth();
   const canEdit = usePermission("products.edit");
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง · ปุ่ม − + · จำกับบัญชี) — การ์ดไม่เล็กกว่า 220px เหมือนเดิม
+  const gallery = useGalleryColumns("swatch-browser", 6, "0.75rem");
+  const cardTpl = galleryTemplate(gallery.cols, "0.75rem", 220);
   const [rows, setRows] = useState<SwatchCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -230,7 +234,7 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot, ini
       )}
 
       {loading && rows.length === 0 ? (
-        <SwatchCardGrid>{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-56 rounded-xl bg-slate-100 animate-pulse" />)}</SwatchCardGrid>
+        <SwatchCardGrid template={cardTpl}>{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-56 rounded-xl bg-slate-100 animate-pulse" />)}</SwatchCardGrid>
       ) : rows.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-4xl mb-2">🎨</p>
@@ -242,15 +246,15 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot, ini
           )}
         </div>
       ) : (
-        <>
-          {view !== "table" && <p className="text-[12px] text-slate-400 mb-2">{total.toLocaleString("th-TH")} แผ่น{color ? " · เรียงจากสีใกล้สุด" : ""}</p>}
+        <div ref={view === "table" ? undefined : gallery.wheelRef}>
+          {view !== "table" && <div className="mb-2 flex items-center gap-2"><GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} className="order-2 ml-auto" /><p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} แผ่น{color ? " · เรียงจากสีใกล้สุด" : ""}</p></div>}
           {view === "table" ? (
             <SwatchTableView rows={rows} onOpen={(s) => setOpen({ id: s.id, edit: false })} selecting={selecting} selected={picked} onSelectedChange={setPicked}
               actions={<button type="button" onClick={() => void exportRows()} className="h-8 px-3 text-[12px] rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ส่งออก Excel</button>} />
           ) : view === "group" ? (
-            <SwatchGroupView rows={rows} render={card} />
+            <SwatchGroupView rows={rows} render={card} template={cardTpl} />
           ) : (
-            <SwatchCardGrid>{rows.map(card)}</SwatchCardGrid>
+            <SwatchCardGrid template={cardTpl}>{rows.map(card)}</SwatchCardGrid>
           )}
           {rows.length < total && (
             <div className="text-center mt-4">
@@ -259,7 +263,7 @@ export function SwatchBrowser({ openId, focusSpotId, onPickSkus, onPickSpot, ini
               </button>
             </div>
           )}
-        </>
+        </div>
       )}
 
       {createOpen && <CreateSwatchModal onClose={() => setCreateOpen(false)} onCreated={(id, hasChips) => { setCreateOpen(false); void load(false); setOpen({ id, edit: !hasChips }); }} />}
