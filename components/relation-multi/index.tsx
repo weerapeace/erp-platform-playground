@@ -16,6 +16,8 @@ import { ImageInput } from "@/components/image-input";
 import { CopyButton } from "@/components/copy-button";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { ancestorTagsOf } from "@/lib/tag-hierarchy";
+import { askAndNestTag } from "@/lib/tag-nest";
+import type { NewItemTagSuggestion } from "@/lib/tag-suggest-rules";
 import { useToast } from "@/components/toast";
 import { BomEditorModal } from "@/components/bom-editor-modal";
 import { useAuth } from "@/components/auth";
@@ -169,10 +171,12 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
 //  • โหมดสร้าง (ไม่มี recordId): เก็บใน form ผ่าน value/onChange → master-crud ผูกลิงก์หลังสร้าง
 //  • โหมดแก้ไข (มี recordId): widget ถือ state เอง (serverLinked) โหลดจาก DB แล้วผูก/ถอดทันทีต่อคลิก
 //    (แหล่งความจริงเดียว = state ของ widget ↔ DB, ไม่ผ่าน form → ไม่มี lag/ค่าเพี้ยน)
-export function RelationMany2Many({ config, recordId, editable, value, onChange }: {
+export function RelationMany2Many({ config, recordId, editable, value, onChange, siblingValues }: {
   config: RelConfig; recordId?: string | null; editable: boolean;
   value?: string[];
   onChange?: (ids: string[]) => void;        // โหมดสร้างเท่านั้น (parent: updateForm)
+  /** ค่าช่องอื่นในฟอร์ม (ชื่อ/รหัส/แบรนด์/หมวด/Parent) — ใช้เดาแท็กตอนสร้างสินค้า (แท็ก product_families เท่านั้น) */
+  siblingValues?: Record<string, unknown>;
 }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
@@ -188,6 +192,9 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const [busy, setBusy] = useState(false);
   const [mgrOpen, setMgrOpen] = useState(false);       // popup จัดการแท็ก
   const [pickerOpen, setPickerOpen] = useState(false); // popup เลือกแท็ก (แบ่งกลุ่ม)
+  const toast = useToast();
+  const dragTagRef = useRef<string | null>(null);         // ป๊อปเลือกแท็ก: ลากแท็กทับแท็ก = สร้างกลุ่มย่อย (lib/tag-nest)
+  const [tagOver, setTagOver] = useState<string | null>(null);
 
   // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) — ไม่มี state ภายใน widget (กัน diverge/remount ทำค่าหาย)
   const loading = !isCreate && value === undefined;
@@ -235,6 +242,49 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
     linkedRef.current = next;
     onChange?.(next);
   };
+  // ── 💡 เดาแท็กตอนสร้าง SKU / Parent (เจ้าของสั่ง 2026-11-20) — กฎกลาง lib/tag-suggest-rules ผ่าน /api/product-tags/suggest/new ──
+  //   แน่นอน (แบรนด์/หมวดที่เลือก · แท็กของ Parent) = ใส่ให้ก่อน 1 ครั้ง (เอาออกแล้วไม่ใส่ซ้ำ) · ที่เหลือ = ปุ่มให้กดเอง
+  const sv = siblingValues ?? {};
+  const svStr = (k: string) => (typeof sv[k] === "string" || typeof sv[k] === "number" ? String(sv[k]) : "");
+  const sugName = svStr("name_th") || svStr("name") || svStr("sku_name");
+  const sugCode = svStr("code");
+  const sugBrand = svStr("brand_id"), sugCat = svStr("category_id"), sugParent = svStr("parent_sku_id");
+  const canSuggest = usesGroups && isCreate && editable && !!siblingValues;
+  const [suggestions, setSuggestions] = useState<NewItemTagSuggestion[]>([]);
+  const autoAddedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!canSuggest || (!sugName.trim() && !sugCode.trim() && !sugBrand && !sugCat && !sugParent)) { setSuggestions([]); return; }
+    let alive = true;
+    const tm = setTimeout(() => {
+      const qs = new URLSearchParams({ name: sugName, code: sugCode, brand_id: sugBrand, category_id: sugCat, parent_sku_id: sugParent });
+      apiFetch(`/api/product-tags/suggest/new?${qs}`).then((r) => r.json()).then((j) => {
+        if (!alive) return;
+        const list = (j.data ?? []) as NewItemTagSuggestion[];
+        setSuggestions(list);
+        const add = list.filter((x) => x.conf === "sure" && !autoAddedRef.current.has(x.tagId) && !linkedRef.current.includes(x.tagId));
+        if (add.length) {
+          for (const x of add) autoAddedRef.current.add(x.tagId);
+          const next = [...linkedRef.current, ...add.map((x) => x.tagId)];
+          linkedRef.current = next; onChange?.(next);
+        }
+      }).catch(() => {});
+    }, 600);
+    return () => { alive = false; clearTimeout(tm); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSuggest, sugName, sugCode, sugBrand, sugCat, sugParent]);
+  const pendingSuggestions = suggestions.filter((x) => !linked.includes(x.tagId));
+
+  // ลากแท็กทับแท็กในป๊อปเลือกแท็ก → ป๊อปสร้างกลุ่มย่อย (ของกลาง lib/tag-nest)
+  const nestOnto = (parentId: string) => {
+    const dragId = dragTagRef.current; dragTagRef.current = null; setTagOver(null);
+    if (!dragId || dragId === parentId) return;
+    const asNest = (o: Opt) => ({ id: o.id, label: o.label, group_id: o.group_id ?? null, sort_order: o.sort_order ?? null });
+    const moving = opts.find((o) => o.id === dragId); const parent = opts.find((o) => o.id === parentId);
+    if (!moving || !parent) return;
+    void askAndNestTag({ moving: asNest(moving), parent: asNest(parent), tags: opts.map(asNest), groups, toast,
+      onChanged: () => { reloadOpts(); fetchGroups().then(setGroups).catch(() => {}); } });
+  };
+
   const createNew = async () => {
     const name = q.trim();
     if (!name || !allowCreate) return;
@@ -270,9 +320,18 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const tagRow = (o: Opt) => {
     const on = linked.includes(o.id);
     const single = scopeOfTag(o.id) != null;
+    const over = tagOver === o.id;
+    const dnd = allowCreate ? {
+      draggable: true,
+      onDragStart: (e: React.DragEvent) => { dragTagRef.current = o.id; e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", o.id); } catch { /* ไม่รองรับ */ } },
+      onDragEnd: () => { dragTagRef.current = null; setTagOver(null); },
+      onDragOver: (e: React.DragEvent) => { if (!dragTagRef.current || dragTagRef.current === o.id) return; e.preventDefault(); if (tagOver !== o.id) setTagOver(o.id); },
+      onDragLeave: () => { if (tagOver === o.id) setTagOver(null); },
+      onDrop: (e: React.DragEvent) => { if (!dragTagRef.current) return; e.preventDefault(); nestOnto(o.id); },
+    } : {};
     return (
-      <button key={o.id} type="button" onClick={() => toggle(o.id)}
-        className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50 ${on ? "bg-blue-50/60" : ""}`}>
+      <button key={o.id} type="button" onClick={() => toggle(o.id)} {...dnd}
+        className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50 ${on ? "bg-blue-50/60" : ""} ${over ? "ring-2 ring-blue-400 bg-blue-50" : ""}`}>
         <span className={`inline-flex items-center justify-center w-4 h-4 ${single ? "rounded-full" : "rounded"} border text-[10px] leading-none ${on ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent"}`}>
           {single ? "●" : "✓"}
         </span>
@@ -294,6 +353,17 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
           </span>
         ))}
       </div>
+      {canSuggest && pendingSuggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+          <span className="text-[11px] text-slate-400">{t("แนะนำแท็ก (กดเพื่อใส่):", "Suggested tags (tap to add):")}</span>
+          {pendingSuggestions.map((x) => (
+            <button key={x.tagId} type="button" onClick={() => toggle(x.tagId)} title={x.reason}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100">
+              ＋ {x.name}
+            </button>
+          ))}
+        </div>
+      )}
       {editable && !loading && (
         <div className="flex gap-1.5">
           <button type="button" onClick={() => { setPickerOpen(true); setQ(""); }}
@@ -312,7 +382,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <div>
                 <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
-                {usesGroups && <p className="text-[11px] text-slate-400 mt-0.5">{t("เลือกแท็กย่อย (↳) = เลือกแท็กแม่ให้ด้วย · เอาแท็กแม่ออกเองได้", "Picking a sub-tag (↳) also picks its parent tag · you can remove the parent yourself")}</p>}
+                {usesGroups && <p className="text-[11px] text-slate-400 mt-0.5">{t("เลือกแท็กย่อย (↳) = เลือกแท็กแม่ให้ด้วย · ลากแท็กไปวางทับแท็กอื่น = สร้างกลุ่มย่อย", "Picking a sub-tag (↳) also picks its parent · drag a tag onto another to make a sub-group")}</p>}
               </div>
               <button type="button" onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
             </div>

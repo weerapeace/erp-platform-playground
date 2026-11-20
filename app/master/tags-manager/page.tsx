@@ -23,6 +23,9 @@ import { IconPicker } from "@/components/icon-picker";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 import { Icon } from "@/components/icon";
+import { HoverImage } from "@/components/hover-image";
+import { useToast } from "@/components/toast";
+import { askAndNestTag } from "@/lib/tag-nest";
 import dynamic from "next/dynamic";
 
 // ระบบช่วยเดาแท็ก (ของกลาง components/tag-suggest) — โหลดเมื่อกดเปิดเท่านั้น
@@ -39,7 +42,8 @@ const ENTITIES = {
 type EntityKey = keyof typeof ENTITIES;
 const TAG_MODULE = "product_families";
 
-function recImg(k: string | null) { return k ? `/api/r2-image?key=${encodeURIComponent(k)}&w=96` : null; }
+// w=256 = รูปย่อ + รูปลอยตอนชี้ (HoverImage) ใช้ไฟล์เดียวกัน
+function recImg(k: string | null) { return k ? `/api/r2-image?key=${encodeURIComponent(k)}&w=256` : null; }
 
 const EMPTY_TAGS: string[] = [];   // อ้างอิงเดียวสำหรับการ์ดที่ยังไม่มีแท็ก (ไม่งั้น memo พังทุกใบ)
 
@@ -59,7 +63,7 @@ const RecCard = memo(function RecCard({ r, tags, tagLabel, mode, inCart, checked
             onClick={(e) => e.stopPropagation()} className="mt-0.5 h-4 w-4 accent-blue-600 shrink-0" />
         )}
         {img
-          ? <img src={img} alt="" loading="lazy" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
+          ? <span className="shrink-0" onClick={(e) => e.stopPropagation()}><HoverImage url={img} size={48} alt={r.code} className="bg-slate-100" /></span>
           : <div className="w-12 h-12 rounded bg-slate-100 shrink-0" />}
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
@@ -101,7 +105,7 @@ const RecRow = memo(function RecRow({ r, tags, tagLabel, mode, inCart, checked, 
       )}
       <td className="px-2 py-1 w-10">
         {img
-          ? <img src={img} alt="" loading="lazy" className="w-8 h-8 rounded object-cover bg-slate-100" />
+          ? <HoverImage url={img} size={32} alt={r.code} className="bg-slate-100" />
           : <div className="w-8 h-8 rounded bg-slate-100" />}
       </td>
       <td className="px-2 py-1 font-semibold text-slate-800 whitespace-nowrap">{r.code}</td>
@@ -137,6 +141,11 @@ export default function TagsManagerPage() {
   useEffect(() => { const v = typeof window !== "undefined" ? localStorage.getItem("tagsmgr_view") : null; if (v === "table" || v === "card") setView(v); }, []);
   const changeView = (v: "card" | "table") => { setView(v); try { localStorage.setItem("tagsmgr_view", v); } catch { /* ignore */ } };
   const [filterSel, setFilterSel] = useState<TagFilterValue>({ tagIds: [], none: false });
+  const [onlyUntagged, setOnlyUntagged] = useState(false);              // 🏷️ เฉพาะที่ยังไม่ติดแท็ก — กรองทั้งคลังที่เซิร์ฟเวอร์
+  const [untaggedCount, setUntaggedCount] = useState<number | null>(null);
+  const [allCount, setAllCount] = useState<number | null>(null);
+  const [tagOver, setTagOver] = useState<string | null>(null);         // แท็กที่กำลังถูกลากแท็กอื่นมาทับ
+  const toast = useToast();
   const [groups, setGroups] = useState<Grp[]>([]);
   const [loadingPool, setLoadingPool] = useState(false);
   const [page, setPage] = useState(0);
@@ -203,6 +212,7 @@ export default function TagsManagerPage() {
     setLoadingPool(true);
     const qs = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(page * PAGE_SIZE), sort_by: "code", sort_dir: sortDir });
     if (search.trim()) qs.set("search", search.trim());
+    if (onlyUntagged) qs.set("untagged_junction", cfg.junction);
     apiFetch(`/api/master-v2/${cfg.api}?${qs}`).then((r) => r.json())
       .then((j) => {
         const recs = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
@@ -213,9 +223,22 @@ export default function TagsManagerPage() {
       })
       .catch(() => setPool([]))
       .finally(() => setLoadingPool(false));
-  }, [cfg.api, search, sortDir, page, loadTagMap]);
+  }, [cfg.api, cfg.junction, search, sortDir, page, onlyUntagged, loadTagMap]);
   useEffect(() => { const t = setTimeout(loadPool, 300); return () => clearTimeout(t); }, [loadPool]);
-  useEffect(() => { setPage(0); }, [entity, search, sortDir]);   // เปลี่ยนเงื่อนไข → กลับหน้าแรก
+  useEffect(() => { setPage(0); }, [entity, search, sortDir, onlyUntagged]);
+  // จำนวนบนปุ่ม "ทั้งหมด / ยังไม่ติดแท็ก" (ตามคำค้นหา) — นับใหม่หลังใส่/ลบแท็ก
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => {
+      const base = new URLSearchParams({ limit: "1", sort_by: "code" });
+      if (search.trim()) base.set("search", search.trim());
+      const un = new URLSearchParams(base); un.set("untagged_junction", cfg.junction);
+      Promise.all([apiFetch(`/api/master-v2/${cfg.api}?${base}`).then((r) => r.json()), apiFetch(`/api/master-v2/${cfg.api}?${un}`).then((r) => r.json())])
+        .then(([a, b]) => { if (alive) { setAllCount(typeof a.total === "number" ? a.total : null); setUntaggedCount(typeof b.total === "number" ? b.total : null); } })
+        .catch(() => {});
+    }, 400);
+    return () => { alive = false; clearTimeout(t); };
+  }, [cfg.api, cfg.junction, search, result]);   // เปลี่ยนเงื่อนไข → กลับหน้าแรก
   useEffect(() => { setCart([]); setTagMap({}); setCartSel(new Set()); }, [entity]);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -231,6 +254,7 @@ export default function TagsManagerPage() {
     try {
       const qs = new URLSearchParams({ limit: "5000", sort_by: "code", sort_dir: sortDir });
       if (search.trim()) qs.set("search", search.trim());
+      if (onlyUntagged) qs.set("untagged_junction", cfg.junction);
       const j = await apiFetch(`/api/master-v2/${cfg.api}?${qs}`).then((r) => r.json());
       const recs: Rec[] = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
         id: String(r.id), code: String(r.code ?? r.id), name: String(r.name_th ?? r.name ?? ""), image: (r.cover_image_r2_key as string) ?? null,
@@ -451,12 +475,25 @@ export default function TagsManagerPage() {
   const subOfGrp = (id: string) => groups.filter((g) => g.parent_group_id === id).sort(byOrder);
   const tagsOfGrp = (gid: string) => allTags.filter((t) => t.group_id === gid);
   const ungroupedTags = useMemo(() => allTags.filter((t) => !t.group_id || !groupById.has(t.group_id)), [allTags, groupById]);
+  // ลากแท็กไปวางทับแท็กอื่น → ป๊อปสร้างกลุ่มย่อย (ของกลาง lib/tag-nest) · เช่น ผ้าแคนวาส → ผ้า = กลุ่ม "↳ ผ้า"
+  const nestOnto = (parentId: string) => {
+    const d = dragRef.current; dragRef.current = null; setTagOver(null);
+    if (!d || d.type !== "tag" || d.id === parentId) return;
+    const moving = allTags.find((x) => x.id === d.id); const parent = allTags.find((x) => x.id === parentId);
+    if (!moving || !parent) return;
+    void askAndNestTag({ moving, parent, tags: allTags, groups, toast, onChanged: () => { loadTags(); loadGroups(); } });
+  };
   const tagChip = (t: Tag) => {
     const inSet = tagSet.includes(t.id);
     const en = tagEnMap[t.id] ?? "";
+    const over = tagOver === t.id;
     return (
-      <span key={t.id} className="inline-flex items-center rounded-full border overflow-hidden"
-        style={{ borderColor: inSet ? "#fde68a" : "#e2e8f0", background: inSet ? "#fef3c7" : "#fff" }}>
+      <span key={t.id} className={`inline-flex items-center rounded-full border overflow-hidden ${over ? "ring-2 ring-blue-400" : ""}`}
+        title="ลากแท็กอื่นมาวางทับ = สร้างกลุ่มย่อยใต้แท็กนี้"
+        onDragOver={(e) => { if (dragRef.current?.type !== "tag" || dragRef.current.id === t.id) return; e.preventDefault(); e.stopPropagation(); if (tagOver !== t.id) setTagOver(t.id); }}
+        onDragLeave={() => { if (tagOver === t.id) setTagOver(null); }}
+        onDrop={(e) => { if (dragRef.current?.type !== "tag") return; e.preventDefault(); e.stopPropagation(); nestOnto(t.id); }}
+        style={{ borderColor: over ? "#60a5fa" : inSet ? "#fde68a" : "#e2e8f0", background: over ? "#eff6ff" : inSet ? "#fef3c7" : "#fff" }}>
         <button draggable onDragStart={() => { dragRef.current = { type: "tag", id: t.id }; }}
           onClick={() => addTag(t.id)} disabled={inSet}
           className={`px-2.5 py-1 text-xs cursor-grab active:cursor-grabbing ${inSet ? "text-amber-700 opacity-60" : "text-slate-600 hover:bg-amber-50"}`}>
@@ -609,6 +646,10 @@ export default function TagsManagerPage() {
             <span className="text-sm font-semibold text-slate-700">คลัง{cfg.label}</span>
             <span className="text-xs text-slate-400">({total.toLocaleString()})</span>
             <div className="flex-1" />
+            <div className="inline-flex rounded-md border border-slate-200 overflow-hidden" title="ยังไม่ติดแท็ก = นับทั้งคลัง ไม่ใช่แค่หน้านี้">
+              <button onClick={() => setOnlyUntagged(false)} className={`h-7 px-2 text-xs ${!onlyUntagged ? "bg-blue-50 text-blue-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>ทั้งหมด{allCount != null ? ` ${allCount.toLocaleString()}` : ""}</button>
+              <button onClick={() => setOnlyUntagged(true)} className={`h-7 px-2 text-xs border-l border-slate-200 ${onlyUntagged ? "bg-amber-50 text-amber-700" : "bg-white text-amber-600 hover:bg-amber-50"}`}>ยังไม่ติดแท็ก{untaggedCount != null ? ` ${untaggedCount.toLocaleString()}` : ""}</button>
+            </div>
             <TagGroupFilter value={filterSel} onChange={setFilterSel} />
             <div className="inline-flex rounded-md border border-slate-200 overflow-hidden" title="สลับมุมมอง การ์ด/ตาราง">
               <button onClick={() => changeView("card")} className={`h-7 px-2 text-xs ${view === "card" ? "bg-blue-50 text-blue-700" : "bg-white text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>

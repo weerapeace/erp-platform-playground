@@ -2822,7 +2822,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           <div className="mt-0.5">
             <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled}
               value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
-              onChange={(ids) => updateForm({ [f.key]: ids })} />
+              onChange={(ids) => updateForm({ [f.key]: ids })} siblingValues={form} />
           </div>
         ) : f.type === "one2many" ? (
           <div className="mt-0.5">

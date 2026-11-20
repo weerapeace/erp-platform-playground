@@ -594,10 +594,19 @@ async function _GET(
     if (set.size > 2000) console.warn(`[master-v2] tag filter list capped at 2000 (junction=${junction}, found=${set.size})`);
     return [...set].slice(0, 2000);
   };
-  const exclJunction = searchParams.get("excl_junction") ?? "";
+  let exclJunction = searchParams.get("excl_junction") ?? "";
   const exclTgtIds = (searchParams.get("excl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const inclJunction = searchParams.get("incl_junction") ?? "";
   const inclTgtIds = (searchParams.get("incl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  // ?untagged_junction=<junction> = เฉพาะแถวที่ "ยังไม่ติดแท็กเลย" ทั้งตาราง (ไม่ใช่แค่หน้าที่โหลด) — เจ้าของสั่ง 2026-11-20 (คลังแท็ก)
+  //   SKU → ใช้ RPC เดิม (p_excl = แท็กทุกตัว) · ตารางอื่น → ไล่ id ที่ตรงตัวกรองแล้วตัดตัวที่มีแท็กออก (บล็อกด้านล่าง)
+  const untaggedRaw = searchParams.get("untagged_junction") ?? "";
+  const untaggedJunction = JUNC_RE.test(untaggedRaw) && untaggedRaw.endsWith("_product_family_m2m") ? untaggedRaw : "";
+  if (untaggedJunction && cfg.table === "skus_v2" && !(JUNC_RE.test(exclJunction) && exclTgtIds.length > 0)) {
+    const { data: famRows } = await supabaseAdmin().from("product_families").select("id");
+    exclJunction = untaggedJunction;
+    exclTgtIds.push(...((famRows ?? []) as { id: string }[]).map((r) => String(r.id)));
+  }
   const hasExcl = JUNC_RE.test(exclJunction) && exclTgtIds.length > 0;
   const hasIncl = JUNC_RE.test(inclJunction) && inclTgtIds.length > 0;
   // skus + กรองแท็ก → ใช้ RPC (EXISTS/NOT EXISTS ที่ DB) รองรับทุกขนาด ไม่ส่ง id ใน URL
@@ -643,6 +652,44 @@ async function _GET(
     const rows = await resolveRelationLabels(supabase, cfg, processed);
     const { hiddenCols } = await fieldAccessP;
     return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
+  }
+
+  // ── 🏷️ ยังไม่ติดแท็ก (ตารางที่ไม่ใช่ SKU เช่น Parent) — ไล่ id ตามตัวกรอง/เรียงเดิม ตัดตัวที่มีแท็ก แล้วแบ่งหน้าใน JS ──
+  if (untaggedJunction && cfg.table !== "skus_v2") {
+    const admin4 = supabaseAdmin();
+    const tagged = new Set<string>();
+    for (let from = 0; from < 500_000; from += 1000) {
+      const { data: jr, error: je } = await admin4.from(untaggedJunction).select("src_id").order("src_id").range(from, from + 999);
+      if (je) return NextResponse.json({ data: [], error: je.message }, { status: 500 });
+      for (const r of (jr ?? []) as { src_id: string }[]) tagged.add(String(r.src_id));
+      if ((jr ?? []).length < 1000) break;
+    }
+    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : (cfg.orderColumn ?? "updated_at");
+    const orderAsc = sortBy ? sortDir : false;
+    const scanCols = [...new Set(["id", ...(SAFE_COL.test(orderCol) ? [orderCol] : [])])].join(",");
+    const matched: string[] = [];
+    for (let from = 0; from < 100_000; from += 1000) {
+      let q = supabase.from(cfg.table).select(scanCols).order(orderCol, { ascending: orderAsc }).order("id").range(from, from + 999);
+      q = applyListFilters(q, { searchColumns: cfg.searchColumns, search, colFilters, softDeleteColumn: cfg.softDeleteColumn, includeInactive });
+      const { data: part, error: scanErr } = await q;
+      if (scanErr) return NextResponse.json({ data: [], error: scanErr.message }, { status: 500 });
+      const rows = (part ?? []) as unknown as Record<string, unknown>[];
+      for (const r of rows) if (!tagged.has(String(r.id))) matched.push(String(r.id));
+      if (rows.length < 1000) break;
+    }
+    const pageIds = matched.slice(offset, offset + limit);
+    const fetched: Record<string, unknown>[] = [];
+    for (let i = 0; i < pageIds.length; i += 200) {
+      const { data: rowsData, error: fetchErr } = await supabase.from(cfg.table).select(selectCols).in("id", pageIds.slice(i, i + 200));
+      if (fetchErr) return NextResponse.json({ data: [], error: fetchErr.message }, { status: 500 });
+      fetched.push(...((rowsData ?? []) as unknown as Record<string, unknown>[]));
+    }
+    const order = new Map(pageIds.map((id, i) => [id, i]));
+    const ordered = fetched.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
+    const processed = cfg.postProcess ? ordered.map(cfg.postProcess) : ordered;
+    const rows = await resolveRelationLabels(supabase, cfg, processed);
+    const { hiddenCols } = await fieldAccessP;
+    return NextResponse.json({ data: maskSecretRows(cfg.table, stripHidden(rows, hiddenCols)), total: matched.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
   }
 
   // ── 📝 กรอง "ยังลงไม่ครบโหมดลงรายละเอียด" (?mode_incomplete=<โหมด>) ──

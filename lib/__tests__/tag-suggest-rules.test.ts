@@ -63,3 +63,39 @@ describe("ระบบช่วยเดาแท็ก — ก๊อปจา�
     expect(matchTagByName("กระเป๋าสตางค์", tags, CATEGORY_TAG_ALIASES)?.name).toBe("กระเป๋าสตางค์");
   });
 });
+
+// 2026-11-20: เดาแท็กตอนสร้าง SKU / Parent
+import { suggestTagsForNewItem } from "@/lib/tag-suggest-rules";
+describe("suggestTagsForNewItem", () => {
+  const groups = [
+    { id: "gb", name: "ฺBrands", parent_group_id: null },
+    { id: "gc", name: "หมวดหมู่สินค้า", parent_group_id: null },
+    { id: "gm", name: "วัตถุดิบ", parent_group_id: null, single_select: true },
+  ];
+  const T = [
+    { id: "lm", name: "Louis Montini", group_id: "gb" },
+    { id: "bag", name: "กระเป๋า", group_id: "gc" },
+    { id: "belt", name: "เข็มขัด", group_id: "gc" },
+    { id: "zip", name: "ซิป", group_id: "gm" },
+    { id: "lea", name: "หนัง", group_id: "gm" },
+    { id: "can", name: "ผ้าแคนวาส", group_id: "gm" },
+  ];
+  const ids = (xs: { tagId: string }[]) => xs.map((x) => x.tagId).sort();
+
+  it("สินค้าสำเร็จ: แบรนด์+หมวดจากชื่อ ไม่เดาวัตถุดิบ", () => {
+    const r = suggestTagsForNewItem({ name: "Louis Montini กระเป๋าหนังแท้ ซิปไนล่อน" }, T, groups);
+    expect(ids(r)).toEqual(["bag", "lm"]);
+  });
+  it("แบรนด์/หมวดที่เลือกไว้ + แท็กของ Parent = แน่นอน", () => {
+    const r = suggestTagsForNewItem({ name: "x", brandName: "Louis Montini", categoryName: "เข็มขัด", parentTagIds: ["bag"] }, T, groups);
+    expect(r.every((x) => x.conf === "sure")).toBe(true);
+    expect(ids(r)).toEqual(["bag", "belt", "lm"]);
+  });
+  it("วัตถุดิบ: เดาผ่านกฎรหัส/ชื่อ + แท็กชื่อตรง", () => {
+    expect(ids(suggestTagsForNewItem({ code: "ZIP-N-5", name: "ซิปไนล่อน #5" }, T, groups))).toEqual(["zip"]);
+    expect(ids(suggestTagsForNewItem({ name: "ผ้าแคนวาส สีดำ" }, T, groups))).toEqual(["can"]);
+  });
+  it("ไม่มีอะไรตรง = ว่าง", () => {
+    expect(suggestTagsForNewItem({ name: "" }, T, groups)).toEqual([]);
+  });
+});

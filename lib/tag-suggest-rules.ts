@@ -104,3 +104,58 @@ export function matchTagByName<T extends { name: string }>(name: string | null |
   const want = normName(aliases[k] ?? k);
   return tags.find((t) => normName(t.name) === want) ?? null;
 }
+
+// ───────────────────────── เดาแท็กตอน "สร้าง" SKU / Parent (เจ้าของสั่ง 2026-11-20) ─────────────────────────
+// ใช้ที่: GET /api/product-tags/suggest/new → ปุ่มแนะนำแท็กในฟอร์มสร้าง (components/relation-multi)
+// sure = ติ๊กให้ก่อน (แบรนด์/หมวดที่ตั้งไว้ · แท็กของ Parent) · high/check = แสดงเป็นปุ่มให้กดเอง
+
+export type NewItemTagSuggestion = { tagId: string; name: string; conf: SuggestConf; reason: string };
+type SugTag = { id: string; name: string; group_id: string | null };
+type SugGroup = { id: string; name: string; parent_group_id: string | null; single_select?: boolean | null };
+
+export function suggestTagsForNewItem(
+  input: { code?: string | null; name?: string | null; brandName?: string | null; categoryName?: string | null; parentTagIds?: string[] },
+  tags: SugTag[],
+  groups: SugGroup[],
+): NewItemTagSuggestion[] {
+  const out = new Map<string, NewItemTagSuggestion>();
+  const rank: Record<SuggestConf, number> = { sure: 0, high: 1, check: 2, new: 3 };
+  const add = (t: SugTag | null | undefined, conf: SuggestConf, reason: string) => {
+    if (!t) return;
+    const cur = out.get(t.id);
+    if (!cur || rank[conf] < rank[cur.conf]) out.set(t.id, { tagId: t.id, name: t.name, conf, reason });
+  };
+  const byId = new Map(tags.map((t) => [t.id, t]));
+  for (const id of input.parentTagIds ?? []) add(byId.get(id), "sure", "จากแท็กของ Parent");
+  add(matchTagByName(input.brandName, tags), "sure", "แบรนด์ที่เลือกไว้");
+  add(matchTagByName(input.categoryName, tags, CATEGORY_TAG_ALIASES), "sure", "หมวดหมู่ที่เลือกไว้");
+
+  const name = String(input.name ?? "");
+  const n = normName(name);
+  // ตัดชื่อแบรนด์ (แท็กในกลุ่ม Brands) ออกก่อนตัดสิน — "Louis Montini กระเป๋า…" = สินค้าสำเร็จ ไม่ใช่วัตถุดิบ
+  const brandGroupIds = new Set(groups.filter((g) => normName(g.name) === "brands").map((g) => g.id));
+  let core = name;
+  for (const t of tags) if (t.group_id && brandGroupIds.has(t.group_id) && t.name.trim()) core = core.split(t.name).join(" ");
+  core = core.replace(/s+/g, " ").trim();
+  const mat = suggestMaterial(input.code, core);
+  if (mat) add(tags.find((t) => normName(t.name) === normName(mat.rule.tag)), mat.rule.conf === "high" ? "high" : "check", mat.reason);
+
+  if (n) {
+    const finished = looksFinishedProduct(core);
+    const groupById = new Map(groups.map((g) => [g.id, g]));
+    const inSingle = (gid: string | null) => {
+      let cur = gid; const seen = new Set<string>();
+      while (cur && !seen.has(cur)) { seen.add(cur); const g = groupById.get(cur); if (!g) return false; if (g.single_select) return true; cur = g.parent_group_id; }
+      return false;
+    };
+    const materialNames = new Set(MATERIAL_RULES.map((r) => normName(r.tag)));
+    for (const t of tags) {
+      const tn = normName(t.name);
+      if (tn.length < 2 || !n.includes(tn)) continue;
+      if (materialNames.has(tn)) continue;                 // วัตถุดิบเดาผ่านกฎ MATERIAL_RULES เท่านั้น (กัน "กระเป๋าหนัง" → หนัง)
+      if (finished && inSingle(t.group_id)) continue;      // สินค้าสำเร็จไม่เดาแท็กกลุ่มเลือกได้ 1 (วัตถุดิบ)
+      add(t, "high", `ชื่อมีคำ “${t.name}”`);
+    }
+  }
+  return [...out.values()].sort((a, b) => rank[a.conf] - rank[b.conf] || a.name.localeCompare(b.name, "th"));
+}
