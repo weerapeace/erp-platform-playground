@@ -15,6 +15,7 @@ import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { tr } from "@/lib/lang";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";   // ขนาดรูป − N + / Ctrl+ลูกกลิ้ง
 
 export type ViewerImage = { url: string; thumbUrl?: string | null; label?: string | null; cover?: boolean };
 export type ViewerOwner = {
@@ -72,6 +73,9 @@ export function GroupedImageViewer({ open, onClose, title, description, groups, 
     return { flat, startOf };
   }, [shown]);
   const lbGroups = useMemo(() => shown.map((g) => ({ key: g.key, label: g.label })), [shown]);
+  // ขนาดรูป (ของกลาง มุมมองการ์ดกลาง) — จำรายคน · โหลดค่าเมื่อเปิดป๊อปเท่านั้น
+  const gallery = useGalleryColumns("grouped-image-viewer", 6, "0.5rem", { enabled: open });
+  const tileGrid = galleryTemplate(gallery.cols, "0.5rem");
 
   const chip = (key: string, label: string, n: number, icon?: string) => (
     <button key={key} type="button" onClick={() => setFilter(key)}
@@ -87,10 +91,11 @@ export function GroupedImageViewer({ open, onClose, title, description, groups, 
     body = <EmptyState icon={<Icon name="image" />} title={emptyTitle ?? tr("ยังไม่มีรูป", "No images yet")} hint={emptyHint} />;
   } else {
     body = (
-      <div className="space-y-5">
-        <div className="flex flex-wrap gap-1.5">
+      <div ref={gallery.wheelRef} className="space-y-5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {chip("all", tr("ทั้งหมด", "All"), total)}
           {visible.map((g) => chip(g.key, g.label, countGroup(g), g.icon))}
+          <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} className="ml-auto" />
         </div>
         {shown.map((g) => {
           const n = countGroup(g);
@@ -113,7 +118,7 @@ export function GroupedImageViewer({ open, onClose, title, description, groups, 
                         ? <p className="text-xs text-slate-400">{tr("ยังไม่มีรูป", "No images yet")}</p>
                         : <p className="inline-flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5"><Icon name="warning" />{o.label} {tr("ยังไม่มีรูป", "has no images yet")}</p>
                     ) : (
-                      <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(110px,1fr))]">
+                      <div className="grid gap-2" style={{ gridTemplateColumns: tileGrid }}>
                         {o.images.map((im, i) => (
                           <button key={`${im.url}-${i}`} type="button" onClick={() => setLbIndex(startOf.get(`${g.key}|${o.key}|${i}`) ?? 0)}
                             title={tr("กดดูเต็มจอ", "View full screen")}

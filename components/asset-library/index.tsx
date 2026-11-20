@@ -24,6 +24,8 @@ import { type AssetRow } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
 import { AssetPicker } from "@/components/asset-picker";
 import { Pager } from "@/components/pager";
+import { useGalleryColumns, CardGrid, CardViewBar } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (ซูม Ctrl+ลูกกลิ้ง)
+import { EmptyState } from "@/components/state-views";
 import { LoadingOverlay } from "@/components/spinner";
 import { useRefresh } from "@/lib/refresh-bus";
 import type { PrintType } from "@/app/api/print-types/route";
@@ -86,6 +88,8 @@ export function AssetLibrary() {
   const [tags, setTags] = useState<AssetTag[]>([]);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // ขนาดการ์ดไฟล์ (ของกลาง มุมมองการ์ดกลาง) — จำรายคน · Ctrl+ลูกกลิ้งบนการ์ด = ย่อ/ขยาย
+  const gallery = useGalleryColumns("asset-library", 6);
   const [uploadOpen, setUploadOpen] = useState(false);
   // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ · กลับมาดูผล/ย้อนทั้งชุดได้)
   const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
@@ -563,25 +567,25 @@ export function AssetLibrary() {
           {showBrandView ? (
             <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
           ) : loading ? (
-            <div className="text-center py-16 text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div>
+            <CardGrid gallery={gallery} loading />
           ) : rows.length === 0 ? (
-            <div className="text-center py-16 text-slate-400 text-sm">
-              {searching ? `${t("ไม่พบไฟล์ที่ตรงกับ", "No files match")} “${search.trim()}”`
+            <EmptyState icon="🗂️" title={
+              searching ? `${t("ไม่พบไฟล์ที่ตรงกับ", "No files match")} “${search.trim()}”`
                 : trash ? t("ถังขยะว่าง", "Trash is empty")
                 : source === "artwork" ? t("ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)", "No Artwork yet — click “Add Artwork” to create a design card (preview image + source file path)")
                 : source === "print" ? t("ยังไม่มีงานพิมพ์ — กด “เพิ่มงานพิมพ์” เพื่อลงรูป preview + ไฟล์ .ai/.pdf สำหรับส่งพิมพ์", "No print jobs yet — click “Add print job” to add a preview image + .ai/.pdf files for printing")
                 : source === "odoo_product" ? t("ยังไม่มีรูปสินค้านำเข้า", "No imported product images")
-                : t("ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์", "No files in the library — click “Upload” to start storing files")}
-            </div>
-          ) : (
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+                : t("ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์", "No files in the library — click “Upload” to start storing files")} />
+          ) : (<>
+            <CardViewBar gallery={gallery} count={`${total.toLocaleString("th-TH")} ${t("ไฟล์", "files")}`} />
+            <CardGrid gallery={gallery}>
               {rows.map((a) => (
                 <AssetCard key={a.id} a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
                   onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)}
                   onSameFolder={(id, label) => setFolderFilter({ id, label })} />
               ))}
-            </div>
-          )}
+            </CardGrid>
+          </>)}
           {!showBrandView && !loading && total > 0 && rows.length > 0 && (
             <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel={t("ไฟล์", "files")} /></div>
           )}

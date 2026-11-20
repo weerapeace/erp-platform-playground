@@ -7,13 +7,14 @@
  * รูป = "แกลเลอรีจริง" ของสินค้า (รูปภาพเพิ่มเติม + Odoo รวมกัน) เรียงรูปหลักก่อนตามที่ตั้งในฟอร์ม Parent SKU
  * คลิกรูป → ดูรูปใหญ่ (lightbox). จัดรูป/ตั้งรูปหลัก/ลำดับ ทำที่ฟอร์ม Parent SKU
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { useStepHistory } from "@/lib/use-step-history";   // ปุ่ม Back ย้อนทีละชั้น (ของกลาง)
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate, GALLERY_LABEL } from "@/components/gallery-columns";   // ขนาดรูป − N + / Ctrl+ลูกกลิ้ง
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
 type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number; web_img?: number };
@@ -37,16 +38,20 @@ function Thumb({ a, onOpen }: { a: Img; onOpen: () => void }) {
           ? <img src={withImageWidth(a.url, 200) ?? a.url} alt={a.title} loading="lazy" draggable={false} onError={() => setBroken(true)} className="w-full h-full object-cover" />
           : <span className="text-2xl">🖼️</span>}
       </div>
-      <p className="px-1.5 py-1 text-[10px] text-slate-600 truncate">{a.title}</p>
+      <p className={`${GALLERY_LABEL} px-1.5 py-1 text-[10px] text-slate-600 truncate`}>{a.title}</p>
     </button>
   );
 }
 
+/** ขนาดช่องรูปที่ผู้ใช้เลือก (ของกลาง มุมมองการ์ดกลาง) — ทุกกริดในหน้ารายละเอียด Parent ใช้ค่าเดียวกัน */
+const GridTplCtx = createContext("repeat(auto-fill, 104px)");
+
 function Grid({ items, onOpen }: { items: Img[]; onOpen: (a: Img) => void }) {
   const t = useT();
+  const tpl = useContext(GridTplCtx);
   if (items.length === 0) return <p className="text-[12px] text-slate-400 py-2">{t("— ยังไม่มีรูป —", "— No images —")}</p>;
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, 104px)" }}>
+    <div className="grid gap-2" style={{ gridTemplateColumns: tpl }}>
       {items.map((a) => <Thumb key={a.id} a={a} onOpen={() => onOpen(a)} />)}
     </div>
   );
@@ -61,6 +66,8 @@ function Crumb({ label, onClick, last }: { label: string; onClick?: () => void; 
 export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: number; openParentId?: string | null }) {
   const toast = useToast();
   const t = useT();
+  // ขนาดรูปในหน้ารายละเอียด Parent — จำรายคน · Ctrl+ลูกกลิ้งบนรูป = ย่อ/ขยาย
+  const gallery = useGalleryColumns("asset-brand-album", 8, "0.5rem");
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -167,13 +174,15 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
       <div>
         {crumbs}
         {loadingDetail || !detail ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด…", "Loading…")}</div> : (
-          <div className="flex flex-col gap-5">
+          <GridTplCtx.Provider value={galleryTemplate(gallery.cols, "0.5rem")}>
+          <div ref={gallery.wheelRef} {...gallery.compactAttr} className="flex flex-col gap-5">
             <div className="flex items-center justify-between gap-2 flex-wrap -mb-1">
               <p className="text-[12px] text-slate-400">{t("กดรูปเพื่อดูใหญ่ · กดโฟลเดอร์ SKU เพื่อกางดูรูป", "Click an image to enlarge · click a SKU folder to expand its images")}</p>
               <button onClick={downloadAllZip} disabled={zipBusy} title={t("โหลดรูปทั้งหมดของสินค้านี้เป็นไฟล์ zip", "Download all images of this product as a zip")}
                 className="h-8 px-3 text-[12px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
                 {zipBusy ? (zipMsg || t("กำลังเตรียม…", "Preparing…")) : t("⬇ ดาวน์โหลดทั้งหมด (zip)", "⬇ Download all (zip)")}
               </button>
+              <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
             </div>
             <section>
               <p className="text-[13px] font-medium text-slate-700 mb-2">{t("🖼️ รูปที่ลงใน Parent SKU", "🖼️ Images on the Parent SKU")} <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)}) · {t("รูปหลักก่อน", "primary first")}</span></p>
@@ -256,6 +265,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
               )}
             </section>
           </div>
+          </GridTplCtx.Provider>
         )}
         {lightboxNode}
       </div>

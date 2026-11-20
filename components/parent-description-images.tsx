@@ -16,6 +16,7 @@ import { formatBytes } from "@/lib/assets";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { AssetPicker } from "@/components/asset-picker";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";   // ขนาดรูป − N + / Ctrl+ลูกกลิ้ง
 import type { AssetRow } from "@/app/api/assets/shared";
 
 const imgDims = (file: File) => new Promise<{ w: number; h: number } | null>((res) => {
@@ -37,6 +38,8 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);   // กดรูป → ดูใหญ่ (เลื่อนซ้าย/ขวาได้)
   const [delTarget, setDelTarget] = useState<AssetRow | null>(null); // ยืนยันก่อนลบจากคลัง
   const inputRef = useRef<HTMLInputElement>(null);
+  // ขนาดรูป (ของกลาง มุมมองการ์ดกลาง) — จำรายคน · Ctrl+ลูกกลิ้งบนรูป = ย่อ/ขยาย
+  const gallery = useGalleryColumns("parent-desc-images", 8, "0.5rem");
   const dragIdx = useRef<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);   // ลากไฟล์จากนอกมาวาง
@@ -198,6 +201,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
             title="เลือกรูปจากคลังไฟล์กลาง (media) มาเป็นรูป Description"
             className="h-8 px-2.5 text-[12px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50 flex items-center gap-1">
             {linking ? <span className="w-3.5 h-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" /> : "📁"} เลือกจากคลัง</button>}
+          {images.length > 0 && <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />}
           {!readonly && <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
             className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
             {busy ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />กำลังอัป {progress?.done}/{progress?.total}</> : "＋ เพิ่มรูป"}</button>}
@@ -212,7 +216,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
             {dragOver ? "วางรูปที่นี่" : <>ยังไม่มีรูป Description{!readonly && " — ลากรูปมาวาง · คลิก · หรือกด Ctrl+V"}</>}
           </div>
         ) : (
-          <div className={`grid gap-2 rounded-lg ${dragOver ? "ring-2 ring-indigo-300 p-1" : ""}`} style={{ gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))" }}>
+          <div ref={gallery.wheelRef} className={`rounded-lg ${dragOver ? "ring-2 ring-indigo-300 p-1" : ""}`} style={gallery.gridStyle}>
             {images.map((a, idx) => (
               <div key={a.id} draggable={!readonly}
                 onDragStart={() => { dragIdx.current = idx; }}
@@ -220,7 +224,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
                 onDrop={(e) => { e.preventDefault(); if (dragIdx.current != null) drop(idx); else if (e.dataTransfer.files?.length) { setDragOver(false); void upload(e.dataTransfer.files); } }}
                 onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
                 className={`relative group rounded-lg border overflow-hidden bg-white ${overIdx === idx ? "ring-2 ring-indigo-400" : "border-slate-200"} ${!readonly ? "cursor-grab active:cursor-grabbing" : ""}`}>
-                <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden cursor-zoom-in"
+                <div className="aspect-[4/3] bg-slate-100 flex items-center justify-center overflow-hidden cursor-zoom-in"
                   onClick={() => a.asset_type === "image" && setLightboxIdx(idx)} title="กดเพื่อดูรูปใหญ่">
                   {a.asset_type === "image"
                     ? <img src={withImageWidth(a.url, 200) ?? a.url} alt={a.title} loading="lazy" draggable={false} className="w-full h-full object-cover" />

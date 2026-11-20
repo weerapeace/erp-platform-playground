@@ -16,6 +16,7 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { useUserPref } from "@/lib/use-user-pref";
+import { useGalleryColumns, GalleryColumnsControl } from "@/components/gallery-columns";   // ขนาดรูป − N + / Ctrl+ลูกกลิ้ง
 import {
   SAMPLE_ALBUM_SORTS, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE,
   albumFullName, albumMatches, albumPath, browseAlbums, photoMatches, sortAlbums, sortPhotos,
@@ -35,7 +36,6 @@ export type SamplePickerPanelProps = {
 
 const strPref = (raw: unknown) => (typeof raw === "string" && raw ? raw : null);
 const cardGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "0.75rem" } as const;
-const photoGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "0.6rem" } as const;
 
 export default function SamplePickerPanel({ multiple, isSelected, onToggle, onPickMany }: SamplePickerPanelProps) {
   const t = useT();
@@ -48,6 +48,8 @@ export default function SamplePickerPanel({ multiple, isSelected, onToggle, onPi
   // แบรนด์ที่เลือกไว้ + วิธีเรียง = ค่าเดียวกับหน้า SAMPLE Images (เปิดมาเจอแบบที่ดูล่าสุด)
   const [tab, setTab] = useUserPref<string>("sample_images_brand", SAMPLE_TAB_ALL, strPref);
   const { albumSort, setAlbumSort, photoSort, setPhotoSort } = useSampleSorts();
+  // ขนาดรูปในอัลบั้ม (ของกลาง มุมมองการ์ดกลาง) — จำรายคน · Ctrl+ลูกกลิ้งบนรูป = ย่อ/ขยาย
+  const gallery = useGalleryColumns("sample-picker-photos", 6, "0.6rem");
 
   const loadList = async () => {
     try { setErr(null); const d = await loadSamples(null); setBrands(d.brands); setAlbums(d.albums); }
@@ -98,6 +100,7 @@ export default function SamplePickerPanel({ multiple, isSelected, onToggle, onPi
           <SampleSearchSort query={query} onQuery={setQuery} placeholder={t("ค้นชื่อรูป / อัลบั้มย่อย / เลขใบงาน DS-…", "Search photo / sub-album / DS-…")}
             sort={photoSort} onSort={setPhotoSort} options={SAMPLE_PHOTO_SORTS}>
             <span className="flex-1" />
+            <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
             {searching && photos && <span className="text-[12px] text-slate-500">{t(`พบ ${list.length} จาก ${total} รูป`, `${list.length} of ${total}`)}</span>}
             {multiple && list.length > 0 && (
               <button type="button" onClick={() => onPickMany(list, !allOn)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50">
@@ -120,7 +123,7 @@ export default function SamplePickerPanel({ multiple, isSelected, onToggle, onPi
           {photos === null ? <LoadingState className="py-10 text-sm" />
             : !list.length ? (children.length ? null : searching && total ? noMatch : <EmptyState icon={<Icon value="i:photo" />} className="p-8" title={t("ยังไม่มีรูปในอัลบั้มนี้", "No images in this album")} />)
             : (
-              <div style={photoGrid}>
+              <div ref={gallery.wheelRef} {...gallery.compactAttr} style={gallery.gridStyle}>
                 {list.map((p) => <SamplePhotoTile key={p.id} photo={p} on={isSelected(p.id)} onToggle={() => onToggle(p)} />)}
               </div>
             )}

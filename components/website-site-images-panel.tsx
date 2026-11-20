@@ -17,6 +17,7 @@ import { notifyImageSetsChanged } from "@/components/website-image-sets-context"
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { IMAGE_ALT_MAX, mediaFileName, type SiteDocKind, type SiteImage, type SiteImageUse } from "@/lib/website-site-images";
 import { useT } from "@/components/i18n";
+import { useGalleryColumns, GalleryColumnsControl, GALLERY_LABEL } from "@/components/gallery-columns";   // ขนาดการ์ดรูป − N + / Ctrl+ลูกกลิ้ง
 import { tr, getLang } from "@/lib/lang";
 import { labelEn } from "@/lib/website-admin-en";
 
@@ -115,6 +116,8 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
   const [chips, setChips] = useState<Set<Chip>>(new Set());
   const [withProducts, setWithProducts] = useState(false);
   const [q, setQ] = useState("");
+  // ขนาดการ์ดรูป (ของกลาง มุมมองการ์ดกลาง) — จำรายคน
+  const gallery = useGalleryColumns("website-site-images", 4, "0.625rem");
   const [selKey, setSelKey] = useState<string | null>(null);
   const [alt, setAlt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -298,6 +301,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
           {t("รวมรูปสินค้าที่วางในหน้า", "Include product images placed on pages")}
         </label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("🔎 ค้นชื่อไฟล์ / ที่ใช้", "🔎 Search file name / place")} className="ml-auto w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm sm:w-56" />
+        <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
       </div>
 
       {!shown.length ? (
@@ -305,7 +309,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
       ) : (
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
           {/* การ์ดรูป */}
-          <div className="grid content-start gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
+          <div ref={gallery.wheelRef} {...gallery.compactAttr} className="content-start" style={gallery.gridStyle}>
             {shown.map((i) => (
               <button
                 key={i.key}
@@ -320,7 +324,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
                   {i.product && <span className="rounded bg-sky-100 px-1.5 text-[10px] text-sky-800">{t("รูปสินค้า", "Product image")}</span>}
                   {!i.uses.some((u) => u.live) && <span className="rounded bg-amber-50 px-1.5 text-[10px] text-amber-700">{t("ร่าง", "Draft")}</span>}
                 </span>
-                <span className="block px-2 py-1.5 text-[11px] leading-snug text-slate-500">
+                <span className={`${GALLERY_LABEL} block px-2 py-1.5 text-[11px] leading-snug text-slate-500`}>
                   <b className="block truncate text-xs font-medium text-slate-800">{i.file?.name || mediaFileName(i.key)}</b>
                   {fileLine(i) && <span className="block truncate">{fileLine(i)}</span>}
                   {t(`ใช้ ${i.uses.length} ที่`, `Used in ${i.uses.length}`)}{i.kind === "image" && !i.alt ? t(" · ไม่มีคำอธิบาย", " · no description") : ""}

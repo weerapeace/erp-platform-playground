@@ -5,6 +5,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { CardZoom, type GalleryCols } from "@/components/gallery-columns";   // โหมดการ์ด: ซูม Ctrl+ลูกกลิ้ง
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR, invalidateSWR } from "@/lib/swr-lite";
@@ -2029,6 +2030,7 @@ export function DataTable<T extends Record<string, unknown>>({
               rows={isServer ? filteredData : table.getRowModel().rows.map(r => r.original as T)}
               columns={columns}
               config={effCardCfg}
+              zoomScope={`datatable-${tableId ?? "default"}`}
               onRowClick={isRowClickable ? handleRowClick : undefined}
             />
           )
@@ -3155,12 +3157,14 @@ const PRIMARY_SIZE: Record<NonNullable<CardConfig["primarySize"]>, string> = {
 };
 
 function CardsView<T extends Record<string, unknown>>({
-  rows, columns, config, onRowClick,
+  rows, columns, config, onRowClick, zoomScope,
 }: {
   rows: T[];
   columns: ColumnDef<T>[];
   config: CardConfig;
   onRowClick?: (row: T) => void;
+  /** ชื่อจำขนาดการ์ด (มุมมองการ์ดกลาง: − N + / Ctrl+ลูกกลิ้ง) */
+  zoomScope?: string;
 }) {
   const meta = useMemo(() => getColMeta(columns), [columns]);
   const get = (key: string | undefined) => meta.find(m => m.id === key);
@@ -3222,9 +3226,26 @@ function CardsView<T extends Record<string, unknown>>({
     </div>
   );
 
+  // มุมมองการ์ดกลาง (2026-11-20): ปุ่ม − N + และ Ctrl+ลูกกลิ้ง · ค่าเริ่มมาจาก "คอลัมน์ต่อแถว" ที่ตั้งไว้ · แต่ละคนปรับเองแล้วจำ
+  // จอแคบลดจำนวนเอง (การ์ดไม่เล็กกว่า 220px → มือถือ 1 ใบต่อแถวเหมือนเดิม) · ตั้ง "1 คอลัมน์" = รายการยาวแบบเดิม ไม่มีซูม
+  const cfgCols = config.columns ?? "auto";
+  if (cfgCols !== "1") {
+    const initial = (cfgCols === "auto" ? 4 : Number(cfgCols)) as GalleryCols;
+    return (
+      <div className="p-4">
+        <CardZoom scope={zoomScope ?? "datatable-cards"} initial={initial} gap="0.75rem" minPx={220}>
+          {(z) => <div className="grid gap-3" style={{ gridTemplateColumns: z.template }}>{rows.map((row, i) => cardOf(row, i))}</div>}
+        </CardZoom>
+      </div>
+    );
+  }
   return (
     <div className={`grid ${colsCls} gap-3 p-4`}>
-      {rows.map((row, i) => {
+      {rows.map((row, i) => cardOf(row, i))}
+    </div>
+  );
+
+  function cardOf(row: T, i: number) {
         const v = (k: string) => (row as Record<string, unknown>)[k];
         // F29: image field เก็บ r2_key → แปลงเป็น proxy URL
         const rawImg = showImg && image ? v(image.id) : null;
@@ -3252,9 +3273,7 @@ function CardsView<T extends Record<string, unknown>>({
             {renderContent(v)}
           </div>
         );
-      })}
-    </div>
-  );
+  }
 }
 
 /* eslint-disable @next/next/no-img-element */

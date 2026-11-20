@@ -37,16 +37,21 @@ const isValidCols = (n: unknown, options: readonly number[]): n is GalleryCols =
 
 /** อ่าน/ตั้งจำนวนการ์ดต่อแถว + คืน gridStyle พร้อมใช้ (จำค่ารายคน) */
 export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, gap = "0.75rem",
-  opts?: { options?: readonly GalleryCols[]; ctrlWheel?: boolean }) {
+  opts?: { options?: readonly GalleryCols[]; ctrlWheel?: boolean; enabled?: boolean }) {
   const options = opts?.options ?? GALLERY_COL_OPTIONS;
   const [cols, setColsState] = useState<GalleryCols>(initial);
   const prefKey = `gallery_cols_${scopeKey}`;
+  // enabled=false = ยังไม่โหลดค่าที่จำไว้ (เช่น ป๊อปอัปที่ฝังอยู่ในหน้าแต่ยังปิด) — กันยิงคำขอฟรีทุกหน้า
+  const enabled = opts?.enabled ?? true;
+  const loadedKey = useRef("");
   useEffect(() => {
+    if (!enabled || loadedKey.current === prefKey) return;
+    loadedKey.current = prefKey;
     apiFetch(`/api/user-prefs?key=${encodeURIComponent(prefKey)}`).then((r) => r.json())
       .then((j) => { const v = Number(j?.value); if (isValidCols(v, options)) setColsState(v); })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefKey]);
+  }, [prefKey, enabled]);
   // บันทึกค่าหลังหยุดเปลี่ยนครู่หนึ่ง — หมุนลูกกลิ้งรัว ๆ ไม่ยิงบันทึกทุกขั้น
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setCols = useCallback((n: GalleryCols) => {
@@ -100,7 +105,7 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
 export type GalleryState = ReturnType<typeof useGalleryColumns>;
 
 // มุมมองการ์ดกลาง (กริด + สถานะ + แถบเครื่องมือ) — ต่อยอดจากตัวนี้ (2026-11-20)
-export { CardGrid, CardViewBar } from "./card-grid";
+export { CardGrid, CardViewBar, CardZoom } from "./card-grid";
 
 /** ปุ่มเลือกจำนวนการ์ดต่อแถว (segmented · as="select" = dropdown กะทัดรัด · as="stepper" = − N ต่อแถว + ใช้ได้ทั้ง PC/มือถือ)
  *  — เสียบข้างแถบเครื่องมือของหน้ากริดใดก็ได้

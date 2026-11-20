@@ -28,6 +28,7 @@
  *   (ช่องว่าง/ขอบหลังช่องที่ล็อกถูกถมด้วยเงาสีพื้น · แถวทุกแถวกว้างเท่ากัน กันหัวตาราง/พื้นขาดตอนเลื่อนไกล)
  */
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { CardZoom, type GalleryCols } from "@/components/gallery-columns";   // โหมดการ์ด: ซูม Ctrl+ลูกกลิ้ง (opt-in cardZoom)
 import { useT } from "@/components/i18n";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useAuthOptional } from "@/components/auth";
@@ -158,6 +159,9 @@ export type MiniTableProps<T> = {
   onScrollTop?: (top: number, el: HTMLDivElement) => void;
   /** โหมดการ์ด: วางเป็นตารางหลายคอลัมน์ (ค่า CSS grid-template-columns เช่น "repeat(auto-fill,minmax(240px,1fr))") · การ์ดที่กางเต็มแถว */
   cardGrid?: string;
+  /** โหมดการ์ด: ปุ่ม − N + และ Ctrl+ลูกกลิ้ง ย่อ/ขยาย (ของกลาง มุมมองการ์ดกลาง · จำรายคน) — ใส่แล้วไม่ต้องใส่ cardGrid
+   *  scope = ชื่อจำค่า (ไม่ซ้ำหน้าอื่น) · minPx = การ์ดเล็กสุดก่อนลดจำนวนต่อแถว */
+  cardZoom?: { scope: string; initial?: GalleryCols; minPx?: number };
   /** คุมความกว้างคอลัมน์จากข้างนอก (เช่น เก็บในมุมมองด่วน) — ใส่คู่ onWidthsChange · ไม่ใส่ = จำใน localStorage ตาม storageKey แบบเดิม */
   widths?: Record<string, number>;
   onWidthsChange?: (w: Record<string, number>) => void;
@@ -185,7 +189,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, cardPick, extraSorts, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows, columnMenu,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, cardZoom, widths: widthsCtl, onWidthsChange, fitContent, lazyRows, columnMenu,
     exportOpts,
   } = props;
   const auth = useAuthOptional();
@@ -540,6 +544,28 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       </div>
     );
   };
+  // เนื้อโหมดการ์ดทั้งชุด (เลือกทั้งหมด + กลุ่ม + การ์ด) — grid = ค่า grid-template-columns (มาจาก cardGrid หรือ cardZoom)
+  const CardsBody = (grid?: string) => (
+    <div ref={scrollerRef} onScroll={onScroll} className={`space-y-2 ${fill ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1" : ""}`}>
+      {selectable && (
+        <label className="inline-flex items-center gap-2 px-1 text-xs text-slate-500">
+          <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
+        </label>
+      )}
+      {groups.map((g) => {
+        const gKeys = g.rows.map(rowKey);
+        const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
+        return (
+          <div key={g.name || "_all"} className="space-y-2">
+            {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
+            {gClosed(g.name) ? null : grid
+              ? <div className="grid gap-2" style={{ gridTemplateColumns: grid }}>{g.rows.map((r) => Card(r))}</div>
+              : g.rows.map((r) => Card(r))}
+          </div>
+        );
+      })}
+    </div>
+  );
   const gClosed = (name: string) => !!groupCollapsible && closedG.has(name);
   const toggleG = (name: string) => setClosedG((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
   const GroupHead = ({ g, gSel, gKeys }: { g: { name: string; rows: T[] }; gSel: boolean; gKeys: string[] }) => (
@@ -684,26 +710,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         <div className="text-center py-16 text-slate-300">{emptyText}</div>
       ) : shown === 0 ? (
         <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : t(`ไม่พบรายการที่ตรงกับ “${q}”`, `Nothing matches “${q}”`)}</div>
+      ) : cards && cardZoom ? (
+        <CardZoom scope={cardZoom.scope} initial={cardZoom.initial} minPx={cardZoom.minPx} className={fill ? "flex min-h-0 flex-1 flex-col" : ""}>
+          {(z) => CardsBody(z.template)}
+        </CardZoom>
       ) : cards ? (
-        <div ref={scrollerRef} onScroll={onScroll} className={`space-y-2 ${fill ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1" : ""}`}>
-          {selectable && (
-            <label className="inline-flex items-center gap-2 px-1 text-xs text-slate-500">
-              <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
-            </label>
-          )}
-          {groups.map((g) => {
-            const gKeys = g.rows.map(rowKey);
-            const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
-            return (
-              <div key={g.name || "_all"} className="space-y-2">
-                {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
-                {gClosed(g.name) ? null : cardGrid
-                  ? <div className="grid gap-2" style={{ gridTemplateColumns: cardGrid }}>{g.rows.map((r) => Card(r))}</div>
-                  : g.rows.map((r) => Card(r))}
-              </div>
-            );
-          })}
-        </div>
+        CardsBody(cardGrid)
       ) : (
         // overflow-x-auto (ไม่ใช่ hidden) — คอลัมน์เยอะเกินจอ = เลื่อนซ้าย-ขวาได้ แทนที่จะโดนตัดหายเงียบ ๆ
         // fill = เลื่อนทั้งสองแกนในกล่องนี้ → หัวตาราง sticky ติดบนได้ (ถ้าเลื่อนที่กล่องแม่ หัวจะไม่ติด)

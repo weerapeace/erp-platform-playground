@@ -21,7 +21,7 @@ import { useCallback, type HTMLAttributes, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { ErrorState, SkeletonBar } from "@/components/state-views";
 import { LayoutSwitch, type MiniLayout } from "@/components/mini-table/layout-switch";
-import { GalleryColumnsControl, type GalleryState } from "./index";
+import { GalleryColumnsControl, useGalleryColumns, galleryTemplate, type GalleryState, type GalleryCols } from "./index";
 
 /** กริดการ์ด + สถานะ โหลด/ว่าง/พลาด — ผูก Ctrl+ลูกกลิ้ง + ขนาดการ์ดจาก gallery ให้เอง */
 export function CardGrid({ gallery, loading = false, error, onRetry, isEmpty = false, empty, skeletonCount, className = "", children, ...rest }: {
@@ -61,6 +61,30 @@ export function CardGrid({ gallery, loading = false, error, onRetry, isEmpty = f
   return (
     <div ref={ref} style={gridStyle} {...compactAttr} className={className} {...rest}>
       {children}
+    </div>
+  );
+}
+
+/** ซูมการ์ดแบบห่อ (สำหรับของกลางที่มีหลายกริดในตัว เช่น แบ่งกลุ่ม · ตัวเลือกรูป) — เรียก hook เฉพาะตอนแสดง
+ *  <CardZoom scope="asset-picker" initial={6} gap="0.5rem">{(z) => <div style={{ display: "grid", gap: "0.5rem", gridTemplateColumns: z.template }}>…</div>}</CardZoom>
+ *  ได้: ปุ่ม − N + ชิดขวาด้านบน (bar=false = ไม่โชว์) · Ctrl+ลูกกลิ้งทั้งกล่อง · minPx = การ์ดเล็กสุดก่อนลดจำนวนต่อแถว */
+export function CardZoom({ scope, initial = 6, gap = "0.5rem", minPx, bar = true, barExtra, className = "", children }: {
+  scope: string;
+  initial?: GalleryCols;
+  gap?: string;
+  minPx?: number;
+  bar?: boolean;
+  /** ของเพิ่มในแถบเดียวกับปุ่มขนาด (ซ้ายมือ) */
+  barExtra?: ReactNode;
+  className?: string;
+  children: (z: { template: string; cols: number; thumbW: (base?: number) => number; compact: boolean }) => ReactNode;
+}) {
+  const gallery = useGalleryColumns(scope, initial, gap);
+  const template = galleryTemplate(gallery.cols, gap, minPx);
+  return (
+    <div ref={gallery.wheelRef} {...gallery.compactAttr} className={className}>
+      {bar && <CardViewBar gallery={gallery} count={barExtra} />}
+      {children({ template, cols: gallery.cols, thumbW: gallery.thumbW, compact: gallery.compact })}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useT } from "@/components/i18n";
 import { formatBytes } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
+import { GALLERY_LABEL } from "@/components/gallery-columns";
 import { type AssetRow } from "@/app/api/assets/shared";
 import { HoverPreview } from "@/components/hover-image";
 import { VideoThumb } from "@/components/video-thumb";
@@ -53,7 +54,7 @@ export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSame
           </div>
         </HoverPreview>
       </button>
-      <div className="px-2 py-1.5 cursor-pointer" onClick={selectionMode ? () => onToggle() : onOpen}>
+      <div className={`${GALLERY_LABEL} px-2 py-1.5 cursor-pointer`} title={a.title} onClick={selectionMode ? () => onToggle() : onOpen}>
         <p className="text-[12px] font-medium text-slate-700 truncate">{a.title}</p>
         <div className="flex items-center justify-between gap-1 mt-0.5">
           <p className="text-[10px] text-slate-400 truncate">

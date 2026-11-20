@@ -34,6 +34,10 @@ const gallery = useGalleryColumns("my-page", 6);           // scope ไม่ซ
 - รูปในการ์ดใช้ `aspect-[…]` ไม่ใช่ความสูงตายตัว (`h-32`) — ไม่งั้นซูมออกแล้วการ์ดผอมสูง
 - ขอรูปตามขนาดการ์ด: `gallery.thumbW(base)`
 - `CardGrid` รับ props ของ div ต่อ (เช่น onPointerDown สำหรับลากคลุมเลือก)
+- **ของกลางที่มีหลายกริดในตัว** (แบ่งกลุ่ม · ป๊อปเลือกรูป) → `<CardZoom scope="…">{(z) => …z.template…}</CardZoom>` (เรียก hook เฉพาะตอนแสดง)
+- **ป๊อปอัปที่ฝังในหน้าแต่ยังปิด** → `useGalleryColumns(scope, 6, gap, { enabled: open })` ไม่ยิงคำขอจนกว่าจะเปิด
+- **MiniTable โหมดการ์ด** → `cardZoom={{ scope, initial, minPx }}` แทน `cardGrid` (opt-in · หน้าที่ยังใส่ cardGrid หน้าตาเดิม)
+- **DataTable โหมดการ์ด** → เปิดให้เองทุกตาราง (scope `datatable-<tableId>`) · ค่าเริ่ม = "คอลัมน์ต่อแถว" ที่ตั้งไว้ · การ์ดไม่เล็กกว่า 220px (มือถือ 1 ใบเหมือนเดิม) · ตั้ง "1 คอลัมน์" = รายการยาวแบบเดิม
 - ยังใช้ `GalleryColumnsControl` (ปุ่มเรียงตัวเลข / select / stepper) + `gridStyle` แบบเดิมได้ — หน้าเก่า 10 จุดหน้าตาไม่เปลี่ยน
 
 ## ห้ามใช้เมื่อ
@@ -46,6 +50,9 @@ const gallery = useGalleryColumns("my-page", 6);           // scope ไม่ซ
 
 ## หน้าที่ย้ายมาแล้ว (CardGrid/CardViewBar)
 - `components/sku-tag-browser` (SKU → เลือกดูตามแท็ก) — 2026-11-20
+- กลุ่ม A (2026-11-20): DataTable โหมดการ์ด (ทุกตาราง) · AssetPicker (ป๊อปเลือกรูปจากคลัง) · GroupedImageViewer · MiniTable (`cardZoom` opt-in)
+- กลุ่ม B (2026-11-20): คลังรูป Assets · อัลบั้มแบรนด์ (หน้ารายละเอียด Parent) · แท็บ SAMPLE ในตัวเลือกรูป · รูปเว็บไซต์ · ป๊อปเลือกรายการเว็บ (`website-pick-modal`) · รูป Description ของ Parent
+- ยังไม่ย้าย: บอร์ดผลิต/จ่ายงาน (กลุ่ม D — มีตัวตั้งขนาดของทีมเอง) · หน้าดูสินค้า/ดีไซน์ (กลุ่ม C)
 
 ## ยังทำกริดเอง (รอย้ายทีละกลุ่ม · เจ้าของติ๊กก่อนทุกรอบ)
 หา: `grep -rl "auto-fill, minmax" app components | xargs grep -L gallery-columns`

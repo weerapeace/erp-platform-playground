@@ -217,7 +217,7 @@ export function WebsitePickModal<T>({
           layout={view}
           renderCard={renderCard}
           cardPick
-          cardGrid="repeat(auto-fill, minmax(8.5rem, 1fr))"
+          cardZoom={{ scope: "website-pick-modal", initial: 6, minPx: 100 }}   // ขนาดการ์ด − N + / Ctrl+ลูกกลิ้ง (มุมมองการ์ดกลาง)
           actions={viewToggle}
           inlineActions
         />

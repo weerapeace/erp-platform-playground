@@ -36,6 +36,7 @@ import { VideoThumb } from "@/components/video-thumb";
 import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 import { Icon } from "@/components/icon";
 import { AlbumSelect } from "@/components/album-picker";
+import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/components/gallery-columns";   // ขนาดรูป − N + / Ctrl+ลูกกลิ้ง (มุมมองการ์ดกลาง)
 import {
   PARENT_ATT_PREFIX, PARENT_IMAGE_GROUP_LABEL, isPendingParentImage, type ParentImageGroup, type ParentImageHit,
 } from "@/lib/parent-sku-images";
@@ -270,6 +271,9 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const recentShown = recentAssets.filter((a) => (typeFilter ? a.asset_type === typeFilter : kindTabs ? kindTabs.includes(a.asset_type as AssetType) : true));
   const orderOf = (id: string) => (multiple ? Array.from(selected.keys()).indexOf(id) + 1 : 0);
   const unitType = tab === "sample" ? "image" : type;   // คำในปุ่ม/ตัวนับ: รูป · คลิป · ไฟล์
+  // ขนาดช่องรูป (ของกลาง) — จำรายคน · Ctrl+ลูกกลิ้งบนรูป = ย่อ/ขยาย
+  const gallery = useGalleryColumns("asset-picker", 6, "0.5rem", { enabled: open });
+  const tileGrid = galleryTemplate(gallery.cols, "0.5rem");
 
   if (!open) return null;
 
@@ -301,8 +305,12 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           <button onClick={() => setTab("upload")}
             className={`pb-2 text-sm ${tab === "upload" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⬆ อัปโหลดใหม่</button>
         )}
+        {(tab === "library" || tab === "recent") && (
+          <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} className="ml-auto mb-1.5 self-end" />
+        )}
       </div>
 
+      <div ref={gallery.wheelRef} {...gallery.compactAttr}>
       {tab === "library" ? (
         <>
           {kindTabs && (
@@ -353,7 +361,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           )}
           {parentEnabled && (
             <ParentImagesSection hits={parentHits} loading={parentLoading} query={query.trim()} only={source === "parent"}
-              group={parentGroup} onGroup={setParentGroup} selected={selected} onPick={pick} />
+              group={parentGroup} onGroup={setParentGroup} selected={selected} onPick={pick} grid={tileGrid} />
           )}
           {source === "parent" ? null : loading ? (
             <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
@@ -364,7 +372,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           ) : (
             <>
             {parentEnabled && parentHits.length > 0 && <p className="mb-1.5 text-[12px] text-slate-500">รูปในคลัง (ชื่อไฟล์ / แท็ก ตรงคำค้น) · {total}</p>}
-            <div className="grid gap-2 max-h-[360px] overflow-auto pr-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+            <div className="grid gap-2 max-h-[360px] overflow-auto pr-1" style={{ gridTemplateColumns: tileGrid }}>
               {rows.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />)}
               {rows.length < total && (
                 <div style={{ gridColumn: "1 / -1" }} className="flex justify-center py-2">
@@ -379,7 +387,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           )}
         </>
       ) : tab === "recent" ? (
-        <div className="grid gap-2 max-h-[420px] overflow-auto pr-1" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+        <div className="grid gap-2 max-h-[420px] overflow-auto pr-1" style={{ gridTemplateColumns: tileGrid }}>
           {recentShown.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />)}
         </div>
       ) : tab === "sample" ? (
@@ -400,6 +408,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
             toast.success(`อัปแล้ว ${assets.length} ไฟล์ — เลือกให้อัตโนมัติ`);
           }} />
       )}
+      </div>
     </ERPModal>
   );
 }
@@ -414,7 +423,7 @@ function AssetTile({ a, on, onPick, badge, order = 0 }: { a: AssetRow; on: boole
           📱 ทัช (มือถือ/แท็บเล็ต) ไม่เด้ง เพราะของกลางกันไว้ด้วย useCanHover */}
       {a.asset_type === "image" ? (
         <HoverPreview url={a.url} previewW={420}>
-          <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden">
+          <div className="aspect-[4/3] bg-slate-100 flex items-center justify-center overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={withImageWidth(a.url, 240) ?? a.url} alt={a.title} loading="lazy" className="w-full h-full object-cover" />
           </div>
@@ -441,7 +450,9 @@ function AssetTile({ a, on, onPick, badge, order = 0 }: { a: AssetRow; on: boole
 const PARENT_GROUPS: ParentImageGroup[] = ["parent", "sku", "description"];
 
 /** 📦 กล่อง "รูปจาก Parent SKU ที่ตรงคำค้น" — แยกตาม Parent · ปุ่มกรองย่อย รูป Parent / SKU ลูก / Description */
-function ParentImagesSection({ hits, loading, query, only, group, onGroup, selected, onPick }: {
+function ParentImagesSection({ hits, loading, query, only, group, onGroup, selected, onPick, grid }: {
+  /** grid-template-columns จากขนาดรูปที่ผู้ใช้เลือก (ของกลาง gallery-columns) */
+  grid: string;
   hits: ParentImageHit[]; loading: boolean; query: string; only: boolean;
   group: "" | ParentImageGroup; onGroup: (g: "" | ParentImageGroup) => void;
   selected: Map<string, AssetRow>; onPick: (a: AssetRow) => void;
@@ -479,7 +490,7 @@ function ParentImagesSection({ hits, loading, query, only, group, onGroup, selec
                 <span className="shrink-0">· {h.items.length} รูป</span>
                 {!h.is_active && <span className="shrink-0 rounded bg-slate-200 px-1 text-[10px] text-slate-600">ปิดใช้งาน</span>}
               </p>
-              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+              <div className="grid gap-2" style={{ gridTemplateColumns: grid }}>
                 {items.map((it) => (
                   <AssetTile key={it.asset.id} a={it.asset} on={selected.has(it.asset.id)} onPick={onPick}
                     badge={it.group === "sku" ? it.owner : it.group === "description" ? "Description" : "Parent"} />
