@@ -5,6 +5,7 @@ import { renderCaption } from "@/lib/caption-template";
 import { ERPModal } from "@/components/modal";
 import { ERPTextarea } from "@/components/form";
 import { InfoHint } from "@/components/info-hint";
+import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { listHashtags, createHashtag, type ContentCaption, type Hashtag, type CaptionTemplate, type PlatformSettings, type PlatformSetting } from "../data";
 import { platformLabel } from "../use-options";
@@ -235,7 +236,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
                 {snippet || (useCaption ? t("ยังไม่เขียน", "Not written") : t("ปิดแคปชั่นแพลตฟอร์มนี้", "Caption off"))}
               </span>
               {format && <span className="text-[10px] text-slate-500 bg-slate-100 rounded-full px-1.5 shrink-0" title={t("รูปแบบโพสต์", "Post format")}>{postFormatLabel(cap.platform, format, t)}</span>}
-              {selectedImages.length > 0 && <span className="text-[11px] text-slate-400 shrink-0" title={t("รูปที่เลือกไว้", "Selected images")}>🖼 {selectedImages.length}</span>}
+              {selectedImages.length > 0 && <span className="text-[11px] text-slate-400 shrink-0" title={t("รูปที่เลือกไว้", "Selected images")}><Icon name="image" className="inline -mt-0.5" /> {selectedImages.length}</span>}
             </>
           )}
           {open && <span className="flex-1" />}
@@ -243,11 +244,11 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
         {/* 👁 ดูตัวอย่าง · 📋 คัดลอกแคปชั่น · 📂 คัดลอก path · ☐ โพสต์แล้ว — กดได้จากหัวการ์ดโดยไม่ต้องกาง (เจ้าของขอ) */}
         <button type="button" onClick={() => setPreviewOpen(true)} disabled={!canPreview}
           title={useCaption ? t("ดูตัวอย่างที่จะโพสต์", "Preview the post") : t("ดูรูปที่จะลง (แพลตฟอร์มนี้ไม่ใช้แคปชั่น)", "Preview the images (no caption on this platform)")}
-          className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">👁</button>
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-slate-200 text-sm text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40"><Icon name="view" /></button>
         {useCaption && (
           <>
             <button type="button" onClick={() => void copy()} disabled={!preview.trim()} title={t("คัดลอกแคปชั่นที่จะโพสต์ (ประกอบจากแม่แบบ+แฮชแท็ก)", "Copy the assembled caption")}
-              className="h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40">📋</button>
+              className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md border border-slate-200 text-sm text-slate-500 hover:bg-slate-50 hover:text-violet-700 disabled:opacity-40"><Icon name="list" /></button>
             {overLimit && (
               <button type="button" onClick={() => setPreviewOpen(true)} className="h-7 shrink-0 rounded-md border border-rose-300 bg-rose-50 px-1.5 text-[10px] font-medium text-rose-700"
                 title={lim.over > 0 ? t(`ยาวเกินลิมิต ${platformLabel(cap.platform)} ${lim.max?.toLocaleString("th-TH")} ตัวอักษร อยู่ ${lim.over.toLocaleString("th-TH")} ตัว`, `${lim.over} chars over the ${lim.max} limit`) : t(`แฮชแท็กเกิน ${lim.maxHashtags} อัน`, `Over ${lim.maxHashtags} hashtags`)}>
@@ -307,9 +308,9 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
       {open && (
         <div className="px-2.5 pb-2.5 space-y-2">
           {/* สถานะเชื่อมบัญชี (Facebook/Instagram): เชื่อมแล้วโพสต์จริงได้ · ยังไม่เชื่อม = โพสต์มือ + ลิงก์ไปตั้งค่า */}
-          {connInfo && (
-            <div className={`flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border ${connInfo.connected ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
-              <span>{connInfo.connected ? "🔗" : "⚠️"}</span>
+          {connInfo && !connInfo.connected && (   /* เชื่อมแล้วไม่ต้องโชว์ (เจ้าของสั่ง 2026-11-20) — เปลี่ยนเพจได้ที่ตั้งค่าแพลตฟอร์ม */
+            <div className="flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border bg-amber-50 border-amber-200 text-amber-800">
+              <Icon name="warning" />
               <span className="flex-1 min-w-0 truncate" title={connInfo.label}>{connInfo.label}</span>
               <a href={connInfo.href} target="_blank" rel="noreferrer" className="shrink-0 underline hover:no-underline">{connInfo.connected ? t("เปลี่ยน", "Change") : t("เชื่อมบัญชี", "Connect")} ↗</a>
             </div>
@@ -317,7 +318,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
           {/* แม่แบบ — เปลี่ยนเป็นช่องเลือกเล็ก ๆ (เดิมเป็นชิปกางเต็มแถว) */}
           {!draft && (POST_FORMATS[cap.platform] ?? []).length > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-slate-400 shrink-0">🎬 {t("ลงเป็น", "Post as")}</span>
+              <span className="text-[11px] text-slate-400 shrink-0 inline-flex items-center gap-1"><Icon name="video" /> {t("ลงเป็น", "Post as")}</span>
               <select value={format ?? ""} onChange={(e) => onSetFormat?.(e.target.value)} className="h-7 text-xs border border-slate-200 rounded-md px-1.5 bg-white">
                 <option value="">{t("อัตโนมัติ (ดูจากสื่อที่เลือก)", "Auto (from media)")}</option>
                 {(POST_FORMATS[cap.platform] ?? []).map((f) => <option key={f.key} value={f.key}>{t(f.th, f.en)}</option>)}
@@ -331,7 +332,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
           )}
           {useCaption && templates.length > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-slate-400 shrink-0">📑 {t("แม่แบบ", "Template")}</span>
+              <span className="text-[11px] text-slate-400 shrink-0 inline-flex items-center gap-1"><Icon name="documents" /> {t("แม่แบบ", "Template")}</span>
               <select value={typeKey} onChange={(e) => onChange({ caption_type: e.target.value })} className="h-7 text-xs border border-slate-200 rounded-md px-1.5 bg-white max-w-[60%]">
                 {templates.map((tp) => <option key={tp.key} value={tp.key}>{tp.label}</option>)}
               </select>
@@ -352,17 +353,18 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
           {/* ── รูป + สถานะโพสต์ รวมอยู่ท้ายเดียว (เดิมแยก 2 บล็อกมีเส้นคั่น 2 เส้น) ── */}
           <div className="pt-2 border-t border-slate-100 space-y-2">
             {!draft && <div className="flex items-start gap-2 flex-wrap">
-              <span className="text-[11px] text-slate-400 mt-1 shrink-0">🖼 {t("รูป", "Images")}</span>
+              <span className="text-[11px] text-slate-400 mt-1 shrink-0 inline-flex items-center gap-1"><Icon name="image" /> {t("รูป", "Images")}</span>
               {postImages.length === 0
                 ? <span className="text-[11px] text-slate-300 italic mt-1">{t("ยังไม่มีรูป — แนบที่ส่วน “แนบเพิ่มเอง” หรือผูกงานก่อน", "No media yet — attach in “Attach” section or link a task first")}</span>
                 : imgEdit
                   ? (   // โหมดเลือก: โชว์รูปทั้งหมดให้ติ๊ก
                     <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-                      {postImages.map((im) => { const on = selectedImages.includes(im.key); return (
+                      {postImages.map((im) => { const on = selectedImages.includes(im.key); const isCover = on && selectedImages[0] === im.key; return (
                         <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-12 w-12 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-60 hover:opacity-100"}`}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
                           {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                          {isCover && <span className="absolute top-0.5 left-0.5 text-[9px] font-medium bg-amber-500 text-white px-1 rounded shadow">{t("ปก", "Cover")}</span>}
                           {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
                         </button>
                       ); })}
@@ -378,27 +380,27 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
                             <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
                             {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
                             {isMain
-                              ? <span className="absolute top-0.5 left-0.5 text-[8px] bg-violet-600 text-white px-1 rounded shadow" title={t("รูปใหญ่", "Main")}>⭐</span>
-                              : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปใหญ่", "Set as main")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">⭐</button>}
+                              ? <span className="absolute top-0.5 left-0.5 text-[9px] font-medium bg-amber-500 text-white px-1 rounded shadow" title={t("รูปปก (รูปแรกของโพสต์)", "Cover (first image of the post)")}>{t("ปก", "Cover")}</span>
+                              : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปปก", "Set as cover")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">{t("ตั้งปก", "Set cover")}</button>}
                           </div>
                         ); })}
                       </div>
                     )}
               {postImages.length > 0 && (
                 <button type="button" onClick={() => setImgEdit((v) => !v)} className="text-[11px] font-medium text-violet-700 hover:underline mt-1 shrink-0 ml-auto">
-                  {imgEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("เลือก/แก้รูป", "Choose")}`}
+                  {imgEdit ? <><Icon name="done" /> {t("เสร็จ", "Done")}</> : <><Icon name="edit" /> {t("เลือก/แก้รูป", "Choose")}</>}
                 </button>
               )}
             </div>}
             <div className="flex items-center gap-1.5 flex-wrap">
               {canAi && useCaption && (contentId || draft) && (
                 <button onClick={onAiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
-                  className="h-7 px-2.5 text-xs font-medium text-fuchsia-700 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียน", "✨ AI write")}</button>
+                  className="h-7 px-2.5 text-xs font-medium text-fuchsia-700 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50"><span className="inline-flex items-center gap-1"><Icon name="ai" />{aiBusy ? t("กำลังเขียน...", "Writing...") : t("AI เขียน", "AI write")}</span></button>
               )}
-              <button onClick={copy} className="h-7 px-2.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">📋 {t("คัดลอกทั้งหมด", "Copy all")}</button>
+              <button onClick={copy} className="h-7 px-2.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="list" /> {t("คัดลอกทั้งหมด", "Copy all")}</button>
               <span className="flex-1" />
               {!draft && postStatus !== "skip" && (
-                <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มนี้", "Copy caption + open this platform's post page")} className={`h-7 inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("ไปโพสต์ที่", "Post on")} ${platformLabel(cap.platform)}`}</button>
+                <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มนี้", "Copy caption + open this platform's post page")} className={`h-7 inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? <><Icon name="upload" /> {t("โพสต์ขึ้น", "Post to")} {autoLabel}</> : <><Icon name="export" /> {t("ไปโพสต์ที่", "Post on")} {platformLabel(cap.platform)}</>}</button>
               )}
             </div>
             {!draft && (postStatus === "posted" || postStatus === "scheduled") && (

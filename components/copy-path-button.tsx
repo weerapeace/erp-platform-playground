@@ -14,6 +14,7 @@ import { Popover } from "@/components/popover";
 import { copyText } from "@/components/copy-button";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 
 export type PathItem = { path: string; label?: string | null };
 
@@ -47,14 +48,14 @@ export function CopyPathButton({ paths, onAdd, notify, emptyHint, className = ""
     say(ok ? "success" : "error", ok ? t(`คัดลอก path แล้ว — ${p}`, `Path copied — ${p}`) : t("คัดลอกไม่สำเร็จ", "Copy failed"));
     return ok;
   };
-  const base = `relative h-7 w-7 shrink-0 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 hover:text-violet-700 ${className}`;
+  const base = `relative inline-flex items-center justify-center h-7 w-7 shrink-0 rounded-md border border-slate-200 text-sm text-slate-500 hover:bg-slate-50 hover:text-violet-700 ${className}`;
 
   if (list.length === 1) {
     // path เดียว: กดคัดลอกเลย (เพิ่ม path อื่นได้ที่ส่วนไฟล์ของหน้านั้น ๆ)
-    return <button type="button" onClick={() => void copy(list[0].path)} title={`${t("คัดลอก path", "Copy path")}: ${list[0].path}${list[0].label ? `\n(${list[0].label})` : ""}`} className={base}>📂</button>;
+    return <button type="button" onClick={() => void copy(list[0].path)} title={`${t("คัดลอก path", "Copy path")}: ${list[0].path}${list[0].label ? `\n(${list[0].label})` : ""}`} className={base}><Icon name="folder" /></button>;
   }
   if (list.length === 0 && !onAdd) {
-    return <button type="button" disabled title={emptyHint ?? t("ยังไม่มี path", "No path yet")} className={`${base} opacity-40 cursor-not-allowed`}>📂</button>;
+    return <button type="button" disabled title={emptyHint ?? t("ยังไม่มี path", "No path yet")} className={`${base} opacity-40 cursor-not-allowed`}><Icon name="folder" /></button>;
   }
   return (
     <Popover align="right" panelClassName="w-80 p-2"
@@ -62,7 +63,7 @@ export function CopyPathButton({ paths, onAdd, notify, emptyHint, className = ""
         <button type="button" onClick={toggle}
           title={list.length ? t(`คัดลอก path (${list.length} ที่) — กดเพื่อเลือก`, `Copy path (${list.length}) — click to choose`) : (emptyHint ?? t("ยังไม่มี path — กดเพื่อใส่", "No path yet — click to add"))}
           className={`${base} ${open ? "bg-violet-50 text-violet-700 border-violet-300" : ""} ${list.length ? "" : "border-dashed text-slate-400"}`}>
-          📂{list.length > 1 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-violet-600 text-white text-[9px] leading-[14px] px-0.5">{list.length}</span>}
+          <Icon name="folder" />{list.length > 1 && <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-violet-600 text-white text-[9px] leading-[14px] px-0.5">{list.length}</span>}
         </button>
       )}>
       {(close) => (

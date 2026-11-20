@@ -2,11 +2,10 @@
  * ห้องแชทรวม — การ์ดสินค้า + สต็อกของสินค้าที่คุยในห้อง (server เท่านั้น)
  *   การ์ดสร้างจากข้อมูลจริงในระบบ (ไม่เชื่อค่าจากหน้าเว็บ): ชื่อ · รหัส · รูป
  *   ราคา + ลิงก์ = จากรายการบนร้านของช่องทางนั้นเท่านั้น (ราคาที่ลูกค้าเห็นจริง) — ไม่มีรายการบนร้าน = ไม่ใส่ราคา (พนักงานพิมพ์เอง)
- * ใช้ของกลาง: lib/platform-links (ลิงก์หน้าสินค้า) · lib/sku-stock (สต็อก)
+ * ใช้ของกลาง: lib/product-shop-links (ลิงก์ + ราคาบนร้าน) · lib/sku-stock (สต็อก)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { listingLinks } from "@/lib/platform-links";
-import { isGoneStatus } from "@/lib/platform-listing-health";
+import { loadProductShopLinks } from "@/lib/product-shop-links";
 import { loadSkuStock } from "@/lib/sku-stock";
 import { isUuid } from "./rules";
 import type { ChatAttachment, ChatChannel } from "./types";
@@ -53,21 +52,8 @@ export async function resolveProductCard(admin: Admin, ref: { skuId?: unknown; p
   const brand = brandId ?? (isUuid(parent?.brand_id) ? (parent!.brand_id as string) : null);
   if (pfCode && parent && brand) {
     try {
-      const { data: pf } = await admin.from("erp_platforms").select("id").eq("code", pfCode).maybeSingle();
-      const pfId = (pf as { id?: string } | null)?.id;
-      if (pfId) {
-        const [{ data: listings }, { data: acct }] = await Promise.all([
-          admin.from("platform_catalog_listings").select("external_product_id, price, status")
-            .eq("platform_id", pfId).eq("brand_id", brand).eq("matched_parent_sku_id", parent.id).order("updated_at", { ascending: false }).limit(5),
-          admin.from("platform_accounts").select("external_shop_id").eq("platform_id", pfId).eq("brand_id", brand).eq("is_active", true).limit(1).maybeSingle(),
-        ]);
-        const l = ((listings ?? []) as Row[]).find((x) => !isGoneStatus(x.status as string | null));
-        if (l) {
-          const p = Number(l.price);
-          card.price = Number.isFinite(p) && p > 0 ? p : null;
-          card.url = listingLinks(pfCode, s(l.external_product_id), s((acct as Row | null)?.external_shop_id)).storefront;
-        }
-      }
+      const [l] = await loadProductShopLinks(admin, { id: String(parent.id), code: s(parent.code), brand_id: isUuid(parent.brand_id) ? (parent.brand_id as string) : null }, { codes: [pfCode], preferBrandId: brand, strictBrand: true });
+      if (l?.url) { card.url = l.url; card.price = l.price; }
     } catch { /* ไม่มีราคา/ลิงก์ก็ยังส่งการ์ดได้ */ }
   }
   return card;

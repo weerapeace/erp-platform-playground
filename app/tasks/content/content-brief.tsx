@@ -18,7 +18,7 @@ import { BriefTemplatePicker } from "./brief-templates";
 
 const hasThai = (s: string) => /[฀-๿]/.test(s);
 
-export function ContentBriefCard({ contentId, brief, refImageKeys, refLinks, brandId, brands, pushToast, style }: {
+export function ContentBriefCard({ contentId, brief, refImageKeys, refLinks, brandId, brands, pushToast, style, autoCollapse = false }: {
   contentId: string;
   brief: string | null | undefined;
   refImageKeys: string[];
@@ -28,8 +28,12 @@ export function ContentBriefCard({ contentId, brief, refImageKeys, refLinks, bra
   brands: { id: string; name: string; color?: string | null }[];
   pushToast: (type: ToastVariant, m: string) => void;
   style?: CSSProperties;
+  /** พับเหลือแถวเดียวไว้ก่อน (เช่น โพสต์มีรูปงานจริงแล้ว) — กด "ดู" เปิดได้เสมอ · เจ้าของสั่ง 2026-11-20 */
+  autoCollapse?: boolean;
 }) {
   const t = useT();
+  const [collapsed, setCollapsed] = useState(autoCollapse);
+  useEffect(() => { setCollapsed(autoCollapse); }, [autoCollapse]);
   // ── โน้ต ──
   const [html, setHtml] = useState(() => noteToHtml(brief));
   const htmlRef = useRef(html); htmlRef.current = html;
@@ -102,11 +106,27 @@ export function ContentBriefCard({ contentId, brief, refImageKeys, refLinks, bra
     catch (e) { pushToast("error", t("ย้อนกลับไม่สำเร็จ: ", "Couldn't undo: ") + (e as Error).message); }
   };
 
+  // แถวสรุปตอนพับ: บรีฟกี่บรรทัด · Ref กี่รูป/ลิงก์
+  const briefLines = isEmptyNote(html) ? 0 : html.replace(/<(br|\/p|\/li|\/div)[^>]*>/gi, "\n").replace(/<[^>]+>/g, "").split("\n").filter((x) => x.trim()).length;
+  const summary = [briefLines ? t(`บรีฟ ${briefLines} บรรทัด`, `${briefLines} line(s)`) : null, imgs.length ? t(`Ref ${imgs.length} รูป`, `${imgs.length} ref image(s)`) : null, links.length ? t(`ลิงก์ ${links.length}`, `${links.length} link(s)`) : null].filter(Boolean).join(" · ") || t("ยังว่าง", "Empty");
+  if (collapsed) {
+    return (
+      <button type="button" style={style} onClick={() => setCollapsed(false)} title={t("กดเพื่อดูรายการงานที่ต้องการ", "Show the work brief")}
+        className="w-full flex items-center gap-2 border border-amber-200 rounded-xl bg-amber-50/40 px-3 py-2 text-left hover:bg-amber-50">
+        <Icon name="note" />
+        <span className="text-sm font-semibold text-amber-900 whitespace-nowrap">{t("รายการงานที่ต้องการ", "Work brief")}</span>
+        <span className="min-w-0 truncate text-xs text-amber-800/70">{summary}</span>
+        <span className="ml-auto shrink-0 text-xs font-medium text-violet-700">▸ {t("ดู", "Show")}</span>
+      </button>
+    );
+  }
+
   return (
     <div style={style} className="border border-amber-200 rounded-xl bg-amber-50/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1">
         <span className="text-sm font-semibold text-amber-900 flex items-center gap-1.5 whitespace-nowrap"><Icon name="note" /> {t("รายการงานที่ต้องการ", "Work brief")}</span>
         <div className="flex items-center gap-1.5 ml-auto">
+        {autoCollapse && <button type="button" onClick={() => setCollapsed(true)} className="h-7 px-2 text-[11px] font-medium text-violet-700 hover:underline">▾ {t("พับ", "Collapse")}</button>}
         <BriefTemplatePicker brandId={brandId} brands={brands} onMessage={pushToast} onApply={(tpl) => void applyTemplate(tpl)}
           getCurrent={() => ({ html: htmlRef.current, images: imgs, links })} />
         <div className="inline-flex rounded-lg border border-amber-200 overflow-hidden text-[11px] bg-white shrink-0">

@@ -43,6 +43,7 @@ import { HashtagLibraryModal, RecommendedTimesModal, PlatformSettingsModal, Capt
 import { CaptionToolbar, CaptionCard, AiCaptionModal, PullCaptionModal } from "./caption-card";
 import { ContentAttachments } from "./content-attachments";
 import { ContentBriefCard } from "./content-brief";
+import { ShopLinkChips, useShopLinks } from "./shop-link-chips";
 import { AddToPlanModal } from "@/components/team-plan/add-to-plan";
 import { PlanLinkedBadge } from "@/components/team-plan/linked-badge";
 
@@ -279,9 +280,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     setPostedLinks((prev) => { const n = { ...prev }; if (url.trim()) n[platform] = url; else delete n[platform]; return n; });
   const persistPostedLinks = () => void updateContent(contentId, { posted_links: postedLinks }).catch((e) => pushToast("error", (e as Error).message));
   // เลือก/ยกเลิกรูปต่อแพลตฟอร์ม — เปลี่ยนแล้วบันทึกทันที (ไม่แตะแคปชั่น) · รูปที่เลือกไปโชว์บนการ์ดย่อย + เป็น default ตอนโพสต์
+  const allPostKeysRef = useRef<string[]>([]);
   const togglePlatformImage = (platform: string, key: string) => {
     setPlatformImages((prev) => {
-      const cur = prev[platform] ?? [];
+      const cur = prev[platform]?.length ? prev[platform] : allPostKeysRef.current;   // ยังไม่เคยเลือก = ทั้งหมด
       const arr = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
       const next = { ...prev }; if (arr.length) next[platform] = arr; else delete next[platform];
       void updateContent(contentId, { platform_images: next }).catch((e) => pushToast("error", (e as Error).message));
@@ -291,13 +293,25 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // ตั้งรูปที่เลือกให้เป็น "รูปใหญ่" (ย้ายไปหน้าสุด · [0]=รูปใหญ่บนการ์ดย่อย) — บันทึกทันที
   const setPlatformMainImage = (platform: string, key: string) => {
     setPlatformImages((prev) => {
-      const cur = prev[platform] ?? []; if (!cur.includes(key) || cur[0] === key) return prev;
+      const cur = prev[platform]?.length ? prev[platform] : allPostKeysRef.current; if (!cur.includes(key) || cur[0] === key) return prev;
       const next = { ...prev, [platform]: [key, ...cur.filter((k) => k !== key)] };
       void updateContent(contentId, { platform_images: next }).catch((e) => pushToast("error", (e as Error).message));
       return next;
     });
   };
   // media ที่เลือกลงโพสต์ได้ (รูป/วิดีโอแนบ + รูปจากงาน · ตัดซ้ำ) + ชนิดต่อ key
+  // ลิงก์สินค้าบนร้าน (Shopee/Lazada/TikTok/LINE/เว็บ) — ชิปในการ์ดสินค้า + เติมช่อง "ลิงก์สินค้า" ให้เองถ้ายังว่าง (ใช้กับ {link} ในแคปชั่น · แก้/ลบได้ · บันทึกตอนกดบันทึก)
+  const shopLinks = useShopLinks(parent?.id ?? sku?.parent_sku_id ?? null, brandId);
+  const filledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!shopLinks || !d) return;
+    const key = `${d.id}|${parent?.id ?? sku?.parent_sku_id ?? ""}`;
+    if (filledFor.current === key) return;
+    filledFor.current = key;
+    const known = new Set(platforms.map((p) => p.value));
+    const auto = shopLinks.filter((l) => l.url && known.has(l.platform)).map((l) => ({ platform: l.platform, url: l.url as string }));
+    if (auto.length) setLinks((cur) => (cur.some((l) => l.url.trim()) ? cur : auto));
+  }, [shopLinks, d, parent?.id, sku?.parent_sku_id, platforms]);
   const postImages: PostImage[] = (() => {
     const seen = new Set<string>(); const out: PostImage[] = [];
     // รูปที่อัปเอง: r2_key = รูปย่อ (โชว์เร็ว) · original = ต้นฉบับเต็มบน Drive (ถ้าระบบส่งขึ้นแล้ว) — ตอนโพสต์ใช้ต้นฉบับได้
@@ -317,6 +331,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const mediaDrag = useDragReorder(reorderMedia);
   const platformImageEntries = Object.entries(platformImages).filter(([k]) => k !== "_order");   // ใช้นับว่ารูปถูกเลือกกี่แพลตฟอร์ม
   const mediaTypeOf = (k: string): "image" | "video" => postImages.find((m) => m.key === k)?.type ?? "image";
+  // รูปที่ใช้ต่อแพลตฟอร์ม: ยังไม่เคยเลือก = ทุกไฟล์ในงานจริง (เจ้าของสั่ง 2026-11-20 · รูปแรก = ปก) — การ์ด/ป๊อปโพสต์/ปุ่มโพสต์ใช้ค่าเดียวกัน
+  const allPostKeys = postImages.map((m) => m.key);
+  allPostKeysRef.current = allPostKeys;
+  const selectedFor = (p: string): string[] => (platformImages[p]?.length ? platformImages[p] : allPostKeys);
   const contentImageKeys = attachments.filter((a) => a.kind === "image" && (a.r2_key || (a.url ?? "").startsWith("drive:"))).map((a) => (a.r2_key || a.url) as string);
 
   // ยิงโพสต์จริง (Facebook/Instagram) จากป๊อปยืนยัน · รูป/วิดีโอ/อัลบั้ม + ตั้งเวลา(FB) · IG Reels = ตามเช็กสถานะ
@@ -561,7 +579,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const latestCaptions = useMemo(() => Object.fromEntries(caps.map((c) => [c.platform, assembleCaption(c, pset[c.platform], templates, sharedVars)])), [caps, pset, templates, sharedVars]);
   const queueOptions: QueuePlatformOption[] = caps.filter((c) => c.platform === "facebook" || c.platform === "instagram").map((c) => {
     const p = c.platform; const fmt = platformFormats[p] ?? "";
-    const keys = (platformImages[p]?.length ? platformImages[p] : contentImageKeys).filter((k) => postImages.some((m) => m.key === k));
+    const keys = selectedFor(p).filter((k) => postImages.some((m) => m.key === k));
     // ตั้งคิวทีเดียว: ใช้ต้นฉบับ Drive (ถ้ามี) + IG ใช้ค่าปรับขอบล่าสุดที่เลือกไว้ในป๊อปโพสต์ (ไม่มี = เติมขอบขาวเฉพาะรูปที่ไม่ผ่าน)
     const media = toPostMedia(keys, p === "instagram" ? loadPostFit("instagram") : null, true);
     const blocked = metaProblem ? metaProblem
@@ -799,7 +817,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* ───── รายการงานที่ต้องการ (บรีฟคุยกับพนักงาน + Ref รูป/ลิงก์) — บนสุดฝั่งซ้าย ───── */}
             {!isHidden(dth, "brief") && (
-              <ContentBriefCard key={d.id} style={{ order: -1 }} contentId={contentId} brief={d.brief} refImageKeys={d.ref_image_keys ?? []} refLinks={d.ref_links ?? []} brandId={brandId} brands={brands} pushToast={pushToast} />
+              <ContentBriefCard key={d.id} style={{ order: -1 }} contentId={contentId} brief={d.brief} refImageKeys={d.ref_image_keys ?? []} refLinks={d.ref_links ?? []} brandId={brandId} brands={brands} pushToast={pushToast} autoCollapse={postImages.length > 0} />
             )}
 
             {/* ───── การ์ดสินค้า: สรุปสั้น (รูป + รหัส + ชื่อ + แบรนด์ + สี + ราคาบรรทัดเดียว) · กด ✏️ เพื่อแก้ ───── */}
@@ -822,6 +840,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   <div className="min-w-0 flex-1">
                     <div className="font-mono text-[11px] text-slate-500 truncate">{sku?.code ?? parent?.code}{sku && parent ? <span className="text-slate-300"> · Parent {parent.code}</span> : null}</div>
                     <div className="text-sm text-slate-800 leading-snug line-clamp-2">{sku?.name ?? parent?.name}</div>
+                    {/* ลิงก์ร้านแบบย่อ — สีเข้มกดเปิดหน้าร้าน · เทา = ยังไม่ลงร้านนี้ */}
+                    <ShopLinkChips links={shopLinks} className="mt-1.5" />
                     <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500 flex-wrap">
                       {sku ? <span>{t("SKU สีเดี่ยว", "Single SKU")}</span> : <span>{t("Parent SKU ทุกสี", "Parent (all colors)")}</span>}
                       {parent && <button onClick={() => setOpenParentId(parent.id)} className="text-violet-700 hover:underline">↗ {t("เปิดดูสินค้า", "Open product")}</button>}
@@ -1124,7 +1144,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                         ? { connected: true, label: t(`เชื่อม Instagram แล้ว (ผ่านเพจ ${metaStatus.facebook?.page_name ?? "-"})`, `Instagram connected (via page ${metaStatus.facebook?.page_name ?? "-"})`), href: "/admin/platform-accounts" }
                         : { connected: false, label: t("ยังไม่เชื่อม Instagram — ต้องเชื่อมเพจ Facebook ที่ผูกบัญชี IG ธุรกิจ", "Instagram not connected — link an FB page with an IG business account"), href: "/admin/platform-accounts" })
                       : undefined}
-                  postImages={postImages} selectedImages={platformImages[c.platform] ?? []} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast}
+                  postImages={postImages} selectedImages={selectedFor(c.platform)} onToggleImage={(key) => togglePlatformImage(c.platform, key)} onSetMain={(key) => setPlatformMainImage(c.platform, key)} pushToast={pushToast}
                   pageName={(c.platform === "facebook" || c.platform === "instagram") ? (metaStatus.facebook?.page_name ?? brandLabel) : brandLabel} avatarUrl={brands.find((b) => b.id === brandId)?.logo_url ?? null} />)}
               </div>
             )}
@@ -1221,7 +1241,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           avatarUrl={brands.find((b) => b.id === brandId)?.logo_url ?? null}
           captionText={postModal.captionText}
           images={postImages}
-          defaultSelected={platformImages[postModal.platform]?.length ? platformImages[postModal.platform] : contentImageKeys}
+          defaultSelected={selectedFor(postModal.platform)}
           scheduledAtLocal={scheduledAt}
           format={platformFormats[postModal.platform]}
           busy={posting === postModal.platform || posting === "queue"}
