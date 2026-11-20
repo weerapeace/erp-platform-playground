@@ -22,6 +22,21 @@ export type AttrSuggestState = {
   runText: () => void; runAi: () => Promise<void>; clear: () => void;
 };
 
+/** ยิง AI เติมช่อง (ของกลาง · ใช้ทั้งปุ่ม "ให้ AI ช่วยเติม" และเดาอัตโนมัติตอนเปิดหน้า Lazada) — เฉพาะช่องที่ส่งมา (ควรเป็นช่องที่ยังว่าง) */
+export async function fetchAiAttrHits(ai: AttrSuggestAi, fields: TtsAttrField[]): Promise<{ hits: SuggestHit[]; error: string | null }> {
+  if (!fields.length) return { hits: [], error: null };
+  try {
+    const r = await apiFetch("/api/ai/attr-fill", { method: "POST", body: JSON.stringify({
+      platform: ai.platform, name: ai.name, description: ai.description, category: ai.category,
+      image_keys: ai.imageKeys.slice(0, 3),
+      fields: fields.map((f) => ({ id: f.id, name: f.name, required: f.required, multiple: f.multiple, customizable: f.customizable, numeric: f.numeric, options: f.options.map((o) => ({ id: o.id, name: o.name })) })),
+    }) });
+    const j = await r.json().catch(() => ({ hits: [], error: `HTTP ${r.status}` })) as { hits: SuggestHit[]; error: string | null };
+    if (j.error) return { hits: [], error: r.status === 401 ? "ไม่มีสิทธิ์ใช้ AI — ขอสิทธิ์จากผู้ดูแลระบบ" : j.error };
+    return { hits: j.hits ?? [], error: null };
+  } catch (e) { return { hits: [], error: (e as Error).message || "AI ตอบไม่ได้" }; }
+}
+
 export function useAttrSuggest(opts: { fields: TtsAttrField[]; values: TtsAttrState; text: () => string; ai: AttrSuggestAi | null }): AttrSuggestState {
   const [hits, setHits] = useState<SuggestHit[] | null>(null);
   const [source, setSource] = useState<AttrSuggestSource | null>(null);
@@ -38,16 +53,10 @@ export function useAttrSuggest(opts: { fields: TtsAttrField[]; values: TtsAttrSt
     if (!empty.length) { setSource("ai"); setHits([]); return; }
     setBusy(true); setError(null);
     try {
-      const r = await apiFetch("/api/ai/attr-fill", { method: "POST", body: JSON.stringify({
-        platform: opts.ai.platform, name: opts.ai.name, description: opts.ai.description, category: opts.ai.category,
-        image_keys: opts.ai.imageKeys.slice(0, 3),
-        fields: empty.map((f) => ({ id: f.id, name: f.name, required: f.required, multiple: f.multiple, customizable: f.customizable, numeric: f.numeric, options: f.options })),
-      }) });
-      const j = await r.json().catch(() => ({ hits: [], error: `HTTP ${r.status}` })) as { hits: SuggestHit[]; error: string | null };
-      if (j.error) { setError(r.status === 401 ? "ไม่มีสิทธิ์ใช้ AI — ขอสิทธิ์จากผู้ดูแลระบบ" : j.error); return; }
-      setSource("ai"); setHits(j.hits ?? []);
-    } catch (e) { setError((e as Error).message || "AI ตอบไม่ได้"); }
-    finally { setBusy(false); }
+      const res = await fetchAiAttrHits(opts.ai, empty);
+      if (res.error) { setError(res.error); return; }
+      setSource("ai"); setHits(res.hits);
+    } finally { setBusy(false); }
   };
   return { hits, source, busy, error, canAi: !!opts.ai, runText, runAi, clear: () => { setHits(null); setSource(null); setError(null); } };
 }

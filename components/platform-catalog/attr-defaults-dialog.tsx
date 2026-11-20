@@ -17,7 +17,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { SearchableSelect } from "@/components/searchable-select";
-import { ATTR_DEFAULT_SOURCE_LABEL, DEFAULT_ATTR_RULES, listingAttrDefaultsKey, type AttrDefaultRule, type AttrDefaultSource } from "@/lib/listing-attr-defaults";
+import { ATTR_DEFAULT_SOURCE_LABEL, defaultAttrRules, listingAttrDefaultsKey, type AttrDefaultRule, type AttrDefaultSource } from "@/lib/listing-attr-defaults";
 
 const SOURCES: AttrDefaultSource[] = ["fixed", "warranty", "size", "weight"];
 const same = (a: AttrDefaultRule[], b: AttrDefaultRule[]) => JSON.stringify(a) === JSON.stringify(b);
@@ -49,6 +49,7 @@ export function AttrDefaultsDialog({ open, onClose, platform, platformName, bran
   const dirty = !same(clean(rows), clean(rules));
   const nameOpts = useMemo(() => [...new Set([...(fieldNames ?? []), ...rows.map((r) => r.field)].filter(Boolean))].map((n) => ({ value: n, label: n })), [fieldNames, rows]);
   const bad = rows.some((r) => !r.field.trim() || (r.source === "fixed" && !(r.value ?? "").trim()));
+  const systemRules = defaultAttrRules(platform);
 
   const save = async (value: Record<string, unknown>, msg: string, undoTo: { value: Record<string, unknown> } | null) => {
     if (!brandId) return;
@@ -107,7 +108,9 @@ export function AttrDefaultsDialog({ open, onClose, platform, platformName, bran
             <div className="min-w-0">
               <span className="mb-0.5 block text-[11px] text-slate-500 sm:hidden">ค่า</span>
               {r.source === "fixed"
-                ? <input value={r.value ?? ""} disabled={!canEdit} onChange={(e) => set(i, { value: e.target.value })} placeholder="เช่น ไทย / ใหม่" className={`h-9 w-full rounded-md border px-2 text-sm ${!(r.value ?? "").trim() ? "border-rose-300" : "border-slate-200"}`} />
+                ? (r.value ?? "").length > 60
+                  ? <textarea value={r.value ?? ""} disabled={!canEdit} onChange={(e) => set(i, { value: e.target.value })} rows={3} className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm [overflow-wrap:anywhere]" />
+                  : <input value={r.value ?? ""} disabled={!canEdit} onChange={(e) => set(i, { value: e.target.value })} placeholder="เช่น ไทย / ใหม่" className={`h-9 w-full rounded-md border px-2 text-sm ${!(r.value ?? "").trim() ? "border-rose-300" : "border-slate-200"}`} />
                 : <div className="flex h-9 items-center text-xs text-slate-500">ดึงจากสินค้าแต่ละตัว (ไม่มีข้อมูล = เว้นว่าง)</div>}
             </div>
           </div>
@@ -115,10 +118,10 @@ export function AttrDefaultsDialog({ open, onClose, platform, platformName, bran
         {canEdit && (
           <div className="flex flex-wrap gap-2 pt-1">
             <button type="button" onClick={() => setRows((xs) => [...xs, { field: "", source: "fixed", value: "" }])} className="inline-flex h-8 items-center gap-1 rounded-md border border-dashed border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50"><Icon name="add" />เพิ่มช่อง</button>
-            {!same(clean(rows), DEFAULT_ATTR_RULES) && <button type="button" onClick={() => setRows(DEFAULT_ATTR_RULES)} className="h-8 rounded-md px-2 text-xs text-slate-500 hover:bg-slate-50">ใส่ชุดค่าเริ่มต้นของระบบ</button>}
+            {!same(clean(rows), systemRules) && <button type="button" onClick={() => setRows(systemRules)} className="h-8 rounded-md px-2 text-xs text-slate-500 hover:bg-slate-50">ใส่ชุดค่าเริ่มต้นของระบบ</button>}
           </div>
         )}
-        <p className="text-[11px] text-slate-400">ช่องที่ให้เลือกจากรายการ: ค่าต้องตรงกับตัวเลือกของร้าน (ไม่ตรง = เว้นว่างให้เลือกเอง) · ช่องที่พิมพ์ได้ = ใส่ตามที่ตั้ง</p>
+        <p className="text-[11px] text-slate-400">ช่องที่ให้เลือกจากรายการ: ค่าต้องตรงกับตัวเลือกของร้าน (ไม่ตรง = เว้นว่างให้เลือกเอง) · ช่องที่พิมพ์ได้ = ใส่ตามที่ตั้ง · ในค่าใส่ {"{warranty}"} = ระยะประกันของสินค้า · {"{warranty_en}"} = ระยะประกันภาษาอังกฤษ · สินค้าที่ไม่มีรับประกัน ช่องประเภทการประกันจะใส่ “ไม่มีประกัน” ให้เอง</p>
       </div>
     </ERPModal>
   );

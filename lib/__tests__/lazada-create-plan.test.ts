@@ -125,6 +125,57 @@ describe("รูปตัวเลือก — ส่งรูปทั้ง�
   });
 });
 
+describe("รอบ LY22 — เหมือน Shopee", () => {
+  const draftWith = (extra: Record<string, unknown>) => ({ title: null, description: null, category_path: null, image_keys: null, extra, platform_product_id: null });
+  it("ชื่อสี = Color Platform [TH] · แก้ราคา/ชื่อสีในร่าง (ราคาลดยังเป็นราคาขายถ้าต่ำกว่า)", () => {
+    const skus = [sku("L-01", "ดำ", 490, 590, { color_platform_th: "ดำ (01)" }), sku("L-02", "ขาว", 490, 590, { color_platform_th: "ขาว (02)" })];
+    const a = planLazadaCreate({ ...base, parent: parent(), skus }).preview;
+    expect(a.dims[0].values).toEqual(["ดำ (01)", "ขาว (02)"]);
+    expect(a.colorChoices).toEqual(["ดำ (01)", "ดำ", "ขาว (02)", "ขาว"]);
+    const { preview: b, payload } = planLazadaCreate({ ...base, parent: parent(), skus, draft: draftWith({ lazada_prices: { "s-L-02": 650 }, lazada_option_names: { "s-L-01": "ดำด้าน" } }) });
+    expect(b.dims[0].values).toEqual(["ดำด้าน", "ขาว (02)"]);
+    expect(b.variants[1]).toMatchObject({ price: 650, special: 490, price_base: 590, price_custom: true });
+    expect(b.variants[0]).toMatchObject({ color_custom: true, color_base: "ดำ (01)", price_custom: false });
+    const prod = (payload.Request as { Product: Record<string, any> }).Product;
+    expect(prod.Skus.Sku[1]).toMatchObject({ price: "650", special_price: "490", saleProp: { color_family: "ขาว (02)" } });
+  });
+  it("ช่องของหมวด: ร่าง → ค่าเริ่มต้นของร้าน/สินค้า → ที่เดาไว้ · ไม่มีรับประกัน = No Warranty", () => {
+    const d2: LazadaAttrDef[] = [
+      ...defs,
+      def({ name: "condition", label: "Condition", input_type: "singleSelect", choices: [{ name: "New", en: "New" }, { name: "Used", en: "Used" }] }),
+      def({ name: "warranty_type", label: "Warranty Type", input_type: "singleSelect", choices: [{ name: "Warranty by Seller", en: "Warranty by Seller" }, { name: "No Warranty", en: "No Warranty" }] }),
+      def({ name: "warranty", label: "Warranty Period", input_type: "singleSelect", choices: [{ name: "1 Month", en: "1 Month" }, { name: "No Warranty", en: "No Warranty" }] }),
+      def({ name: "style", label: "Style", input_type: "singleSelect", choices: [{ name: "Korean", en: "Korean" }] }),
+    ];
+    const guess = { at: "2026-11-20T10:00:00Z", ai: true, values: { style: "Korean", material: "Resin", condition: "Used" } };
+    const { preview: p, payload } = planLazadaCreate({ ...base, attrDefs: d2, parent: parent({ warranty: "ไม่มีรับประกัน" }), skus: [sku("A-01", "ดำ", 100)], draft: draftWith({ lazada_attr_guess: guess }) });
+    expect(p.attrs.values).toMatchObject({ condition: "New", warranty_type: "No Warranty", warranty: "No Warranty", style: "Korean", material: "Resin" });
+    expect(p.attrs.sources).toMatchObject({ condition: "default", warranty_type: "default", warranty: "product", style: "ai", material: "ai" });
+    expect(p.attrs.guess).toEqual({ at: "2026-11-20T10:00:00Z", ai: true });
+    expect(p.attrs.missingRequired).toEqual([]);   // วัสดุ (บังคับ) ได้จากที่ AI เดา · Brand ไม่ใช่ช่องที่แก้ได้
+    const withWarr = planLazadaCreate({ ...base, attrDefs: d2, parent: parent({ warranty: "1 เดือน" }), skus: [sku("A-01", "ดำ", 100)], draft: draftWith({ lazada_attrs: { material: "เรซิน" } }) }).preview;
+    expect(withWarr.attrs.values).toMatchObject({ warranty_type: "Warranty by Seller", warranty: "1 Month", material: "เรซิน" });
+    expect(withWarr.attrs.sources.material).toBe("draft");
+    expect((payload.Request as { Product: Record<string, any> }).Product.Attributes).toMatchObject({ condition: "New", style: "Korean" });
+  });
+  it("รูปในรายละเอียด: อัตโนมัติ = รูปสินค้าทั้งหมดต่อท้าย · เลือกเอง/ไม่ใส่ · ฝากรูปแล้วแทนลิงก์ในรายละเอียด", () => {
+    const skus = [sku("D-01", "ดำ", 100), sku("D-02", "ขาว", 100)];
+    const { preview: p, payload } = planLazadaCreate({ ...base, parent: parent(), skus, galleryKeys: ["g/1.jpg"] });
+    expect(p.descImages).toMatchObject({ refs: ["r2:img/D-01.jpg", "r2:img/D-02.jpg", "r2:g/1.jpg"], custom: false });
+    const desc = (payload.Request as { Product: Record<string, any> }).Product.Attributes.description as string;
+    expect(desc).toContain('<img src="r2:g/1.jpg" />');
+    expect(p.description.value).not.toContain("<img");
+    expect(lazCreateImageRefs(payload)).toEqual(expect.arrayContaining(["r2:g/1.jpg"]));
+    const fixed = lazCreateResolveImages(payload, new Map([["r2:g/1.jpg", "https://th-live-01.slatic.net/p/g1.jpg"]])) as any;
+    expect(fixed.Request.Product.Attributes.description).toContain('<img src="https://th-live-01.slatic.net/p/g1.jpg" />');
+    const none = planLazadaCreate({ ...base, parent: parent(), skus, galleryKeys: ["g/1.jpg"], draft: draftWith({ lazada_desc_images: [] }) });
+    expect(none.preview.descImages).toMatchObject({ refs: [], custom: true });
+    expect((none.payload.Request as { Product: Record<string, any> }).Product.Attributes.description).not.toContain("<img");
+    const picked = planLazadaCreate({ ...base, parent: parent(), skus, draft: draftWith({ lazada_desc_images: ["r2:g/9.jpg"] }) }).preview;
+    expect(picked.descImages.refs).toEqual(["r2:g/9.jpg"]);
+  });
+});
+
 describe("ของช่วย", () => {
   it("รูปที่ต้องฝาก = ที่ยังไม่ใช่ลิงก์ Lazada · แทนลิงก์ทุกจุด", () => {
     const payload = { Request: { Product: { Images: { Image: ["r2:a", "https://th-live-01.slatic.net/p/x.jpg", "https://obs.line-scdn.net/y"] }, Skus: { Sku: [{ Images: { Image: ["r2:a"] } }, { SellerSku: "z" }] } } } };

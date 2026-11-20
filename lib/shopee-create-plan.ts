@@ -26,7 +26,7 @@ import { noteToText } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
-import { attrDefaultVals, attrRuleValue, matchAttrRule, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
+import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
 
 /** สต๊อกตอนสร้าง (BigSeller ยังคุมสต๊อก — ไม่ส่งจำนวนจริง) · สถานะตอนสร้าง = ปิดขาย */
 export const SHOPEE_CREATE_STOCK = 0;
@@ -450,14 +450,8 @@ export function planShopeeCreate(input: {
   // ค่าเริ่มต้นของร้าน (ตั้งเองได้ · ไม่ตั้ง = ค่าเริ่มต้นของระบบ) + ค่าจากข้อมูลสินค้า → เติมช่องที่ยังว่าง (ทุกช่อง ไม่ใช่แค่ช่องบังคับ)
   const rules = input.attrRules ?? DEFAULT_ATTR_RULES;
   if (fields) {
-    const prod = { warranty: p.warranty ?? null, size: p.size ?? null, weightKg: weight };
-    for (const f of fields) {
-      if ((attrVals[f.id] ?? []).length) continue;
-      const rule = matchAttrRule(f.name, rules); if (!rule) continue;
-      const val = attrRuleValue(rule, prod); if (!val) continue;
-      const vals = attrDefaultVals(f, val); if (!vals) continue;
-      attrVals[f.id] = vals; attrSources[f.id] = rule.source === "fixed" ? "default" : "product";
-    }
+    const filled = applyAttrDefaults(fields, attrVals, rules, { warranty: p.warranty ?? null, size: p.size ?? null, weightKg: weight });
+    Object.assign(attrVals, filled.values); Object.assign(attrSources, filled.sources);
   }
   // ช่องบังคับที่ร่างยังไม่มี → เติมจากสินค้าแบบหมวดเดียวกัน (เตือนให้ตรวจ)
   if (fields && t && t.categoryId && t.categoryId === categoryId) {

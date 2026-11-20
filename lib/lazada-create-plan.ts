@@ -24,12 +24,20 @@
  *   ราคา = ราคาเต็ม (fake_price) + ราคาลด (ราคาขาย) · ไม่มีราคาเต็ม = ราคาขายเป็นราคาปกติ · ตัวขายไม่มี → ใช้ของตัวสี
  *   สต๊อก = 0 (ไม่ส่งสต๊อกตอนสร้าง — ระบบสต๊อกกลาง/BigSeller ดูแล)
  *   ข้อมูลเฉพาะของหมวด = ร่าง extra.lazada_attrs · ชั้นตัวเลือก = ร่าง extra.lazada_variation (ไม่ตั้ง = ระบบเลือกให้)
+ * รอบ LY22 (เจ้าของเลือก 2026-11-20 · ให้เหมือน Shopee):
+ *   ราคาแก้ในร่าง extra.lazada_prices { sku_id: บาท } · ชื่อสี = Color Platform [TH] → แก้ในร่าง extra.lazada_option_names { sku_id: ชื่อ }
+ *   ช่องของหมวด = ร่าง → ค่าเริ่มต้นของร้าน/ข้อมูลสินค้า (lib/listing-attr-defaults · ui_config) → ที่ AI/จับคำเดาไว้ (extra.lazada_attr_guess { at, ai, values })
+ *   รูปในรายละเอียด = ร่าง extra.lazada_desc_images [ref] (เลือก/เรียงเอง · [] = ไม่ใส่) → รูปสินค้าทั้งหมด (≤ 20) ต่อท้ายข้อความ · route ฝากรูปกับ Lazada ก่อนส่ง
  */
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { lazAttrEditable, lazNormAttr, linesToHighlights, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 import { skuImageKeys, type SkuImageSource } from "@/lib/sku-gallery-images";
+import { applyAttrDefaults, defaultAttrRules, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
+import { lazAttrFieldOf, lazAttrStateOf, lazAttrTextOf } from "@/lib/lazada-attr-fields";
 
 export const LAZADA_CREATE_MAX_IMAGES = 8;
+/** รูปในรายละเอียดสูงสุด (ต่อท้ายข้อความ) */
+export const LAZADA_DESC_MAX_IMAGES = 20;
 export const LAZADA_NO_BRAND = "No Brand";
 const NAME_MAX = 255;
 const DESC_MAX = 25_000;
@@ -42,6 +50,8 @@ const LAZADA_IMG_HOST = /(^|\.)(slatic\.net|lazcdn\.com|alicdn\.com)$/i;
 
 export type LazCreateSku = {
   id: string; code: string; color_th: string | null; color: string | null;
+  /** "Color Platform [TH]" เช่น "ดำ (01)" — ชื่อสีบนร้าน (มาก่อน color_th) */
+  color_platform_th?: string | null;
   list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null;
   attribute_values: Record<string, unknown> | null; is_active: boolean; sale_ok?: boolean | null;
   /** รูปแกลเลอรีของ SKU (r2 key เรียง ⭐ ก่อน) — loadSkuGalleryKeys · ไม่มี = ใช้แค่ปก */
@@ -51,6 +61,9 @@ export type LazCreateParent = {
   id: string; code: string; name_th: string | null; name_platform: string | null;
   description: string | null; platform_description: string | null;
   weight_g: number | null; box: { l: number | null; w: number | null; h: number | null } | null;
+  /** ช่องรับประกัน + ขนาดสินค้า (ซม.) — ค่าเริ่มต้นช่องคุณลักษณะ */
+  warranty?: string | null;
+  size?: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type LazCreateDraft = {
   title: string | null; description: string | null; category_path: string | null; image_keys: string[] | null;
@@ -86,7 +99,11 @@ export type LazCreateVariantRow = {
   images_custom: boolean;
   /** ค่าชั้นแรก (SKU ที่ค่าเดียวกันใช้รูปชุดเดียวกัน) · null = ไม่มีชั้นตัวเลือก */
   group: string | null;
+  /** ราคาจากระบบ (ก่อนแก้ในร่าง) · ชื่อสีจากระบบ (ก่อนแก้ในร่าง) */
+  price_base: number | null; price_custom: boolean; color_base: string | null; color_custom: boolean;
 };
+/** ที่มาของค่าช่องคุณลักษณะ: ร่าง · ค่าเริ่มต้นของร้าน · ข้อมูลสินค้า · AI เดา · จับคำจากข้อความ */
+export type LazAttrSource = "draft" | "default" | "product" | "ai" | "text";
 export type LazCreateField<T> = { value: T; src: string };
 export type LazCreatePreview = {
   parent_id: string; parent_code: string;
@@ -101,7 +118,16 @@ export type LazCreatePreview = {
   /** ช่องขายของหมวด (เลือกเป็นชื่อชั้นได้) */
   saleProps: { name: string; label: string }[];
   variants: LazCreateVariantRow[];
-  attrs: { values: Record<string, string>; missingRequired: string[]; loaded: boolean };
+  /** ชื่อสีที่เลือกได้ (Color Platform [TH] → ชื่อสีปกติ) */
+  colorChoices: string[];
+  /** รูปต่อท้ายรายละเอียด (custom = เลือกเองในร่าง) */
+  descImages: { refs: string[]; custom: boolean; src: string; max: number };
+  attrs: {
+    values: Record<string, string>; missingRequired: string[]; loaded: boolean;
+    sources: Record<string, LazAttrSource>; rules: AttrDefaultRule[]; rulesCustom: boolean;
+    /** เดาไว้แล้วเมื่อไหร่ (AI ไหม) · null = ยังไม่เคยเดา */
+    guess: { at: string | null; ai: boolean } | null;
+  };
   missing: string[];
   warnings: string[];
   on_shop: string | null;
@@ -112,6 +138,8 @@ const str = (v: unknown) => (v == null ? "" : String(v)).trim();
 const pos = (v: unknown): number | null => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
 const r2 = (k: string) => `r2:${k}`;
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const recOf = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
+const IMG_SRC = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi;
 export const lazCategoryIdOf = (path: unknown): string | null => {
   const s = str(path); if (!s) return null;
   if (s.includes(" · ")) return s.split(" · ")[0].trim() || null;
@@ -148,6 +176,8 @@ export function splitSkus<T extends Pick<LazCreateSku, "code" | "is_active" | "s
 export function planLazadaCreate(input: {
   parent: LazCreateParent; skus: LazCreateSku[]; draft: LazCreateDraft;
   mappedCategory: string | null; galleryKeys: string[]; attrDefs: LazadaAttrDef[] | null; onShop: string | null;
+  /** ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ui_config) · null/ไม่ส่ง = ค่าเริ่มต้นของระบบ */
+  attrRules?: AttrDefaultRule[] | null;
 }): { preview: LazCreatePreview; payload: Record<string, unknown> } {
   const { parent: p, draft: d } = input;
   const extra = (d?.extra && typeof d.extra === "object" ? d.extra : {}) as Record<string, unknown>;
@@ -171,7 +201,6 @@ export function planLazadaCreate(input: {
   const descRaw = dDesc.trim() ? dDesc : descPf.trim() ? descPf : descMain;
   const descHtml = descRaw.trim() ? lazDescriptionHtml(descRaw) : "";
   const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด (ไม่บังคับ)" : dDesc.trim() && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ Lazada" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
-  if (descHtml.length > DESC_MAX) missing.push(`รายละเอียดยาวเกิน ${DESC_MAX.toLocaleString()} ตัวอักษร`);
   const hiLines = str(extra.lazada_highlights);
   const highlightsHtml = hiLines ? linesToHighlights(hiLines) : "";
 
@@ -181,7 +210,9 @@ export function planLazadaCreate(input: {
   if (!sellable.length) missing.push("SKU ที่เปิดขาย ≥ 1");
 
   // ---------- ชั้นตัวเลือก ----------
-  const colorOf = (s: LazCreateSku) => str(s.color_th || s.color);
+  const nameOv = recOf(extra.lazada_option_names);
+  const colorBase = (s: LazCreateSku) => str(s.color_platform_th || s.color_th || s.color);
+  const colorOf = (s: LazCreateSku) => str(nameOv[s.id]) || colorBase(s);
   const vo = (s: LazCreateSku) => { const av = s.attribute_values; const v = av && typeof av === "object" ? (av as Record<string, unknown>).variant_option : null; return v && typeof v === "object" ? v as Record<string, unknown> : null; };
   const optOf = (s: LazCreateSku) => str(vo(s)?.value);
   const optName = sellable.map((s) => str(vo(s)?.name)).find(Boolean) || "ตัวเลือก";
@@ -244,13 +275,18 @@ export function planLazadaCreate(input: {
   if (dims[0]?.hasImage && overMax) warnings.push(`รูปตัวเลือก ${overMax} ชุดมีเกิน ${LAZADA_CREATE_MAX_IMAGES} รูป — ส่ง ${LAZADA_CREATE_MAX_IMAGES} รูปแรก (กดจำนวนรูปที่แถวเพื่อเลือกเอง)`);
 
   // ---------- แถวตัวเลือก ----------
+  const priceOv = recOf(extra.lazada_prices);
   const variants: LazCreateVariantRow[] = sellable.map((s) => {
     const fake = owner(s, "fake_price"), sale = owner(s, "list_price");
-    const price = fake ?? sale; const special = fake && sale && sale < fake ? sale : null;
+    const pOv = pos(priceOv[s.id]);
+    const price = pOv ?? fake ?? sale; const special = price && sale && sale < price ? sale : null;
     const saleProp: Record<string, string> = {};
     dims.forEach((dm, i) => { saleProp[dm.lazName] = ourDims[i].valOf(s); });
     const im = imgsOf(s);
-    return { sku_id: s.id, code: s.code, saleProp, price, special, fake, sale, image_ref: im.refs[0] ?? null, image_refs: im.refs, image_pool: im.pool, images_custom: im.custom, group: dims[0] ? groupOf(s) : null };
+    return {
+      sku_id: s.id, code: s.code, saleProp, price, special, fake, sale, image_ref: im.refs[0] ?? null, image_refs: im.refs, image_pool: im.pool, images_custom: im.custom, group: dims[0] ? groupOf(s) : null,
+      price_base: fake ?? sale, price_custom: pOv != null, color_base: colorBase(s) || null, color_custom: !!str(nameOv[s.id]),
+    };
   });
   if (variants.length && variants.some((v) => !v.price)) missing.push(`ราคา (${variants.filter((v) => !v.price).length} ตัวเลือกยังไม่มีราคา)`);
   if (dims.length) {
@@ -268,6 +304,13 @@ export function planLazadaCreate(input: {
   const imgSrc = picked.length ? "เลือกไว้สำหรับ Lazada" : draftKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
   if (!refs.length) missing.push("รูปสินค้า ≥ 1");
 
+  // ---------- รูปในรายละเอียด (ต่อท้ายข้อความ) ----------
+  const descPicked = Array.isArray(extra.lazada_desc_images) ? [...new Set((extra.lazada_desc_images as unknown[]).map(str).filter(Boolean))] : null;
+  const descRefs = (descPicked ?? autoRefs).slice(0, LAZADA_DESC_MAX_IMAGES);
+  const descImgSrc = descPicked ? (descPicked.length ? "เลือกไว้สำหรับ Lazada" : "เลือกไม่ใส่รูป") : "รูปสินค้าทั้งหมด (อัตโนมัติ)";
+  const descFull = descHtml + descRefs.map((r) => `<p><img src="${r.replace(/"/g, "&quot;")}" /></p>`).join("");
+  if (descFull.length > DESC_MAX) missing.push(`รายละเอียดยาวเกิน ${DESC_MAX.toLocaleString()} ตัวอักษร`);
+
   // ---------- พัสดุ ----------
   const wKg = pos(extra.lazada_weight) ?? (pos(p.weight_g) ? (p.weight_g as number) / 1000 : null);
   const weight = wKg != null ? round2(wKg) : null;
@@ -279,8 +322,22 @@ export function planLazadaCreate(input: {
   else if (box.l + box.w + box.h > PKG_SUM_MAX) missing.push(`กล่อง กว้าง+ยาว+สูง เกิน ${PKG_SUM_MAX} ซม.`);
 
   // ---------- ข้อมูลเฉพาะของหมวด ----------
-  const attrVals = (extra.lazada_attrs && typeof extra.lazada_attrs === "object" ? extra.lazada_attrs : {}) as Record<string, string>;
+  // ร่าง (ยืนยันแล้ว) → ค่าเริ่มต้นของร้าน/ข้อมูลสินค้า → ที่ AI/จับคำเดาไว้ — เติมเฉพาะช่องที่ยังว่าง
+  const draftAttrs = (extra.lazada_attrs && typeof extra.lazada_attrs === "object" ? extra.lazada_attrs : {}) as Record<string, string>;
   const editable = (input.attrDefs ?? []).filter(lazAttrEditable);
+  const attrVals: Record<string, string> = { ...draftAttrs };
+  const attrSources: Record<string, LazAttrSource> = {};
+  for (const def of editable) if (lazNormAttr(def, draftAttrs[def.name])) attrSources[def.name] = "draft";
+  const rules = input.attrRules ?? defaultAttrRules("lazada");
+  if (input.attrDefs) {
+    const filled = applyAttrDefaults(editable.map(lazAttrFieldOf), lazAttrStateOf(editable, attrVals), rules, { warranty: p.warranty ?? null, size: p.size ?? null, weightKg: weight });
+    for (const def of editable) { const v = filled.values[def.name]; if (v) { attrVals[def.name] = lazAttrTextOf(def, v); attrSources[def.name] = filled.sources[def.name]; } }
+  }
+  const guessRaw = recOf(extra.lazada_attr_guess); const guessVals = recOf(guessRaw.values); const guessBy = recOf(guessRaw.by);
+  for (const def of editable) {
+    const g = str(guessVals[def.name]);
+    if (g && !lazNormAttr(def, attrVals[def.name]) && lazNormAttr(def, g)) { attrVals[def.name] = g; attrSources[def.name] = guessBy[def.name] === "text" ? "text" : guessBy[def.name] === "ai" || guessRaw.ai === true ? "ai" : "text"; }
+  }
   const attrOut: Record<string, string> = {};
   for (const def of editable) { const v = lazNormAttr(def, attrVals[def.name]); if (v) attrOut[def.name] = v; }
   const missingRequired = editable.filter((def) => def.required && !attrOut[def.name]).map((def) => def.label);
@@ -312,7 +369,7 @@ export function planLazadaCreate(input: {
         Images: img(refs),
         ...(dims.length ? { variation } : {}),
         Attributes: {
-          name, description: descHtml, ...(highlightsHtml ? { short_description: highlightsHtml } : {}),
+          name, description: descFull, ...(highlightsHtml ? { short_description: highlightsHtml } : {}),
           brand: LAZADA_NO_BRAND, ...attrOut,
         },
         Skus: { Sku: skuPayload },
@@ -332,7 +389,12 @@ export function planLazadaCreate(input: {
       images: { refs, src: imgSrc, custom: picked.length > 0 },
       package: { weight, ...box, src: pkgSrc },
       dims, saleProps, variants,
-      attrs: { values: attrVals, missingRequired, loaded: !!input.attrDefs },
+      colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
+      descImages: { refs: descRefs, custom: !!descPicked, src: descImgSrc, max: LAZADA_DESC_MAX_IMAGES },
+      attrs: {
+        values: attrVals, missingRequired, loaded: !!input.attrDefs, sources: attrSources, rules, rulesCustom: !!input.attrRules,
+        guess: Object.keys(guessRaw).length ? { at: str(guessRaw.at) || null, ai: guessRaw.ai === true } : null,
+      },
       missing, warnings,
       on_shop: input.onShop ?? (str(d?.platform_product_id) || null),
       draft_extra: extra,
@@ -345,7 +407,8 @@ export function lazCreateImageRefs(payload: Record<string, unknown>): string[] {
   const prod = ((payload.Request as Record<string, unknown>)?.Product ?? {}) as Record<string, unknown>;
   const main = (((prod.Images as Record<string, unknown>)?.Image ?? []) as string[]);
   const skuImgs = ((((prod.Skus as Record<string, unknown>)?.Sku ?? []) as Record<string, unknown>[]).flatMap((s) => (((s.Images as Record<string, unknown>)?.Image ?? []) as string[])));
-  return [...new Set([...main, ...skuImgs])].filter((r) => !isLazadaImage(r));
+  const descImgs = [...String(((prod.Attributes as Record<string, unknown>)?.description) ?? "").matchAll(IMG_SRC)].map((m) => m[1].replace(/&quot;/g, "\""));
+  return [...new Set([...main, ...skuImgs, ...descImgs])].filter((r) => !isLazadaImage(r));
 }
 /** แทน ref ด้วยลิงก์ Lazada ที่ฝากแล้ว (ทุกจุดใน payload) */
 export function lazCreateResolveImages(payload: Record<string, unknown>, migrated: Map<string, string>): Record<string, unknown> {
@@ -354,5 +417,9 @@ export function lazCreateResolveImages(payload: Record<string, unknown>, migrate
   const prod = (copy.Request as Record<string, unknown>).Product as Record<string, unknown>;
   if (prod.Images) (prod.Images as Record<string, unknown>).Image = fix((prod.Images as Record<string, unknown>).Image);
   for (const s of (((prod.Skus as Record<string, unknown>)?.Sku ?? []) as Record<string, unknown>[])) if (s.Images) (s.Images as Record<string, unknown>).Image = fix((s.Images as Record<string, unknown>).Image);
+  const attrs = prod.Attributes as Record<string, unknown> | undefined;
+  if (attrs && typeof attrs.description === "string") {
+    attrs.description = attrs.description.replace(IMG_SRC, (tag, src: string) => { const to = migrated.get(src.replace(/&quot;/g, "\"")); return to ? tag.replace(src, to.replace(/"/g, "&quot;")) : tag; });
+  }
   return copy;
 }

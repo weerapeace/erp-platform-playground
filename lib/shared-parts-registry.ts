@@ -1654,6 +1654,22 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "shopee-connector.md",
   },
   {
+    key: "listing-variant-table", label: "ตารางตัวเลือก & ราคา (หน้าลงสินค้าใหม่บนร้าน)", code: "ListingVariantTable", category: "feature",
+    source: { path: "components/platform-listing/listing-variant-table" },
+    what: "ตารางตัวเลือกของหน้าลงสินค้า — แก้ราคาต่อแถว (MoneyInput) · ชื่อสีจาก Color Platform [TH]/พิมพ์ใหม่ (SearchableSelect) · รูป single (รูปประจำสี) หรือ all (โชว์ทุกรูป ไม่พับ · ชี้ดูรูปใหญ่) · สต๊อกล็อก 0 · แก้ค้างแล้วบันทึกครั้งเดียว (onSave ได้ prices/names/imgs) · ปุ่มย้อนต่อช่อง + กลับไปใช้ค่าจากระบบ · PC ตาราง/มือถือการ์ด",
+    when: "หน้าดูก่อนลงสินค้าใหม่ของร้าน (Shopee + Lazada ใช้แล้ว · TikTok ต่อได้) — เก็บลงร่างของร้านเอง (extra.<ร้าน>_prices / _option_names)",
+    notWhen: "แก้สินค้าที่มีบนร้านแล้ว (ใช้ลิ้นชักสินค้าบนร้าน) · ห้ามเขียนกลับราคา/สีในระบบ",
+    doc: "shopee-connector.md",
+  },
+  {
+    key: "listing-description-box", label: "กล่องรายละเอียด (หน้าตาบนร้าน + กดแก้ + รูปในรายละเอียด)", code: "ListingDescriptionBox", category: "feature",
+    source: { path: "components/platform-listing/listing-description-box" },
+    what: "แบบ B ที่เจ้าของเลือก — ปกติโชว์หน้าตาบนร้าน (HTML ผ่าน sanitizeRichHtml หรือข้อความตามบรรทัด · ตัดบรรทัดเอง · ดูทั้งหมด/ย่อ) · กด \"แก้\" = ช่องพิมพ์สูงตามข้อความ + นับตัวอักษร · images = รูปต่อท้ายรายละเอียด (ListingImageGrid ลากเรียง/เอาออก/เพิ่มจากคลังรูป · ไม่ใส่รูป · กลับไปใช้รูปอัตโนมัติ)",
+    when: "รายละเอียดในหน้าลงสินค้าใหม่ของร้าน (Shopee ข้อความล้วน · Lazada HTML + รูปในรายละเอียด)",
+    notWhen: "แก้รายละเอียดสินค้าในระบบ (ใช้ RichTextEditor ที่หน้าสินค้า) · ลิ้นชักสินค้าบนร้าน (มีตัวแก้ของร้านนั้นแล้ว)",
+    doc: "lazada-connector.md",
+  },
+  {
     key: "attr-defaults-dialog", label: "ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ป๊อปตั้งค่า)", code: "AttrDefaultsDialog", category: "feature",
     source: { path: "components/platform-catalog/attr-defaults-dialog" },
     what: "ป๊อปตั้งกติกา \"ชื่อช่อง → ใส่ค่าอะไร\" ต่อร้าน×แบรนด์ (ค่าตายตัว เช่น ประเทศ = ไทย · หรือดึงจากสินค้า: รับประกัน / ขนาด ยาว×กว้าง×สูง / น้ำหนัก) · เก็บ ui_config listingAttrDefaultsKey · กติกา pure lib/listing-attr-defaults (matchAttrRule · attrRuleValue · attrDefaultVals) · ยังไม่ตั้ง = DEFAULT_ATTR_RULES · บันทึกแล้วย้อนกลับได้",

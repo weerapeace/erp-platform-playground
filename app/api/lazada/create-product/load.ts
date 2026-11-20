@@ -1,6 +1,7 @@
 /**
  * ตัวโหลดของ "สร้างสินค้าใหม่บน Lazada" (ไม่ใช่ route · import ได้) — สินค้า + SKU + ร่าง Lazada + ช่องของหมวด (ดึงสด) → แผน
  * กฎประกอบ = lib/lazada-create-plan (pure + เทสต์) · ใช้ทั้ง GET (ดูก่อนส่ง) และ POST (ลงจริง) — ต้องเหมือนกันเสมอ
+ * ค่าเริ่มต้นช่องคุณลักษณะของร้าน = ui_config listingAttrDefaultsKey("lazada", แบรนด์) (lib/listing-attr-defaults · ป๊อป "ค่าเริ่มต้นของร้าน")
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
@@ -9,6 +10,7 @@ import { lazErrorText, type LazGateway } from "@/lib/lazada";
 import { lazAttrDefsWithExtras } from "@/lib/lazada-listing-edit";
 import { planLazadaCreate, lazCategoryIdOf, type LazCreatePreview, type LazCreateSku } from "@/lib/lazada-create-plan";
 import { loadSkuGalleryKeys } from "@/lib/sku-gallery-images";
+import { attrRulesOf, listingAttrDefaultsKey } from "@/lib/listing-attr-defaults";
 import { getPlatformId, lazCategoryAttrsCached, lazTokenOrReason } from "../shared";
 
 type Row = Record<string, unknown>;
@@ -26,7 +28,7 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
   if (!platformId) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม Lazada" };
   const [items, { data: skus }, { data: onShop }] = await Promise.all([
     loadListingContexts(admin, [parentId], platformId),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, color_platform_th, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
     // 🛡️ กันซ้ำ: มีรายการบน Lazada ที่จับคู่สินค้านี้อยู่แล้ว (ไม่นับตัวที่ร้านลบไปแล้ว)
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platformId).eq("matched_parent_sku_id", parentId).or(LIVE_LISTING_OR).limit(1),
   ]);
@@ -35,11 +37,16 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
   // รูปแกลเลอรีของ SKU ทุกตัว (รูปตัวเลือกบน Lazada ได้ ≤ 8 รูป/ตัว) · โหลดไม่ได้ = ใช้แค่ปก (ไม่ล้มทั้งหน้า)
   const skuRows = (skus ?? []) as Row[];
   const [{ data: pRow }, gallery] = await Promise.all([
-    admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle(),
+    admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g, warranty, size_length_cm, size_thickness_cm, size_height_cm").eq("id", parentId).maybeSingle(),
     loadSkuGalleryKeys(admin, skuRows.map((s) => str(s.id))).catch((e) => { console.warn("[lazada create] sku gallery", (e as Error).message); return {} as Record<string, string[]>; }),
   ]);
   const pr = (pRow ?? {}) as Row;
   const brandId = str(pr.brand_id) || null;
+  // ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ไม่เคยตั้ง = ค่าเริ่มต้นของระบบ) — ดึงคู่กับกุญแจร้าน
+  const rulesP = brandId
+    ? Promise.resolve(admin.from("ui_config").select("value").eq("key", listingAttrDefaultsKey("lazada", brandId)).maybeSingle()).then((r) => attrRulesOf((r.data as Row | null)?.value), () => null)
+    : Promise.resolve(null);
+  const numOr = (v: unknown) => (v == null || v === "" ? null : Number(v) || null);
   const d = it.draft as Row | null;
   const draft = d ? {
     title: d.title == null ? null : String(d.title), description: d.description == null ? null : String(d.description),
@@ -69,14 +76,16 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
   }
   const p = it.parent;
   const exOnShop = ((onShop ?? []) as Row[])[0];
+  const attrRules = await rulesP;
   const { preview, payload } = planLazadaCreate({
     parent: {
       id: parentId, code: str(p.code), name_th: str(p.name_th) || null, name_platform: str(p.name_platform) || null,
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height },
+      warranty: pr.warranty == null ? null : String(pr.warranty), size: { l: numOr(pr.size_length_cm), w: numOr(pr.size_thickness_cm), h: numOr(pr.size_height_cm) },
     },
     skus: skuRows.map((s): LazCreateSku => ({
-      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null,
+      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,
       list_price: s.list_price == null ? null : Number(s.list_price), fake_price: s.fake_price == null ? null : Number(s.fake_price),
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
@@ -84,7 +93,7 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
     })),
     draft, mappedCategory: it.platformCategory || null,
     galleryKeys: it.images.map((x) => x.key), attrDefs,
-    onShop: exOnShop ? str(exOnShop.external_product_id) : null,
+    onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules,
   });
   if (preview.on_shop) blockers.push(`มีบน Lazada แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);
   return { ok: true, preview, payload, blockers, platformId, brandId, token, draftExists: !!d };
