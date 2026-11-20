@@ -9,6 +9,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { ERPInput, ERPSelect } from "@/components/form";
@@ -326,6 +327,13 @@ function PlatformOrdersInner() {
           <p className="mt-0.5 text-sm text-slate-500">ออเดอร์จากทุกร้านในที่เดียว · เลือกหลายใบแล้วพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า · ออกใบกำกับภาษีได้จากออเดอร์</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* 2026-11-20 เจ้าของเลือก widget แบบ A: ปุ่มไปหน้าสถานะการดึงออเดอร์ทุกร้าน */}
+          {!demo && (
+            <Link href="/master/platform-orders/pull-status" title="ดูว่าแต่ละร้านดึงออเดอร์อัตโนมัติปกติไหม · ดึงตอนนี้ได้"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
+              <Icon value="i:route" />สถานะดึงออเดอร์
+            </Link>
+          )}
           {canManage && !demo && (
             <button type="button" onClick={() => void syncTiktokOrders()} disabled={ttsSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก TikTok Shop (อ่านอย่างเดียว · สถานะตามร้าน)"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">

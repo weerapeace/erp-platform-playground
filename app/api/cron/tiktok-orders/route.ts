@@ -12,7 +12,10 @@
  * + 2026-11-14 (เจ้าของ "เริ่มเฟส 3" Shopee): ต่อท้ายด้วยดึงออเดอร์ Shopee ที่ "เปลี่ยนสถานะ" ใน 3 ชม.ล่าสุด ของทุกแบรนด์ที่เชื่อม Shopee
  *   (../../shopee/orders-sync · ใช้ตัวตั้งเวลาเดิม ไม่เพิ่มงานใน DB / ไม่เพิ่มคนในออฟฟิศ AI) · Shopee พลาดไม่ทำให้ส่วน TikTok ล้ม
  *   ออเดอร์ Shopee ของแบรนด์ที่เชื่อมแล้วไม่บันทึกจากเมลอีก (lib/platform-email/server) → ตัวนี้คือทางเข้าหลัก จึงย้อน 3 ชม. เผื่อรอบที่ล้ม
- * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok / Shopee
+ * + 2026-11-20 (เจ้าของเลือก widget หน้าสถานะดึงออเดอร์ ข้อ 1-5): ต่อท้ายด้วย Lazada (ทุกแบรนด์ที่เชื่อม · ย้อน 3 ชม.) · LINE SHOPPING · ออเดอร์เว็บไซต์
+ *   ผ่านตัวกลาง ../../platform-orders/pull-runner · จดผลทุกร้านด้วย recordShopPull (หน้า /master/platform-orders/pull-status)
+ *   ท้ายรอบเช็กร้านที่มีปัญหาแล้วเด้งกระดิ่ง (sendPullAlerts · เรื่องเดิมวันละครั้ง · กฎ orders.pull_problem)
+ * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok / Shopee / Lazada / LINE SHOPPING
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -25,10 +28,16 @@ import { syncTiktokProductsChanged } from "../../tiktok-shop/products-sync";
 import { shopeeConfigured } from "@/lib/shopee";
 import { shopeeTokenOrReason } from "../../shopee/shared";
 import { syncShopeeOrders, shopeeConnectedBrandIds, fillShopeeTracking, SHOPEE_ORDER_SOURCE } from "../../shopee/orders-sync";
+import { lazadaConnectedBrandIds } from "../../lazada/orders-sync";
+import { lineConnectedBrandIds } from "../../line-shopping/orders-sync";
+import { pullShop, type PullOutcome } from "../../platform-orders/pull-runner";
+import { loadPullInputs, recordShopPull, sendPullAlerts } from "@/lib/order-pull-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 120;
+export const maxDuration = 300;   // 2026-11-20: 120 → 300 เผื่อ Lazada / LINE / เว็บไซต์ ต่อท้าย (TikTok/Shopee ใช้งบเวลาเดิม ≤ 110 วิ)
+const ROUND_END_MS = 270_000;     // ส่วนต่อท้าย (Lazada/LINE/เว็บ) ทำได้ถึงวินาทีที่ 270 · เผื่อจดผล + เตือน
+const EXTRA_WINDOW_SEC = 3 * 3600; // Lazada / LINE: ย้อน 3 ชม. — รอบไหนล้มรอบถัดไปยังเก็บตก
 
 const WINDOW_SEC = 3600;   // รอบละ 15 นาที แต่ย้อน 1 ชม. — รอบไหนล้มรอบถัดไปยังเก็บตก
 const SHOPEE_WINDOW_SEC = 3 * 3600;   // Shopee: ทางเข้าหลัก (ไม่มีเมลสำรองแล้ว) → ย้อน 3 ชม.
@@ -62,14 +71,16 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const results: { brand_id: string; ok: boolean; created?: number; updated?: number; products?: number; error?: string }[] = [];
   for (const brandId of brands) {
     const tok = await ttsTokenOrReason(admin, brandId, ttId, null);
-    if (!tok.ok) { results.push({ brand_id: brandId, ok: false, error: tok.reason }); continue; }
+    if (!tok.ok) { results.push({ brand_id: brandId, ok: false, error: tok.reason }); await recordShopPull(admin, "tiktok", brandId, { ok: false, error: tok.reason }); continue; }
     const shop = tok.meta.shops?.[0];
-    if (!shop?.cipher) { results.push({ brand_id: brandId, ok: false, error: "ยังไม่รู้รหัสร้าน (กด ตรวจการเชื่อมต่อ)" }); continue; }
+    if (!shop?.cipher) { results.push({ brand_id: brandId, ok: false, error: "ยังไม่รู้รหัสร้าน (กด ตรวจการเชื่อมต่อ)" }); await recordShopPull(admin, "tiktok", brandId, { ok: false, error: "ยังไม่รู้รหัสร้าน (กด ตรวจการเชื่อมต่อ)" }); continue; }
     const r = await syncTiktokOrders(admin, { platformId: ttId, brandId, accessToken: tok.accessToken, shop, window: { updateTimeGe }, timeBudgetMs: 45_000 });
     // สินค้าที่เปลี่ยนใน 1 ชม.ล่าสุด (สถานะ/ราคา/ชื่อ) — พลาดไม่ทำให้รอบออเดอร์ล้ม (บอกใน error)
     const ps = await syncTiktokProductsChanged(admin, { platformId: ttId, brandId, accessToken: tok.accessToken, cipher: shop.cipher, updateTimeGe, timeBudgetMs: 25_000 });
     const errs = [r.stop_reason, ps.stop_reason ? `สินค้า: ${ps.stop_reason}` : null].filter(Boolean).join(" · ");
     results.push({ brand_id: brandId, ok: !errs, created: r.created, updated: r.updated, products: ps.saved, ...(errs ? { error: errs } : {}) });
+    // หน้าสถานะดึงออเดอร์: นับเฉพาะส่วนออเดอร์ (สินค้าพลาดไม่ทำให้ร้านขึ้นแดง)
+    await recordShopPull(admin, "tiktok", brandId, { ok: !r.stop_reason, created: r.created, updated: r.updated, error: r.stop_reason });
     // บันทึกประวัติเฉพาะรอบที่มีออเดอร์ใหม่หรือมีปัญหา (รอบปกติ ~48 ครั้ง/วัน ไม่ต้องรก audit)
     if (r.created > 0 || r.stop_reason) {
       const { sample: _sample, ...counts } = r;
@@ -88,7 +99,7 @@ async function handle(request: NextRequest): Promise<NextResponse> {
     for (const brandId of shopeeBrands) {
       if (leftMs() < 15_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก — ย้อน 3 ชม.)" }); continue; }
       const tok = await shopeeTokenOrReason(admin, brandId, spId, null);
-      if (!tok.ok) { shopee.push({ brand_id: brandId, ok: false, error: tok.reason }); continue; }
+      if (!tok.ok) { shopee.push({ brand_id: brandId, ok: false, error: tok.reason }); await recordShopPull(admin, "shopee", brandId, { ok: false, error: tok.reason }); continue; }
       const budget = Math.min(30_000, leftMs() - 10_000);
       if (budget < 5_000) { shopee.push({ brand_id: brandId, ok: false, error: "เวลารอบหมดก่อนถึง Shopee (รอบถัดไปเก็บตก — ย้อน 3 ชม.)" }); continue; }
       const r = await syncShopeeOrders(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, window: { field: "update_time", from: nowSec - SHOPEE_WINDOW_SEC, to: nowSec }, timeBudgetMs: budget });
@@ -96,6 +107,7 @@ async function handle(request: NextRequest): Promise<NextResponse> {
       const tb = Math.min(20_000, leftMs() - 10_000);
       const tr = tb > 3_000 ? await fillShopeeTracking(admin, { platformId: spId, brandId, accessToken: tok.accessToken, shopId: tok.shopId, timeBudgetMs: tb }) : null;
       shopee.push({ brand_id: brandId, ok: !r.stop_reason, created: r.created, updated: r.updated, tracking_filled: tr?.filled ?? 0, ...(tr?.error ? { tracking_error: tr.error } : {}), ...(r.stop_reason ? { error: `Shopee: ${r.stop_reason}` } : {}) });
+      await recordShopPull(admin, "shopee", brandId, { ok: !r.stop_reason, created: r.created, updated: r.updated, error: r.stop_reason });
       if (r.created > 0 || r.stop_reason) {
         const { sample: _s, ...counts } = r;
         await writeAudit(admin, {
@@ -105,6 +117,31 @@ async function handle(request: NextRequest): Promise<NextResponse> {
       }
     }
   }
+
+  // ── Lazada · LINE SHOPPING · เว็บไซต์ (2026-11-20) — เวลาที่เหลือของรอบ · พลาดไม่ทำให้ส่วน TikTok/Shopee ล้ม ──
+  const extra: PullOutcome[] = [];
+  const extraLeft = () => ROUND_END_MS - (Date.now() - startedAt);
+  const lzId = await getPlatformId(admin, "lazada");
+  const lsId = await getPlatformId(admin, "line_shopping");
+  const lzBrands = lzId ? await lazadaConnectedBrandIds(admin, lzId).catch(() => [] as string[]) : [];
+  const lsBrands = lsId ? await lineConnectedBrandIds(admin, lsId).catch(() => [] as string[]) : [];
+  const jobs: { platform: "lazada" | "line_shopping" | "website"; brandId: string | null; cap: number }[] = [
+    ...lzBrands.map((b) => ({ platform: "lazada" as const, brandId: b, cap: 40_000 })),
+    ...lsBrands.map((b) => ({ platform: "line_shopping" as const, brandId: b, cap: 20_000 })),
+    { platform: "website", brandId: null, cap: 10_000 },
+  ];
+  for (const j of jobs) {
+    const budget = Math.min(j.cap, extraLeft() - 10_000);
+    if (budget < 5_000) break;   // เวลารอบหมด — รอบถัดไปเก็บตก (ย้อน 3 ชม.) · ไม่จดว่าล้ม
+    extra.push(await pullShop(admin, { platform: j.platform, brandId: j.brandId, windowSec: EXTRA_WINDOW_SEC, budgetMs: budget }));
+  }
+  const exFailed = extra.filter((x) => !x.ok);
+  const exName = (p: string) => (p === "lazada" ? "Lazada" : p === "line_shopping" ? "LINE" : "เว็บ");
+  const exNote = extra.length
+    ? ` · ${["lazada", "line_shopping", "website"].map((p) => { const xs = extra.filter((x) => x.platform === p); return xs.length ? `${exName(p)} ใหม่ ${xs.reduce((a, x) => a + x.created, 0)}` : null; }).filter(Boolean).join(" · ")}${exFailed.length ? ` ⚠️ ${exFailed.map((f) => `${exName(f.platform)}: ${f.error}`).join(" · ").slice(0, 160)}` : ""}`
+    : "";
+  // ร้านที่มีปัญหา → กระดิ่ง (เรื่องเดิมวันละครั้ง)
+  const alerts = await sendPullAlerts(admin, (await loadPullInputs(admin).catch(() => ({ shops: [] }))).shops);
 
   // ok = ส่วน TikTok เท่านั้น (เหมือนเดิม) · Shopee มีปัญหา = warn + เหตุผลต่อท้ายสรุป (ไม่ทำให้คน TikTok ในออฟฟิศขึ้นแดง)
   const failed = results.filter((x) => !x.ok);
@@ -117,11 +154,11 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const spTrackErr = shopee.find((x) => x.tracking_error)?.tracking_error;
   const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated} เลขพัสดุ +${spTrack}${spTrackErr ? ` (เลขพัสดุ: ${spTrackErr.slice(0, 80)})` : ""}${spFailed.length ? ` ⚠️ ${spFailed.map((f) => f.error).join(" · ").slice(0, 160)}` : ""}` : "";
   await recordWorkerRun(admin, "tiktok-orders", {
-    ok: failed.length === 0, warn: spFailed.length > 0,
-    summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote,
+    ok: failed.length === 0, warn: spFailed.length > 0 || exFailed.length > 0,
+    summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote + exNote,
     ...(failed.length ? { error: failed.map((f) => f.error).join(" · ").slice(0, 300) } : {}),
   });
-  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { ok: spFailed.length === 0, brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee } });
+  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { ok: spFailed.length === 0, brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee }, extra, alerts });
 }
 
 export const GET = handle;

@@ -62,7 +62,8 @@ export type GateOrder = {
   packed_by_name?: string | null;
 };
 
-const UNPAID_STATUSES = ["UNPAID", "ON_HOLD"];
+// 2026-11-20: + รหัสยังไม่จ่ายของ LINE SHOPPING / เว็บไซต์ (ดึงเข้าศูนย์ออเดอร์แล้ว · lib/platform-order-status isUnpaidPlatformStatus) · Lazada "unpaid" ตัวพิมพ์เล็ก = เทียบแบบตัวใหญ่
+export const UNPAID_STATUSES = ["UNPAID", "ON_HOLD", "LINE_UNPAID", "LINE_EXPIRED", "WEB_UNPAID", "WEB_VERIFYING"];
 
 export function packGate(o: GateOrder): PackGate {
   const reasons: string[] = [];

@@ -165,14 +165,14 @@ export const WORKFLOWS: WorkflowDef[] = [
   {
     key: "platform-order",
     label: "ออเดอร์จากแพลตฟอร์ม (ศูนย์ออเดอร์ออนไลน์ Shopee/Lazada/…)",
-    flow: "ต้องจัดส่ง → ยืนยัน (ตัดสต๊อก) → แพ็กแล้ว → ส่งแล้ว / ยกเลิก (คืนสต๊อก) · ออเดอร์จากเมล = ยอดขายส่งแล้ว ดูอย่างเดียว · ออเดอร์ TikTok / Shopee (API) = สถานะตามร้าน ดูอย่างเดียว (tiktokToInternal / shopeeToInternal · Shopee ทับใบจากเมลเลขเดียวกัน — เจ้าของเลือก 2026-11-14) · ใบกำกับภาษีออกผ่านใบขาย (ไม่ตัดสต๊อกซ้ำ) · จัดส่ง SHIPPOP (ช่องทางของเรา): จองแล้ว → แพ็กแล้ว · ขนส่งรับ/ส่งถึง → ส่งแล้ว",
-    ruleFiles: ["lib/platform-order-status.ts", "lib/order-shipping.ts"],
-    gates: ["app/api/platform-orders/route.ts", "app/api/platform-orders/invoice/route.ts", "app/api/platform-orders/ship/route.ts", "app/api/lazada/sync-orders/route.ts", "app/api/tiktok-shop/sync-orders/route.ts", "app/api/cron/tiktok-orders/route.ts", "app/api/shopee/sync-orders/route.ts", "app/api/shopee/orders-sync.ts", "app/api/platform-orders/import/route.ts"],
+    flow: "ต้องจัดส่ง → ยืนยัน (ตัดสต๊อก) → แพ็กแล้ว → ส่งแล้ว / ยกเลิก (คืนสต๊อก) · ออเดอร์จากเมล = ยอดขายส่งแล้ว ดูอย่างเดียว · ออเดอร์ TikTok / Shopee (API) = สถานะตามร้าน ดูอย่างเดียว (tiktokToInternal / shopeeToInternal · Shopee ทับใบจากเมลเลขเดียวกัน — เจ้าของเลือก 2026-11-14) · 2026-11-20: Lazada (lazada_api · lazadaToInternal · ทับใบจากเมลเหมือน Shopee) · LINE SHOPPING (line_shopping_api) · ออเดอร์เว็บไซต์ (webshop · ส่งต่อจาก store_orders) = สถานะตามร้าน ดึงอัตโนมัติทุก 15 นาที · หน้าสถานะดึงออเดอร์ /master/platform-orders/pull-status · ใบกำกับภาษีออกผ่านใบขาย (ไม่ตัดสต๊อกซ้ำ) · จัดส่ง SHIPPOP (ช่องทางของเรา): จองแล้ว → แพ็กแล้ว · ขนส่งรับ/ส่งถึง → ส่งแล้ว",
+    ruleFiles: ["lib/platform-order-status.ts", "lib/order-shipping.ts", "lib/order-pull-health.ts", "lib/lazada-orders.ts", "lib/line-shopping-orders.ts"],
+    gates: ["app/api/platform-orders/route.ts", "app/api/platform-orders/invoice/route.ts", "app/api/platform-orders/ship/route.ts", "app/api/lazada/sync-orders/route.ts", "app/api/lazada/orders-sync.ts", "app/api/line-shopping/orders-sync.ts", "lib/webshop-order-mirror.ts", "app/api/platform-orders/pull-runner.ts", "app/api/platform-orders/pull/route.ts", "app/api/tiktok-shop/sync-orders/route.ts", "app/api/cron/tiktok-orders/route.ts", "app/api/shopee/sync-orders/route.ts", "app/api/shopee/orders-sync.ts", "app/api/platform-orders/import/route.ts"],
     tables: ["platform_orders", "platform_order_items", "shipping_profiles"],
     signals: ["stock_deducted", "platform_status", "ship_by_at", "shipping"],
     feeds: ["sales-order"],
     gaps: [
-      "Lazada ดึงออเดอร์ (app/api/lazada/sync-orders) ยังแปลงสถานะเองแบบหยาบ — ควรย้ายมาใช้ตัวแปลงใน lib/platform-order-status แบบ shopeeToInternal",
+      "LINE SHOPPING: ตัวแปลง (lib/line-shopping-orders) ยังไม่เคยเจอข้อมูลจริง — รอบแรกที่มีออเดอร์จด shape ใน audit ให้ตรวจ",
       "ระบบอ่านออเดอร์จากเมล (lib/platform-email/server.ts) ตั้งสถานะ new/cancelled เอง",
       "แผนที่การไหลของงาน (/master/flow-map) ยังไม่มีกล่องออเดอร์ออนไลน์",
     ],

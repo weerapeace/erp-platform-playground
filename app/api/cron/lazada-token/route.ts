@@ -27,6 +27,7 @@ import { shopeeConfigured } from "@/lib/shopee";
 import { getPlatformId, loadLazConn, refreshLazConn } from "../../lazada/shared";
 import { refreshAllShopee, type ShopeeRefreshResult } from "../../shopee/shared";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
+import { checkPullerAlive } from "@/lib/order-pull-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,6 +88,8 @@ async function run(request: NextRequest): Promise<NextResponse> {
     await recordWorkerRun(admin, "lazada-token", failed
       ? { ok: false, error: `ต่ออายุไม่สำเร็จ ${failed} ร้าน` }
       : { ok: true, warn: expired > 0, summary: `ต่ออายุแล้ว Lazada ${lazOk} · Shopee ${shpOk} ร้าน${expired ? ` · หมดอายุ ต้องเชื่อมใหม่ ${expired} ร้าน` : ""}` });
+    // 2026-11-20: ตรวจข้ามระบบ — ตัวดึงออเดอร์ทุก 15 นาที (pg_cron ใน Supabase) ยังทำงานไหม · หยุด = กระดิ่ง (ตัวมันเองเตือนตัวเองไม่ได้)
+    await checkPullerAlive(admin);
   }
   return NextResponse.json({
     ok: true, dry, ...(lazNote ? { note: lazNote } : {}),

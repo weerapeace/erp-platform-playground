@@ -21,7 +21,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import {
-  cleanScanCode, packGate, shopCodeGuesses, bestGuess, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES,
+  cleanScanCode, packGate, shopCodeGuesses, bestGuess, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES, UNPAID_STATUSES,
   type BoxSize, type PackFinishStatus, type PackEditStatus,
 } from "@/lib/packing";
 
@@ -217,7 +217,7 @@ async function queue(admin: Admin) {
     .in("status", ["new", "confirmed", "packed"]).is("packed_at", null)
     .gte("created_at", new Date(Date.now() - 30 * 86_400_000).toISOString())   // ใบเก่ากว่า 30 วันที่ค้าง "ใหม่" (เช่น Lazada ทดสอบเดือน 7) ไม่ใช่งานแพ็ค
     .or("source.is.null,source.neq.email")
-    .or("platform_status.is.null,platform_status.not.in.(UNPAID,ON_HOLD)")
+    .or(`platform_status.is.null,platform_status.not.in.(${[...UNPAID_STATUSES, "unpaid"].join(",")})`)   // + Lazada/LINE/เว็บ (2026-11-20)
     .order("ship_by_at", { ascending: true, nullsFirst: false }).limit(300);
   if (error) return NextResponse.json({ queue: [], error: "โหลดคิวรอแพ็คไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const orders = (data ?? []) as Row[];

@@ -144,9 +144,13 @@ export function lazErrorText(e: unknown): string {
 }
 
 // ดึงออเดอร์ (สร้างหลังเวลา createdAfter — ISO8601 มี timezone เช่น 2026-06-01T00:00:00+07:00)
-export async function lazGetOrders(gateway: LazGateway, accessToken: string, opts: { createdAfter: string; limit?: number; offset?: number }): Promise<{ orders: Record<string, unknown>[]; total: number }> {
+// updatedAfter = เฉพาะออเดอร์ที่ "เปลี่ยนสถานะ" หลังเวลานี้ (ตัวดึงอัตโนมัติ app/api/lazada/orders-sync · 2026-11-20) — ส่งอย่างใดอย่างหนึ่ง
+export async function lazGetOrders(gateway: LazGateway, accessToken: string, opts: { createdAfter?: string; updatedAfter?: string; limit?: number; offset?: number }): Promise<{ orders: Record<string, unknown>[]; total: number }> {
+  const when: Record<string, string> = opts.updatedAfter
+    ? { update_after: opts.updatedAfter, sort_by: "updated_at" }
+    : { created_after: opts.createdAfter ?? new Date(Date.now() - 30 * 86_400_000).toISOString(), sort_by: "created_at" };
   const j = await lazApiGet(gateway, "/orders/get", accessToken, {
-    created_after: opts.createdAfter, sort_by: "created_at", sort_direction: "DESC",
+    ...when, sort_direction: "DESC",
     limit: String(opts.limit ?? 50), offset: String(opts.offset ?? 0),
   });
   const data = j.data as { orders?: Record<string, unknown>[]; count?: number } | undefined;

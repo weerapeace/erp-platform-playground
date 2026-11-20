@@ -623,6 +623,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "ออเดอร์ Shopee/Lazada/TikTok — ต้องใช้ขนส่งของแพลตฟอร์ม (canShipViaShippop กันไว้) · เว็บร้านยังเรียก lib/shippop ตรง (ย้ายมาได้)",
   },
   {
+    key: "order-pull-status", label: "สถานะการดึงออเดอร์ทุกร้าน (จดผลรอบ · เตือนกระดิ่ง)", code: "lib/order-pull-server · lib/order-pull-health", category: "system",
+    source: { path: "lib/order-pull-server", names: ["recordShopPull", "loadPullBoard", "sendPullAlerts"] },
+    what: "จดผลรอบดึงออเดอร์ของแต่ละร้าน (ui_config order_pull:*) · ตัดสินสถานะ ปกติ/ต้องดู/หยุดดึง/มีปัญหา/กุญแจใกล้หมด/ยังไม่ต่อ · เด้งกระดิ่ง orders.pull_problem วันละครั้งต่อเรื่อง · หน้า /master/platform-orders/pull-status (ภาพเคลื่อนไหว + ดึงตอนนี้)",
+    when: "เพิ่มตัวดึงออเดอร์ร้านใหม่ → เรียก pullShop (app/api/platform-orders/pull-runner) หรือ recordShopPull หลังดึงทุกรอบ แล้วเพิ่มร้านใน loadPullInputs",
+    notWhen: "งานตั้งเวลาทั่วไปที่ไม่ใช่การดึงออเดอร์ → recordWorkerRun (ออฟฟิศทีม AI)",
+  },
+  {
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
     source: { path: "lib/export" },
     what: "ส่งออกแถวที่เห็น / ที่เลือก / ทั้งหมดที่กรองไว้ เป็น CSV หรือ Excel",
