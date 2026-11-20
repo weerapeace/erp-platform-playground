@@ -1087,6 +1087,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "กดแล้วคัดลอกข้อความ โชว์เครื่องหมายถูกชั่วครู่ ไม่ไปโดนการกดแถว",
   },
   {
+    key: "short-links", label: "ลิงก์สั้น (ย่อลิงก์)", code: "ShortLinksManager · useShortLinkMap · lib/short-links", category: "feature",
+    source: { path: "components/short-links" },
+    what: "ย่อลิงก์ยาวเป็น louismontini.co.th/go/xxxxx (เว็บร้านพาไปปลายทาง) · นับคลิกแยกที่มา Facebook/IG/LINE/TikTok/QR · แก้ปลายทางได้ลิงก์เดิมไม่เปลี่ยน · ใช้ลิงก์เดิมซ้ำ · ตั้งชื่อเองได้ · ปิด/ลบลงถังขยะ/กู้คืน · หน้าจัดการ /tasks/short-links",
+    when: "งานไหนจะส่งลิงก์ให้ลูกค้า (แคปชั่นโพสต์ · LINE · ใบเสนอราคา · QR บนป้าย/ถุง) → ensureShortLinks / useShortLinkMap (lib/short-links-client) · ฝั่ง server ensureShortLinks (lib/short-links-db)",
+    notWhen: "ห้ามทำตารางย่อลิงก์/redirect ของตัวเองในโมดูล · คลายลิงก์สั้นของคนอื่น (vt.tiktok/pin.it) เป็นอีกงาน ใช้ /api/social-embed",
+    doc: "short-links.md",
+  },
+  {
     key: "qr-code", label: "รูป QR", code: "QrCode", category: "layout",
     source: { path: "components/qr-code" },
     what: "สร้างรูป QR จากลิงก์หรือรหัส (โหลดไลบรารีเฉพาะตอนใช้)",

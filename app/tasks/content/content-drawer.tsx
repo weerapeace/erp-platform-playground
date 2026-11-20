@@ -19,6 +19,8 @@ import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, loadPostFit, type PostImage } from "./post-confirm-modal";
 import { AddPathForm, isLocalPath, type PathItem } from "@/components/copy-path-button";
 import { buildCaptionVars, captionsForDetail, assembleCaption } from "./caption-assemble";
+import { extractUrls, SHORT_LINK_DISPLAY } from "@/lib/short-links";
+import { useAutoShortLinks, useShortLinkMap } from "@/lib/short-links-client";
 import { PublishQueueBox, QueueAllModal, type QueuePlatformOption } from "./publish-queue";
 import { StoryPostModal } from "./story-post-modal";
 import { LineBroadcastModal } from "./line-broadcast-modal";
@@ -577,7 +579,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     children, skuIds, priceSkuId, colorSource, links, extras, shopChannels,
   }), [sku, parent, d?.product_name, d?.sku_color_th, d?.sku_color_en, children, skuIds, priceSkuId, colorSource, links, extras, shopChannels]);
   // 📤 แคปชั่นที่ประกอบแล้ว "ตอนนี้" ต่อแพลตฟอร์ม (ต้องอยู่หลัง sharedVars — กัน TDZ) (ข้อความเดียวกับพรีวิวในการ์ด) — ใช้ตั้งคิวทีเดียว + เตือนว่าคิวใช้ข้อความเก่า
-  const latestCaptions = useMemo(() => Object.fromEntries(caps.map((c) => [c.platform, assembleCaption(c, pset[c.platform], templates, sharedVars)])), [caps, pset, templates, sharedVars]);
+  // 🔗 ย่อลิงก์ร้านอัตโนมัติ (ของกลาง lib/short-links) — ลิงก์ร้านในข้อความที่จะโพสต์ → ${SHORT_LINK_DISPLAY}xxxxx · ปิดสวิตช์ = ลิงก์ยาวเหมือนเดิม
+  const [autoShort, setAutoShort] = useAutoShortLinks();
+  const captionUrls = useMemo(() => caps.flatMap((c) => extractUrls(assembleCaption(c, pset[c.platform], templates, sharedVars))), [caps, pset, templates, sharedVars]);
+  const shortMap = useShortLinkMap(captionUrls, { enabled: autoShort, sourceModule: "content", sourceId: contentId, label: d?.content_no ?? d?.title ?? null });
+  const shortCount = Object.keys(shortMap).filter((u) => captionUrls.includes(u)).length;
+  const captionVars = useMemo(() => ({ ...sharedVars, short_links: shortMap }), [sharedVars, shortMap]);
+  const latestCaptions = useMemo(() => Object.fromEntries(caps.map((c) => [c.platform, assembleCaption(c, pset[c.platform], templates, captionVars)])), [caps, pset, templates, captionVars]);
   const queueOptions: QueuePlatformOption[] = caps.filter((c) => c.platform === "facebook" || c.platform === "instagram").map((c) => {
     const p = c.platform; const fmt = platformFormats[p] ?? "";
     const keys = selectedFor(p).filter((k) => postImages.some((m) => m.key === k));
@@ -1115,11 +1123,21 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </div>
               );
             })()}
+            {captionUrls.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none" title={t(`ลิงก์ร้าน (TikTok/Shopee/Lazada/LINE) ในข้อความที่จะโพสต์ → ${SHORT_LINK_DISPLAY}xxxxx · ปิด = ใช้ลิงก์ยาวเหมือนเดิม`, `Shop links in the post text become ${SHORT_LINK_DISPLAY}xxxxx · off = keep long links`)}>
+                  <input type="checkbox" className="accent-violet-600" checked={autoShort} onChange={(e) => setAutoShort(e.target.checked)} />
+                  <Icon name="link" /> {t("ย่อลิงก์ร้านอัตโนมัติ", "Auto-shorten shop links")}
+                </label>
+                {autoShort && shortCount > 0 && <span className="rounded bg-emerald-50 text-emerald-700 px-1.5 py-0.5">{t(`ย่อแล้ว ${shortCount} ลิงก์`, `${shortCount} shortened`)}</span>}
+                <a href="/tasks/short-links" target="_blank" rel="noreferrer" className="text-violet-600 hover:underline">{t("ดูยอดคลิก", "View clicks")}</a>
+              </div>
+            )}
             {caps.length === 0 ? (
               <div className="text-sm text-slate-400 italic rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center">☝️ {t("ยังไม่ได้เลือกว่าจะลงที่ไหน — กดปุ่มแพลตฟอร์มด้านบนเพื่อเพิ่มการ์ดแคปชั่น", "Nothing selected yet — click a platform above to add its caption card")}</div>
             ) : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} onPullFrom={caps.length > 1 ? () => setPullTo(c.platform) : undefined} paths={pathItems} onAddPath={onAddPath} fallbackImages={contentImageKeys} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={autoConnected(c.platform)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={captionVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} onPullFrom={caps.length > 1 ? () => setPullTo(c.platform) : undefined} paths={pathItems} onAddPath={onAddPath} fallbackImages={contentImageKeys} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={autoConnected(c.platform)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
                   connInfo={metaProblem && (c.platform === "facebook" || c.platform === "instagram")
                     ? { connected: false, label: t(`การเชื่อมต่อใช้ไม่ได้ตอนนี้ — ปุ่มโพสต์เป็นโหมดมือ · ${metaProblem}`, `Connection broken — manual mode · ${metaProblem}`), href: "/admin/platform-accounts" }
                     : c.platform === "facebook"

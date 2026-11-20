@@ -11,9 +11,15 @@ import {
 } from "../data";
 import { platformLabel } from "../use-options";
 import { multiProductVars, activeChildren, extrasFromDetail, type ExtraProduct } from "./content-products-editor";
+import { replaceWithShortLinks, extractUrls } from "@/lib/short-links";
+import { ensureShortLinks, readAutoShortLinks } from "@/lib/short-links-client";
 
 /** ตัวแปรสินค้าที่ใช้ร่วมทุกแพลตฟอร์ม (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม) */
-export type SharedVars = { shop: ShopChannel[]; fake_price: number | string | null; real_price: number | string | null; price: number | string | null; color: string | null; sku: string | null; product: string | null; link: string | null };
+export type SharedVars = {
+  shop: ShopChannel[]; fake_price: number | string | null; real_price: number | string | null; price: number | string | null; color: string | null; sku: string | null; product: string | null; link: string | null;
+  /** 🔗 ลิงก์ยาว → ลิงก์สั้น (ย่ออัตโนมัติ · lib/short-links) — แทนในข้อความสุดท้าย ไม่ใช่ตัวแปรแม่แบบ */
+  short_links?: Record<string, string> | null;
+};
 
 export type CaptionVarsInput = {
   sku: { code: string; name: string; color?: string | null; list_price?: number | null; fake_price?: number | null } | null;
@@ -59,7 +65,11 @@ export function captionTemplateFor(cap: Pick<ContentCaption, "caption_type">, se
 }
 
 /** ข้อความที่จะโพสต์ของ 1 แพลตฟอร์ม (ตัดแคปชั่น/แฮชแท็กออกถ้าตั้งปิดไว้) — ตัวเดียวกับปุ่ม 📋 ใน drawer */
-export function assembleCaption(cap: ContentCaption, setting: PlatformSetting | undefined, templates: CaptionTemplate[], vars: SharedVars): string {
+export function assembleCaption(cap: ContentCaption, setting: PlatformSetting | undefined, templates: CaptionTemplate[], allVars: SharedVars): string {
+  const { short_links, ...vars } = allVars;
+  return replaceWithShortLinks(assembleRaw(cap, setting, templates, vars), short_links);
+}
+function assembleRaw(cap: ContentCaption, setting: PlatformSetting | undefined, templates: CaptionTemplate[], vars: SharedVars): string {
   const useCaption = setting?.use_caption !== false;
   const useHashtags = setting?.use_hashtags !== false;
   const tpl = captionTemplateFor(cap, setting, templates);
@@ -109,5 +119,10 @@ export async function loadCaptionTexts(contentId: string, pset?: PlatformSetting
   const { vars } = buildCaptionVars({ ...varsInputFromDetail(detail), children, extras, shopChannels: tpl.shop_channels, priceSkuId: "" });
   const out: Record<string, string> = {};
   for (const cap of captionsForDetail(detail, cfg)) out[cap.platform] = settings[cap.platform]?.use_caption === false ? "" : assembleCaption(cap, settings[cap.platform], tpl.templates, vars).trim();
+  // 🔗 ย่อลิงก์ร้านอัตโนมัติ (ตัวเดียวกับใน drawer — ใช้ลิงก์เดิมซ้ำ ไม่สร้างใหม่)
+  if (readAutoShortLinks()) {
+    const map = await ensureShortLinks(Object.values(out).flatMap(extractUrls), { sourceModule: "content", sourceId: contentId, label: detail.content_no ?? detail.title ?? null });
+    for (const k of Object.keys(out)) out[k] = replaceWithShortLinks(out[k], map);
+  }
   return out;
 }

@@ -20,6 +20,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/tasks/plan", sameAs: "/tasks" },   // แผนงานทีม — ใช้สิทธิ์ tasks.view/create/edit/delete
   { href: "/marketing/content-plan", sameAs: "/tasks" },
   { href: "/tasks/nesting", prefixes: ["nesting."] },
+  { href: "/tasks/short-links", prefixes: ["short_links."] },   // ลิงก์สั้น louismontini.co.th/go/ — สร้าง (ย่อลิงก์ในแคปชั่น) / จัดการทั้งหมด
   { href: "/tasks/samples", prefixes: ["assets."], keys: ["attachments.upload"] },   // SAMPLE Images — ดู/ลง/ลบรูปในคลังไฟล์ + ย้ายเข้าใบงาน (แนบไฟล์)
   { href: "/master/skus", prefixes: ["products."], keys: ["attachments.upload", "attachments.delete"] },
   { href: "/master/parent-skus", sameAs: "/master/skus" },

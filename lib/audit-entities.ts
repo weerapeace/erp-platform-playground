@@ -68,6 +68,7 @@ const E = (module: AuditModuleKey, page: string, href?: (id: string) => string):
 
 /** ชนิดเอกสารที่ตั้งชื่อ/ลิงก์ไว้เอง (เรียงตามจำนวนประวัติจริง มาก → น้อย) */
 export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
+  short_link:                    E("creative", "ลิงก์สั้น", () => "/tasks/short-links"),
   creative_campaign:             E("creative", "แคมเปญ", (id) => `/tasks/campaigns/${id}`),
   file:                          E("files", "ไฟล์ที่อัปโหลด"),
   platform_email:                E("sales", "อีเมลยอดขายแพลตฟอร์ม"),
