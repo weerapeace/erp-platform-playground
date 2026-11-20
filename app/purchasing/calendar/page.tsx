@@ -11,14 +11,15 @@ export default function PurchasingCalendarPage() {
   return (
     <PlaygroundShell>
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="max-w-5xl mx-auto w-full">
+        <div className="w-full">
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">📅 ปฏิทินจัดซื้อ</h1>
-          <p className="text-sm text-slate-500 mt-1">ลากใบสั่งซื้อไปวางบนวัน = ตั้งวัน · กด ⚑ = ติดตาม (งานเร่ง)</p>
+          <p className="text-sm text-slate-500 mt-1">ลากใบสั่งซื้อไปวางบนวัน = ตั้งวัน · เส้นประ = วันกะจากวันสั่ง + วันส่งของร้าน · กดวันที่ = ป๊อปรายการ</p>
         </div>
       </div>
 
-      <div className="px-4 sm:px-8 py-5 max-w-5xl mx-auto w-full">
-        <PurchasingCalendarBoard mode="in" />
+      {/* เต็มความกว้างจอ + ปุ่มเต็มจอ (จำต่อคน) — เจ้าของขอ 2026-11-20 */}
+      <div className="px-3 sm:px-4 py-4 w-full">
+        <PurchasingCalendarBoard mode="in" fullscreen />
       </div>
     </PlaygroundShell>
   );

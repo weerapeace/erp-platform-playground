@@ -17,9 +17,12 @@
 //   "+N" กดได้ → ป๊อปรายการทั้งวัน (ลากออกไปวันอื่นได้) · วันหยุดราชการไทย (lib/thai-holidays) · พิมพ์/PDF
 //   เลือกหลายรายการ → เลื่อนทั้งชุด −1/+1/+7 วัน (onScheduleMany ถ้ามี ไม่งั้นเรียก onSchedule ทีละใบ)
 //   ป๊อปดูงาน: ส่ง renderPopView → กดชิป/การ์ด = ป๊อปเล็กข้างรายการ (แทน onClick เดิมของชิป)
+//   กดช่องวัน = ป๊อป ERPModal รายการทั้งวัน (การ์ดมีรูป · ส่ง renderDayItem ถ้าอยากให้ต่างจากการ์ดกล่อง) — ทุกแท็บปฏิทินใช้ร่วม (เจ้าของสั่ง 2026-11-20)
+//   fill = ช่องวันยืดเต็มความสูงจอ (ใช้คู่ของกลาง FullscreenStage ตอนเต็มจอ) · fillOffset = ความสูงส่วนหัวที่กันไว้ (px)
 // ============================================================
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { thaiHolidays } from "@/lib/thai-holidays";
+import { ERPModal } from "@/components/modal";
 
 const WEEK = ["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -42,6 +45,7 @@ export function ScheduleBoard<T extends { id: string }>({
   items, getDate, onSchedule, renderCard, renderChip,
   filters, getFilter, getSearchText, dayFooter, backlogTitle = "ยังไม่ลงวันที่", hint, maxPerDay = 3,
   layout, getDotColor, onMonthChange, onAddOnDay, renderPopView, onScheduleMany, holidays = true, printTitle,
+  renderDayItem, fill = false, fillOffset = 190, toolbarExtra, dayActions,
 }: {
   items: T[];
   getDate: (i: T) => string | null;
@@ -63,6 +67,11 @@ export function ScheduleBoard<T extends { id: string }>({
   onScheduleMany?: (items: T[], deltaDays: number | null) => void;   // เลื่อนทั้งชุด (null = เอาวันออก)
   holidays?: boolean;     // โชว์วันหยุดราชการไทย (ค่าเริ่มต้น เปิด)
   printTitle?: string;    // หัวกระดาษตอนพิมพ์
+  renderDayItem?: (i: T) => ReactNode;   // แถวในป๊อปรายการวัน (ไม่ส่ง = ใช้ renderCard)
+  fill?: boolean;         // ช่องวันยืดเต็มความสูงจอ (โหมดเต็มจอ)
+  fillOffset?: number;    // ความสูงส่วนบนที่กันไว้ตอน fill (px)
+  toolbarExtra?: ReactNode; // ปุ่มเพิ่มของหน้าในแถบเครื่องมือปฏิทิน (เช่น ตั้งค่าการ์ด · เต็มจอ)
+  dayActions?: (items: T[], date: string) => ReactNode;   // ปุ่มท้ายป๊อปวัน (เช่น ยืนยันวันกะทั้งวัน)
 }) {
   const today = new Date();
   const todayKey = ymd(today);
@@ -79,6 +88,7 @@ export function ScheduleBoard<T extends { id: string }>({
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(() => new Set());
   const [pop, setPop] = useState<Pop<T> | null>(null);
+  const [dayPick, setDayPick] = useState<T | null>(null);   // รายการที่กดดูในป๊อปวัน (มี renderPopView = โชว์ในป๊อปเดียวกัน ไม่ซ้อนป๊อป)
   const dragRef = useRef<T | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -177,6 +187,12 @@ export function ScheduleBoard<T extends { id: string }>({
     if (selecting) { e.preventDefault(); e.stopPropagation(); togglePick(it); return; }
     if (renderPopView) { e.preventDefault(); e.stopPropagation(); setPop({ kind: "item", item: it, ...anchorOf(e.currentTarget) }); }
   };
+  // กดรายการในป๊อปวัน: มีป๊อปดูงาน = เปิดในป๊อปเดียวกัน · ไม่งั้นปล่อย onClick เดิม (เช่น เปิดลิ้นชักใบงาน)
+  const dayClick = (it: T) => (e: React.MouseEvent) => {
+    if (renderPopView) { e.preventDefault(); e.stopPropagation(); setDayPick(it); return; }
+    if ((e.target as HTMLElement).closest("button, a, input, select, textarea")) return;   // ปุ่มในการ์ด (เช่น ยืนยันนัดส่ง) ทำงานในป๊อปต่อ
+    setSelDay(null);   // เปิดลิ้นชัก/หน้ารายละเอียดของหน้านั้นแทน (กันป๊อปซ้อนป๊อป)
+  };
   const pickedItems = useMemo(() => items.filter((i) => picked.has(i.id)), [items, picked]);
   const shiftPicked = (delta: number | null) => {
     const list = delta === null ? pickedItems : pickedItems.filter((i) => !!getDate(i));
@@ -218,12 +234,14 @@ export function ScheduleBoard<T extends { id: string }>({
   const wrapCls = layout === undefined ? "flex flex-col lg:flex-row gap-3" : layout === "desktop" ? "flex flex-row gap-3" : "flex flex-col gap-3";
   const backlogWidth = layout === undefined ? "lg:w-72" : layout === "desktop" ? "w-72" : "w-full";
   const cellMin = view === "week" ? "min-h-[220px]" : isPhone ? "min-h-[50px]" : "min-h-[74px]";
-  const perDay = view === "week" ? 999 : maxPerDay;
+  // เต็มจอ: แบ่งความสูงจอให้ทุกแถวของเดือนเท่า ๆ กัน (ไม่ต่ำกว่าค่าเดิม)
+  const fillStyle = fill && view === "month" && !isPhone ? { minHeight: `max(74px, calc((100vh - ${fillOffset}px) / ${Math.max(4, cells.length / 7)}))` } : undefined;
+  const perDay = view === "week" ? 999 : fill && !isPhone ? Math.max(maxPerDay, 6) : maxPerDay;
   const btnH = touch ? "h-9" : "h-8";
   const seg = (on: boolean) => `px-2.5 ${touch ? "h-8" : "h-7"} text-xs rounded-md ${on ? "bg-white text-slate-800 shadow-sm font-medium" : "text-slate-500 hover:text-slate-700"}`;
 
   const dayCell = (key: string | null, i: number) => {
-    if (!key) return <div key={i} className={cellMin} />;
+    if (!key) return <div key={i} className={cellMin} style={fillStyle} />;
     const dayItems = byDay.get(key) ?? [];
     const on = overKey === key, sel = selDay === key, isToday = key === todayKey, h = hol[key];
     const num = Number(key.slice(8, 10));
@@ -231,6 +249,7 @@ export function ScheduleBoard<T extends { id: string }>({
       <div key={key}
         onClick={() => setSelDay((s) => (s === key ? null : key))}
         {...dropProps(key, key)}
+        style={fillStyle}
         className={`${cellMin} min-w-0 rounded-lg border p-1 transition-colors cursor-pointer ${on ? "border-blue-400 bg-blue-50 ring-1 ring-blue-300" : sel ? "border-blue-400 ring-2 ring-blue-300 bg-white" : isToday ? "border-blue-300 bg-blue-50/40" : "border-slate-100 bg-white hover:bg-slate-50"} ${heatCls(dayItems.length)}`}>
         {isPhone && view !== "week" ? (
           <div className="flex flex-col items-center gap-0.5">
@@ -298,6 +317,7 @@ export function ScheduleBoard<T extends { id: string }>({
               className={`${btnH} shrink-0 rounded-lg border px-2 text-xs ${heat ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>🔥 ความแน่น</button>
             <button type="button" onClick={() => (selecting ? exitSelect() : setSelecting(true))} aria-pressed={selecting} title="เลือกหลายรายการ แล้วเลื่อนวันทั้งชุด"
               className={`${btnH} shrink-0 rounded-lg border px-2 text-xs ${selecting ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>☑ เลือกหลายงาน</button>
+            {toolbarExtra}
             {!touch && <button type="button" onClick={() => window.print()} title="พิมพ์ / บันทึกเป็น PDF"
               className={`${btnH} shrink-0 rounded-lg border border-slate-200 px-2 text-xs text-slate-500 hover:bg-slate-50`}>🖨 พิมพ์</button>}
           </div>
@@ -338,21 +358,6 @@ export function ScheduleBoard<T extends { id: string }>({
         </>)}
         {hint && <p className="sched-noprint text-[11px] text-slate-400 mt-2">💡 {hint}</p>}
 
-        {/* แผงรายการของ "วันที่กดเลือก" */}
-        {selDay && view !== "list" && (
-          <div className="sched-noprint mt-4 border-t border-slate-100 pt-3">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <h4 className="text-sm font-bold text-slate-700">📅 {thDate(selDay, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {selDayItems.length} รายการ{hol[selDay] && <span className="ml-2 text-xs font-normal text-rose-500">{hol[selDay]}</span>}</h4>
-              <div className="flex items-center gap-2 shrink-0">
-                {onAddOnDay && <button onClick={() => onAddOnDay(selDay)} className="text-xs text-blue-600 hover:underline">+ เพิ่มวันนี้</button>}
-                <button onClick={() => setSelDay(null)} className="text-xs text-slate-400 hover:text-slate-600">ปิด ✕</button>
-              </div>
-            </div>
-            {selDayItems.length === 0
-              ? <p className="text-sm text-slate-400">ไม่มีรายการวันนี้</p>
-              : <div className="grid gap-2.5" style={{ gridTemplateColumns: isPhone ? "minmax(0, 1fr)" : "repeat(auto-fill, minmax(240px, 1fr))" }}>{selDayItems.map(card)}</div>}
-          </div>
-        )}
       </div>
 
       {/* กล่อง "ยังไม่ลงวันที่" */}
@@ -379,10 +384,32 @@ export function ScheduleBoard<T extends { id: string }>({
                 )}
               </>
             ) : (
-              <div className="space-y-1.5 max-h-[70vh] overflow-y-auto pr-0.5">{backlogVisible.map(card)}</div>
+              <div className={`space-y-1.5 overflow-y-auto pr-0.5 ${fill ? "max-h-[calc(100vh-150px)]" : "max-h-[70vh]"}`}>{backlogVisible.map(card)}</div>
             )}
         </>}
       </div>
+
+      {/* ป๊อปรายการของ "วันที่กด" (ERPModal ของกลาง · การ์ดมีรูป + วางเมาส์ดูรูปใหญ่ตามที่หน้าส่งมา) */}
+      <ERPModal open={!!selDay && view !== "list"} onClose={() => { setSelDay(null); setDayPick(null); }} size="lg" defaultExpanded={false} storageKey="sched-day-pop"
+        title={selDay ? `${thDate(selDay, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · ${selDayItems.length} รายการ` : ""}
+        description={selDay && hol[selDay] ? hol[selDay] : undefined}
+        footer={selDay && (onAddOnDay || dayActions) ? <>
+          {dayActions?.(selDayItems, selDay)}
+          {onAddOnDay && <button type="button" onClick={() => { const d = selDay; setSelDay(null); onAddOnDay(d); }} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-blue-700 hover:bg-blue-50">+ เพิ่มรายการวันนี้</button>}
+        </> : undefined}>
+        {dayPick && renderPopView ? (
+          <div>
+            <button type="button" onClick={() => setDayPick(null)} className="mb-2 text-xs text-blue-700 hover:underline">‹ กลับไปรายการของวัน</button>
+            {renderPopView(dayPick, () => setDayPick(null))}
+          </div>
+        ) : selDayItems.length === 0
+          ? <p className="py-6 text-center text-sm text-slate-400">ไม่มีรายการวันนี้</p>
+          : <div className="grid gap-2.5" style={{ gridTemplateColumns: isPhone ? "minmax(0, 1fr)" : "repeat(auto-fill, minmax(260px, 1fr))" }}>
+              {selDayItems.map((it) => renderDayItem
+                ? <div key={it.id} onClickCapture={dayClick(it)}>{renderDayItem(it)}</div>
+                : <div key={it.id} onClickCapture={dayClick(it)}>{renderCard(it)}</div>)}
+            </div>}
+      </ERPModal>
 
       {/* ป๊อป: ดูงาน / รายการทั้งวัน (+N) */}
       {pop && (

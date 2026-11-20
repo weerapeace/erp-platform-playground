@@ -7,10 +7,15 @@
 //   กดหัวการ์ด = popup รายละเอียด (สินค้า/ที่มาใบขอซื้อ/MO · ใส่ราคา · ตั้งเครดิต-lead time · ผูกร้าน)
 //
 // ใช้ที่: /purchasing/calendar (หน้าเต็ม) · แดชบอร์ดจัดซื้อ (มุมมองปฏิทินในแผงเจาะรายการ)
+// 2026-11-20 (เจ้าของเลือก): รายชื่อร้านด้านซ้ายพับได้ (แทนชิปร้านหลายแถว) · ⚙ ตั้งวันส่งของต่อร้านในหน้านี้ (ลงทะเบียนร้านช่องเดิม)
+//   วันกะ (auto) = เส้นประ ไม่เขียนลงใบจนกว่าจะลากวาง/กด "ยืนยันเป็นวันจริง" (ทีละใบ/ทั้งวัน · ย้อนกลับได้) · เลยวันแล้วยังไม่เข้า = แดง
+//   fullscreen = เต็มจอ (ของกลาง FullscreenStage · แถบเครื่องมือซ่อนขอบบน วางเมาส์ค่อยโชว์)
 // ============================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { ScheduleBoard, type SchedFilter } from "@/components/schedule-board";
+import { ScheduleBoard } from "@/components/schedule-board";
+import { FullscreenStage, FullscreenBar, FullscreenToggle, useFullscreenStage } from "@/components/fullscreen-stage";
+import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
 import { ERPModal } from "@/components/modal";
 import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
@@ -24,6 +29,10 @@ import type { PoCalItem } from "@/app/api/purchasing/calendar/route";
 
 export type PurchasingCalendarMode = "in" | "pay";
 
+const SHOP_LIST_KEY = "erp_pocal_shoplist_open";
+const NO_SHOP = "(ไม่ระบุร้าน)";
+const todayYmd = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
 const baht = (n: number) => "฿" + Math.round(n || 0).toLocaleString("th-TH");
 const qtyFmt = (n: number) => Number(n || 0).toLocaleString("th-TH");
 // วันที่แบบไทยสั้น เช่น "25 ก.ค. 69"
@@ -35,9 +44,10 @@ export const thDate = (iso?: string | null) => {
 };
 
 export function PurchasingCalendarBoard({
-  mode: modeProp = "in", showModeSwitch = true, onModeChange,
+  mode: modeProp = "in", showModeSwitch = true, onModeChange, fullscreen = false,
 }: {
   mode?: PurchasingCalendarMode;
+  fullscreen?: boolean;                           // หน้าเต็ม: เปิดโหมดเต็มจอได้ (จำต่อคน)
   showModeSwitch?: boolean;                       // false = ล็อกโหมด (เช่นในแดชบอร์ด)
   onModeChange?: (m: PurchasingCalendarMode) => void;
 }) {
@@ -56,6 +66,14 @@ export function PurchasingCalendarBoard({
   const [openRecord, setOpenRecord] = useState<{ moduleKey: string; apiPath: string; id: string; title: string; icon: string } | null>(null);
   const [savingTerm, setSavingTerm] = useState(false);
   const toast = useToast();
+  const fs = useFullscreenStage("purchasing_cal_fullscreen", { active: fullscreen, defaultOn: true, autoHide: true });
+  const fsOn = fullscreen && fs.on;
+  const [shopSel, setShopSel] = useState<Set<string>>(() => new Set());     // ร้านที่ติ๊กกรอง (ว่าง = ทุกร้าน)
+  const [shopListOpen, setShopListOpen] = useState(true);
+  useEffect(() => { try { if (localStorage.getItem(SHOP_LIST_KEY) === "0") setShopListOpen(false); } catch { /* ไม่มีที่เก็บ */ } }, []);
+  const toggleShopList = () => setShopListOpen((v) => { try { localStorage.setItem(SHOP_LIST_KEY, v ? "0" : "1"); } catch { /* ไม่มีที่เก็บ */ } return !v; });
+  const [leadOpen, setLeadOpen] = useState(false);                          // ป๊อปตั้งวันส่งของต่อร้าน
+  const [leadDrafts, setLeadDrafts] = useState<Record<string, string | null>>({});
 
   const load = useCallback(() => {
     setLoading(true);
@@ -94,13 +112,39 @@ export function PurchasingCalendarBoard({
   const dateField = mode === "pay" ? "payment_due_date" : "expected_date";
 
   // ลากตั้งวัน (optimistic + เซฟจริง)
+  const saveDate = async (id: string, date: string | null) => {
+    const r = await apiFetch("/api/purchasing/calendar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, [dateField]: date }) });
+    const j = await r.json(); if (j.error) throw new Error(j.error);
+  };
+  // ย้อนกลับ: ใบที่เดิมเป็นวันกะ (auto) → ล้างวันที่ตั้ง (ระบบกะให้ใหม่เอง) · ใบที่มีวันจริง → กลับไปวันเดิม
   const setDate = async (it: PoCalItem, date: string | null) => {
-    const prev = it.date;
-    setItems((is) => is.map((x) => (x.id === it.id ? { ...x, date } : x)));
+    const prev = it.date, prevAuto = it.auto;
+    if (prev === date && !prevAuto) return;
+    setItems((is) => is.map((x) => (x.id === it.id ? { ...x, date, auto: false } : x)));
     try {
-      const r = await apiFetch("/api/purchasing/calendar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, [dateField]: date }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-    } catch { setItems((is) => is.map((x) => (x.id === it.id ? { ...x, date: prev } : x))); }
+      await saveDate(it.id, date);
+      toast.undo(date ? `ตั้งวัน ${it.po_no} เป็น ${thDate(date)} แล้ว` : `เอาวัน ${it.po_no} ออกแล้ว`, async () => {
+        try { await saveDate(it.id, prevAuto ? null : prev); } catch (e) { toast.error(e instanceof Error ? e.message : "ย้อนกลับไม่สำเร็จ"); }
+        load();
+      });
+      if (!date) load();   // เอาวันออก → ระบบอาจกะวันให้ใหม่จากวันส่งของร้าน
+    } catch (e) {
+      setItems((is) => is.map((x) => (x.id === it.id ? { ...x, date: prev, auto: prevAuto } : x)));
+      toast.error(`ตั้งวันไม่สำเร็จ${e instanceof Error && e.message ? " — " + e.message : ""}`);
+    }
+  };
+  // ยืนยันวันกะเป็นวันจริง (ทีละใบ / ทั้งวัน) — เขียนลงใบสั่งซื้อ · ย้อนกลับ = ล้างกลับเป็นวันกะ
+  const confirmEstimates = async (list: PoCalItem[]) => {
+    const todo = list.filter((x) => x.auto && x.date);
+    if (!todo.length) return;
+    const ok = await Promise.all(todo.map((x) => saveDate(x.id, x.date).then(() => true, () => false)));
+    const done = todo.filter((_, k) => ok[k]);
+    if (done.length < todo.length) toast.error(`ยืนยันไม่สำเร็จ ${todo.length - done.length} ใบ`);
+    if (done.length) toast.undo(`ยืนยันวันจริงแล้ว ${done.length} ใบ`, async () => {
+      await Promise.all(done.map((x) => saveDate(x.id, null).catch(() => undefined)));
+      load();
+    });
+    load();
   };
   // ติดตาม (งานเร่ง)
   const toggleFollow = async (it: PoCalItem) => {
@@ -136,6 +180,45 @@ export function PurchasingCalendarBoard({
       `ตั้งระยะเวลาส่งของแล้ว: ${formatLeadTime(lead)} — ใบของร้านนี้จะคิดวันของเข้าให้อัตโนมัติ`);
   };
 
+  // ⚙ ตั้งวันส่งของต่อร้าน — รายชื่อร้านจากใบที่ค้าง (จัดกลุ่มตามชื่อบนใบ)
+  const shops = useMemo(() => {
+    const m = new Map<string, { name: string; count: number; partnerId: string | null; lead: string | null }>();
+    for (const i of items) {
+      const name = i.seller_name || NO_SHOP;
+      const cur = m.get(name) ?? { name, count: 0, partnerId: null, lead: null };
+      cur.count += 1; cur.partnerId ||= i.seller_partner_id; cur.lead ||= i.seller_lead_time;
+      m.set(name, cur);
+    }
+    return [...m.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "th"));
+  }, [items]);
+  const patchLead = (partnerId: string, v: string | null) => apiFetch(`/api/master-v2/partners/${partnerId}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ purchase_lead_time: v ?? "" }),
+  }).then((r) => r.json()).then((j) => { if (j.error) throw new Error(j.error); });
+  const saveShopLead = async (partnerId: string, name: string, before: string | null) => {
+    const v = leadDrafts[partnerId];
+    if (v === undefined) return;
+    try {
+      await patchLead(partnerId, v);
+      setLeadDrafts((d) => { const n = { ...d }; delete n[partnerId]; return n; });
+      toast.undo(v ? `${name}: ส่งของ ${formatLeadTime(v)} — ใบของร้านนี้กะวันเข้าให้เอง` : `ล้างวันส่งของ ${name} แล้ว`, async () => {
+        await patchLead(partnerId, before).catch(() => undefined);
+        load();
+      });
+      load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+  // ผูกทุกใบของชื่อร้านนี้ (ที่ยังไม่ผูก) กับร้านในทะเบียน
+  const linkShop = async (name: string, partnerId: string, partnerName: string) => {
+    const pos = items.filter((i) => (i.seller_name || NO_SHOP) === name && !i.seller_partner_id);
+    const ok = await Promise.all(pos.map((p) => apiFetch("/api/purchasing/calendar", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: p.id, seller_partner_id: partnerId }),
+    }).then((r) => r.json()).then((j) => !j.error, () => false)));
+    const n = ok.filter(Boolean).length;
+    if (n) toast.success(`ผูก ${n} ใบของ "${name}" กับร้าน "${partnerName}" แล้ว`);
+    if (n < pos.length) toast.error(`ผูกไม่สำเร็จ ${pos.length - n} ใบ`);
+    load();
+  };
+
   // ใส่ราคาสินค้าในใบ → อัปเดตบรรทัด + ยอดรวมใบ + บันทึกเข้าตารางราคาหลายร้านกลาง (supplier_items)
   const savePrice = async (lineId: string, price: number) => {
     const r = await apiFetch("/api/purchasing/po-line-price", {
@@ -146,31 +229,82 @@ export function PurchasingCalendarBoard({
     load();
   };
 
-  const filters = useMemo<SchedFilter[]>(() => {
-    const s = [...new Set(items.map((i) => i.seller_name).filter(Boolean) as string[])].sort();
-    return [{ value: "all", label: "ทุกร้าน" }, ...s.map((x) => ({ value: x, label: x }))];
-  }, [items]);
+  const shown = useMemo(() => (shopSel.size ? items.filter((i) => shopSel.has(i.seller_name || NO_SHOP)) : items), [items, shopSel]);
+  const today = todayYmd();
+  const isLate = (i: PoCalItem) => mode === "in" && !!i.date && i.date.slice(0, 10) < today;   // เลยวัน (กะ/จริง) แล้วยังไม่เข้า
+  const leadSet = shops.filter((x) => x.lead).length;
+  const toggleShop = (name: string) => setShopSel((cur) => { const n = new Set(cur); if (n.has(name)) n.delete(name); else n.add(name); return n; });
 
-  return (
-    <div>
-      {/* แถบเครื่องมือ: สลับโหมด + รีโหลด */}
-      <div className="flex items-center justify-end gap-2 mb-2">
+  // รายชื่อร้านด้านซ้าย (พับเป็นแถบแคบได้ · จำในเครื่อง) — ติ๊กได้หลายร้าน · ว่าง = ทุกร้าน
+  const shopList = (
+    <aside className={`shrink-0 rounded-xl border border-slate-200 bg-white transition-[width] ${shopListOpen ? "w-52" : "w-10"}`}>
+      <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1.5">
+        {shopListOpen && <span className="flex-1 text-xs font-semibold text-slate-600">ร้าน <span className="font-normal text-slate-400">({shops.length})</span></span>}
+        <button type="button" onClick={toggleShopList} title={shopListOpen ? "พับรายชื่อร้าน" : "กางรายชื่อร้าน"} className="h-6 w-6 rounded text-slate-400 hover:bg-slate-100">
+          <Icon value={shopListOpen ? "i:chevron-left" : "i:chevron-right"} />
+        </button>
+      </div>
+      {shopListOpen ? (
+        <div className={`overflow-y-auto p-1 ${fsOn ? "max-h-[calc(100vh-130px)]" : "max-h-[70vh]"}`}>
+          <button type="button" onClick={() => setShopSel(new Set())}
+            className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${shopSel.size === 0 ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
+            <span className="flex-1">ทุกร้าน</span><span className="tabular-nums text-slate-400">{items.length}</span>
+          </button>
+          {shops.map((x) => (
+            <label key={x.name} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${shopSel.has(x.name) ? "bg-blue-50 text-blue-800" : "text-slate-600 hover:bg-slate-50"}`}>
+              <input type="checkbox" checked={shopSel.has(x.name)} onChange={() => toggleShop(x.name)} className="h-3.5 w-3.5 accent-blue-600" />
+              <span className="min-w-0 flex-1 truncate" title={x.name}>{x.name}</span>
+              {!x.lead && mode === "in" && <span title="ยังไม่ตั้งวันส่งของ" className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
+              <span className="tabular-nums text-slate-400">{x.count}</span>
+            </label>
+          ))}
+        </div>
+      ) : shopSel.size > 0 && (
+        <div className="py-2 text-center text-[10px] font-medium text-blue-700" title={[...shopSel].join(", ")}>{shopSel.size}</div>
+      )}
+    </aside>
+  );
+
+  const board = (
+    <div className={fsOn ? "flex min-h-0 flex-1 flex-col" : ""}>
+      {/* แถบเครื่องมือ: สลับโหมด + ตั้งวันส่งของ + รีโหลด (เต็มจอ = ซ่อนขอบบน วางเมาส์ค่อยโชว์) */}
+      <FullscreenBar order={0}>
+      <div className="flex flex-wrap items-center justify-end gap-2 mb-2">
+        {fullscreen && fsOn && <span className="mr-auto text-sm font-bold text-slate-800">ปฏิทินจัดซื้อ</span>}
+        {mode === "in" && (
+          <button type="button" onClick={() => setLeadOpen(true)} title="ตั้งว่าแต่ละร้านส่งของกี่วันหลังสั่ง — ระบบกะวันของเข้าให้เอง"
+            className="h-9 inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-600 hover:bg-slate-50">
+            <Icon name="settings" /> ตั้งวันส่งของต่อร้าน <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${leadSet < shops.length ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>{leadSet}/{shops.length}</span>
+          </button>
+        )}
         {showModeSwitch && (
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
             <button onClick={() => changeMode("in")} className={`text-sm px-3 py-1.5 rounded-md font-medium ${mode === "in" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>📦 ของเข้า</button>
             <button onClick={() => changeMode("pay")} className={`text-sm px-3 py-1.5 rounded-md font-medium ${mode === "pay" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>💰 จ่ายเงิน</button>
           </div>
         )}
-        <button onClick={load} disabled={loading} className="h-9 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 text-sm">🔄</button>
+        <button onClick={load} disabled={loading} title="โหลดใหม่" className="h-9 px-2.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 text-sm"><Icon name="refresh" /></button>
+        {fullscreen && <FullscreenToggle fs={fs} />}
       </div>
+      </FullscreenBar>
 
+      <div className="flex min-h-0 gap-2">
+      {shopList}
+      <div className="min-w-0 flex-1">
       <ScheduleBoard<PoCalItem>
-        items={items}
+        items={shown}
         getDate={(i) => i.date}
         onSchedule={setDate}
-        filters={filters}
-        getFilter={(i) => i.seller_name ?? undefined}
-        getSearchText={(i) => `${i.po_no} ${i.seller_name ?? ""}`}
+        fill={fsOn}
+        fillOffset={120}
+        getSearchText={(i) => `${i.po_no} ${i.seller_name ?? ""} ${i.products.map((p) => p.name).join(" ")}`}
+        dayActions={(its) => {
+          const est = its.filter((x) => x.auto && x.date);
+          return est.length > 0 && mode === "in" ? (
+            <button type="button" onClick={() => void confirmEstimates(est)} title="เขียนวันกะลงใบสั่งซื้อเป็นวันจริง (ย้อนกลับได้)"
+              className="mr-auto h-9 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-sm text-indigo-700 hover:bg-indigo-100">ยืนยันวันกะเป็นวันจริง {est.length} ใบ</button>
+          ) : null;
+        }}
         backlogTitle={mode === "pay" ? "ยังไม่ลงวันจ่าย" : "ยังไม่ลงวันเข้า"}
         hint={mode === "pay"
           ? "🔄 วันจ่ายมาจากเครดิตร้านอัตโนมัติ (ตั้งเครดิตที่ /master/partners) · ลากไปวางวัน = ตั้งเอง (ทับอัตโนมัติ) · กด ⚑ = ติดตาม"
@@ -180,14 +314,19 @@ export function PurchasingCalendarBoard({
           const hasF = its.some((x) => x.follow_up);
           return <div className={`text-[9px] px-1 tabular-nums ${hasF ? "text-rose-600 font-semibold" : "text-slate-400"}`}>รวม {baht(total)}</div>;
         }}
-        renderChip={(i) => (
-          <div title={`${i.po_no} · ${i.seller_name ?? ""}${i.auto ? " · วันคำนวณอัตโนมัติ" : ""}`}
-            className={`text-[9px] leading-tight rounded px-1 py-0.5 flex items-center gap-1 ${i.follow_up ? "bg-rose-50 text-rose-700 font-bold" : "bg-slate-100 text-slate-600"} ${i.auto ? "border border-dashed border-indigo-300" : ""}`}>
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${i.follow_up ? "bg-rose-500" : i.auto ? "bg-indigo-400" : "bg-slate-400"}`} />
-            <span className="truncate flex-1">{i.po_no}</span>
-            <span className="shrink-0 tabular-nums">{baht(i.amount_thb)}</span>
-          </div>
-        )}
+        renderChip={(i) => {
+          const late = isLate(i), img = i.products.find((p) => p.img)?.img ?? null;
+          return (
+            <div title={`${i.po_no} · ${i.seller_name ?? ""}${i.auto ? " · วันกะจากวันสั่ง + วันส่งของร้าน" : ""}${late ? " · เลยวันแล้วยังไม่เข้า" : ""}`}
+              className={`text-[10px] leading-tight rounded px-0.5 py-0.5 flex items-center gap-1 ${late ? "bg-red-50 text-red-700 font-semibold" : i.follow_up ? "bg-rose-50 text-rose-700 font-bold" : i.auto ? "bg-white text-slate-500" : "bg-slate-100 text-slate-600"} ${i.auto ? `border border-dashed ${late ? "border-red-300" : "border-indigo-300"}` : ""}`}>
+              {img
+                ? <span className="shrink-0" onClick={(e) => e.stopPropagation()}><HoverImage url={img} size={18} previewSize={240} alt={i.po_no} /></span>
+                : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${late ? "bg-red-500" : i.follow_up ? "bg-rose-500" : i.auto ? "bg-indigo-400" : "bg-slate-400"}`} />}
+              <span className="truncate flex-1">{i.po_no}</span>
+              <span className="shrink-0 tabular-nums">{baht(i.amount_thb)}</span>
+            </div>
+          );
+        }}
         renderCard={(i) => (
           <div className={`rounded-xl border bg-white p-2.5 ${i.follow_up ? "border-rose-300" : "border-slate-200"}`}>
             {/* กดหัวการ์ด = เปิดรายละเอียด (popup) · ลากที่ว่าง = ตั้งวัน */}
@@ -201,11 +340,18 @@ export function PurchasingCalendarBoard({
             </div>
             {/* ป้ายวันอัตโนมัติ (จากเครดิต/ระยะเวลาส่ง) — ยังลากตั้งวันเองทับได้ */}
             {i.auto && (
-              <div className="mt-1 inline-flex items-center gap-1 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-1.5 py-0.5"
-                title={mode === "pay" ? "วันจ่ายคำนวณจากเครดิตของร้าน · ลากไปวางวันอื่นเพื่อตั้งเอง" : "วันของเข้าคำนวณจากระยะเวลาส่งของร้าน · ลากไปวางวันอื่นเพื่อตั้งเอง"}>
-                🔄 {mode === "pay" ? "วันจ่ายอัตโนมัติ" : "วันของเข้าอัตโนมัติ"}
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                <span className="inline-flex items-center gap-1 text-[10px] text-indigo-600 bg-indigo-50 border border-dashed border-indigo-200 rounded px-1.5 py-0.5"
+                  title={mode === "pay" ? "วันจ่ายคำนวณจากเครดิตของร้าน · ลากไปวางวันอื่นเพื่อตั้งเอง" : "วันของเข้ากะจากวันสั่ง + วันส่งของร้าน · ยังไม่ได้เขียนลงใบ"}>
+                  {mode === "pay" ? "วันจ่ายอัตโนมัติ" : `วันกะ ${thDate(i.date)}`}
+                </span>
+                {mode === "in" && i.date && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); void confirmEstimates([i]); }} title="เขียนวันนี้ลงใบสั่งซื้อเป็นวันจริง (ย้อนกลับได้)"
+                    className="text-[10px] rounded border border-indigo-200 px-1.5 py-0.5 text-indigo-700 hover:bg-indigo-50">ยืนยันเป็นวันจริง</button>
+                )}
               </div>
             )}
+            {isLate(i) && <div className="mt-1 text-[10px] font-medium text-red-600">เลยวัน{i.auto ? "กะ" : "นัด"}แล้ว ยังไม่เข้า — ตามร้านด้วย</div>}
             {/* สินค้าในใบ — รูป + ชื่อ (3 รายการแรก · ชี้รูปดูใหญ่ · กดหัวการ์ดดูทั้งหมด) */}
             {i.products.length > 0 && (
               <div className="mt-1.5 space-y-0.5">
@@ -227,6 +373,8 @@ export function PurchasingCalendarBoard({
           </div>
         )}
       />
+      </div>
+      </div>
 
       {/* Popup รายละเอียดใบสั่งซื้อ — กดหัวการ์ดเพื่อเปิด */}
       <ERPModal open={!!detail} onClose={() => setDetail(null)} size="lg"
@@ -378,6 +526,39 @@ export function PurchasingCalendarBoard({
           onClose={() => setOpenRecord(null)}
         />
       )}
+
+      {/* ⚙ ตั้งวันส่งของต่อร้าน — บันทึกลงทะเบียนร้าน (ช่องเดียวกับหน้าร้านค้า) · ทุกใบของร้านนั้นกะวันเข้าให้เอง (ไม่เขียนลงใบ) */}
+      <ERPModal open={leadOpen} onClose={() => setLeadOpen(false)} size="lg" title="ตั้งวันส่งของต่อร้าน" defaultExpanded={false} storageKey="pocal-lead-settings"
+        description={`ตั้งแล้ว ${leadSet} / ${shops.length} ร้าน · วันในปฏิทินเป็นวันกะ (เส้นประ) จนกว่าจะลากวางหรือกดยืนยัน`}
+        hasUnsavedChanges={Object.keys(leadDrafts).length > 0}>
+        <div className="divide-y divide-slate-100">
+          {shops.map((x) => {
+            const draft = x.partnerId ? leadDrafts[x.partnerId] : undefined;
+            const dirty = draft !== undefined && (draft ?? null) !== (x.lead ?? null);
+            return (
+              <div key={x.name} className="flex flex-wrap items-center gap-2 py-2">
+                <div className="min-w-[160px] flex-1">
+                  <div className="truncate text-sm font-medium text-slate-700" title={x.name}>{x.name}</div>
+                  <div className="text-[11px] text-slate-400">{x.count} ใบค้าง{x.lead ? ` · ตอนนี้: ${formatLeadTime(x.lead)}` : " · ยังไม่ตั้ง"}</div>
+                </div>
+                {x.partnerId ? (<>
+                  <PurchaseLeadTimeInput value={draft !== undefined ? draft : x.lead} onChange={(v) => setLeadDrafts((d) => ({ ...d, [x.partnerId!]: v }))} />
+                  <button type="button" disabled={!dirty} onClick={() => void saveShopLead(x.partnerId!, x.name, x.lead)}
+                    className="h-9 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">บันทึก</button>
+                </>) : (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">ยังไม่ผูกทะเบียนร้าน</span>
+                    <div className="w-56"><SupplierPicker value="" suppliers={suppliers} placeholder="ผูกกับร้านที่มีอยู่…" onChange={(id, name) => void linkShop(x.name, id, name)} /></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {shops.length === 0 && <p className="py-6 text-center text-sm text-slate-400">ไม่มีใบสั่งซื้อที่ค้างอยู่</p>}
+        </div>
+      </ERPModal>
     </div>
   );
+
+  return fullscreen ? <FullscreenStage fs={fs} className="">{board}</FullscreenStage> : board;
 }
