@@ -11,6 +11,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,11 +30,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const total = (await admin.from("platform_category_options").select("id", { count: "exact", head: true }).eq("platform_id", platformId)).count ?? 0;
-  let q = admin.from("platform_category_options").select("external_id, name_en, name_th").eq("platform_id", platformId);
-  if (idsParam) q = q.in("external_id", idsParam.split(",").map((s) => s.trim()).filter(Boolean));
-  else if (search) q = q.or(`name_th.ilike.%${search}%,name_en.ilike.%${search}%,external_id.ilike.%${search}%`);
-  q = q.order("external_id", { ascending: true }).limit(idsParam ? 50 : limit);
-  const { data } = await q;
+  // ⚠️ ฐานข้อมูลตัดผลที่ 1,000 แถวเงียบ ๆ (.limit ใหญ่กว่านั้นไม่ช่วย) — เดิม Lazada 3,068 หมวดได้มาแค่ 1,000
+  //    → หมวดที่จับคู่ไว้แล้ว (เช่น 13433 กระเป๋าถือ, 6938 เข็มขัด) ไม่อยู่ในรายการ ช่อง Lazada เลยโชว์ว่างทั้งที่บันทึกไว้
+  //    แก้: ไล่ดึงทีละหน้าด้วยของกลาง fetchAllPages จนครบ limit (external_id ไม่ซ้ำในร้าน → เรียงคงที่)
+  const build = (from: number, to: number) => {
+    let q = admin.from("platform_category_options").select("external_id, name_en, name_th").eq("platform_id", platformId);
+    if (idsParam) q = q.in("external_id", idsParam.split(",").map((s) => s.trim()).filter(Boolean));
+    else if (search) q = q.or(`name_th.ilike.%${search}%,name_en.ilike.%${search}%,external_id.ilike.%${search}%`);
+    return q.order("external_id", { ascending: true }).range(from, to);
+  };
+  const data = idsParam
+    ? (await build(0, 49)).data
+    : await fetchAllPages<Record<string, unknown>>(build, { maxRows: limit, page: Math.min(1000, limit) });
   const categories = ((data ?? []) as Record<string, unknown>[]).map((c) => ({ external_id: String(c.external_id), name_en: (c.name_en as string) ?? "", name_th: (c.name_th as string) ?? "" }));
   return NextResponse.json({ categories, total, error: null });
 }
