@@ -1,7 +1,7 @@
 import { normalizeReportLayout, type ReportLayoutSettings } from "@/lib/report-layout";
 import { docFileName } from "@/lib/print-filename";
 import { printPartCss, printPartFontLinks, QUOTE_CARD_PARTS } from "@/lib/print-part-style";
-import { cardFieldValue, normalizeCardOrder, PAGE_SLOTS, printBlockPartDefs, type PageBlockSlot } from "@/lib/print-blocks";
+import { cardFieldValue, fillPagePlaceholders, normalizeCardOrder, PAGE_SLOTS, pageFieldRows, printBlockPartDefs, type PageBlockSlot, type PageFieldOption } from "@/lib/print-blocks";
 
 export type QuoteLinePrint = {
   sku?: string | null;
@@ -39,6 +39,41 @@ export type QuotePrintDetail = {
 
 const COMPANY_NAME = "หจก.ไอ.เอส.จี. เทรดดิ้ง (สำนักงานใหญ่)";
 const COMPANY_ADDRESS = "41/243, 41/244 ถนนกัลปพฤกษ์ แขวงบางแค เขตบางแค กรุงเทพมหานคร 10160";
+
+/** ช่องของใบเสนอราคาที่เลือกใส่ "กล่องข้อมูลจากใบ" / แทรกในข้อความ {ลูกค้า} ได้ (lib/print-blocks) */
+export const QUOTE_PAGE_FIELDS: PageFieldOption[] = [
+  { key: "customer_name", label: "ลูกค้า" },
+  { key: "customer_code", label: "รหัสลูกค้า" },
+  { key: "customer_phone", label: "เบอร์ลูกค้า" },
+  { key: "customer_address", label: "ที่อยู่ลูกค้า" },
+  { key: "quote_number", label: "เลขที่ใบ" },
+  { key: "quote_date", label: "วันที่" },
+  { key: "valid_until", label: "ยืนราคาถึง" },
+  { key: "sale_person_name", label: "พนักงานขาย" },
+  { key: "grand_total", label: "ยอดรวม" },
+  { key: "grand_total_text", label: "ยอดรวม (ตัวอักษร)" },
+  { key: "note", label: "หมายเหตุใบ" },
+  { key: "company_name", label: "ชื่อบริษัทเรา" },
+];
+
+/** ค่าจริงของช่องในใบนี้ — ว่าง = null (ไม่พิมพ์) */
+export function quotePageValues(quote: QuotePrintDetail): Record<string, string | null> {
+  const s = (v: string | null | undefined) => (v ?? "").trim() || null;
+  return {
+    customer_name: s(quote.customer_name),
+    customer_code: s(quote.customer_code),
+    customer_phone: s(quote.customer_phone),
+    customer_address: s(quote.customer_address),
+    quote_number: s(quote.quote_number),
+    quote_date: quote.quote_date ? thaiDate(quote.quote_date) : null,
+    valid_until: quote.valid_until ? thaiDate(quote.valid_until) : null,
+    sale_person_name: s(quote.sale_person_name),
+    grand_total: quote.grand_total != null ? `${formatMoney(quote.grand_total)} บาท` : null,
+    grand_total_text: quote.grand_total != null ? thaiBahtText(quote.grand_total) : null,
+    note: s(quote.note),
+    company_name: COMPANY_NAME,
+  };
+}
 
 const ESCAPE_LOOKUP: Record<string, string> = {
   "&": "&amp;",
@@ -289,14 +324,20 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
 }
 
 /** กล่องบนหน้าตามจุดวาง + จุดกด "เพิ่มกล่องตรงนี้" (โชว์เฉพาะตอนแก้บนจอ · lib/print-blocks) */
-function pageSlotHtml(layout: ReportLayoutSettings, origin: string, slot: PageBlockSlot): string {
+function pageSlotHtml(layout: ReportLayoutSettings, origin: string, slot: PageBlockSlot, values: Record<string, string | null>): string {
   const blocks = layout.pageBlocks.filter((b) => b.slot === slot).map((b) => {
+    if (b.kind === "fields") {
+      const rows = pageFieldRows(b, values, QUOTE_PAGE_FIELDS);
+      if (!rows.length) return `<div class="pb pb-empty" data-pp="b-${b.id}">(กล่องข้อมูลจากใบ — ช่องที่เลือกยังว่าง)</div>`;
+      const cell = (r: { label: string; value: string }) => `<span class="pbf">${r.label ? `<span class="pbf-l">${escapeHtml(r.label)}:</span> ` : ""}<span class="pbf-v">${escapeHtml(r.value).replace(/\n/g, "<br>")}</span></span>`;
+      return `<div class="pb pb-fields pb-${b.layout ?? "inline"}" data-pp="b-${b.id}">${rows.map(cell).join(b.layout === "inline" || !b.layout ? '<span class="pbf-sep"> · </span>' : "")}</div>`;
+    }
     if (b.kind === "divider") return `<hr class="pb pb-hr" data-pp="b-${b.id}">`;
     if (b.kind === "image") {
       const src = `${origin}/api/r2-image?key=${encodeURIComponent(b.imageKey ?? "")}`;
       return `<div class="pb pb-img" data-pp="b-${b.id}" style="height:${b.imageMm ?? 24}mm"><img src="${escapeHtml(src)}" alt=""></div>`;
     }
-    return `<div class="pb pb-text" data-pp="b-${b.id}">${escapeHtml(b.text ?? "").replace(/\n/g, "<br>")}</div>`;
+    return `<div class="pb pb-text" data-pp="b-${b.id}">${escapeHtml(fillPagePlaceholders(b.text ?? "", values, QUOTE_PAGE_FIELDS)).replace(/\n/g, "<br>")}</div>`;
   }).join("");
   const label = PAGE_SLOTS.find((x) => x.key === slot)?.label ?? "";
   return `${blocks}<div class="pp-slot" data-slot="${slot}">+ เพิ่มกล่องตรงนี้ (${escapeHtml(label)})</div>`;
@@ -308,6 +349,7 @@ export function buildQuotationHtml(
   layoutInput: Partial<ReportLayoutSettings> = {},
 ): string {
   const layout = normalizeReportLayout(layoutInput);
+  const pageValues = quotePageValues(quote);
   const rows = sortQuoteLines(quote.lines, layout).map((line, index) => {
     const src = imageSrc(line, origin);
     return `
@@ -453,6 +495,12 @@ export function buildQuotationHtml(
     .pb-img { display: flex; align-items: center; justify-content: flex-start; overflow: hidden; }
     .pb-img img { height: 100%; width: auto; max-width: 100%; object-fit: contain; }
     .pb-hr { border: 0; border-top: 0.4mm solid #bbb; margin: 3mm 0; }
+    .pb-fields { font-size: 12px; line-height: 1.5; }
+    .pb-fields .pbf-l { color: #666; }
+    .pb-stack .pbf { display: block; }
+    .pb-cols2 { display: grid; grid-template-columns: 1fr 1fr; column-gap: 6mm; }
+    .pb-empty { display: none; }
+    @media screen { .pb-empty { display: block; font-size: 11px; color: #999; border: 1px dashed #ccc; padding: 2mm; } }
     .pp-slot { display: none; }
     ${isCards ? printPartCss(layout.partStyles, [...QUOTE_CARD_PARTS, ...printBlockPartDefs(layout.cardFields, layout.pageBlocks)]) : ""}
     @media print {
@@ -464,7 +512,7 @@ export function buildQuotationHtml(
 </head>
 <body>
   <main class="page">
-    ${isCards ? cardsHeader.replace("@@SLOT_TOP@@", () => pageSlotHtml(layout, origin, "top")) + pageSlotHtml(layout, origin, "before") : `<div class="company">
+    ${isCards ? cardsHeader.replace("@@SLOT_TOP@@", () => pageSlotHtml(layout, origin, "top", pageValues)) + pageSlotHtml(layout, origin, "before", pageValues) : `<div class="company">
       <div class="company-name">${escapeHtml(COMPANY_NAME)}</div>
       <div class="company-address">${escapeHtml(COMPANY_ADDRESS)}</div>
     </div>
@@ -520,7 +568,7 @@ export function buildQuotationHtml(
       </tbody>
     </table>`}
 
-    ${isCards ? `${pageSlotHtml(layout, origin, "after")}${cardsNote}${cardsGrand}` : layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
+    ${isCards ? `${pageSlotHtml(layout, origin, "after", pageValues)}${cardsNote}${cardsGrand}` : layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
       ${layout.showNote ? `<div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div>` : ""}
       <table class="totals">
         <tr><td class="label">รวมเงิน</td><td class="right">${formatMoney(subtotal)}</td></tr>
@@ -532,7 +580,7 @@ export function buildQuotationHtml(
     <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>`
     : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
     ${termsHtml}
-    ${isCards ? pageSlotHtml(layout, origin, "end") : ""}
+    ${isCards ? pageSlotHtml(layout, origin, "end", pageValues) : ""}
 
     <div class="closing"${isCards ? ` data-pp="sign"` : ""}>
     <section class="signatures${layout.showCustomerApproval ? "" : " signatures-single"}">

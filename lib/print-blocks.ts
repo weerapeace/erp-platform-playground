@@ -4,7 +4,10 @@
  * - ช่องในการ์ด (CardField): ข้อมูลจาก SKU ที่ผูก (วัสดุ ซิป …) · จากบรรทัดเอกสาร (จำนวน ส่วนลด …) · ข้อความที่พิมพ์เอง
  *   ค่าว่าง = ไม่วาดแถวนั้น (SKU ไม่มีวัสดุ ก็ไม่มีแถว "วัสดุ" โล่ง ๆ)
  * - ลำดับในการ์ด (cardOrder): ช่องพื้นฐาน (รหัส ชื่อ สี/ตัวเลือก ราคา จำนวน/รวม) + ช่องที่เพิ่ม ลากเรียงได้ · รูปอยู่บนสุด/ซ้ายเสมอ
- * - กล่องบนหน้า (PageBlock): ข้อความ / รูป / เส้นคั่น วางได้ 4 จุด (PAGE_SLOTS) เรียงตามลำดับใน array
+ * - กล่องบนหน้า (PageBlock): ข้อความ / รูป / เส้นคั่น / ข้อมูลจากใบ วางได้ 4 จุด (PAGE_SLOTS) เรียงตามลำดับใน array
+ *   ข้อมูลจากใบ (kind "fields") = เลือกช่องของเอกสาร (ลูกค้า เลขที่ใบ …) จัดเป็นแถวเดียว/บรรทัด/2 คอลัมน์ · ค่าว่างไม่พิมพ์
+ *   ข้อความแทรกช่องได้ {ลูกค้า} / {customer_name} → แทนด้วยค่าจริงตอนพิมพ์ (fillPagePlaceholders)
+ *   ค่าของช่องมาจากหน้าเอกสาร (เช่น quotePageValues ใน lib/quotation-print) — ไฟล์นี้ไม่ผูกกับเอกสารชนิดใด
  * - ทุกช่อง/กล่องมี data-pp="f-<id>" / "b-<id>" → กดแก้หน้าตาด้วยตัวแก้ทีละกล่องเดิม (lib/print-part-style · printBlockPartDefs)
  * - ค่าเก็บใน ReportLayoutSettings (cardFields · cardOrder · pageBlocks) → จำรายใบ + เข้า "แบบ" ด้วย
  */
@@ -23,7 +26,15 @@ export type CardField = {
 };
 
 export type PageBlockSlot = "top" | "before" | "after" | "end";
-export type PageBlockKind = "text" | "image" | "divider";
+export type PageBlockKind = "text" | "image" | "divider" | "fields";
+export type PageFieldLayout = "inline" | "stack" | "cols2";
+export type PageFieldRef = { key: string; label: string };
+export type PageFieldOption = { key: string; label: string };
+export const PAGE_FIELD_LAYOUTS: { key: PageFieldLayout; label: string }[] = [
+  { key: "inline", label: "แถวเดียว" },
+  { key: "stack", label: "ทีละบรรทัด" },
+  { key: "cols2", label: "2 คอลัมน์" },
+];
 export type PageBlock = {
   id: string;
   slot: PageBlockSlot;
@@ -33,6 +44,12 @@ export type PageBlock = {
   imageKey?: string;
   /** (image) ความสูง mm */
   imageMm?: number;
+  /** (fields) ช่องที่เลือก + ป้าย (ป้ายว่าง = ใช้ชื่อช่อง) */
+  fields?: PageFieldRef[];
+  /** (fields) การจัดวาง */
+  layout?: PageFieldLayout;
+  /** (fields) ซ่อนป้าย เหลือแค่ค่า */
+  hideLabels?: boolean;
 };
 
 export const PAGE_SLOTS: { key: PageBlockSlot; label: string }[] = [
@@ -78,6 +95,7 @@ export const BASE_CARD_SLOTS: { key: string; label: string }[] = [
 const BASE_KEYS = BASE_CARD_SLOTS.map((b) => b.key);
 
 const ID_RE = /^[a-z0-9]{4,12}$/;
+const FIELD_KEY_RE = /^[a-z][a-z0-9_]{1,40}$/;
 const R2_KEY_RE = /^[\w\-./]{3,300}$/;
 const clip = (v: unknown, n: number) => (typeof v === "string" ? v.slice(0, n) : "");
 
@@ -114,7 +132,7 @@ export function normalizePageBlocks(v: unknown): PageBlock[] {
     const id = String(r.id ?? "");
     if (!ID_RE.test(id) || out.some((x) => x.id === id)) continue;
     const slot = PAGE_SLOTS.some((s) => s.key === r.slot) ? (r.slot as PageBlockSlot) : null;
-    const kind = r.kind === "text" || r.kind === "image" || r.kind === "divider" ? r.kind : null;
+    const kind = r.kind === "text" || r.kind === "image" || r.kind === "divider" || r.kind === "fields" ? r.kind : null;
     if (!slot || !kind) continue;
     const b: PageBlock = { id, slot, kind };
     if (kind === "text") { b.text = clip(r.text, 2000); if (!b.text.trim()) continue; }
@@ -124,6 +142,18 @@ export function normalizePageBlocks(v: unknown): PageBlock[] {
       b.imageKey = k;
       const mm = Number(r.imageMm);
       if (Number.isFinite(mm)) b.imageMm = Math.min(150, Math.max(8, Math.round(mm)));
+    }
+    if (kind === "fields") {
+      const fs: PageFieldRef[] = [];
+      for (const x of Array.isArray(r.fields) ? r.fields.slice(0, 20) : []) {
+        const fx = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+        const key = typeof fx.key === "string" && FIELD_KEY_RE.test(fx.key) ? fx.key : "";
+        if (key && !fs.some((y) => y.key === key)) fs.push({ key, label: clip(fx.label, 40) });
+      }
+      if (!fs.length) continue;
+      b.fields = fs;
+      b.layout = PAGE_FIELD_LAYOUTS.some((l) => l.key === r.layout) ? (r.layout as PageFieldLayout) : "inline";
+      if (r.hideLabels === true) b.hideLabels = true;
     }
     out.push(b);
   }
@@ -175,10 +205,29 @@ export function cardFieldDefaultLabel(kind: CardFieldKind, key?: string): string
   return "";
 }
 
+/** แทน {ป้าย} / {key} ในข้อความด้วยค่าจริง — ไม่รู้จัก = คงไว้ตามเดิม · ค่าว่าง = "" */
+export function fillPagePlaceholders(text: string, values: Record<string, string | null | undefined>, options: PageFieldOption[]): string {
+  return text.replace(/\{([^{}\n]{1,40})\}/g, (m, raw: string) => {
+    const name = raw.trim();
+    const key = name in values ? name : options.find((o) => o.label === name)?.key;
+    if (!key || !(key in values)) return m;
+    return values[key] ?? "";
+  });
+}
+
+/** รายการ ป้าย+ค่า ของกล่องข้อมูลจากใบ (ตัดช่องว่างทิ้ง) */
+export function pageFieldRows(b: PageBlock, values: Record<string, string | null | undefined>, options: PageFieldOption[]): { label: string; value: string }[] {
+  return (b.fields ?? []).flatMap((f) => {
+    const v = values[f.key]?.trim();
+    if (!v) return [];
+    return [{ label: b.hideLabels ? "" : (f.label || options.find((o) => o.key === f.key)?.label || ""), value: v }];
+  });
+}
+
 /** ทะเบียนกล่องสำหรับตัวแก้ทีละกล่อง (ช่อง/กล่องที่ผู้ใช้เพิ่ม) */
 export function printBlockPartDefs(fields: CardField[], blocks: PageBlock[]): PrintPartDef[] {
   return [
     ...fields.map((f): PrintPartDef => ({ key: `f-${f.id}`, label: f.kind === "text" ? `ข้อความในการ์ด: ${(f.text ?? "").slice(0, 20)}` : `ช่อง ${f.label || cardFieldDefaultLabel(f.kind, f.key)}`, kind: "text", perCard: true, baseSizePx: 12 })),
-    ...blocks.map((b): PrintPartDef => ({ key: `b-${b.id}`, label: b.kind === "text" ? `กล่องข้อความ: ${(b.text ?? "").slice(0, 20)}` : b.kind === "image" ? "กล่องรูป" : "เส้นคั่น", kind: b.kind === "image" ? "image" : b.kind === "divider" ? "box" : "box", baseSizePx: 12 })),
+    ...blocks.map((b): PrintPartDef => ({ key: `b-${b.id}`, label: b.kind === "text" ? `กล่องข้อความ: ${(b.text ?? "").slice(0, 20)}` : b.kind === "image" ? "กล่องรูป" : b.kind === "fields" ? "กล่องข้อมูลจากใบ" : "เส้นคั่น", kind: b.kind === "image" ? "image" : b.kind === "divider" ? "box" : "box", baseSizePx: 12 })),
   ];
 }

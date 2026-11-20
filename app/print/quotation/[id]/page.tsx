@@ -17,6 +17,8 @@ import {
   buildQuotationHtml as buildPrintableQuotationHtml,
   buildQuoteTemplateData as buildPrintableQuoteTemplateData,
   quoteCardImgMm,
+  QUOTE_PAGE_FIELDS,
+  quotePageValues,
 } from "@/lib/quotation-print";
 import { DEFAULT_REPORT_LAYOUT, reportLayoutFromStoredValue, type ReportLayoutSettings } from "@/lib/report-layout";
 import { docFileName } from "@/lib/print-filename";
@@ -197,6 +199,8 @@ export default function PrintQuotationPage() {
   const blocksEditor = usePrintBlocksEditor({
     cardFields: layout.cardFields, cardOrder: layout.cardOrder, pageBlocks: layout.pageBlocks,
     onChange: (p) => updateLayout({ ...layout, ...p }),
+    pageFields: QUOTE_PAGE_FIELDS,
+    pageValues: quote ? quotePageValues(quote) : {},
   });
   const partEditor = usePrintPartEditor({
     parts: [...QUOTE_CARD_PARTS, ...printBlockPartDefs(layout.cardFields, layout.pageBlocks)],

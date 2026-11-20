@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { normalizeCardFields, normalizePageBlocks, normalizeCardOrder, cardFieldValue, printBlockPartDefs } from "@/lib/print-blocks";
+import { normalizeCardFields, normalizePageBlocks, normalizeCardOrder, cardFieldValue, printBlockPartDefs, fillPagePlaceholders } from "@/lib/print-blocks";
 import { normalizeReportLayout } from "@/lib/report-layout";
-import { buildQuotationHtml } from "@/lib/quotation-print";
+import { buildQuotationHtml, QUOTE_PAGE_FIELDS } from "@/lib/quotation-print";
 
 describe("จัดหน้าเอง — ช่องในการ์ด + กล่องบนหน้า", () => {
   it("ทิ้งค่าที่ไม่ถูกต้อง", () => {
@@ -44,5 +44,31 @@ describe("จัดหน้าเอง — ช่องในการ์ด +
     expect(html).toContain('class="pp-slot" data-slot="top"');
     expect(html).toContain(".pp-slot { display: none; }");
     expect(printBlockPartDefs([{ id: "ab12", kind: "sku", key: "materials", label: "วัสดุ" }], []).map((d) => d.key)).toEqual(["f-ab12"]);
+  });
+});
+
+describe("กล่องข้อมูลจากใบ + แทรกช่องในข้อความ", () => {
+  it("normalize: เก็บช่องที่ถูก ทิ้ง key แปลก/ซ้ำ · ไม่มีช่อง = ทิ้งกล่อง", () => {
+    const out = normalizePageBlocks([
+      { id: "ff11", slot: "top", kind: "fields", fields: [{ key: "customer_name", label: "" }, { key: "customer_name", label: "x" }, { key: "../x", label: "" }], layout: "cols2", hideLabels: true },
+      { id: "ff22", slot: "top", kind: "fields", fields: [] },
+    ]);
+    expect(out).toEqual([{ id: "ff11", slot: "top", kind: "fields", fields: [{ key: "customer_name", label: "" }], layout: "cols2", hideLabels: true }]);
+  });
+  it("แทน {ป้าย} / {key} · ไม่รู้จักคงไว้", () => {
+    const v = { customer_name: "คุณเต้ง", quote_number: null };
+    expect(fillPagePlaceholders("เรียน {ลูกค้า} ({customer_name}) เลขที่ {เลขที่ใบ} {อะไร}", v, QUOTE_PAGE_FIELDS)).toBe("เรียน คุณเต้ง (คุณเต้ง) เลขที่  {อะไร}");
+  });
+  it("วาดลงใบ: ค่าว่างไม่พิมพ์ · ป้ายแก้ได้ · escape", () => {
+    const quote = { quote_number: "QT-9", customer_name: "<b>เต้ง</b>", customer_phone: "", grand_total: 1000, lines: [{ product_name: "A", qty: 1, unit_price: 1000 }] };
+    const html = buildQuotationHtml(quote, "", { lineStyle: "cards", pageBlocks: [
+      { id: "ff11", slot: "top", kind: "fields", fields: [{ key: "customer_name", label: "Customer" }, { key: "customer_phone", label: "" }, { key: "quote_number", label: "" }], layout: "inline" },
+      { id: "tx11", slot: "end", kind: "text", text: "ขอบคุณ {ลูกค้า}" },
+    ] } as never);
+    expect(html).toContain("Customer:");
+    expect(html).toContain("&lt;b&gt;เต้ง&lt;/b&gt;");
+    expect(html).toContain("เลขที่ใบ:</span> <span class=\"pbf-v\">QT-9");
+    expect(html).not.toContain("เบอร์ลูกค้า:");
+    expect(html).toContain("ขอบคุณ &lt;b&gt;เต้ง&lt;/b&gt;");
   });
 });

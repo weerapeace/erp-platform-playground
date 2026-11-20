@@ -9,11 +9,12 @@
  *   {blocks.modal}
  *
  * - ช่องในการ์ด: แผงรายการ (ลากเรียงด้วยหูจับ · แก้ป้าย · ลบ) + ปุ่มเพิ่ม (ข้อมูลจาก SKU / บรรทัด / ข้อความเอง)
- * - กล่องบนหน้า: กด "+ เพิ่มกล่องตรงนี้" ในใบ → เลือก ข้อความ / รูป / เส้นคั่น · กดกล่องแล้วแผงแก้หน้าตามีแก้ข้อความ/เปลี่ยนรูป/ลบ
+ * - กล่องบนหน้า: กด "+ เพิ่มกล่องตรงนี้" ในใบ → เลือก ข้อความ / รูป / เส้นคั่น / ข้อมูลจากใบ · กดกล่องแล้วแผงแก้หน้าตามีแก้ข้อความ/เปลี่ยนรูป/แก้ช่อง/ลบ
+ * - ส่ง pageFields (+ pageValues ไว้โชว์ค่าจริง) = มี "ข้อมูลจากใบ" + ปุ่มแทรกช่อง {ลูกค้า} ในกล่องข้อความ
  * - ลบช่อง/กล่อง → แจ้งผลมีปุ่ม "ย้อนกลับ" (คืนตำแหน่งเดิม)
  * ของกลางที่ใช้: Popover · ERPModal · ImageAttachKeys · askText · useToast · useDragReorder/DragHandle
  */
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "@/components/popover";
 import { ERPModal } from "@/components/modal";
 import { ImageAttachKeys } from "@/components/image-attach";
@@ -22,17 +23,24 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import {
-  BASE_CARD_SLOTS, cardFieldDefaultLabel, LINE_FIELD_OPTIONS, newBlockId, normalizeCardOrder, PAGE_SLOTS, SKU_FIELD_OPTIONS,
+  BASE_CARD_SLOTS, cardFieldDefaultLabel, fillPagePlaceholders, PAGE_FIELD_LAYOUTS, pageFieldRows,
+  type PageFieldLayout, type PageFieldOption, type PageFieldRef, LINE_FIELD_OPTIONS, newBlockId, normalizeCardOrder, PAGE_SLOTS, SKU_FIELD_OPTIONS,
   type CardField, type CardFieldKind, type PageBlock, type PageBlockKind, type PageBlockSlot,
 } from "@/lib/print-blocks";
 
 type Patch = Partial<{ cardFields: CardField[]; cardOrder: string[]; pageBlocks: PageBlock[] }>;
 
-export function usePrintBlocksEditor({ cardFields, cardOrder, pageBlocks, onChange }: {
+type FieldsDraft = { slot: PageBlockSlot; id?: string; fields: PageFieldRef[]; layout: PageFieldLayout; hideLabels: boolean };
+
+export function usePrintBlocksEditor({ cardFields, cardOrder, pageBlocks, onChange, pageFields = [], pageValues = {} }: {
   cardFields: CardField[];
   cardOrder: string[];
   pageBlocks: PageBlock[];
   onChange: (patch: Patch) => void;
+  /** ช่องของเอกสาร (เช่น QUOTE_PAGE_FIELDS) — ส่งมา = มี "ข้อมูลจากใบ" + แทรกช่องในข้อความ */
+  pageFields?: PageFieldOption[];
+  /** ค่าจริงของช่องในใบนี้ (โชว์ข้างชื่อช่อง + ตัวอย่าง) */
+  pageValues?: Record<string, string | null>;
 }) {
   const toast = useToast();
   const order = normalizeCardOrder(cardOrder, cardFields);
@@ -146,8 +154,47 @@ export function usePrintBlocksEditor({ cardFields, cardOrder, pageBlocks, onChan
     if (!slot) return;
     if (kind === "divider") { addBlock(slot, "divider"); return; }
     if (kind === "image") { setImageKeys([]); setImageFor({ slot }); return; }
-    const t = await askText({ title: `กล่องข้อความ (${PAGE_SLOTS.find((s) => s.key === slot)?.label ?? ""})`, placeholder: "เช่น เรียน คุณเต้ง ขอเสนอราคาตามรายละเอียดด้านล่าง", required: true, rows: 4, confirmText: "เพิ่ม" });
-    if (t) addBlock(slot, "text", { text: t.slice(0, 2000) });
+    if (kind === "fields") { setFieldsFor({ slot, fields: [], layout: "inline", hideLabels: false }); return; }
+    setTextFor({ slot, text: "", initial: "" });
+  };
+  // กล่องข้อความ (แทรกช่อง {ลูกค้า} ได้)
+  const [textFor, setTextFor] = useState<{ slot: PageBlockSlot; id?: string; text: string; initial: string } | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const caretRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const at = caretRef.current, ta = taRef.current;
+    if (at == null || !ta) return;
+    caretRef.current = null;
+    ta.focus();
+    ta.setSelectionRange(at, at);
+  }, [textFor?.text]);
+  const insertToken = (label: string) => {
+    if (!textFor) return;
+    const ta = taRef.current, tok = `{${label}}`;
+    const a = ta?.selectionStart ?? textFor.text.length, z = ta?.selectionEnd ?? a;
+    const text = (textFor.text.slice(0, a) + tok + textFor.text.slice(z)).slice(0, 2000);
+    caretRef.current = a + tok.length;
+    setTextFor({ ...textFor, text });
+  };
+  const saveText = () => {
+    if (!textFor || !textFor.text.trim()) return;
+    if (textFor.id) patchBlock(textFor.id, { text: textFor.text.slice(0, 2000) }); else addBlock(textFor.slot, "text", { text: textFor.text.slice(0, 2000) });
+    setTextFor(null);
+  };
+  // กล่องข้อมูลจากใบ
+  const [fieldsFor, setFieldsFor] = useState<FieldsDraft | null>(null);
+  const [fieldsInitial, setFieldsInitial] = useState("");
+  const openFields = (d: FieldsDraft) => { setFieldsFor(d); setFieldsInitial(JSON.stringify(d)); };
+  const toggleField = (key: string) => {
+    if (!fieldsFor) return;
+    const has = fieldsFor.fields.some((f) => f.key === key);
+    setFieldsFor({ ...fieldsFor, fields: has ? fieldsFor.fields.filter((f) => f.key !== key) : [...fieldsFor.fields, { key, label: "" }] });
+  };
+  const saveFields = () => {
+    if (!fieldsFor || !fieldsFor.fields.length) return;
+    const p = { fields: fieldsFor.fields, layout: fieldsFor.layout, hideLabels: fieldsFor.hideLabels || undefined };
+    if (fieldsFor.id) patchBlock(fieldsFor.id, p); else addBlock(fieldsFor.slot, "fields", p);
+    setFieldsFor(null);
   };
   const removeBlock = (id: string) => {
     const before = pageBlocks;
@@ -184,10 +231,10 @@ export function usePrintBlocksEditor({ cardFields, cardOrder, pageBlocks, onChan
         <div className="space-y-1.5">
           <div className="flex flex-wrap gap-1.5">
             {b.kind === "text" && (
-              <button type="button" className={btn} onClick={async () => {
-                const t = await askText({ title: "แก้กล่องข้อความ", initial: b.text ?? "", required: true, rows: 4, confirmText: "บันทึก" });
-                if (t) patchBlock(b.id, { text: t.slice(0, 2000) });
-              }}><Icon value="i:pencil" className="text-[13px]" />แก้ข้อความ</button>
+              <button type="button" className={btn} onClick={() => setTextFor({ slot: b.slot, id: b.id, text: b.text ?? "", initial: b.text ?? "" })}><Icon value="i:pencil" className="text-[13px]" />แก้ข้อความ</button>
+            )}
+            {b.kind === "fields" && (
+              <button type="button" className={btn} onClick={() => openFields({ slot: b.slot, id: b.id, fields: b.fields ?? [], layout: b.layout ?? "inline", hideLabels: !!b.hideLabels })}><Icon value="i:pencil" className="text-[13px]" />แก้ช่อง</button>
             )}
             {b.kind === "image" && <button type="button" className={btn} onClick={() => { setImageKeys(b.imageKey ? [b.imageKey] : []); setImageFor({ slot: b.slot, id: b.id }); }}><Icon value="i:photo" className="text-[13px]" />เปลี่ยนรูป</button>}
             <button type="button" className={btn} onClick={() => moveBlock(b.id, -1)} aria-label="เลื่อนขึ้น"><Icon value="i:chevron-up" className="text-[13px]" />ขึ้น</button>
@@ -213,13 +260,108 @@ export function usePrintBlocksEditor({ cardFields, cardOrder, pageBlocks, onChan
   const modal: ReactNode = (
     <>
       <ERPModal open={!!picker} onClose={() => setPicker(null)} size="sm" title={`เพิ่มกล่อง (${PAGE_SLOTS.find((s) => s.key === picker)?.label ?? ""})`}>
-        <div className="grid grid-cols-3 gap-2">
-          {([["text", "i:file-text", "ข้อความ"], ["image", "i:photo", "รูป"], ["divider", "i:minus", "เส้นคั่น"]] as const).map(([k, ic, l]) => (
+        <div className={`grid gap-2 ${pageFields.length ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
+          {([["text", "i:file-text", "ข้อความ"], ["image", "i:photo", "รูป"], ["divider", "i:minus", "เส้นคั่น"], ...(pageFields.length ? [["fields", "i:database", "ข้อมูลจากใบ"]] : [])] as [PageBlockKind, string, string][]).map(([k, ic, l]) => (
             <button key={k} type="button" onClick={() => void pickKind(k)} className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-200 py-4 text-sm text-slate-700 hover:border-sky-300 hover:bg-sky-50">
               <Icon value={ic} className="text-[22px] text-slate-500" />{l}
             </button>
           ))}
         </div>
+      </ERPModal>
+      <ERPModal open={!!textFor} onClose={() => setTextFor(null)} size="md" hasUnsavedChanges={!!textFor && textFor.text !== textFor.initial}
+        title={textFor?.id ? "แก้กล่องข้อความ" : `กล่องข้อความ (${PAGE_SLOTS.find((s) => s.key === textFor?.slot)?.label ?? ""})`}
+        footer={(
+          <>
+            <button type="button" onClick={() => setTextFor(null)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm">ยกเลิก</button>
+            <button type="button" disabled={!textFor?.text.trim()} onClick={saveText} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white disabled:opacity-50">{textFor?.id ? "บันทึก" : "เพิ่ม"}</button>
+          </>
+        )}>
+        {textFor && (
+          <div className="space-y-2">
+            <textarea ref={taRef} value={textFor.text} rows={4} autoFocus onChange={(e) => setTextFor({ ...textFor, text: e.target.value.slice(0, 2000) })}
+              placeholder={pageFields.length ? "เช่น เรียน {ลูกค้า} ขอเสนอราคาตามรายละเอียดด้านล่าง" : "เช่น ขอเสนอราคาตามรายละเอียดด้านล่าง"}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-sky-300 focus:outline-none" />
+            {pageFields.length > 0 && (
+              <>
+                <div className="text-[11px] text-slate-400">แทรกข้อมูลจากใบ (พิมพ์ออกมาเป็นค่าจริง)</div>
+                <div className="flex flex-wrap gap-1">
+                  {pageFields.map((o) => (
+                    <button key={o.key} type="button" onClick={() => insertToken(o.label)} className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[12px] text-sky-700 hover:bg-sky-100">+ {o.label}</button>
+                  ))}
+                </div>
+                {/\{[^{}]+\}/.test(textFor.text) && (
+                  <div className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[13px] text-slate-700">
+                    <div className="mb-0.5 text-[11px] text-slate-400">ตัวอย่างบนใบนี้</div>
+                    <div className="whitespace-pre-wrap">{fillPagePlaceholders(textFor.text, pageValues, pageFields)}</div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </ERPModal>
+      <ERPModal open={!!fieldsFor} onClose={() => setFieldsFor(null)} size="md" hasUnsavedChanges={!!fieldsFor && JSON.stringify(fieldsFor) !== fieldsInitial}
+        title={fieldsFor?.id ? "แก้กล่องข้อมูลจากใบ" : `กล่องข้อมูลจากใบ (${PAGE_SLOTS.find((s) => s.key === fieldsFor?.slot)?.label ?? ""})`}
+        footer={(
+          <>
+            <button type="button" onClick={() => setFieldsFor(null)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm">ยกเลิก</button>
+            <button type="button" disabled={!fieldsFor?.fields.length} onClick={saveFields} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white disabled:opacity-50">{fieldsFor?.id ? "บันทึก" : "เพิ่มกล่อง"}</button>
+          </>
+        )}>
+        {fieldsFor && (
+          <div className="space-y-3">
+            <div className="text-xs text-slate-500">ติ๊กได้หลายช่อง · ช่องที่ว่างจะไม่พิมพ์ · ลำดับตามที่ติ๊ก</div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {pageFields.map((o) => {
+                const on = fieldsFor.fields.some((f) => f.key === o.key);
+                const v = pageValues[o.key];
+                return (
+                  <button key={o.key} type="button" onClick={() => toggleField(o.key)} aria-pressed={on}
+                    className={`flex min-w-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[13px] ${on ? "border-sky-300 bg-sky-50 text-sky-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                    <Icon value={on ? "i:circle-check" : "i:square"} className="shrink-0 text-[15px]" />
+                    <span className="shrink-0">{o.label}</span>
+                    <span className="ml-auto min-w-0 truncate text-[11px] text-slate-400">{v || "—"}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[12px] text-slate-600">
+              <span>จัดวาง</span>
+              <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+                {PAGE_FIELD_LAYOUTS.map((l) => (
+                  <button key={l.key} type="button" onClick={() => setFieldsFor({ ...fieldsFor, layout: l.key })}
+                    className={`px-2.5 py-1 ${fieldsFor.layout === l.key ? "bg-sky-600 text-white" : "bg-white hover:bg-slate-50"}`}>{l.label}</button>
+                ))}
+              </div>
+              <label className="ml-auto inline-flex items-center gap-1.5">
+                <input type="checkbox" checked={fieldsFor.hideLabels} onChange={(e) => setFieldsFor({ ...fieldsFor, hideLabels: e.target.checked })} />ซ่อนป้าย เหลือแค่ค่า
+              </label>
+            </div>
+            {fieldsFor.fields.length > 0 && !fieldsFor.hideLabels && (
+              <div className="space-y-1">
+                <div className="text-[11px] text-slate-400">ป้ายหน้าค่า (เว้นว่าง = ใช้ชื่อช่อง)</div>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {fieldsFor.fields.map((f) => (
+                    <input key={f.key} value={f.label} placeholder={pageFields.find((o) => o.key === f.key)?.label}
+                      onChange={(e) => setFieldsFor({ ...fieldsFor, fields: fieldsFor.fields.map((x) => (x.key === f.key ? { ...x, label: e.target.value.slice(0, 40) } : x)) })}
+                      className="h-8 min-w-0 rounded-lg border border-slate-200 px-2 text-[13px] focus:border-sky-300 focus:outline-none" />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-[13px]">
+              <div className="mb-0.5 text-[11px] text-slate-400">ตัวอย่างบนใบนี้</div>
+              {(() => {
+                const rows = pageFieldRows({ ...fieldsFor, id: "x", kind: "fields" }, pageValues, pageFields);
+                if (!rows.length) return <span className="text-slate-400">ยังไม่ได้เลือกช่อง หรือช่องที่เลือกว่างในใบนี้</span>;
+                const cell = (r: { label: string; value: string }, i: number) => (
+                  <span key={i} className={fieldsFor.layout === "inline" ? "" : "block"}>{r.label && <span className="text-slate-500">{r.label}: </span>}<span className="whitespace-pre-wrap">{r.value}</span>{fieldsFor.layout === "inline" && i < rows.length - 1 ? " · " : ""}</span>
+                );
+                return <div className={fieldsFor.layout === "cols2" ? "grid grid-cols-2 gap-x-4" : ""}>{rows.map(cell)}</div>;
+              })()}
+            </div>
+          </div>
+        )}
       </ERPModal>
       <ERPModal open={!!imageFor} onClose={() => setImageFor(null)} size="sm" title={imageFor?.id ? "เปลี่ยนรูปในกล่อง" : "เพิ่มกล่องรูป (โลโก้ / แบนเนอร์)"}
         footer={(
