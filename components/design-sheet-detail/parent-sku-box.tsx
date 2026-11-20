@@ -8,7 +8,8 @@
  *   • SKU ใต้ Parent เดียวกันที่ไม่ได้สร้างจากใบนี้ = พับเป็นบรรทัดเดียว "+ อีก N ตัว"
  *   • ร่าง Parent (ยังไม่มีรหัส) = แถวเส้นประสีส้มในกล่องเดียวกัน
  *   • Parent ที่ยังไม่ได้สร้างในระบบ = ปุ่ม "สร้าง SKU" ในแถว (เปิดตัวช่วยสร้าง SKU เลือกรหัสนี้ไว้ · เฉพาะคนมีสิทธิ์สร้างสินค้า) — เจ้าของขอ 2026-11-19
- *   • ปุ่มเดียว "+ เพิ่ม Parent SKU" → เลือก "มีรหัสแล้ว" (เช็กรหัสซ้ำ/ข้ามเลขเหมือนเดิม + ปุ่มลัด "ใช้ XXX (ถัดไป)") หรือ "ยังไม่มีรหัส (ร่าง)"
+ *   • ปุ่มเดียว "+ เพิ่ม Parent SKU" → "เลือกที่มีอยู่" (ParentSkuPicker ของกลาง · เจ้าของขอ 2026-11-20) · "ตั้งรหัสใหม่" (เช็กรหัสซ้ำ/ข้ามเลข + ปุ่มลัด "ใช้ XXX (ถัดไป)") · "ร่าง"
+ *   • พิมพ์รหัสที่มีอยู่แล้ว → ปุ่ม "ผูก XXX ที่มีอยู่" · แถวร่าง → ปุ่ม "ผูกกับที่มีอยู่" (เปลี่ยนร่างเป็น Parent จริง)
  * สถานะช่องพิมพ์รหัส/ผลเช็ก อยู่ที่หน้าแม่ (index.tsx) เพราะตอนบันทึกใบงานต้องรวมรหัสที่ค้างพิมพ์ด้วย
  */
 import { useEffect, useMemo, useState } from "react";
@@ -18,6 +19,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { ParentSkuPicker, findParentSkuByCode, type ParentSkuPickerValue } from "@/components/pickers";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 
@@ -26,7 +28,7 @@ const skuImg = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 export function ParentSkuBox({
   canEdit, codes, drafts, refs, linkedSkus,
   input, setInput, check, checking, onAddTyped, onAddCode, onRemoveCode,
-  draftInput, setDraftInput, onAddDraft, onRemoveDraft, onCreateSku,
+  draftInput, setDraftInput, onAddDraft, onRemoveDraft, onCreateSku, onLinkExisting,
 }: {
   canEdit: boolean;
   codes: string[];
@@ -49,12 +51,30 @@ export function ParentSkuBox({
   onRemoveDraft: (label: string) => void;
   /** แถว Parent ที่ยังไม่ได้สร้าง → ปุ่ม "สร้าง SKU" (ไม่ส่ง = ไม่มีปุ่ม เช่น ไม่มีสิทธิ์สร้างสินค้า) */
   onCreateSku?: (code: string) => void;
+  /** ผูก Parent ที่มีอยู่แล้วในระบบ (รหัส + id) */
+  onLinkExisting: (code: string, id: string) => void;
 }) {
   const t = useT();
   const toast = useToast();
   const [openRows, setOpenRows] = useState<Set<string> | null>(null);   // null = ตั้งต้นตามจำนวน
   const [showSibs, setShowSibs] = useState<Set<string>>(() => new Set());
-  const [adding, setAdding] = useState<null | "code" | "draft">(null);
+  const [adding, setAdding] = useState<null | "pick" | "code" | "draft">(null);
+  const [draftLink, setDraftLink] = useState<string | null>(null);   // แถวร่างที่กำลังผูกกับ Parent ที่มีอยู่
+  const linkPicked = (v: ParentSkuPickerValue | null, draft?: string) => {
+    if (!v?.code) return;
+    if (codes.includes(v.code)) { toast.info(t(`${v.code} อยู่ในใบงานนี้แล้ว`, `${v.code} is already on this sheet`)); return; }
+    onLinkExisting(v.code, v.id);
+    if (draft) onRemoveDraft(draft);
+    toast.success(draft ? t(`ผูกร่าง "${draft}" กับ ${v.code} แล้ว`, `Linked draft "${draft}" to ${v.code}`) : t(`เพิ่ม ${v.code} แล้ว`, `Added ${v.code}`));
+    setAdding(null); setDraftLink(null);
+  };
+  const linkTyped = async () => {
+    const code = input.trim().toUpperCase();
+    const p = await findParentSkuByCode(code);
+    if (!p) { toast.error(t(`หา ${code} ในระบบไม่เจอ`, `${code} not found`)); return; }
+    setInput("");
+    linkPicked(p);
+  };
   const [suggest, setSuggest] = useState<string | null>(null);
 
   const isOpen = (c: string) => (openRows ? openRows.has(c) : codes.length === 1);
@@ -172,9 +192,24 @@ export function ParentSkuBox({
             <Icon name="edit" className="shrink-0 text-amber-500" />
             <span className="min-w-0 flex-1 truncate">{d}</span>
             <span className="shrink-0 text-[10.5px] text-amber-600">{t("ร่าง · ยังไม่มีรหัส", "Draft · no code yet")}</span>
+            {canEdit && draftLink !== d && (
+              <button type="button" onClick={() => setDraftLink(d)} title={t("เปลี่ยนร่างนี้เป็น Parent SKU ที่มีอยู่ในระบบ", "Turn this draft into an existing Parent SKU")}
+                className="h-6 shrink-0 rounded-md border border-amber-300 bg-white px-2 text-[11px] text-amber-700 hover:bg-amber-100">{t("ผูกกับที่มีอยู่", "Link existing")}</button>
+            )}
             {canEdit && <button type="button" onClick={() => onRemoveDraft(d)} title={t("เอาออก", "Remove")} className="h-6 w-6 shrink-0 rounded text-amber-300 hover:bg-rose-50 hover:text-rose-500">✕</button>}
           </div>
         ))}
+
+        {draftLink && drafts.includes(draftLink) && (
+          <div className="rounded-xl border border-amber-200 bg-white p-2">
+            <div className="mb-1 flex items-center gap-2 text-[11px] text-amber-700">
+              {t(`ผูกร่าง "${draftLink}" กับ Parent SKU ที่มีอยู่`, `Link draft "${draftLink}" to an existing Parent SKU`)}
+              <span className="flex-1" />
+              <button type="button" onClick={() => setDraftLink(null)} className="text-slate-400 hover:text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+            </div>
+            <ParentSkuPicker value={null} disableCreate placeholder={t("ค้นรหัส / ชื่อ Parent SKU…", "Search Parent SKU code / name…")} onChange={(v) => linkPicked(v, draftLink)} />
+          </div>
+        )}
 
         {codes.length === 0 && drafts.length === 0 && groups.other.length === 0 && (
           <p className="rounded-xl border border-dashed border-slate-200 px-3 py-2 text-xs text-slate-400">{t("ยังไม่มี Parent SKU — ตั้งรหัส หรือใส่ชื่อร่างไว้ก่อนก็ได้", "No Parent SKU yet — add a code or a draft name")}</p>
@@ -185,7 +220,7 @@ export function ParentSkuBox({
         <div className="mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
-              {([["code", t("มีรหัสแล้ว", "Has a code")], ["draft", t("ยังไม่มีรหัส (ร่าง)", "No code yet (draft)")]] as const).map(([k, l]) => (
+              {([["pick", t("เลือกที่มีอยู่", "Pick existing")], ["code", t("ตั้งรหัสใหม่", "New code")], ["draft", t("ยังไม่มีรหัส (ร่าง)", "No code yet (draft)")]] as const).map(([k, l]) => (
                 <button key={k} type="button" onClick={() => setAdding(k)}
                   className={`h-7 rounded-md px-2.5 text-xs ${adding === k ? "bg-blue-50 font-medium text-blue-700" : "text-slate-500 hover:text-slate-700"}`}>{l}</button>
               ))}
@@ -193,7 +228,12 @@ export function ParentSkuBox({
             <span className="flex-1" />
             <button type="button" onClick={closeAdd} className="text-xs text-slate-400 hover:text-slate-600">{t("ยกเลิก", "Cancel")}</button>
           </div>
-          {adding === "code" ? (
+          {adding === "pick" ? (
+            <div className="mt-2">
+              <ParentSkuPicker value={null} disableCreate placeholder={t("ค้นรหัส / ชื่อ Parent SKU ที่มีในระบบ…", "Search an existing Parent SKU…")} onChange={(v) => linkPicked(v)} />
+              <p className="mt-1 text-[11px] text-slate-400">{t("ยังไม่มีในระบบ → แท็บ \"ตั้งรหัสใหม่\" หรือ \"ร่าง\"", "Not in the system yet → use \"New code\" or \"Draft\"")}</p>
+            </div>
+          ) : adding === "code" ? (
             <>
               <div className="mt-2 flex gap-1">
                 <input autoFocus value={input} onChange={(e) => setInput(e.target.value.toUpperCase())}
@@ -207,7 +247,10 @@ export function ParentSkuBox({
               <div className="mt-1 flex min-h-[18px] flex-wrap items-center gap-1.5 text-[11px]">
                 {checking ? <span className="text-slate-300">{t("กำลังเช็ครหัส...", "Checking code...")}</span>
                   : !input.trim() ? null
-                  : check?.exists ? <span className="font-medium text-rose-600">{t("✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้", "✕ This code already exists — can't add")}</span>
+                  : check?.exists ? <>
+                      <span className="font-medium text-rose-600">{t("รหัสนี้มีอยู่ในระบบแล้ว — ตั้งใหม่ซ้ำไม่ได้", "This code already exists")}</span>
+                      <button type="button" onClick={() => void linkTyped()} className="inline-flex h-6 items-center rounded-full bg-blue-50 px-2 font-medium text-blue-700 hover:bg-blue-100">{t(`ผูก ${input.trim().toUpperCase()} ที่มีอยู่`, `Link existing ${input.trim().toUpperCase()}`)}</button>
+                    </>
                   : check?.skipped ? <span className="text-amber-600">{t(`⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ ${check.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)`, `⚠ Skips numbers — latest set is ${check.latest}`)}</span>
                   : check?.latest ? <span className="text-slate-400">{t("✓ ใช้ได้ · ล่าสุดที่ตั้ง:", "✓ OK · latest:")} <b>{check.latest}</b>{check.max_code ? <> · {t("เลขสูงสุด:", "highest:")} {check.max_code}</> : null}</span>
                   : check ? <span className="text-emerald-600">{t("✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้", "✓ No codes in this group yet — OK")}</span> : null}
@@ -231,7 +274,7 @@ export function ParentSkuBox({
           )}
         </div>
       ) : (
-        <button type="button" onClick={() => setAdding("code")}
+        <button type="button" onClick={() => setAdding("pick")}
           className="mt-2 inline-flex h-8 w-full items-center justify-center gap-1 rounded-xl border border-dashed border-slate-300 text-xs text-slate-600 hover:border-blue-300 hover:bg-blue-50/40 hover:text-blue-700">
           <Icon name="add" /> {t("เพิ่ม Parent SKU", "Add Parent SKU")}
         </button>

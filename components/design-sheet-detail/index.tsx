@@ -2152,6 +2152,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     // 📦 สินค้าของงานนี้ (Parent SKU + SKU ที่เชื่อม + ร่าง) — components/design-sheet-detail/parent-sku-box.tsx (เจ้าของขอ 2026-11-07 "ดูง่าย ๆ")
     parent: (
       <ParentSkuBox canEdit={canEdit} codes={form.parent_sku_codes} drafts={form.parent_sku_drafts} refs={parentRefs} linkedSkus={linkedSkus}
+            onLinkExisting={(code, id) => { addParentCodeValue(code); setParentRefs((r) => ({ ...r, [code]: id })); }}
         input={skuInput} setInput={setSkuInput} check={skuCheck} checking={skuChecking}
         onAddTyped={addParentCode} onAddCode={addParentCodeValue} onRemoveCode={removeParentCode}
         draftInput={draftInput} setDraftInput={setDraftInput} onAddDraft={addParentDraft} onRemoveDraft={removeParentDraft}
