@@ -41,7 +41,7 @@ import { PackQueue, type QueueRow } from "./queue";
 import { TodayPacked, type TodaySession } from "./today-list";
 
 // ── ข้อมูลจาก /api/packing ──
-type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; box: string | null; codes: string[]; packaging?: { id: string; name: string; image_key: string | null; sort?: number }[] };
+type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; guessed?: "code" | "listing" | null; guess_code?: string | null; box: string | null; codes: string[]; packaging?: { id: string; name: string; image_key: string | null; sort?: number }[] };
 type ApiOrder = { id: string; order_no: string | null; platform: string | null; platform_code: string | null; customer_name: string | null; status: string; platform_status: string | null; ship_by_at: string | null; tracking_no: string | null; package_no: string | null; carrier: string | null; cod_amount: number; packed_at: string | null; packed_by_name: string | null; buyer_note: string | null };
 type ApiSession = { id: string; status: string; packer_id: string | null; packer_name: string | null; started_at: string };
 type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
@@ -679,7 +679,8 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-900">{l.info.name}</p>
                   <p className="truncate text-xs text-slate-500">
-                    {l.info.sku_code ?? l.info.shop_code ?? "-"}{l.info.color ? ` · ${l.info.color}` : ""}
+                    {(l.info.guessed ? l.info.shop_code ?? l.info.sku_code : l.info.sku_code ?? l.info.shop_code) ?? "-"}{l.info.color ? ` · ${l.info.color}` : ""}
+                    {l.info.guessed && <span className="ml-1 text-slate-500" title="ระบบเดาให้ตอนแสดงเท่านั้น ยังไม่ได้บันทึกการจับคู่">→ {l.info.guess_code ? `${l.info.guess_code} ` : ""}({l.info.guessed === "listing" ? "เดาจากสินค้าที่จับคู่ในร้าน" : "เดาจากรหัส"})</span>}
                     {l.info.level === "parent" && <span className="ml-1 text-amber-700">(รู้แค่รุ่น ไม่รู้สี)</span>}
                     {l.info.level === "none" && <span className="ml-1 text-amber-700">(จับคู่สินค้าไม่ได้ — ติ๊กมือ)</span>}
                   </p>

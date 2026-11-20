@@ -99,6 +99,33 @@ export function boxSizeText(b: BoxSize | null | undefined): string {
   return dims.some((n) => n > 0) ? `${dims.map((n) => +n.toFixed(1)).join("×")} ซม.` : "";
 }
 
+// ── เดาสินค้าจากรหัสร้าน (ตอนออเดอร์ยังจับคู่ไม่ได้) ─────────────────────────
+/** รหัสร้านมักมีของต่อท้าย เช่น ไซซ์ "MGN369-01XXL" → ลองรหัสที่สั้นลงทีละช่วง (ตัดที่ขีด/ช่องว่าง หรือรอยต่อตัวเลข↔ตัวอักษร)
+ *  เรียงยาว→สั้น · สั้นสุด 4 ตัวอักษร กันไปตรงรหัสสั้น ๆ ที่ไม่เกี่ยว · ใช้แค่ตอนแสดงในหน้าแพ็ก ไม่บันทึกการจับคู่ */
+export const GUESS_MIN_LEN = 4;
+export function shopCodeGuesses(code: string | null | undefined): string[] {
+  const c = String(code ?? "").trim().toUpperCase();
+  if (c.length < GUESS_MIN_LEN) return [];
+  const out = new Set<string>();
+  for (let i = c.length; i >= GUESS_MIN_LEN; i--) {
+    const head = c.slice(0, i), next = c[i];
+    if (next !== undefined) {
+      const a = c[i - 1];
+      const sep = /[-_ ./]/.test(next);
+      const flip = /[0-9]/.test(a) !== /[0-9]/.test(next) && /[A-Z0-9]/.test(a) && /[A-Z0-9]/.test(next);
+      if (!sep && !flip) continue;
+    }
+    const t = head.replace(/[-_ ./]+$/, "");
+    if (t.length >= GUESS_MIN_LEN) out.add(t);
+  }
+  return [...out];
+}
+/** เลือกรหัสที่ยาวที่สุดที่มีอยู่จริง (เจาะจงที่สุด) · ไม่มี = null */
+export function bestGuess(code: string | null | undefined, known: (c: string) => boolean): string | null {
+  for (const g of shopCodeGuesses(code)) if (known(g)) return g;
+  return null;
+}
+
 // ── เช็กของ ─────────────────────────────────────────────────────────────
 export type CheckItem = {
   key: string;                // id บรรทัดในออเดอร์

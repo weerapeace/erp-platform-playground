@@ -160,3 +160,24 @@ describe("รอบ 3 — ย้อน / แก้ / ล็อก", () => {
     expect(isFreshLock("2026-11-19T09:40:00Z", now)).toBe(false);
   });
 });
+
+import { shopCodeGuesses, bestGuess } from "@/lib/packing";
+describe("shopCodeGuesses — เดารหัสจากรหัสร้านที่มีของต่อท้าย", () => {
+  it("ไซซ์ต่อท้ายไม่มีขีด → ลองรหัสลูกแล้วค่อยรหัสรุ่น", () => {
+    expect(shopCodeGuesses("MGN369-01XXL")).toEqual(["MGN369-01XXL", "MGN369-01", "MGN369"]);
+  });
+  it("ขีดคั่นไซซ์ + ตัวเล็ก + ช่องว่าง", () => {
+    expect(shopCodeGuesses(" bcg12-01-l ")).toEqual(["BCG12-01-L", "BCG12-01", "BCG12"]);
+  });
+  it("ไม่ตัดกลางคำ และไม่คืนรหัสสั้นกว่า 4 ตัว", () => {
+    expect(shopCodeGuesses("ABCD")).toEqual(["ABCD"]);
+    expect(shopCodeGuesses("AB1")).toEqual([]);
+    expect(shopCodeGuesses(null)).toEqual([]);
+  });
+  it("bestGuess เลือกตัวที่ยาวที่สุดที่มีจริง", () => {
+    const known = new Set(["MGN369", "MGN369-01"]);
+    expect(bestGuess("MGN369-01XXL", (c) => known.has(c))).toBe("MGN369-01");
+    expect(bestGuess("MGN369-09XXL", (c) => known.has(c))).toBe("MGN369");
+    expect(bestGuess("ZZZZ-1", (c) => known.has(c))).toBeNull();
+  });
+});
