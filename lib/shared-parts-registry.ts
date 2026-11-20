@@ -528,6 +528,15 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "file-drop.md",
   },
   {
+    key: "pdf-merge", label: "รวม PDF หลายไฟล์เป็นไฟล์เดียว", code: "PdfMergeTool · mergePdfBlobs · lib/pdf-merge", category: "file",
+    source: { path: "components/pdf-merge" },
+    what: "ลาก PDF / รูป มาวาง → การ์ดรูปหน้าแรก ลากสลับลำดับ · โหมดทีละหน้า ลาก/ลบ/หมุนรายหน้า · ตั้งชื่อ → รวมแล้วดาวน์โหลด · ทำในเบราว์เซอร์ ไฟล์ไม่ขึ้นเซิร์ฟเวอร์ · ย้อนกลับได้ทุกการเอาออก/ย้าย/ล้าง · กู้งานค้าง (storageKey) · หน้าอื่นรวมไฟล์ในโค้ดเลยใช้ mergePdfBlobs (lib/pdf-merge-engine)",
+    when: "ผู้ใช้อยากรวมไฟล์เอง (/misc/pdf-merge) หรือหน้าที่ทำ PDF หลายใบแล้วอยากได้ไฟล์เดียว (เช่น พิมพ์เอกสารหลายใบ) — ส่ง initialFiles เข้า PdfMergeTool หรือเรียก mergePdfBlobs",
+    notWhen: "เก็บไฟล์แนบเข้าระบบ → FileInput / DriveUploadBox · สร้าง PDF จากหน้าเว็บ → แผงพิมพ์ (print-panels) · อ่านข้อความใน PDF ฝั่งเซิร์ฟเวอร์ → lib/parse-pdf-server",
+    doc: "pdf-merge.md",
+    note: "ไลบรารีวางใน public/vendor (pdf-lib ของ pdfme + pdf.js 5.7.284) — ห้ามลงเป็นแพ็กเกจ npm (build บน Vercel หน่วยความจำหมด)",
+  },
+  {
     key: "file-input", label: "ช่องไฟล์แนบเดี่ยว", code: "FileInput", category: "file",
     source: { path: "components/file-input" },
     what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF) เก็บตามกฎที่เก็บไฟล์ · ลากไฟล์มาวาง / Ctrl+V ได้ · multiple = รับหลายไฟล์ (onChange ทีละไฟล์)",

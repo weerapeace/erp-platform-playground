@@ -52,6 +52,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/pattern-studio", prefixes: ["pattern_studio."] },
   // 📦 แพ็คสินค้า — แพ็ค / ดูคลิป / แดชบอร์ดคนแพ็ค / ตั้งค่า (docs/packing-station.md · 2026-11-17)
   { href: "/packing", prefixes: ["packing."] },
+  // งานอื่นๆ → รวม PDF — ทำในเบราว์เซอร์ ไม่แตะข้อมูล = ไม่มีสิทธิ์ย่อย (เข้าแอปงานอื่นๆ ได้ก็ใช้ได้ · ซ่อนรายคนที่ "ใครเห็นเมนูไหน")
+  { href: "/misc/pdf-merge", keys: [] },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */
