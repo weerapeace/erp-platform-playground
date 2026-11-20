@@ -6,6 +6,8 @@
  *   รายการบนร้าน = loadListingsWithRaw (lib/platform-shop-view-server · ฟังก์ชัน DB platform_listings_slim ตัวเดียวกับมุมมองหน้าร้าน)
  *   "อาจมีแล้ว" = computeMatchSuggestions (lib/platform-match-server) กฎเดียวกับกอง "อาจมีบนร้านแล้ว" ใน loadNotListedGroups
  *   ร้านที่แบรนด์สั่งซ่อน = ui_config listing_hidden_platforms (lib/listing-hidden-platforms) · สต๊อกระบบ = lib/sku-stock
+ *   คอลัมน์ Website = store_listings (หน้าร้านเว็บของเรา · กฎเดียวกับ /api/public/storefront/products: ร้าน active + is_published)
+ *   ป้ายพร้อมลง = ผลที่จดไว้ใน platform_create_readiness (lib/platform-readiness-store · cron ตรวจทุกคืน)
  * ความเร็ว: ทุกร้านอ่านพร้อมกัน · ตัวเดาคู่ทำเฉพาะร้านที่มีรายการยังไม่จับคู่ · สต๊อกถามเป็นชุด (พร้อมกันทีละ 4 ชุด)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
@@ -16,7 +18,8 @@ import { loadListingsWithRaw } from "@/lib/platform-shop-view-server";
 import { computeMatchSuggestions } from "@/lib/platform-match-server";
 import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/listing-hidden-platforms";
 import { loadSkuStock } from "@/lib/sku-stock";
-import { buildCell, emptyCell, type CellListing, type CrossRow, type CrossShop, type CrossShopResponse } from "@/lib/platform-cross-shop";
+import { loadReadiness } from "@/lib/platform-readiness-store";
+import { WEBSITE, buildCell, emptyCell, listableMissing, type CellListing, type CrossRow, type CrossShop, type CrossShopResponse } from "@/lib/platform-cross-shop";
 import type { SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -36,7 +39,8 @@ async function inBatches<T, R>(items: T[], size: number, fn: (x: T) => Promise<R
   return out;
 }
 
-export async function loadCrossShop(admin: Admin, brandId: string): Promise<Omit<CrossShopResponse, "error">> {
+/** opts.suggest=false = ไม่เดาคู่ (cron ไม่ต้องใช้ช่องเหลือง) · opts.stock=false = ไม่อ่านสต๊อก */
+export async function loadCrossShop(admin: Admin, brandId: string, opts: { suggest?: boolean; stock?: boolean } = {}): Promise<Omit<CrossShopResponse, "error">> {
   const [{ data: brand }, { data: pfs }, { data: accounts }, { data: hiddenCfg }, parents] = await Promise.all([
     admin.from("brands").select("id, name").eq("id", brandId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, sort_order").in("code", [...SELLING_PLATFORMS]).order("sort_order", { ascending: true }),
@@ -70,10 +74,14 @@ export async function loadCrossShop(admin: Admin, brandId: string): Promise<Omit
   }
 
   // ร้าน: เปิดตรวจ = มีบัญชีร้านของแบรนด์ หรือมีรายการบนร้าน · แบรนด์สั่งซ่อน = hidden
-  const listingsByPf = await Promise.all(pfRows.map((p) => loadListingsWithRaw(admin, p.id, brandId)));
+  const [listingsByPf, web, readyMap] = await Promise.all([
+    Promise.all(pfRows.map((p) => (p.code === WEBSITE ? Promise.resolve([]) : loadListingsWithRaw(admin, p.id, brandId)))),
+    loadWebListings(admin, parentIds),
+    loadReadiness(admin, parentIds),
+  ]);
   const shops: CrossShop[] = pfRows.map((p, i) => ({
     code: p.code, name: p.name_th,
-    state: hidden.has(p.code) ? "hidden" : withAccount.has(p.id) || listingsByPf[i].length ? "on" : "noshop",
+    state: hidden.has(p.code) ? "hidden" : p.code === WEBSITE ? (web.size ? "on" : "noshop") : withAccount.has(p.id) || listingsByPf[i].length ? "on" : "noshop",
   }));
 
   // ตัวเดาคู่ เฉพาะร้านที่เปิดตรวจและมีรายการยังไม่จับคู่ (กฎเดียวกับกอง "อาจมีบนร้านแล้ว")
@@ -81,12 +89,12 @@ export async function loadCrossShop(admin: Admin, brandId: string): Promise<Omit
   const sugg = await Promise.all(pfRows.map(async (p, i) => {
     const n = listingsByPf[i].filter((l) => !l.matched_parent_sku_id && !l.match_ignored && !isGoneStatus(l.status)).length;
     unmatched[p.code] = n;
-    return shops[i].state === "on" && n ? computeMatchSuggestions(admin, { platformId: p.id, brandId }) : null;
+    return opts.suggest !== false && shops[i].state === "on" && n ? computeMatchSuggestions(admin, { platformId: p.id, brandId }) : null;
   }));
 
   // สต๊อกในระบบ (BigSeller ยังคุมสต๊อก — ส่วนใหญ่ยังไม่มีข้อมูล = null ไม่ใช่ 0)
   const sellIds = [...sellable.values()].flat().map((s) => s.id);
-  const stockMaps = await inBatches(chunks(sellIds, 300), 4, (part) => loadSkuStock(admin, part));
+  const stockMaps = opts.stock === false ? [] : await inBatches(chunks(sellIds, 300), 4, (part) => loadSkuStock(admin, part));
   const stockOf = new Map<string, number>();
   for (const m of stockMaps) for (const [id, st] of m) stockOf.set(id, Math.max(0, st.onHand - st.reserved));
 
@@ -116,12 +124,19 @@ export async function loadCrossShop(admin: Admin, brandId: string): Promise<Omit
     const cells: CrossRow["cells"] = {};
     pfRows.forEach((pf, i) => {
       if (shops[i].state !== "on") { cells[pf.code] = emptyCell("off"); return; }
+      if (pf.code === WEBSITE) {
+        const w = web.get(p.id);
+        const c = emptyCell(!w ? "none" : w.published.length ? "selling" : "hidden");
+        if (w) { c.listings = 1; c.web_shops = w.published.length ? w.published : w.listed; }
+        cells[pf.code] = c; return;
+      }
       const c = buildCell(pf.code, matchedBy[i].get(p.id) ?? [], ctx);
       if (c.st === "none") { const mb = maybeBy[i].get(p.id); if (mb) { c.st = "maybe"; c.maybe = mb; } }
       cells[pf.code] = c;
     });
     const desc = (p.platform_description || p.description || "").trim();
-    return {
+    const stored = readyMap.get(p.id);
+    const row: CrossRow = {
       id: p.id, code: p.code ?? "", name: p.name_th, name_platform: p.name_platform, cover_key: p.cover_image_r2_key,
       our: {
         sale: sales.length ? Math.min(...sales) : null, full: fulls.length ? Math.min(...fulls) : null, skus: sell.length,
@@ -131,6 +146,34 @@ export async function loadCrossShop(admin: Admin, brandId: string): Promise<Omit
       },
       cells,
     };
+    if (stored) {
+      const ready: NonNullable<CrossRow["ready"]> = {};
+      for (const c of listableMissing(row, shops.filter((s) => s.state === "on").map((s) => s.code))) {
+        const r = stored[c]; if (r) ready[c] = { ready: r.ready, on_shop: r.on_shop, missing: r.missing, at: r.checked_at };
+      }
+      if (Object.keys(ready).length) row.ready = ready;
+    }
+    return row;
   });
   return { brand: brand ? { id: (brand as { id: string }).id, name: String((brand as { name: string | null }).name ?? "") } : null, shops, rows, unmatched };
+}
+
+/** หน้าร้านเว็บของเรา: parent → ชื่อร้านที่เผยแพร่อยู่ / ที่เพิ่มไว้แต่ซ่อน (เฉพาะร้าน active) */
+async function loadWebListings(admin: Admin, parentIds: string[]): Promise<Map<string, { published: string[]; listed: string[] }>> {
+  const out = new Map<string, { published: string[]; listed: string[] }>();
+  const { data: shopRows, error } = await admin.from("shops").select("id, name, status");
+  if (error) { console.warn("[cross-shop] shops", error.message); return out; }
+  const nameOf = new Map(((shopRows ?? []) as { id: string; name: string | null; status: string | null }[]).filter((s) => s.status === "active").map((s) => [s.id, s.name ?? "เว็บไซต์"]));
+  if (!nameOf.size) return out;
+  const parts = await inBatches(chunks(parentIds, 300), 4, async (part) => {
+    const { data, error: e } = await admin.from("store_listings").select("shop_id, parent_sku_id, is_published").in("parent_sku_id", part).in("shop_id", [...nameOf.keys()]).limit(5000);
+    if (e) console.warn("[cross-shop] store_listings", e.message);
+    return (data ?? []) as { shop_id: string; parent_sku_id: string; is_published: boolean | null }[];
+  });
+  for (const l of parts.flat()) {
+    const m = out.get(l.parent_sku_id) ?? out.set(l.parent_sku_id, { published: [], listed: [] }).get(l.parent_sku_id)!;
+    const n = nameOf.get(l.shop_id)!;
+    (l.is_published ? m.published : m.listed).push(n);
+  }
+  return out;
 }

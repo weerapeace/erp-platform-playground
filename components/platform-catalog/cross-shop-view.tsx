@@ -25,13 +25,25 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { exportTable, type ExportColumn } from "@/lib/export";
 import { readinessText, type CreateReadiness } from "@/lib/platform-create-readiness";
 import {
-  CROSS_DIMS, TITLE_LIMITS, activeShops, cellIssues, matchPresence, missingShopCodes, presenceCounts, rowHasIssue, titleLength,
-  type CellIssue, type CrossCell, type CrossDim, type CrossRow, type CrossShopResponse, type PresenceFilter,
+  CROSS_DIMS, TITLE_LIMITS, WEBSITE, activeShops, cellIssues, listableMissing, matchPresence, missingShopCodes, presenceCounts, rowHasIssue, titleLength,
+  type CellIssue, type CrossCell, type CrossDim, type CrossReady, type CrossRow, type CrossShopResponse, type PresenceFilter,
 } from "@/lib/platform-cross-shop";
+import { ERPModal, ConfirmDialog } from "@/components/modal";
 import type { AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
+import type { FakePriceRow } from "@/components/fake-price-dialog";
 
 const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 const ListingDrawer = dynamic(() => import("./listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
+const FakePriceDialog = dynamic(() => import("@/components/fake-price-dialog").then((m) => m.FakePriceDialog), { ssr: false });
+
+/** ราคาบนร้านไม่ตรงระบบ (ข้อ 3) — ลูกค้าจ่ายไม่ตรง หรือราคาเต็มไม่ตรง (TikTok เทียบราคาเต็มไม่ได้จริง → นับแค่ราคาจ่าย) */
+const priceMismatch = (r: CrossRow, code: string): boolean => {
+  const c = r.cells[code];
+  if (!c || code === WEBSITE || c.st === "none" || c.st === "maybe" || c.st === "off") return false;
+  return c.pay_diff > 0 || (code !== "tiktok" && c.full_diff > 0);
+};
+const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+const fmtAt = (iso: string) => { try { return new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return iso; } };
 
 const SHORT: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE", website: "Website" };
 const shortName = (code: string, name: string) => SHORT[code] ?? name;
@@ -78,17 +90,22 @@ function rdRequest(parentId: string, codes: string[]): string {
   return key;
 }
 
-function ReadinessBadge({ parentId, codes, names }: { parentId: string; codes: string[]; names: Record<string, string> }) {
+function ReadinessBadge({ parentId, codes, names, stored }: { parentId: string; codes: string[]; names: Record<string, string>; stored?: Record<string, CrossReady> }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [seen, setSeen] = useState(false);
+  const [live, setLive] = useState(false);
   const [, bump] = useState(0);
   const key = `${parentId}|${codes.join(",")}`;
+  // ข้อ 6: มีผลที่ตรวจไว้ครบทุกร้าน (cron ทุกคืน / ตรวจสดล่าสุด) → ขึ้นทันที ไม่ต้องรอ · กดป้าย = ตรวจสดใหม่
+  const allStored = !!stored && codes.length > 0 && codes.every((c) => stored[c]);
+  const useStored = allStored && !live && !rdCache.has(key);
   useEffect(() => {
+    if (useStored) return;
     const el = ref.current; if (!el || seen) return;
     const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { setSeen(true); io.disconnect(); } }, { rootMargin: "100px" });
     io.observe(el);
     return () => io.disconnect();
-  }, [seen]);
+  }, [seen, useStored]);
   useEffect(() => {
     if (!seen || !codes.length) return;
     const f = () => bump((n) => n + 1);
@@ -98,6 +115,19 @@ function ReadinessBadge({ parentId, codes, names }: { parentId: string; codes: s
     return () => { set.delete(f); };
   }, [seen, key, parentId, codes]);
   if (!codes.length) return <span ref={ref} className="text-xs text-slate-300">—</span>;
+  if (useStored && stored) {
+    const list = codes.map((c) => ({ code: c, ...stored[c], error: null }));
+    const ready = list.filter((r) => r.ready).length;
+    const oldest = list.map((r) => r.at).sort()[0];
+    const tip = `${list.map((r) => `${names[r.code] ?? r.code}: ${readinessText(r, 6).text}`).join("\n")}\nตรวจเมื่อ ${fmtAt(oldest)} — กดเพื่อตรวจใหม่ตอนนี้`;
+    return (
+      <button type="button" title={tip} onClick={(e) => { e.stopPropagation(); setLive(true); setSeen(true); }}
+        className={`inline-flex items-center gap-1 text-xs hover:underline ${ready === list.length ? "text-emerald-700" : "text-amber-700"}`}>
+        <Icon value={ready === list.length ? "i:circle-check" : "i:alert-triangle"} />
+        {ready === list.length ? "พร้อมลง" : `พร้อม ${ready}/${list.length} ร้าน`}
+      </button>
+    );
+  }
   const hit = rdCache.get(key);
   if (!hit) return <span ref={ref} className="text-xs text-slate-400">{seen ? "กำลังตรวจ…" : "รอตรวจ"}</span>;
   if (hit.error || !hit.data) return <span ref={ref} className="text-xs text-rose-600" title={hit.error ?? ""}>ตรวจไม่สำเร็จ</span>;
@@ -123,10 +153,19 @@ function CellView({ dim, row, code, brandName, shopCodes }: { dim: CrossDim; row
   );
   const lines = (items: CellIssue[]) => items.map((i) => <div key={i.text} className={`text-[11px] leading-tight ${TONE_CLS[i.tone]}`}>{i.text}</div>);
   if (c.st === "off") return chip("off");
+  if (code === WEBSITE) {
+    const label = c.st === "selling" ? "ขึ้นเว็บแล้ว" : c.st === "hidden" ? "เพิ่มแล้ว·ซ่อน" : "ยังไม่ขึ้นเว็บ";
+    return (
+      <div className="space-y-0.5" title={c.web_shops?.length ? `หน้าร้าน: ${c.web_shops.join(", ")} — กดเพื่อเปิดแท็บเว็บไซต์ของสินค้านี้` : "กดเพื่อเปิด Parent SKU แล้วไปแท็บ \"เว็บไซต์\" เพื่อเพิ่มขึ้นหน้าร้าน"}>
+        <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] whitespace-nowrap ${STATE_CLS[c.st] ?? ""}`}>{label}</span>
+      </div>
+    );
+  }
   if (dim === "status" || c.st === "none" || c.st === "maybe") {
     return (
-      <div className="space-y-0.5" title={c.st === "maybe" && c.maybe ? `ตัวเดาคู่ชี้ว่ารายการ "${c.maybe.title ?? ""}" อาจเป็นสินค้านี้ (คะแนน ${c.maybe.score}) — ไปจับคู่ก่อน อย่าลงซ้ำ` : undefined}>
+      <div className="space-y-0.5" title={c.st === "maybe" && c.maybe ? `ตัวเดาคู่ชี้ว่ารายการ "${c.maybe.title ?? ""}" อาจเป็นสินค้านี้ (คะแนน ${c.maybe.score}) — ไปจับคู่ก่อน อย่าลงซ้ำ` : c.listings > 1 ? `ลงซ้ำ ${c.listings} รายการ — กดเพื่อดูทุกตัว` : undefined}>
         {chip(c.st, c.listings > 1 ? ` ×${c.listings}` : "")}
+        {c.listings > 1 && <div className="text-[11px] text-amber-700 underline decoration-dotted">ดูตัวซ้ำ</div>}
         {dim === "status" && c.st !== "none" && c.st !== "maybe" && c.stock != null && <div className="text-[11px] text-slate-400">สต๊อก {c.stock.toLocaleString()}</div>}
       </div>
     );
@@ -179,6 +218,7 @@ function CellView({ dim, row, code, brandName, shopCodes }: { dim: CrossDim; row
 function cellExport(dim: CrossDim, row: CrossRow, code: string, brandName: string, shopCodes: string[]): string {
   const c = row.cells[code]; if (!c) return "";
   const issues = cellIssues(dim, row, code, brandName, shopCodes).map((i) => i.text).join(" · ");
+  if (code === WEBSITE) return c.st === "off" ? STATE_LABEL.off : c.st === "selling" ? `ขึ้นเว็บแล้ว (${(c.web_shops ?? []).join(", ")})` : c.st === "hidden" ? `เพิ่มแล้วแต่ซ่อน (${(c.web_shops ?? []).join(", ")})` : "ยังไม่ขึ้นเว็บ";
   if (c.st === "off" || c.st === "none" || c.st === "maybe" || dim === "status") return [STATE_LABEL[c.st], c.listings > 1 ? `ลงซ้ำ ${c.listings}` : ""].filter(Boolean).join(" · ");
   const head = dim === "price" ? (c.sale != null ? `${c.sale} (เต็ม ${c.price ?? "-"})` : String(c.price ?? ""))
     : dim === "title" ? (c.title ?? "")
@@ -211,7 +251,15 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   const [addFor, setAddFor] = useState<{ parents: AddWizardParent[]; codes: string[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  useEffect(() => { setSelected(new Set()); setPage(1); setPresence("missing"); setQ(""); }, [brandId]);
+  const canEditProducts = can("products.edit");
+  const [dupFor, setDupFor] = useState<{ row: CrossRow; code: string } | null>(null);                 // ข้อ 8 ดูตัวซ้ำ
+  const [fakeRows, setFakeRows] = useState<FakePriceRow[] | null>(null);                               // ข้อ 2 ใส่ราคาเต็มหลายรุ่น
+  const [fakeLoading, setFakeLoading] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(false);                                                   // ข้อ 3 ส่งราคาตามระบบ
+  const [lineConfirm, setLineConfirm] = useState<CrossRow[] | null>(null);
+  const [linePushing, setLinePushing] = useState<{ done: number; total: number } | null>(null);
+  const [queue, setQueue] = useState<{ code: string; items: { lid: string; code: string }[]; i: number } | null>(null);
+  useEffect(() => { setSelected(new Set()); setPage(1); setPresence("missing"); setQ(""); setQueue(null); }, [brandId]);
 
   const bName = data?.brand?.name || brandName || "";
   const shops = useMemo(() => (data?.shops ?? []).filter((s) => s.state !== "noshop"), [data]);
@@ -231,9 +279,78 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   const selRows = useMemo(() => allRows.filter((r) => selected.has(r.id)), [allRows, selected]);
   const selMissing = useMemo(() => {
     const codes = new Set<string>(); let n = 0;
-    for (const r of selRows) { const m = missingShopCodes(r, on); if (m.length) { n++; m.forEach((c) => codes.add(c)); } }
+    for (const r of selRows) { const m = listableMissing(r, on); if (m.length) { n++; m.forEach((c) => codes.add(c)); } }
     return { n, codes: on.filter((c) => codes.has(c)) };
   }, [selRows, on]);
+
+  // ───── ข้อ 2: ใส่ราคาเต็ม (Fake Price) หลายรุ่น — หน้าต่างสูตรเดิม (FakePriceDialog) + บันทึกทางเดิม (bulk-update · products.edit + audit) ─────
+  const saveFake = useCallback(async (edits: { id: string; fake_price: number | null }[]): Promise<boolean> => {
+    try {
+      const res = await apiFetch("/api/master-v2/skus/bulk-update", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: edits.map((e) => ({ id: e.id, changes: { fake_price: e.fake_price } })) }),
+      });
+      const j = await res.json().catch(() => ({})) as { error?: string | null };
+      if (!res.ok || j.error) { toast.error(`บันทึกไม่สำเร็จ: ${j.error ?? `HTTP ${res.status}`}`); return false; }
+      return true;
+    } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${(e as Error).message || "เครือข่ายขัดข้อง"}`); return false; }
+  }, [toast]);
+  const openFakePrice = useCallback(async () => {
+    if (!selRows.length) return;
+    setFakeLoading(true);
+    try {
+      const res = await apiFetch("/api/platform-catalog/cross-shop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_ids: selRows.map((r) => r.id) }) });
+      const j = await res.json() as { skus?: { id: string; code: string; sale: number | null; fake: number | null }[]; error?: string | null };
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      if (!j.skus?.length) { toast.warning("รุ่นที่เลือกไม่มี SKU ที่เปิดขาย"); return; }
+      setFakeRows(j.skus.map((s) => ({ id: s.id, code: s.code, sale: s.sale, fake: s.fake })));
+    } catch (e) { toast.error(`โหลด SKU ไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setFakeLoading(false); }
+  }, [selRows, toast]);
+  const applyFakePrices = useCallback(async (edits: { id: string; fake_price: number }[]): Promise<boolean> => {
+    const before = new Map((fakeRows ?? []).map((r) => [r.id, r.fake]));
+    if (!await saveFake(edits)) return false;
+    const undo = edits.map((e) => { const v = Number(before.get(e.id)); return { id: e.id, fake_price: Number.isFinite(v) && v > 0 ? v : null }; });
+    toast.undo(`ใส่ราคาเต็มแล้ว ${edits.length.toLocaleString()} SKU`, async () => {
+      if (await saveFake(undo)) { toast.success("ย้อนราคาเต็มกลับแล้ว"); void swr.revalidate(true); }
+    }, { ms: 10_000 });
+    void swr.revalidate(true);
+    return true;
+  }, [fakeRows, saveFake, toast, swr]);
+
+  // ───── ข้อ 3: ส่งราคาตามระบบ — LINE ส่งได้ทีเดียว (ปุ่มส่งราคาเดิม /api/line-shopping/push-prices) · ร้านอื่นไล่แก้ทีละรายการในลิ้นชักเดิม (ถามยืนยันก่อน/หลังทุกครั้ง) ─────
+  const priceShops = useMemo(() => on.filter((c) => c !== WEBSITE).map((c) => ({ code: c, rows: selRows.filter((r) => priceMismatch(r, c)) })), [on, selRows]);
+  const pushLine = useCallback(async (rows: CrossRow[]) => {
+    setLineConfirm(null);
+    setLinePushing({ done: 0, total: rows.length });
+    let ok = 0; const fails: string[] = [];
+    for (const [i, r] of rows.entries()) {
+      try {
+        const res = await apiFetch("/api/line-shopping/push-prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ brand_id: brandId, parent_sku_id: r.id }) });
+        const j = await res.json().catch(() => ({})) as { ok?: boolean; total?: number; okCount?: number; error?: string | null; results?: { ok: boolean; error?: string }[] };
+        if (!res.ok || j.error || j.ok === false) fails.push(`${r.code}: ${j.error ?? `HTTP ${res.status}`}`);
+        else if (typeof j.total === "number" && typeof j.okCount === "number" && j.okCount < j.total) fails.push(`${r.code}: ${j.results?.find((x) => !x.ok)?.error ?? "ส่งไม่ครบทุกรายการ"}`);
+        else ok++;
+      } catch (e) { fails.push(`${r.code}: ${(e as Error).message || "เครือข่ายขัดข้อง"}`); }
+      setLinePushing({ done: i + 1, total: rows.length });
+      if (i < rows.length - 1) await sleep(400);   // ส่งทีละรุ่น เว้นจังหวะ กัน LINE ตอบ "เรียกถี่เกินไป"
+    }
+    setLinePushing(null);
+    if (fails.length) toast.error(`ส่งราคาไป LINE สำเร็จ ${ok} · ไม่สำเร็จ ${fails.length}: ${fails.slice(0, 3).join(" · ")}${fails.length > 3 ? " …" : ""}`);
+    else toast.success(`ส่งราคาไป LINE แล้ว ${ok.toLocaleString()} รุ่น — ตัวเลขในตารางจะเปลี่ยนหลังดึงสินค้าจาก LINE รอบหน้า`);
+    setSelected(new Set());
+    void swr.revalidate(true);
+  }, [brandId, toast, swr]);
+  const startQueue = useCallback((code: string, rows: CrossRow[]) => {
+    const items = rows.map((r) => ({ lid: r.cells[code]?.lid ?? "", code: r.code })).filter((x) => x.lid);
+    if (!items.length) return;
+    setPriceOpen(false);
+    setQueue({ code, items, i: 0 });
+    setOpenId(items[0].lid);
+  }, []);
+  const queueGo = useCallback((i: number) => {
+    setQueue((q) => { if (!q || i < 0 || i >= q.items.length) return q; setOpenId(q.items[i].lid); return { ...q, i }; });
+  }, []);
 
   const doExport = useCallback(async (rows: CrossRow[], mode: "selected" | "filtered_all") => {
     if (!rows.length) return;
@@ -288,14 +405,19 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
     })),
     ...(dim === "status" ? [{
       key: "ready", header: "พร้อมลงร้านที่ขาด", width: "minmax(8rem,0.9fr)",
-      cell: (r: CrossRow) => <ReadinessBadge parentId={r.id} codes={missingShopCodes(r, on)} names={names} />,
+      cell: (r: CrossRow) => <ReadinessBadge parentId={r.id} codes={listableMissing(r, on)} names={names} stored={r.ready} />,
     }] : []),
   ], [shops, names, dim, bName, on]);
 
   const onCell = useCallback((r: CrossRow, colKey: string) => {
     if (!colKey.startsWith("shop_")) return;
-    const c = r.cells[colKey.slice(5)];
-    const lid = c?.lid ?? c?.maybe?.lid ?? null;
+    const code = colKey.slice(5);
+    const c = r.cells[code];
+    if (!c || c.st === "off") return;
+    // Website = หน้าร้านเว็บของเรา → เปิด Parent SKU (แท็บ "เว็บไซต์" เพิ่ม/เผยแพร่ขึ้นหน้าร้าน)
+    if (code === WEBSITE) { window.open(`/master/parent-skus?open=${encodeURIComponent(r.id)}`, "_blank", "noopener"); return; }
+    if (c.listings > 1 && c.dups.length) { setDupFor({ row: r, code }); return; }   // ลงซ้ำ → ดูทุกตัวก่อน
+    const lid = c.lid ?? c.maybe?.lid ?? null;
     if (lid) setOpenId(lid);
   }, []);
 
@@ -304,7 +426,9 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   if (!data && swr.error) return <ErrorState title="โหลดข้อมูลไม่สำเร็จ" hint={swr.error.message} onRetry={() => void swr.revalidate(true)} />;
   if (!data) return null;
 
-  const unmatchedWarn = on.filter((c) => (data.unmatched[c] ?? 0) >= 20);
+  // ข้อ 1 (เจ้าของเลือก 2026-11-20): พาไปหน้าจับคู่ของร้านนั้นตรง ๆ — ยืนยันคู่ที่นั่น (ทางเดิม · เจ้าของกดเอง)
+  const unmatchedWarn = on.filter((c) => (data.unmatched[c] ?? 0) > 0);
+  const matchHref = (code: string) => `/master/platform-catalog?brand=${encodeURIComponent(brandId)}&platform=${encodeURIComponent(code)}`;
   const chip = (key: PresenceFilter, label: string) => (
     <button key={key || "all"} type="button" onClick={() => setPresence(key)} aria-pressed={presence === key}
       className={`h-8 shrink-0 rounded-full border px-3 text-xs whitespace-nowrap ${presence === key ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -332,6 +456,8 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
           {chip("none", "ไม่อยู่ร้านไหนเลย")}
           {on.map((c) => chip(`miss:${c}`, `ขาด ${names[c]}`))}
           {chip("all", `ครบ ${on.length} ร้าน`)}
+          {chip("ready", "พร้อมลงเลย")}
+          {chip("dup", "ลงซ้ำ")}
           {chip("", "ทั้งหมด")}
         </div>
 
@@ -357,10 +483,20 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
         {unmatchedWarn.length > 0 && (
           <div className="mx-3 mb-2 flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <Icon value="i:alert-triangle" className="mt-0.5 shrink-0" />
-            <span>
-              ยังมีรายการบนร้านที่ไม่ได้จับคู่: {unmatchedWarn.map((c) => `${names[c]} ${data.unmatched[c].toLocaleString()}`).join(" · ")} —
-              ช่องสีเหลือง &quot;อาจมีแล้ว&quot; = ระบบเดาว่าลงไว้แล้วแต่ยังไม่จับคู่ ควรไปจับคู่ก่อน (มุมมอง &quot;จับคู่ + ตั้งค่า&quot;) ไม่ใช่ลงซ้ำ
-            </span>
+            <div className="min-w-0 space-y-1.5">
+              <div>
+                ยังมีรายการบนร้านที่ไม่ได้จับคู่ — ตัวเลข &quot;ยังไม่ลง&quot; จะแม่นขึ้นเมื่อจับคู่ครบ ·
+                ช่องสีเหลือง &quot;อาจมีแล้ว&quot; = ระบบเดาว่าลงไว้แล้ว ให้ไปจับคู่ ไม่ใช่ลงซ้ำ
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {unmatchedWarn.map((c) => (
+                  <a key={c} href={matchHref(c)} title={`เปิดหน้าจับคู่ของ ${names[c]} — ยืนยันทีเดียวทุกตัวที่รหัสตรงกันได้ที่การ์ด "รอยืนยัน"`}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 bg-white px-2 font-medium text-amber-800 hover:bg-amber-100">
+                    <Icon value="i:link" />ไปจับคู่ {names[c]} <span className="tabular-nums">{data.unmatched[c].toLocaleString()}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -384,8 +520,8 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
                   </button>
                 ))}
               </div>
-              {dim === "status" && missingShopCodes(r, on).length > 0 && (
-                <div className="text-[11px] text-slate-500">พร้อมลง: <ReadinessBadge parentId={r.id} codes={missingShopCodes(r, on)} names={names} /></div>
+              {dim === "status" && listableMissing(r, on).length > 0 && (
+                <div className="text-[11px] text-slate-500">พร้อมลง: <ReadinessBadge parentId={r.id} codes={listableMissing(r, on)} names={names} stored={r.ready} /></div>
               )}
             </div>
           )}
@@ -412,11 +548,114 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
             <Icon name="upload" />ลงร้านที่ขาด ({selMissing.n.toLocaleString()})
           </button>
         )}
+        {canPublish && priceShops.some((s) => s.rows.length) && (
+          <button type="button" onClick={() => setPriceOpen(true)} title="ส่งราคาตามระบบไปร้านที่ราคาไม่ตรง — ดูราคาก่อน/หลังและยืนยันก่อนส่งทุกครั้ง"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-sm text-slate-800 hover:bg-slate-100">
+            <Icon value="i:currency-baht" />ส่งราคาตามระบบ
+          </button>
+        )}
+        {canEditProducts && (
+          <button type="button" disabled={fakeLoading} onClick={() => void openFakePrice()} title="ใส่ราคาเต็ม (ราคาขีดฆ่า) ให้ทุก SKU ของรุ่นที่ติ๊กตามสูตร — ดูก่อน/หลังก่อนบันทึก · ย้อนกลับได้"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-sm text-slate-800 hover:bg-slate-100 disabled:opacity-50">
+            <Icon value="i:tag" />{fakeLoading ? "กำลังโหลด…" : "ใส่ราคาเต็ม"}
+          </button>
+        )}
         <button type="button" disabled={exporting} onClick={() => void doExport(selRows, "selected")}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-sm text-slate-800 hover:bg-slate-100 disabled:opacity-50">
           <Icon value="i:file-spreadsheet" />Excel ({selected.size.toLocaleString()})
         </button>
       </BulkActionBar>
+
+      {/* ข้อ 3: ไล่แก้ราคาทีละรายการ (ร้านที่ส่งราคาจากลิ้นชัก) */}
+      {queue && (
+        <div className="sticky bottom-16 z-30 mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900 shadow-sm">
+          <Icon value="i:list-check" />
+          <span className="min-w-0 flex-1">
+            ไล่แก้ราคา {names[queue.code]}: รายการ <b className="tabular-nums">{queue.i + 1}/{queue.items.length}</b>
+            <span className="ml-1 font-mono text-xs">{queue.items[queue.i]?.code}</span>
+            <span className="ml-1 text-xs text-violet-700">— ในลิ้นชักกด &quot;ใช้ราคาในระบบ&quot;/แก้ราคา แล้วยืนยันส่ง</span>
+          </span>
+          <button type="button" onClick={() => queueGo(queue.i)} className="h-8 rounded-lg border border-violet-200 bg-white px-2.5 text-xs hover:bg-violet-100">เปิดอีกครั้ง</button>
+          <button type="button" disabled={queue.i === 0} onClick={() => queueGo(queue.i - 1)} className="h-8 rounded-lg border border-violet-200 bg-white px-2.5 text-xs hover:bg-violet-100 disabled:opacity-40">ก่อนหน้า</button>
+          <button type="button" disabled={queue.i >= queue.items.length - 1} onClick={() => queueGo(queue.i + 1)} className="h-8 rounded-lg bg-violet-600 px-3 text-xs text-white hover:bg-violet-500 disabled:opacity-40">ถัดไป</button>
+          <button type="button" onClick={() => { setQueue(null); setOpenId(null); void swr.revalidate(true); }} className="h-8 rounded-lg px-2 text-xs text-violet-700 hover:bg-violet-100">จบ</button>
+        </div>
+      )}
+
+      {priceOpen && (
+        <ERPModal open onClose={() => setPriceOpen(false)} title="ส่งราคาตามระบบ" size="md"
+          description={`จากที่ติ๊กไว้ ${selected.size.toLocaleString()} รุ่น — ส่งเฉพาะร้านที่ราคาบนร้านไม่ตรงกับระบบ`}>
+          <div className="space-y-2 p-1 text-sm">
+            {priceShops.map(({ code, rows }) => (
+              <div key={code} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-800">{names[code]} <span className="tabular-nums text-slate-500">{rows.length.toLocaleString()} รุ่นราคาไม่ตรง</span></div>
+                  <div className="text-xs text-slate-500">
+                    {code === "line_shopping" ? "ส่งได้ทีเดียวทุกรุ่น (ราคาเต็ม + ส่วนลด ตามสูตรเดิม) — ดูก่อน/หลังแล้วยืนยัน"
+                      : "ร้านนี้ส่งราคาทีละรายการในลิ้นชัก (ตรวจราคาบนร้านล่าสุด + ถามยืนยันก่อนส่ง) — ระบบเปิดให้ทีละตัวต่อกันไป"}
+                  </div>
+                </div>
+                {rows.length > 0 && (code === "line_shopping"
+                  ? <button type="button" onClick={() => { setPriceOpen(false); setLineConfirm(rows); }} className="h-8 rounded-lg bg-violet-600 px-3 text-xs text-white hover:bg-violet-500">ดูก่อนส่ง ({rows.length})</button>
+                  : <button type="button" onClick={() => startQueue(code, rows)} className="h-8 rounded-lg border border-violet-300 px-3 text-xs text-violet-800 hover:bg-violet-50">ไล่แก้ทีละรายการ ({rows.length})</button>)}
+              </div>
+            ))}
+            <p className="text-[11px] text-slate-400">ส่งราคาขึ้นร้านแล้วดึงกลับอัตโนมัติไม่ได้ — ถ้าส่งผิด ให้แก้ราคาในระบบแล้วส่งใหม่ · ทุกครั้งบันทึกประวัติว่าใครส่ง</p>
+          </div>
+        </ERPModal>
+      )}
+      <ConfirmDialog open={!!lineConfirm} onClose={() => setLineConfirm(null)} onConfirm={() => lineConfirm && void pushLine(lineConfirm)}
+        title={`ส่งราคาตามระบบไป LINE ${lineConfirm?.length ?? 0} รุ่น?`} confirmText="ส่งราคา" variant="danger"
+        requireTyped={(lineConfirm?.length ?? 0) > 20 ? "ยืนยัน" : undefined}
+        message={
+          <div className="space-y-2 text-sm">
+            <p className="text-slate-600">ราคาที่ลูกค้าเห็นบน LINE จะเปลี่ยนทันที (ราคาต่อสี/ไซซ์ ระบบคำนวณจริงตอนส่ง ตามสูตรเดียวกับปุ่มส่งราคาเดิม)</p>
+            <div className="max-h-64 overflow-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-2 py-1 text-left">รุ่น</th><th className="px-2 py-1 text-right">บน LINE ตอนนี้</th><th className="px-2 py-1 text-right">ตามระบบ</th></tr></thead>
+                <tbody>
+                  {(lineConfirm ?? []).slice(0, 50).map((r) => { const c = r.cells.line_shopping; return (
+                    <tr key={r.id} className="border-t border-slate-100">
+                      <td className="px-2 py-1 font-mono">{r.code}</td>
+                      <td className="px-2 py-1 text-right">จ่าย {baht(c?.sale ?? c?.price)}{c?.sale != null ? <span className="ml-1 text-slate-400 line-through">{baht(c.price)}</span> : null}</td>
+                      <td className="px-2 py-1 text-right font-medium text-violet-800">จ่าย {baht(r.our.sale)}{r.our.full ? <span className="ml-1 text-slate-400 line-through">{baht(r.our.full)}</span> : null}</td>
+                    </tr>); })}
+                </tbody>
+              </table>
+              {(lineConfirm?.length ?? 0) > 50 && <div className="px-2 py-1 text-[11px] text-slate-400">…และอีก {(lineConfirm!.length - 50).toLocaleString()} รุ่น</div>}
+            </div>
+            <p className="text-[11px] text-slate-500">ราคาที่ส่งขึ้นร้านแล้วดึงกลับอัตโนมัติไม่ได้</p>
+          </div>
+        } />
+      {linePushing && (
+        <div className="sticky bottom-16 z-30 mx-auto max-w-md rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
+          กำลังส่งราคาไป LINE… <b className="tabular-nums">{linePushing.done}/{linePushing.total}</b>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-violet-500" style={{ width: `${Math.round((linePushing.done / Math.max(1, linePushing.total)) * 100)}%` }} /></div>
+        </div>
+      )}
+
+      {fakeRows && <FakePriceDialog rows={fakeRows} onApply={applyFakePrices} onClose={() => setFakeRows(null)} />}
+
+      {/* ข้อ 8: ลงซ้ำ — ดูทุกรายการที่จับคู่กับรุ่นนี้บนร้านเดียวกัน */}
+      {dupFor && (() => { const c = dupFor.row.cells[dupFor.code]; return (
+        <ERPModal open onClose={() => setDupFor(null)} title={`ลงซ้ำบน ${names[dupFor.code]} — ${dupFor.row.code}`} size="md"
+          description={`สินค้านี้จับคู่กับ ${c?.dups.length ?? 0} รายการบนร้านเดียวกัน`}>
+          <div className="space-y-2 p-1 text-sm">
+            {(c?.dups ?? []).map((d, i) => (
+              <div key={d.id} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-slate-800" title={d.title ?? ""}>{d.title ?? "—"}</div>
+                  <div className="text-xs text-slate-500">{STATE_LABEL[d.status ?? ""] ?? d.status ?? "—"} · {baht(d.price)}{i === 0 ? " · ตัวที่แสดงในตาราง" : ""}</div>
+                </div>
+                <button type="button" onClick={() => { setDupFor(null); setOpenId(d.id); }} className="h-8 shrink-0 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50">เปิด</button>
+              </div>
+            ))}
+            <p className="text-xs text-slate-500">
+              ตัวที่ไม่ใช้แล้ว: ปิดขายบนร้าน (ในลิ้นชัก ถ้าร้านนั้นรองรับ) หรือไป <a className="text-violet-700 underline" href={matchHref(dupFor.code)}>หน้าจับคู่ {names[dupFor.code]}</a> แล้วยกเลิกคู่/กด &quot;ไม่ต้องจับคู่ตัวนี้&quot; — ตัวเลข ×2 จะหายเอง
+            </p>
+          </div>
+        </ERPModal>
+      ); })()}
 
       {addFor && (
         <AddToPlatformWizard open parents={addFor.parents} brandId={brandId} initialPlatformCodes={addFor.codes}

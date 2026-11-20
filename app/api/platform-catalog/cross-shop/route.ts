@@ -32,3 +32,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ...empty, error: "โหลดข้อมูลไม่สำเร็จ ลองกดรีเฟรชอีกครั้ง" }, { status: 500, headers: NO_STORE });
   }
 }
+
+/**
+ *  POST { parent_ids: string[] } (≤ 500 · products.platforms.view · อ่านอย่างเดียว)
+ *    → { skus: { id, code, parent_sku_id, sale, fake }[] } SKU เปิดขายของรุ่นที่ติ๊ก — ป้อนหน้าต่าง "ใส่ราคาเต็ม" (FakePriceDialog)
+ *    บันทึกไม่ได้ทำที่นี่: หน้าส่งต่อ POST /api/master-v2/skus/bulk-update (products.edit + audit) ทางเดิมของปุ่มรายรุ่น
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
+  let ids: string[] = [];
+  try { const b = await request.json() as { parent_ids?: unknown }; ids = Array.isArray(b.parent_ids) ? b.parent_ids.filter((x): x is string => typeof x === "string" && !!x) : []; }
+  catch { return NextResponse.json({ skus: [], error: "ข้อมูลไม่ถูกต้อง" }, { status: 400, headers: NO_STORE }); }
+  if (!ids.length) return NextResponse.json({ skus: [], error: "ยังไม่ได้เลือกสินค้า" }, { status: 400, headers: NO_STORE });
+  if (ids.length > 500) return NextResponse.json({ skus: [], error: "เลือกได้ครั้งละไม่เกิน 500 รุ่น" }, { status: 400, headers: NO_STORE });
+  const admin = supabaseAdmin();
+  const out: { id: string; code: string; parent_sku_id: string; sale: number | null; fake: number | null }[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from("skus_v2").select("id, code, parent_sku_id, list_price, fake_price, is_active, sale_ok")
+      .in("parent_sku_id", ids.slice(i, i + 200)).order("code", { ascending: true }).limit(5000);
+    if (error) { console.error("[cross-shop skus]", error); return NextResponse.json({ skus: [], error: "โหลด SKU ไม่สำเร็จ" }, { status: 500, headers: NO_STORE }); }
+    for (const s of (data ?? []) as { id: string; code: string; parent_sku_id: string; list_price: number | null; fake_price: number | null; is_active: boolean | null; sale_ok: boolean | null }[]) {
+      if (s.is_active === false || s.sale_ok === false) continue;
+      out.push({ id: s.id, code: s.code, parent_sku_id: s.parent_sku_id, sale: s.list_price != null ? Number(s.list_price) : null, fake: s.fake_price != null ? Number(s.fake_price) : null });
+    }
+  }
+  return NextResponse.json({ skus: out, error: null }, { headers: NO_STORE });
+}

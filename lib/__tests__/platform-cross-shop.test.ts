@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCell, cellIssues, crossPriceDiff, emptyCell, listingDetails, matchPresence, missingShopCodes, presenceCounts, rowHasIssue,
+  buildCell, cellIssues, crossPriceDiff, emptyCell, listableMissing, listingDetails, matchPresence, missingShopCodes, presenceCounts, readyToList, rowHasIssue,
   titleHasBrand, titleHasCode, titleLength, type CrossCell, type CrossRow,
 } from "@/lib/platform-cross-shop";
 import type { SkuLite } from "@/lib/platform-variant-match";
@@ -45,6 +45,7 @@ describe("buildCell", () => {
     const c = buildCell("tiktok", [{ id: "T0", title: "a", status: null, price: null, raw: off }, { id: "T1", title: "b", status: null, price: null, raw: on }], ctx);
     expect(c.listings).toBe(2);
     expect(c.lid).toBe("T1");
+    expect(c.dups.map((d) => d.id)).toEqual(["T1", "T0"]);
   });
 });
 
@@ -114,5 +115,31 @@ describe("ปัญหา + ตัวกรอง", () => {
   });
   it("ร้านที่ขาด ไม่รวม 'อาจมีแล้ว' (ต้องไปจับคู่ก่อน)", () => {
     expect(missingShopCodes(r, shops)).toEqual(["lazada"]);
+  });
+});
+
+describe("Website · ลงซ้ำ · พร้อมลงเลย", () => {
+  const shops = ["shopee", "lazada", "website"];
+  it("Website ไม่ถูกส่งเข้าตัวช่วยลงสินค้า และไม่ตรวจเรื่องอื่น", () => {
+    const r = row({ shopee: { st: "none" }, lazada: {}, website: { st: "none" } });
+    expect(missingShopCodes(r, shops)).toEqual(["shopee", "website"]);
+    expect(listableMissing(r, shops)).toEqual(["shopee"]);
+    const w = row({ website: { st: "selling", pay_diff: 3 } });
+    expect(cellIssues("price", w, "website", "x")).toEqual([]);
+  });
+  it("ตัวกรองลงซ้ำ", () => {
+    const r = row({ shopee: { listings: 2 }, lazada: {} });
+    expect(matchPresence(r, "dup", shops)).toBe(true);
+    expect(matchPresence(row({ shopee: { listings: 1 } }), "dup", shops)).toBe(false);
+  });
+  it("พร้อมลงเลย = ผลตรวจล่าสุดพร้อมครบทุกร้านที่ขาด", () => {
+    const at = "2026-11-20T00:00:00Z";
+    const r = { ...row({ shopee: { st: "none" }, lazada: { st: "none" }, website: { st: "none" } }),
+      ready: { shopee: { ready: true, on_shop: null, missing: [], at }, lazada: { ready: true, on_shop: null, missing: [], at } } };
+    expect(readyToList(r, shops)).toBe(true);
+    expect(readyToList({ ...r, ready: { shopee: r.ready.shopee } }, shops)).toBe(false);
+    expect(readyToList({ ...r, ready: { ...r.ready, lazada: { ...r.ready.lazada, ready: false } } }, shops)).toBe(false);
+    expect(readyToList(row({ shopee: {}, lazada: {} }), shops)).toBe(false);
+    expect(presenceCounts([r], shops)).toMatchObject({ ready: 1, dup: 0 });
   });
 });

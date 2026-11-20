@@ -71,7 +71,13 @@ export type CrossCell = {
   weight: number | null;
   /** ช่อง maybe: รายการบนร้านที่ตัวเดาชี้มา */
   maybe: { lid: string; title: string | null; score: number } | null;
+  /** ลงซ้ำ (listings > 1): ทุกรายการบนร้านที่จับคู่กับรุ่นนี้ — ไว้เปิดดูทีละตัว */
+  dups: { id: string; title: string | null; status: string | null; price: number | null }[];
+  /** Website: ชื่อหน้าร้านเว็บที่มีสินค้านี้ */
+  web_shops?: string[];
 };
+/** ผล "พร้อมลง" ที่ตรวจไว้ล่วงหน้า (cron ทุกคืน / ตรวจสดล่าสุด · ตาราง platform_create_readiness) */
+export type CrossReady = { ready: boolean; on_shop: string | null; missing: string[]; at: string };
 /** ข้อมูลฝั่งระบบของรุ่นนี้ */
 export type CrossOur = {
   /** ราคาขาย/ราคาเต็มต่ำสุดของ SKU ที่เปิดขาย */
@@ -86,7 +92,7 @@ export type CrossOur = {
   weight_g: number | null;
   box: boolean;
 };
-export type CrossRow = { id: string; code: string; name: string | null; name_platform: string | null; cover_key: string | null; our: CrossOur; cells: Record<string, CrossCell> };
+export type CrossRow = { id: string; code: string; name: string | null; name_platform: string | null; cover_key: string | null; our: CrossOur; cells: Record<string, CrossCell>; ready?: Record<string, CrossReady> };
 export type CrossShop = { code: string; name: string; state: "on" | "hidden" | "noshop" };
 export type CrossShopResponse = {
   brand: { id: string; name: string } | null;
@@ -99,7 +105,7 @@ export type CrossShopResponse = {
 
 export const emptyCell = (st: CrossCellState): CrossCell => ({
   st, listings: 0, lid: null, title: null, price: null, sale: null, pay_diff: 0, full_diff: 0, priced: 0, stock: null,
-  vars: 0, v_unknown: 0, v_missing: 0, images: null, category: null, weight: null, maybe: null,
+  vars: 0, v_unknown: 0, v_missing: 0, images: null, category: null, weight: null, maybe: null, dups: [],
 });
 
 /** รูป/หมวด/น้ำหนักจากข้อมูลดิบของร้าน — ร้านที่ไม่ส่งมา = null (ไม่รู้ ≠ ไม่มี) */
@@ -152,6 +158,7 @@ export function buildCell(code: string, listings: CellListing[], ctx: CellCtx): 
   const { l, s } = sums[0];
   const cell = emptyCell(s.state === "gone" ? "none" : s.state);
   cell.listings = live.length; cell.lid = l.id; cell.title = l.title;
+  if (live.length > 1) cell.dups = sums.map(({ l: x, s: y }) => ({ id: x.id, title: x.title, status: y.state, price: y.salePrice ?? y.price }));
   cell.price = s.price; cell.sale = s.salePrice; cell.stock = s.stock;
   Object.assign(cell, listingDetails(code, l.raw));
   const vs = shopVariantsOf(code, l.raw);
@@ -195,6 +202,7 @@ export function cellIssues(dim: CrossDim, row: CrossRow, code: string, brandName
     return out;
   }
   if (c.st === "none" || c.st === "maybe") return [];
+  if (code === WEBSITE) return [];   // หน้าร้านเว็บ: ตรวจได้แค่ "ลงแล้วหรือยัง" (ราคา/ชื่อ ใช้ข้อมูลระบบตรง ๆ อยู่แล้ว)
   if (dim === "price") {
     if (c.pay_diff) out.push({ tone: "danger", text: `ราคาจ่ายไม่ตรง ${c.pay_diff} ตัวเลือก` });
     if (c.full_diff) out.push({ tone: "info", text: `ราคาเต็มไม่ตรง ${c.full_diff} ตัวเลือก` });
@@ -231,7 +239,9 @@ export const rowHasIssue = (dim: CrossDim, row: CrossRow, shopCodes: string[], b
   shopCodes.some((code) => cellIssues(dim, row, code, brandName, shopCodes).some((i) => i.tone !== "info"));
 
 // ───────── ตัวกรองการลงร้าน ─────────
-export type PresenceFilter = "" | "missing" | "none" | "all" | `miss:${string}`;
+export type PresenceFilter = "" | "missing" | "none" | "all" | "dup" | "ready" | `miss:${string}`;
+/** หน้าร้านเว็บของเราเอง — อยู่ในตาราง แต่ลงผ่านแท็บเว็บไซต์ของ Parent SKU ไม่ใช่ตัวช่วยลงสินค้า */
+export const WEBSITE = "website";
 const isMissing = (c: CrossCell | undefined): boolean => !c || c.st === "none" || c.st === "maybe";
 
 export function matchPresence(row: CrossRow, f: PresenceFilter, shopCodes: string[]): boolean {
@@ -239,18 +249,22 @@ export function matchPresence(row: CrossRow, f: PresenceFilter, shopCodes: strin
   if (f === "missing") return shopCodes.some((s) => isMissing(row.cells[s]));
   if (f === "none") return shopCodes.every((s) => isMissing(row.cells[s]) && row.cells[s]?.st !== "maybe");
   if (f === "all") return shopCodes.every((s) => !isMissing(row.cells[s]));
+  if (f === "dup") return shopCodes.some((s) => (row.cells[s]?.listings ?? 0) > 1);
+  if (f === "ready") return readyToList(row, shopCodes);
   const code = f.slice(5);
   return isMissing(row.cells[code]);
 }
 
 /** นับไว้บนชิปตัวกรอง */
 export function presenceCounts(rows: CrossRow[], shopCodes: string[]): Record<string, number> {
-  const out: Record<string, number> = { "": rows.length, missing: 0, none: 0, all: 0 };
+  const out: Record<string, number> = { "": rows.length, missing: 0, none: 0, all: 0, dup: 0, ready: 0 };
   for (const s of shopCodes) out[`miss:${s}`] = 0;
   for (const r of rows) {
     if (matchPresence(r, "missing", shopCodes)) out.missing++;
     if (matchPresence(r, "none", shopCodes)) out.none++;
     if (matchPresence(r, "all", shopCodes)) out.all++;
+    if (matchPresence(r, "dup", shopCodes)) out.dup++;
+    if (readyToList(r, shopCodes)) out.ready++;
     for (const s of shopCodes) if (isMissing(r.cells[s])) out[`miss:${s}`]++;
   }
   return out;
@@ -258,3 +272,12 @@ export function presenceCounts(rows: CrossRow[], shopCodes: string[]): Record<st
 
 /** ร้านที่รุ่นนี้ยังไม่ลง (ไม่นับ "อาจมีแล้ว" — ควรไปจับคู่ก่อน ไม่ใช่ลงซ้ำ) → ส่งให้ตัวช่วยลงสินค้า */
 export const missingShopCodes = (row: CrossRow, shopCodes: string[]): string[] => shopCodes.filter((s) => row.cells[s]?.st === "none");
+
+/** ร้านที่ขาดและลงผ่านตัวช่วยลงสินค้าได้ (ไม่รวมหน้าร้านเว็บ) */
+export const listableMissing = (row: CrossRow, shopCodes: string[]): string[] => missingShopCodes(row, shopCodes).filter((c) => c !== WEBSITE);
+
+/** "พร้อมลงเลย" = ขาดอย่างน้อย 1 ร้าน และผลตรวจล่าสุดบอกว่าพร้อมครบทุกร้านที่ขาด */
+export function readyToList(row: CrossRow, shopCodes: string[]): boolean {
+  const codes = listableMissing(row, shopCodes);
+  return codes.length > 0 && codes.every((c) => row.ready?.[c]?.ready === true);
+}

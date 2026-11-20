@@ -23,6 +23,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { StatFilterCards } from "@/components/stat-filter-cards";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
+import { FileTypeIcon } from "@/components/file-type-icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
 import { IgnoreDialog, IGNORE_REASON_DUP } from "@/components/platform-catalog/ignore-dialog";
@@ -1109,7 +1110,7 @@ export default function PlatformCatalogPage() {
       )}
       <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2 mb-1">
-        <h1 className="mr-auto text-xl font-semibold text-slate-900">🛒 สินค้าบนแพลตฟอร์ม</h1>
+        <h1 className="mr-auto inline-flex items-center gap-2 text-xl font-semibold text-slate-900"><Icon name="store" />สินค้าบนแพลตฟอร์ม</h1>
         {!gate && (
           <>
             <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
@@ -1126,7 +1127,7 @@ export default function PlatformCatalogPage() {
             </button>
           </>
         )}
-        <button onClick={() => setShowHelp((v) => !v)} className="shrink-0 h-9 px-3 text-sm text-sky-700 border border-sky-200 bg-sky-50 rounded-lg hover:bg-sky-100">{showHelp ? "ซ่อนวิธีใช้" : <><span aria-hidden>ℹ️</span><span className="hidden sm:inline"> วิธีใช้</span></>}</button>
+        <button onClick={() => setShowHelp((v) => !v)} className="shrink-0 h-9 px-3 text-sm text-sky-700 border border-sky-200 bg-sky-50 rounded-lg hover:bg-sky-100">{showHelp ? "ซ่อนวิธีใช้" : <span className="inline-flex items-center gap-1"><Icon name="info" /><span className="hidden sm:inline">วิธีใช้</span></span>}</button>
       </div>
       <p className="text-sm text-slate-500 mb-3 hidden sm:block">ดูว่าแต่ละร้านมีสินค้าอะไร แล้วจับคู่กับสินค้าในระบบเรา — จับคู่แล้วถึงจะเทียบสต๊อก/ส่งราคาได้ถูกตัว</p>
 
@@ -1284,7 +1285,7 @@ export default function PlatformCatalogPage() {
               const isOrders = getProfile(it.profileId, customProfiles)?.kind === "orders";
               return (
                 <div key={it.id} className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
-                  <span className="text-sm text-slate-700 truncate max-w-[16rem]" title={it.fileName}>📄 {it.fileName}</span>
+                  <span className="text-sm text-slate-700 truncate max-w-[16rem]" title={it.fileName}><FileTypeIcon ext={it.fileName} size={14} className="mr-1 align-middle" />{it.fileName}</span>
                   <span className="text-slate-300">→</span>
                   <select value={it.profileId} onChange={(e) => setQueueProfile(it.id, e.target.value)} disabled={importing} className="h-8 border border-violet-200 rounded-md px-2 text-sm bg-white max-w-full">
                     {profileOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
@@ -1327,7 +1328,7 @@ export default function PlatformCatalogPage() {
         : loadError ? <ErrorState hint={loadError} onRetry={load} />
         : tab === "catalog" ? (
           listings.length === 0 ? (
-            <EmptyState icon="🛒" title={`ยังไม่มีสินค้าจาก ${where}`}
+            <EmptyState icon={<Icon name="store" />} title={`ยังไม่มีสินค้าจาก ${where}`}
               hint={platformCode === "line_shopping" ? "กดปุ่ม “ตั้งค่า” ด้านบน → ดึงสินค้าจาก LINE แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
                 : platformCode === "tiktok" ? "กด ดึงสินค้าจาก TikTok (ต้องเชื่อมร้านก่อนที่หน้าบัญชีแพลตฟอร์ม) แล้วระบบจะช่วยจับคู่ให้"

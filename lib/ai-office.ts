@@ -119,6 +119,25 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/lazada-token/route.ts", "lib/lazada.ts", "app/api/shopee/shared.ts", "lib/shopee.ts"],
   },
 
+  {
+    id: "platform-readiness", zone: "sales", kind: "auto", icon: "✅",
+    title: "ผู้ตรวจความพร้อมลงร้าน", titleEn: "Listing readiness checker",
+    does: "ตรวจตอนกลางคืนว่ารุ่นที่ยังไม่ลงบางร้าน ข้อมูลครบพอลงร้านนั้นหรือยัง แล้วจดไว้ให้หน้าเช็กข้ามร้านกรอง \"พร้อมลงเลย\"",
+    trigger: `${DAILY} 00:00-04:30 (ทุก 30 นาที)`, cron: "/api/cron/platform-readiness", everyHours: 24,
+    can: ["อ่านข้อมูลสินค้าและถามข้อกำหนดของร้าน", "จดผลความพร้อม"], cannot: ["ลงสินค้าขึ้นร้าน", "สร้างร่าง", "แก้ข้อมูลสินค้า"],
+    source: "บันทึกรอบล่าสุด + ตาราง platform_create_readiness", href: "/master/platform-catalog",
+    files: ["app/api/cron/platform-readiness/route.ts", "lib/platform-create-readiness-server.ts", "lib/platform-readiness-store.ts"],
+  },
+  {
+    id: "platform-cross-daily", zone: "sales", kind: "auto", icon: "🧾",
+    title: "ผู้สรุปเช็กข้ามร้าน", titleEn: "Cross-shop daily digest",
+    does: "ทุกเช้าดูว่ามีรุ่นที่ยังไม่ลงบางร้าน หรือราคาบนร้านไม่ตรงระบบ เพิ่มขึ้นจากเมื่อวานไหม แล้วแจ้งกระดิ่ง",
+    trigger: `${DAILY} 09:10`, cron: "/api/cron/platform-cross-daily", everyHours: 24,
+    can: ["อ่านรายการบนร้านทุกร้าน", "ส่งแจ้งเตือน"], cannot: ["แก้ราคาบนร้าน", "ลงสินค้าขึ้นร้าน"],
+    source: "บันทึกรอบล่าสุด + แจ้งเตือน platform.cross_daily (ส่งเฉพาะวันที่มีของใหม่)", href: "/master/platform-catalog",
+    files: ["app/api/cron/platform-cross-daily/route.ts", "lib/platform-cross-shop-server.ts"],
+  },
+
   // ── จัดซื้อ & คลัง ──
   {
     id: "line-order-ai", zone: "purchase", kind: "ai", icon: "💬",

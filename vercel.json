@@ -39,6 +39,14 @@
       "schedule": "5 1 * * *"
     },
     {
+      "path": "/api/cron/platform-readiness",
+      "schedule": "0,30 17-21 * * *"
+    },
+    {
+      "path": "/api/cron/platform-cross-daily",
+      "schedule": "10 2 * * *"
+    },
+    {
       "path": "/api/cron/perf-watch",
       "schedule": "0 21 * * *"
     }

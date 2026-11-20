@@ -318,3 +318,12 @@
 - **ป้ายพร้อมลง** = `/api/product-platforms/create-readiness` ตัวเดียวกับตัวช่วย · ตรวจเฉพาะแถวที่เลื่อนมาเห็น ทีละ 2 แถว จำผล 10 นาที (ตัวตรวจถามร้านจริง)
 - **ข้อมูล:** GET `/api/platform-catalog/cross-shop?brand_id=` → `lib/platform-cross-shop-server.ts` (อ่านทุกร้านพร้อมกันผ่าน `loadListingsWithRaw` · ตัวเดาคู่เฉพาะร้านที่มีรายการยังไม่จับคู่) · อ่านอย่างเดียว
 - `shopVariantsOf` อ่าน Shopee ผ่าน API (raw.shopee.models) ได้แล้ว → ลิ้นชักรายการ Shopee เห็นตัวเลือก/ราคาต่อ SKU ด้วย
+
+### เช็กข้ามร้าน รอบ 2 (2026-11-20 · เจ้าของเลือกข้อ 1, 2, 3, 5, 6, 7, 8, 9)
+- **ไปจับคู่** — ป้ายเตือนมีปุ่ม "ไปจับคู่ <ร้าน> N" → `/master/platform-catalog?brand=&platform=` (ยืนยันที่การ์ด "รอยืนยัน" ทางเดิม)
+- **ใส่ราคาเต็มหลายรุ่น** — ติ๊กแล้วกด "ใส่ราคาเต็ม" → `POST /api/platform-catalog/cross-shop {parent_ids}` (SKU เปิดขาย) → `FakePriceDialog` เดิม → บันทึก `POST /api/master-v2/skus/bulk-update` (products.edit + audit) · ย้อนกลับได้จากแจ้งผลมุมจอ 10 วินาที
+- **ส่งราคาตามระบบ** (products.platforms.publish) — LINE: ส่งทีเดียวผ่าน `/api/line-shopping/push-prices` ทีละรุ่น เว้น 0.4 วิ · ยืนยันพร้อมตารางก่อน/หลัง (เกิน 20 รุ่นพิมพ์ "ยืนยัน") · Shopee/TikTok/Lazada: "ไล่แก้ทีละรายการ" เปิดลิ้นชักเดิมต่อกันไป (ร้านพวกนี้ส่งราคาได้ทีละรายการ เช็กราคาบนร้านล่าสุดก่อนส่ง) · ราคาที่ส่งขึ้นร้านแล้วดึงกลับอัตโนมัติไม่ได้
+- **คอลัมน์ Website** — อ่าน `store_listings` (ร้าน active · is_published) = ขึ้นเว็บแล้ว / เพิ่มแล้วแต่ซ่อน / ยังไม่ขึ้นเว็บ · กดช่อง → เปิด Parent SKU แท็บเว็บไซต์ · ไม่ส่งเข้าตัวช่วยลงสินค้า (`listableMissing`) และไม่ตรวจราคา/ชื่อ
+- **พร้อมลงล่วงหน้า** — ตัวตรวจย้ายเป็นของกลาง `lib/platform-create-readiness-server` · ผลจดใน `platform_create_readiness` (`lib/platform-readiness-store`) · cron `/api/cron/platform-readiness` 00:00-04:30 (ทุก 30 นาที · ตัวเก่าสุดก่อน · ข้ามที่ตรวจใน 20 ชม. · ทีละ 2 รุ่น · รอบละ ~4 นาที) · ตรวจสดในหน้าก็จดทับ · ป้ายขึ้นทันที กดป้าย = ตรวจใหม่ · ตัวกรอง "พร้อมลงเลย"
+- **สรุปทุกเช้า** — cron `/api/cron/platform-cross-daily` 09:10 → กระดิ่ง `platform.cross_daily` เฉพาะวันที่ขาดเพิ่ม/ราคาไม่ตรงเพิ่ม (เทียบ ui_config `platform_cross_daily:<brand>`) · คนรับตามกฎแจ้งเตือน (ไม่มีกฎ = แอดมิน)
+- **ลงซ้ำ** — ตัวกรอง "ลงซ้ำ" + กดช่อง ×N → ป๊อปรายการทั้งหมด เปิดทีละตัว
