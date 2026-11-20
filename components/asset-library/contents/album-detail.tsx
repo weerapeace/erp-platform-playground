@@ -615,17 +615,17 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                         {canEdit && (
                           <>
                             <button onPointerDown={(e) => e.stopPropagation()} onClick={() => togglePick(f)} aria-pressed={f.picked} aria-label={f.picked ? t("เลิกเลือก", "Unpick") : t("เลือกใช้", "Pick")} title={f.picked ? t("เลิกเลือก", "Unpick") : t("เลือกใช้รูปนี้", "Pick this")}
-                              className={`absolute top-1 left-1 w-7 h-7 grid place-items-center rounded-full border-2 shadow-sm ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/80 border-white text-transparent hover:text-slate-400"}`}><Icon name="done" size={15} /></button>
+                              className={`absolute top-1 left-1 w-7 h-7 grid place-items-center rounded-full border-2 shadow-sm ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/70 border-white hover:bg-white"}`}>{f.picked && <Icon name="done" size={15} />}</button>
                             <button onPointerDown={(e) => e.stopPropagation()} onClick={() => setCover(f)} aria-label={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")} title={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")}
-                              className={`absolute top-1 right-1 w-7 h-7 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
+                              className={`absolute top-1 right-1 w-7 h-7 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 [filter:grayscale(1)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
                           </>
                         )}
                         {canEdit && files.length > 1 && (
                           <>
                             {i > 0 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i - 1)} aria-label={t("เลื่อนไปก่อนหน้า", "Move earlier")}
-                              className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
+                              className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 hidden sm:grid place-items-center rounded-md bg-white/90 text-slate-700 shadow sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
                             {i < files.length - 1 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i + 1)} aria-label={t("เลื่อนไปถัดไป", "Move later")}
-                              className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">›</button>}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 hidden sm:grid place-items-center rounded-md bg-white/90 text-slate-700 shadow sm:opacity-0 sm:group-hover:opacity-100">›</button>}
                           </>
                         )}
                         {can("assets.delete") && (
