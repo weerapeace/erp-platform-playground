@@ -1,7 +1,7 @@
 /**
  * /api/pattern-tickets/[id] — ตั๋วงานช่าง Pattern รายใบ
  *
- * GET   → { data: ticket, actions: ปุ่มที่กดได้, can_edit, can_work, design_sheets: การ์ด Design sheet ที่แนบ, can_open_sheets }   (pattern.view)
+ * GET   → { data: ticket, actions: ปุ่มที่กดได้, rounds: ประวัติรอบส่ง (จาก audit_logs), can_edit, can_work, design_sheets: การ์ด Design sheet ที่แนบ, can_open_sheets }   (pattern.view)
  *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · รุ่นสินค้า (parent_sku การ์ด) = GET ./parent-sku · can_open_sheets = ทุกคนที่ดูตั๋วได้ (รวมพนักงาน)
  * PATCH { action: "transition", key, note? }     เปลี่ยนสถานะ (ประตูเดียว · กติกา lib/pattern-tickets allowedActions)
  *       { action: "update", fields: {...} }      แก้รายละเอียด (ผู้สั่ง/ผู้จัดการ) · รวม design_sheet_ids (แนบ/เอาออก Design sheet)
@@ -13,9 +13,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
-import { allowedActions, canEditTicket, canOpenTicketSheet, canWorkOn, cleanChecklist, cleanLinks, cleanSheetIds, patternActionByKey } from "@/lib/pattern-tickets";
-import { loadActor, PATTERN_TABLE } from "@/lib/pattern-tickets-server";
+import { auditDiff, writeAudit } from "@/lib/audit";
+import { allowedActions, canEditTicket, canOpenTicketSheet, canWorkOn, cleanChecklist, cleanLinks, cleanSheetIds, patternActionByKey, ROUND_EVENT_ACTIONS, submissionRounds } from "@/lib/pattern-tickets";
+import { loadActor, notifyPatternUser, PATTERN_TABLE } from "@/lib/pattern-tickets-server";
 import { loadSheetCards } from "@/lib/design-sheet-view-server";
 import { loadParentCard } from "@/lib/parent-sku-view-server";
 
@@ -34,10 +34,17 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   ]);
   if (error) return NextResponse.json({ error: "โหลดตั๋วไม่สำเร็จ" }, { status: 500 });
   if (!data) return NextResponse.json({ error: "ไม่พบตั๋วนี้" }, { status: 404 });
-  const [design_sheets, parent_sku] = await Promise.all([
+  const [design_sheets, parent_sku, roundLogs] = await Promise.all([
     loadSheetCards(admin, cleanSheetIds(data.design_sheet_ids)),
     loadParentCard(admin, data.parent_sku_id as string | null),
+    // ประวัติรอบส่ง = อ่านจาก audit_logs ที่จดอยู่แล้ว (ไม่มีตารางใหม่)
+    admin.from("audit_logs").select("action, metadata, created_at").eq("entity_type", PATTERN_TABLE).eq("entity_id", id).in("action", ROUND_EVENT_ACTIONS).order("created_at", { ascending: true }).limit(200),
   ]);
+  const rounds = submissionRounds(((roundLogs.data ?? []) as { action: string; metadata: Record<string, unknown> | null; created_at: string }[]).map((r) => ({
+    action: r.action, created_at: r.created_at,
+    actor_name: (r.metadata?.actor as string | null) ?? null,
+    note: (r.metadata?.note as string | null) ?? null,
+  })));
   return NextResponse.json({
     data,
     actions: allowedActions(data, actor),
@@ -46,6 +53,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
     can_assign: actor.canManage || (!!actor.userId && data.requester_id === actor.userId),
     design_sheets,
     parent_sku,
+    rounds,
     can_open_sheets: canOpenTicketSheet(actor),
     error: null,
   });
@@ -83,16 +91,32 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       const note = String(body.note ?? "").trim().slice(0, 1000);
       if (act.needNote && !note) return NextResponse.json({ error: "กรุณาใส่เหตุผล" }, { status: 400 });
       const patch: Record<string, unknown> = { status: act.to };
-      if (act.key === "claim") {
-        patch.started_at = now;
+      // รับงาน · ส่งงานเลยจาก "รอรับงาน" = รับงานให้ด้วย (ลงชื่อช่าง + เวลาเริ่ม)
+      if (act.key === "claim" || (act.key === "submit" && t.status === "new")) {
+        patch.started_at = t.started_at ?? now;
         if (!t.assignee_id) { patch.assignee_id = actor.userId; patch.assignee_name = actor.name; }
       }
       if (act.key === "submit" || act.key === "resubmit") patch.submitted_at = now;
+      if (act.key === "withdraw") patch.submitted_at = null;
       if (act.key === "approve") patch.done_at = now;
-      if (act.key === "reopen") patch.done_at = null;
+      if (act.key === "reopen" || act.key === "unapprove") patch.done_at = null;
       if (note) patch.last_note = note;
+      else if (act.submitForm) patch.last_note = null;   // ส่งรอบใหม่ไม่มีโน้ต = ล้างเหตุผลรอบก่อนออกจากป้าย
       const res = await save(patch);
-      if (res.status === 200) await audit(`pattern.${act.key}`, { from: t.status, to: act.to, note: note || undefined });
+      if (res.status === 200) {
+        await audit(`pattern.${act.key}`, { from: t.status, to: act.to, note: note || undefined, changes: auditDiff(t, patch) });
+        // แจ้งเตือน: ส่งงาน → ผู้สั่ง · อนุมัติ/ส่งกลับ/ย้อนอนุมัติ → ช่าง
+        const label = `${t.ticket_no ?? ""} ${t.title}`.trim();
+        const assignee = (patch.assignee_id as string | undefined) ?? (t.assignee_id as string | null);
+        if (act.key === "submit" || act.key === "resubmit") {
+          await notifyPatternUser(admin, { userId: t.requester_id, actorId: actor.userId, eventType: "pattern.submitted", ticketId: id, priority: "high",
+            title: `ส่งงานรออนุมัติ · ${label}`, body: `${actor.name ?? "ช่าง"} ส่งงานแล้ว${note ? ` — ${note}` : ""}` });
+        } else if (act.key === "approve" || act.key === "reject" || act.key === "unapprove") {
+          const word = act.key === "approve" ? "อนุมัติงานแล้ว" : act.key === "reject" ? "ส่งกลับให้แก้" : "ย้อนการอนุมัติ";
+          await notifyPatternUser(admin, { userId: assignee, actorId: actor.userId, eventType: `pattern.${act.key === "approve" ? "approved" : act.key === "reject" ? "sent_back" : "unapproved"}`, ticketId: id,
+            priority: act.key === "approve" ? "normal" : "high", title: `${word} · ${label}`, body: note ? `${actor.name ?? ""}: ${note}` : actor.name });
+        }
+      }
       return res;
     }
 

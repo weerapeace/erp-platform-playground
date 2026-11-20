@@ -2,14 +2,17 @@
  * ตั๋วงานช่าง Pattern — กติกากลาง (ไฟล์ pure ใช้ได้ทั้งหน้าจอ + API + เทสต์)
  *
  * เส้นทางสถานะ:
- *   รอรับงาน → กำลังทำ → รอตรวจ → เสร็จแล้ว
- *                          ↘ ต้องแก้ → (กำลังทำ / รอตรวจ)
- *   ยกเลิกได้ก่อนเสร็จ (ผู้สั่ง/ผู้จัดการ) · เปิดงานใหม่จากเสร็จ (ผู้จัดการ)
+ *   รอรับงาน → กำลังทำ → รออนุมัติ → เสร็จแล้ว (อนุมัติ)
+ *      ↘ ส่งงานเลย (รับงาน+ส่ง คลิกเดียว)   ↘ ส่งกลับแก้ → (กำลังทำ / รออนุมัติ)
+ *   รออนุมัติ → ถอนการส่ง (ช่าง · ก่อนมีคนอนุมัติ) → กำลังทำ
+ *   เสร็จแล้ว → ย้อนการอนุมัติ (ผู้จัดการ + เหตุผล) → รออนุมัติ · เปิดงานใหม่ (ผู้จัดการ) → กำลังทำ
+ *   ยกเลิกได้ก่อนเสร็จ (ผู้สั่ง/ผู้จัดการ)
+ *   (เจ้าของขอ 2026-11-20 "ส่งงานได้ด้วย แต่รออนุมัติ" — ต่อยอดขั้นส่งตรวจเดิม ไม่ได้สร้างระบบอนุมัติใหม่)
  *
  * ใครทำอะไรได้:
- *   ช่าง (pattern.work)          = รับงาน · ส่งตรวจ · ติ๊กเช็กลิสต์ · แนบไฟล์งาน
- *   ผู้สั่ง (คนเปิดตั๋ว)          = อนุมัติ · ตีกลับ · ยกเลิก · แก้รายละเอียด
- *   ผู้จัดการ (pattern.manage)   = ทำได้ทุกอย่าง + มอบหมายช่าง + เปิดงานใหม่
+ *   ช่าง (pattern.work)          = รับงาน · ส่งงาน · ถอนการส่ง · ติ๊กเช็กลิสต์ · แนบไฟล์งาน
+ *   ผู้สั่ง (คนเปิดตั๋ว)          = อนุมัติ · ส่งกลับแก้ · ยกเลิก · แก้รายละเอียด
+ *   ผู้จัดการ (pattern.manage)   = ทำได้ทุกอย่าง + มอบหมายช่าง + เปิดงานใหม่ + ย้อนการอนุมัติ
  * ประตูบันทึกสถานะเดียว = PATCH /api/pattern-tickets/[id] (action: "transition")
  */
 
@@ -21,8 +24,8 @@ export type PatternPriority = "normal" | "urgent";
 export const PATTERN_STATUSES: { key: PatternStatus; th: string; en: string; cls: string }[] = [
   { key: "new",       th: "รอรับงาน",  en: "New",            cls: "bg-slate-100 text-slate-600 border-slate-200" },
   { key: "doing",     th: "กำลังทำ",   en: "In progress",    cls: "bg-blue-50 text-blue-700 border-blue-200" },
-  { key: "review",    th: "รอตรวจ",    en: "In review",      cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  { key: "fix",       th: "ต้องแก้",    en: "Needs revision", cls: "bg-red-50 text-red-700 border-red-200" },
+  { key: "review",    th: "รออนุมัติ",  en: "Waiting approval", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  { key: "fix",       th: "ส่งกลับแก้",  en: "Sent back",      cls: "bg-red-50 text-red-700 border-red-200" },
   { key: "done",      th: "เสร็จแล้ว",  en: "Done",           cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   { key: "cancelled", th: "ยกเลิก",    en: "Cancelled",      cls: "bg-slate-100 text-slate-400 border-slate-200" },
 ];
@@ -47,24 +50,28 @@ export type PatternActor = { userId: string | null; canWork: boolean; canManage:
 export type PatternTicketLite = { status: string; requester_id: string | null; assignee_id: string | null };
 
 export type PatternAction = {
-  key: "claim" | "submit" | "approve" | "reject" | "resume" | "resubmit" | "cancel" | "reopen";
+  key: "claim" | "submit" | "approve" | "reject" | "resume" | "resubmit" | "withdraw" | "unapprove" | "cancel" | "reopen";
   to: PatternStatus;
   th: string;
   en: string;
   /** ต้องใส่เหตุผล/คำอธิบาย */
   needNote?: boolean;
+  /** เปิดช่องส่งงาน (เช็กไฟล์ที่ต้องส่งกลับ + โน้ตไม่บังคับ) ก่อนยืนยัน */
+  submitForm?: boolean;
   /** ปุ่มหลัก (สีเข้ม) */
   primary?: boolean;
   danger?: boolean;
 };
 
 const ACTIONS: Record<PatternAction["key"], PatternAction> = {
-  claim:    { key: "claim",    to: "doing",     th: "รับงาน",              en: "Take this job",      primary: true },
-  submit:   { key: "submit",   to: "review",    th: "ส่งตรวจ",             en: "Submit for review",  primary: true },
-  approve:  { key: "approve",  to: "done",      th: "อนุมัติ งานเสร็จ",      en: "Approve",            primary: true },
-  reject:   { key: "reject",   to: "fix",       th: "ตีกลับให้แก้",         en: "Send back",          needNote: true, danger: true },
-  resume:   { key: "resume",   to: "doing",     th: "เริ่มแก้งาน",           en: "Start revision" },
-  resubmit: { key: "resubmit", to: "review",    th: "แก้แล้ว ส่งตรวจใหม่",   en: "Resubmit",           primary: true },
+  claim:     { key: "claim",     to: "doing",     th: "รับงาน",              en: "Take this job" },
+  submit:    { key: "submit",    to: "review",    th: "ส่งงาน",              en: "Submit work",        primary: true, submitForm: true },
+  approve:   { key: "approve",   to: "done",      th: "อนุมัติ",             en: "Approve",            primary: true },
+  reject:    { key: "reject",    to: "fix",       th: "ส่งกลับแก้",           en: "Send back",          needNote: true, danger: true },
+  resume:    { key: "resume",    to: "doing",     th: "เริ่มแก้งาน",           en: "Start revision" },
+  resubmit:  { key: "resubmit",  to: "review",    th: "แก้แล้ว ส่งใหม่",       en: "Resubmit",           primary: true, submitForm: true },
+  withdraw:  { key: "withdraw",  to: "doing",     th: "ถอนการส่ง",           en: "Withdraw" },
+  unapprove: { key: "unapprove", to: "review",    th: "ย้อนการอนุมัติ",        en: "Undo approval",      needNote: true },
   cancel:   { key: "cancel",   to: "cancelled", th: "ยกเลิกตั๋ว",           en: "Cancel ticket",      needNote: true, danger: true },
   reopen:   { key: "reopen",   to: "doing",     th: "เปิดงานใหม่",          en: "Reopen",             needNote: true },
 };
@@ -79,6 +86,7 @@ export function allowedActions(t: PatternTicketLite, a: PatternActor): PatternAc
   switch (t.status) {
     case "new":
       if (a.canWork) out.push(ACTIONS.claim);
+      if (worker) out.push(ACTIONS.submit);   // ส่งงานเลย = รับงาน + ส่ง (ชื่อช่างลงให้เอง)
       if (owner) out.push(ACTIONS.cancel);
       break;
     case "doing":
@@ -87,19 +95,47 @@ export function allowedActions(t: PatternTicketLite, a: PatternActor): PatternAc
       break;
     case "review":
       if (owner) out.push(ACTIONS.approve, ACTIONS.reject);
+      if (a.canWork && (isAssignee || a.canManage)) out.push(ACTIONS.withdraw);   // ถอนได้ก่อนมีคนอนุมัติ
       break;
     case "fix":
       if (worker) out.push(ACTIONS.resubmit, ACTIONS.resume);
       if (owner) out.push(ACTIONS.cancel);
       break;
     case "done":
-      if (a.canManage) out.push(ACTIONS.reopen);
+      if (a.canManage) out.push(ACTIONS.unapprove, ACTIONS.reopen);
       break;
   }
   return out;
 }
 
 export const patternActionByKey = (k: string): PatternAction | null => (ACTIONS as Record<string, PatternAction>)[k] ?? null;
+
+/** ไฟล์ที่ต้องส่งกลับที่ยังไม่มีในโฟลเดอร์/ลิงก์ของตั๋ว (เทียบนามสกุลไฟล์ · ตัวเล็กใหญ่ไม่สน)
+ *  ใช้เตือนตอนส่งงาน — ขาดก็ยังส่งได้ (เจ้าของเลือก 2026-11-20 แบบเตือน ไม่บังคับ) */
+export function missingDeliverables(deliverables: string[], fileNames: string[]): string[] {
+  const exts = new Set(fileNames.map((n) => (n.match(/\.([A-Za-z0-9]{2,5})(?:[?#].*)?$/)?.[1] ?? "").toUpperCase()).filter(Boolean));
+  return cleanDeliverables(deliverables).filter((d) => !exts.has(d));
+}
+
+/** ประวัติรอบส่งงาน — จาก audit (action pattern.*) · ส่ง/ส่งใหม่ = รอบ +1 · ถอน/อนุมัติ/ส่งกลับ = ผลของรอบนั้น */
+export type PatternRoundEvent = { action: string; actor_name: string | null; note?: string | null; created_at: string };
+export type PatternRoundRow = { round: number; kind: "submit" | "withdraw" | "approve" | "reject" | "unapprove"; actor: string; note: string | null; at: string };
+const ROUND_KIND: Record<string, PatternRoundRow["kind"]> = {
+  "pattern.submit": "submit", "pattern.resubmit": "submit", "pattern.withdraw": "withdraw",
+  "pattern.approve": "approve", "pattern.reject": "reject", "pattern.unapprove": "unapprove",
+};
+export const ROUND_EVENT_ACTIONS = Object.keys(ROUND_KIND);
+export function submissionRounds(events: PatternRoundEvent[]): PatternRoundRow[] {
+  const out: PatternRoundRow[] = [];
+  let round = 0;
+  for (const e of [...events].sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+    const kind = ROUND_KIND[e.action];
+    if (!kind) continue;
+    if (kind === "submit") round++;
+    out.push({ round: Math.max(round, 1), kind, actor: e.actor_name || "—", note: e.note?.trim() || null, at: e.created_at });
+  }
+  return out;
+}
 
 /** แก้รายละเอียดตั๋ว (ชื่อ/คำอธิบาย/กำหนดส่ง) ได้ไหม — ผู้สั่งหรือผู้จัดการ ก่อนงานเสร็จ */
 export function canEditTicket(t: PatternTicketLite, a: PatternActor): boolean {

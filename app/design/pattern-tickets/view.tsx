@@ -21,7 +21,7 @@ import { TypeTiles } from "./type-tiles";
 import { TypeSettingsModal } from "./type-settings";
 import type { Me, TicketRow, TicketType } from "./types";
 
-type View = "mine" | "open" | "done";
+type View = "mine" | "waiting" | "open" | "done";
 
 export function PatternTicketsView() {
   const t = useT();
@@ -86,6 +86,7 @@ export function PatternTicketsView() {
     const s = q.trim().toLowerCase();
     return rows.filter((r) => {
       if (type && r.type_key !== type) return false;
+      if (view === "waiting" && r.status !== "review") return false;   // คิวรออนุมัติ (ทุกใบที่ส่งงานแล้ว)
       if (view === "mine" && me?.id) {
         // ช่าง = งานที่ฉันรับ + งานที่ยังไม่มีคนรับ · ผู้สั่ง = ตั๋วที่ฉันเปิด
         const mineAsWorker = me.can_work && (r.assignee_id === me.id || !r.assignee_id);
@@ -103,6 +104,7 @@ export function PatternTicketsView() {
       fresh: open.filter((r) => r.status === "new").length,
       doing: open.filter((r) => r.status === "doing").length,
       review: open.filter((r) => r.status === "review" || r.status === "fix").length,
+      waiting: open.filter((r) => r.status === "review").length,
       late: open.filter((r) => isOverdue(r.due_date, r.status, today)).length,
     };
   }, [rows, today]);
@@ -117,7 +119,7 @@ export function PatternTicketsView() {
       <div className="mb-4 flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold text-slate-800">{t("ตั๋วงานช่าง Pattern", "Pattern job tickets")}</h1>
-          <p className="text-sm text-slate-500">{t("งานแบบตัด บล็อก แบบเย็บ สกรีน เลเซอร์ ฯลฯ — ฝ่ายออกแบบเปิดตั๋ว ช่างกดรับแล้วส่งตรวจ", "Cutting, block, sewing, screen, laser jobs and more — design opens a ticket, the pattern maker takes it and submits for review")}</p>
+          <p className="text-sm text-slate-500">{t("งานแบบตัด บล็อก แบบเย็บ สกรีน เลเซอร์ ฯลฯ — ฝ่ายออกแบบเปิดตั๋ว ช่างส่งงานแล้วรอผู้สั่งอนุมัติ", "Cutting, block, sewing, screen, laser jobs and more — design opens a ticket, the pattern maker submits the work for approval")}</p>
         </div>
         {/* โหมด English — ปุ่มกลาง (สลับภาษาทั้งระบบ · จำต่อบัญชีผ่าน LangSync) */}
         <LangToggle />
@@ -136,7 +138,7 @@ export function PatternTicketsView() {
         {[
           { label: t("รอรับงาน", "New"), v: stats.fresh, cls: "text-slate-800" },
           { label: t("กำลังทำ", "In progress"), v: stats.doing, cls: "text-blue-700" },
-          { label: t("รอตรวจ / ต้องแก้", "Review / revision"), v: stats.review, cls: "text-amber-700" },
+          { label: t("รออนุมัติ / ส่งกลับแก้", "Approval / sent back"), v: stats.review, cls: "text-amber-700" },
           { label: t("เลยกำหนด", "Overdue"), v: stats.late, cls: stats.late ? "text-red-600" : "text-slate-800" },
         ].map((m) => (
           <div key={m.label} className="rounded-xl bg-slate-50 px-3 py-2.5">
@@ -159,6 +161,7 @@ export function PatternTicketsView() {
       {/* มุมมอง + ค้นหา */}
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <Chip on={view === "mine"} onClick={() => setView("mine")}>{t("งานของฉัน", "My work")}</Chip>
+        <Chip on={view === "waiting"} onClick={() => setView("waiting")}>{t("รออนุมัติ", "Waiting approval")}{stats.waiting > 0 && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800 tabular-nums">{stats.waiting}</span>}</Chip>
         <Chip on={view === "open"} onClick={() => setView("open")}>{t("งานค้างทั้งหมด", "All open")}</Chip>
         <Chip on={view === "done"} onClick={() => setView("done")}>{t("เสร็จ / ยกเลิก", "Done / cancelled")}</Chip>
         <div className="ml-auto flex w-full items-center gap-2 sm:w-64">

@@ -23,7 +23,7 @@ import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { checklistLabel, fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeIconOf, typeLabelPair, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
+import { checklistLabel, fmtDate, isOverdue, missingDeliverables, patternStatus, ticketTitle, todayBangkok, typeIconOf, typeLabelPair, type ChecklistItem, type PatternAction, type PatternRoundRow, type TicketLink } from "@/lib/pattern-tickets";
 import { uploadTicketFile } from "./upload";
 import { ExtBadge } from "./create-modal";
 import { DesignSheetCards, DesignSheetPicker } from "@/components/pickers/design-sheet-picker";
@@ -52,6 +52,10 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PatternAction | null>(null);   // ปุ่มที่ต้องใส่เหตุผล
   const [note, setNote] = useState("");
+  // ช่องส่งงาน (ส่งงาน / แก้แล้วส่งใหม่): เช็กไฟล์ที่ต้องส่งกลับ (เตือน ไม่บังคับ) + โน้ตไม่บังคับ
+  const [submitting, setSubmitting] = useState<PatternAction | null>(null);
+  const [submitNote, setSubmitNote] = useState("");
+  const [missing, setMissing] = useState<string[] | null>(null);   // null = กำลังเช็ก
   const [editing, setEditing] = useState(false);
   const [up, setUp] = useState<UploadProgressState | null>(null);
   const [filesKey, setFilesKey] = useState(0);
@@ -86,7 +90,23 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
     finally { setBusy(false); }
   };
 
+  const openSubmit = async (a: PatternAction) => {
+    setSubmitting(a); setSubmitNote(""); setMissing(null);
+    const tkNow = d?.data;
+    const need = (tkNow ? types.find((x) => x.key === tkNow.type_key)?.deliverables : undefined) ?? [];
+    if (!tkNow || !need.length) { setMissing([]); return; }
+    let names: string[] = (tkNow.links ?? []).map((l) => l.label || l.url);
+    if (tkNow.drive_folder_url) {
+      try {
+        const j = await apiFetch(`/api/drive/folder-files?folder=${encodeURIComponent(tkNow.drive_folder_url)}`).then((r) => r.json());
+        names = names.concat(((j.files ?? []) as { name: string }[]).map((f) => f.name));
+      } catch { /* อ่านไม่ได้ = เตือนตามที่รู้ */ }
+    }
+    setMissing(missingDeliverables(need, names));
+  };
+
   const runAction = (a: PatternAction) => {
+    if (a.submitForm) { void openSubmit(a); return; }
     if (a.needNote) { setPending(a); setNote(""); return; }
     void patch({ action: "transition", key: a.key }, t(`${a.th} แล้ว`, `${a.en} — done`));
   };
@@ -168,9 +188,15 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
             </div>
           </div>
 
+          {tk.status === "review" && (
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <Icon name="clock" /> {t(`ส่งงานรอบ ${[...(d.rounds ?? [])].reverse().find((r) => r.kind === "submit")?.round ?? 1} แล้ว · รอ ${tk.requester_name ?? "ผู้สั่ง"} อนุมัติ`, `Submitted · waiting for ${tk.requester_name ?? "the requester"} to approve`)}
+              {tk.last_note && <span className="block text-amber-700">{t("โน้ตจากช่าง:", "Maker's note:")} {tk.last_note}</span>}
+            </div>
+          )}
           {tk.last_note && (tk.status === "fix" || tk.status === "cancelled" || tk.status === "doing") && (
             <div className={`rounded-lg px-3 py-2 text-sm ${tk.status === "fix" ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-600"}`}>
-              <Icon name="chat" /> {tk.status === "fix" ? t("ผู้สั่งตีกลับ:", "Sent back:") : t("หมายเหตุล่าสุด:", "Last note:")} {tk.last_note}
+              <Icon name="chat" /> {tk.status === "fix" ? t("ส่งกลับแก้:", "Sent back:") : t("หมายเหตุล่าสุด:", "Last note:")} {tk.last_note}
             </div>
           )}
 
@@ -273,6 +299,9 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
             )}
           </section>
 
+          {/* ประวัติรอบส่ง (จาก audit) */}
+          {(d.rounds?.length ?? 0) > 0 && <RoundHistory rows={d.rounds!} />}
+
           {/* คุยงาน */}
           <section>
             <CommentThread entityType="pattern_tickets" entityId={tk.id} title={t("คุยงาน", "Discussion")} maxHeight={360} />
@@ -280,7 +309,36 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
         </div>
       ) : null}
 
-      {/* เหตุผล (ตีกลับ / ยกเลิก / เปิดใหม่) */}
+      {/* ส่งงาน / แก้แล้วส่งใหม่ — เช็กไฟล์ที่ต้องส่งกลับ (เตือน) + โน้ตไม่บังคับ */}
+      {submitting && (
+        <ERPModal open onClose={() => setSubmitting(null)} title={t(`${submitting.th} ให้${tk?.requester_name ?? "ผู้สั่ง"}อนุมัติ`, `${submitting.en} for approval`)} size="sm" hasUnsavedChanges={!!submitNote.trim()}
+          footer={
+            <div className="flex w-full justify-end gap-2">
+              <button type="button" onClick={() => setSubmitting(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600">{t("กลับ", "Back")}</button>
+              <button type="button" disabled={busy || missing === null}
+                onClick={() => void patch({ action: "transition", key: submitting.key, note: submitNote.trim() }, t("ส่งงานแล้ว รออนุมัติ", "Submitted — waiting for approval")).then((ok) => { if (ok) setSubmitting(null); })}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                {t(submitting.th, submitting.en)}
+              </button>
+            </div>
+          }>
+          <div className="flex flex-col gap-3 text-sm">
+            {missing === null ? <p className="text-slate-400">{t("กำลังเช็กไฟล์ที่แนบ…", "Checking attached files…")}</p>
+              : missing.length ? (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-amber-800"><Icon name="warning" /> {t(`ยังไม่เจอไฟล์ ${missing.join(", ")} ในโฟลเดอร์ตั๋ว — ส่งได้ แต่ผู้สั่งจะเห็นว่าขาด`, `No ${missing.join(", ")} file found in the ticket folder — you can still submit`)}</p>
+              ) : (ty?.deliverables.length ?? 0) > 0 ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700"><Icon name="done" /> {t("แนบไฟล์ที่ต้องส่งกลับครบแล้ว", "All required files are attached")}</p> : null}
+            {tk?.status === "new" && <p className="text-xs text-slate-500">{t("ระบบจะรับงานให้ด้วย (ลงชื่อคุณเป็นช่าง)", "This also takes the job (you become the maker)")}</p>}
+            <label className="block text-slate-600">
+              {t("โน้ตถึงผู้สั่ง (ไม่บังคับ)", "Note to the requester (optional)")}
+              <textarea autoFocus value={submitNote} onChange={(e) => setSubmitNote(e.target.value)} rows={3}
+                placeholder={t("เช่น ปรับระยะเผื่อตะเข็บเป็น 1 ซม.", "e.g. seam allowance changed to 1 cm")}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" />
+            </label>
+          </div>
+        </ERPModal>
+      )}
+
+      {/* เหตุผล (ส่งกลับแก้ / ยกเลิก / เปิดใหม่ / ย้อนการอนุมัติ) */}
       {pending && (
         <ERPModal open onClose={() => setPending(null)} title={t(pending.th, pending.en)} size="sm" hasUnsavedChanges={!!note.trim()}
           footer={
@@ -430,5 +488,35 @@ function EditTicketModal({ tk, sheets: sheetsInit, onClose, onSave }: { tk: Tick
         </div>
       </div>
     </ERPModal>
+  );
+}
+
+/** ประวัติรอบส่งงาน — รอบ 1, 2… พร้อมโน้ต/เหตุผล (ข้อมูลจาก audit_logs ผ่าน API) */
+const ROUND_TEXT: Record<PatternRoundRow["kind"], [string, string, string]> = {
+  submit:    ["ส่งงาน", "Submitted", "text-blue-700"],
+  withdraw:  ["ถอนการส่ง", "Withdrew", "text-slate-500"],
+  approve:   ["อนุมัติ", "Approved", "text-emerald-700"],
+  reject:    ["ส่งกลับแก้", "Sent back", "text-red-600"],
+  unapprove: ["ย้อนการอนุมัติ", "Approval undone", "text-amber-700"],
+};
+function RoundHistory({ rows }: { rows: PatternRoundRow[] }) {
+  const t = useT();
+  return (
+    <section>
+      <h3 className="mb-1.5 text-sm font-semibold text-slate-700">{t("ประวัติรอบส่ง", "Submission history")}</h3>
+      <ul className="flex flex-col divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm">
+        {rows.map((r, i) => {
+          const [th, en, cls] = ROUND_TEXT[r.kind];
+          return (
+            <li key={i} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3 py-1.5">
+              <span className="w-12 shrink-0 text-xs text-slate-400">{t(`รอบ ${r.round}`, `Round ${r.round}`)}</span>
+              <span className={`font-medium ${cls}`}>{t(th, en)}</span>
+              <span className="text-xs text-slate-500">{r.actor} · {new Date(r.at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" })}</span>
+              {r.note && <span className="basis-full whitespace-pre-wrap pl-14 text-xs text-slate-600">{r.note}</span>}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

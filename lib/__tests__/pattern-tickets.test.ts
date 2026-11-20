@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, canOpenTicketSheet, checklistLabel, CHECKLIST_EN, cleanLinks, cleanSheetIds, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, ticketTitle, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, canOpenTicketSheet, checklistLabel, CHECKLIST_EN, cleanLinks, cleanSheetIds, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, missingDeliverables, openCountsByType, submissionRounds, ticketTitle, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
 
 const REQ = "11111111-1111-1111-1111-111111111111";
 const MAKER = "22222222-2222-2222-2222-222222222222";
@@ -12,10 +12,18 @@ const manager: PatternActor = { userId: OTHER, canWork: true, canManage: true, c
 const keys = (t: Parameters<typeof allowedActions>[0], a: PatternActor) => allowedActions(t, a).map((x) => x.key);
 
 describe("ตั๋วงาน Pattern — ใครกดอะไรได้", () => {
-  it("ตั๋วใหม่: ช่างกดรับได้ ผู้สั่งยกเลิกได้ ผู้สั่งที่ไม่ใช่ช่างกดรับไม่ได้", () => {
+  it("ตั๋วใหม่: ช่างกดรับ/ส่งงานเลยได้ ผู้สั่งยกเลิกได้ ผู้สั่งที่ไม่ใช่ช่างกดรับไม่ได้", () => {
     const t = { status: "new", requester_id: REQ, assignee_id: null };
-    expect(keys(t, maker)).toEqual(["claim"]);
+    expect(keys(t, maker)).toEqual(["claim", "submit"]);
     expect(keys(t, designer)).toEqual(["cancel"]);
+    // มอบให้ช่างคนอื่นแล้ว = ช่างอื่นกดรับได้ (เดิม) แต่ส่งงานแทนไม่ได้
+    expect(keys({ ...t, assignee_id: MAKER }, otherMaker)).toEqual(["claim"]);
+    expect(allowedActions(t, maker).find((a) => a.key === "submit")?.submitForm).toBe(true);
+  });
+  it("รออนุมัติ: ช่างที่ส่งถอนได้ ช่างคนอื่นถอนไม่ได้", () => {
+    const t = { status: "review", requester_id: REQ, assignee_id: MAKER };
+    expect(keys(t, maker)).toEqual(["withdraw"]);
+    expect(keys(t, otherMaker)).toEqual([]);
   });
   it("กำลังทำ: เฉพาะช่างที่รับงานส่งตรวจได้ ช่างคนอื่นไม่ได้", () => {
     const t = { status: "doing", requester_id: REQ, assignee_id: MAKER };
@@ -23,15 +31,32 @@ describe("ตั๋วงาน Pattern — ใครกดอะไรได้
     expect(keys(t, otherMaker)).toEqual([]);
     expect(keys(t, manager)).toContain("submit");
   });
-  it("รอตรวจ: ผู้สั่งอนุมัติ/ตีกลับ · ช่างทำอะไรไม่ได้", () => {
+  it("รออนุมัติ: ผู้สั่งอนุมัติ/ส่งกลับแก้", () => {
     const t = { status: "review", requester_id: REQ, assignee_id: MAKER };
     expect(keys(t, designer)).toEqual(["approve", "reject"]);
-    expect(keys(t, maker)).toEqual([]);
   });
   it("ตีกลับ/ยกเลิก/เปิดใหม่ ต้องใส่เหตุผล", () => {
     const t = { status: "review", requester_id: REQ, assignee_id: MAKER };
     expect(allowedActions(t, designer).find((a) => a.key === "reject")?.needNote).toBe(true);
-    expect(allowedActions({ ...t, status: "done" }, manager).map((a) => [a.key, a.needNote])).toEqual([["reopen", true]]);
+    expect(allowedActions({ ...t, status: "done" }, manager).map((a) => [a.key, a.needNote])).toEqual([["unapprove", true], ["reopen", true]]);
+    expect(keys({ ...t, status: "done" }, designer)).toEqual([]);   // ย้อนการอนุมัติ = ผู้จัดการเท่านั้น
+  });
+  it("ไฟล์ที่ต้องส่งกลับที่ยังขาด (เทียบนามสกุล)", () => {
+    expect(missingDeliverables(["DXF", "PDF", "AI"], ["a.pdf", "The-1.DXF", "x.jpg"])).toEqual(["AI"]);
+    expect(missingDeliverables(["dxf"], [])).toEqual(["DXF"]);
+    expect(missingDeliverables([], ["a.pdf"])).toEqual([]);
+  });
+  it("ประวัติรอบส่ง: ส่ง = รอบใหม่ · ส่งกลับ/อนุมัติ = ผลของรอบนั้น", () => {
+    const rows = submissionRounds([
+      { action: "pattern.reject", actor_name: "Gogo", note: "แก้รอยบาก", created_at: "2026-11-20T02:00:00Z" },
+      { action: "pattern.submit", actor_name: "สมชาย", created_at: "2026-11-20T01:00:00Z" },
+      { action: "pattern.checklist", actor_name: "สมชาย", created_at: "2026-11-20T01:30:00Z" },
+      { action: "pattern.resubmit", actor_name: "สมชาย", note: " ", created_at: "2026-11-20T03:00:00Z" },
+      { action: "pattern.approve", actor_name: "Gogo", created_at: "2026-11-20T04:00:00Z" },
+    ]);
+    expect(rows.map((r) => [r.round, r.kind])).toEqual([[1, "submit"], [1, "reject"], [2, "submit"], [2, "approve"]]);
+    expect(rows[1].note).toBe("แก้รอยบาก");
+    expect(rows[2].note).toBeNull();
   });
   it("งานเสร็จ: แก้ได้เฉพาะผู้จัดการ · ยกเลิกแล้วติ๊กเช็กลิสต์ไม่ได้", () => {
     const done = { status: "done", requester_id: REQ, assignee_id: MAKER };

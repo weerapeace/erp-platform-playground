@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { DRIVE_ROOT_FOLDER_ID, driveConfigured, driveEnsureFolder, driveGetFolder } from "@/lib/google-drive";
 import { safeDriveName } from "@/lib/content-drive";
 import type { PatternActor } from "@/lib/pattern-tickets";
+import { bellAllowed } from "@/lib/bell-switch";
 
 export const PATTERN_TABLE = "pattern_tickets";
 export const PATTERN_TYPES_TABLE = "pattern_ticket_types";
@@ -47,4 +48,17 @@ export async function ensureTicketFolder(admin: SupabaseClient, t: { id: string;
   const folderUrl = info?.webViewLink ?? `https://drive.google.com/drive/folders/${folderId}`;
   await admin.from(PATTERN_TABLE).update({ drive_folder_id: folderId, drive_folder_url: folderUrl }).eq("id", t.id);
   return { folderId, folderUrl };
+}
+
+/** เด้งกระดิ่งในระบบหาคนเดียว (best-effort ไม่ throw · เคารพสวิตช์ปิดกระดิ่ง lib/bell-switch)
+ *  ใช้ตอน ส่งงาน → ผู้สั่ง · อนุมัติ/ส่งกลับแก้/ย้อนอนุมัติ → ช่าง (เจ้าของเลือก 2026-11-20) */
+export async function notifyPatternUser(admin: SupabaseClient, n: { userId: string | null | undefined; actorId: string | null; eventType: string; title: string; body?: string | null; ticketId: string; priority?: "normal" | "high" }): Promise<void> {
+  if (!n.userId || n.userId === n.actorId) return;   // ไม่แจ้งตัวเอง
+  try {
+    if (!(await bellAllowed(admin, n.eventType))) return;
+    await admin.from("erp_notifications").insert({
+      user_id: n.userId, event_type: n.eventType, title: n.title, body: n.body ?? null,
+      link_url: `/design/pattern-tickets?id=${n.ticketId}`, entity_type: PATTERN_TABLE, entity_id: n.ticketId, priority: n.priority ?? "normal",
+    });
+  } catch { /* เงียบ — แจ้งเตือนล้มไม่กระทบการบันทึก */ }
 }

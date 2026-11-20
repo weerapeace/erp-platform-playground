@@ -1,6 +1,6 @@
 import type { ParentSkuCard } from "@/lib/parent-sku-view";
 import type { DesignSheetCard } from "@/lib/design-sheet-view";
-import type { ChecklistItem, PatternAction, TemplateItem, TicketLink } from "@/lib/pattern-tickets";
+import type { ChecklistItem, PatternAction, PatternRoundRow, TemplateItem, TicketLink } from "@/lib/pattern-tickets";
 
 export type TicketType = {
   key: string; label_th: string; label_en: string; icon: string; color: string;
@@ -31,4 +31,6 @@ export type TicketDetail = {
   design_sheets: DesignSheetCard[]; can_open_sheets: boolean;
   /** รุ่นสินค้า (การ์ด) · กดเปิดดูได้ตาม can_open_sheets เหมือน Design sheet */
   parent_sku: ParentSkuCard | null;
+  /** ประวัติรอบส่งงาน (จาก audit) — รอบ 1, 2… */
+  rounds?: PatternRoundRow[];
 };
