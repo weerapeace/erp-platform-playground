@@ -6,6 +6,8 @@ import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame, ReportLayoutControls } from "@/components/report";
 import { usePrintPartEditor } from "@/components/print-part-style";
 import { PrintPresetMenu } from "@/components/print-presets";
+import { usePrintBlocksEditor } from "@/components/print-blocks-editor";
+import { printBlockPartDefs } from "@/lib/print-blocks";
 import { QuotationFormModal } from "@/components/quotation-form-modal";
 import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
@@ -60,12 +62,19 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
     }
   }));
 
+  // ข้อมูลจาก SKU ที่ผูก (วัสดุ ซิป …) — ช่องที่เพิ่มในการ์ด (lib/print-blocks)
+  const extras = await apiFetch(`/api/quotations/${q.id}/print-extras`).then(res => res.json()).catch(() => ({ skus: {} }));
+  const skuFields = ((extras as { skus?: Record<string, Record<string, unknown>> }).skus ?? {});
+
   return {
     ...(q as QuotePrintDetail),
     // รูปที่แนบเองมาก่อนเสมอ — ไม่มีค่อย fallback เป็นรูปของ SKU ที่ผูกไว้
-    lines: q.lines.map(line => (line.image_key
-      ? { ...line, image_url: `/api/r2-image?key=${encodeURIComponent(line.image_key)}` }
-      : { ...line, ...(line.sku ? imageBySku.get(line.sku) : undefined) })),
+    lines: q.lines.map(line => ({
+      ...(line.image_key
+        ? { ...line, image_url: `/api/r2-image?key=${encodeURIComponent(line.image_key)}` }
+        : { ...line, ...(line.sku ? imageBySku.get(line.sku) : undefined) }),
+      sku_fields: line.sku ? skuFields[line.sku] ?? null : null,
+    })),
   };
 }
 
@@ -73,7 +82,7 @@ async function enrichQuoteImages(q: QuoteDetail): Promise<QuotePrintDetail> {
 // จำค่าที่ตั้งรายใบ (ต่อ browser): "ไม่รวมยอดทั้งหมด" + การเรียงรายการ — เปิดพิมพ์ใบเดิมซ้ำไม่ต้องตั้งใหม่
 type PerQuoteView = Partial<Pick<ReportLayoutSettings, (typeof PER_QUOTE_FIELDS)[number]>>;
 const PER_QUOTE_FIELDS = ["showTotals", "sortBy", "sortDesc", "sortGroupByNote", "lineStyle", "cardsPerRow", "showCustomer", "showQty", "showLineTotal",
-  "manualOrder", "showCardNo", "showCustomerApproval", "cardNameAdjPx", "cardNoteAdjPx", "cardPriceAdjPx", "headerAdjPx", "partStyles"] as const;
+  "manualOrder", "showCardNo", "showCustomerApproval", "cardNameAdjPx", "cardNoteAdjPx", "cardPriceAdjPx", "headerAdjPx", "partStyles", "cardFields", "cardOrder", "pageBlocks"] as const;
 const sameValue = (a: unknown, b: unknown) => (Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((v, i) => v === b[i])
   : a && b && typeof a === "object" && typeof b === "object" ? JSON.stringify(a) === JSON.stringify(b) : a === b);
 const viewKey = (id: string) => `qt-print-view:${id}`;
@@ -184,8 +193,15 @@ export default function PrintQuotationPage() {
   };
 
   // กดกล่องในใบแล้วแก้หน้าตา (แบบการ์ดเท่านั้น · ของกลาง components/print-part-style · เจ้าของขอ 2026-11-20)
+  // จัดหน้าเอง: ช่องในการ์ด + กล่องบนหน้า (ของกลาง components/print-blocks-editor · เจ้าของขอ 2026-11-20)
+  const blocksEditor = usePrintBlocksEditor({
+    cardFields: layout.cardFields, cardOrder: layout.cardOrder, pageBlocks: layout.pageBlocks,
+    onChange: (p) => updateLayout({ ...layout, ...p }),
+  });
   const partEditor = usePrintPartEditor({
-    parts: QUOTE_CARD_PARTS,
+    parts: [...QUOTE_CARD_PARTS, ...printBlockPartDefs(layout.cardFields, layout.pageBlocks)],
+    onSlot: blocksEditor.onSlot,
+    extra: blocksEditor.extra,
     value: layout.partStyles,
     onChange: (partStyles) => updateLayout({ ...layout, partStyles }),
     enabled: layout.lineStyle === "cards",
@@ -269,6 +285,7 @@ export default function PrintQuotationPage() {
               savingDefault={savingLayoutDefault}
               defaultMessage={layoutDefaultMessage}
               lines={printLines}
+              cardFieldsPanel={blocksEditor.cardPanel}
               leading={<PrintPresetMenu tableId="print:qt" storageKey={`qt-print-preset:${id}`} getConfig={presetConfig} onApply={applyPreset}
                 onSetDefault={saveDefaultLayout} onUseDefault={loadDefaultLayout} savingDefault={savingLayoutDefault} />}
               trailing={(
@@ -282,6 +299,7 @@ export default function PrintQuotationPage() {
             {partEditor.bar}
             <PrintFrame html={html} fileName={fileName} onDocLoad={partEditor.onDocLoad} />
             {partEditor.panel}
+            {blocksEditor.modal}
             <QuotationFormModal open={editOpen} quote={editOpen ? quote : null} defaultSalePerson={user?.name ?? ""} actor={user?.name}
               onClose={() => setEditOpen(false)}
               onSaved={async () => { setEditOpen(false); try { await reloadQuote(); } catch (e) { setError(e instanceof Error ? e.message : "โหลดใบใหม่ไม่สำเร็จ"); } }} />

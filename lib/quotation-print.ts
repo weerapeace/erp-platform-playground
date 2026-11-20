@@ -1,6 +1,7 @@
 import { normalizeReportLayout, type ReportLayoutSettings } from "@/lib/report-layout";
 import { docFileName } from "@/lib/print-filename";
 import { printPartCss, printPartFontLinks, QUOTE_CARD_PARTS } from "@/lib/print-part-style";
+import { cardFieldValue, normalizeCardOrder, PAGE_SLOTS, printBlockPartDefs, type PageBlockSlot } from "@/lib/print-blocks";
 
 export type QuoteLinePrint = {
   sku?: string | null;
@@ -14,6 +15,8 @@ export type QuoteLinePrint = {
   image_url?: string | null;
   image_key?: string | null;
   note?: string | null;
+  /** ข้อมูลจาก SKU ที่ผูก (วัสดุ ซิป …) — ช่องที่เพิ่มในการ์ด (lib/print-blocks) */
+  sku_fields?: Record<string, unknown> | null;
 };
 
 export type QuotePrintDetail = {
@@ -225,6 +228,8 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
   };
   const lines = sortQuoteLines(quote.lines, layout);
   if (!lines.length) return `<div class="center" style="border:1px solid #000;padding:6mm">ไม่มีรายการสินค้า</div>`;
+  // ลำดับช่องในการ์ด (ช่องพื้นฐาน + ช่องที่เพิ่ม · lib/print-blocks) — ยังไม่เคยจัด = ลำดับเดิม
+  const order = normalizeCardOrder(layout.cardOrder, layout.cardFields);
   const cards = lines.map((line, index) => {
     const src = layout.showImage ? imageSrc(line, origin) : "";
     const sku = layout.showSku ? printableSku(line.sku) : "";
@@ -235,16 +240,26 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
       : `<div class="qc-img" data-pp="img">${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(line.product_name)}">` : `<span class="qc-noimg">ไม่มีรูป</span>`}</div>`;
     // ราคา: เอา "/ ชิ้น" ออกตามที่เจ้าของขอ (2026-11-19) — เหลือ "850.00 บาท" ชิดขวา มีเส้นคั่นด้านบน
     // data-pp = กล่องที่กดแก้หน้าตาได้ · data-ci = ลำดับการ์ด (ซ่อนเฉพาะการ์ด) — lib/print-part-style
+    const amount = quoteLinePrintAmount(line);
+    const baseHtml: Record<string, string> = {
+      sku: sku ? `<div class="qc-sku" data-pp="sku">${escapeHtml(sku)}</div>` : "",
+      name: `<div class="qc-name" data-pp="name">${escapeHtml(line.product_name)}</div>`,
+      note: line.note ? `<div class="qc-note" data-pp="note">${escapeHtml(line.note)}</div>` : "",
+      price: `<div class="qc-price" data-pp="price"><span class="qc-price-label">ราคา</span><span><b>${formatMoney(line.unit_price)}</b> <small>บาท</small></span></div>`,
+      foot: (layout.showQty || layout.showLineTotal) ? `<div class="qc-foot" data-pp="foot">${qtyHtml}${totalHtml}</div>` : "",
+    };
+    // ช่องที่เพิ่ม: ค่าว่าง = ไม่วาดแถว (SKU ไม่มีวัสดุ ก็ไม่มีแถว "วัสดุ")
+    const fieldHtml = (id: string) => {
+      const f = layout.cardFields.find((x) => x.id === id); if (!f) return "";
+      const v = cardFieldValue(f, line, line.sku_fields, amount); if (!v) return "";
+      if (f.kind === "text") return `<div class="qc-text" data-pp="f-${f.id}">${escapeHtml(v).replace(/\n/g, "<br>")}</div>`;
+      return `<div class="qc-field" data-pp="f-${f.id}">${f.label ? `<span class="qc-fl">${escapeHtml(f.label)}</span>` : ""}<span class="qc-fv">${escapeHtml(v)}</span></div>`;
+    };
+    const body = order.map((k) => (k.startsWith("base:") ? baseHtml[k.slice(5)] ?? "" : fieldHtml(k.slice(2)))).join("");
     return `<div class="qc" data-pp="card" data-ci="${index}">
       ${layout.showCardNo ? `<span class="qc-no" data-pp="no">${index + 1}</span>` : ""}
       ${img}
-      <div class="qc-body">
-        ${sku ? `<div class="qc-sku" data-pp="sku">${escapeHtml(sku)}</div>` : ""}
-        <div class="qc-name" data-pp="name">${escapeHtml(line.product_name)}</div>
-        ${line.note ? `<div class="qc-note" data-pp="note">${escapeHtml(line.note)}</div>` : ""}
-        <div class="qc-price" data-pp="price"><span class="qc-price-label">ราคา</span><span><b>${formatMoney(line.unit_price)}</b> <small>บาท</small></span></div>
-        ${(layout.showQty || layout.showLineTotal) ? `<div class="qc-foot" data-pp="foot">${qtyHtml}${totalHtml}</div>` : ""}
-      </div>
+      <div class="qc-body">${body}</div>
     </div>`;
   }).join("");
   // 1 ต่อแถว = รูปซ้าย ข้อความขวา (การ์ดแนวนอน) · 2-4 = รูปบน ข้อความล่าง
@@ -265,8 +280,26 @@ export function buildQuoteCards(quote: QuotePrintDetail, origin: string, layout:
     .qc-price small, .qc-price-label { font-size: ${Math.max(9, z.sub - 1)}px; font-weight: 400; color: #666; }
     .qc-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 1mm 3mm; font-size: ${z.sub}px; border-top: 0.3mm dashed #bbb; padding-top: 1.5mm; }
     .qc-total { font-weight: 700; }
+    .qc-field { display: flex; justify-content: space-between; gap: 2mm; font-size: ${z.sub}px; line-height: 1.35; }
+    .qc-fl { color: #777; flex: none; }
+    .qc-fv { text-align: right; overflow-wrap: anywhere; }
+    .qc-text { font-size: ${z.sub}px; color: #333; line-height: 1.4; }
   </style>`;
   return `${css}<div class="qc-grid">${cards}</div>`;
+}
+
+/** กล่องบนหน้าตามจุดวาง + จุดกด "เพิ่มกล่องตรงนี้" (โชว์เฉพาะตอนแก้บนจอ · lib/print-blocks) */
+function pageSlotHtml(layout: ReportLayoutSettings, origin: string, slot: PageBlockSlot): string {
+  const blocks = layout.pageBlocks.filter((b) => b.slot === slot).map((b) => {
+    if (b.kind === "divider") return `<hr class="pb pb-hr" data-pp="b-${b.id}">`;
+    if (b.kind === "image") {
+      const src = `${origin}/api/r2-image?key=${encodeURIComponent(b.imageKey ?? "")}`;
+      return `<div class="pb pb-img" data-pp="b-${b.id}" style="height:${b.imageMm ?? 24}mm"><img src="${escapeHtml(src)}" alt=""></div>`;
+    }
+    return `<div class="pb pb-text" data-pp="b-${b.id}">${escapeHtml(b.text ?? "").replace(/\n/g, "<br>")}</div>`;
+  }).join("");
+  const label = PAGE_SLOTS.find((x) => x.key === slot)?.label ?? "";
+  return `${blocks}<div class="pp-slot" data-slot="${slot}">+ เพิ่มกล่องตรงนี้ (${escapeHtml(label)})</div>`;
 }
 
 export function buildQuotationHtml(
@@ -327,6 +360,7 @@ export function buildQuotationHtml(
         ${layout.showResponsible ? `<tr><td>ผู้รับผิดชอบ</td><td>${escapeHtml(quote.sale_person_name || "-")}</td></tr>` : ""}
       </table>
     </header>
+    @@SLOT_TOP@@
     ${layout.showCustomer ? `<section class="qh-customer" data-pp="customer">
       <div><span class="label">ลูกค้า:</span> ${escapeHtml(quote.customer_name || "-")}</div>
       ${quote.customer_address ? `<div><span class="label">ที่อยู่:</span> ${escapeHtml(quote.customer_address)}</div>` : ""}
@@ -414,7 +448,13 @@ export function buildQuotationHtml(
     .qh-meta td:first-child { color: #666; padding-right: 6mm; }
     .qh-meta td:last-child { font-weight: 700; text-align: right; }
     .qh-customer { border: 0.3mm solid #ccc; border-radius: 2mm; padding: 2mm 3mm; margin-bottom: 4mm; line-height: 1.5; }
-    ${isCards ? printPartCss(layout.partStyles, QUOTE_CARD_PARTS) : ""}
+    .pb { margin: 0 0 3mm; break-inside: avoid; page-break-inside: avoid; }
+    .pb-text { font-size: 12px; line-height: 1.5; }
+    .pb-img { display: flex; align-items: center; justify-content: flex-start; overflow: hidden; }
+    .pb-img img { height: 100%; width: auto; max-width: 100%; object-fit: contain; }
+    .pb-hr { border: 0; border-top: 0.4mm solid #bbb; margin: 3mm 0; }
+    .pp-slot { display: none; }
+    ${isCards ? printPartCss(layout.partStyles, [...QUOTE_CARD_PARTS, ...printBlockPartDefs(layout.cardFields, layout.pageBlocks)]) : ""}
     @media print {
       body { background: #fff; }
       /* ขอบกระดาษ = padding ของ .page (ดู @page ข้างบน) → หน้าเอกสารสูงเกือบเท่ากระดาษ (ลายเซ็นชิดล่างในหน้าเดียว, ยาวกว่านั้นขึ้นหน้าใหม่เอง) */
@@ -424,7 +464,7 @@ export function buildQuotationHtml(
 </head>
 <body>
   <main class="page">
-    ${isCards ? cardsHeader : `<div class="company">
+    ${isCards ? cardsHeader.replace("@@SLOT_TOP@@", () => pageSlotHtml(layout, origin, "top")) + pageSlotHtml(layout, origin, "before") : `<div class="company">
       <div class="company-name">${escapeHtml(COMPANY_NAME)}</div>
       <div class="company-address">${escapeHtml(COMPANY_ADDRESS)}</div>
     </div>
@@ -480,7 +520,7 @@ export function buildQuotationHtml(
       </tbody>
     </table>`}
 
-    ${isCards ? `${cardsNote}${cardsGrand}` : layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
+    ${isCards ? `${pageSlotHtml(layout, origin, "after")}${cardsNote}${cardsGrand}` : layout.showTotals ? `<section class="bottom${layout.showNote ? "" : " bottom-no-note"}">
       ${layout.showNote ? `<div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div>` : ""}
       <table class="totals">
         <tr><td class="label">รวมเงิน</td><td class="right">${formatMoney(subtotal)}</td></tr>
@@ -492,6 +532,7 @@ export function buildQuotationHtml(
     <div class="amount-text">(${escapeHtml(thaiBahtText(quote.grand_total))})</div>`
     : layout.showNote ? `<section class="bottom bottom-note-only"><div class="note"><span class="label">หมายเหตุ :</span><br>${escapeHtml(quote.note || "")}</div></section>` : ""}
     ${termsHtml}
+    ${isCards ? pageSlotHtml(layout, origin, "end") : ""}
 
     <div class="closing"${isCards ? ` data-pp="sign"` : ""}>
     <section class="signatures${layout.showCustomerApproval ? "" : " signatures-single"}">

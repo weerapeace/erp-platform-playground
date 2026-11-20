@@ -13,6 +13,8 @@
  * - ย้อนกลับ (ปุ่ม + Ctrl+Z ทั้งในหน้าและในพรีวิว) · คืนค่าเดิมทีละกล่อง/ทั้งใบ · คัดลอก-วางสไตล์ระหว่างกล่อง
  * - กรอบเส้นประ/สีฟ้าโชว์เฉพาะบนจอ (@media screen) — ไม่ติดไปตอนพิมพ์/บันทึก PDF
  * - กล่องที่ซ่อนทั้งหมดกดในใบไม่ได้แล้ว → แถบบนมีรายการ "ซ่อนอยู่" ให้กดเอากลับ
+ * - จัดหน้าเอง (lib/print-blocks · 2026-11-20): จุด ".pp-slot" ในใบ (โชว์เฉพาะตอนแก้) กดแล้วเรียก onSlot(จุดวาง) ·
+ *   extra(คีย์, ลำดับการ์ด, ปิด) = ปุ่ม/ช่องเพิ่มบนสุดของแผง (เช่น แก้ข้อความ · ลบช่องที่เพิ่ม)
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { FloatingPanel } from "@/components/floating-panel";
@@ -38,10 +40,12 @@ const EDIT_CSS = `@media screen {
   [data-pp] { cursor: pointer; }
   [data-pp]:hover { outline: 1px dashed #85b7eb; outline-offset: 1px; }
   [data-pp].pp-sel { outline: 2px solid #378add !important; outline-offset: 1px; }
+  .pp-slot { display: block !important; margin: 1.5mm 0; padding: 1.2mm; border: 1px dashed #85b7eb; border-radius: 2mm; color: #185fa5; font-size: 11px; text-align: center; cursor: pointer; background: #f5f9fe; }
+  .pp-slot:hover { background: #e6f1fb; }
 }`;
 const MAX_UNDO = 60;
 
-export function usePrintPartEditor({ parts, value, onChange, enabled = true, defaultImgMm = 60 }: {
+export function usePrintPartEditor({ parts, value, onChange, enabled = true, defaultImgMm = 60, onSlot, extra }: {
   parts: PrintPartDef[];
   value: PrintPartStyles;
   onChange: (next: PrintPartStyles) => void;
@@ -49,7 +53,12 @@ export function usePrintPartEditor({ parts, value, onChange, enabled = true, def
   enabled?: boolean;
   /** ความสูงรูปตั้งต้นตอนยังไม่ปรับ (mm) */
   defaultImgMm?: number;
+  /** กดจุด "เพิ่มกล่องตรงนี้" (.pp-slot data-slot) ในใบ */
+  onSlot?: (slot: string) => void;
+  /** ส่วนเพิ่มบนสุดของแผงสำหรับกล่องนี้ (เช่น แก้ข้อความ/ลบ ช่องที่ผู้ใช้เพิ่ม) */
+  extra?: (key: string, ci: number | null, close: () => void) => ReactNode;
 }) {
+  const onSlotRef = useRef(onSlot); onSlotRef.current = onSlot;
   const [sel, setSel] = useState<Sel | null>(null);
   const [clip, setClip] = useState<PrintPartStyle | null>(null);
   const [undoCount, setUndoCount] = useState(0);
@@ -92,6 +101,8 @@ export function usePrintPartEditor({ parts, value, onChange, enabled = true, def
     if (!enabled) return;
     const st = doc.createElement("style"); st.textContent = EDIT_CSS; doc.head?.appendChild(st);
     doc.addEventListener("click", (e) => {
+      const slot = (e.target as Element | null)?.closest?.(".pp-slot");
+      if (slot) { e.preventDefault(); onSlotRef.current?.(slot.getAttribute("data-slot") ?? ""); return; }
       const el = (e.target as Element | null)?.closest?.("[data-pp]");
       if (!el) return;
       e.preventDefault();
@@ -185,8 +196,10 @@ export function usePrintPartEditor({ parts, value, onChange, enabled = true, def
     </div>
   );
   const isImage = def?.kind === "image";
+  const extraNode = def && sel && extra ? extra(sel.key, sel.ci, () => setSel(null)) : null;
   const body = def && sel ? (
     <div className="px-1 text-sm">
+      {extraNode && <div className="mb-2 border-b border-slate-100 pb-2">{extraNode}</div>}
       {row("ซ่อน", (
         <div className="flex flex-wrap gap-1.5">
           <button type="button" className={seg(!!cur.hide)} onClick={() => setField({ hide: cur.hide ? undefined : true })}>

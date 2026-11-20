@@ -13,6 +13,7 @@ export const REPORT_FONT_ADJ_MIN = -8;
 export const REPORT_FONT_ADJ_MAX = 16;
 
 import { normalizePrintPartStyles, type PrintPartStyles } from "@/lib/print-part-style";
+import { normalizeCardFields, normalizeCardOrder, normalizePageBlocks, type CardField, type PageBlock } from "@/lib/print-blocks";
 
 export const REPORT_IMAGE_SIZE_MIN_MM = 10;
 export const REPORT_IMAGE_SIZE_MAX_MM = 45;
@@ -54,6 +55,12 @@ export type ReportLayoutSettings = {
   headerAdjPx: number;
   /** (การ์ด) ปรับหน้าตาทีละกล่อง — กดกล่องในพรีวิว (ของกลาง lib/print-part-style · เจ้าของขอ 2026-11-20) */
   partStyles: PrintPartStyles;
+  /** (การ์ด) ช่องที่เพิ่มในการ์ด — ข้อมูลจาก SKU / บรรทัด / ข้อความเอง (lib/print-blocks · เจ้าของขอ 2026-11-20) */
+  cardFields: CardField[];
+  /** (การ์ด) ลำดับช่องในการ์ด "base:<ช่องพื้นฐาน>" / "f:<id>" — ว่าง = ลำดับเดิม */
+  cardOrder: string[];
+  /** (การ์ด) กล่องบนหน้า — ข้อความ / รูป / เส้นคั่น ตามจุดวาง */
+  pageBlocks: PageBlock[];
   /** แสดงช่องเซ็น "ลูกค้าอนุมัติ" — ปิดแล้วเหลือช่องผู้มีอำนาจช่องเดียวชิดขวา */
   showCustomerApproval: boolean;
   /** กล่องเงื่อนไขท้ายใบ (แก้ข้อความเองได้ · ขึ้นบรรทัดใหม่ได้) */
@@ -104,6 +111,9 @@ export const DEFAULT_REPORT_LAYOUT: ReportLayoutSettings = {
   cardPriceAdjPx: 0,
   headerAdjPx: 0,
   partStyles: {},
+  cardFields: [],
+  cardOrder: [],
+  pageBlocks: [],
   showCustomerApproval: true,
   showTerms: false,
   termsText: "ยืนราคา 30 วัน นับจากวันที่ในใบเสนอราคา\nราคาข้างต้นยังไม่รวมภาษีมูลค่าเพิ่ม",
@@ -149,6 +159,13 @@ function cleanManualOrder(value: unknown): number[] {
   return out;
 }
 
+/** ช่องในการ์ด + ลำดับ — ยังไม่เคยจัด (ไม่มีช่องเพิ่ม ไม่มีลำดับ) = เก็บลำดับว่าง */
+function normalizeCardLayout(fieldsIn: unknown, orderIn: unknown): { cardFields: CardField[]; cardOrder: string[] } {
+  const cardFields = normalizeCardFields(fieldsIn);
+  const touched = cardFields.length > 0 || (Array.isArray(orderIn) && orderIn.length > 0);
+  return { cardFields, cardOrder: touched ? normalizeCardOrder(orderIn, cardFields) : [] };
+}
+
 export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {}): ReportLayoutSettings {
   return {
     topMarginMm: clamp(input.topMarginMm, 0, 30, DEFAULT_REPORT_LAYOUT.topMarginMm),
@@ -176,6 +193,8 @@ export function normalizeReportLayout(input: Partial<ReportLayoutSettings> = {})
     cardPriceAdjPx: Math.round(clamp(input.cardPriceAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
     headerAdjPx: Math.round(clamp(input.headerAdjPx, REPORT_FONT_ADJ_MIN, REPORT_FONT_ADJ_MAX, 0)),
     partStyles: normalizePrintPartStyles(input.partStyles),
+    ...normalizeCardLayout(input.cardFields, input.cardOrder),
+    pageBlocks: normalizePageBlocks(input.pageBlocks),
     showCustomerApproval: input.showCustomerApproval ?? DEFAULT_REPORT_LAYOUT.showCustomerApproval,
     showTerms: input.showTerms ?? DEFAULT_REPORT_LAYOUT.showTerms,
     termsText: typeof input.termsText === "string" ? input.termsText.slice(0, 800) : DEFAULT_REPORT_LAYOUT.termsText,

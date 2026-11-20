@@ -486,6 +486,7 @@ export function ReportLayoutControls({
   lines,
   leading,
   trailing,
+  cardFieldsPanel,
 }: {
   value: ReportLayoutSettings;
   onChange: (next: ReportLayoutSettings) => void;
@@ -499,7 +500,10 @@ export function ReportLayoutControls({
   leading?: ReactNode;
   /** ขวาสุดของแถบ เช่น ปุ่ม "แก้ใบเสนอราคา" */
   trailing?: ReactNode;
+  /** แผงจัดช่องในการ์ด (usePrintBlocksEditor().cardPanel) — ส่งมา = เมนูหน้าตามี "ช่องในการ์ด" */
+  cardFieldsPanel?: ReactNode;
 }) {
+  const [fieldsOpen, setFieldsOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [signatureOpen, setSignatureOpen] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
@@ -546,8 +550,8 @@ export function ReportLayoutControls({
 
   return (
     // แถบจัดกลุ่มใหม่ (เจ้าของขอ 2026-11-20 "เมนูข้างบนดูใช้ยาก"): แบบ ▾ · ตาราง/การ์ด · ต่อแถว · หน้าตา ▾ · ข้อมูล ▾ · (ปุ่มขวา)
-    // ติดใต้แถบพิมพ์ตอนเลื่อนดูใบยาว ๆ · แผงรายละเอียด (จัดหน้า/ลายเซ็น/ซ่อน/สลับ/ตัวหนังสือ/เงื่อนไข) เปิดใต้แถบเหมือนเดิม
-    <div className="no-print sticky top-[61px] z-[9] mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
+    // ติดใต้แถบพิมพ์ตอนเลื่อนดูใบยาว ๆ (เปิดแผงอยู่ = ไม่ติด กันบังใบ) · แผงรายละเอียด (จัดหน้า/ลายเซ็น/ซ่อน/สลับ/ตัวหนังสือ/เงื่อนไข) เปิดใต้แถบเหมือนเดิม
+    <div className={`no-print ${open || signatureOpen || orderOpen || fontOpen || termsOpen || hideOpen || fieldsOpen ? "" : "sticky top-[61px] z-[9] "}mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm`}>
       <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4">
         {leading}
         {/* แบบรายการ: ตาราง / การ์ดรูปใหญ่ */}
@@ -569,13 +573,16 @@ export function ReportLayoutControls({
         {/* หน้าตา ▾ */}
         <Popover align="left" panelClassName="w-64 py-1"
           trigger={(toggle, isOpen) => (
-            <button type="button" onClick={toggle} className={tabBtn(isOpen || open || signatureOpen || fontOpen, fontAdjusted)}>
+            <button type="button" onClick={toggle} className={tabBtn(isOpen || open || signatureOpen || fontOpen || fieldsOpen, fontAdjusted || layout.cardFields.length > 0)}>
               <span className="inline-flex items-center gap-1.5"><Icon value="i:adjustments-horizontal" className="text-[15px]" />หน้าตา<Icon value="i:chevron-down" className="text-[12px] opacity-60" /></span>
             </button>
           )}>
           {(close) => (
             <>
               <button type="button" className={menuRow} onClick={() => { close(); setOpen(c => !c); }}><Icon value="i:ruler" className={menuIcon} />จัดหน้า (ขอบ · ขนาดตัวอักษร){open ? " ✓" : ""}</button>
+              {layout.lineStyle === "cards" && cardFieldsPanel && (
+                <button type="button" className={menuRow} onClick={() => { close(); setFieldsOpen(c => !c); }}><Icon value="i:list-check" className={menuIcon} />ช่องในการ์ด (เพิ่ม · เรียง){layout.cardFields.length ? ` • ${layout.cardFields.length}` : ""}</button>
+              )}
               {layout.lineStyle === "cards" && (
                 <button type="button" className={menuRow} onClick={() => { close(); setFontOpen(c => !c); }}><Icon value="i:typography" className={menuIcon} />ตัวหนังสือแยกส่วน{fontAdjusted ? " •" : ""}</button>
               )}
@@ -654,6 +661,8 @@ export function ReportLayoutControls({
         <span className="flex-1" />
         {trailing}
       </div>
+
+      {fieldsOpen && layout.lineStyle === "cards" && cardFieldsPanel}
 
       {hideOpen && (
         <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-slate-100 px-4 py-3 text-sm text-slate-700">
