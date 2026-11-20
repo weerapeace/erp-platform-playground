@@ -35,7 +35,8 @@ export function UnifiedCalendar() {
   const toast = useToast();
   const { can } = useAuth();
   const layout = useViewportLayout();
-  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  // เริ่มที่เดือนนี้ทันที — เดิมรอ ScheduleBoard แจ้งเดือน แต่ระหว่างโหลดครั้งแรกไม่ได้วาด ScheduleBoard → ไม่เคยเริ่มโหลด (ค้าง "กำลังรวมปฏิทิน…" ตลอด · แก้ 2026-11-20)
+  const [range, setRange] = useState<{ from: string; to: string } | null>(() => { const d = new Date(); return monthRange(d.getFullYear(), d.getMonth()); });
   const [res, setRes] = useState<UnifiedCalendarResponse | null>(null);
   const [items, setItems] = useState<CalItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +74,7 @@ export function UnifiedCalendar() {
   }, [toast]);
 
   useEffect(() => { if (range) void load(range); }, [range, load]);
-  const onMonthChange = useCallback((y: number, m: number) => setRange(monthRange(y, m)), []);
+  const onMonthChange = useCallback((y: number, m: number) => { const r = monthRange(y, m); setRange((cur) => (cur && cur.from === r.from && cur.to === r.to ? cur : r)); }, []);
 
   // บันทึกค่าวันที่ลงโมดูลเดิม · ผ่าน = true
   const save = useCallback(async (it: CalItem, value: string | null): Promise<boolean> => {
