@@ -52,10 +52,23 @@ const gallery = useGalleryColumns("my-page", 6);           // scope ไม่ซ
 - `components/sku-tag-browser` (SKU → เลือกดูตามแท็ก) — 2026-11-20
 - กลุ่ม A (2026-11-20): DataTable โหมดการ์ด (ทุกตาราง) · AssetPicker (ป๊อปเลือกรูปจากคลัง) · GroupedImageViewer · MiniTable (`cardZoom` opt-in)
 - กลุ่ม B (2026-11-20): คลังรูป Assets · อัลบั้มแบรนด์ (หน้ารายละเอียด Parent) · แท็บ SAMPLE ในตัวเลือกรูป · รูปเว็บไซต์ · ป๊อปเลือกรายการเว็บ (`website-pick-modal`) · รูป Description ของ Parent
+- หน้าจัดซื้อ (2026-11-20): ขอซื้อ `/purchasing` (แท็บสินค้า + ใบสั่งผลิต + รวมตามรุ่น) · สั่งซื้อ `/purchasing/orders` (โหมดสั่ง + โหมดรับของ) · รับสินค้า `/purchasing/receive` — ปุ่ม − N + แทนช่องเลือก · จำกับบัญชี (scope `pr-shop` · `po-create` · `recv-pend`) · มือถือคง 2 ใบต่อแถว
 - ยังไม่ย้าย: บอร์ดผลิต/จ่ายงาน (กลุ่ม D — มีตัวตั้งขนาดของทีมเอง) · หน้าดูสินค้า/ดีไซน์ (กลุ่ม C)
 
 ## ยังทำกริดเอง (รอย้ายทีละกลุ่ม · เจ้าของติ๊กก่อนทุกรอบ)
 หา: `grep -rl "auto-fill, minmax" app components | xargs grep -L gallery-columns`
+
+## หน้าที่มีหลายกริด + มือถือคง 2 ใบ (2026-11-20)
+```tsx
+const gallery = useGalleryColumns("po-create", 4, "0.75rem", { options: GALLERY_COL_CHOICES, legacyKey: "po_create_cols" });
+<main ref={gallery.wheelRef}>                       {/* ลูกกลิ้งผูกที่กล่องที่ครอบทุกกลุ่ม (ref ผูกได้ทีละกล่อง) */}
+  {groups.map((g) => <div className={`gap-3 ${GALLERY_GRID_PHONE2}`} style={galleryVars(gallery.cols, "0.75rem")}>…</div>)}
+</main>
+```
+- `legacyKey` = คีย์ localStorage ที่หน้าเคยจำขนาดไว้ → ยกมาให้ครั้งแรก (ปัดเป็นตัวเลือกที่ใกล้สุด) แล้วจำกับบัญชีต่อ ค่าเดิมไม่หาย
+- `GALLERY_GRID_PHONE2` + `galleryVars(cols, gap)` = มือถือ 2 ใบต่อแถวตายตัว · จอ ≥ sm ใช้ขนาดที่ตั้ง (gap ต้องตรงกับ gap ของจอ ≥ sm)
+- กริดซ้อนกัน (เช่น กริดของกลางอยู่ในพื้นที่การ์ดของหน้า) → ตัวในสุดซูม ตัวนอกไม่ซูมซ้ำ (เช็ก `defaultPrevented`)
+- ปิดลูกกลิ้งบางแท็บได้ด้วย `ctrlWheel: เงื่อนไข` (เช่น หน้าขอซื้อเปิดเฉพาะแท็บสินค้า/ใบสั่งผลิต)
 
 ## useCtrlWheel (2026-11-20)
 ตัวจับ Ctrl (⌘) + ลูกกลิ้งแยกออกมาเป็นของกลาง — ใช้เมื่อหน้าเก็บ "จำนวนต่อแถว/ขนาด" เองที่อื่น (ไม่ได้ใช้ useGalleryColumns)

@@ -6,7 +6,7 @@
  * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
 import { LoadingState } from "@/components/state-views";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -28,6 +28,7 @@ import { r2ReadableUrl } from "@/lib/r2-image";
 import { formatDate } from "@/lib/date";
 import { Icon } from "@/components/icon";
 import { PO_PRINT_PICK_KEY } from "@/lib/purchasing-print";
+import { useGalleryColumns, GalleryColumnsControl, GALLERY_COL_CHOICES, GALLERY_GRID_PHONE2, galleryVars } from "@/components/gallery-columns";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { BulkAction, RowAction } from "@/components/data-table";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน + โหลดเฉพาะตอนเปิด
@@ -95,7 +96,9 @@ export default function PurchaseOrdersPage() {
   const [view, setView] = useState<"table" | "card">("card");
   const [mode, setMode] = useState<"order" | "recv">("order");   // 📝 สั่งซื้อ / 📥 รับของ (ของที่ออก PO แล้ว ยังรับไม่ครบ)
   const [mainTab, setMainTab] = useState<"shop" | "mo">("shop");
-  const [cols, setCols] = useState(4);
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง · ปุ่ม − + · จำกับบัญชี · ยกค่าเดิมในเครื่องมาครั้งแรก)
+  const gallery = useGalleryColumns("po-create", 4, "0.75rem", { options: GALLERY_COL_CHOICES, legacyKey: COLS_KEY });
+  const cols = gallery.cols;
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [activeShop, setActiveShop] = useState<string | null>(null);
   const [orderDate, setOrderDate] = useState(today);
@@ -159,7 +162,6 @@ export default function PurchaseOrdersPage() {
     const qm = new URLSearchParams(window.location.search).get("mode");
     const m = qm === "recv" || qm === "order" ? qm : localStorage.getItem(MODE_KEY);
     if (m === "recv" || m === "order") setMode(m);
-    const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 12) setCols(c);
     const r = Number(localStorage.getItem(RATE_KEY)); if (r > 0) setRate(r);
     const sk = localStorage.getItem(SORT_KEY); if (sk === "date" || sk === "name" || sk === "qty" || sk === "price") setSortKey(sk);
     // กู้คืน draft ตะกร้า (เผลอปิดหน้า/รีเฟรช ของไม่หาย)
@@ -188,7 +190,6 @@ export default function PurchaseOrdersPage() {
 
   const changeView = (v: "table" | "card") => { setView(v); localStorage.setItem(VIEW_KEY, v); };
   const changeMode = (m: "order" | "recv") => { setMode(m); localStorage.setItem(MODE_KEY, m); setShopDrawerOpen(false); setCartSheetOpen(false); };
-  const changeCols = (n: number) => { setCols(n); localStorage.setItem(COLS_KEY, String(n)); };
   const changeRate = (n: number) => { setRate(n); if (n > 0) localStorage.setItem(RATE_KEY, String(n)); };
   const changeSort = (s: SortKey) => { setSortKey(s); localStorage.setItem(SORT_KEY, s); };
   // เลือกหลายชิ้น (Mass)
@@ -442,8 +443,8 @@ export default function PurchaseOrdersPage() {
             </div>
             {mode === "recv" && (
               <>
-                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
-                  <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
                 </label>
                 <a href="/purchasing/receive" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center whitespace-nowrap">📦 หน้ารับสินค้า</a>
               </>
@@ -458,8 +459,8 @@ export default function PurchaseOrdersPage() {
                     <option value="price">ราคารวม</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
-                  <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
                 </label>
                 <button onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
                   className={`h-9 px-3 text-sm font-medium rounded-lg border ${selectMode ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>☑️ เลือกหลายชิ้น</button>
@@ -482,7 +483,7 @@ export default function PurchaseOrdersPage() {
         <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={fetchRows} />
 
         {/* 📥 โหมดรับของ — การ์ดรอรับ + ตะกร้ารับของกลาง (ไฟล์ receive-mode.tsx) */}
-        {mode === "recv" && <ReceiveMode cols={cols} isChineseShop={isChineseShop} />}
+        {mode === "recv" && <ReceiveMode cols={cols} wheelRef={gallery.wheelRef} isChineseShop={isChineseShop} />}
 
         {mode === "order" && view === "table" && (
           <DataTable<Row>
@@ -529,7 +530,7 @@ export default function PurchaseOrdersPage() {
               </aside>
 
               {/* กลาง: การ์ด แบ่ง section ตามร้าน */}
-              <main className="flex-1 min-w-0 space-y-4">
+              <main ref={gallery.wheelRef} className="flex-1 min-w-0 space-y-4">
                 {/* จอ < xl: ปุ่มเปิดลิ้นชักร้าน + โชว์ร้านที่เลือกอยู่ */}
                 <div className="flex items-center gap-2">
                   <button onClick={() => setShopDrawerOpen(true)} className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0 whitespace-nowrap">
@@ -569,7 +570,7 @@ export default function PurchaseOrdersPage() {
                         <h2 className="text-sm font-semibold text-slate-800">{sec.title} {sec.sub ? <span className="text-xs font-normal text-slate-500">· ผลิต: {sec.sub}</span> : null} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
                         {sec.shopName && !sectionNoShop && <button onClick={() => setBuyAllShop({ name: sec.shopName!, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
-                      <div className="grid gap-3 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                      <div className={`gap-3 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "0.75rem")}>
                         {list.map((r) => {
                           const on = inCart(r.id);
                           const blocked = noShop(r);

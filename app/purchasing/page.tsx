@@ -8,7 +8,7 @@
  * เลือก → ตะกร้า → สร้างใบขอซื้อ (PR + lines). currency: ร้าน CN → YUAN
  */
 import { LoadingState } from "@/components/state-views";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { PrHistoryButton } from "@/components/pr-history";
@@ -43,6 +43,7 @@ import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progres
 import { MO_SEGS, moProgCounts as progCounts, MoProgressBar, MatStageChip, MatStageSteps } from "@/components/mo-material-progress";
 import { matStage, matSteps, countStages, type MatStage } from "@/lib/mo-material-stage";
 import { useUserPref } from "@/lib/use-user-pref";
+import { useGalleryColumns, GalleryColumnsControl, GALLERY_COL_CHOICES, GALLERY_GRID_PHONE2, galleryVars } from "@/components/gallery-columns";
 import { MoParentGroup, type GroupCartLine } from "./mo-parent-group";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
@@ -152,7 +153,9 @@ export default function PurchasingShopPage() {
   const [bootDone, setBootDone] = useState(false);
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
-  const [cols, setCols] = useState(4);
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้งบนพื้นที่การ์ด · ปุ่ม − + · จำกับบัญชี) — แท็บ Tags/แผงผ้ามีกริดของกลางของตัวเอง จึงเปิดลูกกลิ้งเฉพาะแท็บสินค้า/ใบสั่งผลิต
+  const gallery = useGalleryColumns("pr-shop", 4, "1rem", { options: GALLERY_COL_CHOICES, legacyKey: COLS_KEY, ctrlWheel: source === "sku" || source === "mo" });
+  const cols = gallery.cols;
   const [sortKey, setSortKey] = useState("");   // การเรียง (sort by)
 
   // filter (SKU mode, configurable)
@@ -334,7 +337,6 @@ export default function PurchasingShopPage() {
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
     const sk = localStorage.getItem(SORT_KEY); if (sk && SORTS.some(s => s.key === sk)) setSortKey(sk);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
     // perf: ใช้ค่าที่ cache ไว้ทันที → grid รอบแรกถูกต้อง (ซ่อนแท็กห้ามขอซื้อ + label ประเทศ) โดยไม่รอ network 4s
@@ -351,7 +353,6 @@ export default function PurchasingShopPage() {
     if (typeof window === "undefined") return;
     try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* ignore */ }
   }, [cart]);
-  const changeCols = (n: number) => { setCols(n); if (typeof window !== "undefined") localStorage.setItem(COLS_KEY, String(n)); };
 
   // ติดตามคำค้นรอบก่อน — ใช้แยกว่า "พิมพ์ค้นหา" (หน่วง) กับ "สลับ/กรอง" (ทันที)
   const prevQ = useRef(q);
@@ -988,7 +989,7 @@ export default function PurchasingShopPage() {
         </aside>
 
         {/* Grid */}
-        <main className="flex-1 xl:overflow-auto p-5">
+        <main ref={gallery.wheelRef} className="flex-1 xl:overflow-auto p-5">
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
             {/* จอเล็ก: ปุ่มเปิดลิ้นชักตัวกรอง (PC ไม่ต้องเพราะกรองอยู่คอลัมน์ซ้ายแล้ว) */}
             <button onClick={() => setFilterOpen(true)}
@@ -1010,11 +1011,7 @@ export default function PurchasingShopPage() {
             )}
             {source === "sku" && (
               <label className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 flex-shrink-0">
-                <span className="whitespace-nowrap">▦ การ์ด/แถว</span>
-                <select value={cols} onChange={e => changeCols(Number(e.target.value))}
-                  className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white text-slate-700">
-                  {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
+                <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
               </label>
             )}
             <PrHistoryButton />
@@ -1144,7 +1141,7 @@ export default function PurchasingShopPage() {
                 </button>
               );
               const grid = (mos: MoEntry[]) => (
-                <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                <div className={`gap-3 sm:gap-4 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "1rem")}>
                   {mos.map(moCard)}
                 </div>
               );
@@ -1230,7 +1227,7 @@ export default function PurchasingShopPage() {
                   )}
                   {list.length === 0 && <div className="text-center text-slate-300 py-16">{q.trim() ? `ไม่พบใบสั่งผลิตที่ตรงกับ “${q}”` : "ไม่มีใบสั่งผลิตที่ตรงกับตัวกรองที่เลือก"}</div>}
                   {moView === "parent" ? (
-                    <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                    <div className={`gap-3 sm:gap-4 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "1rem")}>
                       {parents.map(parentCard)}
                     </div>
                   ) : moGroup === "none" ? grid(list) : groups.map(([title, mos]) => {
@@ -1328,7 +1325,7 @@ export default function PurchasingShopPage() {
                   return (
                     <div key={g.title} className="mb-5">
                       <div className="text-sm font-semibold text-slate-700 mb-2">{g.title} <span className="text-xs font-normal text-slate-400">{list.length} รายการ{g.hint ? ` · ${g.hint}` : ""}</span></div>
-                      <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                      <div className={`gap-3 sm:gap-4 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "1rem")}>
                         {list.map(it => (
                           <MoBomCard key={it.summary_id} it={it} inCart={inCartQty(it.code)} canEdit={canEditMat} busy={haveBusy === it.summary_id}
                             dispatchedAt={moStatus?.dispatch?.dispatched_at ?? null}
@@ -1366,7 +1363,7 @@ export default function PurchasingShopPage() {
           {/* การ์ดสินค้าทั่วไป (ทุกโหมดยกเว้น "ใบสั่งผลิต" และ "ตาม Tags" ที่ใช้ SkuTagBrowser) */}
           {source !== "mo" && source !== "tags" && source !== "swatch" && (<>
           {/* responsive: iPhone (<sm) 2 คอลัมน์ตายตัว · iPad+ ใช้ค่าที่ตั้ง (--cols, default 4 ปรับได้บนหัว) */}
-          <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
+          <div className={`gap-3 sm:gap-4 ${GALLERY_GRID_PHONE2} transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={galleryVars(cols, "1rem")}>
             {cards.map(c => (
               <div key={c.id} className="relative group">
                 {/* ปุ่มดาว ⭐ (เฉพาะการ์ด SKU จริง — favorite เก็บเป็น sku_id) */}

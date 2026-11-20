@@ -8,7 +8,7 @@
  * รับไม่ครบ (แท็บ A) จะเด้งถามว่าจบงาน/รอของ · รับเกินได้
  */
 import { LoadingState } from "@/components/state-views";
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission } from "@/components/auth";
 import { useBackdropDismiss, ERPModal } from "@/components/modal";
@@ -29,6 +29,7 @@ import { PO_PAY_FILTERS, isPoPayFilterKey, matchPayFilter, payFilterOf, poPaySta
 import { PO_PAY_CLS, PoPayFilterBar } from "@/components/po-pay-chip";
 import { etaSourceLabel } from "@/lib/po-eta";
 import { Icon } from "@/components/icon";
+import { useGalleryColumns, GalleryColumnsControl, GALLERY_COL_CHOICES, GALLERY_GRID_PHONE2, galleryVars } from "@/components/gallery-columns";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type PoCard = PO & { pendCount: number };
@@ -96,7 +97,6 @@ function etaBadge(days: number | null): { text: string; cls: string } {
 
 const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group", PEND_PAY_KEY = "recv_pend_pay";
 const PEND_DIR_KEY = "recv_pend_dir", PEND_PSIZE_KEY = "recv_pend_psize", PO_VIEW_KEY = "recv_po_view", PEND_COPY_KEY = "recv_pend_copy";
-const COL_OPTIONS = [3, 4, 5, 6, 8, 10];
 const PAGE_SIZES = [50, 100, 200];
 // ข้อมูลที่เลือกโชว์ได้บนการ์ดติดตาม (Card Builder)
 const TRACK_CARD_FIELDS: CardField[] = [
@@ -141,7 +141,9 @@ export default function ReceiveGoodsPage() {
   const [activeMo, setActiveMo] = useState<string | null>(null);       // filter ตามใบสั่งผลิต (MO)
   const [shopQ, setShopQ] = useState("");
   const [poQ, setPoQ] = useState("");                                  // ค้นหาใบ PO (แท็บตามใบสั่งซื้อ)
-  const [pendCols, setPendCols] = useState(4);
+  // ขนาดการ์ด = ของกลาง มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง · ปุ่ม − + · จำกับบัญชี · ยกค่าเดิมในเครื่องมาครั้งแรก)
+  const gallery = useGalleryColumns("recv-pend", 4, "0.75rem", { options: GALLERY_COL_CHOICES, legacyKey: PEND_COLS_KEY });
+  const pendCols = gallery.cols;
   const [pendSort, setPendSort] = useState<PendSort>("eta");
   const [pendDir, setPendDir] = useState<SortDir>("asc");
   const [pendGroup, setPendGroup] = useState<PendGroup>("none");
@@ -193,7 +195,6 @@ export default function ReceiveGoodsPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const v = localStorage.getItem(PEND_VIEW_KEY); if (v === "card" || v === "table") setPendView(v);
-    const c = Number(localStorage.getItem(PEND_COLS_KEY)); if (COL_OPTIONS.includes(c)) setPendCols(c);
     const s = localStorage.getItem(PEND_SORT_KEY); if (["eta","order","name","seller","remaining","recv","def","status","ordered","received","defective"].includes(s ?? "")) setPendSort(s as PendSort);
     const d = localStorage.getItem(PEND_DIR_KEY); if (d === "asc" || d === "desc") setPendDir(d);
     const ps = Number(localStorage.getItem(PEND_PSIZE_KEY)); if (PAGE_SIZES.includes(ps)) setPendPageSize(ps);
@@ -204,7 +205,6 @@ export default function ReceiveGoodsPage() {
   }, []);
   const changeShowCopy = (v: boolean) => { setShowCopy(v); localStorage.setItem(PEND_COPY_KEY, v ? "1" : "0"); };
   const changePendView = (v: "card" | "table") => { setPendView(v); localStorage.setItem(PEND_VIEW_KEY, v); };
-  const changePendCols = (n: number) => { setPendCols(n); localStorage.setItem(PEND_COLS_KEY, String(n)); };
   const changePendSort = (s: PendSort) => { setPendSort(s); setPendDir("asc"); localStorage.setItem(PEND_SORT_KEY, s); localStorage.setItem(PEND_DIR_KEY, "asc"); };
   const changePendGroup = (g: PendGroup) => { setPendGroup(g); localStorage.setItem(PEND_GROUP_KEY, g); };
   const changePayF = (k: PoPayFilterKey | "") => { setPayF(k); localStorage.setItem(PEND_PAY_KEY, k); };
@@ -810,8 +810,8 @@ export default function ReceiveGoodsPage() {
                 <button onClick={() => setDesignOpen(true)} title="เลือกข้อมูลที่โชว์บนการ์ด" className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🎨 ออกแบบการ์ด</button>
               )}
               {pendView === "card" && (
-                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
-                  <select value={pendCols} onChange={(e) => changePendCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{COL_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <GalleryColumnsControl as="stepper" cols={gallery.cols} onChange={gallery.setCols} options={gallery.options} />
                 </label>
               )}
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
@@ -854,11 +854,11 @@ export default function ReceiveGoodsPage() {
               <div className="py-16 text-center text-slate-300 text-sm">— ไม่พบรายการที่ค้นหา —</div>
             ) : pendView === "card" ? (
               /* มุมมองการ์ด — แตะการ์ดเพื่อกรอกจำนวนใน popup */
-              <div className="space-y-5">
+              <div ref={gallery.wheelRef} className="space-y-5">
                 {groupedPend.map((g) => (
                   <section key={g.key}>
                     {g.label && <h3 className="text-sm font-semibold text-slate-700 mb-2">{g.label} <span className="text-xs font-normal text-slate-400">({g.items.length})</span></h3>}
-                    <div className="grid gap-3 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": pendCols } as CSSProperties}>
+                    <div className={`gap-3 ${GALLERY_GRID_PHONE2}`} style={galleryVars(pendCols, "0.75rem")}>
                       {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const recv = num(inp.recv), def = num(inp.def);

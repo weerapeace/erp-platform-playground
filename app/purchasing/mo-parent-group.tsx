@@ -6,7 +6,9 @@
  * ของกลางที่ใช้: /api/mo/material-status?mo_nos= · PATCH /api/mo/material {items} · /api/inventory/quick-count · /api/mo/material-allocations
  *   lib/mo-group-materials (รวมยอด/แบ่งสต๊อก) · oddMos (ใบที่ใช้ต่อชิ้นผิดปกติ ไม่รวมในขอซื้อ — กติกาเดียวกับ "ซื้อรวมทั้งกลุ่ม")
  */
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { GALLERY_GRID_PHONE2, galleryVars } from "@/components/gallery-columns";
+
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -204,7 +206,7 @@ export function MoParentGroup({ title, mos, needs, cols, canEdit, canStock, canS
                 className="text-xs font-normal text-blue-600 hover:underline">{s.list.every((r) => pick.has(r.key)) ? "ไม่เลือกกลุ่มนี้" : "เลือกทั้งกลุ่ม"}</button>
             )}
           </div>
-          <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+          <div className={`gap-3 sm:gap-4 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "1rem")}>
             {s.list.map((r) => (
               <GroupMatCard key={r.key} r={r} odd={oddOf(r)} multiColor={multiColor} picked={pick.has(r.key)} busy={busy}
                 inCart={inCartQty(r.code, r.mos.map((m) => m.mo_no))} canEdit={canEdit} canStock={canStock} canStockView={canStockView}

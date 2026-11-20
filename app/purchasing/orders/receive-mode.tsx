@@ -7,7 +7,9 @@
  * ตะกร้า/บันทึก = ของกลาง components/receive-line-modal/receive-cart (ตัวเดียวกับป๊อปตะกร้าหน้ารับสินค้า)
  *  → บังคับแนบใบรับของ + บิล · 1 ใบสั่งซื้อ = 1 ใบรับ GR · บวกสต๊อก · audit · แจ้งไลน์ (API /api/purchasing/receive)
  */
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { GALLERY_GRID_PHONE2, galleryVars } from "@/components/gallery-columns";
+
 import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
@@ -46,7 +48,7 @@ function ageBadge(days: number | null): { text: string; cls: string } | null {
   return { text: `ค้าง ${days} วัน`, cls: "bg-red-50 text-red-700 border-red-200" };
 }
 
-export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseShop: (name: string, currency: string) => boolean }) {
+export function ReceiveMode({ cols, wheelRef, isChineseShop }: { cols: number; wheelRef?: (el: HTMLElement | null) => void; isChineseShop: (name: string, currency: string) => boolean }) {
   const toast = useToast();
   const canReceive = usePermission("products.edit");   // สิทธิ์เดียวกับ API รับของ
   const canBackfill = usePermission("po.receive_backfill");   // 🧹 เคลียร์ของค้างเก่า (รับย้อนหลังไม่ต้องแนบ)
@@ -199,7 +201,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
           </aside>
 
           {/* กลาง: การ์ดรอรับ แบ่ง section ตามร้าน / ใบสั่งงาน */}
-          <main className="flex-1 min-w-0 space-y-4">
+          <main ref={wheelRef} className="flex-1 min-w-0 space-y-4">
             <div className="flex items-center gap-2">
               <button onClick={() => setShopDrawerOpen(true)} className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0 whitespace-nowrap">
                 🏪 {mainTab === "mo" ? "ใบสั่งงาน" : shopSel ?? "ทุกร้าน"}
@@ -248,7 +250,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
                     <h2 className="text-sm font-semibold text-slate-800">{sec.title} {sec.sub ? <span className="text-xs font-normal text-slate-500">· ผลิต: {sec.sub}</span> : null} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
                     <button onClick={() => addAll(list)} disabled={allIn} title="ใส่ทุกรายการในกลุ่มนี้ลงตะกร้ารับ (รับครบ)" className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40 shrink-0">{allIn ? "✓ อยู่ในตะกร้าครบ" : mainTab === "mo" ? "📥 รับทั้งใบงาน" : "📥 รับทั้งร้าน"}</button>
                   </div>
-                  <div className="grid gap-3 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                  <div className={`gap-3 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "0.75rem")}>
                     {list.map((it) => {
                       const inp = cart[it.id];
                       const age = ageBadge(ageDays(it.order_date));

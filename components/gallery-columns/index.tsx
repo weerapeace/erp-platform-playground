@@ -37,7 +37,7 @@ const isValidCols = (n: unknown, options: readonly number[]): n is GalleryCols =
 
 /** อ่าน/ตั้งจำนวนการ์ดต่อแถว + คืน gridStyle พร้อมใช้ (จำค่ารายคน) */
 export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, gap = "0.75rem",
-  opts?: { options?: readonly GalleryCols[]; ctrlWheel?: boolean; enabled?: boolean }) {
+  opts?: { options?: readonly GalleryCols[]; ctrlWheel?: boolean; enabled?: boolean; legacyKey?: string }) {
   const options = opts?.options ?? GALLERY_COL_OPTIONS;
   const [cols, setColsState] = useState<GalleryCols>(initial);
   const prefKey = `gallery_cols_${scopeKey}`;
@@ -48,7 +48,19 @@ export function useGalleryColumns(scopeKey: string, initial: GalleryCols = 6, ga
     if (!enabled || loadedKey.current === prefKey) return;
     loadedKey.current = prefKey;
     apiFetch(`/api/user-prefs?key=${encodeURIComponent(prefKey)}`).then((r) => r.json())
-      .then((j) => { const v = Number(j?.value); if (isValidCols(v, options)) setColsState(v); })
+      .then((j) => {
+        const v = Number(j?.value);
+        if (isValidCols(v, options)) { setColsState(v); return; }
+        // ยังไม่เคยจำกับบัญชี → ยกค่าเดิมที่หน้าเคยจำไว้ในเครื่อง (localStorage legacyKey) มาครั้งแรก แล้วจำกับบัญชีต่อ
+        const lk = opts?.legacyKey;
+        if (!lk || typeof window === "undefined") return;
+        let old = NaN;
+        try { old = Number(window.localStorage.getItem(lk)); } catch { /* ignore */ }
+        if (!(old > 0)) return;
+        const near = options.reduce((b, n) => (Math.abs(n - old) < Math.abs(b - old) ? n : b), options[0]);
+        setColsState(near);
+        void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: prefKey, value: near }) }).catch(() => {});
+      })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefKey, enabled]);
@@ -102,7 +114,8 @@ export function useCtrlWheel(onStep: (dir: 1 | -1) => void, enabled = true) {
     if (!el || !enabled) return;
     let last = 0;
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !e.deltaY) return;
+      // กริดซ้อนกัน (เช่น กริดของกลางอยู่ในพื้นที่การ์ดของหน้า) → ตัวในสุดรับไปแล้ว ตัวนอกไม่ซูมซ้ำ
+      if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || !e.deltaY) return;
       e.preventDefault();
       const now = Date.now();
       if (now - last < 140) return;
@@ -113,6 +126,11 @@ export function useCtrlWheel(onStep: (dir: 1 | -1) => void, enabled = true) {
     detach.current = () => el.removeEventListener("wheel", onWheel);
   }, [enabled]);
 }
+
+/** กริดที่มือถือคง 2 ใบต่อแถว แต่จอ ≥ sm ใช้ขนาดจาก gallery (หน้าจัดซื้อ 2026-11-20)
+ *   <div className={`gap-3 ${GALLERY_GRID_PHONE2}`} style={galleryVars(cols, "0.75rem")}>  · gap ต้องตรงกับ gap ของจอ ≥ sm */
+export const GALLERY_GRID_PHONE2 = "grid grid-cols-2 sm:[grid-template-columns:var(--gallery-tpl)]";
+export const galleryVars = (cols: number, gap = "0.75rem") => ({ "--gallery-tpl": galleryTemplate(cols, gap) }) as CSSProperties;
 
 /** ค่าที่ useGalleryColumns คืน — ส่งต่อให้ CardGrid / CardViewBar */
 export type GalleryState = ReturnType<typeof useGalleryColumns>;
