@@ -6,6 +6,7 @@ import type { SkuPickerValue } from "@/components/pickers";
 // หน่วยนับ = ทะเบียนหน่วยจริง (uoms — ตัวเดียวกับหน่วยของสินค้า) · เดิม UnitPicker อ่านตารางทดลอง 12 หน่วย เลือก หลา/Units/pcs. ไม่ได้ · ค่ายังเก็บเป็นชื่อหน่วยเหมือนเดิม
 import { UomPicker } from "@/components/uom-picker";
 import { ImageThumbnail } from "@/components/image-manager";
+import type { PickerDesignSheet } from "@/components/asset-picker/design-sheet-images-panel";
 import { AssetPicker } from "@/components/asset-picker";
 import { calculateDocument, type DocumentResult } from "@/lib/tax";
 import { format as formatMoney, money } from "@/lib/money";
@@ -66,8 +67,8 @@ export const emptyLine = (): EditorLine => ({
  * รูปประกอบของบรรทัด — คลิกเพื่อแนบ/เปลี่ยนรูปจากคลังไฟล์กลาง (ติดไปกับใบพิมพ์คอลัมน์ "ภาพ")
  * ไม่แนบเอง = ใช้รูปของ SKU ที่ผูกไว้ตามเดิม
  */
-function LineImagePick({ url, size, readonly, onPick, onClear, alt }: {
-  url: string | null; size: number; readonly?: boolean; alt?: string;
+function LineImagePick({ url, size, readonly, onPick, onClear, alt, designSheets }: {
+  url: string | null; size: number; readonly?: boolean; alt?: string; designSheets?: PickerDesignSheet[];
   onPick: (r2Key: string, url: string | null) => void; onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -85,7 +86,7 @@ function LineImagePick({ url, size, readonly, onPick, onClear, alt }: {
           className="absolute -right-1.5 -top-1.5 h-4 w-4 rounded-full border border-slate-200 bg-white text-[10px] leading-none text-slate-400 shadow hover:text-rose-500">x</button>
       )}
       {open && (
-        <AssetPicker open onClose={() => setOpen(false)} typeFilter="image" title="เลือกรูปประกอบรายการ"
+        <AssetPicker open onClose={() => setOpen(false)} typeFilter="image" title="เลือกรูปประกอบรายการ" designSheets={designSheets}
           onSelect={(assets) => { const a = assets[0]; if (a) onPick(a.r2_key, a.url ?? null); setOpen(false); }} />
       )}
     </div>
@@ -150,13 +151,16 @@ export function SOLineEditor({
   extraColumns = [],
   rowBelow,
   rowTone,
+  imageDesignSheets,
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
   readonly?: boolean;
   /** "card" (default) = การ์ดต่อรายการ · "table" = ตารางแก้ไขในแถว ·
    *  "compact" = ตารางแน่น 1 แถว/รายการ (ชื่อ/สี/หน่วย/ส่วนลดเป็นตัวหนังสือ · กดแถวเพื่อแก้สินค้า) — ใบสั่งขายใช้ */
-  layout?: "card" | "table" | "compact";
+  layout?: "card" | "card2" | "table" | "compact";
+  /** ส่งมา = ป๊อปเลือกรูปของรายการมีแท็บ "ใบงานออกแบบ" (ใบที่ส่งมาขึ้นก่อน) — ใบเสนอราคาส่งใบงานที่ผูกไว้ */
+  imageDesignSheets?: PickerDesignSheet[];
   /** ถ้าส่งมา = เปิดตัวเลือก "บันทึกเป็นชื่อสินค้าตัวจริงด้วย" (อัปเดต name_th ใน master) */
   onSaveMasterName?: (productId: string, name: string) => Promise<void>;
   /** ซ่อนคอลัมน์ราคา/ส่วนลด/รวม (โหมดตาราง) — เช่น ใบส่งสินค้าที่สนใจแค่จำนวน */
@@ -340,7 +344,7 @@ export function SOLineEditor({
                       </button>
                     ) : (
                     <div className="flex items-start gap-2">
-                      <div className="pt-0.5"><LineImagePick url={lineImageUrl(l)} size={36} readonly={readonly} alt={l.product_name || "สินค้า"}
+                      <div className="pt-0.5"><LineImagePick url={lineImageUrl(l)} size={36} readonly={readonly} designSheets={imageDesignSheets} alt={l.product_name || "สินค้า"}
                         onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} /></div>
                       <div className="min-w-0 flex-1">
                         <SkuPicker value={pickerValueOf(l)} onChange={(p) => applyPick(i, p, l)} disabled={readonly} placeholder="เลือก SKU / ชื่อสินค้า..." />
@@ -432,7 +436,7 @@ export function SOLineEditor({
           <h3 className="text-sm font-semibold text-slate-800">
             รายการสินค้า <span className="text-xs font-normal text-slate-400">({lines.length})</span>
           </h3>
-          <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
+          <p className={`mt-0.5 text-[11px] leading-4 text-slate-400 ${layout === "card2" ? "hidden sm:block" : ""}`}>
             เลือก SKU แล้วระบบจะดึงรูป หน่วย และราคาขายมาให้ แก้จำนวน/ราคาได้ในแถวนี้
           </p>
         </div>
@@ -470,7 +474,7 @@ export function SOLineEditor({
         />
       )}
 
-      <div className="space-y-3 bg-slate-50/40 p-3">
+      <div className={`${layout === "card2" ? "space-y-1.5 p-2" : "space-y-3 p-3"} bg-slate-50/40`}>
         {lines.map((l, i) => {
           const hasDiscount = l.discount_value > 0;
           const pickerValue = l.product_name
@@ -485,12 +489,56 @@ export function SOLineEditor({
               } satisfies SkuPickerValue)
             : null;
 
+          if (layout === "card2") {
+            const inp = "h-8 w-full rounded-md border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50";
+            return (
+              <article key={l.tempId} className={`rounded-lg border bg-white px-2.5 py-2 ${rowTone?.(l) === "danger" ? "border-rose-300 bg-rose-50/40" : "border-slate-200"}`}>
+                <div className="flex items-start gap-2">
+                  <div className="w-5 shrink-0 pt-2 text-center font-mono text-[11px] text-slate-400">{i + 1}</div>
+                  <LineImagePick url={lineImageUrl(l)} size={40} readonly={readonly} designSheets={imageDesignSheets} alt={l.product_name || "สินค้า"}
+                    onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} />
+                  <div className="grid min-w-0 flex-1 gap-1.5 sm:grid-cols-[minmax(0,1fr)_200px]">
+                    <div className="min-w-0">
+                      <SkuPicker value={pickerValue} onChange={(p: SkuPickerValue | null) => applyPick(i, p, l)} disabled={readonly} placeholder="เลือก SKU / ชื่อสินค้า..." />
+                      {renderNameEditor(l, i)}
+                      {rowBelow?.(l, i)}
+                    </div>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <div className="min-w-0 flex-1">{renderVariantField(l, i, true)}</div>
+                      {!readonly && l.product_name && <button type="button" onClick={() => startNameEdit(l)} title="แก้ชื่อสินค้า (ที่พิมพ์บนเอกสาร)" className="shrink-0 rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-600">✏️</button>}
+                    </div>
+                  </div>
+                  {!readonly && (
+                    <button type="button" onClick={() => remove(i)} aria-label="ลบรายการ"
+                      className="h-8 w-8 shrink-0 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">x</button>
+                  )}
+                </div>
+                <div className="mt-1.5 grid grid-cols-3 items-center gap-1.5 sm:grid-cols-[76px_130px_110px_minmax(130px,1fr)_auto] sm:pl-[76px]">
+                  <label className="min-w-0"><span className="sr-only">จำนวน</span>
+                    <input type="number" value={l.qty} title="จำนวน" disabled={readonly} onChange={(e) => update(i, { qty: parseFloat(e.target.value) || 0 })} className={inp} /></label>
+                  <div className="min-w-0"><UomPicker value={l.unit || null} onChange={(u) => update(i, { unit: u ?? "ชิ้น" })} disabled={readonly} /></div>
+                  <label className="min-w-0"><span className="sr-only">ราคา/หน่วย</span>
+                    <input type="number" value={l.unit_price} title="ราคา/หน่วย" disabled={readonly} onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })} className={inp} /></label>
+                  <div className="col-span-2 flex min-w-0 items-center gap-1 sm:col-span-1">
+                    <span className="shrink-0 text-[11px] text-slate-400">ลด</span>
+                    <input type="number" value={l.discount_value || ""} placeholder="0" title="ส่วนลด" disabled={readonly}
+                      onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })} className={`${inp} min-w-0`} />
+                    <select value={l.discount_type} disabled={readonly} onChange={(e) => update(i, { discount_type: e.target.value as "percent" | "amount" })}
+                      className="h-8 shrink-0 rounded-md border border-slate-200 bg-white px-1 text-xs disabled:bg-slate-50">
+                      <option value="percent">%</option><option value="amount">บาท</option>
+                    </select>
+                  </div>
+                  <div className="text-right font-mono text-sm font-semibold tabular-nums text-slate-900" title="รวมก่อนภาษี">{formatMoney(money(lineTotal(l)))}</div>
+                </div>
+              </article>
+            );
+          }
           return (
             <article key={l.tempId} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
               <div className="grid grid-cols-[28px_64px_minmax(0,1fr)_auto] items-start gap-3">
                 <div className="pt-3 text-center font-mono text-xs text-slate-400">{i + 1}</div>
                 <div className="pt-1">
-                  <LineImagePick url={lineImageUrl(l)} size={56} readonly={readonly} alt={l.product_name || "สินค้า"}
+                  <LineImagePick url={lineImageUrl(l)} size={56} readonly={readonly} designSheets={imageDesignSheets} alt={l.product_name || "สินค้า"}
                     onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} />
                 </div>
                 <div className="min-w-0">

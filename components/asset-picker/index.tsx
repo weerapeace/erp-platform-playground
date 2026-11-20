@@ -32,6 +32,7 @@ import { type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { type AssetRow } from "@/app/api/assets/shared";
+import { DesignSheetImagesPanel, type PickerDesignSheet } from "./design-sheet-images-panel";
 import { VideoThumb } from "@/components/video-thumb";
 import { MediaUploadError, SMALL_UPLOAD_BYTES, normalizeMediaFile, uploadMediaAsset } from "@/lib/media-upload";
 import { Icon } from "@/components/icon";
@@ -81,16 +82,18 @@ export type AssetPickerProps = {
   defaultSource?: string;          // ที่มาเริ่มต้น เช่น "artwork" (เปิดมาที่คลัง Artwork เลย)
   defaultSearch?: string;          // คำค้นเริ่มต้น (เปิดมากรองรายการที่เกี่ยวข้องเลย)
   requireDriveFolder?: boolean;    // โชว์เฉพาะรูปที่มีโฟลเดอร์ Drive แล้ว (เลือกรูปต้นทางเพื่อผูกโฟลเดอร์)
+  /** ส่งมา = มีแท็บ "ใบงานออกแบบ" (รูปของใบงาน · ใบที่ส่งมาขึ้นก่อน · ค้นใบอื่นได้) — รูปไม่ได้อยู่ในคลัง id ขึ้นต้น "ds:" */
+  designSheets?: PickerDesignSheet[];
   lockCollectionName?: string;     // ล็อกให้เลือกได้เฉพาะอัลบั้มชื่อนี้ (ซ่อนตัวกรอง+แท็บอัปโหลด) เช่น "งานพิมพ์ DFT UV (Printed)"
 };
 
 const KIND_LABEL: Partial<Record<AssetType, string>> = { image: "🖼 รูป", video: "🎬 วิดีโอ", document: "📄 เอกสาร", design: "🎨 ออกแบบ" };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, kinds, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, kinds, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName, designSheets }: AssetPickerProps) {
   const firstKind = typeFilter ?? kinds?.[0] ?? "";
   const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
-  const [tab, setTab] = useState<"library" | "upload" | "sample" | "recent">("library");
+  const [tab, setTab] = useState<"library" | "upload" | "sample" | "recent" | "sheet">("library");
   const [recentAssets, setRecentAssets] = useState<AssetRow[]>([]);
   useEffect(() => { if (open) setRecentAssets(loadRecent<AssetRow>(RECENT_KEYS.assets)); }, [open]);
   // 📸 SAMPLE Images: ช่องที่รับรูปได้เท่านั้น (ไม่ใช่ช่องวิดีโอ/เอกสารอย่างเดียว · ไม่ล็อกอัลบั้ม · ไม่บังคับโฟลเดอร์ Drive)
@@ -119,7 +122,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); fromSample.current = new Set(); setTab("library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setSelected(new Map()); fromSample.current = new Set(); setTab(designSheets?.length ? "sheet" : "library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
   // พิมพ์ค้น → รอหยุดพิมพ์ 0.3 วิ ค่อยค้นจริง (ไม่ยิงทุกตัวอักษร)
   useEffect(() => {
     if (search === query) return;
@@ -297,6 +300,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           <button onClick={() => setTab("sample")}
             className={`pb-2 text-sm inline-flex items-center gap-1 ${tab === "sample" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}><Icon value="i:camera" /> SAMPLE Images</button>
         )}
+        {designSheets && (
+          <button onClick={() => setTab("sheet")}
+            className={`pb-2 text-sm inline-flex items-center gap-1 ${tab === "sheet" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}><Icon value="i:palette" /> ใบงานออกแบบ</button>
+        )}
         {recentShown.length > 0 && !lockCollectionName && (
           <button onClick={() => setTab("recent")}
             className={`pb-2 text-sm ${tab === "recent" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⏱ ใช้ล่าสุด</button>
@@ -390,6 +397,9 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         <div className="grid gap-2 max-h-[420px] overflow-auto pr-1" style={{ gridTemplateColumns: tileGrid }}>
           {recentShown.map((a) => <AssetTile key={a.id} a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />)}
         </div>
+      ) : tab === "sheet" && designSheets ? (
+        <DesignSheetImagesPanel sheets={designSheets} grid={tileGrid}
+          renderTile={(a) => <AssetTile a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />} />
       ) : tab === "sample" ? (
         <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (

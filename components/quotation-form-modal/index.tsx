@@ -18,6 +18,7 @@ import type { CustomerPickerValue, UserPickerValue } from "@/components/pickers"
 import { DateInput } from "@/components/date-input";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 import { apiFetch } from "@/lib/api";
+import { useUserPref } from "@/lib/use-user-pref";
 import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 
 const addDays = (iso: string, days: number) => {
@@ -95,6 +96,8 @@ export function QuotationFormModal({ open, quote, defaultSalePerson = "", actor,
   onSaved: (id: string | null, isNew: boolean) => void | Promise<void>;
 }) {
   const [form, setForm] = useState<FormState>(() => makeEmpty(defaultSalePerson));
+  // หน้าตารายการ: กะทัดรัด (การ์ด 2 บรรทัด) / การ์ดใหญ่ — จำต่อคน (เจ้าของเลือก 2026-11-20)
+  const [lineLayout, setLineLayout] = useUserPref<"card2" | "card">("quote_form_line_layout", "card2", (v) => (v === "card" || v === "card2" ? v : null));
   const [formErr, setFormErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const baseline = useRef("");
@@ -172,11 +175,11 @@ export function QuotationFormModal({ open, quote, defaultSalePerson = "", actor,
           </button>
         </>
       }>
-      <div className="space-y-4">
+      <div className="space-y-3">
         {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="col-span-2 lg:col-span-1">
             <span className="text-xs font-medium text-slate-600">ลูกค้า *</span>
             <div className="mt-0.5">
               <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
@@ -190,7 +193,7 @@ export function QuotationFormModal({ open, quote, defaultSalePerson = "", actor,
             )}
           </div>
           <div>
-            <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(ผู้ใช้ระบบ — ไม่บังคับ)</span></span>
+            <span className="text-xs font-medium text-slate-600" title="ผู้ใช้ระบบ — ไม่บังคับ">เซลส์</span>
             <div className="mt-0.5">
               {/* เซลส์ = ผู้ใช้ระบบ (ของกลาง UserPicker · user_profiles) — ค่ายังเก็บเป็นชื่อเหมือนเดิม */}
               <UserPicker
@@ -198,27 +201,31 @@ export function QuotationFormModal({ open, quote, defaultSalePerson = "", actor,
                 onChange={(v: UserPickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
               />
             </div>
-            {defaultSalePerson && (
-              <p className="mt-1 text-[11px] text-slate-400">
-                ค่าเริ่มต้นคือ user ที่ login: {defaultSalePerson}
-              </p>
-            )}
           </div>
           <div>
-            <span className="text-xs font-medium text-slate-600">วันที่เสนอราคา</span>
+            <span className="text-xs font-medium text-slate-600">วันที่</span>
             <div className="mt-0.5">
               <DateInput value={form.quote_date} onChange={(iso) => setForm({ ...form, quote_date: iso })} />
             </div>
           </div>
           <div>
-            <span className="text-xs font-medium text-slate-600">ยืนราคาถึงวันที่ <span className="text-slate-400">(default 30 วัน)</span></span>
+            <span className="text-xs font-medium text-slate-600"><span title="ค่าเริ่มต้น 30 วัน">ยืนราคาถึง</span></span>
             <div className="mt-0.5">
               <DateInput value={form.valid_until} onChange={(iso) => setForm({ ...form, valid_until: iso })} />
             </div>
           </div>
         </div>
 
-        <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} />
+        <div className="-mb-2 flex justify-end">
+          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs" role="group" aria-label="หน้าตารายการ">
+            {(["card2", "card"] as const).map((k) => (
+              <button key={k} type="button" onClick={() => setLineLayout(k)}
+                className={`px-2.5 py-1 ${lineLayout === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{k === "card2" ? "กะทัดรัด" : "การ์ดใหญ่"}</button>
+            ))}
+          </div>
+        </div>
+        <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout={lineLayout}
+          imageDesignSheets={(quote?.design_sheets ?? []).map((d) => ({ id: d.id, code: d.code, name: d.name }))} />
 
         <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-lg sm:grid-cols-4">
           <label className="block">
