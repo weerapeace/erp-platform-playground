@@ -45,3 +45,16 @@ describe("แบ่งจำนวน", () => {
     expect(colorUnitPrice(null, { delta: 3 })).toBeNull();
   });
 });
+
+describe("สีผูก SKU", () => {
+  it("เก็บรหัส SKU + id · ค่าแปลกทิ้ง", () => {
+    const out = cleanQuoteColors([
+      { name: "ส้ม", sku: "CTL121-01", sku_id: "11111111-1111-1111-1111-111111111111", qty: 5 },
+      { name: "ฟ้า", sku: "<b>x</b>", sku_id: "nope" },
+      { name: "ดำ" },
+    ]);
+    expect(out?.[0]).toMatchObject({ name: "ส้ม", sku: "CTL121-01", sku_id: "11111111-1111-1111-1111-111111111111", qty: 5 });
+    expect(out?.[1].sku).toBeUndefined();
+    expect(out?.[2].sku).toBeUndefined();
+  });
+});

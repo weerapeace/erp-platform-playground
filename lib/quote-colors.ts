@@ -8,7 +8,10 @@
  * เทสต์ lib/__tests__/quote-colors.test.ts
  */
 
-export type QuoteColor = { name: string; hex: string | null; qty: number | null; delta: number | null };
+/** sku/sku_id = ผูก SKU จริง (เลือกจากรายการ SKU · เจ้าของขอ 2026-11-20) → ส่งไปใบเสนอราคาแล้วบรรทัดผูก SKU ให้ · สีพิมพ์เอง = ไม่มี */
+export type QuoteColor = { name: string; hex: string | null; qty: number | null; delta: number | null; sku?: string | null; sku_id?: string | null };
+const SKU_CODE = /^[\w.\-/ ]{1,60}$/;
+const UUID = /^[0-9a-f-]{36}$/i;
 
 /** จานสีให้กดเลือกเร็ว (พิมพ์ชื่อสีเองได้ — ไม่มีในจาน = จุดสีเทา) */
 export const QUOTE_COLOR_PALETTE: { name: string; hex: string }[] = [
@@ -41,7 +44,9 @@ export function cleanQuoteColors(raw: unknown): QuoteColor[] | null {
     const hex = typeof o.hex === "string" && HEX.test(o.hex) ? o.hex.toUpperCase() : paletteHex(name);
     const q = numOrNull(o.qty);
     const d = numOrNull(o.delta);
-    out.push({ name, hex, qty: q != null && q >= 0 ? Math.round(q) : null, delta: d != null && d !== 0 ? Math.round(d * 100) / 100 : null });
+    const c: QuoteColor = { name, hex, qty: q != null && q >= 0 ? Math.round(q) : null, delta: d != null && d !== 0 ? Math.round(d * 100) / 100 : null };
+    if (typeof o.sku === "string" && SKU_CODE.test(o.sku.trim())) { c.sku = o.sku.trim(); if (typeof o.sku_id === "string" && UUID.test(o.sku_id)) c.sku_id = o.sku_id; }
+    out.push(c);
     if (out.length >= QUOTE_COLOR_MAX) break;
   }
   return out.length ? out : null;

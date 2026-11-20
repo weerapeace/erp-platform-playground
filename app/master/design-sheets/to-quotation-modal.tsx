@@ -27,7 +27,8 @@ type RoundPick = {
   id: string; round: number; size: string; status: string; checked: boolean; qty: string; price: string;
   batch: number; date: string | null; note: string | null;   // ครั้งที่จริง (1 ครั้ง = หลายไซส์ × หลายขั้นจำนวน) + วันที่/หมายเหตุของครั้ง
   cost: number | null;                                       // ราคาจากตีราคา ณ ตอนเสนอ (ไว้โชว์กำไร/ชิ้น)
-  tier: number | null; color: string | null; hex: string | null; ci: number;   // ขั้นจำนวนของช่อง · สี (null = ไม่แยกสี) · ลำดับสี
+  tier: number | null; color: string | null; hex: string | null; ci: number;
+  sku?: string | null; sku_id?: string | null;               // สีที่เลือกจาก SKU จริง → บรรทัดผูก SKU ให้   // ขั้นจำนวนของช่อง · สี (null = ไม่แยกสี) · ลำดับสี
 };
 const fmt2 = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string | null) => { if (!d) return ""; const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit" }); };
@@ -133,7 +134,7 @@ export function ToQuotationModal({
       return colors.map((c, i) => ({
         ...base, id: `${q.id}#${i}`, checked: checked && (c.qty ?? 0) > 0,
         qty: c.qty != null && c.qty > 0 ? String(c.qty) : "", price: String(colorUnitPrice(offered, c) ?? offered),
-        color: c.name, hex: c.hex, ci: i,
+        color: c.name, hex: c.hex, ci: i, sku: c.sku ?? null, sku_id: c.sku_id ?? null,
       }));
     }));
     setManual(priced.length === 0);
@@ -193,7 +194,7 @@ export function ToQuotationModal({
       product_name: name.trim(),
       variation: [variation.trim(), p.size ? labelOf(p.size) : "", p.color ?? ""].filter(Boolean).join(" · ") || null,
       unit_price: Number(p.price), qty: Number(p.qty),
-      sku: sel?.code ?? null, product_id: sel?.id ?? null,
+      sku: p.sku ?? sel?.code ?? null, product_id: p.sku ? (p.sku_id ?? null) : (sel?.id ?? null),
     })) : null;
     const sendCount = batch ? batch.length : roundLines ? roundLines.length : 1;
     setSaving(true);

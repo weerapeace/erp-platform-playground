@@ -35,6 +35,9 @@ import { useCanHover } from "@/lib/use-can-hover";
 import { priceFromCost, tierPrice, quoteQtyMode, quoteCellTotal, sumQuoteLines, type QuoteQtyMode, type QuoteTotals } from "@/lib/quote-pricing";
 import { usePermission } from "@/components/auth";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
+import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import { ImageThumbnail } from "@/components/image-manager";
+import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import { QUOTE_COLOR_PALETTE, cleanQuoteColors, colorQtyStatus, colorUnitPrice, paletteHex, percentsToQty, qtyToPercent, splitEvenly, type QuoteColor } from "@/lib/quote-colors";
 
 /** จุดสีของสินค้า (ไม่รู้สี = เทา) */
@@ -58,7 +61,9 @@ const byQty = (a: number | null, b: number | null) => (a == null ? 1 : b == null
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
-export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, orderQtyFor, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false, pricingHelper = false }: {
+export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, orderQtyFor, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false, pricingHelper = false, linkedSkus = [] }: {
+  /** SKU ของใบ/ใต้ Parent ของใบ — ให้ติ๊กเลือกแทนพิมพ์สี (เจ้าของขอ 2026-11-20) */
+  linkedSkus?: DesignSheetLinkedSku[];
   sheetId: string;
   quotes: DesignSheetQuote[];
   sizes: Size[];                                  // ไซส์/แท็บทั้งหมดของใบ (เรียงตามแท็บตีราคา)
@@ -217,7 +222,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
       )}
 
       {addOpen && (
-        <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null} fill={fill}
+        <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null} fill={fill} linkedSkus={linkedSkus}
           costDirty={costDirty} saveCost={saveCost} showCost={showCost} onClose={() => { setAddOpen(false); setAddFrom(null); }}
           onSaved={async (n) => { setAddOpen(false); setAddFrom(null); await onReload(); toast.success(tr(`เสนอราคาครั้งที่ ${n} แล้ว`, `Quote round ${n} saved`)); }} />
       )}
@@ -239,7 +244,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
         // "ที่เปลี่ยนจากครั้งก่อน" ต่อไซส์ (API คำนวณจากเวอร์ชันตีราคา) — เอาช่องแรกของแต่ละไซส์
         const changes = b.sizes.map((s) => ({ size: s, q: b.quotes.find((q) => (q.parent_code ?? "") === s) })).filter((x) => x.q?.changes || x.q?.cost_snapshot_id);
         if (editKey === cardKey(b)) return (
-          <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b} fill={fill}
+          <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b} fill={fill} linkedSkus={linkedSkus}
             costDirty={costDirty} saveCost={saveCost} showCost={showCost} onClose={() => setEditKey(null)} onReload={onReload}
             onSaved={async (n) => { setEditKey(null); await onReload(); toast.success(tr(`บันทึกการแก้ไขครั้งที่ ${n} แล้ว`, `Round ${n} changes saved`)); }} />
         );
@@ -488,7 +493,8 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, or
  *  ครั้งใหม่: เตรียมค่าจากครั้งล่าสุด/ครั้งที่คัดลอก
  *  แก้ไข (editing): ใส่ค่าของการ์ดนั้น → บันทึกเฉพาะที่เปลี่ยน ทีละช่อง (ช่องเดิมแก้ราคา/จำนวน · ล้างราคา/ปิดไซส์/เอาขั้นออก = ลบช่อง · ช่องใหม่ = เพิ่ม)
  *  วันที่/สถานะ/หมายเหตุ แก้เฉพาะช่องของการ์ดนี้ (ข้อมูลเก่าที่ครั้งเดียวกันแยกเป็นหลาย "รายการ" จะไม่กระทบกัน) */
-function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, fill = null, costDirty, saveCost, showCost = false, onClose, onSaved, onReload }: {
+function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, fill = null, costDirty, saveCost, showCost = false, onClose, onSaved, onReload, linkedSkus = [] }: {
+  linkedSkus?: DesignSheetLinkedSku[];
   showCost?: boolean;           // 🧮 สรุปสดท้ายฟอร์ม: โชว์ต้นทุน/กำไร (คนมีสิทธิ์ดูต้นทุน)
   copiedFrom?: number | null;   // คัดลอกมาจากครั้งที่ (โชว์ที่หัวฟอร์ม)
   fill?: PriceFill | null;      // 💰 จากตัวช่วยตั้งราคา: ใส่ราคา = ตีราคาของช่อง × ตัวคูณ (ทุกไซส์ที่ติ๊ก × ทุกขั้นจำนวน)
@@ -520,7 +526,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     return m;
   });
   // 🎨 สีต่อไซส์: รายการสี + ราคาต่าง (ใช้ทุกขั้นจำนวน) · จำนวนต่อสีแยกตามขั้น (key = ไซส์|ขั้น|ชื่อสี) · โหมด % = 1 ค่าต่อสีใช้ทุกขั้น
-  type ColorDef = { name: string; hex: string | null; delta: string };
+  type ColorDef = { name: string; hex: string | null; delta: string; sku?: string | null; sku_id?: string | null };
   const ckey = (sz: string, qty: number | null, name: string) => `${sz}|${qtyKey(qty)}|${name}`;
   const [colorInit] = useState(() => {
     const defs: Record<string, ColorDef[]> = {}; const qty: Record<string, string> = {}; const split: Record<string, boolean> = {};
@@ -528,7 +534,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
       const sz = q.parent_code ?? "";
       for (const c of cleanQuoteColors(q.colors) ?? []) {
         const list = defs[sz] ?? (defs[sz] = []);
-        if (!list.some((x) => x.name === c.name)) list.push({ name: c.name, hex: c.hex, delta: c.delta ? String(c.delta) : "" });
+        if (!list.some((x) => x.name === c.name)) list.push({ name: c.name, hex: c.hex, delta: c.delta ? String(c.delta) : "", sku: c.sku ?? null, sku_id: c.sku_id ?? null });
         if (c.delta) split[sz] = true;
         if (c.qty != null) qty[ckey(sz, q.qty, c.name)] = String(c.qty);
       }
@@ -548,6 +554,27 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     if (colorsOf(sz).some((c) => c.name === n)) { toast.info(tr(`มีสี ${n} แล้ว`, `${n} is already added`)); return; }
     setColorDefs((m) => ({ ...m, [sz]: [...(m[sz] ?? []), { name: n, hex: hex ?? paletteHex(n), delta: "" }] }));
   };
+  // 📦 เลือก SKU จริงแทนพิมพ์สี — ชื่อแถว = สีของ SKU (ซ้ำ/ไม่มีสี = รหัส) · ผูกรหัสไว้ส่งไปใบเสนอราคา
+  const [skuSearchFor, setSkuSearchFor] = useState<string | null>(null);
+  const addSkus = (sz: string, list: { id: string; code: string; color?: string | null }[]) => {
+    setColorDefs((m) => {
+      const cur = [...(m[sz] ?? [])];
+      for (const s of list) {
+        if (!s.code || cur.some((c) => c.sku === s.code)) continue;
+        const col = (s.color ?? "").trim();
+        let n = (col && !cur.some((c) => c.name === col) ? col : s.code).slice(0, 40);
+        if (cur.some((c) => c.name === n)) n = `${s.code} ${col}`.trim().slice(0, 40);
+        if (cur.some((c) => c.name === n)) continue;
+        cur.push({ name: n, hex: paletteHex(col), delta: "", sku: s.code, sku_id: s.id });
+      }
+      return { ...m, [sz]: cur };
+    });
+  };
+  const toggleSku = (sz: string, s: DesignSheetLinkedSku) => {
+    const has = colorsOf(sz).find((c) => c.sku === s.code);
+    if (has) removeColor(sz, has.name); else addSkus(sz, [{ id: s.id, code: s.code, color: s.color }]);
+  };
+  const skusOfSize = (sz: string) => (sz ? linkedSkus.filter((s) => s.parent_code === sz && s.is_active) : []);
   const removeColor = (sz: string, name: string) => setColorDefs((m) => ({ ...m, [sz]: (m[sz] ?? []).filter((c) => c.name !== name) }));
   const setDelta = (sz: string, name: string, v: string) => setColorDefs((m) => ({ ...m, [sz]: (m[sz] ?? []).map((c) => (c.name === name ? { ...c, delta: v } : c)) }));
   const splitEven = (sz: string) => {
@@ -572,7 +599,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   };
   /** สีของช่อง (ไซส์ × ขั้น) ที่จะบันทึก · ไม่มีสี = null */
   const colorsForCell = (sz: string, qty: number | null): QuoteColor[] | null =>
-    cleanQuoteColors(colorsOf(sz).map((c, i) => ({ name: c.name, hex: c.hex, qty: colorQtyFor(sz, qty, i), delta: splitBy[sz] ? Number(c.delta) || 0 : null })));
+    cleanQuoteColors(colorsOf(sz).map((c, i) => ({ name: c.name, hex: c.hex, qty: colorQtyFor(sz, qty, i), delta: splitBy[sz] ? Number(c.delta) || 0 : null, sku: c.sku ?? null, sku_id: c.sku_id ?? null })));
   const [newQty, setNewQty] = useState("");
   const [editQty, setEditQty] = useState<{ from: number | null; val: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -844,12 +871,12 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
                         <span>{t("สี", "Colors")}</span>
                         {cs.map((c) => (
                           <span key={c.name} className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white pl-1.5 pr-1 text-xs text-slate-700">
-                            <ColorDot hex={c.hex} />{c.name}
+                            <ColorDot hex={c.hex} />{c.sku && c.sku !== c.name && <code className="font-mono text-[10px] text-orange-700">{c.sku}</code>}{c.name}
                             <button type="button" onClick={() => removeColor(s.key, c.name)} aria-label={t(`เอาสี ${c.name} ออก`, `Remove ${c.name}`)} className="px-0.5 text-slate-400 hover:text-rose-500">×</button>
                           </span>
                         ))}
                         <button type="button" onClick={() => { setPickerFor(pickerFor === s.key ? null : s.key); setCustomColor(""); }}
-                          className={`inline-flex h-6 items-center rounded-full border border-dashed px-2 text-xs ${pickerFor === s.key ? "border-blue-400 text-blue-700" : "border-slate-300 text-slate-500 hover:border-blue-300 hover:text-blue-600"}`}>{t("＋ สี", "＋ Color")}</button>
+                          className={`inline-flex h-6 items-center rounded-full border border-dashed px-2 text-xs ${pickerFor === s.key ? "border-blue-400 text-blue-700" : "border-slate-300 text-slate-500 hover:border-blue-300 hover:text-blue-600"}`}>{t("＋ เลือก SKU / สี", "＋ SKU / color")}</button>
                         {cs.length > 0 && <>
                           <label className="ml-1 inline-flex cursor-pointer items-center gap-1" title={t("บางสีแพงกว่า — ใส่ ± บาท จากราคาไซส์ (ใช้ทุกขั้นจำนวน)", "Some colors cost more — enter ± THB from the size price (all tiers)")}>
                             <input type="checkbox" checked={!!splitBy[s.key]} onChange={(e) => setSplitBy((m) => ({ ...m, [s.key]: e.target.checked }))} className="h-3.5 w-3.5" />{t("แยกราคาตามสี", "Price per color")}
@@ -862,7 +889,29 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
                         </>}
                       </div>
                       {pickerFor === s.key && (
-                        <div className="mt-1 flex flex-wrap items-center gap-1 pl-5">
+                        <div className="mt-1 space-y-1 pl-5">
+                          {skusOfSize(s.key).length > 0 && (
+                            <div>
+                              <div className="mb-0.5 text-[11px] text-slate-400">{t(`SKU ของ ${s.label} — ติ๊กได้หลายตัว`, `SKUs of ${s.label} — tick several`)}</div>
+                              <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                                {skusOfSize(s.key).map((k) => {
+                                  const onSku = cs.some((c) => c.sku === k.code);
+                                  return (
+                                    <button key={k.id} type="button" onClick={() => toggleSku(s.key, k)} aria-pressed={onSku}
+                                      className={`flex min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 text-left text-xs ${onSku ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:border-blue-300"}`}>
+                                      <input type="checkbox" readOnly checked={onSku} tabIndex={-1} className="h-3.5 w-3.5 shrink-0" />
+                                      {k.image_key ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(k.image_key)}`} size={24} /> : <span className="h-6 w-6 shrink-0 rounded bg-slate-100" />}
+                                      <span className="min-w-0"><code className="block truncate font-mono text-[11px]">{k.code}</code><span className="block truncate text-[10.5px] text-slate-500">{k.color || k.name_th || ""}</span></span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          <button type="button" onClick={() => setSkuSearchFor(s.key)}
+                            className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700">🔍 {t("ค้น SKU อื่น…", "Search other SKUs…")}</button>
+                          <div className="text-[11px] text-slate-400">{t("ยังไม่มี SKU — เลือกสีจากจาน / พิมพ์สีเอง", "No SKU yet — pick a palette color / type one")}</div>
+                        <div className="flex flex-wrap items-center gap-1">
                           {QUOTE_COLOR_PALETTE.filter((p) => !cs.some((c) => c.name === p.name)).map((p) => (
                             <button key={p.name} type="button" onClick={() => addColor(s.key, p.name, p.hex)} className="inline-flex h-6 items-center gap-1 rounded-full border border-slate-200 bg-white px-2 text-xs text-slate-700 hover:border-blue-300">
                               <ColorDot hex={p.hex} />{p.name}
@@ -872,6 +921,11 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
                             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addColor(s.key, customColor); setCustomColor(""); } }}
                             className="h-6 w-36 rounded-md border border-slate-200 px-2 text-xs" />
                         </div>
+                        </div>
+                      )}
+                      {skuSearchFor === s.key && (
+                        <SkuMultiPickerModal open onClose={() => setSkuSearchFor(null)} excludeIds={cs.map((c) => c.sku_id ?? "").filter(Boolean)}
+                          onConfirm={(list) => { addSkus(s.key, list.map((x) => ({ id: x.id, code: x.code, color: (x as { color?: string | null }).color ?? null }))); setSkuSearchFor(null); }} />
                       )}
                     </td>
                   </tr>
