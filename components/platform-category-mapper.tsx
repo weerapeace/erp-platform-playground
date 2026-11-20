@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { PlatformIcon } from "@/components/platform-icon";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { PlatformCategoryAutofillModal } from "@/components/platform-category-autofill-modal";
 
 type Cat = { id: string; name: string };
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
@@ -50,6 +51,7 @@ export function PlatformCategoryMapper() {
   // 🌐 ร้านเว็บ (แยกรายร้าน) + ค่าที่กำลังเลือก (shopId → รหัสหมวดเว็บ)
   const [webShops, setWebShops] = useState<WebShop[]>([]);
   const [webDraft, setWebDraft] = useState<Record<string, string>>({});
+  const [autoOpen, setAutoOpen] = useState(false);   // ✨ ใส่ให้เอง (ไม่เสียเงิน)
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -266,16 +268,18 @@ export function PlatformCategoryMapper() {
 
   return (
     <div className="max-w-6xl mx-auto px-5 py-6">
-      <div className="mb-4 flex items-start justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🗂️ จับคู่หมวดหมู่แพลตฟอร์ม</h1>
           <p className="text-sm text-slate-500 mt-1">สร้าง “หมวดกลาง” ของเราเอง → จับคู่กับหมวดของแต่ละร้าน (เลือกจากรายการที่นำเข้าไว้)</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={openPfSettings}
             className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ตั้งค่าร้านที่แสดง</button>
           <button type="button" onClick={() => { setImportOpen(true); setImportMsg(null); }}
             className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">📂 นำเข้าหมวดของร้าน</button>
+          <button type="button" onClick={() => setAutoOpen(true)} title="เดาหมวดให้ช่องที่ยังว่าง จากชื่อหมวดและหมวดที่ร้านอื่นจับไว้ — ไม่ใช้ AI ดูก่อนบันทึกได้"
+            className="h-9 px-3 text-sm border border-indigo-200 rounded-lg text-indigo-700 bg-indigo-50/50 hover:bg-indigo-50 whitespace-nowrap">✨ ใส่ให้เอง (ไม่เสียเงิน)</button>
         </div>
       </div>
 
@@ -365,6 +369,9 @@ export function PlatformCategoryMapper() {
           </div>
         </div>
       )}
+
+      {/* บันทึก/ย้อนกลับแล้ว → โหลดการจับคู่ใหม่ + เปิดหมวดที่เลือกอยู่ใหม่ (ช่องขวาโชว์ค่าล่าสุด) */}
+      <PlatformCategoryAutofillModal open={autoOpen} onClose={() => setAutoOpen(false)} onApplied={() => { setSel(null); void load(); }} />
 
       {importOpen && (
         <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center p-4" onClick={() => !importing && setImportOpen(false)}>

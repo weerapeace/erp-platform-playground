@@ -27,6 +27,16 @@ export function bigramSimilarity(A: Bigrams, B: Bigrams): number {
   return short >= 6 ? Math.max(dice, 0.85 * (inter / short)) : dice;
 }
 
+/** Dice ล้วน (ไม่มีโหมด "ชื่อสั้นอยู่ในข้อความยาว") — ใช้เมื่อคำทั่วไปสั้น ๆ เช่น "อุปกรณ์เสริม" ไม่ควรได้คะแนนเต็มเพราะไปอยู่ในชื่อยาว */
+export function bigramDice(A: Bigrams, B: Bigrams): number {
+  let sa = 0, sb = 0, inter = 0;
+  A.forEach((v) => { sa += v; });
+  B.forEach((v) => { sb += v; });
+  if (!sa || !sb) return 0;
+  A.forEach((v, g) => { inter += Math.min(v, B.get(g) ?? 0); });
+  return (2 * inter) / (sa + sb);
+}
+
 /**
  * ความใกล้เคียงของชื่อ 0..1 — เอาค่ามากกว่าระหว่าง
  *   Dice (ทั้งสองชื่อคล้ายกันทั้งก้อน) กับ overlap (ชื่อสั้นอยู่ในข้อความยาว — เช่น ชื่อ+ตัวเลือก+คำแปล)

@@ -15,29 +15,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { normalizeFieldMap } from "@/lib/website-field-map";
-import { categoryPathLabel } from "@/lib/website-category-tree";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-
-type ShopRow = { id: string; name: string; slug: string; field_map: unknown };
-
-/** ร้านเว็บที่ตั้งหมวดของตัวเองแล้ว (ร้านที่ยังใช้หมวดตั้งต้นของระบบ = ไม่โชว์) */
-function webShopsOf(rows: ShopRow[]) {
-  return rows
-    .filter((s) => {
-      const raw = (s.field_map ?? {}) as { categories?: unknown };
-      return Array.isArray(raw.categories) && raw.categories.length > 0;
-    })
-    .map((s) => {
-      const fm = normalizeFieldMap(s.field_map);
-      return {
-        id: s.id,
-        name: s.name,
-        slug: s.slug,
-        categories: fm.categories.map((c) => ({ key: c.key, label: c.label, path: categoryPathLabel(fm.categories, c.key), parent: c.parent ?? null })),
-        centralRules: fm.category.centralRules,
-      };
-    });
-}
+import { webShopsOf, type WebShopRow as ShopRow } from "@/lib/platform-category-web-shops";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
