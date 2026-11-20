@@ -72,7 +72,10 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
   const viewport = useViewportLayout();
   const scopePref = useViewPref<(typeof SCOPES)[number]>("team_plan_scope", SCOPES, "all");
   const boardModePref = useViewPref<(typeof BOARD_MODES)[number]>("team_plan_board_mode2", BOARD_MODES, "draw");   // คีย์ใหม่ 2026-11-19 = ทุกคนเริ่มที่ "งานทั้งหมด" 1 ครั้ง แล้วจำต่อคน
-  const view = forcedView ?? viewPref.view, scope = scopePref.view;
+  // หน้าเต็ม (ไม่ได้ฝัง): แท็บปฏิทินพาไปปฏิทินรวมแล้ว → ค่าที่จำไว้เป็น "calendar" ให้เปิดที่ "ตามความด่วน" แทน · ?view=calendar / ฝังใน /calendar ยังเห็นปฏิทินแผนงานเหมือนเดิม
+  const [isTop, setIsTop] = useState(false);
+  useEffect(() => { setIsTop(window.self === window.top); }, []);
+  const view: PlanView = forcedView ?? (isTop && viewPref.view === "calendar" ? "priority" : viewPref.view), scope = scopePref.view;
   // ⛶ เต็มจอแบบ Miro (ของกลาง FullscreenStage · จำต่อคน · มือถือเต็มจอเสมอ) — เฉพาะแท็บกระดาน
   const boardFs = useFullscreenStage("team_plan_board_fullscreen", { active: view === "board" && !!items && !err, defaultOn: true, autoHide: true });
   const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
@@ -176,7 +179,8 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         <div role="tablist" className="inline-flex overflow-hidden rounded-lg border border-slate-200">
           <button type="button" role="tab" aria-selected={view === "priority"} data-split-href="/tasks/plan?view=priority" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "priority")} onClick={() => pickView("priority")}>ตามความด่วน</button>
           <button type="button" role="tab" aria-selected={view === "matrix"} data-split-href="/tasks/plan?view=matrix" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "matrix")} onClick={() => pickView("matrix")}>ตาราง 4 ช่อง</button>
-          <button type="button" role="tab" aria-selected={view === "calendar"} data-split-href="/tasks/plan?view=calendar" title="Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "calendar")} onClick={() => pickView("calendar")}><Icon name="calendar" /> ปฏิทิน</button>
+          {/* ปฏิทิน → ไปปฏิทินรวม (เจ้าของสั่ง 2026-11-20) · ถูกฝังอยู่ในหน้า /calendar เอง (iframe) = เปิดปฏิทินแผนงานในที่เดิม กันวนซ้อน */}
+          <button type="button" role="tab" aria-selected={view === "calendar"} data-split-href="/calendar?cal=all" title="ไปปฏิทินรวม (งานทีม · Task · คอนเทนต์ · ผลิต · ใบงาน · บิล) · Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)" className={seg(view === "calendar")} onClick={() => { if (typeof window !== "undefined" && window.self === window.top) window.location.assign("/calendar?cal=all"); else pickView("calendar"); }}><Icon name="calendar" /> ปฏิทิน</button>
           <button type="button" role="tab" aria-selected={view === "board"} data-split-href="/tasks/plan?view=board" className={seg(view === "board")} onClick={() => pickView("board")} title="กระดานวางงานคู่กับใบงาน / SKU / งาน / คอนเทนต์ · ลากเส้นผูกงาน · Ctrl+คลิก = เปิดข้างขวา (แบ่งจอ)"><Icon name="magnet" /> กระดาน</button>
         </div>
         <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
@@ -186,9 +190,7 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         {filterChip("star", <><Icon name="star" /> งานหลักวันนี้</>, open.filter((t) => isStarredToday(t.plan)).length)}
         {filterChip("waiting", <><Icon name="waiting" /> รอคนอื่น</>, open.filter((t) => t.plan.waiting).length)}
         {filterChip("overdue", <><Icon name="warning" /> เกินกำหนด</>, open.filter((t) => isOverdue(t.due_at)).length)}
-        <a href="/calendar" title="ปฏิทินรวมทุกแผนก — งานทีม · Task · คอนเทนต์ · ผลิต · ใบงานออกแบบ · บิล ในปฏิทินเดียว ลากเปลี่ยนวันได้"
-          className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"><Icon name="calendar" /> ปฏิทินรวม</a>
-        <button type="button" onClick={() => void load()} title="โหลดใหม่" className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
+        <button type="button" onClick={() => void load()} title="โหลดใหม่" className="ml-auto h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
       </div>
       {/* 🏷 กรองตามแท็ก (โชว์เมื่อมีงานที่ใส่แท็ก) */}
       {tagCounts.length > 0 && (
