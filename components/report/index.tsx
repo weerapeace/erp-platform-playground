@@ -2,6 +2,7 @@
 
 import { SendPdfButton } from "./send-pdf";
 import { shortcutKey } from "@/lib/shortcut-key";
+import { sanitizeFileName } from "@/lib/print-filename";
 import { PRINT_EVENT, type PrintHow } from "@/lib/print-log";
 import React, { useEffect, useRef, useState, type ReactNode } from "react";
 import { Popover } from "@/components/popover";
@@ -150,9 +151,26 @@ function announcePrint(how: PrintHow) {
   try { window.dispatchEvent(new CustomEvent(PRINT_EVENT, { detail: { how } })); } catch { /* ไม่มีใครฟังก็ไม่เป็นไร */ }
 }
 
+// ---- คำนำหน้าชื่อไฟล์ PDF (เจ้าของขอ 2026-11-20 · พิมพ์หลายเวอร์ชัน เช่น "V2 ใบเสนอราคา - QT-…") ----
+// แถบพิมพ์กลาง (PrintToolbar) ตั้งค่า → ทุกทางที่สั่งพิมพ์ (ปุ่ม · Ctrl+P ในกรอบ) ใช้ชื่อที่มีคำนำหน้า
+let pdfPrefixNow = "";
+const PDF_PREFIX_RECENT = "pdf-prefix-recent";
+const PDF_PREFIX_DEFAULTS = ["V1", "V2", "V3", "ร่าง", "แก้ไข"];
+const pdfPrefixKey = (base: string) => `pdf-prefix:${base}`;
+const cleanPrefix = (v: string) => sanitizeFileName(v).slice(0, 30);
+/** ชื่อไฟล์ + คำนำหน้าที่ตั้งไว้ (ไม่ซ้อนถ้ามีอยู่แล้ว) */
+export function withPdfPrefix(name: string, prefix = pdfPrefixNow): string {
+  const p = prefix.trim();
+  if (!p || !name || name.startsWith(`${p} `)) return name;
+  return sanitizeFileName(`${p} ${name}`);
+}
+function readRecentPrefixes(): string[] {
+  try { const v = JSON.parse(localStorage.getItem(PDF_PREFIX_RECENT) ?? "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 8) : []; } catch { return []; }
+}
+
 export function printReportFrameOrWindow(fileName?: string) {
   announcePrint("print");
-  const name = typeof fileName === "string" ? fileName.trim() : "";
+  const name = withPdfPrefix(typeof fileName === "string" ? fileName.trim() : "");
   const frame = document.querySelector<HTMLIFrameElement>('iframe[data-report-print-frame="true"]');
   const frameWindow = frame?.contentWindow;
   const frameDoc = frame?.contentDocument;
@@ -310,18 +328,47 @@ export function PrintToolbar({ onBack, onPrint, fileName }: {
   onPrint?: (fileName?: string) => void;
   fileName?: string;
 }) {
-  const name = typeof fileName === "string" ? fileName.trim() : "";
-  const run = () => (onPrint ? onPrint(name || undefined) : printReportFrameOrWindow(name || undefined));
+  const base = typeof fileName === "string" ? fileName.trim() : "";
+  // คำนำหน้าชื่อไฟล์ — จำต่อใบ (ตามชื่อไฟล์ตั้งต้น) + ปุ่มลัด "ใช้ล่าสุด"
+  const [prefix, setPrefixState] = useState("");
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    if (!base) return;
+    let v = "";
+    try { v = localStorage.getItem(pdfPrefixKey(base)) ?? ""; } catch { /* ไม่มีที่เก็บ = ไม่จำ */ }
+    setPrefixState(v); pdfPrefixNow = v;
+    setRecent(readRecentPrefixes());
+    return () => { pdfPrefixNow = ""; };
+  }, [base]);
+  const setPrefix = (raw: string) => {
+    const v = cleanPrefix(raw);
+    setPrefixState(raw.slice(0, 30)); pdfPrefixNow = v;
+    try { if (v) localStorage.setItem(pdfPrefixKey(base), v); else localStorage.removeItem(pdfPrefixKey(base)); } catch { /* */ }
+  };
+  const rememberPrefix = () => {
+    const v = cleanPrefix(prefix);
+    if (!v || PDF_PREFIX_DEFAULTS.includes(v)) return;
+    const next = [v, ...readRecentPrefixes().filter((x) => x !== v)].slice(0, 6);
+    try { localStorage.setItem(PDF_PREFIX_RECENT, JSON.stringify(next)); } catch { /* */ }
+    setRecent(next);
+  };
+  const name = base ? withPdfPrefix(base, cleanPrefix(prefix)) : "";
+  const run = () => { rememberPrefix(); return onPrint ? onPrint(name || undefined) : printReportFrameOrWindow(name || undefined); };
+  const chips = [...PDF_PREFIX_DEFAULTS, ...recent.filter((x) => !PDF_PREFIX_DEFAULTS.includes(x))];
   return (
-    <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center gap-3">
+    <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200">
+    <div className="px-6 py-3 flex flex-wrap items-center gap-3">
       <button onClick={() => closeOrBack(onBack)} title="ปิดหน้านี้" className="h-9 px-4 text-sm text-slate-600 border border-slate-200 bg-white rounded-lg hover:bg-slate-50">
         ✕ ปิด
       </button>
       <div className="flex-1" />
       {name && (
-        <span className="hidden sm:block text-xs text-slate-400 truncate max-w-[280px]" title={`ชื่อไฟล์: ${name}.pdf`}>
-          ชื่อไฟล์: {name}.pdf
-        </span>
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
+          <input value={prefix} onChange={(e) => setPrefix(e.target.value)} onBlur={rememberPrefix} placeholder="คำนำหน้า"
+            title="คำนำหน้าชื่อไฟล์ PDF เช่น V2 — จำไว้กับใบนี้" aria-label="คำนำหน้าชื่อไฟล์ PDF"
+            className="h-8 w-24 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-blue-300 focus:outline-none" />
+          <span className="hidden max-w-[300px] truncate font-mono sm:block" title={`ชื่อไฟล์: ${name}.pdf`}>{name}.pdf</span>
+        </div>
       )}
       {name ? (
         <>
@@ -343,6 +390,18 @@ export function PrintToolbar({ onBack, onPrint, fileName }: {
           🖨️ พิมพ์ / บันทึก PDF
         </button>
       )}
+    </div>
+    {name && (
+      <div className="flex flex-wrap items-center justify-end gap-1 px-6 pb-2 text-[11px] text-slate-400">
+        <span className="mr-0.5">คำนำหน้า:</span>
+        {chips.map((c) => (
+          <button key={c} type="button" onClick={() => setPrefix(prefix.trim() === c ? "" : c)}
+            className={`rounded-full border px-2 py-0.5 ${cleanPrefix(prefix) === c ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{c}</button>
+        ))}
+        {prefix.trim() && <button type="button" onClick={() => setPrefix("")} className="rounded-full px-2 py-0.5 text-slate-400 hover:text-slate-600">ไม่ใส่</button>}
+        <span className="sm:hidden w-full truncate text-right font-mono text-slate-500">{name}.pdf</span>
+      </div>
+    )}
     </div>
   );
 }
