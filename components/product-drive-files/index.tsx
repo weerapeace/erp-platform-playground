@@ -7,7 +7,8 @@
  *   ไฟล์เดิมที่เคยแนบ (Supabase) โชว์ต่อด้านล่างพร้อมป้าย "ไฟล์เดิม" — เปิด/ลบได้ ไม่รับอัปเพิ่ม
  *   ยังไม่ได้เชื่อม Drive = กลับไปใช้ช่องไฟล์แนบเดิม (RecordFilesField) ทั้งหมด
  * ประกอบจากของกลาง: DriveUploadBox · DriveFolderFiles(thumbs) · DriveFilePicker · ImageLightbox · ConfirmDialog · RecordFilesField
- * API: /api/product-drive/[entity]/[id] (+ /link, /files/[fileId]) · ใช้ที่: MasterCRUD (fileAttachments.storage="drive") · doc: docs/product-drive-files.md
+ *   Parent SKU: กลุ่ม "จากใบงานออกแบบ" = ไฟล์ในโฟลเดอร์ Drive ของใบงานที่ผูก Parent นี้ (ดูอย่างเดียว · อ่านสด ไม่ก๊อป · เจ้าของขอ 2026-11-20)
+ * API: /api/product-drive/[entity]/[id] (+ /link, /files/[fileId], /sheets) · ใช้ที่: MasterCRUD (fileAttachments.storage="drive") · doc: docs/product-drive-files.md
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -48,6 +49,20 @@ export function ProductDriveFiles({ entity, entityId, canEdit, actor, title = "�
   const [linking, setLinking] = useState(false);
   const [delTarget, setDelTarget] = useState<DriveFile | null>(null);
   const [lightbox, setLightbox] = useState(-1);
+  type SheetFiles = { id: string; code: string | null; name: string | null; folder_url: string; files: DriveFile[] };
+  const [sheetFiles, setSheetFiles] = useState<SheetFiles[]>([]);
+  const [sheetErr, setSheetErr] = useState<string | null>(null);
+  const [sheetBox, setSheetBox] = useState<{ images: DriveFile[]; index: number } | null>(null);
+  useEffect(() => {
+    if (entity !== "parent_skus_v2") return;
+    let alive = true;
+    apiFetch(`${base}/sheets`).then(readJson).then((j) => {
+      if (!alive) return;
+      setSheetFiles(((j.data ?? {}) as { sheets?: SheetFiles[] }).sheets ?? []);
+      setSheetErr(j.error ?? null);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [base, entity]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,6 +165,25 @@ export function ProductDriveFiles({ entity, entityId, canEdit, actor, title = "�
         }
       />
 
+      {/* ไฟล์จากใบงานออกแบบที่ผูก Parent นี้ — ดูอย่างเดียว (อัป/ลบที่ใบงาน) */}
+      {sheetFiles.map((sh) => {
+        const pv = sh.files.filter((f) => f.hasThumbnail !== false || f.shortcutTargetId);
+        return (
+          <div key={sh.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-2">
+            <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[12px] text-slate-600">
+              <Icon value="i:link" className="text-slate-400" />
+              <span className="min-w-0 truncate">จากใบงานออกแบบ <b className="font-medium">{sh.code}</b> {sh.name}</span>
+              <span className="flex-1" />
+              <a href={`/master/design-dashboard/sheet/${sh.id}`} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline">เปิดใบงาน</a>
+              <a href={sh.folder_url} target="_blank" rel="noreferrer" className="text-[11px] text-slate-500 hover:underline">เปิดโฟลเดอร์</a>
+            </div>
+            <DriveFolderFiles files={sh.files} loading={false} thumbs title={`${sh.files.length} ไฟล์ · ดูอย่างเดียว อัปเพิ่มที่ใบงาน`}
+              onPreview={(f) => { const i = pv.findIndex((x) => x.id === f.id); if (i >= 0) setSheetBox({ images: pv, index: i }); }} />
+          </div>
+        );
+      })}
+      {sheetErr && <p className="text-[11px] text-amber-600">{sheetErr}</p>}
+
       {/* ไฟล์เดิมก่อนย้ายมา Drive — เปิด/ลบได้ ไม่รับอัปเพิ่ม · ไม่มี = ไม่โชว์ */}
       <RecordFilesField entityType={entity} entityId={entityId} actor={actor} readonly={!canEdit} noUpload hideWhenEmpty
         title="ไฟล์เดิม (เก็บที่เดิม ก่อนย้ายมา Drive)" />
@@ -158,6 +192,11 @@ export function ProductDriveFiles({ entity, entityId, canEdit, actor, title = "�
 
       <ImageLightbox images={previewable.map((f) => ({ url: driveThumbUrl(f.id, 1600), label: f.name }))} index={lightbox}
         onClose={() => setLightbox(-1)} onIndex={setLightbox} />
+
+      {sheetBox && (
+        <ImageLightbox images={sheetBox.images.map((f) => ({ url: driveThumbUrl(f.id, 1600), label: f.name }))} index={sheetBox.index}
+          onClose={() => setSheetBox(null)} onIndex={(i) => setSheetBox((b) => (b ? { ...b, index: i } : b))} />
+      )}
 
       {delTarget && (
         <ConfirmDialog open variant="danger" title="เอาไฟล์ออก?"
