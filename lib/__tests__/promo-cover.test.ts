@@ -67,6 +67,9 @@ describe("แทนรูปแรก / ย้อนรูปแรก", () => {
   it("เทียบลิงก์รูปแบบไม่สน https/query/_tn", () => {
     expect(sameImageRef("https://cf.shopee.co.th/file/abc_tn", "http://cf.shopee.co.th/file/abc?x=1")).toBe(true);
     expect(sameImageRef("a", "")).toBe(false);
+    expect(sameImageRef("https://sg-test-11.slatic.net/p/d7065a6a.jpg", "https://th-live-01.slatic.net/p/d7065a6a.jpg")).toBe(true);
+    expect(sameImageRef("https://sg-test-11.slatic.net/p/d7065a6a.jpg", "https://img.lazcdn.com/g/p/d7065a6a.jpg_720x720q80.jpg")).toBe(true);
+    expect(sameImageRef("https://th-live.slatic.net/p/aaa.jpg", "https://th-live.slatic.net/p/bbb.jpg")).toBe(false);
   });
 });
 

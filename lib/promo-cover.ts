@@ -99,7 +99,12 @@ export function swapCover<T>(list: readonly T[], promo: T): T[] {
 
 /** ลิงก์รูปแบบเทียบได้ (ตัด https/http · query · ขนาดต่อท้ายแบบ _tn) */
 export function sameImageRef(a: string | null | undefined, b: string | null | undefined): boolean {
-  const n = (s: string | null | undefined) => String(s ?? "").trim().replace(/^https?:\/\//i, "").replace(/[?#].*$/, "").replace(/_tn$/i, "").replace(/\/+$/, "");
+  const n = (s: string | null | undefined) => {
+    const v = String(s ?? "").trim().replace(/^https?:\/\//i, "").replace(/[?#].*$/, "").replace(/_tn$/i, "").replace(/\/+$/, "");
+    // Lazada: ไฟล์เดียวกันอยู่ได้หลายชื่อเซิร์ฟเวอร์ (sg-test-11 / th-live-01 / lazcdn) + ต่อท้ายขนาด _720x720q80 → เทียบชื่อไฟล์
+    const laz = /^[^/]*(?:slatic\.net|lazcdn\.com|alicdn\.com)\/(?:.*\/)?p\/([^/]+?)\.(?:jpe?g|png|webp)/i.exec(v);
+    return laz ? `lazada:${laz[1].toLowerCase()}` : v;
+  };
   const x = n(a); const y = n(b);
   return !!x && x === y;
 }
