@@ -8,7 +8,7 @@ import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position
 import { flowEdgePath } from "./edge-path";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
-import { FLOW_COLORS, FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, edgeShapeOf, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowEdgeShape, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
+import { FLOW_COLORS, FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, edgeShapeOf, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, todoProgress, toggleTodo, newFlowId, TODO_MAX, type FlowTodo, type FlowColor, type FlowEdgeShape, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { plainToRich, richToPlain, sanitizeRich } from "@/lib/flowchart-rich";
 import { BoxFormatBar, RichEditor, RichText, type BoxFormatOp } from "./rich-text";
@@ -68,6 +68,8 @@ export type FlowBoardActions = {
   removeEdge: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
   editRule: (id: string) => void;
+  /** ชื่อคนที่ล็อกอินอยู่ (กล่องรายการงานจำว่าใครติ๊ก) */
+  meName: string;
   /** ผลเทียบแผนกับกฎที่ผูก · null = ไม่ได้ผูก · "loading" = กำลังโหลดกฎ */
   ruleCheck: (data: FlowNodeData) => PlanRuleCheck | "loading" | null;
 };
@@ -215,6 +217,92 @@ function RuleChip({ check, onClick }: { check: PlanRuleCheck | "loading" | null;
   );
 }
 
+const fmtTodoAt = (iso?: string) => { if (!iso) return ""; const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("th-TH", { day: "numeric", month: "short" }); };
+const stopAll = { onDoubleClick: (e: React.SyntheticEvent) => e.stopPropagation(), onPointerDown: (e: React.SyntheticEvent) => e.stopPropagation() };
+
+/** กล่อง "รายการงาน" (เจ้าของสั่ง 2026-11-20): หัว (ชื่อ + เสร็จ n/ทั้งหมด) · แถบคืบหน้า · ข้อพร้อมช่องติ๊ก (จำว่าใครติ๊ก เมื่อไหร่)
+ *  กดข้อความ = แก้ · ปุ่ม x = ลบข้อ (Ctrl+Z ย้อนได้) · ช่องล่างสุด = เพิ่มข้อ · กล่องยืดสูงตามจำนวนข้อเอง
+ *  editingTitle = กำลังแก้ชื่อกล่อง (ดับเบิลคลิกกล่อง / ปุ่ม "แก้" บนแถบ) */
+function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }: { id: string; data: FlowNodeData; color: FlowColor; width?: number; height?: number; editingTitle: boolean; onTitleDone: () => void }) {
+  const { readOnly, t, updateData, growNode, meName } = useBoard();
+  const pal = FLOW_PALETTE[color];
+  const items = data.items ?? [];
+  const prog = todoProgress(items);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState("");
+  const [title, setTitle] = useState(data.label);
+  const ref = useRef<HTMLDivElement>(null);
+  const addRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editingTitle) setTitle(data.label); }, [editingTitle]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ข้อเยอะขึ้นจนล้นกล่อง → ยืดกล่องลงให้พอดี (ไม่หด)
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || !height) return;
+    const need = el.scrollHeight + 4;
+    if (need > height) growNode(id, width ?? 0, need);
+  }, [items.length, editId, data.label, height]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setItems = (next: FlowTodo[]) => updateData(id, { items: next });
+  const saveEdit = () => {
+    if (!editId) return;
+    const text = draft.trim();
+    setItems(text ? items.map((i) => (i.id === editId ? { ...i, text } : i)) : items.filter((i) => i.id !== editId));
+    setEditId(null);
+  };
+  const add = () => {
+    const text = adding.trim(); if (!text || items.length >= TODO_MAX) return;
+    setItems([...items, { id: newFlowId("n"), text }]);
+    setAdding("");
+  };
+  const input = "nodrag nopan nowheel w-full rounded border border-violet-300 bg-white px-1.5 py-0.5 text-[12px] text-slate-800 outline-none focus:ring-2 focus:ring-violet-200";
+  return (
+    <div ref={ref} className="flex w-full flex-col text-left">
+      <div className="flex items-center gap-1.5 px-2.5 pt-2 text-[13px] font-semibold" style={{ color: pal.text }}>
+        <span className="shrink-0" style={{ color: pal.stroke }}><Icon value={prog.allDone ? "i:circle-check" : "i:list-check"} /></span>
+        {editingTitle
+          ? <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} {...stopAll} className={input}
+              onBlur={() => { updateData(id, { label: title.trim() || t("สิ่งที่ต้องทำ", "To do") }); onTitleDone(); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitle(data.label); onTitleDone(); } }} />
+          : <span className="min-w-0 flex-1 truncate" title={data.label}>{splitFlowLabel(data.label).title || t("สิ่งที่ต้องทำ", "To do")}</span>}
+        <span className="shrink-0 text-[11px] font-normal" style={{ color: pal.sub }}>{prog.done}/{prog.total}</span>
+      </div>
+      <div className="mx-2.5 mb-1 mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200/80">
+        <div className="h-full rounded-full transition-[width]" style={{ width: `${prog.total ? (prog.done / prog.total) * 100 : 0}%`, background: pal.stroke }} />
+      </div>
+      {items.map((it) => (
+        <div key={it.id} className="group flex items-start gap-1.5 px-2.5 py-[3px] text-[12px]"
+          title={it.done && (it.by || it.at) ? t(`ติ๊กโดย ${it.by ?? "-"} · ${fmtTodoAt(it.at)}`, `Checked by ${it.by ?? "-"} · ${fmtTodoAt(it.at)}`) : undefined}>
+          <input type="checkbox" checked={!!it.done} disabled={readOnly} {...stopAll}
+            onChange={(e) => setItems(toggleTodo(items, it.id, e.target.checked, meName))}
+            aria-label={it.text} className="nodrag nopan mt-[2px] h-3.5 w-3.5 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-default" />
+          {editId === it.id
+            ? <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} {...stopAll} className={input} onBlur={saveEdit}
+                onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditId(null); }} />
+            : <div className={`min-w-0 flex-1 break-words leading-snug ${readOnly ? "" : "nodrag cursor-text"}`}
+                onClick={(e) => { if (readOnly) return; e.stopPropagation(); setEditId(it.id); setDraft(it.text); }} onDoubleClick={(e) => e.stopPropagation()}>
+                <span className={it.done ? "text-slate-400 line-through" : "text-slate-800"}>{it.text || "—"}</span>
+                {it.done && it.by && <div className="text-[10px] text-slate-400">{t(`ติ๊กโดย ${it.by}`, `by ${it.by}`)}{it.at ? ` · ${fmtTodoAt(it.at)}` : ""}</div>}
+              </div>}
+          {!readOnly && editId !== it.id && (
+            <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); setItems(items.filter((i) => i.id !== it.id)); }}
+              title={t("ลบข้อนี้ (ย้อนกลับได้ Ctrl+Z)", "Delete this item (Ctrl+Z to undo)")}
+              className="nodrag nopan invisible shrink-0 rounded px-0.5 text-slate-400 hover:text-rose-600 group-hover:visible"><Icon value="i:x" /></button>
+          )}
+        </div>
+      ))}
+      {!readOnly && items.length < TODO_MAX && (
+        <div className="flex items-center gap-1 px-2.5 pb-2 pt-1">
+          <span className="text-[12px]" style={{ color: pal.stroke }}><Icon value="i:plus" /></span>
+          <input ref={addRef} value={adding} onChange={(e) => setAdding(e.target.value)} {...stopAll}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } if (e.key === "Escape") { setAdding(""); addRef.current?.blur(); } }}
+            onBlur={add} placeholder={t("เพิ่มข้อ แล้วกด Enter", "Add an item, press Enter")}
+            className="nodrag nopan nowheel min-w-0 flex-1 bg-transparent text-[12px] text-slate-700 outline-none placeholder:text-slate-400" />
+        </div>
+      )}
+      {readOnly && !items.length && <div className="px-2.5 pb-2 text-[11px] text-slate-400">{t("ยังไม่มีข้อ", "No items yet")}</div>}
+    </div>
+  );
+}
+
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
 function ShapeBg({ kind, color, fill, stroke }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string }) {
   const p0 = FLOW_PALETTE[color];
@@ -281,7 +369,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
     kind === "question" || kind === "storage" || frameless ? {}
     : { background: data.fill ?? pal.fill, border: `2px solid ${data.stroke ?? pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
-  const pad = frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
+  const pad = kind === "todo" ? "0" : frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
   // ไอคอนโตตามกล่อง (lib/flowchart flowIconSizes — สูตรเดียวกับตอนบันทึกเป็นรูป)
   const iconBase = iconBoxBaseSize({ type: kind, data });
@@ -341,6 +429,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           : info?.missing && <div className="text-[10.5px] text-amber-700" title={data.href}><Icon value="i:alert-triangle" /> {t("หน้านี้ไม่อยู่ในเมนูแล้ว", "This page is no longer in the menu")}</div>}
       </div>
     );
+  } else if (kind === "todo") {
+    content = <TodoList id={id} data={data} color={color} width={width} height={height} editingTitle={editing} onTitleDone={() => setEditing(false)} />;
   } else if (kind === "file") {
     const exts = data.exts?.length ? data.exts : [""];
     const size = icons.file;
@@ -367,7 +457,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         </NodeToolbar>
       )}
       <div
-        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
+        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" || kind === "todo" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
         style={{ ...boxStyle, padding: pad }}
         title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : kind === "page" && data.href ? t(`ดับเบิลคลิก = เปิดหน้า ${data.href}`, `Double-click to open ${data.href}`) : undefined}
         onDoubleClick={(e) => {
@@ -380,7 +470,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         {!frameless && <ShapeBg kind={kind} color={color} fill={data.fill} stroke={data.stroke} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
-        {editing && (
+        {editing && kind !== "todo" && (
           kind === "folder" || kind === "file"
             ? <InlineEditor initial={data} folder={kind === "folder"} boxW={width} boxH={height}
                 onDone={(patch, size) => { setEditing(false); if (patch) updateData(id, patch); if (patch && size) growNode(id, size.w, size.h); }} />

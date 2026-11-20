@@ -7,6 +7,8 @@
  *     ทั้งระบบ = ผัง ซื้อ · ผลิต · จ่ายงาน · ขาย เรียงซ้าย→ขวาบนผืนเดียว (lib/plan-flow-merge · กล่องระบบ id "<ส่วน>:<กล่อง>")
  *     ปุ่มกระโดดไปส่วน · กดกล่องที่อยู่หลายส่วน = ไฮไลต์ทุกที่ + ป๊อปบอกว่าอยู่ส่วนไหนบ้าง
  *     ของที่วาดเสริมไว้ในแท็บเดิม ย้ายมาเองครั้งแรกที่เปิด (seed) — กระดานเดิม team_plan_flow/buy|make|dispatch|sell เก็บเป็นสำรอง ไม่ลบ
+ *   - แท็บ "ที่เก็บไฟล์" (เจ้าของสั่ง 2026-11-20 "จัดการได้ที่เดียว") = กระดานแผนผังการเก็บไฟล์ตัวเดียวกับหน้า /master/storage-plan
+ *     (entity storage_plan_flow/main · สิทธิ์ตามคลังไฟล์ assets.view/manage ที่ /api/canvas-sketch) — ไม่ได้คัดลอก แก้ที่ไหนก็ตรงกัน
  *   - กล่อง/เส้นวาดจากทะเบียน lib/flow-map (ชั้นล็อก) · วาดเสริมทับได้ (entity team_plan_flow/ov | all) · ปุ่ม ↗ บนกล่อง = เปิดหน้านั้นในแท็บใหม่
  *   - กดกล่อง/วงกลมเลขเส้น = ป๊อปเล็กข้าง ๆ จุดที่กด บอกข้อมูลจากทะเบียน (กดซ้ำที่เดิม = ปิด · มือถือขึ้นล่างจอ) — เจ้าของสั่ง 2026-11-19
  *   - รายละเอียดเต็ม (ตัวเลขสด · ช่องโหว่ · โน้ต · อยากแก้อะไร) = /master/flow-map
@@ -27,6 +29,7 @@ import { apiFetch } from "@/lib/api";
 import { parseFlowScene, type FlowScene } from "@/lib/flowchart";
 import { PLAN_ALL_KEY, PLAN_ALL_SECTIONS, PLAN_SECTION_W, allBoxId, mergeOldScenes, sectionX, splitAllId, type PlanAllSection } from "@/lib/plan-flow-merge";
 import { FLOW_VIEW_PREF_DEFAULT, parseFlowViewPref, type FlowViewPref } from "@/lib/work-canvas";
+import { STORAGE_PLAN_ENTITY, storagePlanStarter } from "@/lib/storage-plan-starter";
 
 const FlowchartBoard = dynamic(() => import("@/components/flowchart-board").then((m) => m.FlowchartBoard), { ssr: false, loading: () => <LoadingState /> });
 
@@ -35,7 +38,8 @@ const OV_VIEW = FLOW_VIEWS.find((v) => v.key === "ov")!;
 const ALL_SECTIONS = PLAN_ALL_SECTIONS.map((k, i) => ({ view: FLOW_VIEWS.find((v) => v.key === k)!, ox: sectionX(i) }));
 const ALL_H = Math.max(...ALL_SECTIONS.map((x) => x.view.height)) + 20;
 const ALL_W = sectionX(PLAN_ALL_SECTIONS.length - 1) + PLAN_SECTION_W;
-const TABS = [{ key: "ov", label: "ภาพรวม" }, { key: PLAN_ALL_KEY, label: "ทั้งระบบ" }];
+const FILES_KEY = "files";
+const TABS = [{ key: "ov", label: "ภาพรวม" }, { key: PLAN_ALL_KEY, label: "ทั้งระบบ" }, { key: FILES_KEY, label: "ที่เก็บไฟล์" }];
 type Sec = { key: string; view: FlowView; ox: number; drawn: FmDrawn[] };
 const OV_SECS: Sec[] = [{ key: "ov", view: OV_VIEW, ox: 0, drawn: layoutFlowView(OV_VIEW) }];
 const ALL_SECS: Sec[] = ALL_SECTIONS.map(({ view, ox }) => ({ key: view.key, view, ox, drawn: layoutFlowView(view) }));
@@ -62,8 +66,9 @@ export function PlanFlowBoard({ canEdit, fill = false }: {
 }) {
   // แท็บที่เปิดล่าสุด (จำต่อคน · ค่าเดิม ซื้อ/ผลิต/จ่ายงาน/ขาย = "ทั้งระบบ")
   const [pref, setPref] = useUserPref<FlowViewPref>("team_plan_flow_pref", FLOW_VIEW_PREF_DEFAULT, parseFlowViewPref);
-  const isAll = pref.view !== "ov";
-  const mode = isAll ? PLAN_ALL_KEY : "ov";
+  const isFiles = pref.view === FILES_KEY;
+  const isAll = !isFiles && pref.view !== "ov";
+  const mode = isFiles ? FILES_KEY : isAll ? PLAN_ALL_KEY : "ov";
   const secs = isAll ? ALL_SECS : OV_SECS;
   /** id บนกระดาน ↔ (ส่วน, id ทะเบียน) — ภาพรวมใช้ id ตรงเหมือนเดิม (ตำแหน่งกล่องที่ย้ายไว้ไม่หาย) */
   const gid = (key: string, id: string) => (isAll ? allBoxId(key, id) : id);
@@ -190,17 +195,27 @@ export function PlanFlowBoard({ canEdit, fill = false }: {
               ))}
             </div>
           )}
-          <a href="/master/flow-map" target="_blank" rel="noopener noreferrer" title="ตัวเลขสด · ช่องโหว่ · โน้ต · อยากแก้อะไร ของแต่ละกล่อง/เส้น"
+          {isFiles && (
+            <a href="/master/storage-plan" target="_blank" rel="noopener noreferrer" title="กระดานเดียวกับหน้านี้ — เปิดหน้าเต็มของแผนผังการเก็บไฟล์"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">
+              <Icon value="i:sitemap" /> หน้าแผนผังการเก็บไฟล์ ↗
+            </a>
+          )}
+          {!isFiles && <a href="/master/flow-map" target="_blank" rel="noopener noreferrer" title="ตัวเลขสด · ช่องโหว่ · โน้ต · อยากแก้อะไร ของแต่ละกล่อง/เส้น"
             className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">
             <Icon name="map" /> รายละเอียดเต็มของผัง ↗
-          </a>
-          {!fill && <span className="text-[11px] text-slate-400">งานค้างทั้งหมดอยู่ที่ &quot;งานทั้งหมด&quot; · กดกล่อง/เส้น = ดูข้อมูล · ชี้กล่องแล้วกด ↗ = เปิดหน้านั้น{canEdit ? " · วาดเสริมทับผังได้" : ""}</span>}
+          </a>}
+          {!fill && isFiles && <span className="text-[11px] text-slate-400">แผนผังการเก็บไฟล์ (กระดานเดียวกับหน้าคลังไฟล์ — แก้ที่นี่ก็เปลี่ยนที่นั่น) · ใส่กล่อง &quot;รายการงาน&quot; ติ๊กงานที่ต้องจัดได้</span>}
+          {!fill && !isFiles && <span className="text-[11px] text-slate-400">งานค้างทั้งหมดอยู่ที่ &quot;งานทั้งหมด&quot; · กดกล่อง/เส้น = ดูข้อมูล · ชี้กล่องแล้วกด ↗ = เปิดหน้านั้น{canEdit ? " · วาดเสริมทับผังได้" : ""}</span>}
         </div>
       </FullscreenBar>
 
       <div ref={wrapRef} onPointerDownCapture={onPointerDownCapture} className={`relative min-w-0 rounded-xl border border-slate-200 bg-white p-1 ${fill ? "flex min-h-0 flex-1 flex-col" : ""}`}>
-        <FlowchartBoard key={mode} entityType="team_plan_flow" entityId={mode} height={H} editable={canEdit}
-          fileName={`แผนงาน-ผัง${isAll ? "ทั้งระบบ" : OV_VIEW.label}`} locked={lockedLayer} seed={isAll ? seedAll : undefined} />
+        {isFiles
+          ? <FlowchartBoard key={mode} entityType={STORAGE_PLAN_ENTITY.type} entityId={STORAGE_PLAN_ENTITY.id} height={H} editable={canEdit}
+              starter={storagePlanStarter} fileName="แผนผังการเก็บไฟล์" />
+          : <FlowchartBoard key={mode} entityType="team_plan_flow" entityId={mode} height={H} editable={canEdit}
+              fileName={`แผนงาน-ผัง${isAll ? "ทั้งระบบ" : OV_VIEW.label}`} locked={lockedLayer} seed={isAll ? seedAll : undefined} />}
         {cur && curP && (
           <div ref={popRef} style={popStyle(cur.at)} className="absolute inset-x-1 bottom-1 z-20 max-h-[55%] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-xl sm:inset-x-auto sm:bottom-auto sm:right-3 sm:top-14 sm:max-h-[70%] sm:w-80">
             <div className="mb-1.5 flex items-start gap-2">

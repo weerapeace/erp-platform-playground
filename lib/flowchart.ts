@@ -12,7 +12,7 @@ import { isAppKey, isErpPageHref } from "./menu-pages";
 import { isFlowAlign, isHexColor, sanitizeRich, type FlowAlign } from "./flowchart-rich";
 
 /** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
-export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "zone"] as const;
+export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "zone"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -39,6 +39,7 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
   file:     { w: 200, h: 120, color: "slate",   th: "ไฟล์",         en: "File",        hintTh: "ประเภทไฟล์ เช่น JPG · CR2 · PSD · AI · PDF (เลือกได้หลายชนิด)", hintEn: "File types, e.g. JPG · CR2 · PSD · AI · PDF (pick several)", icon: "i:files" },
   folder:   { w: 220, h: 64,  color: "cyan",    th: "โฟลเดอร์",     en: "Folder",      hintTh: "ทางลัด ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง", hintEn: "Shortcut — double-click opens a local folder", icon: "i:folder" },
   page:     { w: 220, h: 80,  color: "emerald", th: "หน้าใน ERP",   en: "ERP page",    hintTh: "บอกว่าดูไฟล์ได้ที่หน้าไหนในระบบ — เลือกจากเมนูจริง · กด เปิด ↗ บนกล่อง = ไปหน้านั้น", hintEn: "Shows which ERP page has these files — picked from the real menu · click Open ↗ to go there", icon: "i:apps" },
+  todo:     { w: 260, h: 150, color: "amber",   th: "รายการงาน",    en: "To-do list",  hintTh: "สิ่งที่ต้องทำหลายข้อ ติ๊กเมื่อเสร็จ — ครบทุกข้อกล่องเป็นสีเขียว", hintEn: "Several tasks with check boxes — turns green when all are done", icon: "i:list-check" },
   note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
   zone:     { w: 480, h: 320, color: "blue",    th: "กรอบโซน",      en: "Zone",        hintTh: "กรอบใหญ่ครอบหลายกล่อง เช่น ในออฟฟิศ / บนคลาวด์ — ลากหัวกรอบ = ย้ายทั้งกลุ่ม", hintEn: "Big frame around boxes, e.g. Office / Cloud — drag its title to move everything inside", icon: "i:circle-dashed" },
 };
@@ -48,7 +49,10 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** href/app/appName/icon = กล่อง "หน้าใน ERP": ลิงก์หน้าในระบบ (ขึ้นต้น "/") · รหัสแอป · ชื่อแอปตอนเลือก · ไอคอนเมนู — เลือกจากเมนูจริง (lib/menu-pages) */
 /** rule = กล่อง "ที่เก็บ" ผูกกับกฎที่เก็บจริง (erp_storage_rules.rule_key · หน้า /master/storage-rules) → กระดานเตือนเมื่อแผนไม่ตรงกฎ */
 /** rich = ข้อความจัดรูปแบบ (HTML ชุดเล็ก ผ่าน sanitizeRich เสมอ · label = ข้อความล้วนคู่กัน) · align = จัดชิดทั้งกล่อง · fill/stroke = สีพื้น/เส้นขอบกำหนดเอง #rrggbb (ทับสีชุด) — lib/flowchart-rich */
-export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** ข้อในกล่อง "รายการงาน" · by/at = ใครติ๊กเสร็จ เมื่อไหร่ (ISO) — เอาติ๊กออก = ลบ by/at */
+export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; at?: string };
+/** items = ข้อของกล่อง "รายการงาน" */
+export type FlowNodeData = { items?: FlowTodo[]; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -129,7 +133,8 @@ const handleOrNull = (v: unknown): string | null => (typeof v === "string" && (F
 
 /** สีที่ใช้จริงของกล่อง (ไม่ได้เลือก = สีตั้งต้นของชนิด) */
 export const nodeColor = (kind: FlowKind, data: Partial<FlowNodeData> | undefined): FlowColor =>
-  isColor(data?.color) ? data!.color! : FLOW_KIND_META[kind].color;
+  kind === "todo" && todoProgress(data?.items).allDone ? "emerald"   // รายการงานเสร็จครบ = เขียว (ทั้งบนจอและตอนบันทึกเป็นรูป)
+  : isColor(data?.color) ? data!.color! : FLOW_KIND_META[kind].color;
 
 /** รับข้อมูลดิบจากฐานข้อมูล → FlowScene ที่ปลอดภัย · ไม่ใช่กระดาน flowchart (เช่น กระดาน Excalidraw) = null */
 export function parseFlowScene(raw: unknown): FlowScene | null {
@@ -152,6 +157,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (isPlaceKey(d.place)) data.place = d.place;
     if (o.type === "page") Object.assign(data, cleanPageData(d));
     if (o.type === "storage" && isRuleKey(d.rule)) data.rule = d.rule;
+    if (o.type === "todo") { const items = cleanTodos(d.items); if (items.length) data.items = items; }
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
     if (isFlowAlign(d.align)) data.align = d.align;
@@ -171,6 +177,46 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     eids.add(id);
   }
   return withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
+}
+
+// ── กล่อง "รายการงาน" (เจ้าของสั่ง 2026-11-20 แบบ A + แถบคืบหน้า · ใครติ๊ก · งานค้างทั้งผัง) ──
+export const TODO_MAX = 100;
+/** ข้อในกล่องรายการงาน → ค่าที่ปลอดภัย (ข้อความ ≤ 300 ตัว · สูงสุด 100 ข้อ · id ซ้ำตัดทิ้ง) */
+export function cleanTodos(raw: unknown): FlowTodo[] {
+  const out: FlowTodo[] = [];
+  const ids = new Set<string>();
+  for (const v of Array.isArray(raw) ? raw : []) {
+    const o = (v ?? {}) as Record<string, unknown>;
+    const id = str(o.id).slice(0, 40);
+    if (!id || ids.has(id)) continue;
+    const it: FlowTodo = { id, text: str(o.text).slice(0, 300) };
+    if (o.done === true) {
+      it.done = true;
+      if (typeof o.by === "string" && o.by.trim()) it.by = o.by.trim().slice(0, 80);
+      if (typeof o.at === "string" && !Number.isNaN(Date.parse(o.at))) it.at = o.at;
+    }
+    out.push(it); ids.add(id);
+    if (out.length >= TODO_MAX) break;
+  }
+  return out;
+}
+/** เสร็จกี่ข้อจากทั้งหมด (ข้อว่างไม่นับ) · allDone = มีอย่างน้อย 1 ข้อและเสร็จครบ */
+export function todoProgress(items: FlowTodo[] | undefined): { done: number; total: number; allDone: boolean } {
+  const list = (items ?? []).filter((i) => i.text.trim());
+  const done = list.filter((i) => i.done).length;
+  return { done, total: list.length, allDone: list.length > 0 && done === list.length };
+}
+/** ติ๊ก / เอาติ๊กออก 1 ข้อ — ติ๊ก = จำชื่อคน + เวลา · เอาออก = ลบทิ้ง */
+export function toggleTodo(items: FlowTodo[], id: string, done: boolean, by: string, at = new Date().toISOString()): FlowTodo[] {
+  return items.map((i) => (i.id !== id ? i : done ? { id: i.id, text: i.text, done: true, ...(by ? { by } : {}), at } : { id: i.id, text: i.text }));
+}
+export type OpenTodo = { nodeId: string; box: string; item: FlowTodo };
+/** "งานค้างทั้งผัง": ทุกข้อที่ยังไม่ติ๊กในทุกกล่องรายการงาน (เรียงตามกล่องบน→ล่าง ซ้าย→ขวา) */
+export function openTodos(nodes: Pick<FlowSceneNode, "id" | "type" | "position" | "data">[]): OpenTodo[] {
+  return nodes.filter((n) => n.type === "todo")
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+    .flatMap((n) => (n.data.items ?? []).filter((i) => !i.done && i.text.trim())
+      .map((item) => ({ nodeId: n.id, box: splitFlowLabel(n.data.label).title, item })));
 }
 
 /** ช่องของกล่อง "หน้าใน ERP" ที่ผ่านการตรวจ (ลิงก์ต้องเป็นหน้าในระบบเท่านั้น — กันลิงก์แปลก/javascript:) */
@@ -313,6 +359,7 @@ export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (t
     data: {
       label: data?.label ?? defLabel, ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}), ...(place ? { place } : {}),
       ...(kind === "page" && data ? cleanPageData(data as Record<string, unknown>) : {}),
+      ...(kind === "todo" ? { label: data?.label ?? t("สิ่งที่ต้องทำ", "To do"), items: cleanTodos(data?.items) } : {}),
     },
   };
 }

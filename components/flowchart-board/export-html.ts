@@ -8,7 +8,7 @@ import { flowEdgePath } from "./edge-path";
 import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { sanitizeRich } from "@/lib/flowchart-rich";
-import { FLOW_PALETTE, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
+import { FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const SIDE: Record<string, Position> = { t: Position.Top, r: Position.Right, b: Position.Bottom, l: Position.Left };
@@ -61,6 +61,13 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
       + `</div>`;
   } else if (n.type === "folder") {
     text = `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`;
+  } else if (n.type === "todo") {
+    const pr = todoProgress(n.data.items);
+    const rows = (n.data.items ?? []).filter((i) => i.text.trim()).map((i) =>
+      `<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.35;margin-top:3px">`
+      + `<span style="flex:none;width:12px;height:12px;margin-top:2px;border:1.5px solid ${strokeC};border-radius:3px;background:${i.done ? strokeC : "#fff"}"></span>`
+      + `<span style="color:${i.done ? "#94a3b8" : p.text};${i.done ? "text-decoration:line-through;" : ""}word-break:break-word">${esc(i.text)}</span></div>`).join("");
+    text = `<div style="width:100%;text-align:left"><div style="display:flex;justify-content:space-between;gap:6px;font-size:13px;font-weight:700;color:${p.text}"><span>${esc(title) || "&nbsp;"}</span><span style="font-weight:400;font-size:11px;color:${p.sub}">${pr.done}/${pr.total}</span></div>${rows}</div>`;
   } else {
     text = labelHtml;
   }
@@ -74,7 +81,7 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
     box = ""; pad = `${Math.round(h * 0.22)}px ${Math.round(w * 0.1)}px ${Math.round(h * 0.1)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
-  const align = n.type === "note" ? "flex-start" : "center";
+  const align = n.type === "note" || n.type === "todo" ? "flex-start" : "center";
   return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;
 }
 

@@ -24,6 +24,7 @@ import {
   type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
 import { useT } from "@/components/i18n";
+import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { usePushToast } from "@/components/toast";
 import { LoadingState, ErrorState, EmptyState } from "@/components/state-views";
@@ -45,6 +46,7 @@ import {
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
   OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
+  openTodos,
 } from "@/lib/flowchart";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
@@ -154,6 +156,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const t = useT();
   const pushToast = usePushToast();
   const rf = useReactFlow();
+  const meName = useAuth().user?.name ?? "";
   const wrapRef = useRef<HTMLDivElement>(null);    // พื้นที่วาด (ใช้หาจุดวาง/กลางจอ)
   const boardRef = useRef<HTMLDivElement>(null);   // ทั้งกระดานรวมแถบเครื่องมือ (คีย์ลัดทำงานเมื่อเมาส์/โฟกัสอยู่ในนี้)
 
@@ -624,6 +627,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         return r ? { ...n, ...r } : n;
       }));
     },
+    meName,
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
     formatNodes: (ids, op) => {
       const set = new Set(ids);
@@ -652,7 +656,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName]);
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
   const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
@@ -725,8 +729,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     ...(locked && hideOwn ? [] : nodes.map((n) => ({ id: n.id, label: n.data.label.replace(/\n/g, " ") }))),
   ], [locked, hideOwn, nodes]);
   const findHits = useMemo(() => searchBoxes(findItems, findQ), [findItems, findQ]);
+  // ── งานค้างทั้งผัง: ทุกข้อที่ยังไม่ติ๊กในกล่องรายการงาน (เจ้าของสั่ง 2026-11-20 ข้อ 3) ──
+  const [todoOpen, setTodoOpen] = useState(false);
+  const hasTodoBox = !(locked && hideOwn) && nodes.some((n) => n.type === "todo");
+  const pending = useMemo(() => (hasTodoBox ? openTodos(nodes) : []), [hasTodoBox, nodes]);
   const goTo = (id: string) => {
-    setFindQ("");
+    setFindQ(""); setTodoOpen(false);
     void rf.fitView({ nodes: [{ id }], padding: 0.6, maxZoom: 1.4, duration: 400 });
     if (!isSysId(id)) setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === id })));
   };
@@ -833,6 +841,26 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
               </span>
             )}
           </span>
+          {hasTodoBox && (
+            <span className="relative">
+              <button type="button" className={`${tb} ${pending.length ? "text-amber-700" : "text-emerald-700"}`} onClick={() => setTodoOpen((v) => !v)} aria-expanded={todoOpen}
+                title={t("ทุกข้อที่ยังไม่ติ๊กในกล่องรายการงาน — กดเพื่อไปที่กล่อง", "Every unchecked item in the to-do boxes — click to jump to the box")}>
+                <Icon value={pending.length ? "i:list-check" : "i:circle-check"} />
+                {pending.length ? t(`งานค้าง ${pending.length}`, `${pending.length} to do`) : t("งานเสร็จครบ", "All done")}
+              </button>
+              {todoOpen && (
+                <span className="absolute left-0 top-9 z-20 block max-h-80 w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  {pending.length ? pending.map((p) => (
+                    <button key={`${p.nodeId}:${p.item.id}`} type="button" onClick={() => goTo(p.nodeId)}
+                      className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-slate-50">
+                      <span className="w-full truncate text-[12px] text-slate-800">{p.item.text}</span>
+                      <span className="w-full truncate text-[10.5px] text-slate-400"><Icon value="i:list-check" /> {p.box || t("สิ่งที่ต้องทำ", "To do")}</span>
+                    </button>
+                  )) : <span className="block px-2 py-1.5 text-[12px] text-emerald-700">{t("ทุกข้อติ๊กเสร็จแล้ว", "Every item is checked")}</span>}
+                </span>
+              )}
+            </span>
+          )}
           <span className="flex-1" />
           {!readOnly && (
             <>
