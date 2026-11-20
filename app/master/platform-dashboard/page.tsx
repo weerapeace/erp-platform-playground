@@ -21,7 +21,8 @@ import { rangePresets, TH_MONTHS } from "@/lib/date-range";
 
 // ตัวอักษรแบบนิตยสาร: Playfair Display (ตัวเลข/อังกฤษ) + Noto Serif Thai (ไทย) — โหลดเฉพาะหน้านี้
 const FONT_URL = "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Noto+Serif+Thai:wght@400;500&display=swap";
-const SERIF: CSSProperties = { fontFamily: "'Playfair Display','Noto Serif Thai',Georgia,serif" };
+// lining-nums = ตัวเลขสูงเท่ากันทุกตัว (Playfair ตั้งต้นเป็นเลขสูงต่ำแบบหนังสือ — 0 ดูเล็ก)
+const SERIF: CSSProperties = { fontFamily: "'Playfair Display','Noto Serif Thai',Georgia,serif", fontVariantNumeric: "lining-nums tabular-nums" };
 const INK = "#1e293b";      // slate-800 — สีแท่งกราฟ
 const ACCENT = "#9f1239";   // rose-800 — สีเน้นจุดเดียวของหน้า
 
@@ -150,7 +151,7 @@ export default function PlatformDashboardPage() {
       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-6 sm:px-10 sm:py-9">
         {/* หัวหน้า */}
         <header className="text-center">
-          <div className="text-[11px] tracking-[0.2em] text-slate-400">ภาพรวมทุกช่องทาง</div>
+          <div className="text-[11px] tracking-wide text-slate-400">ภาพรวมทุกช่องทาง</div>
           <h1 className="mt-1 text-3xl leading-tight text-slate-900 sm:text-5xl" style={SERIF}>แดชบอร์ดรวม</h1>
           <p className="mt-1 text-xs text-slate-500 sm:text-sm">ยอดขาย ออเดอร์ สินค้าบนแพลตฟอร์ม และสต๊อก — รวมทุกช่องทางไว้ที่เดียว</p>
 
@@ -191,22 +192,22 @@ export default function PlatformDashboardPage() {
             {/* ตัวเลขหลัก 4 ช่อง */}
             <div className="grid grid-cols-2 gap-y-6 text-center lg:grid-cols-4">
               <div className="px-2">
-                <div className="text-[11px] tracking-[0.15em] text-slate-400">ยอดขายรวม</div>
+                <div className="text-[11px] tracking-wide text-slate-400">ยอดขายรวม</div>
                 <div className="mt-1 break-all text-2xl tabular-nums text-slate-900 sm:text-4xl" style={SERIF}>{baht(kpi.salesTotal)}</div>
                 <div className="flex flex-wrap items-center justify-center gap-x-1.5 text-[11px] text-slate-400">ไม่รวมออเดอร์ที่ยกเลิก <Delta cur={kpi.salesTotal} prev={prev?.salesTotal} /></div>
               </div>
               <div className="border-l border-slate-200 px-2">
-                <div className="text-[11px] tracking-[0.15em] text-slate-400">ออเดอร์ทั้งหมด</div>
+                <div className="text-[11px] tracking-wide text-slate-400">ออเดอร์ทั้งหมด</div>
                 <div className="mt-1 text-2xl tabular-nums text-slate-900 sm:text-4xl" style={SERIF}>{num(kpi.ordersCount)}</div>
                 <div className="flex flex-wrap items-center justify-center gap-x-1.5 text-[11px] text-slate-400">รอแพ็ค/ยืนยัน {kpi.ordersPending} · รอส่ง {kpi.ordersToShip} <Delta cur={kpi.ordersCount} prev={prev?.ordersCount} /></div>
               </div>
               <div className="border-t border-slate-200 px-2 pt-5 lg:border-l lg:border-t-0 lg:pt-0">
-                <div className="text-[11px] tracking-[0.15em] text-slate-400">สินค้าบนแพลตฟอร์ม</div>
+                <div className="text-[11px] tracking-wide text-slate-400">สินค้าบนแพลตฟอร์ม</div>
                 <div className="mt-1 text-2xl tabular-nums text-slate-900 sm:text-4xl" style={SERIF}>{num(kpi.catalogTotal)}</div>
                 <div className="text-[11px] text-slate-400">จับคู่ ERP แล้ว {num(kpi.catalogMatched)} ({matchPct}%)</div>
               </div>
               <Link href="/master/platform-catalog" className="group border-l border-t border-slate-200 px-2 pt-5 lg:border-t-0 lg:pt-0">
-                <div className="text-[11px] tracking-[0.15em] text-slate-400" style={kpi.catalogUnmatched > 0 ? { color: ACCENT } : undefined}>ยังไม่จับคู่ ERP</div>
+                <div className="text-[11px] tracking-wide text-slate-400" style={kpi.catalogUnmatched > 0 ? { color: ACCENT } : undefined}>ยังไม่จับคู่ ERP</div>
                 <div className="mt-1 text-2xl tabular-nums sm:text-4xl" style={{ ...SERIF, color: kpi.catalogUnmatched > 0 ? ACCENT : "#059669" }}>{num(kpi.catalogUnmatched)}</div>
                 <div className="inline-flex items-center gap-1 text-[11px] text-slate-400 group-hover:text-slate-700">
                   {kpi.catalogUnmatched > 0 ? "ไปไล่จับคู่ให้ครบ" : "ครบแล้ว"} <Icon value="i:external-link" />
@@ -324,7 +325,7 @@ export default function PlatformDashboardPage() {
                       <div key={`${s.code}-${i}`} className="flex items-center gap-3 py-2 text-sm">
                         <span className="w-24 shrink-0 truncate font-mono text-[11px] text-slate-400">{s.code}</span>
                         <span className="min-w-0 flex-1 truncate text-slate-700" title={s.name}>{s.name}</span>
-                        <span className={`w-12 shrink-0 text-right text-base tabular-nums ${s.available <= 0 ? "text-rose-700" : "text-amber-600"}`} style={SERIF}>{s.available}</span>
+                        <span className={`w-12 shrink-0 text-right text-base tabular-nums ${s.available <= 0 ? "text-rose-700" : "text-amber-600"}`} style={SERIF}>{num(Math.round(s.available * 100) / 100)}</span>
                       </div>
                     ))}
                   </div>
