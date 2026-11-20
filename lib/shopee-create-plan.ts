@@ -26,6 +26,7 @@ import { noteToText } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
+import { attrDefaultVals, attrRuleValue, matchAttrRule, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
 
 /** สต๊อกตอนสร้าง (BigSeller ยังคุมสต๊อก — ไม่ส่งจำนวนจริง) · สถานะตอนสร้าง = ปิดขาย */
 export const SHOPEE_CREATE_STOCK = 0;
@@ -48,7 +49,8 @@ const r2 = (k: string) => `r2:${k}`;
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 export type ShopeeCreateSku = {
-  id: string; code: string; color_th: string | null; color: string | null;
+  /** color_platform_th = "Color Platform [TH]" เช่น "ดำ (01)" — ชื่อสีที่ร้านใช้บน Shopee อยู่แล้ว (มาก่อน color_th) */
+  id: string; code: string; color_th: string | null; color: string | null; color_platform_th?: string | null;
   list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null;
   attribute_values: Record<string, unknown> | null; is_active: boolean; sale_ok?: boolean | null;
 };
@@ -57,6 +59,9 @@ export type ShopeeCreateParent = {
   description: string | null; platform_description: string | null; weight_g: number | null;
   box: { l: number | null; w: number | null; h: number | null } | null;
   brand_name: string | null;
+  /** ช่องรับประกันของสินค้า + ขนาดสินค้า (ยาว/กว้าง/สูง ซม.) — ใช้กับค่าเริ่มต้นช่องคุณลักษณะ (lib/listing-attr-defaults) */
+  warranty?: string | null;
+  size?: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type ShopeeCreateDraft = {
   title: string | null; description: string | null; category_path: string | null; image_keys: string[] | null;
@@ -77,6 +82,9 @@ export type ShopeeBulkCategoryRow = {
   /** เหตุที่แนะนำไม่ได้ (เช่น แบรนด์ยังไม่เชื่อม Shopee) */
   note: string | null;
 };
+export type ShopeeAttrSource = "draft" | "default" | "product" | "template";
+/** ก้อน { key: value } ในร่าง (extra.*) → object (กันค่าแปลก) */
+const recOf = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
 /** "{id} · ชื่อ" / "{id}" → id หมวด */
 export const shopeeCategoryIdOf = (path: unknown): string | null => {
   const s = str(path); if (!s) return null;
@@ -154,7 +162,7 @@ export function shopeeAttrStateOf(v: unknown): TtsAttrState {
 
 // ───────── "สินค้าแบบ" บนร้าน (get_item_base_info ของสินค้าที่ขายอยู่ แบรนด์เดียวกัน) → แบรนด์ / ขนส่ง / วันส่ง / ค่าคุณลักษณะ ─────────
 export type ShopeeLogistic = { logistic_id: number; name: string | null; enabled: boolean; shipping_fee?: number; size_id?: number; is_free?: boolean; /** ค่าส่งโดยประมาณตามน้ำหนัก (get_item_base_info · โชว์อย่างเดียว) */ estimated_fee?: number };
-export type ShopeeTemplate = { itemId: string; categoryId: string | null; brand: { id: number; name: string } | null; logistics: ShopeeLogistic[]; daysToShip: number | null; attrs: TtsAttrState };
+export type ShopeeTemplate = { itemId: string; categoryId: string | null; brand: { id: number; name: string } | null; logistics: ShopeeLogistic[]; daysToShip: number | null; attrs: TtsAttrState; /** normal / extended (extended = ร้านได้สิทธิ์ใส่รูปในรายละเอียด) */ descType?: string | null };
 export function shopeeTemplateOf(base: Obj): ShopeeTemplate | null {
   const itemId = str(base.item_id); if (!itemId) return null;
   const b = obj(base.brand);
@@ -172,7 +180,7 @@ export function shopeeTemplateOf(base: Obj): ShopeeTemplate | null {
   return {
     itemId, categoryId: base.category_id != null ? String(base.category_id) : null,
     brand: brandId != null ? { id: brandId, name: str(b?.original_brand_name) || "NoBrand" } : null,
-    logistics, daysToShip: num(obj(base.pre_order)?.days_to_ship), attrs,
+    logistics, daysToShip: num(obj(base.pre_order)?.days_to_ship), attrs, descType: str(base.description_type) || null,
   };
 }
 // ───────── ขนส่ง (เจ้าของขอ 2026-11-15 "ตรงติ๊กจัดส่งด้วย อยากให้ติ๊กได้ด้วย") ─────────
@@ -243,12 +251,20 @@ export function shopeeBrandMatches(erpBrand: string | null | undefined, shopeeBr
 
 // ───────── แผน ─────────
 export type ShopeeCreateDim = { key: "color" | "option" | "code"; label: string; name: string; values: string[] };
-export type ShopeeCreateVariantRow = { sku_id: string; code: string; attrs: Record<string, string>; price: number | null; fake: number | null; sale: number | null; image_ref: string | null };
+/** price = ที่จะส่ง (แก้ในร่างได้) · price_base = ราคาจากระบบ (ราคาเต็ม → ราคาขาย) · color_base = ชื่อสีจากระบบ (ก่อนแก้ในร่าง) */
+export type ShopeeCreateVariantRow = {
+  sku_id: string; code: string; attrs: Record<string, string>; price: number | null; fake: number | null; sale: number | null; image_ref: string | null;
+  price_base: number | null; price_custom: boolean; color_base: string | null; color_custom: boolean; image_custom: boolean;
+  /** รูปตัวเลือกอัตโนมัติ (ปก SKU) — ใช้ตอนกด "กลับไปใช้รูปอัตโนมัติ" */
+  image_base: string | null;
+};
 export type ShopeeCreateField<T> = { value: T; src: string };
 export type ShopeeCreatePreview = {
   parent_id: string; parent_code: string;
   name: ShopeeCreateField<string>;
-  description: ShopeeCreateField<string>;
+  description: ShopeeCreateField<string> & { /** ร้านใส่รูปในรายละเอียดได้ไหม (Shopee เปิดสิทธิ์ extended description): true = สินค้าแบบใช้รูปในรายละเอียด · false = สินค้าแบบเป็นข้อความ (ยังไม่พบสิทธิ์) · null = ไม่มีสินค้าแบบ */ imagesAllowed: boolean | null };
+  /** ชื่อสีที่เลือกได้ (Color Platform [TH] ของ SKU ในสินค้านี้ → ชื่อสีปกติ) */
+  colorChoices: string[];
   category: { id: string | null; label: string | null; kind: ShopeeCategoryKind | null; src: string; candidates: ShopeeCategoryPick[] };
   brand: { id: number; name: string; src: string };
   images: { refs: string[]; src: string; custom: boolean; min: number; max: number };
@@ -258,7 +274,9 @@ export type ShopeeCreatePreview = {
   variants: ShopeeCreateVariantRow[];
   /** ช่องคุณลักษณะของหมวด · required = ช่องบังคับที่ยังว่าง · fromTemplate = เติมจากสินค้าแบบ (#item) */
   /** ช่องคุณลักษณะของหมวด · sources = ค่าแต่ละช่องมาจากไหน (draft = กรอก/บันทึกไว้ในร่าง · template = สินค้าบนร้านหมวดเดียวกัน) */
-  attrs: { required: string[]; loaded: boolean; fields: TtsAttrField[]; values: TtsAttrState; fromTemplate: string | null; sources: Record<string, "draft" | "template"> };
+  /** sources = ค่าแต่ละช่องมาจากไหน: draft ร่าง · default ค่าเริ่มต้นของร้าน · product จากข้อมูลสินค้า · template สินค้าบนร้านหมวดเดียวกัน
+   *  rules = ค่าเริ่มต้นของร้านที่ใช้อยู่ (rulesCustom = ร้านตั้งเอง · false = ค่าเริ่มต้นของระบบ) */
+  attrs: { required: string[]; loaded: boolean; fields: TtsAttrField[]; values: TtsAttrState; fromTemplate: string | null; sources: Record<string, ShopeeAttrSource>; rules: AttrDefaultRule[]; rulesCustom: boolean };
   /** ขนส่ง: options = ติ๊กได้ (เปิด/ปิด · ค่าส่งโดยประมาณ) · custom = เลือกเองไว้ในร่าง */
   logistics: { channels: { id: number; name: string | null }[]; options: ShopeeLogisticOption[]; custom: boolean; src: string };
   daysToShip: number | null;
@@ -280,6 +298,8 @@ export function planShopeeCreate(input: {
   category: ShopeeCategoryPick | null; candidates: ShopeeCategoryPick[];
   galleryKeys: string[]; attrFields: TtsAttrField[] | null; limits: ShopeeCreateLimits | null;
   template: ShopeeTemplate | null; onShop: string | null;
+  /** ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ui_config) · null/ไม่ส่ง = ค่าเริ่มต้นของระบบ DEFAULT_ATTR_RULES */
+  attrRules?: AttrDefaultRule[] | null;
   /** ขนส่งของร้าน (get_channel_list) · null = ดึงไม่ได้ (ใช้ของสินค้าแบบอย่างเดียว) */
   channels?: ShopeeChannel[] | null;
 }): { preview: ShopeeCreatePreview; payload: { add_item: Record<string, unknown>; tier: Record<string, unknown> | null } } {
@@ -322,7 +342,9 @@ export function planShopeeCreate(input: {
   if (!sellable.length) missing.push("SKU ที่เปิดขาย ≥ 1");
 
   // ---------- ชั้นตัวเลือก (≤ 2 ชั้น · ชื่อชั้น/ตัวเลือกยาวตามร้าน) ----------
-  const colorOf = (s: ShopeeCreateSku) => str(s.color_th || s.color);
+  const nameOv = recOf(extra.shopee_option_names);
+  const colorBase = (s: ShopeeCreateSku) => str(s.color_platform_th || s.color_th || s.color);
+  const colorOf = (s: ShopeeCreateSku) => str(nameOv[s.id]) || colorBase(s);
   const vo = (s: ShopeeCreateSku) => { const av = s.attribute_values; const v = av && typeof av === "object" ? (av as Record<string, unknown>).variant_option : null; return v && typeof v === "object" ? v as Record<string, unknown> : null; };
   const optOf = (s: ShopeeCreateSku) => str(vo(s)?.value);
   const optName = sellable.map((s) => str(vo(s)?.name)).find(Boolean) || "ตัวเลือก";
@@ -344,14 +366,23 @@ export function planShopeeCreate(input: {
   }
 
   // ---------- แถวตัวเลือก ----------
+  // รูปประจำตัวเลือก: เลือกเองในร่าง (extra.shopee_option_images { ชื่อสี: ref }) → ปกของ SKU
+  const imgOv = recOf(extra.shopee_option_images);
   const colorImg = new Map<string, string>();
-  for (const s of act) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const k = masters.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (k) colorImg.set(c, k); }
-  const imgOfSku = (s: ShopeeCreateSku): string | null => { const k = colorImg.get(colorOf(s)) ?? s.cover_image_r2_key ?? masterOf(s.code)?.cover_image_r2_key ?? null; return k ? r2(k) : null; };
+  for (const s of act) { const c = colorOf(s); if (!c || colorImg.has(c)) continue; const k = masters.has(s.code) ? s.cover_image_r2_key : (s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null); if (k) colorImg.set(c, r2(k)); }
+  const imgAuto = (s: ShopeeCreateSku): string | null => { const k = s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null; return colorImg.get(colorOf(s)) ?? (k ? r2(k) : null); };
+  const imgOfSku = (s: ShopeeCreateSku): string | null => str(imgOv[colorOf(s)]) || imgAuto(s);
+  const priceOv = recOf(extra.shopee_prices);
   const variants: ShopeeCreateVariantRow[] = sellable.map((s) => {
     const fake = owner(s, "fake_price"), sale = owner(s, "list_price");
+    const pOv = pos(priceOv[s.id]);
     const attrs: Record<string, string> = {};
     dims.forEach((dm, i) => { attrs[dm.name] = ourDims[i].valOf(s); });
-    return { sku_id: s.id, code: s.code, attrs, price: fake ?? sale, fake, sale, image_ref: imgOfSku(s) };
+    return {
+      sku_id: s.id, code: s.code, attrs, price: pOv ?? fake ?? sale, fake, sale, image_ref: imgOfSku(s),
+      price_base: fake ?? sale, price_custom: pOv != null, color_base: colorBase(s) || null, color_custom: !!str(nameOv[s.id]), image_custom: !!str(imgOv[colorOf(s)]),
+      image_base: imgAuto(s),
+    };
   });
   const noPrice = variants.filter((v) => !v.price).length;
   if (noPrice) missing.push(`ราคา (${noPrice} ตัวเลือกยังไม่มีราคา)`);
@@ -369,7 +400,7 @@ export function planShopeeCreate(input: {
   // รูปตัวเลือก: ชั้นแรกเป็น "สี" และทุกสีมีรูป → ใส่ทุกค่า · ไม่ครบ = ไม่ใส่ (เตือน)
   const colorDim = dims[0]?.key === "color" ? dims[0] : null;
   const optImgOn = !!colorDim && variants.length > 0 && variants.every((v) => !!v.image_ref);
-  if (colorDim && !optImgOn) warnings.push("บางสียังไม่มีรูป — ไม่ใส่รูปตัวเลือก · ตั้งปกของ SKU ในระบบ แล้วเปิดหน้านี้ใหม่");
+  if (colorDim && !optImgOn) warnings.push("บางสียังไม่มีรูป — ไม่ใส่รูปตัวเลือก · กดช่องรูปในตารางตัวเลือกเพื่อเลือกรูป (หรือตั้งปกของ SKU ในระบบ)");
   if (variants.some((v) => v.fake && v.sale && v.sale < v.fake)) warnings.push("ราคาตั้งบน Shopee = ราคาเต็มในระบบ — ส่วนลดทำด้วยโปรโมชันของร้าน (ราคาขายในระบบไม่ได้ส่ง)");
 
   // ---------- รูปสินค้า ----------
@@ -414,8 +445,20 @@ export function planShopeeCreate(input: {
   const fields = input.attrFields ?? null;
   const draftAttrs = shopeeAttrStateOf(extra.shopee_attrs);
   const attrVals: TtsAttrState = { ...draftAttrs };
-  const attrSources: Record<string, "draft" | "template"> = Object.fromEntries(Object.keys(draftAttrs).map((k) => [k, "draft" as const]));
+  const attrSources: Record<string, ShopeeAttrSource> = Object.fromEntries(Object.keys(draftAttrs).map((k) => [k, "draft" as const]));
   let fromTemplate: string | null = null;
+  // ค่าเริ่มต้นของร้าน (ตั้งเองได้ · ไม่ตั้ง = ค่าเริ่มต้นของระบบ) + ค่าจากข้อมูลสินค้า → เติมช่องที่ยังว่าง (ทุกช่อง ไม่ใช่แค่ช่องบังคับ)
+  const rules = input.attrRules ?? DEFAULT_ATTR_RULES;
+  if (fields) {
+    const prod = { warranty: p.warranty ?? null, size: p.size ?? null, weightKg: weight };
+    for (const f of fields) {
+      if ((attrVals[f.id] ?? []).length) continue;
+      const rule = matchAttrRule(f.name, rules); if (!rule) continue;
+      const val = attrRuleValue(rule, prod); if (!val) continue;
+      const vals = attrDefaultVals(f, val); if (!vals) continue;
+      attrVals[f.id] = vals; attrSources[f.id] = rule.source === "fixed" ? "default" : "product";
+    }
+  }
   // ช่องบังคับที่ร่างยังไม่มี → เติมจากสินค้าแบบหมวดเดียวกัน (เตือนให้ตรวจ)
   if (fields && t && t.categoryId && t.categoryId === categoryId) {
     for (const f of fields) {
@@ -468,14 +511,15 @@ export function planShopeeCreate(input: {
     preview: {
       parent_id: p.id, parent_code: p.code,
       name: { value: name, src: nameSrc },
-      description: { value: desc, src: descSrc },
+      description: { value: desc, src: descSrc, imagesAllowed: input.template?.descType === "extended" ? true : input.template?.descType === "normal" ? false : null },
+      colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },
       images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax },
       weight: { kg: weight, src: wSrc },
       box: { ...box, mandatory: boxMandatory },
       dims, variants,
-      attrs: { required, loaded: !!fields, fields: fields ?? [], values: attrVals, fromTemplate, sources: attrSources },
+      attrs: { required, loaded: !!fields, fields: fields ?? [], values: attrVals, fromTemplate, sources: attrSources, rules, rulesCustom: !!input.attrRules },
       logistics: { channels: chosenLog.map((l) => ({ id: l.id, name: l.name })), options: logOptions, custom: !!pickedLog, src: logSrc },
       daysToShip, stock: SHOPEE_CREATE_STOCK, status: SHOPEE_CREATE_STATUS,
       missing, warnings, on_shop: onShop, template_item: t?.itemId ?? null, draft_extra: extra,

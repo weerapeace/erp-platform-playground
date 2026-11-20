@@ -94,7 +94,10 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     expect(payload.add_item).toMatchObject({
       item_name: PARENT.name_th, item_status: "UNLIST", seller_stock: [{ stock: SHOPEE_CREATE_STOCK }], category_id: 100095, weight: 0.35,
       brand: { brand_id: 1125513 }, logistic_info: [{ logistic_id: 70016, enabled: true }], item_sku: "BCG09", pre_order: { is_pre_order: false, days_to_ship: 2 },
-      attribute_list: [{ attribute_id: 100134, attribute_value_list: [{ value_id: 1165 }] }],
+      attribute_list: [
+        { attribute_id: 100134, attribute_value_list: [{ value_id: 1165 }] },
+        { attribute_id: 100999, attribute_value_list: [{ value_id: 0, original_value_name: "ไทย" }] },   // ค่าเริ่มต้นของระบบ ประเทศ* = ไทย
+      ],
     });
     const tier = payload.tier as { standardise_tier_variation: { variation_option_list: { image_ref?: string }[] }[]; model: { tier_index: number[]; model_sku: string; original_price: number; seller_stock: { stock: number }[] }[] };
     expect(tier.standardise_tier_variation[0].variation_option_list.map((o) => o.image_ref)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"]);
@@ -168,9 +171,52 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     const fields = [...FIELDS, { id: "200", name: "ลาย", required: true, multiple: false, customizable: true, numeric: false, options: [] }];
     const t2 = { ...TEMPLATE, attrs: { ...TEMPLATE.attrs, "200": [{ name: "เรียบ" }] } };
     const { preview: pv } = plan({ attrFields: fields, template: t2, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { shopee_attrs: { "100134": [{ id: "1165" }] } } } });
-    expect(pv.attrs.sources).toEqual({ "100134": "draft", "200": "template" });
+    expect(pv.attrs.sources).toEqual({ "100134": "draft", "200": "template", "100999": "default" });
     expect(pv.attrs.values["200"]).toEqual([{ name: "เรียบ" }]);
     expect(pv.attrs.fromTemplate).toBe("467297004");
+  });
+  test("ชื่อสี = Color Platform [TH] ก่อน · แก้ชื่อ/ราคา/รูปตัวเลือกในร่างได้ (ไม่แก้ระบบ)", () => {
+    const skus = [sku("LY22-01", { color_th: "ดำ", color_platform_th: "ดำ (01)" }), sku("LY22-02", { color_th: "ขาว", color_platform_th: "ขาว (02)", cover_image_r2_key: null })];
+    const base = plan({ skus });
+    expect(base.preview.dims[0].values).toEqual(["ดำ (01)", "ขาว (02)"]);
+    expect(base.preview.colorChoices).toEqual(["ดำ (01)", "ดำ", "ขาว (02)", "ขาว"]);
+    expect(base.preview.variants[1]).toMatchObject({ price: 1590, price_base: 1590, price_custom: false, color_base: "ขาว (02)", image_ref: null, image_base: null });
+    const extra = { shopee_prices: { "s-LY22-02": 1490 }, shopee_option_names: { "s-LY22-01": "ดำเงา" }, shopee_option_images: { "ขาว (02)": "r2:pick/white.jpg" } };
+    const ed = plan({ skus, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra } });
+    expect(ed.preview.dims[0].values).toEqual(["ดำเงา", "ขาว (02)"]);
+    expect(ed.preview.variants[0]).toMatchObject({ color_custom: true, color_base: "ดำ (01)" });
+    expect(ed.preview.variants[1]).toMatchObject({ price: 1490, price_custom: true, image_ref: "r2:pick/white.jpg", image_custom: true, image_base: null });
+    expect(ed.preview.variants[0]).toMatchObject({ image_ref: "r2:img/LY22-01.jpg", image_base: "r2:img/LY22-01.jpg", image_custom: false });
+    const tier = ed.payload.tier as { standardise_tier_variation: { variation_option_list: { variation_option_name: string; image_ref?: string }[] }[]; model: { original_price: number }[] };
+    expect(tier.standardise_tier_variation[0].variation_option_list.map((o) => o.image_ref)).toEqual(["r2:img/LY22-01.jpg", "r2:pick/white.jpg"]);   // ครบทุกสี = ใส่รูปตัวเลือก
+    expect(tier.model.map((m) => m.original_price)).toEqual([1590, 1490]);
+  });
+  test("ค่าเริ่มต้นของร้าน + ข้อมูลสินค้า: เติมช่องว่าง · ร่างมาก่อน · ร้านตั้งเองแทนของระบบ · ขนาด/รับประกันจากสินค้า", () => {
+    const fields = [
+      { id: "1", name: "ประเทศผู้ผลิต", required: false, multiple: false, customizable: true, numeric: false, options: [{ id: "11", name: "ไทย" }] },
+      { id: "2", name: "สภาพ", required: true, multiple: false, customizable: false, numeric: false, options: [{ id: "21", name: "ใหม่" }] },
+      { id: "3", name: "ขนาด (ยาว x กว้าง x สูง)", required: false, multiple: false, customizable: true, numeric: false, options: [] },
+      { id: "4", name: "ระยะเวลารับประกัน", required: false, multiple: false, customizable: true, numeric: false, options: [] },
+      { id: "5", name: "ขนาดกระเป๋า", required: false, multiple: false, customizable: false, numeric: false, options: [{ id: "51", name: "เล็ก" }] },
+    ];
+    const parent = { ...PARENT, warranty: "ไม่มีรับประกัน", size: { l: 20, w: 9, h: 16.5 } };
+    const { preview: pv } = plan({ parent, attrFields: fields, template: null });
+    expect(pv.attrs.values).toMatchObject({ "1": [{ id: "11" }], "2": [{ id: "21" }], "3": [{ name: "20 x 9 x 16.5 ซม." }], "4": [{ name: "ไม่มีรับประกัน" }] });
+    expect(pv.attrs.values["5"]).toBeUndefined();
+    expect(pv.attrs.sources).toEqual({ "1": "default", "2": "default", "3": "product", "4": "product" });
+    expect(pv.attrs.rulesCustom).toBe(false);
+    const custom = plan({ parent, attrFields: fields, template: null, attrRules: [{ field: "ประเทศผู้ผลิต", source: "fixed", value: "จีน" }] });
+    expect(custom.preview.attrs.values["1"]).toEqual([{ name: "จีน" }]);
+    expect(custom.preview.attrs.values["2"]).toBeUndefined();          // ร้านตั้งเอง = ใช้ชุดของร้านแทนของระบบ
+    expect(custom.preview.attrs.rulesCustom).toBe(true);
+    const withDraft = plan({ parent, attrFields: fields, template: null, draft: { title: null, description: null, category_path: null, image_keys: null, platform_product_id: null, extra: { shopee_attrs: { "1": [{ name: "ญี่ปุ่น" }] } } } });
+    expect(withDraft.preview.attrs.values["1"]).toEqual([{ name: "ญี่ปุ่น" }]);
+    expect(withDraft.preview.attrs.sources["1"]).toBe("draft");
+  });
+  test("รูปในรายละเอียด: ร้านได้สิทธิ์เมื่อสินค้าแบบเป็นแบบมีรูป (extended) · ไม่รู้ = null", () => {
+    expect(plan().preview.description.imagesAllowed).toBeNull();
+    expect(plan({ template: { ...TEMPLATE, descType: "extended" } }).preview.description.imagesAllowed).toBe(true);
+    expect(plan({ template: { ...TEMPLATE, descType: "normal" } }).preview.description.imagesAllowed).toBe(false);
   });
   test("SKU เดียว = ไม่มีชั้น · item_sku = รหัส SKU · ราคา = ของ SKU", () => {
     const { preview: pv, payload } = plan({ skus: [sku("BCG10", { fake_price: null, list_price: 1290 })] });

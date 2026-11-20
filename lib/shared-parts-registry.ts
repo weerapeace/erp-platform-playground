@@ -1632,7 +1632,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "listing-images", label: "รูปสินค้าบนร้าน (เรียง/ปก/ลบ/เพิ่มจากระบบ)", code: "ListingImageGrid", category: "feature",
     source: { path: "components/platform-catalog/listing-images" },
-    what: "ตารางรูปสินค้าของรายการบนร้าน — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\" · useSystemImages(id, { withSkuImages: true }) ได้รูปทั้งหมดของแต่ละ SKU ด้วย (skuImages)",
+    what: "ตารางรูปสินค้าของรายการบนร้าน (ช่องเล็ก ~88px เต็มแถวอัตโนมัติ · ชี้ = รูปใหญ่ HoverPreview) — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\" · useSystemImages(id, { withSkuImages: true }) ได้รูปทั้งหมดของแต่ละ SKU ด้วย (skuImages)",
     when: "ลิ้นชักสินค้าบนร้าน: แท็บรูป LINE + Lazada · ป๊อปเลือกรูปตัวเลือก (LINE รายละเอียดตัวเลือก · Lazada รูป·น้ำหนัก·กล่อง)",
     notWhen: "คลังรูปของสินค้าในระบบ (หน้า Parent SKU) ให้ใช้ ProductImageGallery · อัปโหลดไฟล์ใหม่ ให้ใช้ ImageAttach",
     doc: "platform-catalog.md",
@@ -1643,6 +1643,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ปุ่ม \"แนะนำจากชื่อ/รายละเอียด (ฟรี)\" (lib/attr-suggest) + \"ให้ AI ช่วยเติม\" (POST /api/ai/attr-fill · ด่านกลาง aiChat \"ai.attr_fill\" · lib/attr-ai-fill) → กล่องผล (AI ติดป้าย \"AI เดา · ตรวจก่อน\") → ใส่ทั้งหมด (applyAttrHits เติมเฉพาะช่องที่ว่าง)",
     when: "ช่องคุณลักษณะของหมวดตอนลง/แก้สินค้าบนร้าน (Shopee ใช้แล้ว · TikTok/Lazada ย้ายมาใช้ได้) — ช่องรูปแบบ TtsAttrField",
     notWhen: "เดาแท็กสินค้าในระบบ ให้ใช้ lib/tag-suggest-rules · ห้ามเติมแล้วส่งขึ้นร้านอัตโนมัติ (คนต้องกดใส่ + บันทึกเอง)",
+    doc: "shopee-connector.md",
+  },
+  {
+    key: "attr-defaults-dialog", label: "ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ป๊อปตั้งค่า)", code: "AttrDefaultsDialog", category: "feature",
+    source: { path: "components/platform-catalog/attr-defaults-dialog" },
+    what: "ป๊อปตั้งกติกา \"ชื่อช่อง → ใส่ค่าอะไร\" ต่อร้าน×แบรนด์ (ค่าตายตัว เช่น ประเทศ = ไทย · หรือดึงจากสินค้า: รับประกัน / ขนาด ยาว×กว้าง×สูง / น้ำหนัก) · เก็บ ui_config listingAttrDefaultsKey · กติกา pure lib/listing-attr-defaults (matchAttrRule · attrRuleValue · attrDefaultVals) · ยังไม่ตั้ง = DEFAULT_ATTR_RULES · บันทึกแล้วย้อนกลับได้",
+    when: "ช่องคุณลักษณะของหมวดตอนลงสินค้าใหม่บนร้าน (Shopee ใช้แล้ว · TikTok/Lazada ย้ายมาใช้ได้ — ตัวประกอบข้อมูลของร้านเรียก matchAttrRule/attrRuleValue/attrDefaultVals เติมช่องที่ว่าง)",
+    notWhen: "ค่าที่ต่างกันทุกสินค้า (ให้กรอกในร่าง / AI ช่วยเติม attr-suggest-box) · ห้ามเติมทับค่าที่บันทึกไว้ในร่าง",
     doc: "shopee-connector.md",
   },
   {

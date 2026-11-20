@@ -1,12 +1,14 @@
 /**
  * ตัวโหลดของ "ลงสินค้าใหม่บน Shopee" (ไม่ใช่ route · import ได้) — สินค้า + SKU + ร่าง Shopee + ข้อมูลสดจากร้าน → แผน
  * กฎประกอบ = lib/shopee-create-plan (pure + เทสต์) · ใช้ทั้ง GET (ดูก่อนส่ง) และ POST (ลงจริง · 5B) — ต้องเหมือนกันเสมอ (แบบ TikTok/Lazada)
+ * ค่าเริ่มต้นช่องคุณลักษณะของร้าน = ui_config listingAttrDefaultsKey("shopee", แบรนด์) (lib/listing-attr-defaults · แก้ในป๊อป "ค่าเริ่มต้นของร้าน")
  * ดึงสดจาก Shopee (แคช 10 นาที): หมวดที่แนะนำจากชื่อ · ช่วงตามหมวด (get_item_limit) · ช่องของหมวด (get_attribute_tree) · สินค้าแบบ (get_item_base_info)
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { attrRulesOf, listingAttrDefaultsKey } from "@/lib/listing-attr-defaults";
 import { shopeeCategoryRecommend, shopeeErrorText, shopeeGetAttributeTree, shopeeGetCategoryLimit, shopeeGetChannelList, shopeeGetItemBaseInfo } from "@/lib/shopee";
 import {
   planShopeeCreate, shopeeAttrFieldsOf, shopeeCategoryIdOf, shopeeChannelsOf, shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories,
@@ -86,15 +88,19 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
   if (!platformId) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม Shopee" };
   const [items, { data: skus }, { data: onShop }] = await Promise.all([
     loadListingContexts(admin, [parentId], platformId),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, color_platform_th, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
     // 🛡️ กันซ้ำ: มีรายการบน Shopee ที่จับคู่สินค้านี้อยู่แล้ว (ไม่นับตัวที่ร้านลบไปแล้ว)
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platformId).eq("matched_parent_sku_id", parentId).or(LIVE_LISTING_OR).limit(1),
   ]);
   const it = items[0];
   if (!it) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
-  const { data: pRow } = await admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle();
+  const { data: pRow } = await admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g, warranty, size_length_cm, size_thickness_cm, size_height_cm").eq("id", parentId).maybeSingle();
   const pr = (pRow ?? {}) as Row;
   const brandId = str(pr.brand_id) || null;
+  // ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ไม่เคยตั้ง = ค่าเริ่มต้นของระบบ) — ดึงคู่กับกุญแจร้าน
+  const rulesP = brandId
+    ? Promise.resolve(admin.from("ui_config").select("value").eq("key", listingAttrDefaultsKey("shopee", brandId)).maybeSingle()).then((r) => attrRulesOf((r.data as Row | null)?.value), () => null)
+    : Promise.resolve(null);
   const d = it.draft as Row | null;
   const draft = d ? {
     title: d.title == null ? null : String(d.title), description: d.description == null ? null : String(d.description),
@@ -164,20 +170,23 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
   }
 
   const exOnShop = ((onShop ?? []) as Row[])[0];
+  const attrRules = await rulesP;
+  const numOr = (v: unknown) => (v == null || v === "" ? null : Number(v) || null);
   const { preview, payload } = planShopeeCreate({
     parent: {
       id: parentId, code: str(p.code), name_th: str(p.name_th) || null, name_platform: str(p.name_platform) || null,
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height }, brand_name: p.brand_name,
+      warranty: pr.warranty == null ? null : String(pr.warranty), size: { l: numOr(pr.size_length_cm), w: numOr(pr.size_thickness_cm), h: numOr(pr.size_height_cm) },
     },
     skus: ((skus ?? []) as Row[]).map((s): ShopeeCreateSku => ({
-      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null,
+      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,
       list_price: s.list_price == null ? null : Number(s.list_price), fake_price: s.fake_price == null ? null : Number(s.fake_price),
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
     draft, category, candidates, galleryKeys: it.images.map((x) => x.key), attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template, channels,
-    onShop: exOnShop ? str(exOnShop.external_product_id) : null,
+    onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules,
   });
   if (preview.on_shop) blockers.push(`มีบน Shopee แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);
   const lastAttempt: ShopeeLastAttempt | null = d && (d.last_sync_status || d.platform_product_id)

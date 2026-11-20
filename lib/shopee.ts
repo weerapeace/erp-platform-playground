@@ -255,6 +255,8 @@ export type ShopeeSlim = {
   image: string | null; image_count: number; category_id: string | null; item_sku: string | null; brand: string | null;
   has_model: boolean; price: number | null; original_price: number | null; stock: number | null; weight: number | null;
   tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[];
+  /** ชนิดรายละเอียด: normal = ข้อความ · extended = มีรูปในรายละเอียด (ร้านต้องได้สิทธิ์จาก Shopee) */
+  desc_type?: string | null;
 };
 
 /** ราคา: price_info[0].current_price (ราคาที่ลูกค้าจ่าย) / original_price (ราคาตั้ง) */
@@ -311,7 +313,7 @@ export function shopeeItemToCatalogItem(base: Obj, models: { tiers: ShopeeSlimTi
     item_sku: itemSku, brand: str(obj(base.brand)?.original_brand_name),
     has_model: hasModel, price: hasModel ? null : pr.price, original_price: hasModel ? null : pr.original,
     stock: hasModel ? null : stockOf(base), weight: num(base.weight),
-    tiers: models?.tiers ?? [], models: ms,
+    tiers: models?.tiers ?? [], models: ms, desc_type: str(base.description_type),
   };
   const skus = [...new Set([itemSku, ...ms.map((m) => m.sku)].filter((s): s is string => !!s))];
   const listPrice = hasModel ? minPos(ms.map((m) => m.original_price ?? m.price)) : (pr.original ?? pr.price);

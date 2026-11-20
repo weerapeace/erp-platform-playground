@@ -8,7 +8,12 @@
  *   ชื่อ / รายละเอียด / หมวด → ร่าง · รูป → extra.shopee_images · น้ำหนัก (แทนของสินค้า) → extra.shopee_weight · ช่องของหมวด → extra.shopee_attrs
  *   ขนส่ง (ติ๊กเปิด/ปิด · เจ้าของขอ 2026-11-15) → extra.shopee_logistics · ช่องของหมวด: บอกที่มา + แนะนำจากข้อความ (ฟรี) / AI ช่วยเติม (ของกลาง ../platform-catalog/attr-suggest-box)
  * ลงแบบ "ปิดขาย" + สต๊อก 0 เสมอ (BigSeller ยังคุมสต๊อก) · 5B: ลงจริงจากขั้นสุดท้ายของตัวช่วย (POST /api/shopee/create-product)
- * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · PlatformCategoryPicker (หมวด) · LazadaAttrField + ttsAttrDef (ช่องของหมวด) · state-views · Icon
+ * รอบ LY22 (เจ้าของเลือก 2026-11-20): ตารางตัวเลือกแก้ได้ในร่าง — ราคา (extra.shopee_prices) · ชื่อสีจาก Color Platform [TH] (extra.shopee_option_names)
+ *   · รูปประจำสี (extra.shopee_option_images) · สต๊อกล็อก 0 · ปุ่มกลับไปใช้ค่าจากระบบ — ไม่เขียนกลับข้อมูลสินค้าในระบบ
+ *   ช่องของหมวด: ค่าเริ่มต้นของร้าน (ป๊อป AttrDefaultsDialog · ui_config) + ขนาด/รับประกันจากสินค้า · รายละเอียดเต็ม กดย่อ/ขยาย
+ *   บันทึกลงร่างทุกครั้ง กด "ย้อนกลับ" ในแจ้งผลได้ (คืนร่างก่อนหน้า)
+ * ของกลางที่ใช้: ListingImageGrid/ListingImagePicker (รูป) · PlatformCategoryPicker (หมวด) · LazadaAttrField + ttsAttrDef (ช่องของหมวด)
+ *   · AttrDefaultsDialog (ค่าเริ่มต้นของร้าน) · MoneyInput (ราคา) · SearchableSelect (ชื่อสี) · state-views · Icon
  * ห้ามใช้: แก้สินค้าที่มีบน Shopee แล้ว (ใช้ลิ้นชักสินค้าบนร้าน)
  */
 import { useCallback, useEffect, useState } from "react";
@@ -21,14 +26,21 @@ import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } 
 import { LazadaAttrField } from "@/components/platform-catalog/lazada-listing-panels";
 import { useWeightUnit } from "@/components/platform-catalog/weight-unit";
 import { kgToUnit, sameAttrState, ttsAttrDef, ttsAttrFromText, ttsAttrToText, unitToKg, type TtsAttrState, type WeightUnit } from "@/lib/tiktok-attrs";
-import type { ShopeeCreatePreview } from "@/lib/shopee-create-plan";
+import type { ShopeeCreatePreview, ShopeeCreateVariantRow } from "@/lib/shopee-create-plan";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { AttrSuggestButtons, AttrSuggestPanel, applyAttrHits, useAttrSuggest, type AttrSuggestSource } from "@/components/platform-catalog/attr-suggest-box";
+import { AttrDefaultsDialog } from "@/components/platform-catalog/attr-defaults-dialog";
+import { MoneyInput } from "@/components/money-input";
+import { SearchableSelect } from "@/components/searchable-select";
 
 type LastAttempt = { status: string | null; at: string | null; error: string | null; product_id: string | null };
 type Resp = { preview: ShopeeCreatePreview | null; blockers?: string[]; live?: boolean; platform_id?: string; brand_id?: string | null; last_attempt?: LastAttempt | null; error: string | null };
 type EditKey = "name" | "desc" | "weight" | null;
 const baht = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH"));
+/** แก้ตารางตัวเลือก (ยังไม่บันทึก) ต่อ SKU: ราคา (null = กลับไปราคาจากระบบ) · ชื่อสี ("" = กลับไปชื่อจากระบบ) · รูปสี ("" = กลับไปรูปอัตโนมัติ) */
+type VarEdit = { price: Record<string, number | null>; name: Record<string, string>; img: Record<string, string> };
+const NO_VAR_EDIT: VarEdit = { price: {}, name: {}, img: {} };
+const recOf = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {});
 const thDateTime = (iso: string | null) => { if (!iso) return ""; const d = new Date(iso); return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); };
 
 export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
@@ -49,6 +61,10 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const [moreAttrs, setMoreAttrs] = useState(false);
   const [attrSrc, setAttrSrc] = useState<Record<string, AttrSuggestSource>>({});   // ช่องที่เพิ่งเติมจากตัวแนะนำ (ยังไม่บันทึก)
   const [logs, setLogs] = useState<number[] | null>(null);                          // ขนส่งที่ติ๊กไว้ (ยังไม่บันทึก)
+  const [vEdit, setVEdit] = useState<VarEdit>(NO_VAR_EDIT);                          // ตารางตัวเลือกที่แก้ (ยังไม่บันทึก)
+  const [optPick, setOptPick] = useState<string | null>(null);                       // เลือกรูปสีให้แถวนี้ (sku_id)
+  const [defaultsOpen, setDefaultsOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
   const [unit, setUnit] = useWeightUnit();
   const sys = useSystemImages(parentId);
   const pvx = data?.preview ?? null;
@@ -63,25 +79,28 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
     try {
       const j = await apiFetch(`/api/shopee/create-product?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json()) as Resp;
       if (j.error || !j.preview) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setData(j); setImgs(null); setAttrs(null); setAttrSrc({}); setLogs(null); onLoaded?.(j.preview, j.blockers ?? []);
+      setData(j); setImgs(null); setAttrs(null); setAttrSrc({}); setLogs(null); setVEdit(NO_VAR_EDIT); onLoaded?.(j.preview, j.blockers ?? []);
     } catch (e) { setErr((e as Error).message || "โหลดไม่สำเร็จ"); }
   }, [parentId, onLoaded]);
   useEffect(() => { setData(null); void load(); }, [load]);
 
   const pv = data?.preview ?? null;
-  const patch = async (body: Record<string, unknown>, okMsg: string) => {
+  /** undo = ก้อนที่ส่งซ้ำเพื่อคืนค่าก่อนหน้า (ปุ่ม "ย้อนกลับ" ในแจ้งผล 5 วินาที) */
+  const patch = async (body: Record<string, unknown>, okMsg: string, undo?: Record<string, unknown>) => {
     if (!pv || !data?.platform_id) return;
     setSaving(true);
     try {
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentId, platform_id: data.platform_id, ...body }) });
       const j = await r.json();
       if (j.error) throw new Error(j.error);
-      toast.success(okMsg); setEdit(null); await load();
+      if (undo) toast.undo(okMsg, () => void patch(undo, "ย้อนกลับแล้ว")); else toast.success(okMsg);
+      setEdit(null); await load();
     } catch (e) { toast.error((e as Error).message || "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
-  const patchExtra = (partial: Record<string, unknown>, okMsg: string) => patch({ extra: { ...(pv?.draft_extra ?? {}), ...partial } }, okMsg);
-  const dropExtra = (key: string, okMsg: string) => { const ex = { ...(pv?.draft_extra ?? {}) }; delete ex[key]; return patch({ extra: ex }, okMsg); };
+  const prevExtra = () => ({ extra: { ...(pv?.draft_extra ?? {}) } });
+  const patchExtra = (partial: Record<string, unknown>, okMsg: string) => patch({ extra: { ...(pv?.draft_extra ?? {}), ...partial } }, okMsg, prevExtra());
+  const dropExtra = (key: string | string[], okMsg: string) => { const ex = { ...(pv?.draft_extra ?? {}) }; for (const k of [key].flat()) delete ex[k]; return patch({ extra: ex }, okMsg, prevExtra()); };
 
   if (err) return <ErrorState title="โหลดข้อมูลที่จะส่ง Shopee ไม่สำเร็จ" hint={err} onRetry={() => void load()} className="py-6" />;
   if (!pv || !data) return <LoadingState label="กำลังเตรียมข้อมูลที่จะส่ง Shopee (ดึงหมวด/ช่องบังคับจากร้าน)…" className="py-6" />;
@@ -119,8 +138,10 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
   const fields = pv.attrs.fields;
   const vals = attrs ?? pv.attrs.values;
   const attrDirty = !!attrs && !sameAttrState(attrs, pv.attrs.values);
-  const mainFields = fields.filter((f) => f.required);
-  const restFields = fields.filter((f) => !f.required);
+  // โชว์ก่อน: ช่องบังคับ + ช่องที่มีค่าแล้ว (ร่าง/ค่าเริ่มต้นของร้าน/จากสินค้า) · ที่เหลือซ่อนไว้
+  const shownFirst = (f: (typeof fields)[number]) => f.required || (pv.attrs.values[f.id] ?? []).length > 0;
+  const mainFields = fields.filter(shownFirst);
+  const restFields = fields.filter((f) => !shownFirst(f));
 
   return (
     <div className="space-y-3">
@@ -182,8 +203,22 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           <span className="text-xs text-slate-500">แบรนด์</span>
           <div><div className={`text-sm ${pv.brand.id ? "text-slate-800" : "text-amber-700"}`}>{pv.brand.id ? pv.brand.name : "ไม่มีแบรนด์"}</div><div className="mt-0.5 text-[11px] text-slate-400">มาจาก: {pv.brand.src}</div></div>
         </div>
-        {fieldRow("desc", "รายละเอียด", pv.description.value ? <div className="line-clamp-6 whitespace-pre-line text-slate-700">{pv.description.value}</div> : <span className="text-rose-600">ยังไม่มี (Shopee ต้องมี)</span>, pv.description.src, pv.description.value,
-          { multiline: true, bad: !pv.description.value, save: (v) => void patch({ description: v.trim() || null }, "บันทึกรายละเอียดแล้ว") })}
+        {fieldRow("desc", "รายละเอียด", pv.description.value ? (
+          <div>
+            <div className={`whitespace-pre-line text-slate-700 ${descOpen ? "" : "line-clamp-6"}`}>{pv.description.value}</div>
+            {(pv.description.value.length > 300 || pv.description.value.split("\n").length > 6) && (
+              <button type="button" onClick={() => setDescOpen((x) => !x)} className="mt-1 inline-flex items-center gap-0.5 text-xs text-violet-700 hover:underline">
+                <Icon name={descOpen ? "chevron-up" : "chevron-down"} />{descOpen ? "ย่อ" : `ดูทั้งหมด (${pv.description.value.length.toLocaleString()} ตัวอักษร)`}
+              </button>
+            )}
+            <div className="mt-1 text-[11px] text-slate-500">
+              <Icon name="image" /> รูปในรายละเอียด: {pv.description.imagesAllowed === true ? "ร้านนี้ได้สิทธิ์ใส่รูปจาก Shopee แล้ว — ตอนนี้ยังส่งเป็นข้อความอย่างเดียว"
+                : pv.description.imagesAllowed === false ? "สินค้าบนร้านเป็นรายละเอียดแบบข้อความ — ยังไม่พบว่าร้านได้สิทธิ์ใส่รูปในรายละเอียด (Shopee เปิดให้บางร้าน) · ส่งเป็นข้อความ"
+                : "ส่งเป็นข้อความอย่างเดียว"}
+            </div>
+          </div>
+        ) : <span className="text-rose-600">ยังไม่มี (Shopee ต้องมี)</span>, pv.description.src, pv.description.value,
+          { multiline: true, bad: !pv.description.value, save: (v) => void patch({ description: v.trim() || null }, "บันทึกรายละเอียดแล้ว", { description: pv.description.value || null }) })}
       </div>
 
       {/* พัสดุ + ขนส่ง */}
@@ -245,31 +280,29 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
         })()}
       </div>
 
-      {/* ตัวเลือก + ราคา */}
-      <div className="rounded-xl border border-slate-200 p-3 text-sm">
-        <div className="mb-2 text-xs font-medium text-slate-600">
-          ตัวเลือก & ราคาตั้ง ({pv.variants.length.toLocaleString()} SKU{pv.dims.length ? ` · ชั้น: ${pv.dims.map((d) => `${d.name} (${d.values.length})`).join(" · ")}` : " · ตัวเลือกเดียว"} · สต๊อก {pv.stock} ทุกตัว)
-        </div>
-        <div className="max-h-64 divide-y divide-slate-100 overflow-auto rounded-lg border border-slate-100">
-          {pv.variants.map((v) => (
-            <div key={v.sku_id} className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 text-xs">
-              {v.image_ref ? <img src={listingImgSrc(v.image_ref, 96)} alt="" className="h-8 w-8 rounded object-cover" /> : <span className="h-8 w-8 rounded bg-slate-50" />}
-              <div className="min-w-0"><div className="truncate font-mono">{v.code}</div><div className="truncate text-slate-500">{Object.values(v.attrs).join(" · ") || "—"}</div></div>
-              <div className="text-right leading-tight">
-                <span className={v.price ? "font-medium" : "text-rose-600"}>{v.price ? `${baht(v.price)}฿` : "ไม่มีราคา"}</span>
-                {v.fake && v.sale && v.sale < v.fake && <span className="block text-[11px] text-slate-400">ขายในระบบ {baht(v.sale)}฿</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-1 text-[11px] text-slate-400">ราคาตั้ง = ราคาเต็มในระบบ (ไม่มี = ราคาขาย) · แก้ราคาที่หน้าสินค้า · ส่วนลดทำด้วยโปรโมชันของร้าน</div>
-      </div>
+      {/* ตัวเลือก + ราคา (แก้ในร่าง Shopee ได้ · ไม่แก้ระบบ) */}
+      <VariantTable pv={pv} canEdit={canEdit} saving={saving} edit={vEdit} setEdit={setVEdit} onPickImage={(skuId) => { setOptPick(skuId); sys.load(); }}
+        onSave={(extra) => void patchExtra(extra, "บันทึกตัวเลือกลงร่าง Shopee แล้ว")}
+        onRevertAll={() => void dropExtra(["shopee_prices", "shopee_option_names", "shopee_option_images"], "กลับไปใช้ราคา/ชื่อสี/รูปจากระบบแล้ว")} />
+      <ListingImagePicker open={!!optPick} onClose={() => setOptPick(null)} mode="variant" title="เลือกรูปประจำสี"
+        description="รูปนี้จะขึ้นตอนลูกค้ากดเลือกสีบน Shopee (ใช้กับทุกแถวที่เป็นสีเดียวกัน)" shopImages={curImgs} shopLabel="รูปที่จะส่ง (รูปสินค้า)"
+        matchedParent={parentId} matchedCode={pv.parent_code} sysImages={sys.images} storageKey="shopee-create-option-image-picker"
+        onPick={(ref) => {
+          const row = pv.variants.find((v) => v.sku_id === optPick); setOptPick(null); if (!row) return;
+          const nameOf = (v: ShopeeCreateVariantRow) => varName(pv, vEdit, v);
+          const same = pv.variants.filter((v) => nameOf(v) === nameOf(row));
+          setVEdit((e) => ({ ...e, img: { ...e.img, ...Object.fromEntries(same.map((v) => [v.sku_id, ref])) } }));
+        }} />
 
       {/* ช่องของหมวด (กรอกในร่าง → ส่งพร้อมตอนลง) — ช่องกรอกกลาง LazadaAttrField */}
       <div className="rounded-xl border border-slate-200 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-medium text-slate-600">ช่องของหมวด {pv.attrs.required.length ? <span className="text-rose-600">· ช่องบังคับยังว่าง {pv.attrs.required.length}</span> : null}</span>
-          {canEdit && fields.length > 0 && <AttrSuggestButtons s={sug} />}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {canEdit && fields.length > 0 && <AttrSuggestButtons s={sug} />}
+            <button type="button" onClick={() => setDefaultsOpen(true)} title="ค่าที่ใส่ให้อัตโนมัติทุกสินค้า (เช่น ประเทศ = ไทย · สภาพ = ใหม่)"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50"><Icon name="sliders" />ค่าเริ่มต้นของร้าน</button>
+          </div>
           {canEdit && attrDirty && (
             <div className="flex gap-1.5">
               <button type="button" disabled={saving} onClick={() => void patchExtra({ shopee_attrs: attrs }, "บันทึกช่องของหมวดแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง Shopee</button>
@@ -277,6 +310,8 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
             </div>
           )}
         </div>
+        <AttrDefaultsDialog open={defaultsOpen} onClose={() => setDefaultsOpen(false)} platform="shopee" platformName="Shopee" brandId={data.brand_id ?? null}
+          rules={pv.attrs.rules} custom={pv.attrs.rulesCustom} fieldNames={fields.map((f) => f.name)} canEdit={canEdit} onSaved={() => void load()} />
         <div className="mb-2"><AttrSuggestPanel s={sug} onApply={(hits, src) => {
           const { next, filledIds } = applyAttrHits(attrs ?? pv.attrs.values, hits);
           setAttrs(next); setAttrSrc((m) => ({ ...m, ...Object.fromEntries(filledIds.map((id) => [id, src])) }));
@@ -294,7 +329,9 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
                   const pend = has ? attrSrc[f.id] : undefined;
                   const saved = has && !pend && sameAttrState({ x: vals[f.id] ?? [] }, { x: pv.attrs.values[f.id] ?? [] }) ? pv.attrs.sources[f.id] : undefined;
                   const label = pend === "ai" ? "AI เดา · ตรวจก่อน (ยังไม่บันทึก)" : pend === "text" ? "แนะนำจากชื่อ/รายละเอียด (ยังไม่บันทึก)"
-                    : saved === "template" ? `จากสินค้าบนร้านหมวดเดียวกัน #${pv.attrs.fromTemplate ?? ""} — ตรวจก่อน` : saved === "draft" ? "บันทึกไว้ในร่าง" : has ? "แก้ตอนนี้ (ยังไม่บันทึก)" : null;
+                    : saved === "template" ? `จากสินค้าบนร้านหมวดเดียวกัน #${pv.attrs.fromTemplate ?? ""} — ตรวจก่อน` : saved === "draft" ? "บันทึกไว้ในร่าง"
+                    : saved === "default" ? `ค่าเริ่มต้นของร้าน${pv.attrs.rulesCustom ? "" : " (ของระบบ)"}` : saved === "product" ? "ข้อมูลสินค้า (ขนาด / รับประกัน / น้ำหนัก)"
+                    : has ? "แก้ตอนนี้ (ยังไม่บันทึก)" : null;
                   return (
                     <div key={f.id}>
                       <LazadaAttrField def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(pv.attrs.values[f.id])} can={canEdit}
@@ -306,9 +343,157 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
                 })}
               </div>
               {mainFields.length === 0 && !moreAttrs && <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องบังคับ</p>}
+              {Object.values(pv.attrs.sources).some((s) => s === "default" || s === "product") && <p className="mt-2 text-[11px] text-slate-400">ช่องที่ขึ้น “ค่าเริ่มต้นของร้าน / ข้อมูลสินค้า” ส่งพร้อมตอนลงเลย (แก้ทับได้ · แก้ค่าเริ่มต้นที่ปุ่มด้านบน)</p>}
               {restFields.length > 0 && <button type="button" onClick={() => setMoreAttrs((x) => !x)} className="mt-2 text-xs text-violet-700 hover:underline">{moreAttrs ? "ซ่อนช่องไม่บังคับ" : `แสดงช่องไม่บังคับ (${restFields.length} ช่อง)`}</button>}
             </>
           )}
+      </div>
+    </div>
+  );
+}
+
+/** ชื่อสีของแถว (ที่แก้ค้างอยู่ → ที่บันทึก/จากระบบ) */
+function varName(pv: ShopeeCreatePreview, e: VarEdit, v: ShopeeCreateVariantRow): string {
+  const colorDim = pv.dims[0]?.key === "color" ? pv.dims[0] : null;
+  if (!colorDim) return "";
+  return v.sku_id in e.name ? (e.name[v.sku_id] || v.color_base || "") : (v.attrs[colorDim.name] ?? "");
+}
+
+/**
+ * ตารางตัวเลือก & ราคา (หน้าลง Shopee) — PC = ตาราง · มือถือ = การ์ดซ้อน
+ * แก้ราคา/ชื่อสี/รูปสี ค้างไว้ในเครื่อง → กด "บันทึกลงร่าง Shopee" ครั้งเดียว · สต๊อกล็อก 0 (BigSeller ยังคุม)
+ */
+function VariantTable({ pv, canEdit, saving, edit, setEdit, onPickImage, onSave, onRevertAll }: {
+  pv: ShopeeCreatePreview; canEdit: boolean; saving: boolean; edit: VarEdit; setEdit: (f: (e: VarEdit) => VarEdit) => void;
+  onPickImage: (skuId: string) => void; onSave: (extra: Record<string, unknown>) => void; onRevertAll: () => void;
+}) {
+  const colorDim = pv.dims[0]?.key === "color" ? pv.dims[0] : null;
+  const otherDims = pv.dims.filter((d) => d !== colorDim);
+  const dirty = Object.keys(edit.price).length + Object.keys(edit.name).length + Object.keys(edit.img).length > 0;
+  const anyCustom = pv.variants.some((v) => v.price_custom || v.color_custom || v.image_custom);
+  const priceOf = (v: ShopeeCreateVariantRow) => (v.sku_id in edit.price ? (edit.price[v.sku_id] ?? v.price_base) : v.price);
+  const imgOf = (v: ShopeeCreateVariantRow) => (v.sku_id in edit.img ? (edit.img[v.sku_id] || v.image_base) : v.image_ref);
+  const nameOf = (v: ShopeeCreateVariantRow) => varName(pv, edit, v);
+  const priceCustom = (v: ShopeeCreateVariantRow) => (v.sku_id in edit.price ? edit.price[v.sku_id] != null : v.price_custom);
+  const nameCustom = (v: ShopeeCreateVariantRow) => (v.sku_id in edit.name ? !!edit.name[v.sku_id] && edit.name[v.sku_id] !== v.color_base : v.color_custom);
+  const imgCustom = (v: ShopeeCreateVariantRow) => (v.sku_id in edit.img ? !!edit.img[v.sku_id] : v.image_custom);
+  const colorOpts = [...new Set([...pv.colorChoices, ...pv.variants.map(nameOf)].filter(Boolean))].map((c) => ({ value: c, label: c }));
+  const setPrice = (v: ShopeeCreateVariantRow, raw: string) => { const n = Number(raw); setEdit((e) => ({ ...e, price: { ...e.price, [v.sku_id]: raw.trim() && n > 0 ? n : null } })); };
+  const setName = (v: ShopeeCreateVariantRow, name: string) => setEdit((e) => ({ ...e, name: { ...e.name, [v.sku_id]: name === v.color_base ? "" : name } }));
+  const resetImg = (v: ShopeeCreateVariantRow) => { const nm = nameOf(v); const same = pv.variants.filter((x) => nameOf(x) === nm); setEdit((e) => ({ ...e, img: { ...e.img, ...Object.fromEntries(same.map((x) => [x.sku_id, ""])) } })); };
+
+  const save = () => {
+    const prices = recOf(pv.draft_extra.shopee_prices) as Record<string, unknown>;
+    const names = recOf(pv.draft_extra.shopee_option_names) as Record<string, unknown>;
+    const nextPrices: Record<string, number> = {}; const nextNames: Record<string, string> = {}; const nextImgs: Record<string, string> = {};
+    for (const v of pv.variants) {
+      const p = v.sku_id in edit.price ? edit.price[v.sku_id] : (v.price_custom ? Number(prices[v.sku_id]) : null);
+      if (p != null && p > 0) nextPrices[v.sku_id] = p;
+      const n = v.sku_id in edit.name ? edit.name[v.sku_id] : (v.color_custom ? String(names[v.sku_id] ?? "") : "");
+      if (n && n !== v.color_base) nextNames[v.sku_id] = n;
+      const im = v.sku_id in edit.img ? edit.img[v.sku_id] : (v.image_custom ? v.image_ref ?? "" : "");
+      const nm = nameOf(v);
+      if (im && nm) nextImgs[nm] = im;
+    }
+    onSave({ shopee_prices: nextPrices, shopee_option_names: nextNames, shopee_option_images: nextImgs });
+  };
+  const badPrice = pv.variants.some((v) => { const p = priceOf(v); return p != null && !Number.isInteger(p); });
+
+  const priceCell = (v: ShopeeCreateVariantRow) => (
+    <div className="leading-tight">
+      {canEdit ? (
+        <div className="flex items-center gap-1">
+          <MoneyInput value={priceOf(v) == null ? "" : String(priceOf(v))} onChange={(raw) => setPrice(v, raw)} placeholder="ราคา" formula={false}
+            className={`h-8 w-24 rounded-md border px-2 text-right text-sm ${priceCustom(v) ? "border-violet-400 bg-violet-50" : !priceOf(v) ? "border-rose-300" : "border-slate-200"}`} />
+          <span className="text-xs text-slate-500">฿</span>
+          {priceCustom(v) && <button type="button" onClick={() => setEdit((e) => ({ ...e, price: { ...e.price, [v.sku_id]: null } }))} title={`กลับไปใช้ราคาจากระบบ (${baht(v.price_base)}฿)`} aria-label="กลับไปใช้ราคาจากระบบ" className="rounded p-0.5 text-slate-500 hover:bg-slate-100"><Icon name="back" /></button>}
+        </div>
+      ) : <span className={v.price ? "font-medium" : "text-rose-600"}>{v.price ? `${baht(v.price)}฿` : "ไม่มีราคา"}</span>}
+      {priceCustom(v) ? <span className="block text-[11px] text-violet-700">ระบบ {baht(v.price_base)}฿</span>
+        : v.fake && v.sale && v.sale < v.fake ? <span className="block text-[11px] text-slate-400">ขายในระบบ {baht(v.sale)}฿</span> : null}
+    </div>
+  );
+  const colorCell = (v: ShopeeCreateVariantRow) => !colorDim ? null : canEdit ? (
+    <div className="flex min-w-0 items-center gap-1">
+      <div className={`min-w-0 flex-1 rounded-md ${nameCustom(v) ? "ring-2 ring-violet-300" : ""}`}>
+        <SearchableSelect value={nameOf(v)} options={colorOpts} onChange={(c) => setName(v, c)} onCreate={(q) => setName(v, q)} createLabel="ใช้ชื่อนี้" placeholder="ชื่อสี" />
+      </div>
+      {nameCustom(v) && <button type="button" onClick={() => setName(v, v.color_base ?? "")} title={`กลับไปใช้ชื่อจากระบบ (${v.color_base ?? "-"})`} aria-label="กลับไปใช้ชื่อสีจากระบบ" className="rounded p-0.5 text-slate-500 hover:bg-slate-100"><Icon name="back" /></button>}
+    </div>
+  ) : <span className="truncate">{nameOf(v)}</span>;
+  const imgCell = (v: ShopeeCreateVariantRow) => {
+    const ref = imgOf(v);
+    const pic = ref ? <img src={listingImgSrc(ref, 120)} alt="" className="h-10 w-10 rounded object-cover" /> : <span className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-rose-300 text-[10px] text-rose-500">ไม่มีรูป</span>;
+    return (
+      <div className="relative shrink-0">
+        {canEdit && colorDim ? (
+          <button type="button" onClick={() => onPickImage(v.sku_id)} title="เลือกรูปประจำสี" className={`block rounded ${imgCustom(v) ? "ring-2 ring-violet-400" : "hover:ring-2 hover:ring-violet-200"}`}>{pic}</button>
+        ) : pic}
+        {canEdit && imgCustom(v) && <button type="button" onClick={() => resetImg(v)} title="กลับไปใช้รูปอัตโนมัติ (ปก SKU)" aria-label="กลับไปใช้รูปอัตโนมัติ" className="absolute -right-1.5 -top-1.5 rounded-full bg-white p-0.5 text-[10px] text-slate-500 shadow hover:text-slate-800"><Icon name="cancel" /></button>}
+      </div>
+    );
+  };
+  const stockCell = <span className="inline-flex items-center gap-1 text-slate-400" title="ล็อกไว้ที่ 0 — BigSeller ยังคุมสต๊อกอยู่ · ใส่สต๊อกหลังเลิกใช้ BigSeller"><Icon name="lock" />{pv.stock}</span>;
+
+  return (
+    <div className="rounded-xl border border-slate-200 p-3 text-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-600">
+          ตัวเลือก & ราคาตั้ง ({pv.variants.length.toLocaleString()} SKU{pv.dims.length ? ` · ชั้น: ${pv.dims.map((d) => `${d.name} (${d.values.length})`).join(" · ")}` : " · ตัวเลือกเดียว"})
+        </span>
+        {canEdit && (dirty ? (
+          <div className="flex gap-1.5">
+            <button type="button" disabled={saving || badPrice} onClick={save} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกลงร่าง Shopee</button>
+            <button type="button" onClick={() => setEdit(() => NO_VAR_EDIT)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+          </div>
+        ) : anyCustom ? <button type="button" disabled={saving} onClick={onRevertAll} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">กลับไปใช้ค่าจากระบบทั้งหมด</button> : null)}
+      </div>
+      {/* PC: ตาราง */}
+      <div className="hidden max-h-80 overflow-auto rounded-lg border border-slate-100 sm:block">
+        <table className="w-full text-xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] text-slate-500">
+            <tr>
+              <th className="px-2 py-1.5 text-left font-normal">รูปสี</th>
+              <th className="px-2 py-1.5 text-left font-normal">SKU</th>
+              {colorDim && <th className="px-2 py-1.5 text-left font-normal">ชื่อสีบน Shopee</th>}
+              {otherDims.map((d) => <th key={d.name} className="px-2 py-1.5 text-left font-normal">{d.name}</th>)}
+              <th className="px-2 py-1.5 text-left font-normal">ราคาตั้ง</th>
+              <th className="px-2 py-1.5 text-right font-normal">สต๊อก</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {pv.variants.map((v) => (
+              <tr key={v.sku_id} className="align-middle">
+                <td className="px-2 py-1.5">{imgCell(v)}</td>
+                <td className="px-2 py-1.5 font-mono">{v.code}</td>
+                {colorDim && <td className="w-48 px-2 py-1.5">{colorCell(v)}</td>}
+                {otherDims.map((d) => <td key={d.name} className="px-2 py-1.5 text-slate-600">{v.attrs[d.name] || "—"}</td>)}
+                <td className="px-2 py-1.5">{priceCell(v)}</td>
+                <td className="px-2 py-1.5 text-right">{stockCell}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* มือถือ: การ์ดซ้อน */}
+      <div className="max-h-[28rem] space-y-1.5 overflow-auto sm:hidden">
+        {pv.variants.map((v) => (
+          <div key={v.sku_id} className="rounded-lg border border-slate-100 p-2 text-xs">
+            <div className="flex items-start gap-2">
+              {imgCell(v)}
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-center justify-between gap-2"><span className="truncate font-mono">{v.code}</span>{stockCell}</div>
+                {colorCell(v)}
+                {otherDims.length > 0 && <div className="truncate text-slate-500">{otherDims.map((d) => v.attrs[d.name]).filter(Boolean).join(" · ")}</div>}
+              </div>
+            </div>
+            <div className="mt-1.5 flex justify-end">{priceCell(v)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 text-[11px] text-slate-400">
+        ราคาตั้ง = ราคาเต็มในระบบ (ไม่มี = ราคาขาย) · แก้ที่นี่ = ใช้กับ Shopee เท่านั้น (ไม่แก้ระบบ) · ชื่อสีเริ่มจาก Color Platform [TH] · ส่วนลดทำด้วยโปรโมชันของร้าน · สต๊อกล็อก 0 จนกว่าจะเลิกใช้ BigSeller
+        {badPrice && <span className="text-rose-600"> · Shopee ไทยรับเฉพาะราคาเต็มบาท</span>}
       </div>
     </div>
   );

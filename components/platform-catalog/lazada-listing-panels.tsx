@@ -766,7 +766,8 @@ const MULTI = new Set(["multiSelect", "multiEnumInput"]);
 
 /**
  * ช่องกรอก 1 ช่อง ตามชนิดของ Lazada (เลือก 1 / เลือกหลาย / พิมพ์+รายการ / ข้อความ / ตัวเลข / วันที่) — ใช้ร่วม ลิ้นชัก Lazada/TikTok + หน้าลงฉบับร่าง
- * เลือกหลายค่า = dropdown ติ๊กได้หลายตัว (SearchableMultiSelect · 2026-11-13 เจ้าของขอ "ให้กดจะได้ไม่รก") · เลือก 1 ที่รายการยาว = dropdown พิมพ์ค้นได้
+ * เลือกหลายค่า = dropdown ติ๊กได้หลายตัว (SearchableMultiSelect · 2026-11-13 เจ้าของขอ "ให้กดจะได้ไม่รก")
+ * เลือก 1 ค่า = dropdown พิมพ์ค้นได้ทุกช่อง (SearchableSelect · 2026-11-20 เจ้าของขอ "ทำให้ค้นได้ทุก dropdown") · ช่องที่พิมพ์เองได้ = ค้น หรือกด "ใช้ค่าที่พิมพ์"
  * suggested = ค่าที่ระบบแนะนำ (ป้าย "แนะนำ") — ยังไม่ส่งจนกดบันทึก
  */
 export function LazadaAttrField({ def, value, base, can, onChange, suggested }: { def: LazadaAttrDef; value: string; base: string; can: boolean; onChange: (v: string) => void; suggested?: string[] }) {
@@ -776,20 +777,19 @@ export function LazadaAttrField({ def, value, base, can, onChange, suggested }: 
   const norm = lazNormAttr(def, value);
   let control: ReactNode;
   if (!can) control = <div className="min-h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{lazAttrDisplay(def, value) || <span className="text-slate-400">(ว่าง)</span>}</div>;
-  else if (def.input_type === "singleSelect" && def.choices.length > 12) {
+  else if ((def.input_type === "singleSelect" || def.input_type === "enumInput") && def.choices.length) {
     const known = !norm || def.choices.some((c) => c.en === norm);
+    const free = def.input_type === "enumInput";
     control = (
-      <SearchableSelect value={norm} onChange={(v) => onChange(v)}
-        options={[...(!known ? [{ value: norm, label: `(ค่าเดิม: ${value})` }] : []), ...def.choices.map((c) => ({ value: c.en, label: c.name || c.en, searchText: c.en }))]} />
-    );
-  } else if (def.input_type === "singleSelect" && def.choices.length) {
-    const known = !norm || def.choices.some((c) => c.en === norm);
-    control = (
-      <select value={norm} onChange={(e) => onChange(e.target.value)} className={`h-9 w-full rounded-lg border px-2 text-sm ${ring}`}>
-        <option value="">— เลือก —</option>
-        {!known && <option value={norm}>{`(ค่าเดิม: ${value})`}</option>}
-        {def.choices.map((c) => <option key={c.en} value={c.en}>{c.name || c.en}</option>)}
-      </select>
+      <div className={`rounded-md ${changed ? "ring-2 ring-violet-300" : def.required && empty ? "ring-2 ring-rose-200" : ""}`}>
+        <SearchableSelect value={norm} onChange={(v) => onChange(v)} placeholder={free ? "เลือก หรือพิมพ์เอง" : "— เลือก —"}
+          onCreate={free ? (q) => onChange(q.trim()) : undefined} createLabel="ใช้ค่าที่พิมพ์"
+          options={[
+            ...(norm ? [{ value: "", label: "— ไม่เลือก (ล้างค่า) —" }] : []),
+            ...(!known ? [{ value: norm, label: free ? norm : `(ค่าเดิม: ${value})` }] : []),
+            ...def.choices.map((c) => ({ value: c.en, label: c.name || c.en, searchText: c.en })),
+          ]} />
+      </div>
     );
   } else if (MULTI.has(def.input_type) && def.choices.length) {
     // เลือกหลายค่า = dropdown ติ๊ก (ไม่กางชิปเต็มจอ) · multiEnumInput = พิมพ์ค่าเองได้ (ห้ามมีจุลภาค เพราะใช้คั่นค่า)

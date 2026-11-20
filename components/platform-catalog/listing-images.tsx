@@ -9,7 +9,8 @@
  * รูปในฟอร์ม: ลิงก์ของร้าน หรือ "r2:<key>" = รูปจากคลังรูปในระบบ (systemImageRef) → API ของแต่ละร้านแปลง/ฝากรูปก่อนส่ง
  *   LINE: ลิงก์สาธารณะ /api/r2-image · Lazada: ฝากรูปกับ Lazada (/image/migrate) ได้ลิงก์ slatic.net
  * ลากเรียง = ของกลาง SortableList (useDragReorder · กดค้างที่รูป holdProps หรือหูจับ) · ตั้งปก = ย้ายไปแรก · ลบ (เหลือ ≥ 1)
- * ของกลางที่ใช้: ERPModal · LoadingState · Icon · SortableList
+ * 2026-11-20 (เจ้าของขอจากหน้าลง Shopee): ช่องรูปเล็กลง (เต็มแถวอัตโนมัติ ~88px) · ชี้เมาส์ = รูปใหญ่ (HoverPreview) · ปุ่มตั้งปก/ลบเป็นไอคอน (เดสก์ท็อปโผล่ตอนชี้)
+ * ของกลางที่ใช้: ERPModal · LoadingState · Icon · SortableList · HoverPreview
  */
 import { useCallback, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -17,6 +18,7 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { LoadingState } from "@/components/state-views";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { HoverPreview } from "@/components/hover-image";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { systemImageKey, systemImageRef } from "@/lib/line-listing-edit";
 
@@ -64,21 +66,23 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
   const drag = useDragReorder((from, to) => onChange(moveItem(images, from, to)), { group: dragGroup });
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-1.5">
         {images.map((ref, i) => {
           const isNew = !!systemImageKey(ref);
           return (
             <div key={`${ref}-${i}`} {...(canEdit ? drag.rowProps(i) : {})}
-              className={`relative aspect-square overflow-hidden rounded-lg border bg-slate-50 ${isNew ? "border-violet-300" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
-              <button type="button" onClick={() => onOpen(i)} {...(canEdit ? drag.holdProps(i) : {})} title={canEdit ? "แตะ = ดูรูปใหญ่ · กดค้างแล้วลาก = เรียงลำดับ" : undefined} className="h-full w-full"><img src={listingImgSrc(ref)} alt="" loading="lazy" draggable={false} className="pointer-events-none h-full w-full object-cover" /></button>
+              className={`group relative aspect-square overflow-hidden rounded-lg border bg-slate-50 ${isNew ? "border-violet-300" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
+              <HoverPreview url={listingImgSrc(ref, 800)} previewW={420}>
+                <button type="button" onClick={() => onOpen(i)} {...(canEdit ? drag.holdProps(i) : {})} title={canEdit ? "ชี้ = ดูรูปใหญ่ · กดค้างแล้วลาก = เรียงลำดับ" : undefined} className="block aspect-square w-full"><img src={listingImgSrc(ref, 240)} alt="" loading="lazy" draggable={false} className="pointer-events-none h-full w-full object-cover" /></button>
+              </HoverPreview>
               {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-white/90 px-1.5 text-[10px] text-violet-700">ปก</span>}
               {isNew && <span className="absolute right-1 top-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">ใหม่</span>}
               {canEdit && (
-                <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-white/90 px-1 py-0.5 text-[10px]">
+                <div className="absolute inset-x-0 bottom-0 flex items-center gap-0.5 bg-white/90 px-0.5 py-0.5 text-xs transition-opacity [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-within:opacity-100">
                   <DragHandle {...drag.handleProps(i)} title="ลากเพื่อเรียงลำดับ" />
-                  {i !== 0 && <button type="button" onClick={() => onChange(moveItem(images, i, 0))} className="text-violet-700 hover:underline">ตั้งเป็นปก</button>}
-                  <button type="button" disabled={images.length <= 1} onClick={() => onChange(images.filter((_, k) => k !== i))}
-                    title={images.length <= 1 ? "ต้องเหลืออย่างน้อย 1 รูป" : "เอารูปนี้ออก"} className="ml-auto text-rose-600 hover:underline disabled:opacity-30">ลบ</button>
+                  {i !== 0 && <button type="button" onClick={() => onChange(moveItem(images, i, 0))} title="ตั้งเป็นปก" aria-label="ตั้งเป็นปก" className="rounded px-0.5 text-violet-700 hover:bg-violet-50"><Icon name="star" /></button>}
+                  <button type="button" disabled={images.length <= 1} onClick={() => onChange(images.filter((_, k) => k !== i))} aria-label="เอารูปนี้ออก"
+                    title={images.length <= 1 ? "ต้องเหลืออย่างน้อย 1 รูป" : "เอารูปนี้ออก"} className="ml-auto rounded px-0.5 text-rose-600 hover:bg-rose-50 disabled:opacity-30"><Icon name="delete" /></button>
                 </div>
               )}
             </div>
@@ -87,12 +91,12 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
         {canEdit && images.length < max && (
           <button type="button" disabled={!canAdd} onClick={onAdd}
             title={canAdd ? "เลือกรูปจากคลังรูปของสินค้าในระบบ" : "จับคู่สินค้าในระบบก่อน ถึงจะเพิ่มรูปจากระบบได้"}
-            className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">
-            <Icon name="add" />เพิ่มจากรูปในระบบ
+            className="flex aspect-square flex-col items-center justify-center gap-0.5 rounded-lg border border-dashed border-slate-300 p-1 text-center text-[11px] leading-tight text-slate-500 hover:bg-slate-50 disabled:opacity-40">
+            <Icon name="add" />เพิ่มรูป
           </button>
         )}
       </div>
-      <p className="text-[11px] text-slate-400">{platformName} รับ 1–{max} รูป · รูปแรก = ปก · กดค้างที่รูปแล้วลากเพื่อเรียง (หรือลากที่หูจับ) · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก){note ? ` · ${note}` : ""}</p>
+      <p className="text-[11px] text-slate-400">{platformName} รับ 1–{max} รูป · รูปแรก = ปก · ชี้ที่รูป = ดูรูปใหญ่ · กดค้างที่รูปแล้วลากเพื่อเรียง (หรือลากที่หูจับ) · รูปป้าย “ใหม่” = จากคลังรูปในระบบ (ส่งตอนกดบันทึก){note ? ` · ${note}` : ""}</p>
     </div>
   );
 }
@@ -100,7 +104,7 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
 /**
  * เลือกรูป — mode "product" = เพิ่มรูปสินค้า (เลือกได้หลายรูป ป๊อปค้างไว้) · "variant" = รูปของตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ · เลือกแล้วผู้เรียกปิดเอง)
  */
-export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, showShop, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker" }: {
+export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, shopLabel = "รูปสินค้าบนร้าน", showShop, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker" }: {
   open: boolean;
   onClose: () => void;
   mode: "product" | "variant";
@@ -108,6 +112,8 @@ export function ListingImagePicker({ open, onClose, mode, title, description, sh
   description: string;
   /** รูปสินค้าบนร้าน (โชว์ใน mode variant หรือเมื่อ showShop) */
   shopImages?: string[];
+  /** หัวข้อของชุด shopImages (ค่าเริ่ม "รูปสินค้าบนร้าน" · หน้าลงสินค้าใหม่ = "รูปที่จะส่ง") */
+  shopLabel?: string;
   /** โชว์รูปสินค้าบนร้านใน mode product ด้วย (เลือกหลายรูป — เช่น รูปตัวเลือก Lazada) */
   showShop?: boolean;
   matchedParent: string | null;
@@ -126,7 +132,7 @@ export function ListingImagePicker({ open, onClose, mode, title, description, sh
         <div className="space-y-3">
           {(mode === "variant" || showShop) && (shopImages?.length ?? 0) > 0 && (
             <div>
-              <div className="mb-1 text-xs text-slate-500">รูปสินค้าบนร้าน</div>
+              <div className="mb-1 text-xs text-slate-500">{shopLabel}</div>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                 {shopImages!.map((ref, i) => {
                   const used = mode === "product" && !!isUsed?.(ref);
