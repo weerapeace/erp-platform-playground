@@ -121,7 +121,7 @@ export function PushOpenSettingsModal({ open, onClose }: { open: boolean; onClos
             <div className="font-medium text-slate-800">เปิดหน้าใหม่ให้เช็กอัตโนมัติ</div>
             <div className="text-xs text-slate-500">กดส่งแล้วระบบเปิดแท็บรอไว้ ส่งเสร็จพาไปหน้าที่เลือก · ส่งไม่สำเร็จ แท็บปิดเอง</div>
           </div>
-          <ToggleSwitch on={prefs.enabled} onChange={(v) => set({ enabled: v })} label="เปิดหน้าใหม่ให้เช็กอัตโนมัติ" />
+          <ToggleSwitch on={prefs.enabled} onChange={(v) => set({ enabled: v })} title="เปิดหน้าใหม่ให้เช็กอัตโนมัติ" />
         </div>
         <div className={prefs.enabled ? "" : "pointer-events-none opacity-50"}>
           <div className="mb-1.5 text-xs text-slate-500">เปิดหน้าไหน</div>
