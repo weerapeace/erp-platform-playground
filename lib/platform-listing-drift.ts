@@ -61,9 +61,9 @@ export function normText(s: string | null | undefined): string {
     .replace(/&(#?\w+);/g, (m, k: string) => ENT[k.toLowerCase()] ?? (k.startsWith("#") && /^#\d+$/.test(k) ? String.fromCharCode(Number(k.slice(1))) : m))
     .replace(/[\s​ ]+/g, "").toLowerCase();
 }
-/** ข้อความอ่านง่าย (ตัดแท็ก ย่อช่องว่าง) ไว้โชว์ */
+/** ข้อความอ่านง่าย (ตัดแท็ก ย่อช่องว่าง) ไว้โชว์ · หัวข้อย่อย (<li>) ขึ้นต้นด้วย "• " ให้เห็นว่าเป็นข้อ ๆ */
 export function plainText(s: string | null | undefined): string {
-  return String(s ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|li|div|h\d)>/gi, "\n").replace(/<[^>]*>/g, " ")
+  return String(s ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<li\b[^>]*>/gi, "\n• ").replace(/<\/(p|li|div|h\d)>/gi, "\n").replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
     .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n+/g, "\n").trim();
 }
@@ -206,7 +206,9 @@ export const descLines = (s: string | null | undefined): string[] => plainText(s
  * left.changed = บรรทัดนี้จะหายจากร้าน · right.changed = บรรทัดนี้จะเพิ่มเข้าไป
  */
 export function lineDiff(a: string[], b: string[]): { left: DiffLine[]; right: DiffLine[]; changes: number } {
-  const na = a.map(normText), nb = b.map(normText);
+  // ขีด/จุดหน้าบรรทัด ("- " ข้อความล้วน กับ "• " หัวข้อย่อย HTML) = ข้อเดียวกัน ไม่นับว่าต่าง
+  const key = (l: string) => normText(l.replace(/^\s*[-•*·]\s*/, ""));
+  const na = a.map(key), nb = b.map(key);
   const n = a.length, m = b.length;
   // ตาราง LCS (รายละเอียดสินค้าไม่กี่ร้อยบรรทัด — n·m เล็ก)
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));

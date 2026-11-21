@@ -142,9 +142,17 @@ describe("หน้าเทียบ: รูป + รายละเอีย�
     expect(d.changes).toBe(3);
   });
   it("แบ่งบรรทัดจาก HTML + หารูปในรายละเอียด", () => {
-    expect(descLines("<p>หนึ่ง</p><ul><li>สอง</li></ul>")).toEqual(["หนึ่ง", "สอง"]);
+    expect(descLines("<p>หนึ่ง</p><ul><li>สอง</li></ul>")).toEqual(["หนึ่ง", "• สอง"]);
     expect(descImages('<p>x</p><img class="a" src="https://cdn/a.jpg">')).toEqual(["https://cdn/a.jpg"]);
     expect(looksHtml("ข้อความล้วน")).toBe(false);
     expect(looksHtml("<p>x</p>")).toBe(true);
+  });
+});
+
+describe("หัวข้อย่อย", () => {
+  it("<li> แสดงเป็น • และ \"- ข้อ\" กับ \"• ข้อ\" นับเป็นบรรทัดเดียวกัน", () => {
+    expect(descLines("<ul><li>วัสดุ: PU</li></ul>")).toEqual(["• วัสดุ: PU"]);
+    const d = lineDiff(["- วัสดุ: PU", "- ช่องหลัก 1 ช่อง"], descLines("<ul><li>วัสดุ: PU</li><li>ช่องหลัก 1 ช่อง</li></ul>"));
+    expect(d.changes).toBe(0);
   });
 });
