@@ -46,11 +46,24 @@ describe("planParentComputedSync", () => {
   });
 });
 
+describe("ลองดูจริง 2026-11-21", () => {
+  it("สูตรขึ้นต้นด้วยช่องว่าง → ตัดก่อนเทียบ/เขียน (เนื้อเดียวกัน = ไม่แตะ) · ขนาด 0 x 0 = ว่าง ไม่ทับขนาดเดิม", () => {
+    const plan = planParentComputedSync(
+      [{ id: "a", code: "MGN187", platform_description: "Louis Montini เข็มขัด", size_summary: "30 x 4 cm. (กว้าง x ยาว)" }, { id: "b", code: "CTL120", platform_description: null, size_summary: null }],
+      { a: { platform_description: "  Louis Montini เข็มขัด\n", size_summary: "0 x 0 cm. (กว้าง x ยาว)" }, b: { platform_description: "  \n\nรายละเอียดสินค้า", size_summary: "0 x 0 cm. (กว้าง x ยาว)" } },
+      cols,
+    );
+    expect(plan.changes).toEqual([{ id: "b", code: "CTL120", fields: [{ column: "platform_description", old: null, new: "รายละเอียดสินค้า" }] }]);
+    expect(plan.keptBlank).toBe(1);   // MGN187 ขนาดเดิมไม่ถูกทับด้วย 0 x 0
+  });
+});
+
 describe("ของช่วย", () => {
   it("canonText / previewText", () => {
     expect(canonText(null)).toBeNull();
     expect(canonText("  \n ")).toBeNull();
     expect(canonText("a\r\nb")).toBe("a\nb");
+    expect(canonText("  \n\nข้อความ  ")).toBe("ข้อความ");
     expect(previewText("a\n\nb   c")).toBe("a b c");
     expect(previewText("x".repeat(200), 10)).toBe(`${"x".repeat(10)}…`);
   });
