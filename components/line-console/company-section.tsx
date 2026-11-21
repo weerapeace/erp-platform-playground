@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ส่วน "ไลน์บริษัท" ในศูนย์ LINE — เลือกบอทที่เป็นไลน์บริษัท · สร้างเมนูล่างจอ 3 ชุด · ดูพนักงาน/ลูกค้าที่ผูกไลน์
+ * ส่วน "ไลน์บริษัท" ในศูนย์ LINE — เลือกบอทที่เป็นไลน์บริษัท · ตั้งปุ่มเมนูล่างจอ 4 ชุด (company-menu-editor) · สร้างเมนูในไลน์ · ดูพนักงาน/ลูกค้าที่ผูกไลน์
  * API: /api/admin/line-company · กติกา lib/line-company · คู่มือ docs/line-company-oa.md
  * พนักงาน: ปลดผูก/ระงับที่หน้าสมาชิกไลน์ของฝ่ายบุคคล (ของเดิม) · ลูกค้า: ถอนผูก (ย้อนได้) / ระงับ / ตั้งชื่อเรียก ที่นี่
  */
@@ -11,13 +11,17 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
-import { COMPANY_MENUS, COMPANY_MENU_KINDS, COMPANY_MENU_LABEL } from "@/lib/line-company";
+import type { CompanyMenuLayout } from "@/lib/line-company";
+import { CompanyMenuEditor, type LayoutHistoryItem } from "@/components/line-console/company-menu-editor";
 
 type Data = {
   bots: { key: string; label: string; basic_id: string; ready: boolean }[];
   company_bot: string | null;
   company_ready: boolean;
   menus: { published: boolean; published_at: string | null };
+  layout: { layout: CompanyMenuLayout; saved_at: string | null; saved_by: string | null };
+  layout_history: LayoutHistoryItem[];
+  layout_pending: boolean;
   chat_enabled: boolean;
   employees_active: number | null;
   employees: { id: string; status: string; linked_at: string | null; line_name: string; code: string; name: string; left_company: boolean }[];
@@ -71,8 +75,8 @@ export function LineCompanySection() {
   const publish = async () => {
     const j = await post({ publish: true });
     if (!j) return;
-    const l = j.linked as { employees: number; customers: number; failed: number } | undefined;
-    toast.success(`สร้างเมนูล่างจอแล้ว · พนักงาน ${l?.employees ?? 0} คน · ลูกค้า ${l?.customers ?? 0} คน`);
+    const l = j.linked as { admins: number; employees: number; customers: number; failed: number } | undefined;
+    toast.success(`สร้างเมนูในไลน์แล้ว · แอดมิน ${l?.admins ?? 0} · พนักงาน ${l?.employees ?? 0} · ลูกค้า ${l?.customers ?? 0} คน`);
     if (l?.failed) toast.warning(`ผูกเมนูให้ ${l.failed} คนไม่สำเร็จ — คนเหล่านั้นจะได้เมนูถูกเมื่อปิด-เปิดแชตใหม่ หรือกดสร้างเมนูอีกครั้ง`);
   };
 
@@ -130,28 +134,25 @@ export function LineCompanySection() {
           <div className="text-[11px] text-slate-500 pl-6">ยังไม่มีบอท? เพิ่มบอทใหม่ในส่วน &ldquo;บอท&rdquo; ด้านบนก่อน (ต้องอยู่ Provider เดียวกับ LINE Login ของระบบ ไม่งั้นระบบจำคนไม่ได้) แล้วคัดลอก Webhook ไปวางใน LINE Developers</div>
         )}
 
-        {/* เมนูล่างจอ */}
-        {data.company_bot && (
-          <div className="pl-6 space-y-1.5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-              {COMPANY_MENU_KINDS.map((k) => (
-                <div key={k} className="rounded-lg border border-slate-200 px-2 py-1.5">
-                  <div className="text-xs font-medium text-slate-700">{COMPANY_MENU_LABEL[k]} · {COMPANY_MENUS[k].buttons.length} ปุ่ม</div>
-                  <div className="text-[11px] text-slate-400 leading-snug">{COMPANY_MENUS[k].buttons.map((b) => b.label).join(" · ")}</div>
-                </div>
-              ))}
-            </div>
+        {/* เมนูล่างจอ: ตั้งปุ่มได้ตั้งแต่ยังไม่มีบอท · สร้างในไลน์ได้เมื่อเลือกบอทแล้ว */}
+        <div className="pl-6 space-y-2 pt-1 border-t border-slate-100">
+          <CompanyMenuEditor key={data.layout.saved_at ?? "default"} layout={data.layout.layout} history={data.layout_history}
+            savedAt={data.layout.saved_at} busy={busy} onSaved={load} />
+          {data.company_bot ? (
             <div className="flex items-center gap-2 flex-wrap">
               <button disabled={busy || !data.company_ready} onClick={() => void publish()}
-                className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
-                {busy ? "กำลังทำ…" : data.menus.published ? "สร้างเมนูใหม่อีกครั้ง" : "สร้างเมนูล่างจอ"}
+                className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                {busy ? "กำลังทำ…" : data.menus.published ? "สร้างเมนูในไลน์ใหม่" : "สร้างเมนูในไลน์"}
               </button>
-              <span className="text-[11px] text-slate-500">
-                {data.menus.published ? `สร้างล่าสุด ${fmt(data.menus.published_at)} · ระบบสลับเมนูให้เองเมื่อมีคนผูก/ถอนผูก` : "ยังไม่ได้สร้าง — ตอนนี้คนในไลน์จะเห็นเมนูที่ตั้งใน LINE OA Manager (ถ้ามี)"}
+              <span className={`text-[11px] ${data.layout_pending ? "text-amber-700" : "text-slate-500"}`}>
+                {data.layout_pending ? "แก้ปุ่มแล้ว แต่คนในไลน์ยังเห็นชุดเก่า — กดสร้างเมนูในไลน์ใหม่"
+                  : data.menus.published ? `สร้างล่าสุด ${fmt(data.menus.published_at)} · ระบบสลับเมนูให้เองเมื่อมีคนผูก/ถอนผูก` : "ยังไม่ได้สร้าง — ตอนนี้คนในไลน์จะเห็นเมนูที่ตั้งใน LINE OA Manager (ถ้ามี)"}
               </span>
             </div>
-          </div>
-        )}
+          ) : (
+            <div className="text-[11px] text-slate-500">ตั้งปุ่มรอไว้ได้เลย · เลือกบอทไลน์บริษัทด้านบนแล้วจะมีปุ่ม &ldquo;สร้างเมนูในไลน์&rdquo;</div>
+          )}
+        </div>
 
         {/* คนที่ผูกไลน์ */}
         <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">

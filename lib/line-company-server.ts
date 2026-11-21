@@ -7,7 +7,7 @@
  *   syncCompanyMenuFor(...)      ผูกเมนูล่างจอให้คน 1 คนตามตัวตนตอนนี้ (เรียกหลังผูก/ถอนผูก/บล็อก)
  * รูปเมนู + สร้างเมนูชุดใหม่ อยู่ lib/line-company-menu.ts (ใช้ sharp — ไม่ให้ตัวรับไลน์ต้องโหลด)
  *
- * พนักงาน: บอทตอบเอง ไม่ส่งเข้าห้องแชทรวม (ห้องแชทรวมเป็นของลูกค้า)
+ * พนักงาน / แอดมิน: บอทตอบเอง ไม่ส่งเข้าห้องแชทรวม (ห้องแชทรวมเป็นของลูกค้า)
  * ลูกค้า / ไม่รู้จัก: ข้อความเข้าห้องแชทรวมให้คนตอบ (บอทไม่แย่งตอบ — โทเคนตอบกลับฟรีเก็บไว้ให้พนักงาน)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
@@ -15,21 +15,35 @@ import { lineReplyMessages } from "@/lib/line-intake";
 import { lineBot, lineText, loadLineConfig, type LineBotView, type LineConfig } from "@/lib/line-send";
 import { isLineUserId, type LineChatEvent } from "@/lib/chat/line";
 import {
-  companyReplyText, companyWelcomeText, employeeChatHint, menuKindFor, parseCompanyPostback,
-  type CompanyMenuKind,
+  actionAllowed, companyReplyText, companyWelcomeText, employeeChatHint, menuKindFor, normalizeCompanyLayout, parseCompanyPostback,
+  type CompanyMenuKind, type CompanyMenuLayout, type PublishedMenuKey,
 } from "@/lib/line-company";
 import { identityCallName, resolveLineIdentity, type LineIdentity } from "@/lib/line-identity";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-/** id เมนูล่างจอที่สร้างไว้ใน LINE (เก็บใน line_config.company_menus) */
-export type CompanyMenuState = Partial<Record<CompanyMenuKind, string>> & { published_at?: string; published_by?: string };
+/** id เมนูล่างจอที่สร้างไว้ใน LINE (เก็บใน line_config.company_menus) · layout_saved_at = เลย์เอาต์ชุดที่ใช้ตอนสร้าง */
+export type CompanyMenuState = Partial<Record<PublishedMenuKey, string>> & { published_at?: string; published_by?: string; layout_saved_at?: string | null };
+
+/** ปุ่มเมนูที่ตั้งในศูนย์ LINE (line_config.company_layout) + ประวัติชุดก่อน ๆ (ย้อนกลับได้ 10 ชุด) */
+export type CompanyLayoutState = { layout: CompanyMenuLayout; saved_at: string | null; saved_by: string | null };
+export const LAYOUT_HISTORY_MAX = 10;
 
 const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 export const companyBotKeyOf = (cfg: LineConfig): string => s(cfg.company_bot);
 export const companyMenusOf = (cfg: LineConfig): CompanyMenuState =>
   (cfg.company_menus && typeof cfg.company_menus === "object" ? cfg.company_menus : {}) as CompanyMenuState;
+
+const layoutStateOf = (raw: unknown): CompanyLayoutState => {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return { layout: normalizeCompanyLayout(o.layout), saved_at: s(o.saved_at) || null, saved_by: s(o.saved_by) || null };
+};
+/** ปุ่มเมนูที่ใช้อยู่ (ยังไม่เคยตั้ง = ค่าตั้งต้นตามผังเจ้าของ) */
+export const companyLayoutOf = (cfg: LineConfig): CompanyLayoutState => layoutStateOf(cfg.company_layout);
+/** ชุดก่อน ๆ (ใหม่สุดก่อน) */
+export const companyLayoutHistoryOf = (cfg: LineConfig): CompanyLayoutState[] =>
+  (Array.isArray(cfg.company_layout_history) ? cfg.company_layout_history : []).slice(0, LAYOUT_HISTORY_MAX).map(layoutStateOf);
 
 /** บอทไลน์บริษัท — ยังไม่ตั้ง / บอทถูกลบ / ไม่มีโทเคนหรือรหัสลับ = null (ไลน์บริษัทยังไม่ทำงาน) */
 export function companyBot(cfg: LineConfig): LineBotView | null {
@@ -68,7 +82,7 @@ async function lineCall(token: string, method: "POST" | "DELETE", path: string, 
 export async function linkCompanyMenu(token: string, menus: CompanyMenuState, lineUserId: string, kind: CompanyMenuKind): Promise<boolean> {
   if (!isLineUserId(lineUserId)) return false;
   if (kind === "guest") return lineCall(token, "DELETE", `user/${lineUserId}/richmenu`);
-  const id = menus[kind];
+  const id = menus[kind];   // แอดมิน = หน้าแท็บแรก (แท็บอื่นสลับกันเองในไลน์)
   if (!id) return false;   // ยังไม่ได้สร้างเมนู (กดสร้างในศูนย์ LINE) — ไม่ใช่ข้อผิดพลาด
   return lineCall(token, "POST", `user/${lineUserId}/richmenu/${encodeURIComponent(id)}`);
 }
@@ -135,23 +149,25 @@ export async function handleCompanyEvents(admin: Admin, cfg: LineConfig, bot: Li
     if (e.type === "follow") {
       await linkCompanyMenu(bot.token, menus, uid, menuKindFor(id.who));
       await lineReplyMessages(bot.token, e.replyToken, [lineText(companyWelcomeText(id.who, name))]);
-      // ห้องแชทรวมรู้ว่ามีคนเพิ่มเพื่อน (เฉพาะไม่ใช่พนักงาน) · โทเคนตอบกลับใช้ไปแล้ว → ไม่ส่งต่อ
-      if (id.who !== "employee") forChat.push({ ...e, replyToken: undefined });
+      // ห้องแชทรวมรู้ว่ามีคนเพิ่มเพื่อน (เฉพาะคนนอก — พนักงาน/แอดมินไม่เข้าห้องแชทลูกค้า) · โทเคนตอบกลับใช้ไปแล้ว → ไม่ส่งต่อ
+      if (id.who !== "employee" && id.who !== "admin") forChat.push({ ...e, replyToken: undefined });
       continue;
     }
     if (e.type === "unfollow") {
-      if (id.who !== "employee") forChat.push(e);
+      if (id.who !== "employee" && id.who !== "admin") forChat.push(e);
       continue;
     }
     if (e.type === "postback") {
       const act = parseCompanyPostback(e.postback?.data);
-      if (!act) continue;
+      if (!act) continue;   // กดแท็บเมนูแอดมิน (cmptab=) / ค่าแปลก = ไม่ตอบ
+      // กดจากเมนูเก่าที่ค้าง (เพิ่งถูกถอนผูก/ถอนสิทธิ์แอดมิน) → สลับเมนูให้ถูกชุดเลย
+      if (!actionAllowed(id.who, act)) await linkCompanyMenu(bot.token, menus, uid, menuKindFor(id.who));
       const text = companyReplyText(id.who, act, name);
       if (text) await lineReplyMessages(bot.token, e.replyToken, [lineText(text)]);
       continue;
     }
     // ข้อความ
-    if (id.who === "employee") {
+    if (id.who === "employee" || id.who === "admin") {
       await lineReplyMessages(bot.token, e.replyToken, [lineText(employeeChatHint(e.message?.type))]);
       continue;
     }

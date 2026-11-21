@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
 import { APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { writeAudit } from "@/lib/audit";
+import { syncCompanyMenuFor } from "@/lib/line-company-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { error } = await admin.from("user_profiles").update({ line_user_id: sub }).eq("id", uid);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "line:link_user", entityType: "user", entityId: uid, actorId: uid, actorName: null, metadata: {} });
+  await syncCompanyMenuFor(admin, sub);   // ไลน์บริษัท: แอดมิน → สลับเป็นเมนูแอดมิน (ไม่ใช่แอดมิน = ไม่เปลี่ยนอะไร)
   return NextResponse.json({ ok: true, error: null });
 }
 
@@ -61,8 +63,11 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     if ((prof as { role?: string } | null)?.role !== "admin") return NextResponse.json({ error: "เฉพาะแอดมิน" }, { status: 403 });
     victim = target;
   }
+  const { data: prev } = await admin.from("user_profiles").select("line_user_id").eq("id", victim).maybeSingle();
   const { error } = await admin.from("user_profiles").update({ line_user_id: null }).eq("id", victim);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "line:unlink_user", entityType: "user", entityId: victim, actorId: uid, actorName: null, metadata: {} });
+  const prevLine = (prev as { line_user_id?: string | null } | null)?.line_user_id;
+  if (prevLine) await syncCompanyMenuFor(admin, prevLine);   // ไลน์บริษัท: เลิกเป็นแอดมิน → กลับเป็นเมนูตามตัวตนที่เหลือ
   return NextResponse.json({ ok: true, error: null });
 }

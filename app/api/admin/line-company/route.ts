@@ -2,7 +2,11 @@
  * ไลน์บริษัท — ตั้งค่า + ดูคนที่ผูกไลน์ (ส่วน "ไลน์บริษัท" ในศูนย์ LINE · components/line-console/company-section)
  *   GET  → บอทที่เลือกเป็นไลน์บริษัทได้ · บอทที่ใช้อยู่ · สถานะเมนูล่างจอ · พนักงาน/ลูกค้าที่ผูกไลน์
  *   POST → { set_bot: "<key>" | "" }   เลือก/เลิกใช้บอทเป็นไลน์บริษัท (เลือก = เปิดรับแชทลูกค้าเข้าห้องแชทรวมให้ด้วย)
- *          { publish: true }            สร้างเมนูล่างจอ 3 ชุดใหม่ แล้วสลับทุกคนไปใช้
+ *          { publish: true }            สร้างเมนูล่างจอชุดใหม่ (ยังไม่ผูก/พนักงาน/ลูกค้า/แอดมิน 3 แท็บ) ตามปุ่มที่ตั้งไว้ แล้วสลับทุกคนไปใช้
+ *          { save_layout: {...} }       บันทึกปุ่มเมนู 4 ชุด (ชื่อ · คำอธิบาย · ลำดับ · ซ่อน) — ชุดเดิมเก็บเข้าประวัติ (ย้อนได้ 10 ชุด)
+ *          { revert_layout: <ลำดับ> }   ย้อนกลับไปใช้ชุดในประวัติ (ชุดปัจจุบันเก็บเข้าประวัติแทน — ย้อนกลับมาอีกได้)
+ *          { reset_layout: true }       กลับเป็นค่าตั้งต้นตามผังเจ้าของ (ชุดปัจจุบันเก็บเข้าประวัติ)
+ *          { preview: { key, layout } } → รูป PNG ของเมนูหน้านั้น (ดูก่อนบันทึก · ไม่แตะ LINE)
  *          { link_id, action }          ลูกค้าที่ผูกไลน์: unlink (ถอนผูก เก็บประวัติ) · relink (ย้อนการถอนผูก) · block · unblock · rename (+contact_name)
  * สิทธิ์: admin.users (เหมือนศูนย์ LINE) · ทุกการแก้ลง audit (changes: auditDiff)
  * พนักงาน: ปลดผูก/ระงับที่หน้า /payroll/line-members (ของเดิม) — ที่นี่ดูอย่างเดียว
@@ -13,13 +17,17 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { lineBot, lineBots, loadLineConfig, type LineConfig } from "@/lib/line-send";
-import { companyBot, companyBotKeyOf, companyMenusOf, syncCompanyMenuFor } from "@/lib/line-company-server";
-import { publishCompanyMenus, removeCompanyMenus } from "@/lib/line-company-menu";
+import {
+  LAYOUT_HISTORY_MAX, companyBot, companyBotKeyOf, companyLayoutHistoryOf, companyLayoutOf, companyMenusOf, syncCompanyMenuFor,
+  type CompanyLayoutState,
+} from "@/lib/line-company-server";
+import { publishCompanyMenus, removeCompanyMenus, renderCompanyMenuPng } from "@/lib/line-company-menu";
+import { DEFAULT_COMPANY_LAYOUT, PUBLISHED_MENU_KEYS, normalizeCompanyLayout, type CompanyMenuLayout, type PublishedMenuKey } from "@/lib/line-company";
 import { loadChatSettings, saveChatSettings } from "@/lib/chat/settings";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-export const maxDuration = 60;   // สร้างเมนู = วาดรูป 3 ชุด + อัปโหลด + ผูกเมนูให้ทุกคน
+export const maxDuration = 60;   // สร้างเมนู = วาดรูป 6 หน้า + อัปโหลด + ผูกเมนูให้ทุกคน
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -66,7 +74,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     bots: lineBots(cfg).map((b) => ({ key: b.key, label: b.label, basic_id: b.basic_id, ready: botReady(cfg, b.key) })),
     company_bot: key || null,
     company_ready: !!companyBot(cfg),
-    menus: { published: !!(menus.guest && menus.employee && menus.customer), published_at: menus.published_at ?? null },
+    menus: { published: PUBLISHED_MENU_KEYS.every((k) => !!menus[k]), published_at: menus.published_at ?? null },
+    layout: companyLayoutOf(cfg),
+    layout_history: companyLayoutHistoryOf(cfg).map((h) => ({ saved_at: h.saved_at, saved_by: h.saved_by, layout: h.layout })),
+    // แก้ปุ่มแล้วยังไม่ได้กดสร้างเมนูใหม่ในไลน์ (คนในไลน์ยังเห็นชุดเก่า)
+    layout_pending: PUBLISHED_MENU_KEYS.every((k) => !!menus[k]) && (companyLayoutOf(cfg).saved_at ?? null) !== (menus.layout_saved_at ?? null),
     chat_enabled: key ? chat.line_bots[key]?.enabled === true : false,
     employees_active: empTotal.count ?? null,
     employees: ((emp.data ?? []) as Row[]).map((r) => {
@@ -89,7 +101,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-type Body = { set_bot?: string; publish?: boolean; link_id?: string; action?: string; contact_name?: string };
+type Body = {
+  set_bot?: string; publish?: boolean; link_id?: string; action?: string; contact_name?: string;
+  save_layout?: unknown; revert_layout?: number; reset_layout?: boolean; preview?: { key?: string; layout?: unknown };
+};
+
+/** เปลี่ยนปุ่มเมนูชุดปัจจุบัน → ชุดเดิมเก็บเข้าประวัติ (ใหม่สุดก่อน · เก็บ 10 ชุด) */
+function withLayout(cur: LineConfig, next: CompanyMenuLayout, actor: string | null, dropHistoryIndex?: number): LineConfig {
+  const before = companyLayoutOf(cur);
+  let history = companyLayoutHistoryOf(cur);
+  if (dropHistoryIndex != null) history = history.filter((_, i) => i !== dropHistoryIndex);
+  const nextState: CompanyLayoutState = { layout: next, saved_at: new Date().toISOString(), saved_by: actor };
+  return { ...cur, company_layout: nextState, company_layout_history: [before, ...history].slice(0, LAYOUT_HISTORY_MAX) };
+}
+
+/** สรุปปุ่มที่โชว์ของแต่ละชุด (ใช้ใน audit ให้อ่านง่าย) */
+const layoutSummary = (l: CompanyMenuLayout) =>
+  Object.fromEntries(Object.entries(l).map(([k, bs]) => [k, bs.filter((b) => !b.hidden).map((b) => b.label).join(" · ")]));
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.users"); if (denied) return denied;
@@ -99,7 +127,41 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const err = (error: string, status = 400) => NextResponse.json({ error }, { status });
   let body: Body;
   try { body = await request.json(); } catch { return err("invalid JSON"); }
+
+  // ---- รูปตัวอย่างเมนู (ไม่แตะ LINE · ไม่บันทึก) ----
+  if (body.preview) {
+    const key = String(body.preview.key ?? "") as PublishedMenuKey;
+    if (!PUBLISHED_MENU_KEYS.includes(key)) return err("ไม่รู้จักเมนูนี้");
+    const png = await renderCompanyMenuPng(key, normalizeCompanyLayout(body.preview.layout)).catch(() => null);
+    if (!png) return err("วาดรูปเมนูไม่สำเร็จ ลองใหม่", 500);
+    return new NextResponse(new Uint8Array(png), { headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } });
+  }
+
   const cfg = await loadLineConfig(admin);
+
+  // ---- ปุ่มเมนู: บันทึก / ย้อนกลับ / ค่าตั้งต้น ----
+  if (body.save_layout !== undefined || typeof body.revert_layout === "number" || body.reset_layout) {
+    const before = companyLayoutOf(cfg).layout;
+    let next: CompanyMenuLayout;
+    let drop: number | undefined;
+    let what: string;
+    if (typeof body.revert_layout === "number") {
+      const h = companyLayoutHistoryOf(cfg)[body.revert_layout];
+      if (!h) return err("ไม่พบชุดนี้ในประวัติ (อาจมีคนแก้ไปแล้ว) — โหลดหน้าใหม่", 409);
+      next = h.layout; drop = body.revert_layout; what = "revert";
+    } else if (body.reset_layout) {
+      next = normalizeCompanyLayout(DEFAULT_COMPANY_LAYOUT); what = "reset";
+    } else {
+      next = normalizeCompanyLayout(body.save_layout); what = "save";
+    }
+    try { await saveCfg(admin, (cur) => withLayout(cur, next, actor, drop)); }
+    catch (e) { return err(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ", 500); }
+    await writeAudit(admin, {
+      action: "update", entityType: "line_config", actorId: user?.id ?? null, actorName: actor,
+      metadata: { field: "company_layout", op: what, changes: auditDiff(layoutSummary(before), layoutSummary(next)) },
+    });
+    return NextResponse.json({ ok: true, error: null });
+  }
 
   // ---- เลือก/เลิกใช้บอทเป็นไลน์บริษัท ----
   if (typeof body.set_bot === "string") {
@@ -146,7 +208,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     catch (e) { return err(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ", 500); }
     await writeAudit(admin, {
       action: "update", entityType: "line_config", actorId: user?.id ?? null, actorName: actor,
-      metadata: { field: "company_menus", bot: bot.key, published: true, linked: r.linked },
+      metadata: { field: "company_menus", bot: bot.key, published: true, linked: r.linked, layout: layoutSummary(companyLayoutOf(cfg).layout) },
     });
     return NextResponse.json({ ok: true, linked: r.linked, error: null });
   }
