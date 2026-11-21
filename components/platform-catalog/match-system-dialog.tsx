@@ -20,7 +20,7 @@ import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { PushOpenGearButton, usePushOpen } from "@/components/push-open";
 import { apiFetch } from "@/lib/api";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
-import { DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
+import { DRIFT_KEYS, DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
 
 type Check = { listing_id: string; platform_code: string; items: DriftItem[]; issues: DriftKey[]; checked_at: string; external_product_id?: string | null; shop_ref?: string | null; listing_status?: string | null };
 /** ชื่อร้านสั้น (แจ้งผลของตัวเปิดหน้าให้เช็ก) */
@@ -29,8 +29,8 @@ type Call = { url: string; body: Record<string, unknown>; label: string };
 type Step = { label: string; state: "wait" | "run" | "ok" | "fail"; error?: string };
 
 const REVIEW_NOTE: Record<string, string> = {
-  tiktok: "TikTok: รูป/รายละเอียด/ชื่อตัวเลือก ต้องรอ TikTok ตรวจใหม่ (ระหว่างตรวจร้านยังขายของเดิม) · ราคามีผลทันที",
-  lazada: "Lazada: แก้รูป/รายละเอียดแล้วอาจต้องรอ Lazada ตรวจ (Pending QC)",
+  tiktok: "TikTok: ส่งชื่อ/รูป/รายละเอียด/ชื่อตัวเลือก แล้ว TikTok ต้องตรวจใหม่ (ปกติไม่เกิน 1 วัน) ระหว่างนั้นร้านยังขายของเดิม · ราคามีผลทันที · ส่งหลายเรื่องพร้อมกัน = ตรวจรอบเดียว",
+  lazada: "Lazada: แก้ชื่อ/รูป/รายละเอียดแล้วอาจต้องรอ Lazada ตรวจ (Pending QC) · ราคามีผลทันที",
 };
 const canTick = (it: DriftItem) => it.sendable && (it.state === "diff" || (it.key === "images" && it.state === "unknown"));
 
@@ -172,6 +172,13 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
               <Icon name="warning" /><span>{DRIFT_LABEL[i.key]}: {i.cannot}</span>
             </div>
           ))}
+          {/* อ่านก่อนเริ่ม: ร้านนี้ต้องรอตรวจไหม + จะส่งอะไรบ้าง (เจ้าของ 2026-11-21 "เช็ค tiktok ให้หน่อยดูงงๆ") */}
+          {reviewNote && (
+            <div className="flex items-start gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900"><Icon name="info" /><span>{reviewNote}</span></div>
+          )}
+          <div className="text-xs text-slate-600">
+            {tickN ? <>จะส่ง: <b className="font-medium text-slate-800">{DRIFT_KEYS.filter((k) => picked.has(k)).map((k) => DRIFT_LABEL[k]).join(" · ")}</b> — เรื่องอื่นบนร้านคงเดิม</> : "ยังไม่ได้ติ๊กเรื่องที่จะส่ง — ติ๊กช่องหน้าเรื่องที่อยากให้ร้านเหมือนระบบ"}
+          </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full min-w-[34rem] text-left">
               <thead className="bg-slate-50 text-xs text-slate-500">
@@ -228,7 +235,6 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
           </div>
           <div className="text-[11px] text-slate-500 space-y-0.5">
             <div>ไม่แตะสต๊อก (BigSeller ดูแล) · ส่งแล้วระบบดึงกลับมาเทียบให้ และลงประวัติว่าใครส่ง ก่อน → หลัง · ถ้ามีคนแก้บนร้านระหว่างนี้ ระบบจะไม่ส่งทับ</div>
-            {reviewNote && <div>{reviewNote}</div>}
           </div>
           {steps && (
             <ul className="rounded-lg border border-slate-200 p-2 space-y-1 text-xs">

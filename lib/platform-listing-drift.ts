@@ -102,7 +102,7 @@ function compareImagesCore(sys: SystemValues, shop: ShopValues, sync: SysSync | 
       note: sysChanged && shopChanged ? "ทั้งรูปในระบบและบนร้านเปลี่ยน" : sysChanged ? "เปลี่ยนรูปที่สินค้าหลังส่งขึ้นร้านครั้งล่าสุด" : "มีคนแก้รูปบนร้านหลังส่งจากระบบ",
     };
   }
-  if (shop.imageCount !== sys.imageRefs.length) return { key: "images", state: "diff", summary: `รูป: บนร้าน ${shop.imageCount} · ระบบ ${sys.imageRefs.length}`, before, after, note: "ยังไม่เคยส่งรูปจากระบบ — จำนวนรูปไม่เท่ากัน" };
+  if (shop.imageCount !== sys.imageRefs.length) return { key: "images", state: "diff", summary: `รูป: บนร้าน ${shop.imageCount} · ระบบ ${sys.imageRefs.length}`, before, after, note: `ระบบยังไม่เคยส่งรูปขึ้นร้านนี้ (เทียบได้แค่จำนวน) · กดส่ง = แทนรูปบนร้านทั้งชุดด้วย ${sys.imageRefs.length} รูปตามระบบ` };
   return { key: "images", state: "unknown", summary: "ยังไม่เคยส่งรูปจากระบบ", before, after, note: "จำนวนรูปเท่ากัน แต่ยังบอกไม่ได้ว่าเป็นรูปชุดเดียวกัน — กดส่งครั้งแรกแล้วระบบจะจำไว้เทียบรอบหน้า" };
 }
 
