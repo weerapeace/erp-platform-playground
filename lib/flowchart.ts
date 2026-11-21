@@ -11,9 +11,10 @@ import { isPlaceKey, storagePlaceOf } from "./storage-places";
 import { isAppKey, isErpPageHref } from "./menu-pages";
 import { isFlowAlign, isHexColor, sanitizeRich, type FlowAlign } from "./flowchart-rich";
 import { cleanAuto, type FlowAuto } from "./flow-automation";
+import { DEFAULT_SHAPE, flowShapeOf, isShapeKey } from "./flowchart-shapes";
 
 /** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
-export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "auto", "zone"] as const;
+export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "auto", "shape", "zone"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -42,6 +43,7 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
   page:     { w: 220, h: 80,  color: "emerald", th: "หน้าใน ERP",   en: "ERP page",    hintTh: "บอกว่าดูไฟล์ได้ที่หน้าไหนในระบบ — เลือกจากเมนูจริง · กด เปิด ↗ บนกล่อง = ไปหน้านั้น", hintEn: "Shows which ERP page has these files — picked from the real menu · click Open ↗ to go there", icon: "i:apps" },
   todo:     { w: 260, h: 150, color: "amber",   th: "รายการงาน",    en: "To-do list",  hintTh: "สิ่งที่ต้องทำหลายข้อ ติ๊กเมื่อเสร็จ — ครบทุกข้อกล่องเป็นสีเขียว", hintEn: "Several tasks with check boxes — turns green when all are done", icon: "i:list-check" },
   auto:     { w: 290, h: 160, color: "violet",  th: "อัตโนมัติ",     en: "Automation",  hintTh: "กฎ เมื่อ… ถ้า… ให้… (จดแผน + สถานะ — ระบบยังไม่ทำงานเอง)", hintEn: "When… if… then… rule (a plan with status — the system doesn't run it yet)", icon: "i:bolt" },
+  shape:    { w: 180, h: 72,  color: "slate",   th: "รูปทรง",       en: "Shape",       hintTh: "รูปทรง flowchart มาตรฐาน (เอกสาร · ข้อมูลเข้า/ออก · รอ · ...)", hintEn: "Standard flowchart shapes (document · input/output · delay · ...)", icon: "i:category" },
   note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
   zone:     { w: 480, h: 320, color: "blue",    th: "กรอบโซน",      en: "Zone",        hintTh: "กรอบใหญ่ครอบหลายกล่อง เช่น ในออฟฟิศ / บนคลาวด์ — ลากหัวกรอบ = ย้ายทั้งกลุ่ม", hintEn: "Big frame around boxes, e.g. Office / Cloud — drag its title to move everything inside", icon: "i:circle-dashed" },
 };
@@ -54,7 +56,8 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** ข้อในกล่อง "รายการงาน" · by/at = ใครติ๊กเสร็จ เมื่อไหร่ (ISO) — เอาติ๊กออก = ลบ by/at */
 export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; at?: string };
 /** items = ข้อของกล่อง "รายการงาน" */
-export type FlowNodeData = { items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
+export type FlowNodeData = { shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -161,6 +164,8 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (o.type === "storage" && isRuleKey(d.rule)) data.rule = d.rule;
     if (o.type === "todo") { const items = cleanTodos(d.items); if (items.length) data.items = items; }
     if (o.type === "auto") data.auto = cleanAuto(d.auto);
+    if (o.type === "shape") data.shape = isShapeKey(d.shape) ? d.shape : DEFAULT_SHAPE;
+    if (isFontName(d.font)) data.font = d.font;
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
     if (isFlowAlign(d.align)) data.align = d.align;
@@ -220,6 +225,20 @@ export function openTodos(nodes: Pick<FlowSceneNode, "id" | "type" | "position" 
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
     .flatMap((n) => (n.data.items ?? []).filter((i) => !i.done && i.text.trim())
       .map((item) => ({ nodeId: n.id, box: splitFlowLabel(n.data.label).title, item })));
+}
+
+/** ชื่อฟอนต์ที่เก็บได้ (Google Font: ตัวอักษร/ตัวเลข/เว้นวรรค) — กันค่าแปลกเข้า CSS */
+export const isFontName = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9 ]{2,40}$/.test(v);
+
+/** กล่องที่เปลี่ยนรูปทรงได้ (ข้อ 1): กล่อง · เริ่ม/จบ · คำถาม · รูปทรง */
+export const RESHAPE_KINDS: FlowKind[] = ["step", "start", "question", "shape"];
+/** เปลี่ยนรูปทรง: target = "step" | "start" | "question" | key รูปทรง → ชนิด + ข้อมูลใหม่ (ข้อความ สี เส้นที่ต่อ ขนาด เหมือนเดิม) · เปลี่ยนไม่ได้ = null */
+export function reshapeNode(kind: FlowKind, data: FlowNodeData, target: string): { type: FlowKind; data: FlowNodeData } | null {
+  if (!RESHAPE_KINDS.includes(kind)) return null;
+  const d: FlowNodeData = { ...data };
+  if (target === "step" || target === "start" || target === "question") { delete d.shape; return { type: target, data: d }; }
+  if (!isShapeKey(target)) return null;
+  return { type: "shape", data: { ...d, shape: target } };
 }
 
 /** ช่องของกล่อง "หน้าใน ERP" ที่ผ่านการตรวจ (ลิงก์ต้องเป็นหน้าในระบบเท่านั้น — กันลิงก์แปลก/javascript:) */
@@ -353,8 +372,9 @@ export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (t
   const meta = FLOW_KIND_META[kind];
   const exts = kind === "file" || kind === "storage" ? cleanExtList(data?.exts) : [];
   const place = kind === "storage" && isPlaceKey(data?.place) ? data!.place! : "";
-  const { w, h } = kind === "file" ? fileNodeSize(exts.length) : place ? STORAGE_ICON_SIZE : { w: meta.w, h: meta.h };
-  const defLabel = place ? t(storagePlaceOf(place)!.th, storagePlaceOf(place)!.en) : t(meta.th, meta.en);
+  const shp = kind === "shape" ? flowShapeOf(data?.shape) : null;
+  const { w, h } = kind === "file" ? fileNodeSize(exts.length) : place ? STORAGE_ICON_SIZE : shp ? { w: shp.w, h: shp.h } : { w: meta.w, h: meta.h };
+  const defLabel = shp ? t(shp.th, shp.en) : place ? t(storagePlaceOf(place)!.th, storagePlaceOf(place)!.en) : t(meta.th, meta.en);
   return {
     id: newFlowId("n"), type: kind,
     position: { x: snap(at.x - w / 2), y: snap(at.y - h / 2) },
@@ -363,6 +383,8 @@ export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (t
       label: data?.label ?? defLabel, ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}), ...(place ? { place } : {}),
       ...(kind === "page" && data ? cleanPageData(data as Record<string, unknown>) : {}),
       ...(kind === "todo" ? { label: data?.label ?? t("สิ่งที่ต้องทำ", "To do"), items: cleanTodos(data?.items) } : {}),
+      ...(shp ? { shape: shp.key } : {}),
+      ...(data?.font && isFontName(data.font) ? { font: data.font } : {}),
       ...(kind === "auto" ? { label: data?.label ?? t("กฎอัตโนมัติ", "Automation rule"), auto: cleanAuto(data?.auto) } : {}),
     },
   };

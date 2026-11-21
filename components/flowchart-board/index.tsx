@@ -49,6 +49,10 @@ import {
   openTodos,
 } from "@/lib/flowchart";
 import { AUTO_STATUS_META, listAutos } from "@/lib/flow-automation";
+import { pushRecentShape } from "@/lib/flowchart-shapes";
+import { reshapeNode } from "@/lib/flowchart";
+import { googleFontsPreviewHref, useFontLink } from "@/components/font-select";
+import { ShapePalette, SHAPE_DRAG_MIME } from "./shape-palette";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
 import { planRuleCheck } from "@/lib/storage-policy";
@@ -158,6 +162,13 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const pushToast = usePushToast();
   const rf = useReactFlow();
   const meName = useAuth().user?.name ?? "";
+  // 🔷 รูปทรง flowchart (เจ้าของสั่ง 2026-11-21): แผง "รูปทรง ▾" · ใช้ล่าสุดจำต่อเครื่อง
+  const [shapeOpen, setShapeOpen] = useState(false);
+  const [recentShapes, setRecentShapes] = useState<string[]>([]);
+  useEffect(() => { try { setRecentShapes(pushRecentShape(JSON.parse(localStorage.getItem("flowchart-recent-shapes") ?? "[]"), "")); } catch { /* ไม่มีที่จำ */ } }, []);
+  const rememberShape = useCallback((k: string) => {
+    setRecentShapes((cur) => { const next = pushRecentShape(cur, k); try { localStorage.setItem("flowchart-recent-shapes", JSON.stringify(next)); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ } return next; });
+  }, []);
   // ลากที่ว่าง = ลากกรอบเลือกกล่อง (เจ้าของสั่ง 2026-11-20) · เลื่อนกระดาน = Space ค้าง+ลาก / ลากคลิกขวา / ปุ่มกลาง
   //   จอสัมผัส (นิ้ว) = ลากเลื่อนเหมือนเดิม (ไม่มีเมาส์ขวา/Space ให้ใช้)
   const [coarse, setCoarse] = useState(false);
@@ -633,6 +644,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       }));
     },
     meName,
+    recentShapes,
+    setShape: (ids, target) => {
+      const set = new Set(ids);
+      setNodes((ns) => ns.map((n) => { if (!set.has(n.id)) return n; const r = reshapeNode(n.type as FlowKind, n.data, target); return r ? { ...n, type: r.type, data: r.data } : n; }));
+      if (target !== "step" && target !== "start" && target !== "question") rememberShape(target);
+    },
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
     formatNodes: (ids, op) => {
       const set = new Set(ids);
@@ -645,6 +662,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         if (op.align) d.align = op.align;
         if (op.fill !== undefined) { if (op.fill) d.fill = op.fill; else delete d.fill; }
         if (op.stroke !== undefined) { if (op.stroke) d.stroke = op.stroke; else delete d.stroke; }
+        if (op.font !== undefined) { if (op.font) d.font = op.font; else delete d.font; }
         return { ...n, data: d };
       }));
     },
@@ -661,7 +679,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape]);
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
   const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
@@ -740,6 +758,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const pending = useMemo(() => (hasTodoBox ? openTodos(nodes) : []), [hasTodoBox, nodes]);
   // ── อัตโนมัติ N: ทุกกฎบนกระดาน แยกตามสถานะ (เจ้าของสั่ง 2026-11-20 ข้อ 4) ──
   const [autoOpen, setAutoOpen] = useState(false);
+  // ฟอนต์ที่กล่องใช้ → โหลดจาก Google Fonts ครั้งเดียวต่อชุด
+  const fontKey = useMemo(() => [...new Set(nodes.map((n) => n.data.font).filter((x): x is string => !!x))].sort().join("|"), [nodes]);
+  useFontLink(googleFontsPreviewHref(fontKey ? fontKey.split("|") : []));
   const autos = useMemo(() => (locked && hideOwn ? [] : listAutos(nodes)), [locked, hideOwn, nodes]);
   const goTo = (id: string) => {
     setFindQ(""); setTodoOpen(false); setAutoOpen(false);
@@ -787,7 +808,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       <div ref={boardRef} className={`fc-board flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${readOnly ? "fc-readonly" : ""}`} style={{ height }}>
         {/* แถบเครื่องมือ — โชว์ค้างเสมอ แม้อยู่ในเต็มจอแบบซ่อนแถบ (เจ้าของสั่ง 2026-11-19 ข้อ 5) */}
         <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-200 px-2 py-1">
-          {!readOnly && FLOW_KINDS.map((k) => {
+          {!readOnly && FLOW_KINDS.filter((k) => k !== "shape").map((k) => {
             const m = FLOW_KIND_META[k];
             return (
               <button key={k} type="button" className={tb} title={t(m.hintTh, m.hintEn)}
@@ -796,6 +817,19 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
               </button>
             );
           })}
+          {!readOnly && (
+            <span className="relative">
+              <button type="button" className={`${tb} ${shapeOpen ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => setShapeOpen((v) => !v)} aria-expanded={shapeOpen}
+                title={t("รูปทรง flowchart มาตรฐาน — กดวาง หรือลากไปวางบนกระดาน", "Standard flowchart shapes — click or drag onto the board")}>
+                <Icon value="i:category" />{t("รูปทรง", "Shapes")}<Icon value="i:chevron-down" />
+              </button>
+              {shapeOpen && (
+                <span className="absolute left-0 top-9 z-30 block">
+                  <ShapePalette t={t} draggable recent={recentShapes} onPick={(k) => { addNode("shape", { shape: k }); rememberShape(k); setShapeOpen(false); }} />
+                </span>
+              )}
+            </span>
+          )}
           {!readOnly && starter && <button type="button" className={tb} onClick={insertStarter} title={t("วางแม่แบบอีกชุดทางขวาของของเดิม", "Insert the starter template to the right")}><Icon value="i:sitemap" />{t("วางแม่แบบ", "Starter")}</button>}
           {!readOnly && clipReady && <button type="button" className={tb} onClick={pasteRemembered} title={t("วางกล่องที่คัดลอกไว้ (หรือชี้ที่กระดานแล้วกด Ctrl+V)", "Paste copied boxes (or point at the board and press Ctrl+V)")}><Icon value="i:clipboard" />{t("วาง", "Paste")}</button>}
           {!readOnly && (
@@ -937,7 +971,16 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             if (!id || !r || !isFlowSide(side) || isSysId(id)) return;
             setNextMenu((cur) => (cur && cur.id === id && cur.side === side ? null : { id, side, x: e.clientX - r.left, y: e.clientY - r.top }));
           }}
-          onPointerLeave={() => { pointerRef.current = null; }}>
+          onPointerLeave={() => { pointerRef.current = null; }}
+          onDragOver={(e) => { if (!readOnly && e.dataTransfer.types.includes(SHAPE_DRAG_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+          onDrop={(e) => {
+            const k = e.dataTransfer.getData(SHAPE_DRAG_MIME);
+            if (readOnly || !k) return;
+            e.preventDefault();
+            const node = makeFlowNode("shape", rf.screenToFlowPosition({ x: e.clientX, y: e.clientY }), t, { shape: k });
+            setNodes((ns) => [...ns.map((x) => (x.selected ? { ...x, selected: false } : x)), ...toRFNodes({ ...EMPTY_FLOW_SCENE, nodes: [node] }, new Set([node.id]))]);
+            rememberShape(k); setShapeOpen(false);
+          }}>
           <FlowLockedCtx.Provider value={lockedCtx}>
           <ReactFlow<BoardNode, Edge>
             nodes={shownNodes} edges={shownEdges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
@@ -980,7 +1023,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const W = 272, H = 200;
             const left = Math.max(4, Math.min(nextMenu.x + 14, (r?.width ?? 800) - W - 4));
             const top = Math.max(4, Math.min(nextMenu.y - 24, (r?.height ?? 600) - H - 4));
-            const kinds: FlowKind[] = FLOW_KINDS.filter((k) => k !== "zone");
+            const kinds: FlowKind[] = FLOW_KINDS.filter((k) => k !== "zone" && k !== "shape");
             const ordered = recentKind && kinds.includes(recentKind) ? [recentKind, ...kinds.filter((k) => k !== recentKind)] : kinds;
             const isQ = nodesRef.current.find((n) => n.id === nextMenu.id)?.type === "question";
             return (

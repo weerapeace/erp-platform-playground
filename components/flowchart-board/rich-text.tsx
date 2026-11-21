@@ -12,6 +12,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { ColorPicker } from "@/components/color-picker";
 import { RICH_SIZES, sanitizeRich, type FlowAlign, type RichWrap } from "@/lib/flowchart-rich";
+import { FontSelect, type FontOption } from "@/components/font-select";
+import { WEB_FONT_NAMES, webFontOptions } from "@/components/website-text-pickers";
 
 const RECENT_KEY = "flowchart-recent-colors";
 function readRecent(): string[] { try { const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x) => typeof x === "string").slice(0, 8) : []; } catch { return []; } }
@@ -205,8 +207,10 @@ export function RichEditor({ initialHtml, boxW, boxH, textColor, onDone, t }: {
 }
 
 /** แถบจัดทั้งกล่อง (เลือกกล่องแล้วกด "Aa" บนแถบลอย) — ใช้ได้กับหลายกล่องพร้อมกัน */
-export type BoxFormatOp = { wrap?: RichWrap; align?: FlowAlign; fill?: string | null; stroke?: string | null; clear?: boolean };
-export function BoxFormatBar({ onApply, t, fill, stroke, textColor }: { onApply: (op: BoxFormatOp) => void; t: (th: string, en: string) => string; fill: string; stroke: string; textColor: string }) {
+export type BoxFormatOp = { wrap?: RichWrap; align?: FlowAlign; fill?: string | null; stroke?: string | null; clear?: boolean; font?: string | null };
+/** ฟอนต์ที่เลือกได้ในกล่อง = ฟอนต์ Google ชุดเดียวกับธีมเว็บ (lib/website-theme GOOGLE_FONTS) + "ฟอนต์ปกติ" */
+const BOX_FONT_OPTIONS: FontOption[] = [{ value: "", label: "ฟอนต์ปกติ", family: null }, ...webFontOptions()];
+export function BoxFormatBar({ onApply, t, fill, stroke, textColor, font = "" }: { onApply: (op: BoxFormatOp) => void; t: (th: string, en: string) => string; fill: string; stroke: string; textColor: string; font?: string }) {
   const [panel, setPanel] = useState<null | "text" | "fill" | "stroke">(null);
   const [txt, setTxt] = useState(textColor);
   return (
@@ -218,6 +222,8 @@ export function BoxFormatBar({ onApply, t, fill, stroke, textColor }: { onApply:
         <IconBtn icon="i:strikethrough" title={t("ขีดฆ่าทั้งกล่อง", "Strikethrough whole box")} onClick={() => onApply({ wrap: { strike: true } })} />
         <Sep />
         <SizeSelect title={t("ขนาดตัวอักษรทั้งกล่อง", "Font size, whole box")} onPick={(px) => onApply({ wrap: { size: px } })} />
+        <FontSelect size="sm" className="w-36" value={font} onChange={(v) => onApply({ font: v || null })} options={BOX_FONT_OPTIONS}
+          googleFonts={WEB_FONT_NAMES} title={t("ฟอนต์ทั้งกล่อง", "Font, whole box")} placeholder={t("ฟอนต์ปกติ", "Default font")} />
         <Sep />
         <IconBtn icon="i:align-left" title={t("ชิดซ้าย", "Align left")} onClick={() => onApply({ align: "left" })} />
         <IconBtn icon="i:align-center" title={t("กึ่งกลาง", "Center")} onClick={() => onApply({ align: "center" })} />

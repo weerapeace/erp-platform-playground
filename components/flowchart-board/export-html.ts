@@ -9,6 +9,7 @@ import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { sanitizeRich } from "@/lib/flowchart-rich";
 import { AUTO_STATUS_META, autoPickLabel } from "@/lib/flow-automation";
+import { flowShapeOf, flowShapeSvg } from "@/lib/flowchart-shapes";
 import { FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -87,12 +88,15 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   if (n.type === "question") {
     box = ""; pad = `${Math.round(h * 0.18)}px ${Math.round(w * 0.22)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><polygon points="50,1 99,50 50,99 1,50" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+  } else if (n.type === "shape") {
+    box = ""; pad = flowShapeOf(n.data.shape).pad;
+    shape = flowShapeSvg(n.data.shape, w, h, fillC, strokeC);
   } else if (n.type === "storage" && !place) {
     box = ""; pad = `${Math.round(h * 0.22)}px ${Math.round(w * 0.1)}px ${Math.round(h * 0.1)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
   const align = n.type === "note" || n.type === "todo" || n.type === "auto" ? "flex-start" : "center";
-  return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;
+  return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}${n.data.font ? `font-family:'${n.data.font}',${FONT};` : ""}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;
 }
 
 /** กระดานทั้งหมด → HTML (ขนาดเท่ากรอบที่ครอบทุกกล่อง + ขอบ 40px) */

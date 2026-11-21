@@ -13,6 +13,9 @@ import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { plainToRich, richToPlain, sanitizeRich } from "@/lib/flowchart-rich";
 import { BoxFormatBar, RichEditor, RichText, type BoxFormatOp } from "./rich-text";
 import type { PlanRuleCheck } from "@/lib/storage-policy";
+import { flowShapeOf } from "@/lib/flowchart-shapes";
+import { RESHAPE_KINDS } from "@/lib/flowchart";
+import { ShapePalette } from "./shape-palette";
 import { AUTO_ACTIONS, AUTO_ACTS_MAX, AUTO_STATUSES, AUTO_STATUS_META, AUTO_TRIGGERS, autoAction, autoTrigger, type AutoPick, type AutoRef, type FlowAuto } from "@/lib/flow-automation";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
@@ -69,6 +72,10 @@ export type FlowBoardActions = {
   removeEdge: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
   editRule: (id: string) => void;
+  /** เปลี่ยนรูปทรงกล่อง (กล่อง · เริ่ม/จบ · คำถาม · รูปทรง flowchart) — ข้อความ/สี/เส้นเหมือนเดิม */
+  setShape: (ids: string[], target: string) => void;
+  /** รูปทรงที่ใช้ล่าสุด (แถวบนของแผง) */
+  recentShapes: string[];
   /** ชื่อคนที่ล็อกอินอยู่ (กล่องรายการงานจำว่าใครติ๊ก) */
   meName: string;
   /** ผลเทียบแผนกับกฎที่ผูก · null = ไม่ได้ผูก · "loading" = กำลังโหลดกฎ */
@@ -143,7 +150,9 @@ function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: 
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes } = useBoard();
+  const [shapeOpen, setShapeOpen] = useState(false);
+  const canReshape = !!single && RESHAPE_KINDS.includes(single.kind);
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const iconScale = iconScaleOf(ids);
   const [fmt, setFmt] = useState(false);
@@ -153,7 +162,7 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
     <div className="relative">
     <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
       {single?.kind !== "zone" && (
-        <button type="button" className={`${btn} ${fmt ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => setFmt((v) => !v)}
+        <button type="button" className={`${btn} ${fmt ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => { setFmt((v) => !v); setShapeOpen(false); }}
           title={t("จัดข้อความ / สีพื้น / สีเส้นขอบ ทั้งกล่อง" + (single ? "" : " (ทุกกล่องที่เลือก)") + " · จัดเฉพาะคำ = ดับเบิลคลิกกล่อง", "Format text / fill / border for the whole box · double-click to format words")}>
           <Icon value="i:typography" />
         </button>
@@ -165,6 +174,12 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
           style={{ background: FLOW_PALETTE[c].fill, borderColor: FLOW_PALETTE[c].stroke }} />
       ))}
       <span className="mx-1 h-5 w-px bg-slate-200" />
+      {canReshape && (
+        <button type="button" className={`${btn} ${shapeOpen ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => { setShapeOpen((v) => !v); setFmt(false); }}
+          title={t("เปลี่ยนรูปทรงกล่องนี้ — ข้อความ สี และเส้นที่ต่ออยู่เหมือนเดิม", "Change this box's shape — text, colour and lines stay")}>
+          <Icon value="i:category" />{t("รูปทรง", "Shape")}
+        </button>
+      )}
       {single && <button type="button" className={btn} onClick={single.onEdit} title={single.kind === "file" ? t("เลือกประเภทไฟล์ / แก้ชื่อ (หรือดับเบิลคลิกกล่อง)", "Choose file types / rename (or double-click)") : t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>}
       {single?.kind === "storage" && (
         <>
@@ -196,8 +211,14 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
     </div>
     {fmt && (
       <div className="absolute left-0 top-full z-20 mt-1">
-        <BoxFormatBar t={t} onApply={(op) => formatNodes(ids, op)}
+        <BoxFormatBar t={t} onApply={(op) => formatNodes(ids, op)} font={single?.data.font ?? ""}
           fill={single?.data.fill ?? pal.fill} stroke={single?.data.stroke ?? pal.stroke} textColor={pal.text} />
+      </div>
+    )}
+    {shapeOpen && single && (
+      <div className="absolute left-0 top-full z-20 mt-1">
+        <ShapePalette t={t} includeBasic recent={recentShapes} current={single.kind === "shape" ? single.data.shape : single.kind}
+          onPick={(k) => { setShape(ids, k); setShapeOpen(false); }} />
       </div>
     )}
     </div>
@@ -429,10 +450,19 @@ function AutoCard({ id, data, color, width, height, editingTitle, onTitleDone }:
 }
 
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
-function ShapeBg({ kind, color, fill, stroke }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string }) {
+function ShapeBg({ kind, color, fill, stroke, shape }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string; shape?: string }) {
   const p0 = FLOW_PALETTE[color];
   const p = { ...p0, fill: fill ?? p0.fill, stroke: stroke ?? p0.stroke };
   const common = { fill: p.fill, stroke: p.stroke, strokeWidth: 2, vectorEffect: "non-scaling-stroke" as const };
+  if (kind === "shape") {
+    const s = flowShapeOf(shape);
+    return (
+      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+        {s.fill.map((d) => <path key={d} d={d} {...common} />)}
+        {(s.line ?? []).map((d) => <path key={d} d={d} fill="none" stroke={p.stroke} strokeWidth={2} vectorEffect="non-scaling-stroke" />)}
+      </svg>
+    );
+  }
   if (kind === "question") return (
     <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
       <polygon points="50,1 99,50 50,99 1,50" {...common} />
@@ -491,10 +521,10 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
   // กล่องไฟล์ + ที่เก็บแบบมีไอคอน = ไม่มีกรอบ (ไอคอน + ชื่อ) · ที่เก็บไม่มีไอคอน = ทรงกระบอกเดิม
   const frameless = kind === "file" || kind === "text" || !!place;
   const boxStyle: React.CSSProperties =
-    kind === "question" || kind === "storage" || frameless ? {}
+    kind === "question" || kind === "storage" || kind === "shape" || frameless ? {}
     : { background: data.fill ?? pal.fill, border: `2px solid ${data.stroke ?? pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
-  const pad = kind === "todo" || kind === "auto" ? "0" : frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
+  const pad = kind === "shape" ? flowShapeOf(data.shape).pad : kind === "todo" || kind === "auto" ? "0" : frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
   // ไอคอนโตตามกล่อง (lib/flowchart flowIconSizes — สูตรเดียวกับตอนบันทึกเป็นรูป)
   const iconBase = iconBoxBaseSize({ type: kind, data });
@@ -585,7 +615,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
       )}
       <div
         className={`fc-node relative flex h-full w-full justify-center ${kind === "note" || kind === "todo" || kind === "auto" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
-        style={{ ...boxStyle, padding: pad }}
+        style={{ ...boxStyle, padding: pad, ...(data.font ? { fontFamily: `"${data.font}", sans-serif` } : {}) }}
         title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : kind === "page" && data.href ? t(`ดับเบิลคลิก = เปิดหน้า ${data.href}`, `Double-click to open ${data.href}`) : undefined}
         onDoubleClick={(e) => {
           if (kind === "folder") { if (data.path) openFolder(data.path); return; }   // โฟลเดอร์: ดับเบิลคลิก = เปิด (แก้ผ่านปุ่ม "แก้")
@@ -594,7 +624,7 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           e.stopPropagation(); startEdit();
         }}
       >
-        {!frameless && <ShapeBg kind={kind} color={color} fill={data.fill} stroke={data.stroke} />}
+        {!frameless && <ShapeBg kind={kind} color={color} fill={data.fill} stroke={data.stroke} shape={data.shape} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {kind === "storage" && data.rule && <RuleChip check={ruleCheck(data)} onClick={readOnly ? undefined : () => editRule(id)} />}
         {editing && kind !== "todo" && kind !== "auto" && (
