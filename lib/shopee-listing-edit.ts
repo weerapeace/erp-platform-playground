@@ -6,10 +6,15 @@
  *                                     เปิด/ปิดขาย → v2.product.unlist_item (ปิด = UNLIST · เปิด = กลับเป็น NORMAL)
  *   เฟส 4B ราคาตั้ง (update_price) · เฟส 4C รูปสินค้า (media_space.upload_image + update_item image) · ตัวเลือก = ดูอย่างเดียว · สต๊อก = ไม่แก้ (BigSeller ยังซิงค์อยู่)
  * กติกา Shopee (เอกสาร open.shopee.com อ่าน 2026-11-14):
- *   - update_item: ทุกช่องไม่บังคับยกเว้น item_id · description_type extended (ร้าน whitelist) ต้องส่ง description_info แทน → เฟสนี้แก้เฉพาะแบบ normal
+ *   - update_item: ทุกช่องไม่บังคับยกเว้น item_id · description_type extended (ร้าน whitelist) ต้องส่ง description_info แทน description
+ *     ✅ 2026-11-21 แก้แบบ extended ได้แล้ว (ข้อความ + รูปในรายละเอียด · แบบ A รูปต่อท้าย) — planShopeeEdit({ descImages }) · route ฝากรูป (scene desc) แล้วแทน image_ref → image_id
  *   - unlist_item: item_list ≤50 · สินค้าที่อยู่ในโปรโมชัน "ปิดขายไม่ได้" · รอตรวจ/ถูกแบน ปิด/เปิดไม่ได้ · ผลรายตัวอยู่ใน failure_list (HTTP 200)
  */
 import type { ShopeeSlimModel } from "@/lib/shopee";
+
+/** รูปในรายละเอียด (extended) — ใช้ทั้งลงสินค้าใหม่ (lib/shopee-create-plan) และแก้สินค้าที่ลงแล้ว · จำนวนสูงสุดยังไม่ยืนยันจากเอกสาร (ตั้ง 12 ไว้ก่อน) */
+export const SHOPEE_DESC_MAX_IMAGES = 12;
+export const SHOPEE_DESC_MIN_WIDTH = 800;
 
 export type ShopeeLimits = { nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null; priceMin?: number | null; priceMax?: number | null };
 export type ShopeeModelView = { modelId: string; sku: string | null; label: string | null; price: number | null; originalPrice: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน — แก้ราคาตัวนี้ไม่ได้ */ promo?: boolean };
@@ -20,8 +25,10 @@ export type ShopeeListingView = {
   status: string;
   description: string;
   descriptionType: string;
-  /** แก้รายละเอียดได้ไหม (แบบ extended = ร้าน whitelist ต้องใช้ฟอร์มอื่น → เฟสนี้ดูอย่างเดียว) */
+  /** แก้รายละเอียดได้ไหม (2026-11-21: แบบ extended แก้ได้แล้ว — ส่ง description_info) */
   descriptionEditable: boolean;
+  /** รูปในรายละเอียด (แบบ extended · เรียงตามที่ขึ้นบนร้าน) */
+  descriptionImages: { id: string; url: string | null }[];
   images: string[];
   /** รหัสรูปบน Shopee เรียงตรงกับ images (ใช้ส่ง update_item · ว่าง = Shopee ไม่ส่งรหัสมา) */
   imageIds: string[];
@@ -65,14 +72,16 @@ export function shopeeLimitsOf(j: Obj | null): ShopeeLimits | null {
   return Object.values(out).some((v) => v != null) ? out : null;
 }
 
-/** ข้อความรายละเอียดจากคำตอบ get_item_base_info (normal = description · extended = ต่อข้อความใน field_list) */
-export function shopeeDescriptionOf(base: Obj): { text: string; type: string } {
+/** ข้อความรายละเอียดจากคำตอบ get_item_base_info (normal = description · extended = ต่อข้อความใน field_list + รูป) */
+export function shopeeDescriptionOf(base: Obj): { text: string; type: string; images: { id: string; url: string | null }[] } {
   const type = (str(base.description_type) ?? "normal").toLowerCase();
   if (type === "extended") {
     const fields = arr(obj(obj(base.description_info)?.extended_description)?.field_list).map(obj).filter((x): x is Obj => !!x);
-    return { text: fields.filter((f) => str(f.field_type) === "text").map((f) => String(f.text ?? "")).join("\n").trim(), type };
+    const images = fields.filter((f) => str(f.field_type) === "image").map((f) => obj(f.image_info)).filter((x): x is Obj => !!x)
+      .map((i) => ({ id: str(i.image_id) ?? "", url: str(i.image_url) })).filter((x) => x.id);
+    return { text: fields.filter((f) => str(f.field_type) === "text").map((f) => String(f.text ?? "")).join("\n").trim(), type, images };
   }
-  return { text: String(base.description ?? ""), type };
+  return { text: String(base.description ?? ""), type, images: [] };
 }
 
 /**
@@ -92,7 +101,7 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
   const imgs = arr(img?.image_url_list).map((u, i) => ({ url: str(u), id: imgIds[i] ?? null })).filter((x): x is { url: string; id: string | null } => !!x.url);
   return {
     itemId, name: String(base.item_name ?? ""), status: (str(base.item_status) ?? "").toUpperCase(),
-    description: desc.text, descriptionType: desc.type, descriptionEditable: desc.type !== "extended",
+    description: desc.text, descriptionType: desc.type, descriptionEditable: true, descriptionImages: desc.images,
     images: imgs.map((x) => x.url), imageIds: imgs.map((x) => x.id ?? ""), imageRatio: str(img?.image_ratio),
     categoryId: base.category_id != null ? String(base.category_id) : null,
     brand: str(obj(base.brand)?.original_brand_name), itemSku: str(base.item_sku),
@@ -124,9 +133,10 @@ export function shopeeTextLength(s: string): number {
 }
 
 // ───────── แผนแก้ชื่อ / รายละเอียด ─────────
-export type ShopeeEditInput = { name?: string | null; description?: string | null };
+/** descImages = รูปในรายละเอียดชุดใหม่ ("spi:<image_id>" รูปเดิม · "r2:<key>" รูปจากระบบ) · null/ไม่ส่ง = คงเดิม */
+export type ShopeeEditInput = { name?: string | null; description?: string | null; descImages?: string[] | null };
 export type ShopeeEditPlan = {
-  body: { item_name?: string; description?: string };
+  body: { item_name?: string; description?: string; description_type?: "extended"; description_info?: { extended_description: { field_list: Record<string, unknown>[] } } };
   changes: { label: string; before: string; after: string }[];
   errors: string[];
   warnings: string[];
@@ -148,17 +158,37 @@ export function planShopeeEdit(view: ShopeeListingView, input: ShopeeEditInput):
       out.changes.push({ label: "ชื่อสินค้า", before: clip(view.name), after: clip(name) });
     }
   }
+  // รายละเอียด: ข้อความ + รูปในรายละเอียด (แบบ extended ส่ง description_info · แบบข้อความส่ง description)
+  let descText = view.description.trim();
+  let textChanged = false;
   if (input.description != null) {
     const desc = input.description.replace(/\r\n/g, "\n").trim();
     if (desc !== view.description.trim()) {
-      if (!view.descriptionEditable) out.errors.push("รายละเอียดสินค้านี้เป็นแบบมีรูป (extended) — แก้ใน Shopee Seller Centre (ระบบยังแก้ได้เฉพาะแบบข้อความ)");
       const n = shopeeTextLength(desc);
       if (!desc) out.errors.push("รายละเอียดว่างไม่ได้");
       else if (L?.descMin != null && n < L.descMin) out.errors.push(`รายละเอียดสั้นไป (${n} ตัวอักษร · Shopee ต้องอย่างน้อย ${L.descMin})`);
       else if (L?.descMax != null && n > L.descMax) out.errors.push(`รายละเอียดยาวไป (${n} ตัวอักษร · Shopee รับได้ไม่เกิน ${L.descMax})`);
-      out.body.description = desc;
+      descText = desc; textChanged = true;
       out.changes.push({ label: "รายละเอียด", before: `${shopeeTextLength(view.description)} ตัวอักษร`, after: `${n} ตัวอักษร` });
     }
+  }
+  const curImgs = (view.descriptionImages ?? []).map((x) => shopeeImageRef(x.id));
+  const wantImgs = input.descImages != null ? input.descImages.map((x) => String(x ?? "").trim()).filter(Boolean) : null;
+  const imgsChanged = wantImgs != null && wantImgs.join("\n") !== curImgs.join("\n");
+  if (textChanged || imgsChanged) {
+    const finalImgs = wantImgs ?? curImgs;
+    if (view.descriptionType === "extended" || finalImgs.length) {
+      if (finalImgs.length > SHOPEE_DESC_MAX_IMAGES) out.errors.push(`รูปในรายละเอียดได้ไม่เกิน ${SHOPEE_DESC_MAX_IMAGES} รูป (ตอนนี้ ${finalImgs.length} รูป)`);
+      if (new Set(finalImgs).size !== finalImgs.length) out.errors.push("รูปในรายละเอียดซ้ำกัน — เอารูปที่ซ้ำออกก่อน");
+      if (finalImgs.some((r) => !shopeeImageIdOfRef(r) && !shopeeR2KeyOfRef(r))) out.errors.push("มีรูปในรายละเอียดที่ระบบไม่รู้จัก — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่");
+      out.body.description_type = "extended";
+      out.body.description_info = { extended_description: { field_list: [
+        { field_type: "text", text: descText },
+        ...finalImgs.map((ref) => ({ field_type: "image", image_info: { image_ref: ref } })),
+      ] } };
+      if (view.descriptionType !== "extended") out.warnings.push("รายละเอียดจะเปลี่ยนเป็นแบบมีรูป (ข้อความ + รูปต่อท้าย)");
+    } else out.body.description = descText;
+    if (imgsChanged) out.changes.push({ label: "รูปในรายละเอียด", before: `${curImgs.length} รูป`, after: `${finalImgs.length} รูป` });
   }
   if (out.changes.length && view.status === "REVIEWING") out.warnings.push("สินค้านี้กำลังรอ Shopee ตรวจ — แก้แล้วอาจต้องรอตรวจต่อ");
   if (out.changes.length && view.status === "BANNED") out.warnings.push("สินค้านี้ถูก Shopee แบน — แก้ตามที่ Shopee แจ้งแล้วอาจต้องรอตรวจใหม่");
@@ -195,6 +225,27 @@ export const SHOPEE_MAX_IMAGES = 9;
 export const shopeeImageRef = (id: string): string => `spi:${id}`;
 export const shopeeImageIdOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("spi:") ? ref.slice(4) || null : null);
 export const shopeeR2KeyOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) || null : null);
+
+/** รูปในรายละเอียดของ body (extended) ที่ต้องฝากใหม่ ("r2:" เท่านั้น — "spi:" = รูปเดิมบน Shopee) */
+export function shopeeEditDescUploadRefs(body: ShopeeEditPlan["body"]): string[] {
+  const fl = body.description_info?.extended_description.field_list ?? [];
+  return [...new Set(fl.map((f) => String((f.image_info as Record<string, unknown> | undefined)?.image_ref ?? "")).filter((r) => !!shopeeR2KeyOfRef(r)))];
+}
+/** แทน image_ref ด้วย image_id (รูปเดิม = รหัสใน ref · รูปใหม่ = idOf ที่ฝากแล้ว) → body ที่ส่ง Shopee ได้จริง · ข้อความ (text) ของ extended */
+export function shopeeEditResolveDesc(body: ShopeeEditPlan["body"], idOf: Map<string, string>): { body: ShopeeEditPlan["body"]; text: string | null; imageIds: string[] } {
+  if (!body.description_info) return { body, text: body.description ?? null, imageIds: [] };
+  const imageIds: string[] = [];
+  let text: string | null = null;
+  const field_list = body.description_info.extended_description.field_list.flatMap((f) => {
+    if (String(f.field_type) === "text") { text = String(f.text ?? ""); return [f]; }
+    const ref = String((f.image_info as Record<string, unknown> | undefined)?.image_ref ?? "");
+    const id = shopeeImageIdOfRef(ref) ?? idOf.get(ref) ?? null;
+    if (!id) return [];
+    imageIds.push(id);
+    return [{ field_type: "image", image_info: { image_id: id } }];
+  });
+  return { body: { ...body, description_info: { extended_description: { field_list } } }, text, imageIds };
+}
 /** จำนวนรูปสูงสุดของร้าน (get_item_limit) · ไม่รู้ = 9 */
 export const shopeeImagesMax = (v: Pick<ShopeeListingView, "limits">): number => v.limits?.imagesMax ?? SHOPEE_MAX_IMAGES;
 

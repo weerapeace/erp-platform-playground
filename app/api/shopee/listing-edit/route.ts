@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { shopeeErrorText, shopeeUpdateItem } from "@/lib/shopee";
-import { planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
+import { shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { loadShopeeListingLive, refetchShopeeLive, saveShopeeSlimCopy, shopeeUploadRef, shopeeWriteEcho } from "../shared";
@@ -35,13 +35,17 @@ const CONFLICT = "บนร้าน Shopee เปลี่ยนไปหลั
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { listing_id?: string; before?: { name?: string; description?: string }; edit?: { name?: string | null; description?: string | null }; images?: { before_ids?: unknown; refs?: unknown } };
+  let body: { listing_id?: string; before?: { name?: string; description?: string }; edit?: { name?: string | null; description?: string | null }; images?: { before_ids?: unknown; refs?: unknown };
+    /** รูปในรายละเอียด (extended · 2026-11-21): before_ids = รหัสรูปเดิมตอนเปิด (กันทับ) · refs = ชุดใหม่ "spi:<id>" / "r2:<key>" */
+    desc_images?: { before_ids?: unknown; refs?: unknown } };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const wantText = !!body.edit && !!body.before;
   const images = body.images ? { beforeIds: strList(body.images.before_ids), refs: strList(body.images.refs) } : null;
   if (images && (!images.beforeIds || !images.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปไม่ครบ (before_ids + refs)" }, 400);
-  if (!listingId || (!wantText && !images)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
+  const descImgs = body.desc_images ? { beforeIds: strList(body.desc_images.before_ids), refs: strList(body.desc_images.refs) } : null;
+  if (descImgs && (!descImgs.beforeIds || !descImgs.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปในรายละเอียดไม่ครบ (before_ids + refs)" }, 400);
+  if (!listingId || (!wantText && !images && !descImgs)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
 
   const admin = supabaseAdmin();
   const r = await loadShopeeListingLive(admin, listingId, user?.id ?? null);
@@ -53,8 +57,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     || (body.edit!.description != null && norm(body.before!.description) !== norm(view.description)));
   if (changedOnShop) return reply({ ok: false, view, error: `ชื่อหรือรายละเอียด${CONFLICT}` }, 409);
   if (images && images.beforeIds!.join("\n") !== view.imageIds.join("\n")) return reply({ ok: false, view, error: `รูปสินค้า${CONFLICT}` }, 409);
+  if (descImgs && descImgs.beforeIds!.join("\n") !== view.descriptionImages.map((x) => x.id).join("\n")) return reply({ ok: false, view, error: `รูปในรายละเอียด${CONFLICT}` }, 409);
 
-  const plan = planShopeeEdit(view, wantText ? { name: body.edit!.name ?? null, description: body.edit!.description ?? null } : {});
+  const plan = planShopeeEdit(view, { ...(wantText ? { name: body.edit!.name ?? null, description: body.edit!.description ?? null } : {}), ...(descImgs ? { descImages: descImgs.refs! } : {}) });
   const imgPlan = images ? planShopeeImages(view, images.refs!) : null;
   const imgChanged = !!imgPlan?.changed;
   const errors = [...plan.errors, ...(imgChanged ? imgPlan!.errors : [])];
@@ -63,7 +68,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ประวัติแบบกลาง "จากอะไรเป็นอะไร" (auditDiff) + ป้ายภาษาไทย (ลิ้นชักอ่าน label)
   const before: Record<string, unknown> = { ...(plan.body.item_name != null ? { item_name: view.name } : {}), ...(plan.body.description != null ? { description: view.description } : {}) };
-  const changes: Record<string, unknown>[] = auditDiff(before, plan.body).map((c) => ({ ...c, label: c.field === "item_name" ? "ชื่อสินค้า" : "รายละเอียด" }));
+  const changes: Record<string, unknown>[] = auditDiff(before, { ...(plan.body.item_name != null ? { item_name: plan.body.item_name } : {}), ...(plan.body.description != null ? { description: plan.body.description } : {}) })
+    .map((c) => ({ ...c, label: c.field === "item_name" ? "ชื่อสินค้า" : "รายละเอียด" }));
+  for (const c of plan.changes.filter((x) => x.label === "รูปในรายละเอียด" || (x.label === "รายละเอียด" && plan.body.description_info))) {
+    changes.push({ field: c.label === "รายละเอียด" ? "description_info.text" : "description_info.images", label: c.label, old: c.label === "รายละเอียด" ? view.description : view.descriptionImages.map((x) => x.id), new: c.label === "รายละเอียด" ? (plan.body.description_info?.extended_description.field_list.find((f) => f.field_type === "text")?.text ?? null) : descImgs?.refs ?? null, text: `${c.before} → ${c.after}` });
+  }
   if (imgChanged) changes.push({ field: "image_id_list", label: "รูปสินค้า", old: view.imageIds, new: imgPlan!.refs, text: `${imgPlan!.changes[0]?.before ?? ""} → ${imgPlan!.changes[0]?.after ?? ""}` });
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
@@ -84,8 +93,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
   }
+  // รูปในรายละเอียดใหม่ → ฝากแบบคงสัดส่วน (scene desc) · ไม่ผ่าน = หยุด ยังไม่แก้สินค้า
+  const descUp = new Map<string, string>();
+  for (const ref of shopeeEditDescUploadRefs(plan.body)) {
+    try { descUp.set(ref, (await shopeeUploadRef(ref, "raw")).imageId); }
+    catch (e) {
+      const error = `ฝากรูปในรายละเอียดกับ Shopee ไม่สำเร็จ (${descUp.size + 1}): ${(e as Error).message} — ยังไม่ได้แก้สินค้า`;
+      await audit({ ok: false, error, raw_error: (e as Error).message, uploaded: uploaded.size + descUp.size });
+      return reply({ ok: false, view, error }, 502);
+    }
+  }
+  const descResolved = shopeeEditResolveDesc(plan.body, descUp);
   const sentIds = imgChanged ? imgPlan!.refs.map((ref) => shopeeImageIdOfRef(ref) ?? uploaded.get(ref)!.imageId) : null;
-  const patch = { ...plan.body, ...(sentIds ? { image: { image_id_list: sentIds, ...(ratio === "3:4" ? { image_ratio: "3:4" } : {}) } } : {}) };
+  const patch = { ...descResolved.body, ...(sentIds ? { image: { image_id_list: sentIds, ...(ratio === "3:4" ? { image_ratio: "3:4" } : {}) } } : {}) };
+  const wantDescText = plan.body.description_info ? descResolved.text : plan.body.description ?? null;
 
   let echo: ReturnType<typeof shopeeWriteEcho>;
   try {
@@ -105,7 +126,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const imagesLanded = (ids: string[]) => !sentIds || (ids.length === sentIds.length && sentIds.every((id, i) => !kept.has(id) || ids[i] === id));
   const landed = (l: { base: Record<string, unknown> }) => {
     const v2 = shopeeListingView(l.base, null);
-    return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (plan.body.description == null || norm(v2.description) === norm(plan.body.description))
+    return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (wantDescText == null || norm(v2.description) === norm(wantDescText))
+      && (!plan.body.description_info || v2.descriptionImages.length === descResolved.imageIds.length)
       && imagesLanded(v2.imageIds);
   };
   const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, landed);
@@ -123,6 +145,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ...fresh.base,
       ...(plan.body.item_name != null ? { item_name: plan.body.item_name } : {}),
       ...(plan.body.description != null ? { description: plan.body.description } : {}),
+      ...(descResolved.body.description_info ? { description_type: "extended", description_info: descResolved.body.description_info } : {}),
       ...(sentIds && sentUrls ? { image: { ...((fresh.base.image as Record<string, unknown> | undefined) ?? {}), image_id_list: sentIds, image_url_list: sentUrls } } : {}),
     },
   }) : null;

@@ -27,7 +27,7 @@ import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
 import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
-import { shopeeTextLength } from "@/lib/shopee-listing-edit";
+import { SHOPEE_DESC_MAX_IMAGES, SHOPEE_DESC_MIN_WIDTH, shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
 
@@ -43,8 +43,7 @@ const DEFAULT_IMAGES_MAX = 9;
  * เจ้าของเลือก 2026-11-21 แบบ A (รูปต่อท้ายข้อความ) + ข้อ 1 (ไม่มีรูป Description = รูปสินค้า) · 2 (เตือนรูปไม่คม) · 3 (ใช้ชุดเดียวกับ Lazada)
  * จำนวนสูงสุดยังไม่ยืนยันจากเอกสาร Shopee → ตั้ง 12 ไว้ก่อน (เกิน = Shopee ตอบเหตุผล) · รูปกว้างไม่ถึง 800px = เตือน
  */
-export const SHOPEE_DESC_MAX_IMAGES = 12;
-export const SHOPEE_DESC_MIN_WIDTH = 800;
+export { SHOPEE_DESC_MAX_IMAGES, SHOPEE_DESC_MIN_WIDTH };
 /** ✅ ลองจริง 2026-11-15 (MGW318 2 รูป): Shopee ปฏิเสธ "The number of product images must be between 3 and 9" → อย่างน้อย 3 (ร้านบอกช่วงเองได้ใน get_item_limit) */
 export const SHOPEE_MIN_IMAGES = 3;
 const DEFAULT_DESC_MAX = 3000;

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   planShopeeDisplay, planShopeeEdit, shopeeDescriptionOf, shopeeLimitsOf, shopeeListingView, shopeeStatusBadge, shopeeTextLength, shopeeUnlistErrors,
   applyShopeeBulkPrice, planShopeePrices, shopeePriceBatches, shopeePriceResult, shopeePriceRowsFromView,
-  planShopeeImages, shopeeImagesMax, shopeeRefsForSend, shopeeImageIdOfRef, shopeeR2KeyOfRef,
+  planShopeeImages, shopeeImagesMax, shopeeRefsForSend, shopeeImageIdOfRef, shopeeR2KeyOfRef, shopeeEditDescUploadRefs, shopeeEditResolveDesc,
   type ShopeeListingView,
 } from "@/lib/shopee-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
@@ -32,10 +32,10 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
     expect(odd.images).toEqual(["https://u/b", "https://u/c"]);
     expect(odd.imageIds).toEqual(["yb", ""]);
   });
-  test("รายละเอียดแบบ extended = ต่อข้อความ + แก้ไม่ได้", () => {
+  test("รายละเอียดแบบ extended = ต่อข้อความ + อ่านรูป · แก้ได้แล้ว (2026-11-21)", () => {
     const d = shopeeDescriptionOf({ description_type: "extended", description_info: { extended_description: { field_list: [{ field_type: "text", text: "บรรทัด 1" }, { field_type: "image", image_info: { image_id: "x" } }, { field_type: "text", text: "บรรทัด 2" }] } } });
-    expect(d).toEqual({ text: "บรรทัด 1\nบรรทัด 2", type: "extended" });
-    expect(shopeeListingView({ ...BASE, description_type: "extended" }, null)!.descriptionEditable).toBe(false);
+    expect(d).toEqual({ text: "บรรทัด 1\nบรรทัด 2", type: "extended", images: [{ id: "x", url: null }] });
+    expect(shopeeListingView({ ...BASE, description_type: "extended" }, null)!.descriptionEditable).toBe(true);
   });
   test("ช่วงความยาวจาก get_item_limit · อ่านไม่ได้ = null", () => {
     expect(shopeeLimitsOf({ response: { item_name_length_limit: { min_limit: 10, max_limit: 120 }, item_description_length_limit: { min_limit: 20, max_limit: 3000 }, item_image_count_limit: { max_limit: 9 } } }))
@@ -69,8 +69,10 @@ describe("Shopee ลิ้นชัก — แผนแก้ชื่อ/รา
   test("ไม่รู้ช่วง = ให้ Shopee ตรวจเอง", () => {
     expect(planShopeeEdit(view({ limits: null }), { name: "สั้น" }).errors).toEqual([]);
   });
-  test("รายละเอียดแบบ extended แก้ไม่ได้", () => {
-    expect(planShopeeEdit(view({ descriptionEditable: false, descriptionType: "extended" }), { description: "ใหม่ยาวพอสมควรเกินยี่สิบตัวอักษรแน่นอน" }).errors[0]).toContain("Seller Centre");
+  test("รายละเอียดแบบ extended แก้ได้ (ส่ง description_info คงรูปเดิม · 2026-11-21)", () => {
+    const p = planShopeeEdit(view({ descriptionType: "extended", descriptionImages: [{ id: "i1", url: null }] }), { description: "ใหม่ยาวพอสมควรเกินยี่สิบตัวอักษรแน่นอน" });
+    expect(p.errors).toEqual([]);
+    expect(p.body.description_info!.extended_description.field_list).toEqual([{ field_type: "text", text: "ใหม่ยาวพอสมควรเกินยี่สิบตัวอักษรแน่นอน" }, { field_type: "image", image_info: { image_ref: "spi:i1" } }]);
   });
   test("รอตรวจ/ถูกแบน = เตือน", () => {
     expect(planShopeeEdit(view({ status: "REVIEWING" }), { name: "Louis Montini ชื่อใหม่ยาวพอ" }).warnings[0]).toContain("รอ Shopee ตรวจ");
@@ -221,5 +223,38 @@ describe("Shopee เฟส 4C — รูปสินค้า", () => {
   });
   test("ประวัติ: แก้รูป = ป้าย รูปสินค้า", () => {
     expect(listingHistoryText({ source: "shopee_listing_edit", ok: true, changes: [{ label: "รูปสินค้า", text: "2 รูป → 3 รูป" }] })).toBe("แก้บน Shopee: รูปสินค้า");
+  });
+});
+
+describe("Shopee ลิ้นชัก — รายละเอียดแบบมีรูป (extended · 2026-11-21 LY22)", () => {
+  const EXT = { ...BASE, description_type: "extended", description_info: { extended_description: { field_list: [{ field_type: "text", text: "ข้อความเดิมของสินค้า" }, { field_type: "image", image_info: { image_id: "old1" } }] } } };
+  test("ใส่รูปในรายละเอียด: ส่ง description_info (ข้อความเดิม + รูป) · ฝากเฉพาะ r2 · แทนเป็น image_id", () => {
+    const v = shopeeListingView(EXT, null, LIMITS)!;
+    const p = planShopeeEdit(v, { descImages: ["spi:old1", "r2:library/d1.jpeg"] });
+    expect(p.errors).toEqual([]);
+    expect(p.body.description).toBeUndefined();
+    expect(p.body.description_type).toBe("extended");
+    expect(p.changes).toEqual([{ label: "รูปในรายละเอียด", before: "1 รูป", after: "2 รูป" }]);
+    expect(shopeeEditDescUploadRefs(p.body)).toEqual(["r2:library/d1.jpeg"]);
+    const r = shopeeEditResolveDesc(p.body, new Map([["r2:library/d1.jpeg", "new1"]]));
+    expect(r.text).toBe("ข้อความเดิมของสินค้า");
+    expect(r.imageIds).toEqual(["old1", "new1"]);
+    expect(r.body.description_info!.extended_description.field_list).toEqual([
+      { field_type: "text", text: "ข้อความเดิมของสินค้า" }, { field_type: "image", image_info: { image_id: "old1" } }, { field_type: "image", image_info: { image_id: "new1" } },
+    ]);
+  });
+  test("สินค้าแบบข้อความ ใส่รูป = เปลี่ยนเป็นแบบมีรูป + เตือน · แก้แค่ข้อความ = ส่ง description แบบเดิม", () => {
+    const normal = planShopeeEdit(view(), { descImages: ["r2:a.jpg"] });
+    expect(normal.body.description_type).toBe("extended");
+    expect(normal.warnings.some((w) => w.includes("แบบมีรูป"))).toBe(true);
+    const plain = planShopeeEdit(view(), { description: "รายละเอียดใหม่ที่ยาวพอสำหรับร้านค้าแน่นอน" });
+    expect(plain.body.description_type).toBeUndefined();
+    expect(typeof plain.body.description).toBe("string");
+  });
+  test("กันพลาด: เกิน 12 รูป / ซ้ำ / รูปไม่รู้จัก", () => {
+    const v = shopeeListingView(EXT, null, LIMITS)!;
+    expect(planShopeeEdit(v, { descImages: Array.from({ length: 13 }, (_, i) => `r2:${i}.jpg`) }).errors.join()).toContain("ไม่เกิน 12");
+    expect(planShopeeEdit(v, { descImages: ["r2:a.jpg", "r2:a.jpg"] }).errors.join()).toContain("ซ้ำ");
+    expect(planShopeeEdit(v, { descImages: ["https://x/y.jpg"] }).errors.join()).toContain("ไม่รู้จัก");
   });
 });

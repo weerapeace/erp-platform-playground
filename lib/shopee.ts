@@ -537,10 +537,11 @@ export async function shopeeInitTierVariation(accessToken: string, shopId: strin
  * ฝากแล้วยังไม่แก้สินค้า (รูปค้างในคลังของ Shopee จนกว่าจะส่ง update_item)
  * ✅ ลองจริง 2026-11-15 (BPU02-01): ได้ image_id "sg-11134201-…" · update_item เก็บรหัสนี้ตามเดิม (ดึงกลับเห็นรหัสเดียวกัน)
  */
-export async function shopeeUploadImage(bytes: ArrayBuffer, name: string, contentType: string, ratio: "1:1" | "3:4" = "1:1"): Promise<{ imageId: string; url: string | null }> {
+/** scene: "normal" = รูปสินค้า (Shopee ปรับเป็นจัตุรัส) · "desc" = รูปในรายละเอียดแบบ extended (ไม่ปรับรูป) */
+export async function shopeeUploadImage(bytes: ArrayBuffer, name: string, contentType: string, ratio: "1:1" | "3:4" = "1:1", scene: "normal" | "desc" = "normal"): Promise<{ imageId: string; url: string | null }> {
   const fd = new FormData();
   fd.append("image", new Blob([bytes], { type: contentType }), name);
-  fd.append("scene", "normal");
+  fd.append("scene", scene);
   if (ratio === "3:4") fd.append("ratio", "3:4");
   return shopeeUploadImageOf(await shopeeFetch("/api/v2/media_space/upload_image", { form: fd }));
 }

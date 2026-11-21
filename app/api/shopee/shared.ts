@@ -249,19 +249,20 @@ export async function refetchShopeeLive(accessToken: string, shopId: string, ite
 /**
  * ฝากรูปในระบบ 1 รูปกับ Shopee (เฟส 4C · แก้รูปในลิ้นชัก) → image_id + ลิงก์ — ล้อ ttsUploadRef ของ TikTok
  *   "r2:<key>" → JPG พื้นขาว 1500px จาก /api/r2-image (1:1 = &sq=1 · ร้าน 3:4 = &pad=34) · Shopee รับแค่ JPG/PNG ≤10MB
+ *   "raw" = รูปในรายละเอียด: ย่อกว้าง 1500px คงสัดส่วนเดิม (ไม่บีบเป็นจัตุรัส — รูปยาวแบบอินโฟกราฟิกจะได้ไม่เล็ก · บั๊กที่เจอ 2026-11-21)
  * โยน Error ข้อความภาษาคน (ผู้เรียกบันทึกประวัติ/หยุดเอง)
  */
-export async function shopeeUploadRef(ref: string, ratio: "1:1" | "3:4" = "1:1"): Promise<{ imageId: string; url: string | null }> {
+export async function shopeeUploadRef(ref: string, ratio: "1:1" | "3:4" | "raw" = "1:1"): Promise<{ imageId: string; url: string | null }> {
   const key = ref.startsWith("r2:") ? ref.slice(3) : null;
   if (!key) throw new Error("รูปนี้ไม่ใช่รูปในระบบ");
-  const res = await fetch(`${publicImageUrl(key)}&w=1500&${ratio === "3:4" ? "pad=34" : "sq=1"}`, { cache: "no-store" });
+  const res = await fetch(`${publicImageUrl(key)}&w=1500${ratio === "raw" ? "" : ratio === "3:4" ? "&pad=34" : "&sq=1"}`, { cache: "no-store" });
   const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim();
   if (!res.ok) throw new Error(`โหลดรูปจากระบบไม่ได้ (HTTP ${res.status})`);
   if (ct !== "image/jpeg" && ct !== "image/png") throw new Error(`ไฟล์ชนิด ${ct || "ไม่รู้จัก"} — Shopee รับแค่ JPG/PNG (รูป GIF/วิดีโอใช้ไม่ได้)`);
   const bytes = await res.arrayBuffer();
   if (!bytes.byteLength || bytes.byteLength > 10 * 1024 * 1024) throw new Error(`ขนาดรูป ${(bytes.byteLength / 1048576).toFixed(1)}MB ไม่อยู่ในช่วงที่ Shopee รับ (≤ 10MB)`);
   const name = `${key.split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || "image"}.${ct === "image/png" ? "png" : "jpg"}`;
-  try { return await shopeeUploadImage(bytes, name, ct, ratio); }
+  try { return await shopeeUploadImage(bytes, name, ct, ratio === "raw" ? undefined : ratio, ratio === "raw" ? "desc" : "normal"); }
   catch (e) { throw new Error(shopeeErrorText(e)); }
 }
 

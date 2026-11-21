@@ -122,7 +122,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const descRefs = shopeeCreateDescImageRefs(r.payload);
   let descErr: string | null = null;
   for (const ref of descRefs.filter((x) => !idOf.has(x))) {
-    try { idOf.set(ref, (await shopeeUploadRef(ref)).imageId); }
+    try { idOf.set(ref, (await shopeeUploadRef(ref, "raw")).imageId); }   // คงสัดส่วนเดิม (ไม่บีบจัตุรัส)
     catch (e) { descErr = (e as Error).message; }
   }
   const descOk = descRefs.filter((x) => idOf.has(x)).length;
