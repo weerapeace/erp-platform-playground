@@ -652,11 +652,37 @@ export async function loadCampaignFull(admin: Admin, id: string) {
   const its = (items ?? []) as ItemRow[];
   const { data: parents } = its.length ? await admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key, brand_id").in("id", its.map((i) => i.parent_sku_id)) : { data: [] };
   const pOf = new Map(((parents ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; brand_id: string | null }[]).map((p) => [p.id, p]));
+  const tgs = (targets ?? []) as TargetRow[];
   return {
     campaign: c as CampaignRow,
     items: its.map((i) => { const p = pOf.get(i.parent_sku_id); return { ...i, code: p?.code ?? "", name: p?.name_th ?? "", cover_key: p?.cover_image_r2_key ?? null, brand_id: p?.brand_id ?? null }; }),
-    targets: (targets ?? []) as TargetRow[],
+    targets: await withShopLinks(admin, tgs),
   };
+}
+
+/** ข้อมูลเปิดหน้าเช็กหลังส่ง (ของกลาง push-open): รหัสสินค้าบนร้าน · Shop ID (Shopee) · slug เว็บ (หน้าแก้ใน ERP) */
+async function withShopLinks(admin: Admin, tgs: TargetRow[]): Promise<(TargetRow & { external_product_id: string | null; shop_ref: string | null; web_slug: string | null })[]> {
+  const listingIds = tgs.filter((t) => t.platform !== "website").map((t) => t.target_key);
+  const shopIds = [...new Set(tgs.filter((t) => t.platform === "website").map((t) => t.target_key))];
+  const [{ data: ls }, { data: shops }] = await Promise.all([
+    listingIds.length ? admin.from("platform_catalog_listings").select("id, brand_id, platform_id, external_product_id").in("id", listingIds) : Promise.resolve({ data: [] }),
+    shopIds.length ? admin.from("shops").select("id, slug").in("id", shopIds) : Promise.resolve({ data: [] }),
+  ]);
+  const lOf = new Map(((ls ?? []) as { id: string; brand_id: string | null; platform_id: string; external_product_id: string | null }[]).map((l) => [l.id, l]));
+  const pairs = [...new Set([...lOf.values()].filter((l) => l.brand_id).map((l) => `${l.brand_id}|${l.platform_id}`))];
+  const { data: accts } = pairs.length
+    ? await admin.from("platform_accounts").select("brand_id, platform_id, external_shop_id, is_active").in("brand_id", [...new Set(pairs.map((p) => p.split("|")[0]))])
+    : { data: [] };
+  const refOf = new Map<string, string>();
+  for (const a of (accts ?? []) as { brand_id: string; platform_id: string; external_shop_id: string | null; is_active: boolean | null }[]) {
+    const k = `${a.brand_id}|${a.platform_id}`;
+    if (a.external_shop_id && a.is_active !== false && !refOf.has(k)) refOf.set(k, a.external_shop_id);
+  }
+  const slugOf = new Map(((shops ?? []) as { id: string; slug: string | null }[]).map((s) => [s.id, s.slug]));
+  return tgs.map((t) => {
+    const l = t.platform === "website" ? null : lOf.get(t.target_key);
+    return { ...t, external_product_id: l?.external_product_id ?? null, shop_ref: l?.brand_id ? refOf.get(`${l.brand_id}|${l.platform_id}`) ?? null : null, web_slug: t.platform === "website" ? slugOf.get(t.target_key) ?? null : null };
+  });
 }
 
 /** ยังมีปกโปรค้างบนร้านไหม (ต้องย้อนก่อนลบชุด) */

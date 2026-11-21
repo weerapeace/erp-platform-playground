@@ -15,6 +15,8 @@ export type Target = {
   id: string; campaign_id: string; item_id: string; parent_sku_id: string; platform: PromoPlatform; target_key: string; brand_id: string | null; label: string | null;
   status: TargetStatus; before_cover_url: string | null; backup_key: string | null; applied_ref: string | null; error: string | null; attempts: number;
   applied_at: string | null; reverted_at: string | null; updated_at: string;
+  /** เปิดหน้าเช็กหลังส่ง (push-open): รหัสสินค้าบนร้าน · Shop ID · slug เว็บ */
+  external_product_id?: string | null; shop_ref?: string | null; web_slug?: string | null;
 };
 export type Full = { campaign: Campaign; items: Item[]; targets: Target[] };
 export type PlatformSummary = { platform: PromoPlatform; targets: number; ready: number; closed: number; unmatched: number; blocked: string[] };

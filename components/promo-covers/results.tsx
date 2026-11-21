@@ -7,8 +7,9 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { CAMPAIGN_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, STILL_IN_REVIEW, TARGET_STATUS, applyDueAt, countTargets, thTime, type TargetStatus } from "@/lib/promo-cover";
-import { confirmCampaign, imgUrl, runUntilDone, type Full, type RunResult, type Target } from "./api";
+import { usePushOpen } from "@/components/push-open";
+import { CAMPAIGN_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, REVIEW_PLATFORMS, STILL_IN_REVIEW, TARGET_STATUS, applyDueAt, countTargets, thTime, type TargetStatus } from "@/lib/promo-cover";
+import { confirmCampaign, getCampaign, imgUrl, runUntilDone, type Full, type RunResult, type Target } from "./api";
 import { Pill, Thumb } from "./parts";
 
 type Ask = { title: string; message: string; confirm: string; danger?: boolean; run: () => Promise<void> };
@@ -16,6 +17,7 @@ const btnSm = "inline-flex h-8 items-center gap-1 rounded-md border border-slate
 
 export function PromoResults({ full, canRun, onReload }: { full: Full; canRun: boolean; onReload: () => Promise<void> }) {
   const toast = useToast();
+  const pushOpen = usePushOpen();
   const c = full.campaign;
   const [filter, setFilter] = useState<TargetStatus | "all">("all");
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -29,12 +31,28 @@ export function PromoResults({ full, canRun, onReload }: { full: Full; canRun: b
   const nextDue = Math.min(...PROMO_PLATFORMS.filter((p) => c.platforms.includes(p)).map((p) => applyDueAt(c, p) ?? Infinity));
 
   const doRun = async (mode: Parameters<typeof runUntilDone>[1], label: string, ids?: string[]) => {
+    // เปิดหน้าให้เช็กหลังส่ง (ของกลาง push-open · ค่าเริ่มปิด) — ต้องเตรียมแท็บ "ก่อน await" ตอนยังอยู่ในจังหวะกดยืนยัน
+    const touch: ReadonlySet<TargetStatus> = new Set<TargetStatus>(
+      mode === "run" || mode === "start_now" ? ["pending"] : mode === "retry" ? ["failed", "revert_failed"] : mode === "revert" ? ["applied", "review", "revert_failed"] : ["conflict", "revert_failed", "review"]);
+    const before = new Map(full.targets.map((t) => [t.id, t.status]));
+    const affected = full.targets.filter((t) => touch.has(t.status) && (!ids || ids.includes(t.id)));
+    const session = affected.length ? pushOpen.prepare([...new Set(affected.map((t) => t.platform))].map((code) => ({ code }))) : null;
     setBusy(label); setProgress("กำลังทำ…");
     try {
       const r: RunResult = await runUntilDone(c.id, mode, (_x, total) => setProgress(`ส่งปกโปร ${total.applied} · ย้อน ${total.reverted} · ไม่ผ่าน ${total.failed}${total.remaining ? ` · เหลือ ${total.remaining}` : ""}`), ids);
       const msg = `ส่งปกโปร ${r.applied} · ย้อนปกเดิม ${r.reverted}${r.failed ? ` · ไม่ผ่าน ${r.failed}` : ""}${r.conflict ? ` · มีคนเปลี่ยนปกเอง ${r.conflict}` : ""}${r.remaining ? ` · ค้าง ${r.remaining} (ตัวตั้งเวลาทำต่อ)` : ""}`;
       if (r.failed || r.conflict) toast.warning(msg); else toast.success(r.applied + r.reverted ? msg : "ไม่มีงานที่ถึงเวลา");
-    } catch (e) { toast.error((e as Error).message); }
+      if (session) {
+        const fresh = await getCampaign(c.id).catch(() => null);
+        const done = (fresh?.targets ?? []).filter((t) => before.get(t.id) !== t.status && (t.status === "applied" || t.status === "review" || t.status === "reverted"));
+        session.finish(done.map((t) => ({
+          code: t.platform, shopName: t.label ?? PLATFORM_LABEL[t.platform], productId: t.platform === "website" ? t.parent_sku_id : t.external_product_id ?? null,
+          label: codeOf.get(t.item_id)?.code, shopRef: t.shop_ref ?? null,
+          state: t.status === "review" || (t.status === "reverted" && REVIEW_PLATFORMS.has(t.platform)) ? "review" as const : "live" as const,
+          ...(t.platform === "website" ? { links: { sellerCenter: t.web_slug ? `${window.location.origin}/website/${t.web_slug}?tab=listings` : null, sellerExact: true, sellerLabel: "หน้าแก้ใน ERP" } } : {}),
+        })));
+      }
+    } catch (e) { session?.finish([]); toast.error((e as Error).message); }
     finally { setBusy(null); setProgress(null); await onReload(); }
   };
   const confirmRun = (a: Ask) => setAsk(a);
