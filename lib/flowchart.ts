@@ -12,6 +12,7 @@ import { isAppKey, isErpPageHref } from "./menu-pages";
 import { isFlowAlign, isHexColor, sanitizeRich, type FlowAlign } from "./flowchart-rich";
 import { cleanAuto, type FlowAuto } from "./flow-automation";
 import { DEFAULT_SHAPE, flowShapeOf, isShapeKey } from "./flowchart-shapes";
+import { isFlowStyle, type FlowStyleKey } from "./flowchart-styles";
 
 /** ลำดับ = ลำดับปุ่มบนแถบเครื่องมือ (กล่อง · ข้อความ ขึ้นก่อน — เจ้าของสั่ง 2026-11-19) */
 export const FLOW_KINDS = ["step", "text", "start", "question", "storage", "file", "folder", "page", "note", "todo", "auto", "shape", "zone"] as const;
@@ -57,7 +58,8 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; at?: string };
 /** items = ข้อของกล่อง "รายการงาน" */
 /** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
-export type FlowNodeData = { shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** style = สไตล์ของกล่อง (lib/flowchart-styles · ไม่มี = ตามกระดาน) */
+export type FlowNodeData = { style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -78,7 +80,8 @@ export const edgeShapeOf = (e: { shape?: unknown } | null | undefined): FlowEdge
  * ไม่มี = ทุกกล่องของระบบอยู่ที่เดิม · เก็บเฉพาะตอนมีค่า (กระดานเดิมลายเซ็นไม่เปลี่ยน)
  */
 export type FlowPins = Record<string, { x: number; y: number }>;
-export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins };
+/** style = สไตล์ทั้งกระดาน (ไม่มี = ปกติ · เก็บเฉพาะตอนตั้ง) */
+export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins; style?: FlowStyleKey };
 
 /** กล่อง/เส้นของ "ชั้นล็อก" (ระบบสร้าง ไม่ได้เก็บในกระดาน) ขึ้นต้นด้วยคำนี้ — เส้นที่วาดเองต่อเข้ากล่องพวกนี้ได้ */
 export const SYS_PREFIX = "sys:";
@@ -166,6 +169,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (o.type === "auto") data.auto = cleanAuto(d.auto);
     if (o.type === "shape") data.shape = isShapeKey(d.shape) ? d.shape : DEFAULT_SHAPE;
     if (isFontName(d.font)) data.font = d.font;
+    if (isFlowStyle(d.style)) data.style = d.style;   // "normal" เก็บได้ (กล่องที่ตั้งปกติเองบนกระดานสไตล์อื่น)
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
     if (isFlowAlign(d.align)) data.align = d.align;
@@ -184,7 +188,8 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}) });
     eids.add(id);
   }
-  return withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
+  const out = withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
+  return isFlowStyle(r.style) && r.style !== "normal" ? { ...out, style: r.style } : out;
 }
 
 // ── กล่อง "รายการงาน" (เจ้าของสั่ง 2026-11-20 แบบ A + แถบคืบหน้า · ใครติ๊ก · งานค้างทั้งผัง) ──
@@ -255,9 +260,9 @@ function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | 
 type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
 /** แบบลูกศรของเส้นบนกระดานเก็บใน data.shape (React Flow) */
 type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown; data?: unknown };
-export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins): FlowScene {
+export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins, style?: FlowStyleKey): FlowScene {
   return parseFlowScene({
-    kind: "flowchart", pins,
+    kind: "flowchart", pins, style,
     nodes: nodes.map((n) => ({
       id: n.id, type: n.type, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       width: Math.round(n.width ?? n.measured?.width ?? 0) || undefined,
@@ -440,7 +445,9 @@ export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowSc
     const v = JSON.stringify(mp[k]) !== JSON.stringify(bp[k]) ? mp[k] : tp[k];
     if (v) pins[k] = v;
   }
-  return withPins({ kind: "flowchart", v: 1, nodes, edges }, pins);
+  const style = mine.style !== base.style ? mine.style : theirs.style;   // สไตล์กระดาน: เราเปลี่ยน = ของเรา · ไม่ได้แตะ = ของอีกฝั่ง
+  const merged = withPins({ kind: "flowchart", v: 1, nodes, edges }, pins);
+  return style ? { ...merged, style } : merged;
 }
 
 /** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */
