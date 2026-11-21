@@ -23,6 +23,7 @@ import { hasSecretFields } from "@/lib/settings-secrets";
 import { guardApi } from "@/lib/api-auth";
 import { getFieldAccess } from "@/lib/field-permissions";
 import { isGeneratedColumn, generatedHint } from "@/lib/generated-columns";
+import { syncComputedAfterSave } from "@/lib/parent-computed-sync-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -148,6 +149,7 @@ export async function POST(
       metadata: { entity, mode: "edits", groups: groups.size, affected: affected2,
         changed_fields: [...new Set([...groups.values()].flatMap((g) => Object.keys(g.changes)))] },
     });
+    syncComputedAfterSave(cfg.table, allIds, { actorId: user.id, actorName: actorName2 });   // Parent SKU: ช่องคำนวณตามหลัง
     return NextResponse.json({ ok: true, affected: affected2, error: null });
   }
 
@@ -200,6 +202,7 @@ export async function POST(
     actorId: user.id, actorName,
     metadata: { entity, mode: "filter", changes: hasSecretFields(cfg.table) ? Object.keys(changes) : changes, affected },
   });
+  syncComputedAfterSave(cfg.table, ids, { actorId: user.id, actorName });   // Parent SKU: ช่องคำนวณตามหลัง (เกิน 300 = รอบทุกคืน)
 
   return NextResponse.json({ ok: true, affected, error: null });
 }

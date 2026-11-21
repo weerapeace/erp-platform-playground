@@ -37,7 +37,8 @@ export type ImageFieldKey = "cover" | "gallery" | "description_images";
 const KEEP_TEXT = 10;
 const KEEP_IMAGE: Record<ImageFieldKey, number> = { cover: 10, gallery: 30, description_images: 30 };
 
-export type VersionSource = "master_edit" | "gallery_delete" | "description_image_remove" | "restore" | "gallery_add" | "description_image_add";
+/** computed_sync = ระบบเขียนช่องคำนวณ (Platform Description) ให้ตรงสูตร — lib/parent-computed-sync-server */
+export type VersionSource = "master_edit" | "gallery_delete" | "description_image_remove" | "restore" | "gallery_add" | "description_image_add" | "computed_sync";
 /** ผู้แก้ + งานที่เป็นต้นเหตุ (แก้จากในงาน Creative โหมดใหม่ → การ์ดงานสรุปสิ่งที่แก้ได้เอง) */
 export type VersionActor = { actorId?: string | null; actorName?: string | null; taskId?: string | null; subtaskId?: string | null };
 

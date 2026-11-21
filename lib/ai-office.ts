@@ -138,6 +138,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/platform-cross-daily/route.ts", "lib/platform-cross-shop-server.ts"],
   },
   {
+    id: "parent-computed-sync", zone: "sales", kind: "auto", icon: "📝",
+    title: "ผู้อัปเดตรายละเอียดสินค้า", titleEn: "Product description refresher",
+    does: "ทุกคืนคิด Platform Description / สรุปขนาด ของทุก Parent SKU ตามสูตร (ตัวเดียวกับที่ป๊อป Parent SKU โชว์) แล้วบันทึกตัวที่เปลี่ยน ให้หน้าลง LINE/TikTok · เช็กข้ามร้าน · เว็บร้าน ได้ข้อความล่าสุด",
+    trigger: `${DAILY} 03:20`, cron: "/api/cron/parent-computed-sync", everyHours: 24,
+    can: ["อ่านข้อมูล Parent SKU", "บันทึก Platform Description / สรุปขนาด ตามสูตร (เก็บค่าเดิมในประวัติเวอร์ชัน)"], cannot: ["แก้ช่องอื่นของสินค้า", "ลบข้อความเดิมเมื่อสูตรคิดได้ค่าว่าง", "ส่งอะไรขึ้นร้าน"],
+    source: "บันทึกรอบล่าสุด + ประวัติ audit parent_computed:sync", href: "/master/parent-skus",
+    files: ["app/api/cron/parent-computed-sync/route.ts", "lib/parent-computed-sync-server.ts", "lib/parent-computed-sync.ts"],
+  },
+  {
     id: "promo-covers", zone: "sales", kind: "auto", icon: "🖼️",
     title: "ผู้เปลี่ยนปกโปรทุกร้าน", titleEn: "Promo cover scheduler",
     does: "ทุก 15 นาที ดูชุดโปรที่ถึงเวลา แล้วเปลี่ยนรูปปกบนร้าน (Shopee/Lazada/TikTok/LINE/เว็บ) · ถึงเวลาจบก็ย้อนเป็นปกเดิม · ส่งไม่ผ่านแจ้งกระดิ่ง",

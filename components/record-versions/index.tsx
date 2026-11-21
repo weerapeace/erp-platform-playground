@@ -87,6 +87,7 @@ export function RecordVersionsPanel({ entityType, entityId, canRestore, fieldLab
       : v.source === "gallery_add" || v.source === "description_image_add" ? t("เพิ่มรูป (จากงาน)", "Added (from task)")
       : v.source === "gallery_delete" ? t("ลบออก", "Removed")
       : v.source === "description_image_remove" ? t("เอาออก", "Removed")
+      : v.source === "computed_sync" ? t("ระบบอัปเดตตามสูตร", "Updated from formula")
       : t("แก้ไข", "Edited");
   const actionText = (v: Version) => (v.field_key === "gallery" || v.field_key === "description_images" ? t("＋ กู้รูปกลับ", "＋ Put back") : t("↩︎ ย้อนกลับ", "↩︎ Restore"));
 

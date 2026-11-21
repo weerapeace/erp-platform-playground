@@ -19,6 +19,7 @@ import { r2KeyStillReferenced } from "@/lib/r2-refs";
 import { captureFieldVersions, diffVersionedFields, editContextFromRequest, versionedColumnsIn } from "@/lib/record-versions";
 import { deleteRecordFilesFor } from "@/lib/record-files";
 import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
+import { syncComputedAfterSave } from "@/lib/parent-computed-sync-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -175,6 +176,8 @@ async function _PATCH(
       ...(skipped.length ? { skipped_no_permission: skipped } : {}),
     },
   });
+  // Parent SKU: เขียน Platform Description / สรุปขนาด ล่าสุดลงคอลัมน์ตามหลัง (ระบบอื่นอ่านคอลัมน์ · lib/parent-computed-sync)
+  syncComputedAfterSave(cfg.table, [id], { actorId: user.id, actorName });
 
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   // คืนชื่อ relation (label) ด้วย → หน้า detail โชว์ชื่อทันทีหลังบันทึก (ไม่ใช่รหัส)

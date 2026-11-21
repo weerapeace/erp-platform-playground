@@ -134,19 +134,40 @@ function valuesFor(
  */
 export async function loadParentComputedTexts(admin: Admin, ids: string[], computeName: string): Promise<Record<string, { th: string | null; en: string | null }>> {
   if (!ids.length) return {};
-  const catalog = buildSpecCatalog(await registryRows(admin, "parent_skus_v2"), [], () => true);
+  const catalog = await parentComputedCatalog(admin);
   const f = catalog.find((x) => x.level === "parent" && x.kind === "computed" && x.compute?.name === computeName);
   if (!f) return {};
-  const prods = await loadSpecProducts(admin, catalog, ids, [f.key], "th");
+  const cols = await loadParentComputedColumns(admin, ids, [computeName], catalog);
+  return Object.fromEntries(Object.entries(cols).map(([id, v]) => [id, { th: v[f.column] ?? null, en: f.enColumn ? v[f.enColumn] ?? null : null }]));
+}
+
+/** ทะเบียนช่องของ Parent (ไม่กรองสิทธิ์ — ใช้ฝั่ง server เท่านั้น) · สร้างครั้งเดียวแล้วส่งต่อให้ loadParentComputedColumns ได้ (งานทีละมาก ๆ) */
+export async function parentComputedCatalog(admin: Admin): Promise<SpecField[]> {
+  return buildSpecCatalog(await registryRows(admin, "parent_skus_v2"), [], () => true);
+}
+
+/**
+ * ค่าช่องคำนวณหลายตัวของหลาย Parent → { id: { คอลัมน์: ค่า } } (คอลัมน์ไทย + คอลัมน์ EN ถ้าช่องนั้นมีคู่ EN) — ฝั่ง server · ของกลาง
+ * ตัวเดียวกับป๊อป Parent SKU / ส่งออกสเปก · ไม่โหลด SKU ลูก (เร็วพอทำทุกรุ่นทีเดียว) · ใช้กับ lib/parent-computed-sync-server
+ */
+export async function loadParentComputedColumns(admin: Admin, ids: string[], computeNames: readonly string[], catalog?: SpecField[]): Promise<Record<string, Record<string, string | null>>> {
+  if (!ids.length) return {};
+  const cat = catalog ?? await parentComputedCatalog(admin);
+  const fields = cat.filter((x) => x.level === "parent" && x.kind === "computed" && !!x.compute && computeNames.includes(x.compute.name));
+  if (!fields.length) return {};
+  const prods = await loadSpecProducts(admin, cat, ids, fields.map((f) => f.key), "th", { kids: false });
   const txt = (v: unknown) => (v == null ? null : String(v).trim() ? String(v) : null);
-  return Object.fromEntries(prods.map((p) => [p.id, { th: txt(p.values[f.column]), en: f.enColumn ? txt(p.values[f.enColumn]) : null }]));
+  return Object.fromEntries(prods.map((p) => [p.id, Object.fromEntries(fields.flatMap((f) => [
+    [f.column, txt(p.values[f.column])] as const,
+    ...(f.enColumn ? [[f.enColumn, txt(p.values[f.enColumn])] as const] : []),
+  ]))]));
 }
 
 /**
  * ค่าจริงของหลายรุ่น + SKU ลูก (เฉพาะช่องที่เลือกและมีสิทธิ์ — catalog ต้องมาจาก loadSpecCatalog)
  * คืนเรียงตามลำดับ ids ที่ส่งมา
  */
-export async function loadSpecProducts(admin: Admin, catalog: SpecField[], ids: string[], fieldKeys: string[], lang: SpecLang): Promise<SpecProduct[]> {
+export async function loadSpecProducts(admin: Admin, catalog: SpecField[], ids: string[], fieldKeys: string[], lang: SpecLang, opts?: { kids?: boolean }): Promise<SpecProduct[]> {
   const allowed = new Map(catalog.map((f) => [f.key, f]));
   const chosen = fieldKeys.map((k) => allowed.get(k)).filter((f): f is SpecField => !!f);
   const pFields = chosen.filter((f) => f.level === "parent");
@@ -179,7 +200,7 @@ export async function loadSpecProducts(admin: Admin, catalog: SpecField[], ids: 
   // SKU ลูก
   const kidsBy = new Map<string, SpecKid[]>();
   const kidRows: Record<string, unknown>[] = [];
-  for (const part of chunk(ids, 150)) {
+  for (const part of opts?.kids === false ? [] : chunk(ids, 150)) {   // kids:false = ไม่ต้องการ SKU ลูก (ช่องคำนวณของ Parent อย่างเดียว)
     const { data } = await admin.from("skus_v2").select("*").in("parent_sku_id", part)
       .order("color_index", { ascending: true, nullsFirst: false }).order("code", { ascending: true });
     kidRows.push(...((data ?? []) as Record<string, unknown>[]));

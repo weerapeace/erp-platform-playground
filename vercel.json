@@ -51,6 +51,10 @@
       "schedule": "0 21 * * *"
     },
     {
+      "path": "/api/cron/parent-computed-sync",
+      "schedule": "20 20 * * *"
+    },
+    {
       "path": "/api/cron/promo-covers",
       "schedule": "*/15 * * * *"
     }
