@@ -26,6 +26,7 @@ import { noteToText } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
+import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
@@ -354,7 +355,7 @@ export function planShopeeCreate(input: {
 
   // ---------- ชั้นตัวเลือก (≤ 2 ชั้น · ชื่อชั้น/ตัวเลือกยาวตามร้าน) ----------
   const nameOv = recOf(extra.shopee_option_names);
-  const colorBase = (s: ShopeeCreateSku) => str(s.color_platform_th || s.color_th || s.color);
+  const colorBase = (s: ShopeeCreateSku) => listingColorName(s);   // ชื่อสีเหมือนกันทุกร้าน (lib/listing-defaults)
   const colorOf = (s: ShopeeCreateSku) => str(nameOv[s.id]) || colorBase(s);
   const vo = (s: ShopeeCreateSku) => { const av = s.attribute_values; const v = av && typeof av === "object" ? (av as Record<string, unknown>).variant_option : null; return v && typeof v === "object" ? v as Record<string, unknown> : null; };
   const optOf = (s: ShopeeCreateSku) => str(vo(s)?.value);
@@ -417,12 +418,16 @@ export function planShopeeCreate(input: {
   // ---------- รูปสินค้า ----------
   const imagesMax = L?.imagesMax ?? DEFAULT_IMAGES_MAX;
   const picked = Array.isArray(extra.shopee_images) ? (extra.shopee_images as unknown[]).map(str).filter(Boolean) : [];
-  const draftKeys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean).map(r2) : [];
-  const autoRefs = [...new Set([...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null), ...input.galleryKeys].filter(Boolean) as string[])].map(r2);
+  // ชุดรูปตั้งต้นเหมือนกันทุกร้าน (lib/listing-defaults · เจ้าของบอก 2026-11-21): รูปในร่าง → รูปของสินค้าในระบบตามลำดับหน้า Parent SKU (ปก → แกลเลอรี → ปกตัวสี → รูปตัวขาย)
+  //   galleryKeys = it.images ของ lib/product-listing-context (เรียงแล้ว) · ปกตัวสี/ตัวขายต่อท้ายเผื่อชุดรูปไม่มี
+  const coverKeys = [...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null)].filter(Boolean) as string[];
+  const poolKeys = listingDefaultImages([...input.galleryKeys, ...coverKeys], [], 999);
+  const draftKeysRaw = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean) : [];
+  const autoRefs = poolKeys.map(r2);
   // เลือกเอง (extra.shopee_images) = ใช้ตามนั้น · ไม่ได้เลือก = รูปในร่าง (ตัวเตรียมร่างเติมให้แค่ปก) แล้วเติมด้วยรูปสินค้าในระบบจนครบ
   //   🐛 ลองจริง 2026-11-15: MGW318 ร่างมีแค่ 2 รูป (ปกสินค้า + ปก SKU) ทั้งที่แกลเลอรีมีอีก 4 → Shopee ปฏิเสธ (ต้อง ≥ 3) — เดิมใช้รูปในร่างอย่างเดียว
-  const refs = [...new Set(picked.length ? picked : [...draftKeys, ...autoRefs])].slice(0, imagesMax);
-  const imgSrc = picked.length ? "เลือกไว้สำหรับ Shopee" : draftKeys.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
+  const refs = picked.length ? [...new Set(picked)].slice(0, imagesMax) : listingDefaultImages(poolKeys, draftKeysRaw, imagesMax).map(r2);
+  const imgSrc = picked.length ? "เลือกไว้สำหรับ Shopee" : draftKeysRaw.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "รูปสินค้าในระบบ ลำดับเดียวกับหน้า Parent SKU (อัตโนมัติ)";
   const imagesMin = Math.max(SHOPEE_MIN_IMAGES, L?.imagesMin ?? 0);
   if (refs.length < imagesMin) missing.push(`รูปสินค้าต้องมีอย่างน้อย ${imagesMin} รูป (Shopee บังคับ · ตอนนี้ ${refs.length} รูป) — เพิ่มรูปในแท็บรูปของหน้านี้ หรือเพิ่มรูปสินค้าที่หน้า Parent SKU`);
   else if (refs.length < 5) warnings.push(`มีรูป ${refs.length} รูป — แนะนำอย่างน้อย 5 รูป (Shopee รับได้ ${imagesMax})`);

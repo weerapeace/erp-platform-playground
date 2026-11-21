@@ -41,7 +41,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
   if (!platformId) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม TikTok" };
   const [items, { data: skus }, { data: onShop }] = await Promise.all([
     loadListingContexts(admin, [parentId], platformId),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, color_platform_th, list_price, fake_price, cover_image_r2_key, attribute_values, is_active, sale_ok").eq("parent_sku_id", parentId).order("code"),
     // 🛡️ กันซ้ำ: มีรายการบน TikTok ที่จับคู่สินค้านี้อยู่แล้ว (ไม่นับตัวที่ร้านลบไปแล้ว)
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platformId).eq("matched_parent_sku_id", parentId).or(LIVE_LISTING_OR).limit(1),
   ]);
@@ -114,7 +114,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height },
     },
     skus: ((skus ?? []) as Row[]).map((s): TtsCreateSku => ({
-      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null,
+      id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,
       list_price: s.list_price == null ? null : Number(s.list_price), fake_price: s.fake_price == null ? null : Number(s.fake_price),
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,

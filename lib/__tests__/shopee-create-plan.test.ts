@@ -106,27 +106,27 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
       { tier_index: [1], original_price: 1590, model_sku: "BCG09-02", seller_stock: [{ stock: 0 }] },
     ]);
     expect(pv.attrs.fromTemplate).toBe("467297004");
-    expect(shopeeCreateImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"]);
+    expect(shopeeCreateImageRefs(payload)).toEqual(["r2:gal/1.jpg", "r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"]); // ลำดับเดียวกับหน้า Parent SKU: รูปของสินค้า (แกลเลอรี) ก่อน แล้วปกตัวสี (เจ้าของบอก 2026-11-21 · lib/listing-defaults)
   });
   test("ลงจริง (5B): แทนรูปเป็น image_id · รูปตัวเลือกฝากไม่ครบ = ตัดทั้งชุด", () => {
     const { payload } = plan();
-    expect(shopeeCreateMainImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"]);
+    expect(shopeeCreateMainImageRefs(payload)).toEqual(["r2:gal/1.jpg", "r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"]);
     expect(shopeeCreateOptionImageRefs(payload)).toEqual(["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"]);
     const all = new Map([["r2:img/BCG09-01.jpg", "id1"], ["r2:img/BCG09-02.jpg", "id2"], ["r2:gal/1.jpg", "id3"]]);
     const ok = shopeeCreateResolve(payload, all);
-    expect(ok.add_item.image).toEqual({ image_id_list: ["id1", "id2", "id3"] });
+    expect(ok.add_item.image).toEqual({ image_id_list: ["id3", "id1", "id2"] });
     expect(ok.optionImages).toBe(true);
     const opts = (ok.tier!.standardise_tier_variation as { variation_option_list: Record<string, unknown>[] }[])[0].variation_option_list;
     expect(opts).toEqual([{ variation_option_id: 0, variation_option_name: "ดำ", image_id: "id1" }, { variation_option_id: 0, variation_option_name: "น้ำตาล", image_id: "id2" }]);
     const part = shopeeCreateResolve(payload, new Map([["r2:img/BCG09-01.jpg", "id1"], ["r2:gal/1.jpg", "id3"]]));
     expect(part.optionImages).toBe(false);
     expect((part.tier!.standardise_tier_variation as { variation_option_list: Record<string, unknown>[] }[])[0].variation_option_list.some((o) => "image_id" in o || "image_ref" in o)).toBe(false);
-    expect(payload.add_item.image).toEqual({ image_ref_list: ["r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg"] }); // ต้นฉบับไม่ถูกแก้
+    expect(payload.add_item.image).toEqual({ image_ref_list: ["r2:gal/1.jpg", "r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg"] }); // ต้นฉบับไม่ถูกแก้
   });
   test("รูป: ร่างมีแค่ปก 2 รูป → เติมจากรูปสินค้าในระบบ · น้อยกว่า 3 = ขาด (ลองจริง MGW318)", () => {
     const draft = { title: null, description: null, category_path: null, platform_product_id: null, extra: {}, image_keys: ["cover.jpg", "img/BCG09-01.jpg"] };
     const { preview: pv } = plan({ draft, galleryKeys: ["gal/1.jpg", "gal/2.jpg"] });
-    expect(pv.images.refs).toEqual(["r2:cover.jpg", "r2:img/BCG09-01.jpg", "r2:img/BCG09-02.jpg", "r2:gal/1.jpg", "r2:gal/2.jpg"]);
+    expect(pv.images.refs).toEqual(["r2:cover.jpg", "r2:img/BCG09-01.jpg", "r2:gal/1.jpg", "r2:gal/2.jpg", "r2:img/BCG09-02.jpg"]); // ลำดับเดียวกับหน้า Parent SKU: รูปของสินค้า (แกลเลอรี) ก่อน แล้วปกตัวสี (เจ้าของบอก 2026-11-21 · lib/listing-defaults)
     expect(pv.images.min).toBe(3);
     const few = plan({ skus: [sku("A1", { cover_image_r2_key: null })], galleryKeys: ["g1.jpg"] });
     expect(few.preview.missing.join(" ")).toContain("อย่างน้อย 3 รูป");

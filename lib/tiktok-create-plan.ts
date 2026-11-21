@@ -28,6 +28,7 @@ import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
+import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
 import { ttsAttrPayload, type TtsAttrField, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import type { TtsSizeMeta } from "@/lib/tiktok-size-chart";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
@@ -40,6 +41,8 @@ const SELLER_SKU_MAX = 50;
 
 export type TtsCreateSku = {
   id: string; code: string; color_th: string | null; color: string | null;
+  /** "Color Platform [TH]" เช่น "ดำ (01)" — ชื่อสีบนร้าน (มาก่อน color_th · เหมือนทุกร้าน) */
+  color_platform_th?: string | null;
   list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null;
   attribute_values: Record<string, unknown> | null; is_active: boolean; sale_ok?: boolean | null;
 };
@@ -173,7 +176,7 @@ export function planTiktokCreate(input: {
   if (!sellable.length) missing.push("SKU ที่เปิดขาย ≥ 1");
 
   // ---------- ชั้นตัวเลือก (ชื่อกำหนดเอง ≤ 20 · ค่า ≤ 50 · ≤ 3 ชั้น) ----------
-  const colorOf = (s: TtsCreateSku) => str(s.color_th || s.color);
+  const colorOf = (s: TtsCreateSku) => listingColorName(s);   // ชื่อสีเหมือนกันทุกร้าน (lib/listing-defaults) — เดิม color_th → ได้ "ดำ" แทน "ดำ (01)"
   const vo = (s: TtsCreateSku) => { const av = s.attribute_values; const v = av && typeof av === "object" ? (av as Record<string, unknown>).variant_option : null; return v && typeof v === "object" ? v as Record<string, unknown> : null; };
   const optOf = (s: TtsCreateSku) => str(vo(s)?.value);
   const optName = sellable.map((s) => str(vo(s)?.name)).find(Boolean) || "ตัวเลือก";
@@ -220,10 +223,15 @@ export function planTiktokCreate(input: {
 
   // ---------- รูปสินค้า ----------
   const picked = Array.isArray(extra.tiktok_images) ? (extra.tiktok_images as unknown[]).map(str).filter(Boolean) : [];
-  const draftKeys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean).map(r2) : [];
-  const autoRefs = [...new Set([...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null), ...input.galleryKeys].filter(Boolean) as string[])].map(r2);
-  const refs = [...new Set(picked.length ? picked : draftKeys.length ? draftKeys : autoRefs)].slice(0, TTS_MAX_IMAGES);
-  const imgSrc = picked.length ? "เลือกไว้สำหรับ TikTok" : draftKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
+  // ชุดรูปตั้งต้นเหมือนกันทุกร้าน (lib/listing-defaults · เจ้าของบอก 2026-11-21): รูปในร่าง → รูปของสินค้าในระบบตามลำดับหน้า Parent SKU (ปก → แกลเลอรี → ปกตัวสี → รูปตัวขาย)
+  //   galleryKeys = it.images ของ lib/product-listing-context (เรียงแล้ว) · ปกตัวสี/ตัวขายต่อท้ายเผื่อชุดรูปไม่มี
+  const coverKeys = [...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null)].filter(Boolean) as string[];
+  const poolKeys = listingDefaultImages([...input.galleryKeys, ...coverKeys], [], 999);
+  const draftKeysRaw = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean) : [];
+  const autoRefs = poolKeys.map(r2);
+  void autoRefs;
+  const refs = picked.length ? [...new Set(picked)].slice(0, TTS_MAX_IMAGES) : listingDefaultImages(poolKeys, draftKeysRaw, TTS_MAX_IMAGES).map(r2);
+  const imgSrc = picked.length ? "เลือกไว้สำหรับ TikTok" : draftKeysRaw.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "รูปสินค้าในระบบ ลำดับเดียวกับหน้า Parent SKU (อัตโนมัติ)";
   if (!refs.length) missing.push("รูปสินค้า ≥ 1");
   else if (refs.length < 5) warnings.push(`มีรูป ${refs.length} รูป — TikTok แนะนำอย่างน้อย 5 รูป`);
 

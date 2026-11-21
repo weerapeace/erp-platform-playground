@@ -31,6 +31,7 @@
  */
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
+import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { lazAttrEditable, lazNormAttr, linesToHighlights, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 import { skuImageKeys, type SkuImageSource } from "@/lib/sku-gallery-images";
@@ -225,7 +226,7 @@ export function planLazadaCreate(input: {
 
   // ---------- ชั้นตัวเลือก ----------
   const nameOv = recOf(extra.lazada_option_names);
-  const colorBase = (s: LazCreateSku) => str(s.color_platform_th || s.color_th || s.color);
+  const colorBase = (s: LazCreateSku) => listingColorName(s);   // ชื่อสีเหมือนกันทุกร้าน (lib/listing-defaults)
   const colorOf = (s: LazCreateSku) => str(nameOv[s.id]) || colorBase(s);
   const vo = (s: LazCreateSku) => { const av = s.attribute_values; const v = av && typeof av === "object" ? (av as Record<string, unknown>).variant_option : null; return v && typeof v === "object" ? v as Record<string, unknown> : null; };
   const optOf = (s: LazCreateSku) => str(vo(s)?.value);
@@ -312,10 +313,14 @@ export function planLazadaCreate(input: {
 
   // ---------- รูปสินค้า ----------
   const picked = Array.isArray(extra.lazada_images) ? (extra.lazada_images as unknown[]).map(str).filter(Boolean) : [];
-  const draftKeys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean).map(r2) : [];
-  const autoRefs = [...new Set([...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null), ...input.galleryKeys].filter(Boolean) as string[])].map(r2);
-  const refs = [...new Set(picked.length ? picked : draftKeys.length ? draftKeys : autoRefs)].slice(0, LAZADA_CREATE_MAX_IMAGES);
-  const imgSrc = picked.length ? "เลือกไว้สำหรับ Lazada" : draftKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU + รูปสินค้า (อัตโนมัติ)";
+  // ชุดรูปตั้งต้นเหมือนกันทุกร้าน (lib/listing-defaults · เจ้าของบอก 2026-11-21): รูปในร่าง → รูปของสินค้าในระบบตามลำดับหน้า Parent SKU (ปก → แกลเลอรี → ปกตัวสี → รูปตัวขาย)
+  //   galleryKeys = it.images ของ lib/product-listing-context (เรียงแล้ว) · ปกตัวสี/ตัวขายต่อท้ายเผื่อชุดรูปไม่มี
+  const coverKeys = [...act.filter((s) => masters.has(s.code)).map((s) => s.cover_image_r2_key), ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null)].filter(Boolean) as string[];
+  const poolKeys = listingDefaultImages([...input.galleryKeys, ...coverKeys], [], 999);
+  const draftKeysRaw = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).map(str).filter(Boolean) : [];
+  const autoRefs = poolKeys.map(r2);
+  const refs = picked.length ? [...new Set(picked)].slice(0, LAZADA_CREATE_MAX_IMAGES) : listingDefaultImages(poolKeys, draftKeysRaw, LAZADA_CREATE_MAX_IMAGES).map(r2);
+  const imgSrc = picked.length ? "เลือกไว้สำหรับ Lazada" : draftKeysRaw.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "รูปสินค้าในระบบ ลำดับเดียวกับหน้า Parent SKU (อัตโนมัติ)";
   if (!refs.length) missing.push("รูปสินค้า ≥ 1");
 
   // ---------- รูปในรายละเอียด (ต่อท้ายข้อความ) ----------

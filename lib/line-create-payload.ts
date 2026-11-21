@@ -25,6 +25,8 @@ import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
+import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
+import { loadListingContexts } from "@/lib/product-listing-context";
 import { loadFieldHistoryValues } from "@/lib/field-history";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 import { giftFromExtra, type GiftSetting } from "@/lib/line-gift";
@@ -34,7 +36,7 @@ import { giftFromExtra, type GiftSetting } from "@/lib/line-gift";
 export const LINE_DESC_HTML: NoteHtmlOptions = { keepBlankLines: true, keepIndent: true, bullets: false };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-type SkuRow = { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null; attribute_values: Record<string, unknown> | null };
+type SkuRow = { id: string; code: string; color_th: string | null; color: string | null; color_platform_th?: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null; attribute_values: Record<string, unknown> | null };
 
 export const LINE_CREATE_MAX_IMAGES = 7;
 /** ช่องที่ LINE รับแต่ไม่ส่งตอนสร้าง (บอกผู้ใช้ให้รู้ — ตั้งทีหลังในลิ้นชักสินค้า) */
@@ -97,15 +99,17 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const platform_id = (pf as { id?: string } | null)?.id;
   if (!platform_id) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" };
 
-  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist, nameThHist, namePfHist] = await Promise.all([
+  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist, nameThHist, namePfHist, ctx] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g, platform_category_id").eq("id", parentSkuId).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, description_image_keys, platform_product_id").eq("parent_sku_id", parentSkuId).eq("platform_id", platform_id).maybeSingle(),
-    admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentSkuId).eq("is_active", true).order("code"),
+    admin.from("skus_v2").select("id, code, color_th, color, color_platform_th, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentSkuId).eq("is_active", true).order("code"),
     // 🛡️ กันซ้ำ (บทเรียน JEAN08 ถูกสร้างซ้ำ 6 รายการ ก.ค. 2026): มีรายการบน LINE ที่จับคู่สินค้านี้อยู่แล้ว · ไม่นับตัวที่ร้านลบไปแล้ว
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parentSkuId).or(LIVE_LISTING_OR).limit(1),
     loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "platform_description"),   // ร่างที่ตรงค่าเก่า = สำเนา (lib/listing-description)
     loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "name_th"),               // ชื่อเก่า = สำเนา (lib/listing-title)
     loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "name_platform"),
+    // ชุดรูปของสินค้าในระบบ (ลำดับเดียวกับหน้า Parent SKU · ตัวเดียวกับ Shopee/Lazada/TikTok) — พลาด = ใช้ปกตัวสี/ตัวขายแบบเดิม
+    loadListingContexts(admin, [parentSkuId], platform_id).catch(() => []),
   ]);
   if (!parent) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
   const p = parent as Record<string, unknown>;
@@ -182,7 +186,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const lpOf = (s: SkuRow) => linePrice(fakeOf(s), saleOf(s));
 
   // มิติตัวเลือก (LINE รองรับ option1 + option2)
-  const colorOf = (s: SkuRow) => (s.color_th || s.color || "").trim();
+  const colorOf = (s: SkuRow) => listingColorName(s);   // ชื่อสีเหมือนกันทุกร้าน (lib/listing-defaults) — เดิม color_th → ได้ "ดำ" แทน "ดำ (01)"
   const voOf = (s: SkuRow) => { const av = s.attribute_values; const vo = (av && typeof av === "object") ? (av as Record<string, unknown>).variant_option : null; return (vo && typeof vo === "object") ? vo as Record<string, unknown> : null; };
   const opt2Of = (s: SkuRow) => { const vo = voOf(s); return vo ? String(vo.value ?? "").trim() : ""; };
   const opt2Name = (() => { for (const s of sellable) { const vo = voOf(s); const n = vo ? String(vo.name ?? "").trim() : ""; if (n) return n; } return "ตัวเลือก"; })();
@@ -225,13 +229,16 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   let galleryKeys: string[]; let imgSrc: string;
   if (lineImages.length) { galleryKeys = [...new Set(lineImages)].slice(0, LINE_CREATE_MAX_IMAGES); imgSrc = copiedLabel(extra, "images", lineImages) ?? "เลือกไว้สำหรับ LINE"; }
   else {
-    const autoKeys = imageKeys.length ? imageKeys : [...new Set([
+    // ชุดรูปตั้งต้นเหมือนกันทุกร้าน (lib/listing-defaults): รูปในร่าง → รูปของสินค้าในระบบตามลำดับหน้า Parent SKU
+    const coverKeys = [
       ...skuRows.filter((s) => masterCodes.has(s.code)).map((s) => s.cover_image_r2_key),
       ...sellable.map((s) => s.cover_image_r2_key || masterOf(s.code)?.cover_image_r2_key || null),
-    ].filter(Boolean) as string[])];
+    ].filter(Boolean) as string[];
+    const pool = [...(((ctx as { images?: { key: string }[] }[])[0]?.images ?? []).map((x) => x.key)), ...coverKeys];
+    const autoKeys = listingDefaultImages(pool, imageKeys, LINE_CREATE_MAX_IMAGES);
     // รูปในรายละเอียด: LINE ไม่รับ <img> ลิงก์ภายนอกในช่องรายละเอียด → รวมเข้าแกลเลอรีแทน (รูปหลักก่อน)
     galleryKeys = [...new Set([...autoKeys, ...descImgKeys])].slice(0, LINE_CREATE_MAX_IMAGES);
-    imgSrc = `${imageKeys.length ? "รูปที่เลือกในร่าง" : "ปกตัวสี + ปก SKU (อัตโนมัติ)"}${descImgKeys.length ? " + รูปในรายละเอียด" : ""}`;
+    imgSrc = `${imageKeys.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "รูปสินค้าในระบบ ลำดับเดียวกับหน้า Parent SKU (อัตโนมัติ)"}${descImgKeys.length ? " + รูปในรายละเอียด" : ""}`;
   }
   // รูปในระบบ = R2 key → ลิงก์สาธารณะของเรา · รูปจากร้านต้นทาง (คัดลอกมา) = ลิงก์ http ของร้านนั้น ส่งตรง
   const imageUrls = galleryKeys.map((k) => (/^https?:\/\//i.test(k) ? k : `${baseUrl()}/api/r2-image?key=${encodeURIComponent(k)}`));

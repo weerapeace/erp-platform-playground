@@ -161,7 +161,7 @@ describe("รอบ LY22 — เหมือน Shopee", () => {
   it("รูปในรายละเอียด: อัตโนมัติ = รูปสินค้าทั้งหมดต่อท้าย · เลือกเอง/ไม่ใส่ · ฝากรูปแล้วแทนลิงก์ในรายละเอียด", () => {
     const skus = [sku("D-01", "ดำ", 100), sku("D-02", "ขาว", 100)];
     const { preview: p, payload } = planLazadaCreate({ ...base, parent: parent(), skus, galleryKeys: ["g/1.jpg"] });
-    expect(p.descImages).toMatchObject({ refs: ["r2:img/D-01.jpg", "r2:img/D-02.jpg", "r2:g/1.jpg"], custom: false });
+    expect(p.descImages).toMatchObject({ refs: ["r2:g/1.jpg", "r2:img/D-01.jpg", "r2:img/D-02.jpg"], custom: false }); // ลำดับเดียวกับหน้า Parent SKU: รูปของสินค้า (แกลเลอรี) ก่อน แล้วปกตัวสี (เจ้าของบอก 2026-11-21 · lib/listing-defaults)
     const desc = (payload.Request as { Product: Record<string, any> }).Product.Attributes.description as string;
     expect(desc).toContain('<img src="r2:g/1.jpg" />');
     expect(p.description.value).not.toContain("<img");
