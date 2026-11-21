@@ -10,7 +10,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
-import { ImageAttach, ImageAttachKeys, uploadResizedImage } from "@/components/image-attach";
+import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
 import { RichTextEditor } from "@/components/rich-text";
 import dynamic from "next/dynamic";
 // คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
@@ -40,7 +40,7 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import { TaskPlatformListing } from "./task-platform-listing";
-import { TaskReferenceBoard, taskReferenceUrl } from "./task-reference-board";
+import { TaskBriefBoard, TaskReferenceBoard, taskReferenceUrl } from "./task-reference-board";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { InfoHint } from "@/components/info-hint";
@@ -353,11 +353,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 </div>
               )}
 
-              {/* แนบรูป (บรีฟ/อ้างอิง) — อยู่ใต้รายละเอียด · แสดงเสมอ (คนละชุดกับรูปแนบระดับงานด้านล่าง) */}
-              <div>
-                <p className="text-xs text-slate-400 mb-1">🖼 {t("แนบรูป (บรีฟ/อ้างอิง)", "Images (brief/reference)")}</p>
-                <ImageAttachKeys value={d.reference_images ?? []} onChange={(keys) => { void saveQuick({ reference_images: keys }, true); }} folder="creative-tasks" maxSize={800} />
-              </div>
+              {/* กระดานบรีฟ — แทนช่องแนบรูปบรีฟเดิม (เจ้าของเลือก 2026-11-21) · รูปบรีฟเดิม (reference_images) ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก ไม่ลบของเดิม */}
+              <TaskBriefBoard key={d.id} taskId={d.id}
+                seedImageUrls={(d.reference_images ?? []).map((k) => r2ImageUrl(k)).filter((u): u is string => !!u)} />
 
               {/* 🔁 โหมดใหม่ + ไม่มีงานย่อยรูป/คำอธิบาย → แก้ที่สินค้าจากหน้างานเลย (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
               <TaskDirectPanel task={d} pushToast={pushToast}

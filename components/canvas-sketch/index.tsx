@@ -57,6 +57,8 @@ export type CanvasSketchControls = {
   listCards: () => { kind: string; data: Record<string, unknown> }[];
   /** อ่าน element ดิบบนกระดาน (อ่านอย่างเดียว) — โมดูลที่ต้องรู้ตำแหน่ง/frame ของการ์ด เช่น บอร์ดจ่ายงาน (การ์ดอยู่ในกรอบโต๊ะไหน) */
   getElements: () => Record<string, unknown>[];
+  /** กระดานนี้ยังไม่เคยบันทึกเลย (ยังไม่มีแถวในฐานข้อมูล) — ใช้เติมของตั้งต้นครั้งแรกครั้งเดียว เช่น ย้ายรูปบรีฟเดิมขึ้นกระดาน */
+  isNewBoard: () => boolean;
   /** แก้ค่าบน element ที่มีอยู่ (คืน null = ไม่แก้ใบนั้น) — ใช้จัดตำแหน่งการ์ด/เปลี่ยนชื่อกรอบ · ไม่มีอะไรเปลี่ยนจริง = ไม่บันทึก */
   patchElements: (patch: (el: Record<string, unknown>) => Record<string, unknown> | null) => void;
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
@@ -416,6 +418,7 @@ export function CanvasSketch({
       },
       // element ดิบบนกระดาน (ยังไม่ถูกลบ) — อ่านอย่างเดียว
       getElements: () => { const api = apiRef.current; return api ? ((api.getSceneElements() as Record<string, unknown>[]) ?? []) : []; },
+      isNewBoard: () => baseRevRef.current === 0,
       // แก้ค่าบน element เดิม (ตำแหน่ง/ชื่อกรอบ ฯลฯ) — bump version ให้ collab merge ได้ · ไม่มีอะไรเปลี่ยน = ไม่ยุ่งกับ scene
       patchElements: (patch) => {
         const api = apiRef.current; if (!api) return;

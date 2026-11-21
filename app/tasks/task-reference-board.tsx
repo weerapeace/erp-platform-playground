@@ -8,7 +8,8 @@
 //  • แท็บย่อย "โน้ต" = โน้ตอ้างอิงแบบเดิม (reference_html) — ส่งเข้ามาเป็น children
 // เจ้าของขอ 2026-11-21
 // ============================================================
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
@@ -57,6 +58,70 @@ export function TaskReferenceBoard({ taskId, notes, hasNotes, height = "60vh", s
       {sub === "board"
         ? <CanvasSketch entityType={TASK_REF_ENTITY} entityId={taskId} height={height} collab />
         : notes}
+    </div>
+  );
+}
+
+// ============================================================
+// กระดานบรีฟของงาน (แท็บ "งาน" ใต้ "รายละเอียดงาน" — แทนช่องแนบรูปบรีฟเดิม) · เจ้าของเลือก 2026-11-21
+//  • กระดานกลาง CanvasSketch ห้องแยก entity_type=creative_task_brief (คนละห้องกับกระดานอ้างอิง)
+//  • รูปบรีฟที่แนบไว้แบบเดิม (reference_images) → ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก (กระดานยังไม่เคยบันทึก) ครั้งเดียว
+//    ไม่ลบรูปชุดเดิมในฐานข้อมูล (เก็บไว้เป็นสำรอง) · ลบรูปบนกระดานแล้วไม่ถูกเติมกลับ (กระดานบันทึกแล้ว)
+//  • พับ/ขยายได้ จำค่าต่อเครื่อง · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
+// ============================================================
+export const TASK_BRIEF_ENTITY = "creative_task_brief";
+export const taskBriefUrl = (taskId: string) => `${taskReferenceUrl(taskId)}?board=brief`;
+const BRIEF_FOLD_KEY = "task-brief-board-folded";
+
+export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", showOpenFull = true, foldable = true }: {
+  taskId: string;
+  /** รูปบรีฟเดิม (URL เต็ม) — เติมขึ้นกระดานครั้งแรกครั้งเดียว */
+  seedImageUrls?: string[];
+  height?: string;
+  showOpenFull?: boolean;
+  foldable?: boolean;
+}) {
+  const t = useT();
+  const [folded, setFolded] = useState(false);
+  useEffect(() => { if (!foldable) return; try { setFolded(localStorage.getItem(BRIEF_FOLD_KEY) === "1"); } catch { /* ไม่มี storage = ขยายไว้ */ } }, [foldable]);
+  const toggleFold = () => setFolded((f) => { const n = !f; try { localStorage.setItem(BRIEF_FOLD_KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; });
+
+  const controlsRef = useRef<CanvasSketchControls | null>(null);
+  const seedRef = useRef(seedImageUrls); seedRef.current = seedImageUrls;
+  const seededRef = useRef(false);
+  const onReady = useCallback(() => {
+    const c = controlsRef.current; const urls = seedRef.current.filter(Boolean);
+    if (!c || seededRef.current || !urls.length || !c.isNewBoard() || c.getElements().length > 0) return;
+    seededRef.current = true;
+    // วางเรียงแถวละ 4 รูป กรอบ 220×220 (คงสัดส่วนรูปจริง)
+    const BOX = 220, GAP = 24, PER = 4;
+    const cols = Math.min(PER, urls.length);
+    const ox = -((cols * BOX + (cols - 1) * GAP) / 2), oy = -BOX / 2;
+    void c.insert(urls.map((u, i) => ({
+      type: "image", _imageUrl: u, width: BOX, height: BOX,
+      x: ox + (i % PER) * (BOX + GAP), y: oy + Math.floor(i / PER) * (BOX + GAP),
+    })));
+  }, []);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-slate-400">🎨 {t("กระดานบรีฟ", "Brief board")}</span>
+        {!folded && <span className="text-[11px] text-slate-400">{t("วางรูป Ctrl+V · ลิงก์ · โน้ต · ย้อน Ctrl+Z", "Paste images, links, notes · Undo Ctrl+Z")}</span>}
+        <span className="ml-auto inline-flex items-center gap-1.5">
+          {foldable && (
+            <button type="button" onClick={toggleFold} className="inline-flex items-center h-7 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
+              {folded ? `▾ ${t("ขยาย", "Expand")}` : `▴ ${t("พับ", "Collapse")}`}
+            </button>
+          )}
+          {showOpenFull && (
+            <Link href={taskBriefUrl(taskId)} target="_blank" className="inline-flex items-center h-7 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
+              ⛶ {t("เปิดเต็มจอ", "Open full screen")}
+            </Link>
+          )}
+        </span>
+      </div>
+      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab controlsRef={controlsRef} onReady={onReady} />}
     </div>
   );
 }

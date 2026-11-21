@@ -28,6 +28,8 @@ const PERM: Record<string, { view: string; edit: string }> = {
   creative_trend:   { view: "tasks.view",    edit: "tasks.edit" },
   // กระดานอ้างอิงของงาน (แท็บ "อ้างอิง" ในลิ้นชักงาน · entity_id = id งาน) — app/tasks/task-reference-board.tsx
   creative_task_ref:{ view: "tasks.view",    edit: "tasks.edit" },
+  // กระดานบรีฟของงาน (แท็บ "งาน" ใต้รายละเอียดงาน · entity_id = id งาน) — แยกห้องจากกระดานอ้างอิง
+  creative_task_brief:{ view: "tasks.view",  edit: "tasks.edit" },
   // กระดานแผนงานทีม (หน้า /tasks/plan มุมมอง "กระดาน" · entity_id="main" กระดานเดียวทั้งทีม) — สิทธิ์เดียวกับแผนงาน
   team_plan_board:  { view: "tasks.view",    edit: "tasks.edit" },
   // โหมด "ผังระบบ" ของกระดานแผนงาน (entity_id = key แท็บผัง) — ที่วาดเสริม/ตำแหน่งกล่องที่ย้าย แยกจากหน้าแผนผังการทำงาน
