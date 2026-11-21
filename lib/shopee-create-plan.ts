@@ -25,6 +25,7 @@
 import { noteToText } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
+import { pickListingTitle } from "@/lib/listing-title";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
@@ -66,6 +67,8 @@ export type ShopeeCreateParent = {
   platform_description_live?: string | null;
   /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า */
   platform_description_history?: string[] | null;
+  /** ชื่อเวอร์ชันเก่า (name_th/name_platform จากประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (lib/listing-title) */
+  name_history?: string[] | null;
   /** จำนวนรูป Description ของ Parent (Shopee ยังส่งไม่ได้ — บอกเฉย ๆ) */
   desc_image_count?: number;
   size?: { l: number | null; w: number | null; h: number | null } | null;
@@ -316,9 +319,10 @@ export function planShopeeCreate(input: {
   const missing: string[] = []; const warnings: string[] = [];
 
   // ---------- ชื่อ ----------
-  const dTitle = str(d?.title), namePf = str(p.name_platform), nameTh = str(p.name_th);
-  const name = (dTitle || namePf || nameTh).replace(/\s+/g, " ");
-  const nameSrc = !name ? "ยังไม่มีชื่อ" : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ Shopee" : name === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
+  // ตัวเลือกชื่อกลาง (lib/listing-title): ร่างที่คนแก้เอง → ชื่อแพลตฟอร์ม → ชื่อสินค้า · ร่างที่เป็นสำเนาชื่อเก่า = ใช้ชื่อล่าสุด
+  const titlePick = pickListingTitle(d?.title, p, "Shopee");
+  const name = titlePick.text;
+  const nameSrc = titlePick.src;
   const nLen = shopeeTextLength(name);
   if (!name) missing.push("ชื่อสินค้า");
   else if (L?.nameMin != null && nLen < L.nameMin) missing.push(`ชื่อสั้นไป ${nLen} ตัวอักษร (Shopee ต้องอย่างน้อย ${L.nameMin})`);

@@ -27,6 +27,7 @@
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
+import { pickListingTitle } from "@/lib/listing-title";
 import { ttsAttrPayload, type TtsAttrField, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import type { TtsSizeMeta } from "@/lib/tiktok-size-chart";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
@@ -47,6 +48,8 @@ export type TtsCreateParent = {
   description: string | null; platform_description: string | null;
   /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า */
   platform_description_history?: string[] | null;
+  /** ชื่อเวอร์ชันเก่า (name_th/name_platform จากประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (lib/listing-title) */
+  name_history?: string[] | null;
   weight_g: number | null; box: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type TtsCreateDraft = {
@@ -139,9 +142,10 @@ export function planTiktokCreate(input: {
   const missing: string[] = []; const warnings: string[] = [];
 
   // ---------- ชื่อ ----------
-  const dTitle = str(d?.title), namePf = str(p.name_platform), nameTh = str(p.name_th);
-  const name = (dTitle || namePf || nameTh).replace(/\s+/g, " ");
-  const nameSrc = !name ? "ยังไม่มีชื่อ" : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ TikTok" : name === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
+  // ตัวเลือกชื่อกลาง (lib/listing-title): ร่างที่เป็นสำเนาชื่อเก่า = ใช้ชื่อล่าสุด
+  const titlePick = pickListingTitle(d?.title, p, "TikTok");
+  const name = titlePick.text;
+  const nameSrc = titlePick.src;
   const nLen = ttsTitleLength(name);
   if (!name) missing.push("ชื่อสินค้า");
   else if (nLen < TTS_TITLE_MIN) missing.push(`ชื่อสั้นไป ${nLen} ตัวอักษร (TikTok ไทยต้อง ${TTS_TITLE_MIN}–${TTS_TITLE_MAX})`);

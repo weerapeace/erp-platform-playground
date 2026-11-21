@@ -176,6 +176,16 @@ describe("รอบ LY22 — เหมือน Shopee", () => {
   });
 });
 
+describe("ชื่อจากร่างที่เป็นสำเนาชื่อเก่า (เจอ 2026-11-21 LY22)", () => {
+  it("ร่างเก็บชื่อเก่า (อยู่ในประวัติ) = ใช้ชื่อล่าสุด · ร่างที่แก้เอง = ใช้ร่าง", () => {
+    const pr = parent({ name_platform: null, name_th: "กระเป๋า พร้อมพวงกุญแจ LY22", name_history: ["กระเป๋าถือผู้หญิง LY22"] });
+    const old = planLazadaCreate({ ...base, parent: pr, skus: [sku("A-01", "ดำ", 100)], draft: { title: "กระเป๋าถือผู้หญิง  LY22", description: null, category_path: null, image_keys: null, extra: {}, platform_product_id: null } }).preview;
+    expect(old.name.value).toBe("กระเป๋า พร้อมพวงกุญแจ LY22");
+    const own = planLazadaCreate({ ...base, parent: pr, skus: [sku("A-01", "ดำ", 100)], draft: { title: "ตั้งชื่อเองสำหรับ Lazada", description: null, category_path: null, image_keys: null, extra: {}, platform_product_id: null } }).preview;
+    expect(own.name).toEqual({ value: "ตั้งชื่อเองสำหรับ Lazada", src: "แก้ไว้สำหรับ Lazada" });
+  });
+});
+
 describe("รายละเอียดจาก Parent SKU (เจ้าของบอก 2026-11-20)", () => {
   const draftWith = (extra: Record<string, unknown>, description: string | null = null) => ({ title: null, description, category_path: null, image_keys: null, extra, platform_product_id: null });
   it("Platform Description สด มาก่อนคอลัมน์เก่า · ร่างที่เป็นสำเนาคอลัมน์เก่า = ไม่นับ · ร่างที่แก้เอง = ใช้", () => {

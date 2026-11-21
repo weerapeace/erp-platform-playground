@@ -24,6 +24,7 @@ import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
 import { pickListingDescription } from "@/lib/listing-description";
+import { pickListingTitle } from "@/lib/listing-title";
 import { loadFieldHistoryValues } from "@/lib/field-history";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 import { giftFromExtra, type GiftSetting } from "@/lib/line-gift";
@@ -96,13 +97,15 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const platform_id = (pf as { id?: string } | null)?.id;
   if (!platform_id) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" };
 
-  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist] = await Promise.all([
+  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist, nameThHist, namePfHist] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g, platform_category_id").eq("id", parentSkuId).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, description_image_keys, platform_product_id").eq("parent_sku_id", parentSkuId).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentSkuId).eq("is_active", true).order("code"),
     // 🛡️ กันซ้ำ (บทเรียน JEAN08 ถูกสร้างซ้ำ 6 รายการ ก.ค. 2026): มีรายการบน LINE ที่จับคู่สินค้านี้อยู่แล้ว · ไม่นับตัวที่ร้านลบไปแล้ว
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parentSkuId).or(LIVE_LISTING_OR).limit(1),
     loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "platform_description"),   // ร่างที่ตรงค่าเก่า = สำเนา (lib/listing-description)
+    loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "name_th"),               // ชื่อเก่า = สำเนา (lib/listing-title)
+    loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "name_platform"),
   ]);
   if (!parent) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
   const p = parent as Record<string, unknown>;
@@ -121,9 +124,11 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
 
   // ---------- ชื่อ / หมวด / รายละเอียด / แบรนด์ / น้ำหนัก (+ มาจากไหน) ----------
   const namePf = str(p.name_platform), nameTh = str(p.name_th), dTitle = str(d.title);
-  const name = dTitle || namePf || nameTh;
+  // คัดลอกจากร้านต้นทาง = ตั้งใจ ใช้ร่าง · นอกนั้นตัวเลือกชื่อกลาง (ร่างที่เป็นสำเนาชื่อเก่า = ใช้ชื่อล่าสุด)
   const nameCopied = dTitle ? copiedLabel(extra, "title", dTitle) : null;
-  const nameSrc = !name ? "ยังไม่มีชื่อ" : nameCopied ? nameCopied : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ LINE" : (dTitle ? dTitle : name) === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
+  const titlePick = nameCopied ? { text: dTitle, src: nameCopied } : pickListingTitle(dTitle, { name_platform: namePf, name_th: nameTh, name_history: [...nameThHist, ...namePfHist] }, "LINE");
+  const name = titlePick.text;
+  const nameSrc = titlePick.src;
 
   const catPath = str(d.category_path);
   const categoryId = lineCategoryIdOf(catPath);

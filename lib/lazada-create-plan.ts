@@ -30,6 +30,7 @@
  *   รูปในรายละเอียด = ร่าง extra.lazada_desc_images [ref] (เลือก/เรียงเอง · [] = ไม่ใส่) → รูปสินค้าทั้งหมด (≤ 20) ต่อท้ายข้อความ · route ฝากรูปกับ Lazada ก่อนส่ง
  */
 import { pickListingDescription } from "@/lib/listing-description";
+import { pickListingTitle } from "@/lib/listing-title";
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { lazAttrEditable, lazNormAttr, linesToHighlights, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 import { skuImageKeys, type SkuImageSource } from "@/lib/sku-gallery-images";
@@ -68,6 +69,8 @@ export type LazCreateParent = {
   platform_description_live?: string | null;
   /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า ไม่ใช่ที่คนแก้ */
   platform_description_history?: string[] | null;
+  /** ชื่อเวอร์ชันเก่า (name_th/name_platform จากประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (lib/listing-title) */
+  name_history?: string[] | null;
   /** รูป Description ของ Parent SKU (r2 key เรียงตามที่จัด) — รูปในรายละเอียดอัตโนมัติ */
   desc_image_keys?: string[] | null;
   size?: { l: number | null; w: number | null; h: number | null } | null;
@@ -194,9 +197,10 @@ export function planLazadaCreate(input: {
   const missing: string[] = []; const warnings: string[] = [];
 
   // ---------- ชื่อ ----------
-  const dTitle = str(d?.title), namePf = str(p.name_platform), nameTh = str(p.name_th);
-  const name = dTitle || namePf || nameTh;
-  const nameSrc = !name ? "ยังไม่มีชื่อ" : dTitle && dTitle !== namePf && dTitle !== nameTh ? "แก้ไว้สำหรับ Lazada" : name === namePf ? "ชื่อสำหรับแพลตฟอร์ม" : "ชื่อสินค้า";
+  // ตัวเลือกชื่อกลาง (lib/listing-title): ร่างที่เป็นสำเนาชื่อเก่า = ใช้ชื่อล่าสุด
+  const titlePick = pickListingTitle(d?.title, p, "Lazada");
+  const name = titlePick.text;
+  const nameSrc = titlePick.src;
   if (!name) missing.push("ชื่อสินค้า");
   else if (name.length > NAME_MAX) missing.push(`ชื่อยาว ${name.length} ตัวอักษร (Lazada รับไม่เกิน ${NAME_MAX})`);
 
