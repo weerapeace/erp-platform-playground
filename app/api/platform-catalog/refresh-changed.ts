@@ -68,9 +68,14 @@ async function pullLazada(admin: SupabaseClient, ctx: { platformId: string; bran
   let offset = Number(ctx.cursor) || 0; let saved = 0; let newly = 0;
   const updateAfter = new Date(ctx.sinceMs).toISOString().replace(/\.\d{3}Z$/, "+00:00");
   while (Date.now() - started < ctx.budgetMs) {
-    let res: { products: Record<string, unknown>[]; total: number };
-    try { res = await lazGetProducts(tok.gateway, tok.accessToken, { offset, limit: PAGE, updateAfter }); }
-    catch (e) { return { done: false, cursor: String(offset), sinceMs: ctx.sinceMs, saved, newly, error: lazErrorText(e) }; }
+    // Lazada ตอบ "RPC timeout" เป็นพัก ๆ (เจอจริงรอบแรก 2026-11-21 ที่ตัวที่ 150) → ลองซ้ำ 2 ครั้ง และขอทีละน้อยลง (50 → 20 → 10)
+    let res: { products: Record<string, unknown>[]; total: number } | null = null;
+    let lim = PAGE; let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3 && !res; attempt++) {
+      try { res = await lazGetProducts(tok.gateway, tok.accessToken, { offset, limit: lim, updateAfter }); }
+      catch (e) { lastErr = e; if (attempt < 2) { await sleep(2000 * (attempt + 1)); lim = attempt === 0 ? 20 : 10; } }
+    }
+    if (!res) return { done: false, cursor: String(offset), sinceMs: ctx.sinceMs, saved, newly, error: lazErrorText(lastErr) };
     const items: LazCatalogItem[] = [];
     for (const p of res.products) { const it = lazProductToCatalogItem(p); if (it) items.push(it); }
     if (items.length) {
@@ -80,7 +85,7 @@ async function pullLazada(admin: SupabaseClient, ctx: { platformId: string; bran
       } catch (e) { return { done: false, cursor: String(offset), sinceMs: ctx.sinceMs, saved, newly, error: `บันทึกไม่สำเร็จ: ${(e as Error).message}` }; }
     }
     offset += res.products.length;
-    if (!res.products.length || res.products.length < PAGE || (res.total && offset >= res.total)) return { done: true, cursor: "", sinceMs: ctx.sinceMs, saved, newly, error: null };
+    if (!res.products.length || res.products.length < lim || (res.total && offset >= res.total)) return { done: true, cursor: "", sinceMs: ctx.sinceMs, saved, newly, error: null };
   }
   return { done: false, cursor: String(offset), sinceMs: ctx.sinceMs, saved, newly, error: null };
 }
