@@ -16,6 +16,7 @@ import { HoverImage } from "@/components/hover-image";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { uploadResizedImage } from "@/components/image-attach";
 import { PACK_FLAG_PRESETS, PACK_NOTE_MAX, type PackagingItem } from "@/lib/packaging";
+import { usePhotoCapture } from "@/components/photo-capture";
 
 const API = "/api/packing/packaging";
 const post = async (body: Record<string, unknown>): Promise<{ ok: boolean; j: Record<string, unknown> }> => {
@@ -107,6 +108,8 @@ function PackagingManager({ pk }: { pk: ReturnType<typeof usePackagingItems> }) 
     finally { setBusy(false); }
   };
 
+  // มือถือ: ถ่ายรูปบรรจุภัณฑ์ตรง (ของกลาง photo-capture · ตัวอัปย่อเหลือ 400px อยู่แล้ว → maxSide 0)
+  const cap = usePhotoCapture({ onFiles: (fs) => onImage(fs[0]), multiple: false, maxSide: 0 });
   const list = (pk.items ?? []).filter((i) => i.is_active);
   const trash = (pk.items ?? []).filter((i) => !i.is_active);
   if (pk.error) return <ErrorState title="โหลดรายการบรรจุภัณฑ์ไม่ได้" hint={pk.error} onRetry={() => void pk.reload()} />;
@@ -136,6 +139,7 @@ function PackagingManager({ pk }: { pk: ReturnType<typeof usePackagingItems> }) 
                   <span className="flex items-center gap-1 text-xs">
                     <button type="button" disabled={busy} onClick={() => { setEditing(it.id); setEditName(it.name); }} aria-label={`แก้ชื่อ ${it.name}`} className="rounded px-1 text-slate-500 hover:bg-slate-100"><Icon name="edit" /></button>
                     <button type="button" disabled={busy} onClick={() => { imgFor.current = it; fileRef.current?.click(); }} aria-label={`ใส่รูป ${it.name}`} className="rounded px-1 text-slate-500 hover:bg-slate-100"><Icon name="upload" /></button>
+                    {cap.touch && <button type="button" disabled={busy} onClick={() => { imgFor.current = it; cap.openCamera(); }} aria-label={`ถ่ายรูป ${it.name}`} className="rounded px-1 text-blue-600 hover:bg-blue-50"><Icon name="camera" /></button>}
                     <button type="button" disabled={busy} onClick={() => void act({ action: "item_archive", id: it.id, archived: true }, `ย้าย "${it.name}" เข้าถังแล้ว`, { action: "item_archive", id: it.id, archived: false })} aria-label={`ลบ ${it.name}`} className="rounded px-1 text-red-500 hover:bg-red-50"><Icon name="delete" /></button>
                   </span>
                 )}
@@ -151,6 +155,7 @@ function PackagingManager({ pk }: { pk: ReturnType<typeof usePackagingItems> }) 
           <button type="submit" disabled={busy || !name.trim()} className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">เพิ่ม</button>
         </form>
       )}
+      {cap.ui}
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void onImage(e.target.files?.[0]); e.target.value = ""; }} />
       {showTrash && (
         <div className="mt-2 rounded-lg bg-slate-50 p-2">

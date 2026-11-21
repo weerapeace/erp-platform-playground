@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ERPInput } from "@/components/form";
 import { ERPModal } from "@/components/modal";
 import { ImageAttach } from "@/components/image-attach";
+import { CameraButton } from "@/components/photo-capture";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { HoverImage } from "@/components/hover-image";
@@ -116,6 +117,8 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
             {uploading ? "⏳" : <>📥 {tt("ลากรูปมาใส่ / เลือกไฟล์", "Drop or pick images")}</>}
             <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) onAddDraft(e.target.files); e.target.value = ""; }} />
           </label>
+          <CameraButton onFiles={(fs) => { if (fs.length) onAddDraft(fs); }} disabled={uploading} label={tt("ถ่ายรูป", "Camera")}
+            className="h-12 px-2 inline-flex items-center gap-1 rounded border border-blue-300 bg-blue-50 text-[11px] text-blue-700 disabled:opacity-50" />
         </div>
         {draft.length > 0 && (
           <div className="flex items-center justify-between gap-2 mt-1.5">

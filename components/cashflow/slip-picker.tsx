@@ -5,8 +5,11 @@
  * ตัวอัปโหลดจริงเป็นของกลาง uploadRecordFile (components/record-files) — ช่องนี้แค่เลือกไฟล์ + โชว์ความคืบหน้า
  */
 import { UploadProgress } from "@/components/upload-progress";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 
 export function SlipPicker({ file, onChange, busyLabel }: { file: File | null; onChange: (f: File | null) => void; busyLabel: string | null }) {
+  // มือถือ: ถ่ายรูปสลิปตรง / เลือกไฟล์ (ของกลาง photo-capture · ย่อรูป ≤2400px)
+  const cap = usePhotoCapture({ onFiles: (fs) => onChange(fs[0] ?? null), multiple: false, libraryAccept: "image/*,application/pdf" });
   return (
     <div>
       <label className="block text-xs text-slate-500 mb-1">แนบสลิป / หลักฐาน (ไม่บังคับ · รูปหรือ PDF)</label>
@@ -18,10 +21,13 @@ export function SlipPicker({ file, onChange, busyLabel }: { file: File | null; o
           <span className="text-xs text-slate-400">{Math.round(file.size / 1024)} KB</span>
           <button type="button" onClick={() => onChange(null)} className="text-xs text-slate-500 underline">เอาออก</button>
         </div>
+      ) : cap.touch ? (
+        <PhotoCaptureButtons capture={cap} size="sm" libraryLabel="เลือกไฟล์" webLink={false} />
       ) : (
         <input type="file" accept="image/*,application/pdf" onChange={(e) => onChange(e.target.files?.[0] ?? null)}
           className="block w-full text-sm text-slate-600 file:mr-3 file:h-8 file:px-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:text-slate-700" />
       )}
+      {cap.ui}
     </div>
   );
 }

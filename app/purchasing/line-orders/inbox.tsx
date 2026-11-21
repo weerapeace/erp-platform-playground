@@ -20,6 +20,7 @@ import { shrinkImageToFit } from "@/lib/image-resize";
 import { PLATFORM_LABEL, curSym, type CaptureRow } from "@/lib/order-capture-shared";
 import { CaptureModal } from "./capture-modal";
 import { LineGroupSetup } from "./line-group-setup";
+import { CameraButton } from "@/components/photo-capture";
 
 type Row = CaptureRow & { po_no: string | null };
 type Tab = "pending" | "confirmed" | "rejected" | "all";
@@ -156,6 +157,8 @@ export function LineOrdersInbox() {
               </button>
               <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden
                 onChange={(e) => void upload(Array.from(e.target.files ?? []))} />
+              <CameraButton onFiles={(fs) => { if (fs.length) void upload(fs); }} disabled={uploading} label="ถ่ายรูป"
+                className="h-10 px-3 inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 text-blue-700 text-sm font-medium disabled:opacity-50" />
             </>
           )}
         </div>

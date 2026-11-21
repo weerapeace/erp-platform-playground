@@ -80,8 +80,10 @@ export type FreeCropResult = { blob: Blob; w: number; h: number; rotation: numbe
 const FULL = { x: 0, y: 0, w: 100, h: 100 };
 
 /** ✂️ ครอปกรอบอิสระ + หมุน 90° (รูปเดียว) — ดูหัวไฟล์ */
-export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️ ครอปรูป", description = "ลากกรอบ = ย้าย · ลากมุม = ย่อ/ขยาย · ลากที่ว่างบนรูป = วาดกรอบใหม่ · นอกกรอบ (ส่วนมืด) จะถูกตัดทิ้ง", maxSide = 2400, initialRect }: {
+export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️ ครอปรูป", description = "ลากกรอบ = ย้าย · ลากมุม = ย่อ/ขยาย · ลากที่ว่างบนรูป = วาดกรอบใหม่ · นอกกรอบ (ส่วนมืด) จะถูกตัดทิ้ง", maxSide = 2400, initialRect, zIndex }: {
   open: boolean;
+  /** ชั้นของป๊อป (เปิดจากป๊อปที่ทำเองซึ่งสูงกว่า z-50) */
+  zIndex?: number;
   /** blob URL (ไฟล์ในเครื่อง) หรือ URL รูป r2 (/api/r2-image?key=…&w=3200) */
   src: string;
   onClose: () => void;
@@ -133,7 +135,7 @@ export function ImageFreeCropModal({ open, src, onClose, onDone, title = "✂️
   };
   const dim = "absolute bg-slate-950/55";
   return (
-    <ERPModal open={open} onClose={onClose} title={title} description={description} size="xl" loading={busy}
+    <ERPModal open={open} onClose={onClose} title={title} description={description} size="xl" loading={busy} zIndex={zIndex}
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <div className="flex items-center gap-1.5">

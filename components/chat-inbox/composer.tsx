@@ -12,6 +12,7 @@ import { ERPTextarea } from "@/components/form";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useToast } from "@/components/toast";
 import { toChatJpeg } from "@/lib/image-resize";
+import { usePhotoCapture } from "@/components/photo-capture";
 import { CHAT_CHANNEL_INFO, chatTextError, renderQuickReply } from "@/lib/chat/rules";
 import type { ChatMessage, ChatQuickReply } from "@/lib/chat/types";
 import type { ChatDetail } from "./shared";
@@ -46,6 +47,8 @@ export function Composer({ detail, quickReplies, onSent }: { detail: ChatDetail;
   const quotaLeft = s.quota && s.quota.limit != null && s.quota.used != null ? Math.max(0, s.quota.limit - s.quota.used) : null;
   const isLine = c.channel === "line";
 
+  // มือถือ: ปุ่มถ่ายรูปส่งในแชต (ของกลาง photo-capture · ตัวส่งย่อรูปเองอยู่แล้ว → maxSide 0)
+  const cap = usePhotoCapture({ onFiles: (fs) => pickImage(fs[0]), multiple: false, maxSide: 0 });
   const pickImage = async (f: File | null | undefined) => {
     if (!f) return;
     const jpg = await toChatJpeg(f);
@@ -138,6 +141,13 @@ export function Composer({ detail, quickReplies, onSent }: { detail: ChatDetail;
               <Icon value="i:photo" /> รูป
             </button>
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void pickImage(e.target.files?.[0]); e.target.value = ""; }} />
+            {cap.touch && (
+              <button type="button" onClick={cap.openCamera} disabled={!s.can_send || sending}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Icon name="camera" /> ถ่ายรูป
+              </button>
+            )}
+            {cap.ui}
           </>
         )}
         {s.supports.product && (

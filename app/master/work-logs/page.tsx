@@ -14,6 +14,7 @@ import { decodeWorkLogQr, prepareWorkLogPhoto } from "@/lib/work-log-image";
 import { UploadProgress } from "@/components/upload-progress";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { useFileRefUrls } from "@/components/file-ref";
+import { CameraButton } from "@/components/photo-capture";
 
 type SheetItem = {
   id: string; mo_no: string | null; page_no: number | null; page_total: number | null; status: string; ai_error: string | null;
@@ -96,6 +97,9 @@ export default function WorkLogsPage() {
             <div className="text-base font-semibold text-blue-700">📷 ถ่ายรูป / เลือกรูปใบจด</div>
             <div className="mt-1 text-xs text-slate-500">ส่งได้หลายรูปพร้อมกัน · ถ่ายให้เห็นจุดดำครบ 4 มุม · แสงพอ ไม่มีเงาบัง QR</div>
           </button>
+          {/* มือถือ: เปิดกล้องตรง + ถาดตรวจรูป (ครอป/ดัดให้ตรง/ถ่ายต่อเนื่อง) — ของกลาง photo-capture */}
+          <CameraButton onFiles={(fs) => { if (fs.length) void run(fs); }} disabled={busy} label="เปิดกล้องถ่ายใบจด"
+            className="w-full h-11 inline-flex items-center justify-center gap-1.5 rounded-xl border border-blue-300 bg-white text-blue-700 text-sm font-medium disabled:opacity-60" />
           {jobs.length > 0 && (
             <ul className="space-y-2">
               {jobs.map((j) => (

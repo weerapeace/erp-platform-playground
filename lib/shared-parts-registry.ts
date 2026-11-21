@@ -481,7 +481,7 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "photo-capture", label: "ถ่ายรูปจากมือถือ/กล้อง", code: "PhotoCapture", category: "file",
     source: { path: "components/photo-capture" },
     what: "มือถือ: ปุ่ม ถ่ายรูป (เปิดกล้องตรง) + เลือกจากคลัง + กล้องในเว็บมีเส้นกริด · ถาดตรวจรูปก่อนใส่ (ถ่ายต่อเนื่อง · ครอป/หมุน · ดัดรูปเอียงให้ตรง 4 มุม · ลบแล้วย้อนกลับได้) · ย่อรูป ≤2400px ก่อนส่ง · PC มีเว็บแคม = ลิงก์เล็ก",
-    when: "ช่องอัปรูปที่คนอาจกดจากโทรศัพท์ — เสียบในช่องอัปของกลางแล้ว (ImageAttach · FileInput · FileMultiInput · กล่องรูปแผงผ้า Swatch)",
+    when: "ช่องอัปรูปที่คนอาจกดจากโทรศัพท์ — เสียบแล้วในช่องอัปของกลาง (ImageAttach · ImageInput · FileInput · FileMultiInput · SlipPicker · SellerBillIntake ฯลฯ) + หน้างาน (โอนเงินจีน ใบจดผลงาน แจ้งปัญหา แพ็ค ฯลฯ) · หน้าเดิมที่มีปุ่มเลือกรูปเอง → วาง CameraButton ข้างปุ่ม",
     notWhen: "ไม่อัปโหลดเอง — ผู้เรียกอัปตามทางเดิม · ไฟล์งานใหญ่ (AI/PSD) → DriveUploadBox · เลือกรูปที่มีในคลัง R2 → AssetPicker",
     doc: "photo-capture.md",
   },

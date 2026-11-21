@@ -21,6 +21,7 @@ import { toChatJpeg } from "@/lib/image-resize";
 import { costLineFromNote, guessNoteItem, matchNoteName, sameNoteName, type NoteDimRow, type NoteDims } from "@/lib/note-dims";
 import type { CostItemLike } from "@/lib/design-sheet-cost-row";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
+import { CameraButton } from "@/components/photo-capture";
 
 type Row = NoteDimRow & { use: boolean; item: string | undefined; src?: "match" | "guess" | "follow" | "user" };   // item: undefined = ตามกลุ่ม · "" = ไม่เลือก · id = เลือกเฉพาะบรรทัด · src = มาจากไหน (ชื่อตรง / AI เดา / ตามชื่อเดียวกัน / เลือกเอง)
 
@@ -91,11 +92,16 @@ export function NoteDimsModal<T extends CostItemLike>({ open, onClose, items, on
     onAdd(picked.map((r, k) => costLineFromNote(r, byId.get(itemOf(r)) ?? null, startIdx + k, parentCode || null)));
   };
 
+  // มือถือ: ปุ่มถ่ายรูปโน้ตตรง (ของกลาง photo-capture · ดัดโน้ตเอียงให้ตรงก่อนให้ AI อ่าน)
   const fileBtn = (label: string) => (
+    <>
+    <CameraButton onFiles={(fs) => { if (fs[0]) void read(fs[0]); }} multiple={false} disabled={busy} label="ถ่ายรูปโน้ต"
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-blue-700 disabled:opacity-50" />
     <label className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-sm font-medium ${busy ? "border-slate-200 text-slate-400" : "border-blue-300 bg-white text-blue-700 hover:bg-blue-50"}`}>
       <Icon value="i:camera" className="text-[15px]" />{label}
       <input type="file" accept="image/*" className="hidden" disabled={busy} onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.target.value = ""; }} />
     </label>
+    </>
   );
 
   return (

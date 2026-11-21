@@ -10,8 +10,10 @@ import { useEffect, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 
-export function WebCameraModal({ open, onClose, onShots, multiple = true }: {
+export function WebCameraModal({ open, onClose, onShots, multiple = true, initialFacing = "environment", zIndex }: {
   open: boolean;
+  zIndex?: number;
+  initialFacing?: "environment" | "user";
   onClose: () => void;
   /** รูปที่ถ่าย (ส่งตอนกด "เสร็จ") */
   onShots: (files: File[]) => void;
@@ -19,7 +21,7 @@ export function WebCameraModal({ open, onClose, onShots, multiple = true }: {
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [facing, setFacing] = useState<"environment" | "user">("environment");
+  const [facing, setFacing] = useState<"environment" | "user">(initialFacing);
   const [err, setErr] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [shots, setShots] = useState<File[]>([]);
@@ -86,7 +88,7 @@ export function WebCameraModal({ open, onClose, onShots, multiple = true }: {
   const finish = (list = shots) => { stop(); if (list.length) onShots(list); onClose(); };
 
   return (
-    <ERPModal open={open} onClose={() => { stop(); onClose(); }} title="กล้องในเว็บ" size="xl" hasUnsavedChanges={shots.length > 0}
+    <ERPModal open={open} onClose={() => { stop(); onClose(); }} title="กล้องในเว็บ" size="xl" zIndex={zIndex} hasUnsavedChanges={shots.length > 0}
       description="จัดแผ่นให้ขอบขนานกับเส้นกริด แล้วกดปุ่มกลมเพื่อถ่าย — ถ่ายต่อได้หลายรูป"
       footer={
         <div className="flex items-center justify-between w-full gap-2">

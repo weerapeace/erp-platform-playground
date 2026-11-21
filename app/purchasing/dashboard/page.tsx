@@ -21,6 +21,7 @@ import { PoDetailModal } from "@/components/po-detail-modal";   // ของก�
 import { apiFetch } from "@/lib/api";
 import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 import type { ChinaBillOption } from "@/app/api/purchasing/china-bills/route";
+import { CameraButton } from "@/components/photo-capture";
 
 type Dash = {
   rmb_rate: number;
@@ -878,6 +879,8 @@ function DetailModal({ r, type, onClose, onEnrich, onUpload, onSaveSource2, stor
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(r, f); e.target.value = ""; }} />
               <button disabled={uploading} onClick={() => fileRef.current?.click()}
                 className="h-8 px-3 text-xs rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">{uploading ? "กำลังอัป…" : miss("image") ? "📤 อัปโหลดรูป" : "เปลี่ยนรูป"}</button>
+              <CameraButton onFiles={(fs) => { if (fs[0]) onUpload(r, fs[0]); }} multiple={false} disabled={uploading} label="ถ่ายรูป"
+                className="h-8 px-3 inline-flex items-center gap-1 text-xs rounded-lg border border-blue-300 bg-blue-50 text-blue-700 disabled:opacity-50" />
               {miss("image") && <span className="text-[11px] text-amber-600">ยังไม่มีรูป</span>}
             </div>
           </div>

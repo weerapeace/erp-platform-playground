@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { CameraButton, toFileList } from "@/components/photo-capture";
 
 type ReportApp = { id: string; name: string; sort_order: number; is_active: boolean };
 type Report = {
@@ -188,6 +189,8 @@ function ReportForm() {
               <input type="file" accept="image/*" multiple className="hidden"
                 onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.target.value = ""; }} />
             </label>
+            <CameraButton onFiles={(fs) => { if (fs.length) void upload(toFileList(fs)); }} disabled={uploading} label="ถ่ายรูป"
+              className="h-16 px-3 inline-flex flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-pink-300 text-pink-500 text-xs" />
           </div>
         </div>
 

@@ -10,6 +10,8 @@ import { useFileUploadAccess } from "@/components/upload-permission";
 import { apiFetch } from "@/lib/api";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ColorInput } from "@/components/color-picker";
+import { usePhotoCapture } from "@/components/photo-capture";
+import { Icon } from "@/components/icon";
 
 function avatarSrc(v: string | null): string | null {
   if (!v) return null;
@@ -90,8 +92,11 @@ export function ProfileEditor() {
     finally { setBusy(false); }
   };
 
+  // มือถือ: ถ่ายรูปโปรไฟล์ด้วยกล้องหน้า (ของกลาง photo-capture · ครอปได้ในถาดตรวจรูป · ย่อ ≤1024px)
+  const cap = usePhotoCapture({ onFiles: (fs) => { if (fs[0]) void uploadAvatar(fs[0]); }, multiple: false, maxSide: 1024, facing: "user" });
   if (!user) return <div className="p-6 text-center text-slate-400 text-sm">ยังไม่ได้เข้าสู่ระบบ</div>;
   const src = avatarSrc(avatar);
+
 
   return (
     <div className="space-y-5">
@@ -115,6 +120,13 @@ export function ProfileEditor() {
               className="h-9 px-4 text-sm font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               {uploadBusy ? "กำลังอัปโหลด..." : src ? "เปลี่ยนรูป" : "＋ อัปโหลดรูป"}
             </button>
+            {cap.touch && !uploadDisabled && (
+              <button type="button" onClick={cap.openCamera} disabled={uploadBusy}
+                className="h-9 px-4 text-sm font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <Icon name="camera" /> ถ่ายรูป
+              </button>
+            )}
+            {cap.ui}
             {uploadDeniedMessage && <div className="text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
             {src && <button type="button" onClick={() => setAvatar(null)} disabled={uploadBusy || busy}
               className="h-7 px-4 text-xs text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 text-left">ลบรูป</button>}

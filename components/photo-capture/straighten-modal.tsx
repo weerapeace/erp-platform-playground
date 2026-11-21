@@ -12,8 +12,9 @@ import { defaultQuad, isConvexQuad, outputSize, warpQuad, type Pt, type Quad } f
 
 const LABELS = ["บนซ้าย", "บนขวา", "ล่างขวา", "ล่างซ้าย"];
 
-export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400 }: {
+export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zIndex }: {
   open: boolean;
+  zIndex?: number;
   /** blob URL ของรูปในเครื่อง */
   src: string;
   onClose: () => void;
@@ -94,7 +95,7 @@ export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400 }: 
 
   const pct = (p: Pt) => (size ? { left: `${(p.x / size.w) * 100}%`, top: `${(p.y / size.h) * 100}%` } : {});
   return (
-    <ERPModal open={open} onClose={onClose} title="ดัดรูปให้ตรง" size="xl" loading={busy}
+    <ERPModal open={open} onClose={onClose} title="ดัดรูปให้ตรง" size="xl" loading={busy} zIndex={zIndex}
       description="ลากจุดทั้ง 4 ไปวางที่มุมของแผ่น แล้วกด ดัดให้ตรง — ส่วนนอกกรอบจะถูกตัดทิ้ง"
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">

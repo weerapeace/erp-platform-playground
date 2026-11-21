@@ -29,6 +29,7 @@ import { DropAlbumDialog, commonFolderName, type DropMode, type DropPlan, type D
 import { folderGroups } from "@/lib/sample-sku-split";
 import { LinkProductDialog } from "./link-product-dialog";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
+import { usePhotoCapture } from "@/components/photo-capture";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { GALLERY_COL_CHOICES, GalleryColumnsControl, useGalleryColumns } from "@/components/gallery-columns";
@@ -282,6 +283,8 @@ export function SampleImagesPage() {
     } finally { setUp(null); }
     return done;
   };
+  // มือถือ: ถ่ายรูปตัวอย่างเข้าอัลบั้มตรง (ของกลาง photo-capture · ถ่ายต่อเนื่อง · ครอป/ดัดให้ตรง)
+  const cap = usePhotoCapture({ onFiles: (fs) => { void upload(fs); } });
   // ชื่ออัลบั้มย่อยตั้งต้น: ในอัลบั้มของวัน = Product ### (นับต่อทั้งแบรนด์) · ในอัลบั้มสินค้า = Version N (2026-11-17)
   // ⚠️ ต้องประกาศก่อน dropName (useMemo เรียกตอน render)
   const subNameFor = (p: SampleAlbum) => (isDayAlbum(p) ? nextProductName(albums ?? [], p.brand_id) : nextVersionName(albums ?? [], p.id));
@@ -731,6 +734,8 @@ export function SampleImagesPage() {
         {canUpload && (
           <>
             <input ref={fileRef} type="file" multiple accept="image/*,.heic,.heif" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; void upload(fs); }} />
+            {cap.touch && <button type="button" onClick={cap.openCamera} disabled={!!up} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-4 text-sm font-medium text-violet-700 disabled:opacity-60"><Icon name="camera" /> {t("ถ่ายรูป", "Camera")}</button>}
+            {cap.ui}
             <button type="button" onClick={() => fileRef.current?.click()} disabled={!!up} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"><Icon value="i:upload" />{t("เลือกรูป", "Choose images")}</button>
           </>
         )}

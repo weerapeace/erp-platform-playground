@@ -18,6 +18,8 @@ import { useAuth } from "@/components/auth";
 import { canDeleteAttachment } from "@/lib/attachment-delete-perm";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useCanHover } from "@/lib/use-can-hover";
+import { usePhotoCapture } from "@/components/photo-capture";
+import { Icon } from "@/components/icon";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { useFileDrop } from "@/components/file-drop";
 import { useToast } from "@/components/toast";
@@ -220,6 +222,10 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
     } finally { setDelBusy(false); }
   };
 
+  // มือถือ: ปุ่มถ่ายรูปต่อแถว (ของกลาง photo-capture) — จำแถวที่กดไว้ แล้วอัปเข้าแถวนั้น
+  const camRow = useRef<Row | null>(null);
+  const cap = usePhotoCapture({ onFiles: (fs) => { const r = camRow.current; if (r && fs.length) void uploadTo(r, fs); } });
+
   const openBulk = (files: File[]) => {
     const matched = matchFilesToCodes(files, rows.map(codeOf));
     setPending(matched.map((m) => ({ file: m.file, code: m.code, url: URL.createObjectURL(m.file) })));
@@ -312,6 +318,10 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
                         <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; if (fs.length) void uploadTo(r, fs); }} />
                       </label>
                     )}
+                    {canDrop && cap.touch && list.length < MAX_PER_RECORD && busyId !== id && (
+                      <button type="button" onClick={() => { camRow.current = r; cap.openCamera(); }}
+                        className="h-14 w-14 rounded border border-dashed border-blue-300 bg-blue-50/60 text-[10px] leading-tight text-blue-700"><Icon name="camera" /><br />{t("ถ่ายรูป", "Camera")}</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -341,6 +351,7 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
           </span>
         ) : ""} />
 
+      {cap.ui}
       <ImageLightbox images={lb.images} index={lb.index} onClose={() => setLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setLb((s) => ({ ...s, index: i }))} />
 
       {pending && (

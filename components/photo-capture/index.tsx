@@ -37,6 +37,10 @@ export type PhotoCaptureOptions = {
   /** accept ของปุ่ม "เลือกจากคลัง" (ค่าเริ่ม image/*) — ช่องที่รับ PDF ด้วยส่งของตัวเอง */
   libraryAccept?: string;
   disabled?: boolean;
+  /** กล้องที่เปิด: environment = กล้องหลัง (ค่าเริ่ม) · user = กล้องหน้า (รูปโปรไฟล์) */
+  facing?: "environment" | "user";
+  /** ชั้นของหน้าต่าง (ถาด/กล้อง/ครอป) — ใช้เมื่อเปิดจากป๊อปที่ทำเองซึ่งสูงกว่า z-50 (เช่น โอนเงินจีน z-210) */
+  zIndex?: number;
 };
 
 type TrayItem = { id: string; file: File; url: string };
@@ -55,7 +59,7 @@ async function shrink(files: File[], maxSide: number): Promise<File[]> {
 }
 
 export function usePhotoCapture(o: PhotoCaptureOptions) {
-  const { multiple = true, maxSide = 2400, libraryAccept = "image/*", disabled } = o;
+  const { multiple = true, maxSide = 2400, libraryAccept = "image/*", disabled, facing = "environment", zIndex } = o;
   const toast = useToast();
   const canHover = useCanHover();
   const touch = !canHover;
@@ -137,12 +141,12 @@ export function usePhotoCapture(o: PhotoCaptureOptions) {
 
   const ui: ReactNode = (
     <>
-      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden"
+      <input ref={camRef} type="file" accept="image/*" capture={facing} className="hidden"
         onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; addToTray(f, "native"); }} />
       <input ref={libRef} type="file" accept={libraryAccept} multiple={multiple} className="hidden"
         onChange={async (e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; if (f.length) await onFilesRef.current(await shrink(f, maxSide)); }} />
-      <WebCameraModal open={webOpen} onClose={() => setWebOpen(false)} multiple={multiple} onShots={(fs) => addToTray(fs, "web")} />
-      <ERPModal open={trayOpen} onClose={closeTray} title={`ตรวจรูปก่อนใส่ (${tray.length})`} size="lg" loading={sending}
+      <WebCameraModal open={webOpen} onClose={() => setWebOpen(false)} multiple={multiple} initialFacing={facing} zIndex={zIndex} onShots={(fs) => addToTray(fs, "web")} />
+      <ERPModal open={trayOpen} onClose={closeTray} title={`ตรวจรูปก่อนใส่ (${tray.length})`} size="lg" loading={sending} zIndex={zIndex}
         hasUnsavedChanges={tray.length > 0} closeOnBackdrop={false}
         description="ครอป หมุน หรือดัดรูปเอียงให้ตรงได้ก่อน — กด ใส่รูป แล้วระบบย่อรูปให้อัตโนมัติก่อนส่ง"
         footer={
@@ -178,11 +182,11 @@ export function usePhotoCapture(o: PhotoCaptureOptions) {
         )}
       </ERPModal>
       {cropItem && (
-        <ImageFreeCropModal open src={cropItem.url} onClose={() => setCropId(null)} maxSide={maxSide || 4000}
+        <ImageFreeCropModal open src={cropItem.url} onClose={() => setCropId(null)} maxSide={maxSide || 4000} zIndex={zIndex ? zIndex + 1 : undefined}
           onDone={(r) => replaceItem(cropItem.id, r.blob)} />
       )}
       {straightItem && (
-        <StraightenModal open src={straightItem.url} onClose={() => setStraightId(null)} maxSide={maxSide || 4000}
+        <StraightenModal open src={straightItem.url} onClose={() => setStraightId(null)} maxSide={maxSide || 4000} zIndex={zIndex ? zIndex + 1 : undefined}
           onDone={(r) => replaceItem(straightItem.id, r.blob)} />
       )}
     </>
@@ -202,6 +206,13 @@ export function usePhotoCapture(o: PhotoCaptureOptions) {
 }
 
 export type PhotoCaptureApi = ReturnType<typeof usePhotoCapture>;
+
+/** แปลง File[] เป็น FileList (หน้าเก่าที่ตัวรับไฟล์ต้องการ FileList) */
+export function toFileList(files: File[]): FileList {
+  const dt = new DataTransfer();
+  files.forEach((f) => dt.items.add(f));
+  return dt.files;
+}
 
 /** ปุ่มถ่ายรูป/เลือกจากคลัง (เฉพาะจอสัมผัส) · PC มีเว็บแคม = ลิงก์เล็ก · PC ไม่มี = ไม่โชว์อะไร */
 export function PhotoCaptureButtons({ capture, size = "md", libraryLabel = "เลือกจากคลัง", onLibrary, webLink = true, className = "" }: {
@@ -245,4 +256,22 @@ export function PhotoCaptureButtons({ capture, size = "md", libraryLabel = "เ�
 export function PhotoCapture(props: PhotoCaptureOptions & { size?: "sm" | "md"; libraryLabel?: string; webLink?: boolean; className?: string }) {
   const cap = usePhotoCapture(props);
   return <>{<PhotoCaptureButtons capture={cap} size={props.size} libraryLabel={props.libraryLabel} webLink={props.webLink} className={props.className} />}{cap.ui}</>;
+}
+
+/**
+ * ปุ่ม "ถ่ายรูป" ปุ่มเดียว (เฉพาะจอสัมผัส · PC ไม่โชว์อะไร) — วางข้างปุ่มเลือกรูปเดิมของหน้าได้ในบรรทัดเดียว
+ * กด = เปิดกล้องของเครื่อง → ถาดตรวจรูป (ครอป/ดัดให้ตรง/ถ่ายต่อ) → onFiles
+ */
+export function CameraButton({ className = "", label = "ถ่ายรูป", ...o }: PhotoCaptureOptions & { className?: string; label?: string }) {
+  const cap = usePhotoCapture(o);
+  if (!cap.touch) return null;
+  return (
+    <>
+      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); cap.openCamera(); }} disabled={o.disabled}
+        className={className || "inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-blue-700 disabled:opacity-50"}>
+        <Icon name="camera" /> {label}
+      </button>
+      {cap.ui}
+    </>
+  );
 }

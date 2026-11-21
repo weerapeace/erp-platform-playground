@@ -14,6 +14,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import { AssetPicker } from "@/components/asset-picker";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 
 interface ImageInputProps {
   value:    string | null;        // r2_key
@@ -61,6 +62,9 @@ export function ImageInput({
       if (fileRef.current) fileRef.current.value = "";
     }
   };
+
+  // มือถือ: ปุ่มถ่ายรูป / เลือกจากคลัง (ของกลาง photo-capture · ถาดตรวจรูป · ย่อ ≤2400px กันเกินเพดาน 5MB)
+  const cap = usePhotoCapture({ onFiles: (fs) => { if (fs[0]) void handleFile(fs[0]); }, multiple: false, disabled: uploadDisabled || uploading });
 
   // ลากรูปมาวาง (drag & drop)
   const onDrop = (e: React.DragEvent) => {
@@ -187,6 +191,11 @@ export function ImageInput({
               </div>
             )}
           </div>
+        ) : cap.touch && !uploading ? (
+          <div className="p-2.5 text-center">
+            <PhotoCaptureButtons capture={cap} size="sm" />
+            {required && <span className="text-[11px] text-red-500">* จำเป็น</span>}
+          </div>
         ) : (
           // upload mode
           <button
@@ -231,6 +240,7 @@ export function ImageInput({
         className="hidden"
       />
 
+      {cap.ui}
       {err && (
         <div className="mt-1 text-[11px] text-red-600">⚠ {err}</div>
       )}

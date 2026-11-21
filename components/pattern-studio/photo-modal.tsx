@@ -27,6 +27,7 @@ import { autoQuad, checkScale, cropCorners, cropGray, rectifyGray, scaleFromFixe
 import { AI_PATTERN_PROMPT, parseAiPattern, type AiImport, type AiSeam } from "@/lib/bag-ai-import";
 import { shapePathD } from "@/lib/pattern-shape";
 import type { EditorPiece } from "@/components/pattern-sheet/shape-editor";
+import { CameraButton } from "@/components/photo-capture";
 
 type Loaded = { url: string; w: number; h: number; gray: Uint8Array };
 export type AiDraftInfo = { style: string; notes: string; confidence: number; fits: boolean; /** ค่าไหน AI เห็นจากภาพ / ประมาณ (รอบ I3) */ sources?: Record<string, "seen" | "estimated"> };
@@ -497,11 +498,16 @@ export function PhotoModal({ open, onClose, onPieces, onDraft, materials, onMate
   };
 
   const seg = (on: boolean) => `h-8 rounded-md px-3 text-xs ${on ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`;
+  // มือถือ: ข้างปุ่มเลือกรูปมีปุ่มถ่ายรูป (ของกลาง photo-capture · ดัดรูปเอียงให้ตรง 4 มุมได้ · ไม่ย่อรูป คงความละเอียดไว้แกะเส้น)
   const fileBtn = (label: string, onFile: (f: File | undefined) => void) => (
+    <>
+    <CameraButton onFiles={(fs) => onFile(fs[0])} multiple={false} maxSide={0} label={t("ถ่ายรูป", "Camera")}
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 text-sm text-blue-700" />
     <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-sm text-blue-700 hover:bg-blue-50">
       <Icon value="i:photo" className="text-base" />{label}
       <input type="file" accept="image/*" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
     </label>
+    </>
   );
   /** แผงตั้งค่าการแยกชิ้น (เดิมคอลัมน์ขวา → กล่องลอยมุมขวาบน · รอบ 4) */
   const settingsPanel = img ? (<>

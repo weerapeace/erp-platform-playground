@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 import { useFileRefUrls } from "@/components/file-ref";
 import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
 import { SupplierWizard } from "@/components/supplier-wizard";
@@ -145,6 +146,9 @@ export function SellerBillIntake({ onCreated, onManual }: { onCreated: (voucherI
     void create([{ partner_id: blankShop.id, refs: files.map((f) => f.ref), currency: "RMB", lines: [], remember_shop: false }]);
   };
 
+  // มือถือ: ถ่ายรูปบิลตรง (ของกลาง photo-capture · ดัดบิลเอียงให้ตรง · ย่อ ≤2400px ให้ AI อ่านเร็วขึ้น)
+  const cap = usePhotoCapture({ onFiles: (fs) => addFiles(fs), libraryAccept: "image/*,application/pdf", disabled: busy });
+
   const wizBill = wizardFor != null ? (bills ?? []).find((b) => b.idx === wizardFor) ?? null : null;
 
   return (
@@ -154,11 +158,14 @@ export function SellerBillIntake({ onCreated, onManual }: { onCreated: (voucherI
         className={`relative rounded-xl border border-dashed px-4 py-4 text-center cursor-pointer transition ${drop.over === "bill" ? "border-blue-400 bg-blue-50" : "border-slate-300 hover:bg-slate-50"} ${busy ? "pointer-events-none opacity-70" : ""}`}>
         <FileDropHint show={drop.over === "bill"} label="วางรูปบิลที่นี่" />
         <div className="text-2xl text-slate-400"><Icon value="📷" /></div>
-        <div className="text-sm text-slate-700 mt-1">ลาก / วาง (Ctrl+V) / กดเพื่อเลือกหรือถ่ายรูปบิล</div>
+        {cap.touch
+          ? <PhotoCaptureButtons capture={cap} libraryLabel="เลือกไฟล์" className="mt-2 max-w-xs mx-auto" />
+          : <div className="text-sm text-slate-700 mt-1">ลาก / วาง (Ctrl+V) / กดเพื่อเลือกหรือถ่ายรูปบิล</div>}
         <div className="text-[11px] text-slate-400">หลายรูปได้ (หลายหน้าของบิลเดียวกัน · ไม่เกิน {MAX_FILES}) · PDF ได้ · AI อ่านร้าน สกุล วันที่ รายการ ให้เอง</div>
         <input ref={inputRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => { const l = Array.from(e.target.files ?? []); e.target.value = ""; if (l.length) void addFiles(l); }} />
       </div>
       {up && <UploadProgress {...up} />}
+      {cap.ui}
 
       {files.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">

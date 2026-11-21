@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { FileMultiInput } from "@/components/file-multi-input";
+import { CameraButton, toFileList } from "@/components/photo-capture";
 import { useFileRefResolver, fetchFileRefBlob } from "@/components/file-ref";
 import { FileUploadError, uploadFileByRule } from "@/lib/file-upload";
 import { GlobalSearch } from "@/components/global-search";
@@ -1939,6 +1940,9 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
                 <span className="text-3xl">{working ? "⏳" : "📎"}</span>
                 <span className="text-sm font-medium">{working ? "กำลังอ่านสลิปด้วย AI…" : "เลือกสลิป (หลายใบได้)"}</span>
               </button>
+              {/* มือถือ: ถ่ายรูปสลิปตรง (ของกลาง photo-capture · ถาดตรวจรูปอยู่เหนือป๊อปนี้ z-220) */}
+              <CameraButton onFiles={(fs) => { if (fs.length) void onPick(toFileList(fs)); }} disabled={working} zIndex={220} label="ถ่ายรูปสลิป"
+                className="w-full h-12 inline-flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-medium disabled:opacity-50" />
             </>
           ) : (
             <>
@@ -2243,6 +2247,8 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
         <div className="grid grid-cols-2 gap-2 pt-1">
           <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
             className="h-10 border-2 border-dashed border-slate-300 text-slate-600 rounded-lg text-sm hover:border-orange-300 hover:text-orange-600 disabled:opacity-50">📎 เพิ่มสลิป</button>
+          <CameraButton onFiles={(fs) => { if (fs.length) void onPick(toFileList(fs)); }} disabled={busy} zIndex={220} label="ถ่ายรูปสลิป"
+            className="col-span-2 order-last h-10 inline-flex items-center justify-center gap-1.5 rounded-lg border border-orange-300 bg-orange-50 text-orange-700 text-sm font-medium disabled:opacity-50" />
           <button type="button" onClick={save} disabled={busy || !dirty}
             className="h-10 bg-orange-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">{busy ? "กำลังบันทึก…" : dirty ? "💾 บันทึกสลิป" : "บันทึกแล้ว"}</button>
         </div>
@@ -4316,6 +4322,8 @@ function TransferPage({ preselect = [], onConsumePreselect, mode = "bank" }: { p
             className="flex-1 h-12 rounded-xl border-2 border-dashed border-violet-300 text-violet-600 text-base font-semibold disabled:opacity-50 active:scale-[0.99] transition">
             ＋ เพิ่มสลิป
           </button>
+          <CameraButton onFiles={(fs) => { if (fs.length) void uploadSlip(toFileList(fs)); }} disabled={slipUploading || ocrBusy} label="ถ่าย"
+            className="flex-shrink-0 h-12 px-3 inline-flex items-center gap-1 rounded-xl border-2 border-violet-300 bg-violet-50 text-violet-700 text-sm font-semibold disabled:opacity-50" />
           <button type="button" onClick={addManualSlip} disabled={slipUploading || ocrBusy}
             className="flex-shrink-0 h-12 px-3 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 text-sm font-medium disabled:opacity-50 active:scale-[0.99] transition">
             ＋ กรอกเอง
