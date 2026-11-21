@@ -68,7 +68,8 @@ export function usePlatformListedStatus(parents: ParentRef[]): PlatformListedSta
   }, [canView, list]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, [parentKey, canView]);
-  return { listed, known, list, total: list.length, reload: load };
+  // คืนก้อนเดิมถ้าค่าไม่เปลี่ยน — กันหน้าแม่ (แถบความพร้อม) วนอัปเดตไม่รู้จบ (React #185 · 2026-11-21)
+  return useMemo(() => ({ listed, known, list, total: list.length, reload: load }), [listed, known, list, load]);
 }
 
 export function TaskPlatformListing({ platforms, parents, brandId, compact = false, status }: {

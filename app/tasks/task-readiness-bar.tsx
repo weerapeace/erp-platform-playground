@@ -7,7 +7,7 @@
 //  • กดป้ายที่ขาด → เปิด Parent SKU ที่ต้องแก้ (ป้าย Platform → เปิดตัวช่วยลงร้านที่แถบ Platform)
 //  • อ่านอย่างเดียว ไม่แก้ข้อมูล
 // ============================================================
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { cleanReadinessRules, readinessKeysFor, readinessSummary, taskReadiness, READINESS_RULES_KEY, type ReadinessItem, type ReadinessParent, type ReadinessRules } from "@/lib/task-readiness";
@@ -54,13 +54,22 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
     const out: Record<string, boolean> = {};
     for (const code of status.known) out[code] = (status.listed[code] ?? 0) >= status.total;
     return out;
-  }, [status]);
+  }, [status.listed, status.known, status.total, status.list.length]); // ไม่ผูกทั้งก้อน status (กันวนอัปเดต)
 
+  // ผูกด้วยข้อความ (ไม่ผูก array ที่หน้าแม่สร้างใหม่ทุกครั้ง) — กันวนอัปเดต
+  const platformsKey = platforms.join(",");
   const items = useMemo(() => {
     if (!parents || !rules) return null;
-    return taskReadiness(parents, readinessKeysFor(rules, taskType), { platforms, listed, platformLabel: (c) => platformLabel(c) || c });
-  }, [parents, rules, taskType, platforms, listed]);
-  useEffect(() => { if (items) onResult?.(items); }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
+    return taskReadiness(parents, readinessKeysFor(rules, taskType), { platforms: platformsKey ? platformsKey.split(",") : [], listed, platformLabel: (c) => platformLabel(c) || c });
+  }, [parents, rules, taskType, platformsKey, listed]);
+  // ส่งผลขึ้นไปเฉพาะตอนผลเปลี่ยนจริง (เทียบลายเซ็น) — หน้าแม่ setState แล้วเรนเดอร์ใหม่จะไม่วนกลับมา
+  const sentSig = useRef("");
+  useEffect(() => {
+    if (!items) return;
+    const sig = items.map((i) => `${i.key}:${i.ok ? 1 : 0}:${i.pending ? 1 : 0}:${i.issues.length}`).join("|");
+    if (sig === sentSig.current) return;
+    sentSig.current = sig; onResult?.(items);
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (err) return <p className="text-[11px] text-slate-400">{t("ตรวจความพร้อมไม่สำเร็จ — ลองเปิดใหม่", "Couldn't check readiness — reopen to retry")}</p>;
   if (!items) return <div className="h-5 w-40 rounded bg-slate-100 animate-pulse" />;
