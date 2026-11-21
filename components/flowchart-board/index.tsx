@@ -490,6 +490,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
 
   // ── แก้กระดาน ──
   // กล่องระบบ (sys:) ไม่ได้อยู่ใน nodes — ลากกล่องที่ปลดล็อก = จดตำแหน่งลง pins · การเปลี่ยนอื่นของกล่องระบบไม่สน
+  // ลากกรอบเลือกที่เริ่มในกรอบโซน = เลือกกล่องข้างใน ไม่เลือกตัวกรอบโซน (เลือกกรอบ = กดหัวกรอบ · เจ้าของสั่ง 2026-11-21)
+  const marqueeRef = useRef(false);
   const onNodesChange = useCallback((ch: NodeChange<BoardNode>[]) => {
     const own: NodeChange<FlowRFNode>[] = [];
     let moved: FlowPins | null = null;
@@ -499,6 +501,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         if (c.type === "position" && c.position && isSysId(id)) (moved ??= {})[id] = { x: Math.round(c.position.x), y: Math.round(c.position.y) };
         continue;
       }
+      if (marqueeRef.current && c.type === "select" && c.selected && nodesRef.current.find((n) => n.id === c.id)?.type === "zone") continue;
       own.push(c as NodeChange<FlowRFNode>);
     }
     if (moved) { const m = moved; setPins((p) => ({ ...p, ...m })); }
@@ -1002,6 +1005,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable
             multiSelectionKeyCode={["Shift", "Control", "Meta"]}
             deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
+            onSelectionStart={() => { marqueeRef.current = true; }} onSelectionEnd={() => { marqueeRef.current = false; }}
             selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} selectionMode={SelectionMode.Partial} panActivationKeyCode="Space"
             onPaneContextMenu={(e) => { if (!coarse) e.preventDefault(); }}
             minZoom={0.2} maxZoom={2.5}

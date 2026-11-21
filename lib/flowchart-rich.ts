@@ -15,7 +15,7 @@ export const RICH_MAX = 20000;
 const COLOR_RE = /^(#[0-9a-f]{3}|#[0-9a-f]{6}|#[0-9a-f]{8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/i;
 const STYLE_OK: Record<string, (v: string) => string | null> = {
   "color": (v) => (COLOR_RE.test(v) ? v : null),
-  "font-size": (v) => { const m = /^(\d{1,2}(\.\d+)?)px$/.exec(v); return m && Number(m[1]) >= 8 && Number(m[1]) <= 72 ? `${m[1]}px` : null; },
+  "font-size": (v) => { const m = /^(\d{1,2}(\.\d+)?)px$/.exec(v); return m && Number(m[1]) >= 6 && Number(m[1]) <= 72 ? `${m[1]}px` : null; },
   "font-weight": (v) => (/^(bold|normal|[1-9]00)$/.test(v) ? v : null),
   "font-style": (v) => (/^(italic|normal)$/.test(v) ? v : null),
   "text-decoration": (v) => (/^((underline|line-through|none)\s*)+$/.test(v) ? v : null),
@@ -134,4 +134,5 @@ const HEX_RE = /^#[0-9a-f]{6}$/i;
 /** สีพื้น/เส้นขอบกล่องแบบกำหนดเอง (#rrggbb เท่านั้น) */
 export const isHexColor = (v: unknown): v is string => typeof v === "string" && HEX_RE.test(v);
 /** ขนาดตัวอักษรให้เลือก (px) */
-export const RICH_SIZES = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40];
+/** ขนาดตัวอักษร (เล็กสุด 6px · เจ้าของสั่ง 2026-11-21) */
+export const RICH_SIZES = [6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40];
