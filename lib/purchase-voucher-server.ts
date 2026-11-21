@@ -438,3 +438,37 @@ export async function restoreVoucherSnapshot(admin: Admin, id: string, snap: { h
   }
   await recomputeVoucher(admin, id);
 }
+
+/**
+ * ★ 2026-11-21 การรวมใบล่าสุดของใบนี้ที่ "ยังไม่แยกกลับ" (audit "merge" ล่าสุด ไม่มี "split" ตามหลัง) — null = ไม่มี
+ *   ใช้: ปุ่มแยกใบกลับ (/api/purchasing/vouchers/<id>/split) · กันกด "ยกเลิกการแก้" หลังรวม (ไม่งั้นรายการที่ย้ายเข้ามาถูกปิดหาย)
+ */
+export async function findOpenMerge(admin: Admin, voucherId: string): Promise<{ id: string; created_at: string; metadata: Record<string, unknown> } | null> {
+  const ev = await lastMergeEvent(admin, voucherId);
+  return ev && ev.action === "merge" ? { id: ev.id, created_at: ev.created_at, metadata: ev.metadata } : null;
+}
+
+/** ★ 2026-11-21 เหตุการณ์ รวม/แยก ล่าสุดของใบ (ใช้กัน "ยกเลิกการแก้" ที่จะดึงยอดผิดกลับมา) — null = ไม่เคยรวม */
+export async function lastMergeEvent(admin: Admin, voucherId: string): Promise<{ id: string; action: "merge" | "split"; created_at: string; metadata: Record<string, unknown> } | null> {
+  const { data } = await admin.from("audit_logs").select("id, action, metadata, created_at")
+    .eq("entity_type", "purchase_vouchers_v2").eq("entity_id", voucherId).in("action", ["merge", "split"])
+    .order("created_at", { ascending: false }).limit(1);
+  const r = ((data ?? []) as Record<string, unknown>[])[0];
+  if (!r || (r.action !== "merge" && r.action !== "split")) return null;
+  return { id: String(r.id), action: r.action, created_at: String(r.created_at), metadata: (r.metadata ?? {}) as Record<string, unknown> };
+}
+
+/**
+ * ★ 2026-11-21 กด "ยกเลิกการแก้" ได้ไหม (เกี่ยวกับรวม/แยกใบ) — คืนข้อความห้าม หรือ null = ได้
+ *   - รวมใบเข้ามาตอน/ระหว่างโหมดแก้นี้ → เวอร์ชันที่จะคืนไม่มีรายการที่ย้ายเข้ามา (จะถูกปิดหาย) → ต้องแยกใบกลับก่อน
+ *   - แยกใบกลับระหว่างโหมดแก้ที่เริ่มหลังรวม → เวอร์ชันที่จะคืน = ยอดหลังรวม (ค่าส่งซ้ำกับใบที่ได้คืน) → ให้กด บันทึก แทน
+ */
+export function cancelEditMergeBlock(ev: { action: "merge" | "split"; created_at: string; metadata: Record<string, unknown> } | null, editingAt: string | null): string | null {
+  if (!ev || !editingAt) return null;
+  const t = (x: unknown) => (typeof x === "string" && x ? new Date(x).getTime() : NaN);
+  const editStart = t(editingAt);
+  const mergedAt = t(ev.metadata.merged_at ?? (ev.action === "merge" ? ev.created_at : null));
+  if (ev.action === "merge") return mergedAt >= editStart ? "ใบนี้รวมใบอื่นเข้ามาระหว่างแก้ — กด \"แยกใบกลับ\" ก่อน แล้วค่อยยกเลิกการแก้ (ไม่งั้นรายการที่ย้ายเข้ามาจะหาย)" : null;
+  const splitAt = t(ev.metadata.split_at ?? ev.created_at);
+  return splitAt >= editStart && mergedAt < editStart ? "แยกใบกลับระหว่างแก้ไขนี้แล้ว — กด \"บันทึกการแก้ไข\" แทน (ยกเลิกการแก้จะดึงยอดตอนรวมกลับมา ค่าส่งจะซ้ำกับใบที่ได้คืน)" : null;
+}

@@ -41,3 +41,49 @@ describe("checkDraftMerge — รวมใบร่างเป็นใบเ�
     expect(checkDraftMerge([d("a", "2026-09-29"), d("b", "2026-10-16", { currency: "THB" })]).reason).toMatch("สกุลเงิน");
   });
 });
+
+describe("checkVoucherMerge — รวมใบยืนยันแล้วได้ (★ 2026-11-21)", () => {
+  const v = (id: string, date: string, extra: Record<string, unknown> = {}) => ({ id, pv_no: `PV${date}-00${id.length}`, status: "confirmed", voucher_date: date, seller_name: "ร้านผ้ากำมะหยี่", currency: "RMB",
+    editing_at: null, editing_by: null, china_bill_id: null, shipping_bill_id: null, shipping_payment_status: "unpaid", ...extra });
+  it("เคสจริง: 2 ใบยืนยันแล้ว ยังไม่จ่าย · ใบหนึ่งเปิดแก้โดยคนกดเอง = ผ่าน · ใบหลัก = เก่าสุด · บอกว่ามีใบยืนยันแล้ว", async () => {
+    const { checkVoucherMerge } = await import("@/lib/voucher-merge-plan");
+    const r = checkVoucherMerge([v("a", "2026-11-11", { editing_at: "x", editing_by: "narisara wannasoot" }), v("bb", "2026-11-03")], "narisara wannasoot");
+    expect(r).toMatchObject({ ok: true, targetId: "bb", hasConfirmed: true });
+  });
+  it("กันไว้: คนอื่นกำลังแก้ · จ่ายแล้ว (บิลโอนจีน / บิลค่าส่ง / ติ๊กจ่ายค่าส่ง) · ยกเลิกแล้ว — บอกใบไหนติดอะไร", async () => {
+    const { checkVoucherMerge } = await import("@/lib/voucher-merge-plan");
+    const editing = checkVoucherMerge([v("a", "2026-11-11", { editing_at: "x", editing_by: "narisara wannasoot" }), v("bb", "2026-11-03")], "owner");
+    expect(editing.ok).toBe(false);
+    expect(editing.reason).toMatch("กำลังถูกแก้โดย narisara wannasoot");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { china_bill_id: "cb" }), v("bb", "2026-11-03")], "x").reason).toMatch("ผูกบิลโอนเงินจีนแล้ว");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { shipping_bill_id: "sb" }), v("bb", "2026-11-03")], "x").reason).toMatch("ผูกบิลค่าส่งแล้ว");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { shipping_payment_status: "paid" }), v("bb", "2026-11-03")], "x").reason).toMatch("จ่ายค่าส่งแล้ว");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { status: "cancelled" }), v("bb", "2026-11-03")], "x").blocks[0].why).toBe("ยกเลิกแล้ว");
+  });
+  it("ร่าง + ยืนยันแล้ว รวมกันได้ · ใบร่างผูกบิลโอนจีน (เคสเดิม) ไม่ถูกกัน · ต่างร้าน/ต่างสกุล = ไม่ได้", async () => {
+    const { checkVoucherMerge } = await import("@/lib/voucher-merge-plan");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { status: "draft", china_bill_id: "cb" }), v("bb", "2026-11-03")], "x").ok).toBe(true);
+    expect(checkVoucherMerge([v("a", "2026-11-11", { seller_name: "ร้านอื่น" }), v("bb", "2026-11-03")], "x").reason).toMatch("ร้านเดียวกัน");
+    expect(checkVoucherMerge([v("a", "2026-11-11", { currency: "THB" }), v("bb", "2026-11-03")], "x").reason).toMatch("สกุลเงิน");
+  });
+});
+
+describe("shipTogetherCandidates — ถามตอนยืนยัน (★ 2026-11-21 ข้อเสนอ 1)", () => {
+  const me = { id: "me", pv_no: "PV2026-11-11-003", status: "draft", voucher_date: "2026-11-11", seller_name: "ร้านผ้ากำมะหยี่", seller_partner_id: "P", currency: "RMB", ship_total_thb: 0 };
+  it("ร้านเดียวกัน · ร่าง/ยืนยันยังไม่จ่าย · ยังไม่มีค่าส่ง · ห่าง ≤ 14 วัน", async () => {
+    const { shipTogetherCandidates } = await import("@/lib/voucher-merge-plan");
+    const o = (id: string, extra: Record<string, unknown>) => ({ ...me, id, pv_no: id, ...extra });
+    const got = shipTogetherCandidates(me, [
+      o("ok-confirmed", { status: "confirmed", voucher_date: "2026-11-03" }),
+      o("ok-draft", { voucher_date: "2026-11-20" }),
+      o("far", { voucher_date: "2026-10-20" }),
+      o("has-ship", { ship_total_thb: 120 }),
+      o("paid", { status: "confirmed", china_bill_id: "cb" }),
+      o("other-shop", { seller_partner_id: "Q" }),
+      o("thb", { currency: "THB" }),
+      o("cancelled", { status: "cancelled" }),
+      me,
+    ]);
+    expect(got.map((x) => x.id)).toEqual(["ok-confirmed", "ok-draft"]);
+  });
+});

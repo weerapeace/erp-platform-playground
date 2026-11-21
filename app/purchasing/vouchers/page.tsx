@@ -25,11 +25,12 @@ import { SellerBillIntake } from "@/components/seller-bill-intake";
 import { ChinaBillIntake } from "@/components/china-bill-intake";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
 import { GrDetailModal } from "@/components/gr-detail-modal";
-import { checkDraftMerge, mixedCurrencyShops, planVoucherGroups, type VoucherPlanGroup } from "@/lib/voucher-merge-plan";
+import { checkVoucherMerge, mixedCurrencyShops, planVoucherGroups, type VoucherPlanGroup } from "@/lib/voucher-merge-plan";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 
 type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string; receipt_batch_no: string | null; is_backfill: boolean };
-type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string; waiting_count?: number };
+type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string; waiting_count?: number;
+  editing_at?: string | null; editing_by?: string | null; china_bill_id?: string | null; shipping_bill_id?: string | null; shipping_payment_status?: string | null };
 
 const STATUS_BADGE: Record<string, { text: string; cls: string }> = {
   draft: { text: "ร่าง", cls: "bg-slate-100 text-slate-600 border-slate-200" },
@@ -60,6 +61,9 @@ export default function PurchaseVouchersPage() {
   // ★ 2026-11-15 รวมใบร่าง (หลายบิลร้าน ส่งของมารอบเดียว) — ติ๊กใบร่างร้านเดียวกัน → รวมเป็นใบเดียว
   const [vSel, setVSel] = useState<Set<string>>(new Set());
   const [vMerge, setVMerge] = useState<{ targetId: string; date: string } | null>(null);
+  // ★ 2026-11-21 หน้าใบกด "รวมก่อน" (ถามตอนยืนยัน) → มาที่นี่พร้อม ?merge=id,id → ติ๊กใบเหล่านั้นแล้วเปิดป๊อปรวมให้เลย
+  const [mergeFromUrl, setMergeFromUrl] = useState<string[] | null>(null);
+  const [autoOpenMerge, setAutoOpenMerge] = useState(false);
   const [vMerging, setVMerging] = useState(false);
   const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
   // ป๊อป "＋ ออกใบสำคัญรับ": จากใบรับที่รอ หรือสร้างเปล่า
@@ -99,6 +103,13 @@ export default function PurchaseVouchersPage() {
     setAddMode(m); setAddOpen(true);
     router.replace("/purchasing/vouchers");
   }, [canEdit, router]);
+  useEffect(() => {
+    if (!canEdit) return;
+    const m = new URLSearchParams(window.location.search).get("merge");
+    if (!m) return;
+    setMergeFromUrl(m.split(",").map((x) => x.trim()).filter(Boolean));
+    router.replace("/purchasing/vouchers");
+  }, [canEdit, router]);
   const changeTab = (t: "pending" | "vouchers") => { setTab(t); localStorage.setItem(TAB_KEY, t); };
 
   const load = useCallback(async () => {
@@ -121,7 +132,25 @@ export default function PurchaseVouchersPage() {
   const selCurrencies = useMemo(() => [...new Set(selRows.map((g) => g.currency))], [selRows]);
   const selSellers = useMemo(() => [...new Set(selRows.map((g) => g.seller_name))], [selRows]);
   const vSelRows = useMemo(() => vouchers.filter((v) => vSel.has(v.id)), [vouchers, vSel]);
-  const vCheck = useMemo(() => checkDraftMerge(vSelRows), [vSelRows]);
+  // ★ 2026-11-21 รวมใบยืนยันแล้วได้ (ยังไม่จ่าย) — หน้าเว็บตรวจเบื้องต้น (ไม่ดูเรื่อง "คนอื่นกำลังแก้" เพราะชื่อผู้ใช้ฝั่งเว็บอาจไม่ตรง · API ตรวจซ้ำและบอกเหตุผล)
+  const vCheck = useMemo(() => checkVoucherMerge(vSelRows.map((v) => ({ ...v, editing_at: null })), null), [vSelRows]);
+  const vMergeTarget = vMerge ? vSelRows.find((v) => v.id === vMerge.targetId) : undefined;
+  useEffect(() => {
+    if (!mergeFromUrl || loading) return;
+    const ids = mergeFromUrl.filter((x) => vouchers.some((v) => v.id === x));
+    setMergeFromUrl(null);
+    if (ids.length < 2) { toast.info("ไม่พบใบที่จะรวมครบในรายการ — ติ๊กเลือกเองได้"); return; }
+    changeTab("vouchers"); setVSel(new Set(ids)); setAutoOpenMerge(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeFromUrl, loading, vouchers]);
+  useEffect(() => {
+    if (!autoOpenMerge) return;
+    setAutoOpenMerge(false);
+    if (!vCheck.ok || !vCheck.targetId) { toast.error(vCheck.reason ?? "รวมไม่ได้"); return; }
+    const t = vSelRows.find((v) => v.id === vCheck.targetId);
+    setVMerge({ targetId: vCheck.targetId, date: String(t?.voucher_date ?? "").slice(0, 10) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenMerge, vCheck]);
   const openVMerge = () => {
     if (!vCheck.ok || !vCheck.targetId) return;
     const t = vSelRows.find((v) => v.id === vCheck.targetId);
@@ -132,10 +161,10 @@ export default function PurchaseVouchersPage() {
     setVMerging(true);
     try {
       const res = await apiFetch("/api/purchasing/vouchers/merge", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: vSelRows.map((v) => v.id), target_id: vMerge.targetId, voucher_date: vMerge.date || undefined }) });
+        body: JSON.stringify({ ids: vSelRows.map((v) => v.id), target_id: vMerge.targetId, voucher_date: vMergeTarget?.status === "draft" ? vMerge.date || undefined : undefined }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) { toast.error(j.error ?? "รวมใบไม่สำเร็จ"); return; }
-      toast.success(`รวมเป็นใบเดียวแล้ว${j.pv_no ? ` — ${j.pv_no}` : ""} (ย้ายบิล ${j.moved?.bills ?? 0} ใบ)`);
+      toast.success(`รวมเป็นใบเดียวแล้ว${j.pv_no ? ` — ${j.pv_no}` : ""} (ย้ายบิล ${j.moved?.bills ?? 0} ใบ)${j.editing ? " · ใบหลักอยู่ในโหมดแก้ไข ใส่ค่าส่งแล้วกด บันทึกการแก้ไข" : ""}`);
       setVMerge(null); setVSel(new Set());
       router.push(`/purchasing/vouchers/${j.target_id}`);
     } catch { toast.error("รวมใบไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
@@ -341,14 +370,14 @@ export default function PurchaseVouchersPage() {
                 selectable={canEdit} selected={vSel} onSelectedChange={setVSel}
                 onRowClick={(v) => router.push(`/purchasing/vouchers/${v.id}`)}
                 title="ใบสำคัญรับ" countUnit="ใบ" emptyText="— ยังไม่มีใบสำคัญรับ —"
-                footnote={canEdit ? "หลายบิลร้านแต่ส่งของมารอบเดียว: ติ๊กใบร่างของร้านเดียวกัน แล้วกด รวมใบร่าง (แถบล่างจอ)" : undefined}
+                footnote={canEdit ? "หลายบิลร้านแต่ส่งของมารอบเดียว: ติ๊กใบของร้านเดียวกัน (ร่าง หรือยืนยันแล้วที่ยังไม่จ่าย) แล้วกด รวมใบที่เลือก (แถบล่างจอ)" : undefined}
                 resizable storageKey="pv-list" />
             )}
             {canEdit && (
               <BulkActionBar count={vSel.size} unit="ใบ" onClear={() => setVSel(new Set())}
                 extra={!vCheck.ok && vSel.size > 0 ? <span className="text-xs text-amber-300">{vCheck.reason}</span> : null}>
                 <button onClick={openVMerge} disabled={!vCheck.ok} title={vCheck.reason ?? "ย้ายบิลทุกใบเข้าใบเดียว"}
-                  className="h-8 px-3 text-xs font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40">รวมใบร่างที่เลือก ({vSel.size})</button>
+                  className="h-8 px-3 text-xs font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40">รวมใบที่เลือก ({vSel.size})</button>
               </BulkActionBar>
             )}
           </>
@@ -484,29 +513,41 @@ export default function PurchaseVouchersPage() {
           }} />
       )}
 
-      {/* ★ 2026-11-15 รวมใบร่างเป็นใบเดียว (API /api/purchasing/vouchers/merge) */}
-      {vMerge && (
+      {/* ★ 2026-11-15 รวมใบร่างเป็นใบเดียว · ★ 2026-11-21 รวมใบยืนยันแล้ว (ยังไม่จ่าย) ได้ด้วย — API /api/purchasing/vouchers/merge */}
+      {vMerge && vSelRows.length >= 2 && (   /* รายการรีโหลด = ติ๊กหาย → ไม่โชว์ป๊อปเปล่า */
         <ERPModal open onClose={() => !vMerging && setVMerge(null)} size="md" storageKey="pv-draft-merge"
-          title="รวมใบร่างเป็นใบเดียว" description={`${vSelRows.length} ใบ · ${vSelRows[0]?.seller_name ?? ""}`}
+          title="รวมใบสำคัญรับเป็นใบเดียว" description={`${vSelRows.length} ใบ · ${vSelRows[0]?.seller_name ?? ""}`}
           footer={<>
             <button onClick={() => setVMerge(null)} disabled={vMerging} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            <button onClick={() => void doVMerge()} disabled={vMerging || !vMerge.date} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{vMerging ? "กำลังรวม…" : `รวม ${vSelRows.length} ใบเป็นใบเดียว`}</button>
+            <button onClick={() => void doVMerge()} disabled={vMerging || (vMergeTarget?.status === "draft" && !vMerge.date)} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{vMerging ? "กำลังรวม…" : `รวม ${vSelRows.length} ใบเป็นใบเดียว`}</button>
           </>}>
-          <p className="text-sm text-slate-600 mb-3">บิลร้าน ใบส่งของ และรายการของทุกใบจะย้ายเข้า <b>ใบหลัก</b> โดยไม่ต้องให้ AI อ่านบิลใหม่ · ใบที่เหลือจะถูกยกเลิกและคืนเลข</p>
+          <p className="text-sm text-slate-600 mb-3">บิลร้าน ใบส่งของ ใบรับ และรายการของทุกใบจะย้ายเข้า <b>ใบหลัก</b> ทั้งแถว (ราคาเดิมไม่เปลี่ยน · ไม่ต้องให้ AI อ่านบิลใหม่)</p>
           <div className="text-xs font-medium text-slate-600 mb-1">ใบหลัก (เก็บใบนี้ไว้)</div>
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 mb-3">
             {vSelRows.map((v) => (
-              <label key={v.id} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer ${vMerge.targetId === v.id ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+              <label key={v.id} className={`flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-sm cursor-pointer ${vMerge.targetId === v.id ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                 <input type="radio" name="pv-merge-target" checked={vMerge.targetId === v.id} onChange={() => setVMerge((p) => (p ? { ...p, targetId: v.id } : p))} />
-                <span className="font-mono font-semibold text-slate-800">{v.pv_no ?? "— ร่าง —"}</span>
-                <span className="text-xs text-slate-500">{formatDate(v.voucher_date)}</span>
-                <span className="ml-auto text-xs text-slate-500 tabular-nums">{v.line_count} รายการ · ฿{fmtMoney(v.grand_total_thb)}</span>
+                <span className="font-mono font-semibold text-slate-800 whitespace-nowrap">{v.pv_no ?? "— ร่าง —"}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${v.status === "confirmed" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"}`}>{v.status === "confirmed" ? (v.editing_at ? "ยืนยันแล้ว · กำลังแก้" : "ยืนยันแล้ว") : "ร่าง"}</span>
+                <span className="text-xs text-slate-500 whitespace-nowrap">{formatDate(v.voucher_date)}</span>
+                <span className="ml-auto text-xs text-slate-500 tabular-nums whitespace-nowrap">{v.line_count} รายการ · ฿{fmtMoney(v.grand_total_thb)}</span>
               </label>
             ))}
           </div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">วันที่ใบ (วันที่ของมาถึง)</label>
-          <input type="date" value={vMerge.date} onChange={(e) => setVMerge((p) => (p ? { ...p, date: e.target.value } : p))} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
-          <p className="text-[11px] text-slate-400 mt-2">เปลี่ยนวันที่ = เลขใบเปลี่ยนตามวันที่ใหม่ · หลังรวมแล้วเปิดใบหลักให้ตรวจยอดกับบิลทุกใบอีกครั้ง</p>
+          {/* ★ 2026-11-21 บอกชัดว่าแต่ละใบจะเป็นยังไงหลังรวม */}
+          <ul className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600 space-y-1 list-disc pl-6">
+            <li><b>ใบหลัก {vMergeTarget?.pv_no ?? "ร่าง"}</b> เก็บไว้{vMergeTarget?.status === "confirmed" ? <> → <span className="text-amber-700">กลับเป็น &ldquo;กำลังแก้ไข&rdquo;</span> ใส่ค่าส่งแล้วกด <b>บันทึกการแก้ไข</b> (เขียนราคากลับเหมือนตอนยืนยัน)</> : " (ยังเป็นร่าง กดยืนยันตามปกติ)"}</li>
+            {vSelRows.filter((v) => v.id !== vMerge.targetId).map((v) => (
+              <li key={v.id}><b>{v.pv_no ?? "ใบร่าง"}</b> ถูกยกเลิก · {v.status === "confirmed" ? <>เก็บเลขไว้ (ยกเลิก · รวมเข้า {vMergeTarget?.pv_no ?? "ใบหลัก"}) ไม่นำเลขไปใช้ซ้ำ</> : "คืนเลข (ใบร่าง)"}</li>
+            ))}
+            <li>แยกกลับได้ภายหลังที่หน้าใบหลัก ปุ่ม <b>แยกใบกลับ</b> (ถ้ายังไม่จ่าย)</li>
+            {vSelRows.some((v) => v.editing_at) && <li className="text-amber-700">มีใบที่กำลังแก้อยู่ ({vSelRows.filter((v) => v.editing_at).map((v) => `${v.pv_no} โดย ${v.editing_by ?? "—"}`).join(", ")}) — ถ้าไม่ใช่คุณ ระบบจะไม่ยอมรวม ให้คนนั้นกดรวม หรือกด ยกเลิกการแก้ ก่อน</li>}
+          </ul>
+          {vMergeTarget?.status === "draft" ? (<>
+            <label className="block text-xs font-medium text-slate-600 mb-1">วันที่ใบ (วันที่ของมาถึง)</label>
+            <input type="date" value={vMerge.date} onChange={(e) => setVMerge((p) => (p ? { ...p, date: e.target.value } : p))} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+            <p className="text-[11px] text-slate-400 mt-2">เปลี่ยนวันที่ = เลขใบเปลี่ยนตามวันที่ใหม่ · หลังรวมแล้วเปิดใบหลักให้ตรวจยอดกับบิลทุกใบอีกครั้ง</p>
+          </>) : <p className="text-[11px] text-slate-400">ใบหลักยืนยันแล้ว — เปลี่ยนวันที่ได้ตอนแก้ใบ (ระบบถามเปลี่ยนเลขตามวันที่ให้ตอนบันทึกการแก้ไข)</p>}
         </ERPModal>
       )}
 

@@ -12,7 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fetchVoucher, recomputeVoucher, snapshotVoucher, restoreVoucherSnapshot } from "@/lib/purchase-voucher-server";
+import { fetchVoucher, recomputeVoucher, snapshotVoucher, restoreVoucherSnapshot, lastMergeEvent, cancelEditMergeBlock } from "@/lib/purchase-voucher-server";
 import { writeBackVoucherPrices } from "@/lib/voucher-writeback";
 import { saveRevision, listRevisions, getRevision, VOUCHER_ENTITY } from "@/lib/document-revisions";
 import { diffVoucherSnapshots, pvNoNeedsRenumber, reviseReasonFor, type VoucherSnapshot } from "@/lib/voucher-revision";
@@ -80,6 +80,9 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
 
   // ---------- ยกเลิกการแก้ ----------
   if (body.action === "cancel") {
+    // ★ 2026-11-21 รวมใบอื่นเข้ามาระหว่างแก้ → ยกเลิกการแก้จะคืนใบเวอร์ชันก่อนรวม และปิดรายการที่ย้ายเข้ามา (ใบที่ถูกรวมยกเลิกไปแล้ว = ของหาย) → ให้แยกใบกลับก่อน
+    const mergeBlock = cancelEditMergeBlock(await lastMergeEvent(admin, id), c.editing_at ? String(c.editing_at) : null);   // รวม/แยกใบระหว่างโหมดแก้นี้
+    if (mergeBlock) return NextResponse.json({ error: mergeBlock }, { status: 409 });
     const r = await getRevision(admin, VOUCHER_ENTITY, id, revision);
     if (!r?.snapshot) return NextResponse.json({ error: "ไม่พบใบเวอร์ชันล่าสุดที่เก็บไว้ — ยกเลิกการแก้ไม่ได้" }, { status: 500 });
     await restoreVoucherSnapshot(admin, id, r.snapshot as VoucherSnapshot);

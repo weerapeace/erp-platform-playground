@@ -107,6 +107,11 @@ export default function PurchaseVoucherFormPage() {
   const canRevise = usePermission("pv.edit_confirmed");
   const isAdmin = useAuth().user?.role === "admin";   // ★ 2026-11-16 แอดมินเปิดแก้ได้ไม่ต้องใส่เหตุผล (API ตรวจซ้ำ)
   const [leaveTo, setLeaveTo] = useState<string | null>(null);   // ★ 2026-11-16 ปุ่มใบใหม่: มีที่ยังไม่บันทึก → ถามก่อนออก
+  // ★ 2026-11-21 ข้อเสนอ 1: ก่อนยืนยัน ถามว่า "ส่งมาพร้อมใบอื่นไหม?" (ร้านเดียวกัน ยังไม่มีค่าส่ง ≤ 14 วัน) · ข้อเสนอ 2: แยกใบกลับ
+  const [shipAsk, setShipAsk] = useState<{ id: string; pv_no: string | null; status: string; voucher_date: string; grand_total_thb: number }[] | null>(null);
+  const [splitInfo, setSplitInfo] = useState<{ has_merge: boolean; can: boolean; reason: string | null; merged: string[] } | null>(null);
+  const [splitAsk, setSplitAsk] = useState(false);
+  const [splitBusy, setSplitBusy] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [reviseReason, setReviseReason] = useState("");
   const [reviseCancelOpen, setReviseCancelOpen] = useState(false);
@@ -195,6 +200,13 @@ export default function PurchaseVoucherFormPage() {
     };
   }, [data, h, ln, currency]);
   const calc = useMemo(() => (calcIn ? computeVoucher(calcIn.header, calcIn.lines) : null), [calcIn]);
+  const hStatus = data?.header.status; const hEditing = data?.header.editing_at;
+  useEffect(() => {
+    if (!id || !hStatus || hStatus === "cancelled") { setSplitInfo(null); return; }
+    let alive = true;
+    apiFetch(`/api/purchasing/vouchers/${id}/split`).then((r) => r.json()).then((j) => { if (alive) setSplitInfo(j.data ?? null); }).catch(() => { if (alive) setSplitInfo(null); });
+    return () => { alive = false; };
+  }, [id, hStatus, hEditing]);
   /** ★ 2026-11-15 ยอดบาทต่อบรรทัด (สูตรกลางเดียวกับตาราง) → แถวบิลร้านโชว์ ฿/ชิ้น · ยอด ฿ */
   const lineMoney = useMemo(() => {
     if (!data || !calc) return undefined;
@@ -412,6 +424,32 @@ export default function PurchaseVoucherFormPage() {
     seller_ship_foreign: t?.seller_ship_foreign ?? 0, seller_ship_thb: t?.seller_ship_thb ?? 0, pay_fee_thb: t?.pay_fee_thb ?? 0, shop_total_thb: t?.shop_total_thb ?? 0, paid_total_thb: h.paid_total_thb === "" ? null : num(h.paid_total_thb), ship_manual: shipManual };
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
+  /** ★ 2026-11-21 ข้อเสนอ 1 — ใบนี้ยังไม่มีค่าส่ง + ร้านเดียวกันมีใบอื่นที่ยังไม่มีค่าส่ง (≤ 14 วัน) → ถามก่อน "ส่งมาพร้อมใบอื่นไหม?" · ถามไม่ได้ = ยืนยันตามปกติ */
+  const askConfirm = async () => {
+    if (!(Number(t?.ship_total_thb ?? 0) > 0)) {
+      try {
+        const j = await apiFetch(`/api/purchasing/vouchers/merge?for=${id}`).then((r) => r.json());
+        const list = (j.data ?? []) as NonNullable<typeof shipAsk>;
+        if (list.length) { setShipAsk(list); return; }
+      } catch { /* ไม่เป็นไร */ }
+    }
+    setConfirmOpen(true);
+  };
+  /** ★ 2026-11-21 ข้อเสนอ 2 — แยกใบกลับ (ย้อนการรวม) */
+  const doSplit = async () => {
+    setSplitBusy(true);
+    try {
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}/split`, { method: "POST" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) { toast.error(j.error ?? "แยกใบกลับไม่สำเร็จ"); return; }
+      const names = ((j.restored ?? []) as { pv_no: string | null }[]).map((r) => r.pv_no ?? "ใบร่าง").join(", ");
+      toast.success(`แยกใบกลับแล้ว — คืน ${names}${j.still_editing ? " · ใบนี้ยังอยู่ในโหมดแก้ไข (กด ยกเลิกการแก้ เพื่อกลับเป็นแบบก่อนรวม)" : ""}`);
+      setSplitAsk(false); setSellerKey((k) => k + 1);
+      await load();
+    } catch { toast.error("แยกใบกลับไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
+    finally { setSplitBusy(false); }
+  };
+  const openSplit = () => { if (splitInfo?.can) setSplitAsk(true); else toast.info(splitInfo?.reason ?? "แยกกลับไม่ได้"); };
   /** ช่องกรอกในตารางรายการ (แถวบาง) */
   const cellCls = "h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
   const hasBills = foreign && panelStatus.bills > 0;
@@ -454,11 +492,12 @@ export default function PurchaseVoucherFormPage() {
                   ...(canRevise && hd.status === "confirmed" && !editing ? [{ label: "แก้ไขใบ", onClick: () => { setReviseReason(""); setReviseOpen(true); } }] : []),
                   ...(!readonly && hd.status === "draft" ? [{ label: "ยกเลิกใบร่าง", onClick: () => setCancelOpen(true), danger: true }] : []),
                   ...(canEdit && hd.status === "confirmed" && !editing ? [{ label: "ยกเลิกใบนี้", onClick: () => setVoidOpen(true), danger: true }] : []),
+                  ...(canEdit && splitInfo?.has_merge ? [{ label: `แยกใบกลับ (${splitInfo.merged.join(", ")})`, onClick: openSplit, title: splitInfo.can ? undefined : splitInfo.reason ?? undefined }] : []),
                   ...(canEdit ? newItems.map((it) => ({ ...it, label: `＋ ใบใหม่ · ${it.label}` })) : []),
                 ];
                 return (<>
               <div className="flex md:hidden items-center gap-2">
-                {!readonly && hd.status === "draft" && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="h-9 px-3 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน</button>}
+                {!readonly && hd.status === "draft" && <button onClick={() => void askConfirm()} disabled={saving} className="h-9 px-3 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน</button>}
                 <RowMenu items={mobileItems} label="⋯" title="เมนูใบนี้" buttonClassName="h-9 min-w-9 px-2 text-lg leading-none rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" />
               </div>
               <div className="hidden md:flex items-center gap-2 flex-wrap">
@@ -473,8 +512,13 @@ export default function PurchaseVoucherFormPage() {
                     className="h-9 px-3 text-xs rounded-md border border-blue-200 bg-white text-blue-700 hover:bg-blue-50 inline-flex items-center gap-1"><Icon name="edit" mode="line" size={13} /> แก้ไขใบ</button>
                 )}
                 {canEdit && hd.status === "confirmed" && !editing && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
+                {/* ★ 2026-11-21 แยกใบกลับ — ใบนี้รวมใบอื่นเข้ามา (ยังไม่จ่าย) */}
+                {canEdit && splitInfo?.has_merge && (
+                  <button onClick={openSplit} title={splitInfo.can ? `ย้อนการรวม: คืน ${splitInfo.merged.join(", ")} พร้อมเลขเดิมและสถานะเดิม` : splitInfo.reason ?? ""}
+                    className={`h-9 px-3 text-xs rounded-md border bg-white inline-flex items-center gap-1 ${splitInfo.can ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-slate-200 text-slate-400"}`}>↩ แยกใบกลับ</button>
+                )}
                 {/* บันทึกร่าง / ยืนยัน ย้ายไปการ์ด "ก่อนยืนยัน" ด้านขวา (แบบ B) — จอแคบการ์ดอยู่ล่างสุด จึงมีปุ่มสำรองบนหัว */}
-                {!readonly && hd.status === "draft" && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
+                {!readonly && hd.status === "draft" && <button onClick={() => void askConfirm()} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
                 {canEdit && <RowMenu items={newItems} label="＋ ใบใหม่ ▾" title="ออกใบสำคัญรับใบใหม่"
                   buttonClassName="h-9 px-3 text-xs font-medium rounded-md border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" />}
               </div>
@@ -798,7 +842,7 @@ export default function PurchaseVoucherFormPage() {
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
-                    onSave={() => void save()} onConfirm={editing ? startReviseSave : () => setConfirmOpen(true)} onSetGoodsThb={readonly ? undefined : setGoodsThb}
+                    onSave={() => void save()} onConfirm={editing ? startReviseSave : () => void askConfirm()} onSetGoodsThb={readonly ? undefined : setGoodsThb}
                     revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
@@ -866,7 +910,7 @@ export default function PurchaseVoucherFormPage() {
                 note={editing ? `กำลังแก้ → เวอร์ชัน ${hd.revision + 1} · กด "บันทึกการแก้ไข" เมื่อเสร็จ` : "บิลร้าน + หัวใบ + รายการ"}
                 extra={editing
                   ? (canRevise ? <button type="button" onClick={startReviseSave} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
-                  : (hd.status === "draft" && canEdit ? <button type="button" onClick={() => setConfirmOpen(true)} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">✓ ยืนยัน + ออกเลข</button> : null)} />
+                  : (hd.status === "draft" && canEdit ? <button type="button" onClick={() => void askConfirm()} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">✓ ยืนยัน + ออกเลข</button> : null)} />
             )}
           </>
         )}
@@ -889,6 +933,33 @@ export default function PurchaseVoucherFormPage() {
           {delLine.price_source === "bill" && <p className="mt-2 text-xs text-slate-500">รายการนี้มาจากบิลร้าน — แถวในบิลจะกลับเป็น &quot;ยังไม่ใส่ลงใบ&quot; (กดยืนยันหรือข้ามใหม่)</p>}
         </ERPModal>
       )}
+      {/* ★ 2026-11-21 ข้อเสนอ 1 — ส่งมาพร้อมใบอื่นไหม? (ก่อนยืนยัน + ออกเลข) */}
+      {shipAsk && hd && (
+        <ERPModal open onClose={() => setShipAsk(null)} size="md" storageKey="pv-ship-together"
+          title="ส่งมาพร้อมใบอื่นไหม?" description={`${hd.seller_name ?? "ร้านนี้"} มีใบที่ยังไม่มีค่าส่ง (ห่างไม่เกิน 14 วัน)`}
+          footer={<>
+            <button onClick={() => { setShipAsk(null); setConfirmOpen(true); }} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ไม่ใช่ · ยืนยันเลย</button>
+            <button onClick={() => { const to = `/purchasing/vouchers?merge=${[id, ...shipAsk.map((x) => x.id)].join(",")}`; setShipAsk(null); if (dirty || panelStatus.pending) setLeaveTo(to); else router.push(to); }}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">รวมก่อน</button>
+          </>}>
+          <p className="text-sm text-slate-600 mb-2">ถ้าของมารถคันเดียวกัน รวมใบก่อนแล้วใส่ค่าส่งครั้งเดียว — ค่าส่งจะเฉลี่ยลงทุกรายการถูกต้อง</p>
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {shipAsk.map((o) => (
+              <div key={o.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-sm">
+                <span className="font-mono font-semibold text-slate-800 whitespace-nowrap">{o.pv_no ?? "ใบร่าง"}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${o.status === "confirmed" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-100 text-slate-600 border-slate-200"}`}>{o.status === "confirmed" ? "ยืนยันแล้ว · ยังไม่จ่าย" : "ร่าง"}</span>
+                <span className="text-xs text-slate-500 whitespace-nowrap">{formatDate(o.voucher_date)}</span>
+                <span className="ml-auto text-xs text-slate-500 tabular-nums whitespace-nowrap">฿{fmtMoney(o.grand_total_thb)}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">กด รวมก่อน = ไปหน้ารายการแล้วเปิดขั้นรวมโดยติ๊กใบเหล่านี้ไว้ให้ (ตรวจได้ก่อนกดรวม)</p>
+        </ERPModal>
+      )}
+      {/* ★ 2026-11-21 ข้อเสนอ 2 — แยกใบกลับ */}
+      <ConfirmDialog open={splitAsk} onClose={() => !splitBusy && setSplitAsk(false)} onConfirm={() => void doSplit()} loading={splitBusy}
+        title="แยกใบกลับ?" confirmText="แยกใบกลับ" cancelText="ยกเลิก"
+        message={`ใบ ${(splitInfo?.merged ?? []).join(", ")} จะกลับมาพร้อมเลขเดิมและสถานะเดิม · รายการ / บิลร้าน / ใบส่งของ / ใบรับ ย้ายกลับใบเดิม · ใบนี้กลับเป็นค่าก่อนรวม: ค่าส่งในจีน / ค่าธรรมเนียม / ยอดจ่าย / หมายเหตุ (ถ้าใส่ค่าส่งรวมไว้หลังรวม ต้องไปใส่ใหม่ในใบที่ถูก) · ค่าส่งขนส่งไทยและเรทคงเดิม`} />
       {/* ★ 2026-11-16 ปุ่มใบใหม่ — มีที่ยังไม่บันทึก ถามก่อนออก */}
       <ConfirmDialog open={!!leaveTo} onClose={() => setLeaveTo(null)} onConfirm={() => { const to = leaveTo; setLeaveTo(null); if (to) router.push(to); }}
         title="คุณมีข้อมูลที่ยังไม่ได้บันทึก" message="ต้องการออกไปออกใบใหม่โดยไม่บันทึกหรือไม่? (กด อยู่ต่อ แล้วกดบันทึกร่างก่อนก็ได้)"
