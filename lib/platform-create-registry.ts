@@ -44,7 +44,7 @@ export const PLATFORM_CREATORS: Record<string, PlatformCreator> = {
   shopee: {
     code: "shopee", label: "Shopee", endpoint: "/api/shopee/create-product", live: SHOPEE_CREATE_LIVE,
     notLiveReason: "ดูก่อนส่ง + บันทึกร่างได้ · ลงจริงเปิดในขั้นถัดไป (ลงแบบปิดขาย + สต๊อก 0)",
-    note: "ลงแบบ \"ปิดขาย\" + สต๊อก 0 (BigSeller ยังคุมสต๊อก) — ตรวจในลิ้นชักสินค้าบนร้าน แล้วค่อยเปิดขาย/ใส่สต๊อก",
+    note: "ลงแบบ \"ปิดขาย\" (หรือเปิดขายทันทีถ้าเลือกในขั้นยืนยัน) + สต๊อก 0 (BigSeller ยังคุมสต๊อก) — ตรวจในลิ้นชักสินค้าบนร้าน แล้วค่อยเปิดขาย/ใส่สต๊อก",
   },
   // TikTok Shop (เฟส D 2026-11-12 · เจ้าของเลือก "ลงเป็นร่าง"): lib/tiktok-create-plan + /api/tiktok-shop/create-product
   //   ลงเป็นฉบับร่างเสมอ (ไม่ขึ้นขาย) · TikTok บังคับสต๊อก ≥ 1 แม้เป็นร่าง (เจอจริง 2026-11-13) → ร่างใส่ 1 ชิ้น แก้ก่อนเผยแพร่

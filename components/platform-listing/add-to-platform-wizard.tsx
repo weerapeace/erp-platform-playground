@@ -42,11 +42,13 @@ import type { ShopeeCreatePreview } from "@/lib/shopee-create-plan";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import { creatorOf, hasCreatePreview, liveCreateEndpoint, type CreateStep } from "@/lib/platform-create-registry";
+import { listingLinks } from "@/lib/platform-links";
+import { useUserPref } from "@/lib/use-user-pref";
 import { ResultBurst, resultTone } from "@/components/result-burst";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
-  ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, summarizePlan,
-  type AddDecision, type AddReadinessRow,
+  ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, parseAfterDisplayPref, summarizePlan,
+  type AddDecision, type AddReadinessRow, type AfterDisplay,
 } from "@/lib/platform-add-plan";
 
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -64,7 +66,25 @@ type Pf = { id: string; code: string; name_th: string; icon_key: string | null; 
 export type AddWizardParent = { id: string; code: string; name: string | null };
 /** รายการบนร้านต้นทางที่ใช้เป็นต้นแบบ (ลงร้านอื่นจากรายการนี้) */
 export type CopySourceRef = { listing_id: string; platform_code: string; platform_name?: string | null };
-type Outcome = { parent_id: string; platform: string; ok: boolean; text: string; steps?: CreateStep[] };
+/** code + product_id = ลงบนร้านแล้ว → ปุ่ม "เปิดในหลังร้าน" (เจ้าของเลือก 2026-11-21 ข้อ 3 · ลิงก์จาก lib/platform-links) */
+type Outcome = { parent_id: string; platform: string; ok: boolean; text: string; steps?: CreateStep[]; code?: string; productId?: string | null };
+
+/** ร้านที่เลือก "หลังลงเสร็จ เปิด/ปิดขาย" ได้ = มีตัวสร้างที่ลงขายจริง (LINE · Shopee · Lazada) — TikTok ลงเป็นร่างเสมอ */
+const hasDisplayChoice = (code: string): boolean => { const c = creatorOf(code); return !!c && c.mode !== "draft"; };
+
+/** ตัวเลือก "หลังลงร้านเสร็จ" ของร้านหนึ่ง (ปิดไว้ก่อน / เปิดขายทันที) */
+function AfterDisplayChoice({ value, onChange, label }: { value: AfterDisplay; onChange: (v: AfterDisplay) => void; label: string }) {
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap" role="radiogroup" aria-label={`${label}: เปิดหรือปิดขายหลังลง`}>
+      {([["hide", "ปิดไว้ก่อน (ตรวจบนร้านแล้วค่อยเปิด)"], ["onsale", "เปิดขายทันที"]] as const).map(([v, l]) => (
+        <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+          className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs ${value === v ? "border-violet-400 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+          <span className={`h-3 w-3 shrink-0 rounded-full border ${value === v ? "border-[4px] border-violet-600" : "border-slate-300"}`} />{l}
+        </button>
+      ))}
+    </div>
+  );
+}
 const STEPS = ["เลือกร้าน", "ดูและแก้รายละเอียด", "ยืนยัน"];
 
 export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, initialPlatformCodes = [], sources }: {
@@ -110,7 +130,10 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [tab, setTab] = useState<string | null>(null);                     // ขั้น 2: แท็บร้าน (code)
   const [pvState, setPvState] = useState<Record<string, number>>({});      // "code:parent id" → จำนวนข้อที่ขาด (จากหน้าดูก่อนส่ง)
   const [preparing, setPreparing] = useState(false);
-  const [afterDisplay, setAfterDisplay] = useState<"hide" | "onsale">("hide");   // ขั้น 3: หลังลง เปิด/ปิดขาย (ค่าเริ่ม ปิดไว้ก่อน)
+  // ขั้น 3: หลังลง เปิด/ปิดขาย "ต่อร้าน" (ค่าเริ่ม ปิดไว้ก่อน) · จำค่าล่าสุดของแต่ละร้าน ต่อคน (เจ้าของเลือก 2026-11-21 แบบ A + ข้อ 1)
+  const [afterDisplayBy, setAfterDisplayBy] = useUserPref<Record<string, AfterDisplay>>("platform_add_after_display", {}, parseAfterDisplayPref);
+  const displayOf = (code: string): AfterDisplay => (afterDisplayBy[code] === "onsale" ? "onsale" : "hide");
+  const setDisplayOf = (code: string, v: AfterDisplay) => setAfterDisplayBy({ ...afterDisplayBy, [code]: v });
   const [previewFor, setPreviewFor] = useState<string | null>(null);              // ขั้น 3: ดูแบบหน้าร้าน (parent id)
   const preparedRef = useRef<Set<string>>(new Set());                      // บันทึกร่าง LINE ไปแล้ว (ไม่ทำซ้ำตอนย้อนไปมา)
   const stopRef = useRef(false);
@@ -128,7 +151,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   useEffect(() => {
     if (!open) return;
     setStep(1); setRows({}); setSkipped(new Set()); setTyped(""); setOutcomes(null); setCheckErr(null); setProgress({ done: 0, total: 0, label: "" });
-    setFocus(null); setTab(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setAfterDisplay("hide"); setPreviewFor(null);
+    setFocus(null); setTab(null); setPvState({}); preparedRef.current = new Set(); setOthersOpen(false); setPreviewFor(null);   // เปิด/ปิดขายหลังลง = จำค่าล่าสุดต่อร้าน (ไม่รีเซ็ต)
     copiedRef.current = new Set(); setCopyErr({}); setCopying(null);
     let alive = true;
     apiFetch(`/api/platform-accounts${brandId ? `?brand_id=${encodeURIComponent(brandId)}` : ""}`).then((r) => r.json()).then((j) => {
@@ -237,7 +260,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
     return out;
   }, [pickedPfs, rows, real, skipped]);   // eslint-disable-line react-hooks/exhaustive-deps
   const summary = summarizePlan(plan.map((x) => x.decision));
-  const needTyped = needsTypedConfirm(summary.publish);
+  // เปิดขายทันที (ร้านที่ลงจริงได้ + เลือกเปิดขาย) — เกิน 5 ตัวต้องพิมพ์ยืนยัน (ข้อ 4)
+  const onsaleCount = plan.filter((x) => x.decision === "publish" && hasDisplayChoice(x.pf.code) && displayOf(x.pf.code) === "onsale").length;
+  const needTyped = needsTypedConfirm(summary.publish, onsaleCount);
   const problemParents = useMemo(() => {
     const m = new Map<string, { row: AddReadinessRow; pfs: { pf: Pf; missing: string[] }[] }>();
     for (const x of plan) {
@@ -318,7 +343,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         setProgress({ done: i, total: toCreate.length, label: "กำลังลงบนร้าน", current: `${nameOf(id)} → ${pf.name_th}`, hint: creatorOf(pf.code)?.mode === "draft" ? "ตรวจข้อมูล → ฝากรูป → สร้างฉบับร่าง → บันทึกในระบบ (ประมาณ 10–20 วินาทีต่อสินค้า)"
           : pf.code === "shopee" ? `ตรวจข้อมูล → ฝากรูป → สร้างสินค้า (ปิดขาย) → รอ Shopee 6 วิ → สร้างตัวเลือก → บันทึกในระบบ (ประมาณ 20–30 วินาทีต่อสินค้า · เหลือ ${toCreate.length - i} ตัว ≈ ${Math.ceil(((toCreate.length - i) * 25) / 60)} นาที · เปิดหน้านี้ค้างไว้)` : undefined });
         try {
-          const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: afterDisplay }) });
+          const r = await apiFetch(endpoint, { method: "POST", body: JSON.stringify({ parent_sku_id: id, display: displayOf(pf.code) }) });
           const j = await r.json();
           const steps = Array.isArray(j.steps) ? (j.steps as CreateStep[]) : undefined;
           if (j.error || j.ok === false) res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${j.error ?? "ไม่ทราบสาเหตุ"}`, steps });
@@ -329,10 +354,11 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             // ของขวัญ: LINE ไม่รับผ่าน API (ทดสอบ 2026-11-10) → เตือนให้ไปติ๊กเอง พร้อมค่าที่ตั้งใจไว้
             const gf = j.gift as { manual?: boolean; want?: { status: string; categories: string[] } } | null | undefined;
             const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
-            const dp = j.display as { ok: boolean; status: "onsale" | "hide" } | null | undefined;
-            const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : " · ตั้งเปิด/ปิดขายไม่สำเร็จ") : "";
-            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
-            else res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
+            const dp = j.display as { ok: boolean; status: "onsale" | "hide"; error?: string | null } | null | undefined;
+            const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : ` · เปิดขายไม่สำเร็จ (ยังปิดขายอยู่)${dp.error ? `: ${dp.error}` : ""}`) : "";
+            const link = { code: pf.code, productId: j.product_id ? String(j.product_id) : null };
+            if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, ...link, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
+            else res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, ...link, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
         } catch (e) { res.push({ parent_id: id, platform: pf.name_th, ok: false, text: `ลงไม่สำเร็จ: ${(e as Error).message}` }); }
         setProgress({ done: i + 1, total: toCreate.length, label: "กำลังลงบนร้าน" });
@@ -406,6 +432,14 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                     <div className="truncate">{nameOf(o.parent_id)}</div>
                     <div className="text-xs text-slate-500">{o.platform} · {o.text}</div>
                     {o.steps && o.steps.length > 0 && <CreateStepsLine steps={o.steps} />}
+                    {o.code && o.productId && (() => {
+                      const lk = listingLinks(o.code, o.productId);
+                      return lk.sellerCenter ? (
+                        <a href={lk.sellerCenter} target="_blank" rel="noreferrer" className="mt-1 inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50">
+                          <Icon name="external-link" />เปิดในหลังร้าน{lk.sellerExact ? "" : ` (ค้นรหัส #${o.productId})`}
+                        </a>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
               ))}
@@ -664,6 +698,20 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                         {s.skip_listed > 0 && <span className="text-slate-500">มีบนร้านแล้ว {s.skip_listed.toLocaleString()}</span>}
                         {s.skip_missing > 0 && <span className="text-rose-700">ข้าม (ไม่ครบ) {s.skip_missing.toLocaleString()}</span>}
                         {s.skip_user > 0 && <span className="text-slate-500">เลือกไม่ลง {s.skip_user.toLocaleString()}</span>}
+                        {/* หลังลงร้านเสร็จ: ปิดไว้ก่อน / เปิดขายทันที — ทุกร้านที่ลงขายจริงได้ (แบบ A) · ยังไม่เปิดลงจริง = เลือกเก็บไว้ใช้ทีหลัง */}
+                        {hasDisplayChoice(p.code) && (s.publish > 0 || (s.prepare > 0 && !creatorOf(p.code)!.live)) && (
+                          <div className="basis-full space-y-1 pt-1">
+                            <div className="text-xs text-slate-500">หลังลงร้านเสร็จ</div>
+                            <AfterDisplayChoice value={displayOf(p.code)} onChange={(v) => setDisplayOf(p.code, v)} label={p.name_th} />
+                            {!creatorOf(p.code)!.live && <p className="text-[11px] text-slate-400">ใช้ได้เมื่อ {p.name_th} เปิดให้สร้างสินค้า · รอบนี้ยังบันทึกร่าง (ระบบจำค่าที่เลือกไว้)</p>}
+                            {/* ข้อ 2: Shopee ลงสต๊อก 0 เสมอ (BigSeller คุมสต๊อก) → เปิดขาย = ลูกค้าเห็นสินค้าหมด */}
+                            {p.code === "shopee" && displayOf(p.code) === "onsale" && s.publish > 0 && (
+                              <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                                <Icon name="warning" />สต๊อกยัง 0 — ลูกค้าเห็น &quot;สินค้าหมด&quot; จนกว่า BigSeller ส่งสต๊อก (ระบบไม่ส่งสต๊อกเอง) · เปิดขายไม่ผ่าน = สินค้ายังปิดขาย ไม่เสียหาย
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -697,26 +745,13 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                           ))}
                         </div>
                       )}
-                      {pub.length > 0 && (
-                        <div className="border-t border-slate-100 pt-2">
-                          <div className="mb-1 text-xs text-slate-500">หลังลงร้านเสร็จ</div>
-                          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="เปิดหรือปิดขายหลังลง">
-                            {([["hide", "ปิดไว้ก่อน (ตรวจบนร้านแล้วค่อยเปิด)"], ["onsale", "เปิดขายทันที"]] as const).map(([v, l]) => (
-                              <button key={v} type="button" role="radio" aria-checked={afterDisplay === v} onClick={() => setAfterDisplay(v)}
-                                className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs ${afterDisplay === v ? "border-violet-400 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                                <span className={`h-3 w-3 rounded-full border ${afterDisplay === v ? "border-[4px] border-violet-600" : "border-slate-300"}`} />{l}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })()}
                 <p className="text-xs text-slate-500">ตัวที่มีบนร้านแล้ว/กำลังลงอยู่ ระบบข้ามให้เอง · ทุกตัวบันทึกประวัติว่าใครลงอะไร{summary.publish > 0 ? " · ลงจริงทีละตัว (ร้านใหญ่อาจใช้เวลาหลายนาที)" : ""}</p>
                 {needTyped && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-rose-700">ลงจริง {summary.publish.toLocaleString()} ตัว — พิมพ์ &quot;{ADD_CONFIRM_WORD}&quot; เพื่อเริ่ม</span>
+                    <span className="text-rose-700">ลงจริง {summary.publish.toLocaleString()} ตัว{onsaleCount > 0 ? ` · เปิดขายทันที ${onsaleCount.toLocaleString()} ตัว` : ""} — พิมพ์ &quot;{ADD_CONFIRM_WORD}&quot; เพื่อเริ่ม</span>
                     <input value={typed} onChange={(e) => setTyped(e.target.value)} className="h-8 w-32 border border-slate-200 rounded-md px-2 text-sm" aria-label="พิมพ์คำยืนยัน" />
                   </div>
                 )}

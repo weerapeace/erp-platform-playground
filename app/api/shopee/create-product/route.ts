@@ -2,7 +2,9 @@
  * ลงสินค้าใหม่บน Shopee (เฟส 5) — /api/shopee/create-product
  *
  *  GET  ?parent_sku_id=   (products.platforms.view) → { preview, blockers, live } ตัวช่วยลงสินค้า ขั้น "ดูก่อนส่ง" (ไม่ส่งอะไรขึ้นร้าน)
- *  POST { parent_sku_id }  (products.platforms.publish) → 5B (เจ้าของ "เริ่ม 5B" 2026-11-15) สร้างจริงแบบ **ปิดขาย (UNLIST) + สต๊อก 0**
+ *  POST { parent_sku_id, display?: "hide" | "onsale" }  (products.platforms.publish) → 5B (เจ้าของ "เริ่ม 5B" 2026-11-15) สร้างจริงแบบ **ปิดขาย (UNLIST) + สต๊อก 0**
+ *        display "onsale" (เจ้าของเลือก 2026-11-21 "เปิดขายทันที") = สร้างแบบปิดขายเหมือนเดิม แล้วสั่งเปิดขาย (unlist_item unlist=false) ต่อทันที
+ *          สต๊อกยัง 0 (BigSeller คุมสต๊อก) · เปิดไม่ผ่าน = สินค้ายังปิดขาย บอกเหตุผล (ไม่นับว่าลงไม่สำเร็จ) · ตัวเลือกพัง = ไม่เปิดขาย
  *        ลำดับ: ตรวจ (ข้อมูลครบ · กันซ้ำ) → ล็อก 3 นาที → ฝากรูป (media_space · รูปสินค้าไม่ผ่าน = หยุด) → add_item (ไม่ลองซ้ำ — กันสร้างซ้ำ)
  *               → มีตัวเลือก: รอ ≥5 วิ (Shopee กำหนด) → init_tier_variation (ลองได้ 3 ครั้ง ห่าง 5 วิ)
  *               → เก็บรหัสในร่าง + รายการบนร้าน (จับคู่สินค้านี้) → ประวัติ (audit shopee_create)
@@ -15,7 +17,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { ShopeeApiError, shopeeAddItem, shopeeErrorText, shopeeInitTierVariation, shopeeItemToCatalogItem } from "@/lib/shopee";
+import { ShopeeApiError, shopeeAddItem, shopeeErrorText, shopeeInitTierVariation, shopeeItemToCatalogItem, shopeeUnlistItems } from "@/lib/shopee";
+import { shopeeUnlistErrors } from "@/lib/shopee-listing-edit";
 import { shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve, type ShopeeCreatePreview } from "@/lib/shopee-create-plan";
 import { upsertCatalogListings, type CatalogSyncItem } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
@@ -47,9 +50,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   if (!creatorOf("shopee")?.live) return NextResponse.json({ ok: false, error: "ยังไม่เปิดลงสินค้าบน Shopee" }, { status: 403 });
-  let body: { parent_sku_id?: string };
+  let body: { parent_sku_id?: string; display?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, error: "อ่านข้อมูลไม่ได้" }, { status: 400 }); }
   const parentId = String(body.parent_sku_id ?? "").trim();
+  const wantOnSale = body.display === "onsale";
   if (!parentId) return NextResponse.json({ ok: false, error: "ต้องระบุ parent_sku_id" }, { status: 400 });
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const actorId = user?.id ?? null; const actorName = user?.email ?? null;
@@ -148,14 +152,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     last_error: tierError ? `สร้างสินค้า #${itemId} แล้ว แต่สร้างตัวเลือกไม่สำเร็จ: ${tierError}`.slice(0, 500) : null,
   }).eq("parent_sku_id", parentId).eq("platform_id", platformId);
 
-  // 4) เก็บรายการบนร้าน (ปิดขาย) + จับคู่สินค้านี้ — ดึงกลับจาก Shopee (รอจนเห็นตัวเลือกครบ ~9 วิ) · ไม่ได้ = เก็บเท่าที่รู้
+  // 3.5) เปิดขายทันที (ถ้าเลือก) — สร้างครบแล้วเท่านั้น · ไม่ผ่าน = ยังปิดขาย (ไม่ล้มทั้งงาน)
+  let displayRes: { ok: boolean; status: "hide" | "onsale"; error: string | null } = { ok: true, status: "hide", error: null };
+  if (wantOnSale && !tierError) {
+    try {
+      const errs = shopeeUnlistErrors(await shopeeUnlistItems(token.accessToken, token.shopId, [{ itemId, unlist: false }]), itemId);
+      displayRes = errs.length ? { ok: false, status: "hide", error: errs.join(" · ") } : { ok: true, status: "onsale", error: null };
+    } catch (e) { displayRes = { ok: false, status: "hide", error: shopeeErrorText(e) }; }
+    if (displayRes.ok) done("display", "เปิดขาย", "สต๊อกยัง 0 จนกว่า BigSeller ส่งสต๊อก");
+    else steps.push({ key: "display", label: "เปิดขาย", state: "skip", detail: `ไม่สำเร็จ — สินค้ายังปิดขาย (${displayRes.error ?? "ไม่ทราบสาเหตุ"}) · เปิดเองได้ในลิ้นชักสินค้าบนร้าน` });
+  }
+
+  // 4) เก็บรายการบนร้าน (ปิดขาย / เปิดขาย) + จับคู่สินค้านี้ — ดึงกลับจาก Shopee (รอจนเห็นตัวเลือกครบ ~9 วิ) · ไม่ได้ = เก็บเท่าที่รู้
   try {
     const want = resolved.tier && !tierError ? pv.variants.length : 0;
     const live = await refetchShopeeLive(token.accessToken, token.shopId, itemId, (l) => !want || (l.models?.models.length ?? 0) >= want);
     const slim: CatalogSyncItem | null = live ? shopeeItemToCatalogItem(live.base, live.models) : null;
     await upsertCatalogListings(admin, {
       platformId, brandId, source: "api",
-      items: [slim ?? { external_product_id: itemId, title: pv.name.value, skus: pv.variants.map((v) => v.code), price: pv.variants[0]?.price ?? null, status: "unlist", raw: { shopee: { item_id: itemId, status: "UNLIST", created_by_erp: true } } }],
+      items: [slim ?? { external_product_id: itemId, title: pv.name.value, skus: pv.variants.map((v) => v.code), price: pv.variants[0]?.price ?? null, status: displayRes.status === "onsale" ? "normal" : "unlist", raw: { shopee: { item_id: itemId, status: displayRes.status === "onsale" ? "NORMAL" : "UNLIST", created_by_erp: true } } }],
     });
     await admin.from("platform_catalog_listings").update({ matched_parent_sku_id: parentId }).eq("platform_id", platformId).eq("external_product_id", itemId);
     done("save", "บันทึกในระบบ + จับคู่สินค้า", live ? undefined : "ดึงกลับจาก Shopee ไม่ได้ — เก็บเท่าที่รู้");
@@ -167,6 +182,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await audit({
     ok: !tierError, item_id: itemId, variants: pv.variants.length, option_images: resolved.optionImages, uploaded: idOf.size,
     category_id: pv.category.id, error: tierError, shopee_warning: addEcho.warning, shopee_response: addEcho.response, tier_response: tierResp,
+    display: { wanted: wantOnSale ? "onsale" : "hide", ...displayRes },
   });
   if (tierError) {
     return NextResponse.json({
@@ -174,5 +190,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       error: `สร้างสินค้า #${itemId} บน Shopee แล้ว (ปิดขาย · ลูกค้ายังไม่เห็น) แต่สร้างตัวเลือกไม่สำเร็จ: ${tierError} — เพิ่มตัวเลือกใน Seller Centre หรือลบสินค้านี้แล้วลงใหม่ (ระบบไม่สร้างซ้ำให้อัตโนมัติ)`,
     }, { status: 502 });
   }
-  return NextResponse.json({ ok: true, product_id: itemId, display: { ok: true, status: "hide" }, warnings, uploaded: idOf.size, steps, error: null });
+  return NextResponse.json({ ok: true, product_id: itemId, display: displayRes, warnings, uploaded: idOf.size, steps, error: null });
 }

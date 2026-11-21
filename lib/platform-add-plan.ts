@@ -64,8 +64,22 @@ export function summarizePlan(decisions: AddDecision[]): AddPlanSummary {
   return out;
 }
 
-/** ต้องพิมพ์คำยืนยันไหม (นับเฉพาะที่จะลงจริง) */
-export const needsTypedConfirm = (publishCount: number): boolean => publishCount > ADD_TYPED_CONFIRM_OVER;
+/** เปิดขายทันทีเกินจำนวนนี้ ต้องพิมพ์คำยืนยันด้วย (เจ้าของเลือก 2026-11-21 ข้อ 4 — ลูกค้าเห็นสินค้าทันที) */
+export const ADD_ONSALE_TYPED_OVER = 5;
+
+/** ต้องพิมพ์คำยืนยันไหม (นับเฉพาะที่จะลงจริง · onsaleCount = ตัวที่จะเปิดขายทันทีหลังลง) */
+export const needsTypedConfirm = (publishCount: number, onsaleCount = 0): boolean =>
+  publishCount > ADD_TYPED_CONFIRM_OVER || onsaleCount > ADD_ONSALE_TYPED_OVER;
+
+/** หลังลงร้านเสร็จ: ปิดไว้ก่อน / เปิดขายทันที */
+export type AfterDisplay = "hide" | "onsale";
+/** ค่าที่จำไว้ต่อร้าน (useUserPref) → ตรวจรูป · ผิดรูป = null (ใช้ค่าเริ่ม ปิดไว้ก่อน) */
+export function parseAfterDisplayPref(raw: unknown): Record<string, AfterDisplay> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, AfterDisplay> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (v === "hide" || v === "onsale") out[k] = v;
+  return out;
+}
 
 /** แยกข้อที่ขาด (สตริง " · ") เป็นรายการ */
 export const missingList = (missing: string): string[] => missing.split(" · ").map((s) => s.trim()).filter(Boolean);

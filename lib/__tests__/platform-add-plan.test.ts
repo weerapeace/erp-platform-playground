@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideAdd, summarizePlan, needsTypedConfirm, missingList, isOnShop, ADD_TYPED_CONFIRM_OVER, type AddReadinessRow } from "@/lib/platform-add-plan";
+import { decideAdd, summarizePlan, needsTypedConfirm, missingList, isOnShop, ADD_TYPED_CONFIRM_OVER, ADD_ONSALE_TYPED_OVER, parseAfterDisplayPref, type AddReadinessRow } from "@/lib/platform-add-plan";
 
 const row = (over: Partial<AddReadinessRow> = {}): AddReadinessRow => ({
   id: "p1", code: "BKB20", name: "หัวเข็มขัด", status: "new", ready_now: true, missing: "", warnings: "", on_shop: false, ...over,
@@ -31,6 +31,11 @@ describe("สรุป + คำยืนยัน", () => {
   it(`ลงจริงเกิน ${ADD_TYPED_CONFIRM_OVER} ตัวต้องพิมพ์ยืนยัน`, () => {
     expect(needsTypedConfirm(ADD_TYPED_CONFIRM_OVER)).toBe(false);
     expect(needsTypedConfirm(ADD_TYPED_CONFIRM_OVER + 1)).toBe(true);
+    // เปิดขายทันทีเกิน 5 ตัว ต้องพิมพ์ยืนยันด้วย (เจ้าของเลือก 2026-11-21 ข้อ 4)
+    expect(needsTypedConfirm(3, ADD_ONSALE_TYPED_OVER)).toBe(false);
+    expect(needsTypedConfirm(6, ADD_ONSALE_TYPED_OVER + 1)).toBe(true);
+    expect(parseAfterDisplayPref({ shopee: "onsale", lazada: "hide", x: "bad" })).toEqual({ shopee: "onsale", lazada: "hide" });
+    expect(parseAfterDisplayPref(["onsale"])).toBeNull();
   });
   it("แยกข้อที่ขาด", () => {
     expect(missingList("รูปสินค้า ≥ 1 · น้ำหนักพัสดุ (ยังไม่ได้ใส่)")).toEqual(["รูปสินค้า ≥ 1", "น้ำหนักพัสดุ (ยังไม่ได้ใส่)"]);
