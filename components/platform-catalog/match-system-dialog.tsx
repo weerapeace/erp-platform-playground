@@ -12,7 +12,7 @@
  *   4) สำเร็จ = POST mark (จำชุดรูปที่ส่ง) → ตรวจใหม่ให้เห็นผล
  * การส่งขึ้นร้านย้อนอัตโนมัติไม่ได้ → หน้านี้คือหน้ายืนยันก่อนส่ง (ต้องกดยืนยันเอง) · ไม่แตะสต๊อก
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
@@ -57,23 +57,31 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   const [sending, setSending] = useState(false);
   const [openRows, setOpenRows] = useState<Set<DriftKey>>(new Set());
 
+  // 🐛 2026-11-21: เดิม apply/load ขึ้นกับ onChanged (หน้าที่เรียกส่งฟังก์ชันใหม่ทุกครั้งที่วาด) → ผลออก → หน้าที่เรียกอัปเดตป้าย → วาดใหม่
+  //    → load ตัวใหม่ → useEffect โหลดซ้ำวนไม่จบ (ปุ่มยืนยันจางเพราะ "กำลังโหลด" ตลอด · ติ๊กแล้วถูกรีเซ็ต · ถามร้านซ้ำ ๆ)
+  //    → เก็บ onChanged ไว้ใน ref · โหลดใหม่เฉพาะตอนเปิด/เปลี่ยนรายการ
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
   const apply = useCallback((c: Check) => {
     setCheck(c);
     // ราคาไม่ติ๊กไว้ให้ก่อน — ร้านมักตั้งราคาเต็มสูงไว้ทำโปร ต้องให้คนดูแล้วติ๊กเอง
     // เรื่องที่มีคำเตือน "ตรวจก่อนส่ง" (เช่น รายละเอียดมาจากร่างที่แก้ไว้) ก็ไม่ติ๊กไว้ให้
     setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price" && !i.note?.startsWith("ตรวจก่อนส่ง")).map((i) => i.key)));
-    onChanged?.(c);
-  }, [onChanged]);
+    onChangedRef.current?.(c);
+  }, []);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
     if (!listingId) return;
+    const my = ++loadSeq.current;
     setLoading(true); setError(null); setSteps(null);
     try {
       const j = await apiFetch(`/api/platform-catalog/drift?listing_id=${encodeURIComponent(listingId)}`).then((r) => r.json());
+      if (my !== loadSeq.current) return;
       if (j.error || !j.check) throw new Error(j.error || "ตรวจไม่สำเร็จ");
       apply(j.check as Check);
-    } catch (e) { setError((e as Error).message); setCheck(null); }
-    finally { setLoading(false); }
+    } catch (e) { if (my === loadSeq.current) { setError((e as Error).message); setCheck(null); } }
+    finally { if (my === loadSeq.current) setLoading(false); }
   }, [listingId, apply]);
   useEffect(() => { if (open) void load(); else { setCheck(null); setSteps(null); setError(null); } }, [open, load]);
 
@@ -143,6 +151,10 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
           <span className="ml-auto" />
           <button type="button" onClick={onClose} disabled={sending} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ปิด</button>
           {canPublish && <PushOpenGearButton />}
+          {/* ปุ่มกดไม่ได้ = บอกเหตุผลเสมอ (ไม่ปล่อยปุ่มจางเฉย ๆ) */}
+          {canPublish && !sending && (loading || !tickN) && (
+            <span className="text-xs text-slate-500">{loading ? "กำลังดึงข้อมูลล่าสุดจากร้าน…" : diffN ? "ติ๊กเรื่องที่จะส่งก่อน" : "ตรงกับระบบแล้ว ไม่มีอะไรต้องส่ง"}</span>
+          )}
           {canPublish ? (
             <button type="button" onClick={() => void send()} disabled={!tickN || sending || loading}
               className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{sending ? "กำลังส่ง…" : `ยืนยันส่งที่ติ๊ก (${tickN})`}</button>
