@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardPayroll } from "@/lib/payroll-auth";
-import { listLineMembers, updateLineMemberStatus, type LineMemberAction } from "@/lib/line-employee-portal-db";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { LINE_MEMBER_ACTIONS, listLineMembers, updateLineMemberStatus, type LineMemberAction } from "@/lib/line-employee-portal-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,10 +23,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const id = String(body.id ?? "").trim();
     const action = String(body.action ?? "").trim() as LineMemberAction;
-    if (!id || !["reset", "block", "unblock"].includes(action)) {
+    if (!id || !LINE_MEMBER_ACTIONS.includes(action)) {
       return NextResponse.json({ data: null, error: "invalid action" }, { status: 400 });
     }
-    return NextResponse.json({ data: await updateLineMemberStatus(id, action, body.actor), error: null });
+    // ชื่อคนกด = จากบัญชีที่ล็อกอิน (ไม่เชื่อชื่อที่หน้าเว็บส่งมา) — ใช้ลงประวัติ + "ยืนยันโดย"
+    const { data: { user } } = await supabaseFromRequest(req).auth.getUser();
+    const actor = user?.email || String(body.actor ?? "").trim() || null;
+    return NextResponse.json({ data: await updateLineMemberStatus(id, action, actor), error: null });
   } catch (e) {
     return NextResponse.json({ data: null, error: e instanceof Error ? e.message : "Update LINE member failed" }, { status: 500 });
   }

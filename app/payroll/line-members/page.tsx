@@ -32,6 +32,9 @@ type LineMemberRow = {
   status: "pending" | "linked" | "blocked" | "unlinked";
   linked_at?: string | null;
   updated_at?: string | null;
+  link_method?: string | null;      // invite = บัตร QR ส่วนตัว · phone = รหัส+เบอร์
+  hr_confirmed_at?: string | null;  // ว่าง = ยังไม่ยืนยัน (ไลน์บริษัท: ยังเห็นเงินเดือน/ใบเตือนไม่ได้)
+  hr_confirmed_by?: string | null;
   employee?: EmployeeSummary | null;
   employee_label?: string | null;
   employees?: EmployeeSummary | EmployeeSummary[] | null;
@@ -44,7 +47,7 @@ type LineMembersPayload = {
 
 type PendingAction = {
   row: LineMemberRow;
-  action: "reset" | "block" | "unblock";
+  action: "reset" | "block" | "unblock" | "confirm" | "unconfirm";
 };
 
 type QuickEmployeeForm = {
@@ -64,6 +67,16 @@ const EMPTY_QUICK_EMPLOYEE: QuickEmployeeForm = {
 };
 
 const ACTION_COPY: Record<PendingAction["action"], { title: string; confirm: string; message: string; danger?: boolean }> = {
+  confirm: {
+    title: "ยืนยันว่าเป็นตัวจริง",
+    confirm: "ยืนยันตัวตน",
+    message: "คนนี้ผูกไลน์ด้วยรหัส+เบอร์ (สแกน QR โปสเตอร์) — ยืนยันแล้วจะเห็นเงินเดือนและใบเตือนของตัวเองในไลน์บริษัทได้ · ควรถามเจ้าตัวก่อนว่าชื่อไลน์นี้เป็นของเขาจริง",
+  },
+  unconfirm: {
+    title: "ยกเลิกการยืนยันตัวตน",
+    confirm: "ยกเลิกยืนยัน",
+    message: "คนนี้จะดูเงินเดือนและใบเตือนในไลน์ไม่ได้ จนกว่าจะยืนยันใหม่ (ยังผูกไลน์อยู่เหมือนเดิม)",
+  },
   reset: {
     title: "ปลดการผูก LINE",
     confirm: "ปลดการผูก",
@@ -417,10 +430,33 @@ export default function PayrollLineMembersPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3">{statusBadge(row.status)}</td>
+                          <td className="px-4 py-3">
+                            {statusBadge(row.status)}
+                            {row.status === "linked" && (row.hr_confirmed_at
+                              ? <div className="mt-1 text-[11px] text-emerald-700" title={row.hr_confirmed_by ? `โดย ${row.hr_confirmed_by}` : undefined}>ยืนยันตัวตนแล้ว{row.link_method === "invite" ? " (บัตร QR)" : ""}</div>
+                              : <div className="mt-1 text-[11px] font-semibold text-amber-700">รอ HR ยืนยันตัวตน</div>)}
+                          </td>
                           <td className="px-4 py-3 text-slate-500">{formatDateTime(row.linked_at)}</td>
                           <td className="px-4 py-3">
                             <div className="flex justify-end gap-2">
+                              {row.status === "linked" && !row.hr_confirmed_at && (
+                                <button
+                                  onClick={() => setPendingAction({ row, action: "confirm" })}
+                                  disabled={!canEdit}
+                                  className="h-8 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                                >
+                                  ยืนยันตัวตน
+                                </button>
+                              )}
+                              {row.status === "linked" && row.hr_confirmed_at && row.link_method !== "invite" && (
+                                <button
+                                  onClick={() => setPendingAction({ row, action: "unconfirm" })}
+                                  disabled={!canEdit}
+                                  className="h-8 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                                >
+                                  ยกเลิกยืนยัน
+                                </button>
+                              )}
                               {row.status === "blocked" ? (
                                 <button
                                   onClick={() => setPendingAction({ row, action: "unblock" })}

@@ -227,12 +227,12 @@ export function ChatInbox() {
       {detail && selectedId && (
         <>
           <aside className="hidden w-72 shrink-0 border-l border-slate-200 xl:block">
-            <CustomerPanel detail={detail} canAssign={canAssign} onChanged={onChanged} />
+            <CustomerPanel detail={detail} canAssign={canAssign} canReply={canReply} onChanged={onChanged} />
           </aside>
           {panelOpen && (
             <div className="fixed inset-0 z-40 flex justify-end bg-black/30 xl:hidden" onClick={() => setPanelOpen(false)}>
               <div className="h-full w-[min(20rem,90vw)] shadow-xl" onClick={(e) => e.stopPropagation()}>
-                <CustomerPanel detail={detail} canAssign={canAssign} onChanged={onChanged} onClose={() => setPanelOpen(false)} />
+                <CustomerPanel detail={detail} canAssign={canAssign} canReply={canReply} onChanged={onChanged} onClose={() => setPanelOpen(false)} />
               </div>
             </div>
           )}

@@ -6,7 +6,11 @@ import { syncCompanyMenuFor } from "@/lib/line-company-server";
 
 type Row = Record<string, unknown>;
 
-export type LineMemberAction = "reset" | "block" | "unblock";
+export type LineMemberAction = "reset" | "block" | "unblock" | "confirm" | "unconfirm";
+export const LINE_MEMBER_ACTIONS: LineMemberAction[] = ["reset", "block", "unblock", "confirm", "unconfirm"];
+
+/** ลองผูกด้วยรหัส+เบอร์ผิดได้กี่ครั้งต่อวัน (ต่อบัญชี LINE) — กันเดารหัส/เบอร์เพื่อนร่วมงาน (เจ้าของเลือก 2026-11-21) */
+export const LINE_REGISTER_MAX_FAILS_PER_DAY = 5;
 
 export type LineProfile = {
   user_id: string;
@@ -28,7 +32,7 @@ const EMPLOYEE_SELECT = [
   "line_linked_at",
 ].join(",");
 
-const MEMBER_SELECT = `id,employee_id,line_user_id,line_display_name,line_picture_url,status,linked_at,unlinked_at,blocked_at,created_at,updated_at,employees(${EMPLOYEE_SELECT})`;
+const MEMBER_SELECT = `id,employee_id,line_user_id,line_display_name,line_picture_url,status,linked_at,unlinked_at,blocked_at,created_at,updated_at,link_method,hr_confirmed_at,hr_confirmed_by,employees(${EMPLOYEE_SELECT})`;
 
 function text(value: unknown): string {
   return String(value ?? "").trim();
@@ -82,6 +86,9 @@ function normalizeMember(row: Row) {
     linked_at: text(row.linked_at),
     unlinked_at: text(row.unlinked_at),
     blocked_at: text(row.blocked_at),
+    link_method: text(row.link_method),          // invite = บัตร QR ส่วนตัว · phone = รหัส+เบอร์
+    hr_confirmed_at: text(row.hr_confirmed_at),  // ว่าง = HR ยังไม่ยืนยัน (ยังเห็นเงินเดือน/ใบเตือนไม่ได้)
+    hr_confirmed_by: text(row.hr_confirmed_by),
     created_at: text(row.created_at),
     updated_at: text(row.updated_at),
   };
@@ -164,12 +171,30 @@ export async function lineSession(input: { id_token?: unknown; nonce?: unknown }
   return { status: "registered", line_profile: lineProfilePayload(profile), employee: publicEmployee(employee) };
 }
 
-export async function registerLineMember(input: { id_token?: unknown; nonce?: unknown; employee_code?: unknown; phone?: unknown }) {
-  const profile = await verifyLineIdToken(input.id_token, input.nonce);
+/** บัญชี LINE นี้กรอกรหัส/เบอร์ผิดไปกี่ครั้งใน 24 ชม. (นับจากประวัติ line_register_failed) */
+async function recentRegisterFails(lineUserId: string): Promise<number> {
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const { count, error } = await supabaseAdmin().from("audit_logs").select("id", { count: "exact", head: true })
+    .eq("action", "line_register_failed").gte("created_at", since)
+    .eq("metadata->>reason", "employee_or_phone_mismatch").eq("metadata->>line_user_id", lineUserId);
+  if (error) throw new Error("ตรวจสอบไม่สำเร็จ กรุณาลองใหม่");
+  return count ?? 0;
+}
+
+/**
+ * ผูกด้วยรหัสพนักงาน + เบอร์โทร (หน้าเดิม /api/line/register และ QR พนักงานของไลน์บริษัท)
+ * ผิดเกิน 5 ครั้ง/วัน = ล็อก 24 ชม. · ผูกสำเร็จแล้วยังต้องให้ HR กดยืนยันก่อนเห็นเงินเดือน/ใบเตือน (hr_confirmed_at)
+ * opts.clientId = channel ของ LIFF ที่เปิด (หน้า /a ใช้ APPROVE_CHANNEL_ID)
+ */
+export async function registerLineMember(input: { id_token?: unknown; nonce?: unknown; employee_code?: unknown; phone?: unknown }, opts: { clientId?: string; via?: string } = {}) {
+  const profile = await verifyLineIdToken(input.id_token, input.nonce, opts.clientId);
   const lineUserId = text(profile.sub);
   const employeeCode = text(input.employee_code);
   const phone = normalizePhone(input.phone);
   if (!employeeCode || !phone) throw new Error("กรุณากรอกรหัสพนักงานและเบอร์โทร");
+  if ((await recentRegisterFails(lineUserId)) >= LINE_REGISTER_MAX_FAILS_PER_DAY) {
+    throw new Error(`กรอกผิดเกิน ${LINE_REGISTER_MAX_FAILS_PER_DAY} ครั้งแล้ว ลองใหม่พรุ่งนี้ หรือขอบัตร QR ส่วนตัวจาก HR`);
+  }
 
   const admin = supabaseAdmin();
   const { data: employees, error: employeeError } = await admin
@@ -189,7 +214,7 @@ export async function registerLineMember(input: { id_token?: unknown; nonce?: un
   }
   if (text(employee.employment_status) !== "active") throw new Error("บัญชีพนักงานนี้ไม่อยู่ในสถานะใช้งาน กรุณาติดต่อ HR");
 
-  const member = await linkLineToEmployee(employee, profile, { method: "phone", employee_code: employeeCode });
+  const member = await linkLineToEmployee(employee, profile, { method: "phone", employee_code: employeeCode, ...(opts.via ? { via: opts.via } : {}) });
   return { status: "registered", line_profile: lineProfilePayload(profile), employee: publicEmployee(employee), member };
 }
 
@@ -224,6 +249,10 @@ async function linkLineToEmployee(employee: Row, profile: Row, meta: Record<stri
     linked_at: linkedAt,
     unlinked_at: null,
     blocked_at: null,
+    // บัตร QR ส่วนตัว (HR พิมพ์ให้คนนั้น) = ยืนยันแล้วในตัว · รหัส+เบอร์ = รอ HR ยืนยัน
+    link_method: meta.method === "invite" ? "invite" : "phone",
+    hr_confirmed_at: meta.method === "invite" ? linkedAt : null,
+    hr_confirmed_by: meta.method === "invite" ? "บัตร QR ส่วนตัว" : null,
   };
   const query = existingLine
     ? admin.from("line_memberships").update(body).eq("id", text(existingLine.id))
@@ -428,11 +457,16 @@ export async function updateLineMemberStatus(id: string, action: LineMemberActio
   if (!before) throw new Error("ไม่พบรายการผูก LINE");
 
   const now = new Date().toISOString();
+  if (action === "confirm" && text(before.status) !== "linked") throw new Error("ยืนยันได้เฉพาะคนที่ผูกอยู่");
   const update = action === "reset"
     ? { status: "unlinked", unlinked_at: now }
     : action === "block"
       ? { status: "blocked", blocked_at: now }
-      : { status: "linked", blocked_at: null, unlinked_at: null };
+      : action === "confirm"
+        ? { hr_confirmed_at: now, hr_confirmed_by: text(actor) || "HR" }
+        : action === "unconfirm"
+          ? { hr_confirmed_at: null, hr_confirmed_by: null }
+          : { status: "linked", blocked_at: null, unlinked_at: null };
   const { data, error } = await admin.from("line_memberships").update(update).eq("id", id).select(MEMBER_SELECT).limit(1);
   if (error) throw new Error(error.message);
 
@@ -456,6 +490,7 @@ export async function updateLineMemberStatus(id: string, action: LineMemberActio
       line_user_id: text(before.line_user_id),
       previous_status: text(before.status),
       next_status: text(updated?.status),
+      ...(action === "confirm" || action === "unconfirm" ? { changes: { hr_confirmed_at: { from: text(before.hr_confirmed_at) || null, to: text(updated?.hr_confirmed_at) || null } } } : {}),
     },
   });
   // ไลน์บริษัท: ถอนผูก/ระงับ = กลับเป็นเมนูกลาง · คืนสิทธิ์ = เมนูพนักงาน

@@ -7,6 +7,9 @@
  *          { revert_layout: <ลำดับ> }   ย้อนกลับไปใช้ชุดในประวัติ (ชุดปัจจุบันเก็บเข้าประวัติแทน — ย้อนกลับมาอีกได้)
  *          { reset_layout: true }       กลับเป็นค่าตั้งต้นตามผังเจ้าของ (ชุดปัจจุบันเก็บเข้าประวัติ)
  *          { preview: { key, layout } } → รูป PNG ของเมนูหน้านั้น (ดูก่อนบันทึก · ไม่แตะ LINE)
+ *          { rotate_qr: "staff"|"customer"|"admin"|"shop" }  เปลี่ยน QR (ใบเก่าใช้ไม่ได้ทันที · shop = QR รายร้านทุกร้าน)
+ *          { shop_qr: "<partner_id>" }  → ลิงก์ QR รายร้าน (สแกนแล้วผูกร้านนั้นทันที)
+ *          { decide: { link_id, action: approve|reject|undo, partner_id? } }  ตัดสินคำขอผูกร้าน (เหมือนในห้องแชต)
  *          { link_id, action }          ลูกค้าที่ผูกไลน์: unlink (ถอนผูก เก็บประวัติ) · relink (ย้อนการถอนผูก) · block · unblock · rename (+contact_name)
  * สิทธิ์: admin.users (เหมือนศูนย์ LINE) · ทุกการแก้ลง audit (changes: auditDiff)
  * พนักงาน: ปลดผูก/ระงับที่หน้า /payroll/line-members (ของเดิม) — ที่นี่ดูอย่างเดียว
@@ -18,10 +21,12 @@ import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { lineBot, lineBots, loadLineConfig, type LineConfig } from "@/lib/line-send";
 import {
-  LAYOUT_HISTORY_MAX, companyBot, companyBotKeyOf, companyLayoutHistoryOf, companyLayoutOf, companyMenusOf, syncCompanyMenuFor,
+  LAYOUT_HISTORY_MAX, saveLineConfigPatch, companyBot, companyBotKeyOf, companyLayoutHistoryOf, companyLayoutOf, companyMenusOf, syncCompanyMenuFor,
   type CompanyLayoutState,
 } from "@/lib/line-company-server";
 import { publishCompanyMenus, removeCompanyMenus, renderCompanyMenuPng } from "@/lib/line-company-menu";
+import { POSTER_QR_KINDS, QR_KINDS, companyQrLink, posterQrCode, rotateQr, shopQrCode, qrStateOf, type CompanyQrKind } from "@/lib/line-company-qr";
+import { decideCustomerRequest, ensureCompanyQrState } from "@/lib/line-company-qr-server";
 import { DEFAULT_COMPANY_LAYOUT, PUBLISHED_MENU_KEYS, normalizeCompanyLayout, type CompanyMenuLayout, type PublishedMenuKey } from "@/lib/line-company";
 import { loadChatSettings, saveChatSettings } from "@/lib/chat/settings";
 
@@ -40,17 +45,7 @@ const botReady = (cfg: LineConfig, key: string) => {
   return !!(b && b.token && secret);
 };
 
-async function saveCfg(admin: Admin, patch: (cur: LineConfig) => LineConfig): Promise<void> {
-  // อ่านค่าล่าสุดก่อนเขียนเสมอ (ศูนย์ LINE / แอปจีน เขียนก้อนเดียวกัน — กันทับค่าคนอื่น)
-  const { data: row } = await admin.from("china_app_settings").select("id, sval").eq("skey", "line_config").maybeSingle();
-  const cur = ((row as { sval?: LineConfig } | null)?.sval ?? {}) as LineConfig;
-  const next = patch(cur);
-  const id = (row as { id?: string } | null)?.id;
-  const { error } = id
-    ? await admin.from("china_app_settings").update({ sval: next }).eq("id", id)
-    : await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
-  if (error) throw new Error("บันทึกค่าตั้ง LINE ไม่สำเร็จ กรุณาลองใหม่");
-}
+const saveCfg = saveLineConfigPatch;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.users"); if (denied) return denied;
@@ -58,15 +53,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const cfg = await loadLineConfig(admin);
   const key = companyBotKeyOf(cfg);
   const menus = companyMenusOf(cfg);
-  const [chat, emp, cus, empTotal] = await Promise.all([
+  const [chat, emp, cus, empTotal, qrState] = await Promise.all([
     loadChatSettings(admin),
     admin.from("line_memberships")
-      .select("id,status,linked_at,line_display_name,employees(employee_code,first_name,last_name,nickname,employment_status)")
+      .select("id,status,linked_at,line_display_name,link_method,hr_confirmed_at,employees(employee_code,first_name,last_name,nickname,employment_status)")
       .in("status", ["linked", "blocked"]).order("linked_at", { ascending: false }).limit(500),
     admin.from("line_customer_links")
-      .select("id,status,linked_at,unlinked_at,line_display_name,contact_name,partner_id,partners_v2(display_name,code)")
+      .select("id,status,linked_at,unlinked_at,line_display_name,contact_name,partner_id,requested_shop,requested_at,partners_v2(display_name,code)")
       .order("linked_at", { ascending: false }).limit(500),
     admin.from("employees").select("id", { count: "exact", head: true }).eq("employment_status", "active"),
+    ensureCompanyQrState(admin).catch(() => null),
   ]);
   if (emp.error || cus.error) return NextResponse.json({ error: "โหลดรายชื่อคนที่ผูกไลน์ไม่สำเร็จ กรุณาลองใหม่" }, { status: 503 });
 
@@ -80,11 +76,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // แก้ปุ่มแล้วยังไม่ได้กดสร้างเมนูใหม่ในไลน์ (คนในไลน์ยังเห็นชุดเก่า)
     layout_pending: PUBLISHED_MENU_KEYS.every((k) => !!menus[k]) && (companyLayoutOf(cfg).saved_at ?? null) !== (menus.layout_saved_at ?? null),
     chat_enabled: key ? chat.line_bots[key]?.enabled === true : false,
+    // QR โปสเตอร์ 3 แบบ (ลิงก์หน้าเล็ก LIFF) — null = โหลดเลขรุ่นไม่ได้
+    qr: qrState ? Object.fromEntries(POSTER_QR_KINDS.map((k) => {
+      const code = posterQrCode(k, qrState);
+      return [k, { link: code ? companyQrLink(code) : null, rotated_at: qrState.rotated_at?.[k] ?? null }];
+    })) : null,
+    shop_qr_rotated_at: qrState?.rotated_at?.shop ?? null,
     employees_active: empTotal.count ?? null,
     employees: ((emp.data ?? []) as Row[]).map((r) => {
       const e = one(r.employees);
       return {
         id: t(r.id), status: t(r.status), linked_at: r.linked_at ?? null, line_name: t(r.line_display_name),
+        hr_confirmed: !!r.hr_confirmed_at, link_method: t(r.link_method),
         code: t(e?.employee_code), name: [t(e?.first_name), t(e?.last_name)].filter(Boolean).join(" ") || t(e?.nickname),
         left_company: t(e?.employment_status) !== "active",
       };
@@ -95,6 +98,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         id: t(r.id), status: t(r.status), linked_at: r.linked_at ?? null, unlinked_at: r.unlinked_at ?? null,
         line_name: t(r.line_display_name), contact_name: t(r.contact_name),
         partner_id: t(r.partner_id), partner_name: t(p?.display_name) || t(p?.code),
+        requested_shop: t(r.requested_shop), requested_at: r.requested_at ?? null,
       };
     }),
     error: null,
@@ -104,6 +108,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type Body = {
   set_bot?: string; publish?: boolean; link_id?: string; action?: string; contact_name?: string;
   save_layout?: unknown; revert_layout?: number; reset_layout?: boolean; preview?: { key?: string; layout?: unknown };
+  rotate_qr?: string; shop_qr?: string; decide?: { link_id?: string; action?: string; partner_id?: string | null };
 };
 
 /** เปลี่ยนปุ่มเมนูชุดปัจจุบัน → ชุดเดิมเก็บเข้าประวัติ (ใหม่สุดก่อน · เก็บ 10 ชุด) */
@@ -138,6 +143,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const cfg = await loadLineConfig(admin);
+
+  // ---- QR: เปลี่ยน QR (ใบเก่าใช้ไม่ได้) ----
+  if (typeof body.rotate_qr === "string") {
+    const kind = body.rotate_qr as CompanyQrKind;
+    if (!QR_KINDS.includes(kind)) return err("ไม่รู้จัก QR แบบนี้");
+    const before = qrStateOf(cfg.company_qr)[kind] ?? null;
+    try { await saveCfg(admin, (cur) => ({ ...cur, company_qr: rotateQr(qrStateOf(cur.company_qr), kind) })); }
+    catch (e) { return err(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ", 500); }
+    await writeAudit(admin, {
+      action: "rotate_line_company_qr", entityType: "line_config", actorId: user?.id ?? null, actorName: actor,
+      metadata: { field: "company_qr", kind, changes: { [kind]: { from: before ? "รุ่นเดิม" : null, to: "รุ่นใหม่" } } },
+    });
+    return NextResponse.json({ ok: true, error: null });
+  }
+
+  // ---- QR รายร้าน ----
+  if (typeof body.shop_qr === "string") {
+    const pid = body.shop_qr.trim();
+    if (!/^[0-9a-f-]{36}$/i.test(pid)) return err("เลือกร้านก่อน");
+    const { data: p } = await admin.from("partners_v2").select("display_name,code,is_active").eq("id", pid).maybeSingle();
+    const pr = p as Row | null;
+    if (!pr || pr.is_active === false) return err("ไม่พบร้านนี้ หรือร้านปิดใช้งานแล้ว", 404);
+    const st = await ensureCompanyQrState(admin).catch(() => null);
+    const code = st ? shopQrCode(pid, st) : null;
+    if (!code) return err("สร้าง QR ไม่สำเร็จ กรุณาลองใหม่", 500);
+    return NextResponse.json({ ok: true, link: companyQrLink(code), shop_name: t(pr.display_name) || t(pr.code), error: null });
+  }
+
+  // ---- คำขอผูกร้าน (เหมือนในห้องแชต) ----
+  if (body.decide && typeof body.decide === "object") {
+    const d = body.decide;
+    const action = d.action === "approve" || d.action === "reject" || d.action === "undo" ? d.action : null;
+    if (!action || !d.link_id) return err("คำสั่งไม่ถูกต้อง");
+    try { await decideCustomerRequest(admin, { link_id: d.link_id, action, partner_id: d.partner_id ?? null, actor, actorId: user?.id ?? null }); }
+    catch (e) { return err(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    return NextResponse.json({ ok: true, error: null });
+  }
 
   // ---- ปุ่มเมนู: บันทึก / ย้อนกลับ / ค่าตั้งต้น ----
   if (body.save_layout !== undefined || typeof body.revert_layout === "number" || body.reset_layout) {
@@ -224,7 +266,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const now = new Date().toISOString();
     let patch: Row;
     switch (body.action) {
-      case "unlink": patch = { status: "unlinked", unlinked_at: now }; break;
+      case "unlink": if (t(b.status) === "pending" || t(b.status) === "rejected") return err("คำขอนี้ยังไม่ได้ผูก — ใช้ปุ่มยืนยัน/ปฏิเสธ"); patch = { status: "unlinked", unlinked_at: now }; break;
       case "block": if (t(b.status) === "unlinked") return err("ถอนผูกไปแล้ว ระงับไม่ได้"); patch = { status: "blocked", blocked_at: now }; break;
       case "unblock": if (t(b.status) !== "blocked") return err("รายการนี้ไม่ได้ถูกระงับ"); patch = { status: "linked", blocked_at: null }; break;
       case "relink": if (t(b.status) !== "unlinked") return err("รายการนี้ยังผูกอยู่"); patch = { status: "linked", unlinked_at: null }; break;   // ย้อนการถอนผูก

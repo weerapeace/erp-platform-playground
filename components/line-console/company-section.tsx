@@ -13,6 +13,8 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import type { CompanyMenuLayout } from "@/lib/line-company";
 import { CompanyMenuEditor, type LayoutHistoryItem } from "@/components/line-console/company-menu-editor";
+import { CompanyQrPanel, type CompanyQrData } from "@/components/line-console/company-qr-panel";
+import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 
 type Data = {
   bots: { key: string; label: string; basic_id: string; ready: boolean }[];
@@ -22,16 +24,20 @@ type Data = {
   layout: { layout: CompanyMenuLayout; saved_at: string | null; saved_by: string | null };
   layout_history: LayoutHistoryItem[];
   layout_pending: boolean;
+  qr: CompanyQrData;
+  shop_qr_rotated_at: string | null;
   chat_enabled: boolean;
   employees_active: number | null;
-  employees: { id: string; status: string; linked_at: string | null; line_name: string; code: string; name: string; left_company: boolean }[];
-  customers: { id: string; status: string; linked_at: string | null; unlinked_at: string | null; line_name: string; contact_name: string; partner_id: string; partner_name: string }[];
+  employees: { id: string; status: string; linked_at: string | null; line_name: string; code: string; name: string; left_company: boolean; hr_confirmed: boolean; link_method: string }[];
+  customers: { id: string; status: string; linked_at: string | null; unlinked_at: string | null; line_name: string; contact_name: string; partner_id: string; partner_name: string; requested_shop: string; requested_at: string | null }[];
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   linked: { label: "ผูกอยู่", cls: "bg-emerald-50 text-emerald-700" },
   blocked: { label: "ระงับ", cls: "bg-rose-50 text-rose-700" },
   unlinked: { label: "ถอนผูกแล้ว", cls: "bg-slate-100 text-slate-500" },
+  pending: { label: "รอยืนยันร้าน", cls: "bg-amber-50 text-amber-700" },
+  rejected: { label: "ปฏิเสธแล้ว", cls: "bg-slate-100 text-slate-500" },
 };
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "");
 
@@ -42,6 +48,7 @@ export function LineCompanySection() {
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"employees" | "customers">("employees");
   const [showUnlinked, setShowUnlinked] = useState(false);
+  const [shopPick, setShopPick] = useState<Record<string, CustomerPickerValue | null>>({});
 
   const load = useCallback(async () => {
     try {
@@ -97,6 +104,15 @@ export function LineCompanySection() {
     else toast.success(action === "block" ? "ระงับแล้ว" : "คืนสิทธิ์แล้ว");
   };
 
+  /** คำขอผูกร้านจาก QR ลูกค้ารวม — ยืนยัน (เลือกร้าน) / ปฏิเสธ · ย้อนกลับได้จากแจ้งผลมุมจอ */
+  const decide = async (c: Data["customers"][number], action: "approve" | "reject") => {
+    const pick = shopPick[c.id];
+    if (action === "approve" && !pick) { toast.warning("เลือกร้านในระบบก่อน"); return; }
+    if (action === "reject" && !(await askConfirm({ title: "ปฏิเสธคำขอนี้?", message: `"${c.requested_shop}" จะถูกปฏิเสธ (เก็บประวัติไว้ ย้อนกลับได้)`, confirmText: "ปฏิเสธ" }))) return;
+    if (!(await post({ decide: { link_id: c.id, action, partner_id: pick?.id ?? null } }))) return;
+    toast.undo(action === "approve" ? `ผูกกับ ${pick?.name} แล้ว` : "ปฏิเสธคำขอแล้ว", async () => { if (await post({ decide: { link_id: c.id, action: "undo" } })) toast.success("ย้อนกลับเป็นรอยืนยันแล้ว"); });
+  };
+
   if (loadErr) return (
     <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 flex items-center gap-2">
       <span className="flex-1">ไลน์บริษัท: {loadErr}</span>
@@ -106,7 +122,9 @@ export function LineCompanySection() {
   if (!data) return <div className="text-xs text-slate-400 py-3">กำลังโหลดไลน์บริษัท…</div>;
 
   const linkedEmp = data.employees.filter((e) => e.status === "linked" && !e.left_company).length;
-  const customers = data.customers.filter((c) => showUnlinked || c.status !== "unlinked");
+  const customers = data.customers.filter((c) => showUnlinked || (c.status !== "unlinked" && c.status !== "rejected"));
+  const pendingCus = data.customers.filter((c) => c.status === "pending").length;
+  const waitHr = data.employees.filter((e) => e.status === "linked" && !e.left_company && !e.hr_confirmed).length;
   const linkedCus = data.customers.filter((c) => c.status === "linked");
   const shops = new Set(linkedCus.map((c) => c.partner_id)).size;
 
@@ -154,13 +172,18 @@ export function LineCompanySection() {
           )}
         </div>
 
+        {/* QR 3 แบบ + QR รายร้าน */}
+        <div className="pl-6 pt-2 border-t border-slate-100">
+          <CompanyQrPanel qr={data.qr} shopRotatedAt={data.shop_qr_rotated_at} busy={busy} onChanged={load} />
+        </div>
+
         {/* คนที่ผูกไลน์ */}
         <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
           <button onClick={() => setTab("employees")} className={`h-7 px-2.5 text-xs rounded-lg border ${tab === "employees" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}>
-            พนักงาน {linkedEmp}{data.employees_active != null ? `/${data.employees_active}` : ""}
+            พนักงาน {linkedEmp}{data.employees_active != null ? `/${data.employees_active}` : ""}{waitHr > 0 ? <span className="text-amber-700"> · รอ HR ยืนยัน {waitHr}</span> : null}
           </button>
           <button onClick={() => setTab("customers")} className={`h-7 px-2.5 text-xs rounded-lg border ${tab === "customers" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}>
-            ลูกค้า {linkedCus.length} คน · {shops} ร้าน
+            ลูกค้า {linkedCus.length} คน · {shops} ร้าน{pendingCus > 0 ? <span className="text-amber-700"> · รอยืนยัน {pendingCus}</span> : null}
           </button>
           <button onClick={() => void load()} className="h-7 px-2 text-xs rounded-lg border border-slate-200 text-slate-500 ml-auto" aria-label="รีเฟรช"><Icon value="🔄" /></button>
         </div>
@@ -175,6 +198,7 @@ export function LineCompanySection() {
                       <span className="w-16 text-slate-500 shrink-0">{e.code}</span>
                       <span className="flex-1 min-w-0 truncate text-slate-700">{e.name}<span className="text-slate-400"> · ไลน์ {e.line_name || "-"}</span></span>
                       {e.left_company && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 shrink-0">ลาออกแล้ว ยังไม่ปลดผูก</span>}
+                      {e.status === "linked" && !e.left_company && !e.hr_confirmed && <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 shrink-0">รอ HR ยืนยัน</span>}
                       <span className={`px-1.5 py-0.5 rounded shrink-0 ${STATUS[e.status]?.cls ?? ""}`}>{STATUS[e.status]?.label ?? e.status}</span>
                     </div>
                   ))}
@@ -186,17 +210,24 @@ export function LineCompanySection() {
         {tab === "customers" && (
           <div>
             {data.customers.length === 0
-              ? <div className="text-[11px] text-slate-500 py-2">ยังไม่มีลูกค้าผูกไลน์ — ลิงก์เชิญรายร้านจะเปิดในรอบ &ldquo;ลูกค้าดูออเดอร์&rdquo; (ตอนนี้ลูกค้าทักมา = เข้าห้องแชทรวม)</div>
+              ? <div className="text-[11px] text-slate-500 py-2">ยังไม่มีลูกค้าผูกไลน์ — ให้ลูกค้าสแกน QR ลูกค้า (รวมทุกร้าน) หรือพิมพ์ QR รายร้านจากด้านบน</div>
               : <>
                   <div className="divide-y divide-slate-100">
-                    {customers.map((c) => (
+                    {customers.map((c) => c.status === "pending" ? (
+                      <div key={c.id} className="flex items-center gap-2 py-1.5 text-xs flex-wrap bg-amber-50/40">
+                        <span className="flex-1 min-w-[140px] truncate text-slate-700">ขอผูกร้าน: <b>{c.requested_shop}</b><span className="text-slate-400"> · {c.contact_name || c.line_name || "-"}</span></span>
+                        <div className="w-56"><CustomerPicker value={shopPick[c.id] ?? null} onChange={(v) => setShopPick((m) => ({ ...m, [c.id]: v }))} disabled={busy} placeholder="เลือกร้านที่ตรงกัน…" /></div>
+                        <button disabled={busy} onClick={() => void decide(c, "approve")} className="h-6 px-2 rounded bg-emerald-600 text-white shrink-0 disabled:opacity-40">ยืนยันร้าน</button>
+                        <button disabled={busy} onClick={() => void decide(c, "reject")} className="h-6 px-2 rounded border border-slate-200 text-slate-600 shrink-0">ปฏิเสธ</button>
+                      </div>
+                    ) : (
                       <div key={c.id} className="flex items-center gap-2 py-1.5 text-xs flex-wrap">
-                        <span className="flex-1 min-w-[140px] truncate text-slate-700">{c.partner_name}<span className="text-slate-400"> · {c.contact_name || c.line_name || "-"}</span></span>
+                        <span className="flex-1 min-w-[140px] truncate text-slate-700">{c.partner_name || c.requested_shop}<span className="text-slate-400"> · {c.contact_name || c.line_name || "-"}</span></span>
                         <span className={`px-1.5 py-0.5 rounded shrink-0 ${STATUS[c.status]?.cls ?? ""}`}>{STATUS[c.status]?.label ?? c.status}</span>
                         <button disabled={busy} onClick={() => void customerAction(c, "rename")} className="h-6 px-2 rounded border border-slate-200 text-slate-600 shrink-0">ชื่อเรียก</button>
                         {c.status === "linked" && <button disabled={busy} onClick={() => void customerAction(c, "block")} className="h-6 px-2 rounded border border-rose-200 text-rose-600 shrink-0">ระงับ</button>}
                         {c.status === "blocked" && <button disabled={busy} onClick={() => void customerAction(c, "unblock")} className="h-6 px-2 rounded border border-emerald-200 text-emerald-700 shrink-0">คืนสิทธิ์</button>}
-                        {c.status !== "unlinked" && <button disabled={busy} onClick={() => void customerAction(c, "unlink")} className="h-6 px-2 rounded border border-slate-200 text-slate-600 shrink-0">ถอนผูก</button>}
+                        {(c.status === "linked" || c.status === "blocked") && <button disabled={busy} onClick={() => void customerAction(c, "unlink")} className="h-6 px-2 rounded border border-slate-200 text-slate-600 shrink-0">ถอนผูก</button>}
                       </div>
                     ))}
                   </div>

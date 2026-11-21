@@ -5,6 +5,7 @@
  *   0) แอดมิน   = บัญชี ERP ที่ผูกไลน์นี้ (user_profiles.line_user_id · ผูกด้วยการล็อกอิน ERP — /api/account/line-link)
  *                 ที่ยังใช้งาน + มีสิทธิ์ admin.users · เช็กสิทธิ์สดทุกครั้ง (erp_can_user) → ถอนสิทธิ์ใน ERP = หมดทันทีที่กดครั้งถัดไป
  *   1) พนักงาน  = line_memberships (status linked) — ผูกด้วยบัตร QR / รหัส+เบอร์ (lib/line-employee-portal-db)
+ *                 hrConfirmed = HR ยืนยันตัวตนแล้ว (ผูกด้วยรหัส+เบอร์ต้องยืนยันก่อนให้ดูเงินเดือน/ใบเตือน)
  *   2) ลูกค้า   = line_customer_links (status linked) — ร้านเดียวผูกได้หลายคน (ลิงก์เชิญรายร้าน · เฟส 4)
  *   3) ถูกระงับ = สถานะ blocked ในตารางใดตารางหนึ่ง → ไม่ให้ดูข้อมูลอะไร (เมนูกลาง)
  *   4) ไม่รู้จัก = ไม่อยู่ในตารางไหนเลย → เมนูกลาง + แชทเข้าห้องแชทรวม /chat ตามเดิม
@@ -21,7 +22,7 @@ type Row = Record<string, unknown>;
 
 export type LineIdentity =
   | { who: "admin"; lineUserId: string; userId: string; name: string }
-  | { who: "employee"; lineUserId: string; employeeId: string; employeeCode: string; name: string; membershipId: string }
+  | { who: "employee"; lineUserId: string; employeeId: string; employeeCode: string; name: string; membershipId: string; hrConfirmed: boolean }
   | { who: "customer"; lineUserId: string; partnerId: string; partnerName: string; linkId: string; contactName: string }
   | { who: "blocked"; lineUserId: string; side: "employee" | "customer" }
   | { who: "unknown"; lineUserId: string };
@@ -47,7 +48,7 @@ export async function resolveLineIdentity(admin: Admin, lineUserId: string): Pro
     admin.from("user_profiles").select("id,display_name,username")
       .eq("line_user_id", lineUserId).eq("active", true).limit(1),
     admin.from("line_memberships")
-      .select("id,status,employee_id,employees(employee_code,first_name,nickname,employment_status)")
+      .select("id,status,employee_id,hr_confirmed_at,employees(employee_code,first_name,nickname,employment_status)")
       .eq("line_user_id", lineUserId).in("status", ["linked", "blocked"]).limit(1),
     admin.from("line_customer_links")
       .select("id,status,partner_id,contact_name,partners_v2(display_name,code,is_active)")
@@ -67,7 +68,7 @@ export async function resolveLineIdentity(admin: Admin, lineUserId: string): Pro
     const e = one(m.employees);
     // ลาออกแล้ว = ไม่ให้เห็นเมนูพนักงาน (แม้ HR ยังไม่ได้ปลดผูก)
     if (t(m.status) === "blocked" || t(e?.employment_status) !== "active") return { who: "blocked", lineUserId, side: "employee" };
-    return { who: "employee", lineUserId, employeeId: t(m.employee_id), employeeCode: t(e?.employee_code), name: employeeCallName(e), membershipId: t(m.id) };
+    return { who: "employee", lineUserId, employeeId: t(m.employee_id), employeeCode: t(e?.employee_code), name: employeeCallName(e), membershipId: t(m.id), hrConfirmed: !!m.hr_confirmed_at };
   }
   const c = (cus.data?.[0] ?? null) as Row | null;
   if (c) {

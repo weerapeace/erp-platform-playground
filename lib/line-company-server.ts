@@ -31,6 +31,21 @@ export const LAYOUT_HISTORY_MAX = 10;
 
 const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
+/**
+ * บันทึกค่าตั้ง LINE (china_app_settings.line_config) แบบอ่านค่าล่าสุดก่อนเขียนเสมอ
+ * (ศูนย์ LINE / แอปจีน / ไลน์บริษัท เขียนก้อนเดียวกัน — กันทับค่าคนอื่น) · ไม่สำเร็จ = โยน error ภาษาคน
+ */
+export async function saveLineConfigPatch(admin: Admin, patch: (cur: LineConfig) => LineConfig): Promise<void> {
+  const { data: row } = await admin.from("china_app_settings").select("id, sval").eq("skey", "line_config").maybeSingle();
+  const cur = ((row as { sval?: LineConfig } | null)?.sval ?? {}) as LineConfig;
+  const next = patch(cur);
+  const id = (row as { id?: string } | null)?.id;
+  const { error } = id
+    ? await admin.from("china_app_settings").update({ sval: next }).eq("id", id)
+    : await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
+  if (error) throw new Error("บันทึกค่าตั้ง LINE ไม่สำเร็จ กรุณาลองใหม่");
+}
+
 export const companyBotKeyOf = (cfg: LineConfig): string => s(cfg.company_bot);
 export const companyMenusOf = (cfg: LineConfig): CompanyMenuState =>
   (cfg.company_menus && typeof cfg.company_menus === "object" ? cfg.company_menus : {}) as CompanyMenuState;

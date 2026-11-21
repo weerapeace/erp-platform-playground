@@ -10,10 +10,13 @@ import { UserPicker, type UserPickerValue } from "@/components/pickers";
 import { useToast } from "@/components/toast";
 import { CHAT_CHANNEL_INFO, isUnanswered, waitingText } from "@/lib/chat/rules";
 import { ChannelIcon, CustomerAvatar, customerLabel, timeShort, type ChatDetail } from "./shared";
+import { LineShopSection } from "./line-shop-section";
 
-export function CustomerPanel({ detail, canAssign, onChanged, onClose }: {
+export function CustomerPanel({ detail, canAssign, canReply = false, onChanged, onClose }: {
   detail: ChatDetail;
   canAssign: boolean;
+  /** ตอบแชตได้ = ยืนยันร้านให้ลูกค้าไลน์บริษัทได้ */
+  canReply?: boolean;
   onChanged: () => void;
   onClose?: () => void;
 }) {
@@ -47,6 +50,8 @@ export function CustomerPanel({ detail, canAssign, onChanged, onClose }: {
           <button type="button" onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 xl:hidden" title="ปิด"><Icon value="i:x" /></button>
         )}
       </div>
+
+      {c.channel === "line" && <LineShopSection conversationId={c.id} canDecide={canReply} />}
 
       <section className="space-y-2 border-b border-slate-100 p-4">
         <div className="flex items-center justify-between">
