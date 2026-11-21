@@ -211,4 +211,43 @@ export type SoOrderRow = {
   mo_opened_at: string | null; invoice_so_id: string | null; shipped_at: string | null;
   /** ชุดที่รายการในใบนี้อยู่ (ไม่ซ้ำ) */
   groups: { id: string; name: string }[];
+  /** ใบนี้ถูกรวมเข้าใบอื่นแล้ว (ยกเลิก · เลขเดิม merged_from_no) */
+  merged_into_id?: string | null; merged_from_no?: string | null;
+  /** ส่งของ: รายการที่ส่งครบ / ส่งบางส่วน · ชิ้นที่สั่ง / ส่งแล้ว · รายการที่รวมมาจากใบอื่น (แยกคืนได้) */
+  ship?: { done: number; partial: number; ordered: number; shipped: number; merged_in: number } | null;
 };
+
+/**
+ * ราคาที่เคยขายล่าสุดต่อรหัสสินค้า (ใช้เติมรายการที่ราคา 0 — เจ้าของเลือก 2026-11-21)
+ *   ลูกค้าเดียวกันก่อน → ใบสั่งขายใบอื่น → ใบขาย (บิล) · ไม่นับใบที่ยกเลิก · ไม่เจอ = ไม่มีใน Map (ต้องพิมพ์เอง)
+ */
+export async function lastPrices(admin: Admin, skus: string[], customerId?: string | null): Promise<Map<string, { price: number; from: string }>> {
+  const out = new Map<string, { price: number; from: string }>();
+  const list = [...new Set(skus.map((s) => String(s ?? "").trim()).filter(Boolean))];
+  if (!list.length) return out;
+  type L = { sku: string; unit_price: number; created_at: string; so_orders: { order_no: string | null; customer_id: string | null; status: string } | { order_no: string | null; customer_id: string | null; status: string }[] | null };
+  const { data } = await admin.from("so_order_lines").select("sku, unit_price, created_at, so_orders!inner(order_no, customer_id, status)")
+    .in("sku", list).gt("unit_price", 0).order("created_at", { ascending: false }).limit(2000);
+  const rows = ((data ?? []) as unknown as L[]).map((r) => ({ ...r, h: Array.isArray(r.so_orders) ? r.so_orders[0] : r.so_orders }))
+    .filter((r) => r.h && r.h.status !== "cancelled");
+  for (const pass of [true, false]) {
+    for (const r of rows) {
+      const k = String(r.sku).trim();
+      if (out.has(k) || (pass && (!customerId || r.h!.customer_id !== customerId))) continue;
+      out.set(k, { price: Number(r.unit_price), from: r.h!.order_no ?? "ใบสั่งขาย" });
+    }
+  }
+  const left = list.filter((s) => !out.has(s));
+  if (left.length) {
+    type B = { sku: string; unit_price: number; erp_playground_sales_orders: { so_number: string | null; status: string } | { so_number: string | null; status: string }[] | null };
+    const { data: bl } = await admin.from("erp_playground_so_lines").select("sku, unit_price, created_at, erp_playground_sales_orders!inner(so_number, status)")
+      .in("sku", left).gt("unit_price", 0).order("created_at", { ascending: false }).limit(2000);
+    for (const r of (bl ?? []) as unknown as B[]) {
+      const h = Array.isArray(r.erp_playground_sales_orders) ? r.erp_playground_sales_orders[0] : r.erp_playground_sales_orders;
+      const k = String(r.sku).trim();
+      if (!h || h.status === "cancelled" || out.has(k)) continue;
+      out.set(k, { price: Number(r.unit_price), from: h.so_number ?? "ใบขาย" });
+    }
+  }
+  return out;
+}

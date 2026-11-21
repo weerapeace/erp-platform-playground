@@ -38,9 +38,27 @@ const SO_STATUS_LABEL: Record<string, string> = {
   shipped: "จัดส่งแล้ว", completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
 };
 
-export type SourceDocMode = "quotation" | "mo" | "so" | "so_quote";
+export type SourceDocMode = "quotation" | "mo" | "so" | "so_quote" | "so_order";
 
 const CONFIGS: Record<SourceDocMode, ModeConfig> = {
+  // ใบสั่งขาย (so_orders) → ใบขาย/บิล (เจ้าของสั่ง 2026-11-21: "ใบขาย ต้องดึงจาก ใบสั่งขาย")
+  // โชว์ใบที่ยังไม่ส่งครบ · ผู้เรียกดึงรายการ "ค้างส่ง" ต่อเองที่ /api/so-orders/bill?ids=
+  so_order: {
+    title: "ดึงจากใบสั่งขาย",
+    endpoint: "/api/so-orders?status=confirmed&limit=300",
+    eligible: (r) => !r.merged_into_id,
+    emptyHint: "ไม่มีใบสั่งขายที่ยังค้างส่ง — ใบที่ส่งครบ/ยกเลิกแล้วจะไม่ขึ้น",
+    searchText: (r) => `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`,
+    columns: [
+      { key: "order_no", label: "เลขที่", render: (r) => <code className="font-mono text-xs text-slate-700">{String(r.order_no ?? "—")}</code> },
+      { key: "customer_name", label: "ลูกค้า", render: (r) => <span className="text-slate-700">{String(r.customer_name ?? "—")}</span> },
+      { key: "ship", label: "ส่งแล้ว", align: "right", render: (r) => {
+        const s = r.ship as { done?: number } | null | undefined;
+        return <span className="tabular-nums text-xs text-slate-500">{s?.done ?? 0}/{Number(r.line_count ?? 0)} รายการ</span>;
+      } },
+      { key: "grand_total", label: "ยอดรวม", align: "right", render: (r) => <span className="font-mono tabular-nums text-slate-700">{baht(r.grand_total)}</span> },
+    ],
+  },
   // ใบเสนอราคา → ใบสั่งขาย (so_orders): แถวมีบรรทัดสินค้ามาด้วย (rows[].lines) ผู้เรียกเอาไปตั้งรายการได้เลย
   // เซิร์ฟเวอร์คืนเฉพาะใบที่ดึงได้ (ส่งแล้ว/ตอบรับแล้ว · ยังไม่แปลง · ไม่อยู่ในใบสั่งขายอื่น — lib/quote-convert)
   so_quote: {

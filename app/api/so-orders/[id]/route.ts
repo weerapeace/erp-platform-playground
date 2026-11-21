@@ -9,7 +9,7 @@
  *      link_mo  { line_id, mo_id } → ผูกใบสั่งผลิตที่มีอยู่เข้ารายการนี้ (รหัสสินค้าต้องตรง · ใบที่ผูกใบสั่งขายอื่นแล้วผูกไม่ได้)
  *      unlink_mo { mo_id } → เลิกผูกใบสั่งผลิตออกจากใบนี้ (ย้อนกลับ link_mo/ป๊อปสร้างใบผลิต · ใบผลิตไม่ถูกลบ · audit so_order.unlink_mo + mo.so_unlink)
  *      save     → หลังบันทึก ผูกใบสั่งผลิตที่รายการอ้างไว้ให้ด้วย (ไม่เปิดใบใหม่ — open-mo linkOnly)
- *      ship     { create_invoice } → "ส่งแล้ว" · create_invoice=true = ออกใบขาย/บิลให้เลย
+ *      ship     { create_invoice } → "ส่งแล้ว" · create_invoice=true = ออกใบขายเฉพาะที่ค้างส่ง + ผูกใบสั่งผลิต (ship-lines.ts)
  *      cancel   { reason }         → ยกเลิกใบ
  *      reopen   → กลับเป็น "ยืนยันแล้ว"
  *   DELETE → ลบใบ (เฉพาะใบที่ยังไม่เปิดใบสั่งผลิต/ยังไม่ออกใบขาย)
@@ -29,6 +29,7 @@ import { loadMoDispatch } from "@/lib/mo-dispatch";
 import { soLineStageMulti } from "@/lib/so-order-stage";
 import { SKU_COVER_SELECT, coverUrl, resolveSkuCover } from "@/lib/sku-cover";
 import { printSummaryOf } from "@/lib/print-log-server";
+import { actorOf, createInvoice, linkBillToSoLines, loadLineShipState } from "../ship-lines";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -265,59 +266,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (order.status === "cancelled") return NextResponse.json({ error: "ใบที่ยกเลิกแล้ว ส่งไม่ได้" }, { status: 400 });
     let invoiceId = (order.invoice_so_id as string | null) ?? null;
 
-    if (b.create_invoice && !invoiceId) {
-      const { data: lines } = await admin.from("so_order_lines").select("*").eq("order_id", id).order("line_no");
-      const lineRows = (lines ?? []) as Record<string, unknown>[];
-      // ใบขายต้องรู้ "บริษัท" (เลือกชุดเลขใบกำกับ ISG/LOUIS) · "คลังที่ขายออก" (ยืนยัน = จอง, ส่งแล้ว = ตัดของ)
-      // และ "รหัสสินค้า" ของแต่ละบรรทัด — เดิมไม่ส่ง → ใบขายตกไปบริษัทหลัก + ไม่จอง/ไม่ตัดสต็อก
-      // คลัง = โซนสินค้าสำเร็จ WH-FG (ค่าเริ่มต้นเดียวกับฟอร์มสร้างใบขาย /sales-orders)
-      const skuCodes = [...new Set(lineRows.map((l) => (typeof l.sku === "string" ? l.sku.trim() : "")).filter(Boolean))];
-      const [{ data: fgWh }, { data: skuRows }] = await Promise.all([
-        admin.from("erp_playground_warehouses").select("id").eq("code", "WH-FG").maybeSingle(),
-        skuCodes.length ? admin.from("skus_v2").select("id, code").in("code", skuCodes).eq("is_active", true) : Promise.resolve({ data: [] as { id: string; code: string }[] }),
-      ]);
-      const skuIdByCode = new Map(((skuRows ?? []) as { id: string; code: string }[]).map((s) => [s.code, s.id]));
-      const { data: newId, error: rpcErr } = await supabaseFromRequest(request).rpc("erp_playground_so_create", {
-        p_header: {
-          company_id: order.company_id ?? null, customer_po_no: order.customer_po_no ?? null,
-          from_warehouse_id: (fgWh as { id: string } | null)?.id ?? null,
-          customer_id: order.customer_id, customer_name: order.customer_name, customer_code: order.customer_code,
-          sale_person_name: order.sale_person_name, currency: order.currency, exchange_rate: order.exchange_rate ?? null,
-          order_date: order.order_date, expected_ship_date: order.due_date,
-          header_discount_type: order.header_discount_type, header_discount_value: order.header_discount_value,
-          shipping_fee: order.shipping_fee, vat_rate: order.vat_rate, vat_included: order.vat_included,
-          wht_rate: order.wht_rate, note: `จากใบสั่งขาย ${order.order_no ?? ""}`.trim(),
-        },
-        p_lines: lineRows.map((l) => ({
-          product_id: (typeof l.sku === "string" && skuIdByCode.get(l.sku.trim())) || null,
-          sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit,
-          unit_price: l.unit_price, discount_type: l.discount_type, discount_value: l.discount_value, note: l.note,
-        })),
-        p_actor: user?.email ?? null,
-      });
-      if (rpcErr) return NextResponse.json({ error: `ออกใบขายไม่สำเร็จ: ${rpcErr.message}` }, { status: 400 });
-      invoiceId = (newId as string) ?? null;
-    }
-
-    // ส่งของแล้ว → ใบขายต้องเป็น "จัดส่งแล้ว" ด้วย = ตัดของออกจากคลัง (กติกา 2026-11-02: ใบขายจัดส่ง = จุดเดียวที่ตัดสต็อกตอนขาย)
-    // ใบที่เพิ่งออก (ร่าง) → ยืนยัน (ออกเลข/จองของ) → จัดส่ง (ปลดจอง + ตัดของ) ผ่านกติกาสถานะกลางของใบขาย
-    // ไม่สำเร็จ (เช่น ไม่มีสิทธิ์ยืนยัน) = ใบสั่งขายยังบันทึกส่งแล้ว + ใบขายค้างสถานะเดิม แจ้งเตือนให้ไปกดต่อที่หน้าใบขาย
     let warning: string | null = null;
-    if (b.create_invoice && invoiceId) {
-      const sb = supabaseFromRequest(request);
-      const { data: inv } = await admin.from("erp_playground_sales_orders").select("status").eq("id", invoiceId).maybeSingle();
-      const steps = inv?.status === "draft" ? ["confirm", "ship"] : inv?.status === "confirmed" || inv?.status === "ready" ? ["ship"] : [];
-      for (const step of steps) {
-        const { error: tErr } = await sb.rpc("erp_playground_so_transition", { p_id: invoiceId, p_action: step, p_actor: user?.email ?? null, p_reason: null });
-        if (tErr) { warning = `ออกใบขายแล้ว แต่${step === "confirm" ? "ยืนยัน" : "จัดส่ง"}ใบขายไม่สำเร็จ (${tErr.message}) — ไปกดต่อที่หน้าใบขาย`; break; }
-      }
+    let billed: Awaited<ReturnType<typeof linkBillToSoLines>> | null = null;
+    if (b.create_invoice && !invoiceId) {
+      // ออกใบขายเฉพาะที่ "ค้างส่ง" (ส่งบางส่วนไปแล้วผ่าน "เปิดใบขาย" ไม่ออกซ้ำ) · รายการไม่มีใบสั่งผลิต = ทั้งจำนวน
+      const state = await loadLineShipState(admin, [id]);
+      const picks = [...state.entries()].map(([lid, s]) => ({ so_line_id: lid, qty: s.remaining, line: s.line })).filter((p) => p.qty > 0);
+      if (!picks.length) return NextResponse.json({ error: "ทุกรายการส่งครบแล้ว — ไม่มีของค้างให้ออกใบขาย (กดส่งแล้วแบบไม่ออกใบขายแทน)" }, { status: 400 });
+      const inv = await createInvoice(request, admin, order, picks.map((p) => ({ line: p.line, qty: p.qty })), user?.email ?? null);
+      if (inv.error || !inv.id) return NextResponse.json({ error: inv.error ?? "ออกใบขายไม่สำเร็จ" }, { status: 400 });
+      invoiceId = inv.id; warning = inv.warning;
+      const me = await actorOf(request, admin);
+      billed = await linkBillToSoLines(admin, inv.id, picks.map((p) => ({ so_line_id: p.so_line_id, qty: p.qty })), { id: me.id, name: me.name });
     }
 
     const { error } = await admin.from("so_orders")
       .update({ status: "shipped", shipped_at: now, invoice_so_id: invoiceId, updated_at: now }).eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     await writeAudit(admin, { action: "so_order.ship", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, invoice_so_id: invoiceId, created_invoice: !!b.create_invoice, ...(warning ? { warning } : {}) } });
-    return NextResponse.json({ ok: true, invoice_so_id: invoiceId, warning, error: null });
+    return NextResponse.json({ ok: true, invoice_so_id: invoiceId, warning, mos: billed?.mos ?? [], error: null });
   }
 
   // ── ยกเลิก / เปิดใหม่ ───────────────────────────────────

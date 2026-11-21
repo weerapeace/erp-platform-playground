@@ -52,7 +52,7 @@ const ORDER_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: "ยกเลิก", cls: "bg-rose-50 text-rose-700" },
 };
 
-export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo, onUnlinkMo }: {
+export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo, onUnlinkMo, onBill, onFillPrices, mergedLines = 0, onUnmerge }: {
   header: {
     companyName: string; customerName: string; orderDate: string; dueDate: string;
     poNo: string; salePerson: string; note: string; status: string;
@@ -69,6 +69,13 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   onOpenLineMo?: (l: EditorLine) => void;
   /** ปุ่ม "เลิกผูก" ใต้ใบผลิตของรายการ (หยิบผิด → ย้อนกลับ) · ไม่ส่ง = ไม่มีสิทธิ์ → ไม่โชว์ */
   onUnlinkMo?: (mo: { id: string; mo_no: string }) => void;
+  /** "เปิดใบขาย (ส่งของ)" — เลือกรายการ + จำนวน (./bill-modal) · ไม่ส่ง = ไม่มีสิทธิ์ */
+  onBill?: () => void;
+  /** เติมราคารายการที่ราคา 0 ด้วยราคาที่เคยขาย (/api/so-orders/tidy fill_prices) */
+  onFillPrices?: () => void;
+  /** จำนวนรายการที่รวมมาจากใบอื่น + ปุ่ม "แยกคืน" */
+  mergedLines?: number;
+  onUnmerge?: () => void;
 }) {
   const items = useMemo(() => lines.filter((l) => l.product_name.trim() || l.sku), [lines]);
   const main = useMemo(() => majorityGroup(items.map((l) => meta[l.tempId]?.group ?? null)), [items, meta]);
@@ -113,6 +120,16 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           </div>
         </td>
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm tabular-nums text-slate-700">{num(l.qty)} <span className="text-[11px] text-slate-400">{l.unit}</span></td>
+        <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm tabular-nums">
+          {(() => {
+            const sh = Math.min(m?.progress?.shipped ?? 0, Number(l.qty) || 0), left = Math.max(0, (Number(l.qty) || 0) - sh);
+            if (!hasMo(l)) return <span className="text-[10px] text-slate-300" title="รายการที่ไม่มีใบสั่งผลิต ระบบนับส่งไม่ได้">—</span>;
+            return <>
+              <div className="text-slate-600">{num(sh)}</div>
+              {left > 0 ? <div className="text-[11px] font-medium text-amber-700">ค้าง {num(left)}</div> : <div className="text-[11px] font-medium text-emerald-600">ครบ</div>}
+            </>;
+          })()}
+        </td>
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm tabular-nums text-slate-600">
           {baht(l.unit_price)}
           {!!l.discount_value && <div className="text-[10px] text-rose-600">ลด {l.discount_type === "percent" ? `${l.discount_value}%` : baht(l.discount_value)}</div>}
@@ -140,7 +157,11 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
       </tr>
     );
   };
-  const cols = <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-24" /><col className="w-24" /><col className="w-28" /><col className="w-44" /></colgroup>;
+  const cols = <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-24" /><col className="w-24" /><col className="w-24" /><col className="w-28" /><col className="w-44" /></colgroup>;
+  const zeroPrice = items.filter((l) => !(Number(l.unit_price) > 0)).length;
+  const shippedQty = items.reduce((s, l) => s + Math.min(meta[l.tempId]?.progress?.shipped ?? 0, Number(l.qty) || 0), 0);
+  const orderedQty = items.filter(hasMo).reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const leftQty = Math.max(0, orderedQty - shippedQty);
 
   return (
     <div className="space-y-3">
@@ -194,6 +215,30 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         </div>
       )}
 
+      {/* ส่งของ / ใบขาย · ราคาว่าง · รวมมาจากใบอื่น */}
+      {!cancelled && items.length > 0 && (onBill || leftQty > 0 || shippedQty > 0) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm">
+          <Icon name="truck" />
+          <span className="text-slate-700">ส่งแล้ว <b className="font-medium tabular-nums">{num(shippedQty)}</b> / {num(orderedQty)} · <span className={leftQty > 0 ? "font-medium text-amber-700" : "font-medium text-emerald-700"}>{leftQty > 0 ? `ค้างส่ง ${num(leftQty)}` : "ส่งครบแล้ว"}</span></span>
+          {onBill && leftQty > 0 && (
+            <button type="button" onClick={onBill} className="ml-auto h-8 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-700">
+              <Icon name="receipt" /> เปิดใบขาย (ส่งของ)</button>
+          )}
+        </div>
+      )}
+      {!cancelled && zeroPrice > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <Icon name="money" /><span>{zeroPrice} รายการยังไม่ใส่ราคา (ยอดรวมเลยต่ำกว่าจริง)</span>
+          {onFillPrices && <button type="button" onClick={onFillPrices} className="ml-auto h-8 rounded-lg border border-amber-300 bg-white px-3 text-xs text-amber-800 hover:bg-amber-100">เติมจากราคาที่เคยขาย</button>}
+        </div>
+      )}
+      {mergedLines > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <Icon name="documents" /><span>{mergedLines} รายการรวมมาจากใบอื่น</span>
+          {onUnmerge && <button type="button" onClick={onUnmerge} className="ml-auto h-8 rounded-lg border border-slate-300 bg-white px-3 text-xs text-slate-700 hover:bg-slate-100">แยกคืนเป็นใบเดิม</button>}
+        </div>
+      )}
+
       {/* สิ่งที่ค้าง */}
       {noMo.length > 0 && !cancelled && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -242,12 +287,13 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           <div className="px-4 py-8 text-center text-sm text-slate-400">ไม่มีรายการในขั้นนี้ — <button type="button" onClick={() => setFilter(null)} className="text-blue-600 hover:underline">ดูทั้งหมด</button></div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] table-fixed">
+            <table className="w-full min-w-[840px] table-fixed">
               {cols}
               <thead className="bg-white text-[11px] text-slate-500">
                 <tr className="border-b border-slate-100">
                   <th className="py-1.5 pl-3 pr-1 text-center font-medium">#</th><th className="px-1 py-1.5 text-left font-medium">รูป</th>
                   <th className="px-2 py-1.5 text-left font-medium">สินค้า</th><th className="px-2 py-1.5 text-right font-medium">จำนวน</th>
+                  <th className="px-2 py-1.5 text-right font-medium">ส่งแล้ว</th>
                   <th className="px-2 py-1.5 text-right font-medium">ราคา/หน่วย</th><th className="px-2 py-1.5 text-right font-medium">รวมก่อนภาษี</th>
                   <th className="px-3 py-1.5 text-left font-medium">สถานะ</th>
                 </tr>
@@ -265,6 +311,7 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
                       <td className="min-w-0 px-2 py-2"><code className="mr-1.5 font-mono text-xs text-orange-700">{g.key || "—"}</code><span className="truncate text-sm text-slate-800">{g.label}</span>
                         <span className="ml-1.5 text-[11px] text-slate-400">{g.items.length} แบบ</span></td>
                       <td className="px-2 py-2 text-right text-xs tabular-nums text-slate-500">{num(g.qty)}</td>
+                      <td className="px-2 py-2 text-right text-xs tabular-nums text-slate-500">{num(g.items.reduce((s, l) => s + Math.min(meta[l.tempId]?.progress?.shipped ?? 0, Number(l.qty) || 0), 0))}</td>
                       <td />
                       <td className="px-2 py-2 text-right text-sm font-medium tabular-nums text-slate-800">{baht(g.total)}</td>
                       <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-[10px] ${STAGE_TONE[minStage].chip}`}>ช้าสุด: {SO_LINE_STAGES[minStage].short}</span></td>

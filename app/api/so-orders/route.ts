@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { checkQuotePull, syncQuoteConversions } from "@/lib/quote-convert";
 import { checkLineSkus, computeTotals, lineQuoteIds, lineRow, nextOrderNo, writeBackQuoteLineSkus, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
 import { openMoForOrder } from "./open-mo";
+import { loadLineShipState } from "./ship-lines";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   let q = admin.from("so_orders")
-    .select("id, order_no, status, company_code, customer_name, customer_code, customer_po_no, sale_person_name, order_date, due_date, grand_total, mo_opened_at, invoice_so_id, shipped_at")
+    .select("id, order_no, status, company_code, customer_name, customer_code, customer_po_no, sale_person_name, order_date, due_date, grand_total, mo_opened_at, invoice_so_id, shipped_at, merged_into_id, merged_from_no")
     .order("order_date", { ascending: false }).order("created_at", { ascending: false }).limit(limit);
   if (status) q = q.eq("status", status);
   if (search) q = q.or(`order_no.ilike.%${search}%,customer_name.ilike.%${search}%,customer_po_no.ilike.%${search}%`);
@@ -50,10 +51,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: gs } = await admin.from("mo_groups").select("id, name").in("id", allGroupIds);
     for (const g of (gs ?? []) as { id: string; name: string }[]) groupName.set(g.id, g.name);
   }
+  // ส่งแล้วกี่รายการ / ค้างกี่ชิ้น (กติกาเดียวกับลิ้นชัก — ship-lines loadLineShipState) · ใบที่ถูกรวมไปแล้วไม่ต้องคิด
+  const ship = new Map<string, { done: number; partial: number; ordered: number; shipped: number; merged_in: number }>();
+  const liveIds = (data ?? []).filter((r) => !(r as { merged_into_id?: string | null }).merged_into_id).map((r) => (r as { id: string }).id);
+  if (liveIds.length) {
+    const st = await loadLineShipState(admin, liveIds);
+    for (const s of st.values()) {
+      const cur = ship.get(s.order_id) ?? { done: 0, partial: 0, ordered: 0, shipped: 0, merged_in: 0 };
+      cur.ordered += s.ordered; cur.shipped += Math.min(s.shipped, s.ordered);
+      if (s.mos.length && s.remaining <= 0.0001) cur.done += 1; else if (s.shipped > 0) cur.partial += 1;
+      if (s.line.merged_from_order_id) cur.merged_in += 1;
+      ship.set(s.order_id, cur);
+    }
+  }
   const rows: SoOrderRow[] = (data ?? []).map((r) => {
     const id = (r as { id: string }).id;
     return {
       ...(r as Omit<SoOrderRow, "line_count" | "groups">),
+      ship: ship.get(id) ?? null,
       line_count: counts.get(id) ?? 0,
       groups: [...(groupIds.get(id) ?? [])].filter((g) => groupName.has(g)).map((g) => ({ id: g, name: groupName.get(g)! })),
     };

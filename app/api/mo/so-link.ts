@@ -12,7 +12,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { BrandCustomer, BrandInfo, NewSoInput } from "@/lib/mo-so-rule";
 import { brandCustomerIds, orderCustomers } from "@/lib/brand-customers";
-import { computeTotals, lineRow, nextOrderNo, type SoOrderHeaderInput, type SoOrderLineInput } from "../so-orders/shared";
+import { computeTotals, lastPrices, lineRow, nextOrderNo, type SoOrderHeaderInput, type SoOrderLineInput } from "../so-orders/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -128,9 +128,13 @@ export async function attachMoToSo(admin: Admin, mo: MoForSo, target: SoTarget):
     } else {
       const { data: last } = await admin.from("so_order_lines").select("line_no").eq("order_id", target.id).order("line_no", { ascending: false }).limit(1);
       const nextNo = Number(((last ?? [])[0] as Row | undefined)?.line_no ?? 0);
+      // ราคา = ราคาที่เคยขายล่าสุด (ลูกค้าของใบนี้ก่อน) — เดิมใส่ 0 ทำให้ใบสั่งขายยอด ฿0 (เจ้าของถาม 2026-11-21)
+      const { data: so } = await admin.from("so_orders").select("customer_id").eq("id", target.id).maybeSingle();
+      const lp = (await lastPrices(admin, [mo.product_sku], ((so as Row | null)?.customer_id as string) ?? null)).get(mo.product_sku.trim());
       const row = lineRow(target.id, {
-        sku: mo.product_sku, product_name: mo.product_name || mo.product_sku, qty: mo.qty, unit: "ชิ้น", unit_price: 0,
-        due_date: mo.due_date, mo_id: mo.id, mo_no: mo.mo_no, source: "mo", note: "เพิ่มจากป๊อปสร้างใบสั่งผลิต — ยังไม่ใส่ราคา",
+        sku: mo.product_sku, product_name: mo.product_name || mo.product_sku, qty: mo.qty, unit: "ชิ้น", unit_price: lp?.price ?? 0,
+        due_date: mo.due_date, mo_id: mo.id, mo_no: mo.mo_no, source: "mo",
+        note: lp ? `เพิ่มจากป๊อปสร้างใบสั่งผลิต — ราคาจาก ${lp.from}` : "เพิ่มจากป๊อปสร้างใบสั่งผลิต — ยังไม่ใส่ราคา",
       }, nextNo, null);
       const { data: ins, error } = await admin.from("so_order_lines").insert(row).select("id").single();
       if (error || !ins) throw new Error("เพิ่มรายการในใบสั่งขายไม่สำเร็จ");
@@ -153,6 +157,26 @@ export async function createSoForMo(admin: Admin, mo: MoForSo, s: NewSoInput, ac
     const c = co as Row;
     companyId = String(c.id); companyCode = (c.company_code as string) ?? companyCode;
     if (c.vat_registered === false) vatRate = 0;
+  }
+  // กดสร้างใบผลิตหลายรายการติดกัน (คนเดิม · ลูกค้า/บริษัท/PO เดิม · วันนี้ · ภายใน 30 นาที) → เข้าใบสั่งขายใบเดียวกัน
+  // เดิมได้ใบละ 1 รายการ (SO2569-11-010..022 = 13 ใบ) — เจ้าของขอ 2026-11-21 "รวมรายการได้ ตรงนี้รวมเลยดีกว่า"
+  if (actor.id && s.customer_id) {
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    let q = admin.from("so_orders").select("id, order_no, due_date, customer_po_no")
+      .eq("created_by", actor.id).eq("customer_id", s.customer_id).eq("status", "confirmed")
+      .like("note", "สร้างจากป๊อปสร้างใบสั่งผลิต%").gte("created_at", since).order("created_at", { ascending: false }).limit(1);
+    q = companyId ? q.eq("company_id", companyId) : q.is("company_id", null);
+    const { data: recent } = await q;
+    const r = ((recent ?? []) as Row[])[0];
+    const po = (s.customer_po_no ?? "").trim() || null;
+    if (r && ((r.customer_po_no as string | null) ?? null) === po) {
+      const a = await attachMoToSo(admin, mo, { id: String(r.id), order_no: (r.order_no as string) ?? null, due_date: (r.due_date as string) ?? null, line: null });
+      return { id: String(r.id), order_no: String(r.order_no ?? ""), line_id: a.line_id ?? "" };
+    }
+  }
+  if (!(Number(s.unit_price) > 0)) {
+    const lp = (await lastPrices(admin, [mo.product_sku], s.customer_id ?? null)).get(mo.product_sku.trim());
+    if (lp) s = { ...s, unit_price: lp.price };
   }
   const header: SoOrderHeaderInput = {
     company_id: companyId, company_code: companyCode,

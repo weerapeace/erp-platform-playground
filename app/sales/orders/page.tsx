@@ -41,6 +41,8 @@ import { OrderBatchEntryModal } from "@/components/order-batch-entry";
 import { SoBatchView } from "./batch-view";
 import { SoOrderReadView } from "./order-read-view";
 import { SoBillMatchModal } from "./bill-match-modal";
+import { SoBillModal, ShipResultPanel, type ShipResult } from "./bill-modal";
+import { SoMergeModal } from "./merge-modal";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink, useOpenParam } from "@/lib/open-param";
 import { pickQuoteDocs } from "@/lib/quote-pull";
@@ -57,7 +59,10 @@ type Row = {
   order_date: string; due_date: string | null; grand_total: number; line_count: number;
   mo_opened_at: string | null; invoice_so_id: string | null; shipped_at: string | null;
   groups: { id: string; name: string }[];
+  merged_into_id?: string | null; merged_from_no?: string | null;
+  ship?: { done: number; partial: number; ordered: number; shipped: number; merged_in: number } | null;
 };
+type MergeHint = { ids: string[]; order_nos: string[]; customer_name: string | null; order_date: string; zero_price: number };
 /** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — key = tempId */
 type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null;
   /** ผูก SKU (2026-11-19 · lib/so-sku-link): บรรทัดใบเสนอราคาต้นทาง · ระบบเดาให้ · ติ๊กไม่ใช่สินค้า (ไม่ตั้ง = เดาจากชื่อ "ค่า…") */
@@ -131,6 +136,14 @@ export default function SoOrdersPage() {
   const { groups: moGroups } = useMoGroups(canView);
   const [askShip, setAskShip] = useState<Row | Form | null>(null);
   const [askCancel, setAskCancel] = useState<Row | Form | null>(null);
+  // จัดระเบียบ (2026-11-21): เลือกหลายใบ → รวม · แบนเนอร์ใบที่ควรรวม · เปิดใบขายจากใบ · ผลส่งของ
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mergeIds, setMergeIds] = useState<string[] | null>(null);
+  const [mergeHints, setMergeHints] = useState<MergeHint[]>([]);
+  const [billFor, setBillFor] = useState<string[] | null>(null);
+  const [shipResult, setShipResult] = useState<ShipResult | null>(null);
+  const [askUnmerge, setAskUnmerge] = useState(false);
+  const [mergedLines, setMergedLines] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,9 +151,15 @@ export default function SoOrdersPage() {
       const r = await apiFetch("/api/so-orders?limit=400");
       const j = await r.json();
       setRows((j.data ?? []) as Row[]);
+      apiFetch("/api/so-orders/tidy").then((x) => x.json()).then((t) => setMergeHints((t.data ?? []) as MergeHint[])).catch(() => { /* ไม่มีคำแนะนำก็ได้ */ });
     } catch { /* toast ด้านล่างพอ */ }
     finally { setLoading(false); setReloadKey((k) => k + 1); }
   }, []);
+  const tidy = async (body: Record<string, unknown>) => {
+    const res = await apiFetch("/api/so-orders/tidy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "ทำรายการไม่สำเร็จ");
+    return j as Record<string, unknown>;
+  };
   useEffect(() => { if (canView) void load(); }, [canView, load]);
   useEffect(() => {
     if (!canView) return;
@@ -152,7 +171,8 @@ export default function SoOrdersPage() {
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows
-      .filter((r) => !status || r.status === status)
+      // ใบที่ถูกรวมเข้าใบอื่นแล้ว ซ่อนไว้ (ดูได้ในแท็บ "ยกเลิก")
+      .filter((r) => (status ? r.status === status : !r.merged_into_id))
       .filter((r) => !groupFilter || (r.groups ?? []).some((g) => g.id === groupFilter))
       .filter((r) => !q || `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`.toLowerCase().includes(q));
   }, [rows, status, search, groupFilter]);
@@ -256,6 +276,7 @@ export default function SoOrdersPage() {
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
+      setMergedLines((d.lines ?? []).filter((l) => !!l.merged_from_order_id).length);
       setOrphanMos(((d as { orphan_mos?: SoLineMo[] }).orphan_mos) ?? []);
       setEditing(false);
       setForm({
@@ -456,15 +477,35 @@ export default function SoOrdersPage() {
     { key: "lines", header: "รายการ", width: "5rem", align: "right", sortValue: (r) => r.line_count, sortLabel: "จำนวนรายการ",
       cell: (r) => <span className="tabular-nums text-slate-600">{r.line_count}</span> },
     { key: "total", header: "ยอดรวม", width: "8rem", align: "right", sortValue: (r) => r.grand_total, sortLabel: "ยอดรวม",
-      cell: (r) => <span className="tabular-nums text-slate-700">{money(r.grand_total)}</span> },
+      cell: (r) => r.grand_total > 0 || r.status === "cancelled"
+        ? <span className="tabular-nums text-slate-700">{money(r.grand_total)}</span>
+        : <span className="text-[11px] text-amber-700" title="รายการยังไม่ใส่ราคา — เปิดใบแล้วกด “เติมจากราคาที่เคยขาย”">ยังไม่ใส่ราคา</span> },
+    { key: "ship", header: "ส่งแล้ว", width: "7.5rem", align: "center", sortValue: (r) => (r.ship && r.line_count ? r.ship.done / r.line_count : 0), sortLabel: "ส่งแล้ว",
+      cell: (r) => {
+        if (r.status === "cancelled" || !r.ship) return <span className="text-[10px] text-slate-300">—</span>;
+        const pct = r.ship.ordered > 0 ? Math.min(100, Math.round((r.ship.shipped / r.ship.ordered) * 100)) : 0;
+        return <div className="w-full px-1" title={`ส่งแล้ว ${r.ship.shipped.toLocaleString("th-TH")} / ${r.ship.ordered.toLocaleString("th-TH")} ชิ้น`}>
+          <div className={`text-[12px] tabular-nums ${r.ship.done === r.line_count ? "text-emerald-700" : r.ship.done || r.ship.partial ? "text-amber-700" : "text-slate-500"}`}>{r.ship.done}/{r.line_count} รายการ</div>
+          <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} /></div>
+        </div>;
+      } },
     { key: "flow", header: "ผลิต / ใบขาย", width: "9rem", align: "center",
       cell: (r) => <div className="flex items-center justify-center gap-1">
         <span className={`text-[10px] px-1.5 py-0.5 rounded ${r.mo_opened_at ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{r.mo_opened_at ? "🏭 เปิดผลิตแล้ว" : "ยังไม่เปิดผลิต"}</span>
         {r.invoice_so_id && <a href={openLink("/sales-orders", r.invoice_so_id)} onClick={(e) => e.stopPropagation()} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 hover:underline">🧾 ใบขาย</a>}
       </div> },
     { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (r) => ST[r.status]?.label ?? r.status, sortLabel: "สถานะ",
-      cell: (r) => <span className="text-[10px] px-2 py-0.5 rounded-full text-white whitespace-nowrap" style={{ backgroundColor: ST[r.status]?.color ?? "#94a3b8" }}>{ST[r.status]?.label ?? r.status}</span> },
+      cell: (r) => {
+        if (r.merged_into_id) return <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 whitespace-nowrap">รวมเข้าใบอื่น</span>;
+        const part = r.status === "confirmed" && r.ship && (r.ship.done > 0 || r.ship.partial > 0);
+        return <span className={`text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap ${part ? "bg-amber-100 text-amber-800" : "text-white"}`} style={part ? undefined : { backgroundColor: ST[r.status]?.color ?? "#94a3b8" }}>
+          {part ? "ส่งบางส่วน" : ST[r.status]?.label ?? r.status}</span>;
+      } },
   ];
+  const selectedRows = rows.filter((r) => selected.has(r.id));
+  const canMergeSel = selectedRows.length >= 2 && selectedRows.every((r) => r.status === "confirmed")
+    && new Set(selectedRows.map((r) => `${r.customer_code ?? r.customer_name}|${r.company_code ?? ""}`)).size === 1;
+  const sameCustSel = selectedRows.length >= 1 && new Set(selectedRows.map((r) => r.customer_code ?? r.customer_name)).size === 1;
 
   const calDocs: CalDoc[] = shown.map((r) => ({
     id: r.id, no: r.order_no, sub: r.customer_name, date: (r.due_date || r.order_date).slice(0, 10),
@@ -496,7 +537,7 @@ export default function SoOrdersPage() {
       </div>
 
       <div className="flex items-center gap-1.5 flex-wrap">
-        <button onClick={() => setStatus("")} className={`h-8 px-3 text-sm rounded-lg border ${status === "" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}>ทั้งหมด ({rows.length})</button>
+        <button onClick={() => setStatus("")} className={`h-8 px-3 text-sm rounded-lg border ${status === "" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200"}`}>ทั้งหมด ({rows.filter((r) => !r.merged_into_id).length})</button>
         {Object.entries(ST).map(([k, v]) => (counts.get(k) ?? 0) > 0 && (
           <button key={k} onClick={() => setStatus(status === k ? "" : k)}
             className={`h-8 px-3 text-sm rounded-lg border ${status === k ? "text-white border-transparent" : "bg-white text-slate-600 border-slate-200"}`}
@@ -510,9 +551,29 @@ export default function SoOrdersPage() {
         ))}
       </div>
 
+      {/* ใบที่ควรรวม (ลูกค้า+บริษัทเดียวกัน · วันเดียวกัน · ใบละ 1 รายการ) — ดูตัวอย่างก่อนรวมทุกครั้ง */}
+      {canEdit && view === "table" && mergeHints.map((h) => (
+        <div key={h.ids.join(",")} className="flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          <Icon name="documents" />
+          <span>รวมได้ {h.ids.length} ใบ: <span className="font-mono text-[12px]">{h.order_nos[0]} – {h.order_nos[h.order_nos.length - 1]}</span> · {h.customer_name ?? "—"} · {dayText(h.order_date)} · ใบละ 1 รายการ{h.zero_price ? ` · ${h.zero_price} ใบยังไม่ใส่ราคา` : ""}</span>
+          <button onClick={() => setMergeIds(h.ids)} className="ml-auto h-8 rounded-lg bg-sky-600 px-3 text-xs font-medium text-white hover:bg-sky-700">ดูตัวอย่างก่อนรวม</button>
+        </div>
+      ))}
+      {view === "table" && selected.size > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm shadow-sm">
+          <span className="font-medium text-slate-700">เลือก {selected.size} ใบ</span>
+          {canEdit && <button disabled={!canMergeSel} onClick={() => setMergeIds([...selected])} title={canMergeSel ? "" : "รวมได้เฉพาะใบที่ยังไม่ส่ง ลูกค้าและบริษัทเดียวกัน อย่างน้อย 2 ใบ"}
+            className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40">รวมเป็นใบเดียว</button>}
+          {canShip && <button disabled={!sameCustSel || selectedRows.some((r) => r.status === "cancelled")} onClick={() => setBillFor([...selected])} title={sameCustSel ? "" : "ใบขาย 1 ใบต้องเป็นลูกค้าเดียวกัน"}
+            className="h-8 rounded-lg border border-emerald-300 px-3 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"><Icon name="receipt" /> เปิดใบขายรวม</button>}
+          <button onClick={() => setSelected(new Set())} className="ml-auto h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-600 hover:bg-slate-50">ล้างที่เลือก</button>
+        </div>
+      )}
+
       {loading ? <LoadingState />
         : view === "table" ? (
         <MiniTable rows={shown} rowKey={(r) => r.id} columns={cols}
+          selectable={canEdit || canShip} selected={selected} onSelectedChange={setSelected}
           title="🧾 ใบสั่งขาย" countUnit="ใบ" onRowClick={(r) => void openRow(r)}
           searchText={(r) => `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`}
           searchPlaceholder="ค้นหา เลขที่ / ลูกค้า / PO ลูกค้า"
@@ -584,7 +645,14 @@ export default function SoOrdersPage() {
             orphanMos={orphanMos}
             onLinkMo={canEdit && form.status !== "cancelled" ? (l) => setLinkFor({ tempId: l.tempId, sku: l.sku ?? null, name: l.product_name, mode: "read" }) : undefined}
             onOpenLineMo={canEdit && form.status !== "cancelled" ? (l) => void lineAct({ action: "open_mo", line_id: l.tempId }, `เปิดใบสั่งผลิตให้ ${l.sku ?? l.product_name} แล้ว`) : undefined}
-            onUnlinkMo={canEdit && form.status === "confirmed" ? (mo) => setUnlinkMo(mo) : undefined} />
+            onUnlinkMo={canEdit && form.status === "confirmed" ? (mo) => setUnlinkMo(mo) : undefined}
+            onBill={canShip && form.status !== "cancelled" ? () => setBillFor([form.id!]) : undefined}
+            onFillPrices={canEdit && form.status !== "cancelled" ? () => void tidy({ action: "fill_prices", id: form.id }).then((j) => {
+              toast.success(`เติมราคา ${j.filled} รายการ${j.missing ? ` · อีก ${j.missing} รายการไม่เคยมีราคา ต้องพิมพ์เอง` : ""}`);
+              void openRow({ id: form.id! }); void load();
+            }).catch((e) => toast.error(e instanceof Error ? e.message : "เติมราคาไม่สำเร็จ")) : undefined}
+            mergedLines={mergedLines}
+            onUnmerge={canEdit ? () => setAskUnmerge(true) : undefined} />
         )}
         {form && (!form.id || editing) && (
           <div className="space-y-3">
@@ -673,12 +741,34 @@ export default function SoOrdersPage() {
           <button onClick={() => setAskShip(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: false }, "บันทึกว่าส่งแล้ว")}
             className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">แค่ติ๊กว่าส่งแล้ว</button>
-          <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: true }, "ส่งแล้ว + ออกใบขาย (จัดส่ง · ตัดสต็อก) ให้แล้ว").then((j) => { if (j?.warning) toast.error(String(j.warning)); })}
+          <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: true }, "ส่งแล้ว + ออกใบขาย (จัดส่ง · ตัดสต็อก) ให้แล้ว").then((j) => {
+            if (j?.warning) toast.error(String(j.warning));
+            const mos = (j?.mos ?? []) as ShipResult["mos"];
+            if (j && mos.length) setShipResult({ invoice_id: (j.invoice_so_id as string) ?? null, so_number: null, mos });
+          })}
             className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">ส่งแล้ว + ออกใบขายให้เลย</button>
         </>}>
         <p className="text-sm text-slate-600">เลือกว่าจะให้ระบบ <b>ออกใบขาย/บิลให้เลย</b> (คัดลอกรายการจากใบสั่งขายไปตั้งใบขายใหม่) หรือ <b>แค่ติ๊กว่าส่งแล้ว</b> แล้วไปออกใบขายเองที่หน้าใบขาย</p>
         <p className="text-[11px] text-slate-400 mt-2">ออกใบขายให้เลย = ใบขายถูกยืนยันและ “จัดส่งแล้ว” ทันที → ตัดของออกจากคลังสินค้าสำเร็จ · จะมีลิงก์ 🧾 ใบขาย ให้กดข้ามไปดูได้จากรายการ</p>
       </ERPModal>
+
+      {/* ── จัดระเบียบ: รวมใบ / เปิดใบขาย / ผลส่งของ / แยกคืน ── */}
+      <SoMergeModal ids={mergeIds} onClose={() => setMergeIds(null)}
+        onDone={(r) => { setMergeIds(null); setSelected(new Set()); void load(); void openRow({ id: r.id }); }} />
+      <SoBillModal open={!!billFor} orderIds={billFor ?? []} onClose={() => setBillFor(null)}
+        onDone={() => { setSelected(new Set()); void load(); if (form?.id) void openRow({ id: form.id }); }} />
+      <ERPModal open={!!shipResult} onClose={() => setShipResult(null)} size="md" title="🚚 ส่งของแล้ว"
+        footer={<button onClick={() => setShipResult(null)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg">เสร็จ</button>}>
+        {shipResult && <ShipResultPanel r={shipResult} />}
+      </ERPModal>
+      <ConfirmDialog open={askUnmerge} onClose={() => setAskUnmerge(false)}
+        onConfirm={() => form?.id && void tidy({ action: "unmerge", id: form.id }).then((j) => {
+          const rs = (j.restored ?? []) as { to: string }[];
+          toast.success(`แยกคืนแล้ว ${rs.length} ใบ: ${rs.map((x) => x.to).join(", ")}`);
+          setAskUnmerge(false); void openRow({ id: form.id! }); void load();
+        }).catch((e) => toast.error(e instanceof Error ? e.message : "แยกคืนไม่สำเร็จ"))}
+        title="แยกคืนเป็นใบเดิม?" confirmText="แยกคืน"
+        message="รายการที่รวมมาจะกลับไปอยู่ใบเดิม (ใบสั่งผลิตย้ายตาม) · ใบเดิมได้เลขเดิมถ้ายังว่าง ไม่งั้นได้เลขใหม่ · ราคาที่เติมไว้ยังอยู่ · รายการที่ส่งของไปแล้วแยกคืนไม่ได้" />
 
       <ConfirmDialog open={!!askCancel} onClose={() => setAskCancel(null)}
         onConfirm={() => askCancel && void act((askCancel as { id: string }).id, { action: "cancel" }, "ยกเลิกใบแล้ว")}

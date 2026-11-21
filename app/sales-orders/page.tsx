@@ -20,6 +20,9 @@ import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 import { format as formatMoney } from "@/lib/money";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
+import { ShipResultPanel, type ShipResult } from "@/app/sales/orders/bill-modal";
+import { Icon } from "@/components/icon";
+import type { BillSourceLine } from "@/app/api/so-orders/bill/route";
 import { PartnerWizard } from "@/components/supplier-wizard";
 
 const randId = () => String(Math.random()).slice(2);
@@ -136,7 +139,10 @@ export default function SalesOrdersPage() {
   const [saving,    setSaving]    = useState(false);
 
   // ดึงจากเอกสารต้นทาง
-  const [pickerMode,   setPickerMode]   = useState<"quotation" | "mo" | null>(null);
+  const [pickerMode,   setPickerMode]   = useState<"quotation" | "mo" | "so_order" | null>(null);
+  // รายการใบสั่งขายที่ดึงมา (บันทึกแล้วผูกใบขายเข้าใบสั่งผลิต — /api/so-orders/link-bill)
+  const [pulledSo, setPulledSo] = useState<{ so_line_id: string; qty: number; order_no: string }[]>([]);
+  const [soShip, setSoShip] = useState<ShipResult | null>(null);
   const [pulledQuotes, setPulledQuotes] = useState<{ id: string; label: string }[]>([]);
   const [pulling,      setPulling]      = useState(false);
 
@@ -286,12 +292,45 @@ export default function SalesOrdersPage() {
 
   const openCreate = () => {
     const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, company_id: defaultCompanyId, lines: [emptyLine()] };
-    setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setFormErr(null); setModalOpen(true);
+    setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setPulledSo([]); setFormErr(null); setModalOpen(true);
   };
   useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
   // ---- ดึงจากเอกสารต้นทาง ----
   const handlePicked = async (rows: SourceDocRow[]) => {
+    if (pickerMode === "so_order") {
+      // ใบสั่งขาย → ดึงเฉพาะที่ "ค้างส่ง" (จำนวนตั้งให้เท่าค้าง แก้ได้) · ลูกค้าเดียวกันเท่านั้น
+      const custSet = new Set([form.customer?.id, ...rows.map(r => r.customer_id as string)].filter(Boolean));
+      if (custSet.size > 1) { flash("ใบสั่งขายที่เลือกเป็นคนละลูกค้า — ใบขาย 1 ใบต้องเป็นลูกค้าเดียวกัน"); return; }
+      setPulling(true);
+      try {
+        const j = await apiFetch(`/api/so-orders/bill?ids=${encodeURIComponent(rows.map(r => r.id).join(","))}`).then(res => res.json());
+        if (j.error) throw new Error(j.error);
+        const have = new Set(pulledSo.map(p => p.so_line_id));
+        const src = ((j.data?.lines ?? []) as BillSourceLine[]).filter(l => l.remaining > 0 && !have.has(l.so_line_id));
+        if (!src.length) { flash("ใบที่เลือกส่งครบแล้ว / ดึงมาแล้ว — ไม่มีรายการค้างส่ง"); return; }
+        const first = ((j.data?.orders ?? []) as Record<string, unknown>[]).sort((a, b) => String(a.order_no).localeCompare(String(b.order_no)))[0] ?? {};
+        const incoming: EditorLine[] = src.map(l => ({
+          tempId: randId(), product_id: null, sku: l.sku, product_name: l.product_name || l.sku || "สินค้า",
+          image_url: l.image_url, image_key: null, qty: l.remaining, unit: l.unit || "ชิ้น", unit_price: l.unit_price,
+          discount_type: (l.discount_type === "amount" ? "amount" : "percent") as "percent" | "amount", discount_value: l.discount_value, tax_code: null,
+          note: `จาก ${l.order_no ?? "ใบสั่งขาย"}`,
+        }));
+        setForm(f => ({
+          ...f,
+          customer: f.customer ?? (first.customer_id ? { id: String(first.customer_id), code: (first.customer_code as string) ?? null, name: (first.customer_name as string) ?? "" } as CustomerPickerValue : null),
+          company_id: f.lines.some(l => l.product_name.trim()) ? f.company_id : ((first.company_id as string) || f.company_id),
+          customer_po_no: f.customer_po_no || ((first.customer_po_no as string) ?? ""),
+          vat_rate: first.vat_rate != null ? Number(first.vat_rate) : f.vat_rate,
+          vat_included: first.vat_included != null ? Boolean(first.vat_included) : f.vat_included,
+          lines: mergeLines(f.lines, incoming),
+        }));
+        setPulledSo(prev => [...prev, ...src.map(l => ({ so_line_id: l.so_line_id, qty: l.remaining, order_no: l.order_no ?? "ใบสั่งขาย" }))]);
+        flash(`ดึง ${src.length} รายการค้างส่งจากใบสั่งขาย ${rows.length} ใบแล้ว — แก้จำนวนให้เท่าที่ส่งจริงรอบนี้`);
+      } catch (err) { flash(err instanceof Error ? err.message : "ดึงใบสั่งขายไม่สำเร็จ"); }
+      finally { setPulling(false); }
+      return;
+    }
     if (pickerMode === "mo") {
       const incoming: EditorLine[] = rows.map(r => ({
         tempId: randId(), product_id: null,
@@ -416,6 +455,18 @@ export default function SalesOrdersPage() {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : usingSources ? `สร้าง SO + ปิดใบเสนอราคา ${pulledQuotes.length} ใบแล้ว` : "สร้าง SO ใหม่");
+      // ดึงมาจากใบสั่งขาย → ผูกใบขายนี้เข้าใบสั่งผลิตของรายการ (ใบสั่งขายรู้ "ส่งแล้ว/ค้างส่ง" · ใบสั่งผลิตรู้ว่าขายไปเท่าไหร่)
+      // จำนวนที่ผูก = ไม่เกินจำนวนในบรรทัดใบขาย (แก้ลดในฟอร์ม = นับตามที่แก้)
+      if (!editingId && json.id && pulledSo.length) {
+        try {
+          const lr = await apiFetch("/api/so-orders/link-bill", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sale_id: json.id, picks: pulledSo.map(p => ({ so_line_id: p.so_line_id, qty: p.qty })) }) });
+          const lj = await lr.json();
+          if (!lr.ok || lj.error) flash(`สร้างใบขายแล้ว แต่ผูกใบสั่งขายไม่สำเร็จ: ${lj.error ?? ""} — ไปกด “อัปเดตสถานะ” ที่ใบสั่งขาย`);
+          else if ((lj.mos ?? []).length) setSoShip({ invoice_id: json.id, so_number: null, mos: lj.mos, skipped: lj.skipped, orders_shipped: lj.orders_shipped });
+        } catch { flash("สร้างใบขายแล้ว แต่ผูกใบสั่งขายไม่สำเร็จ — ไปกด “อัปเดตสถานะ” ที่ใบสั่งขาย"); }
+        setPulledSo([]);
+      }
       setModalOpen(false);
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
@@ -812,15 +863,29 @@ export default function SalesOrdersPage() {
           {!editingId && (
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 px-3 py-2">
               <span className="text-xs font-medium text-slate-500">เริ่มจากเอกสารเดิม:</span>
-              <button type="button" disabled={pulling} onClick={() => setPickerMode("quotation")}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
-                📋 ดึงจากใบเสนอราคา
+              {/* ใบขายดึงจากใบสั่งขายเป็นหลัก (เจ้าของสั่ง 2026-11-21) · ใบเสนอราคาเก็บไว้ท้ายสุด */}
+              <button type="button" disabled={pulling} onClick={() => setPickerMode("so_order")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                <Icon name="receipt" /> ดึงจากใบสั่งขาย
               </button>
               <button type="button" disabled={pulling} onClick={() => setPickerMode("mo")}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
                 🏭 ดึงจากใบสั่งผลิต
               </button>
+              <button type="button" disabled={pulling} onClick={() => setPickerMode("quotation")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                📋 ใบเสนอราคา
+              </button>
               {pulling && <span className="text-xs text-slate-400">กำลังดึง...</span>}
+              {pulledSo.length > 0 && (
+                <div className="flex w-full flex-wrap items-center gap-1.5 border-t border-blue-100 pt-2">
+                  <span className="text-[11px] text-slate-500">บันทึกแล้วจะนับเป็น &quot;ส่งแล้ว&quot; ในใบสั่งขาย + ใบสั่งผลิต:</span>
+                  {[...new Set(pulledSo.map((p) => p.order_no))].map((no) => (
+                    <span key={no} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">✓ {no}</span>
+                  ))}
+                  <button type="button" onClick={() => setPulledSo([])} className="ml-1 text-[11px] text-slate-400 underline hover:text-slate-600">ยกเลิกการผูก</button>
+                </div>
+              )}
               {pulledQuotes.length > 0 && (
                 <div className="flex w-full flex-wrap items-center gap-1.5 border-t border-blue-100 pt-2">
                   <span className="text-[11px] text-slate-500">จะปิดเป็น &quot;ผ่าน&quot; เมื่อบันทึก:</span>
@@ -1036,6 +1101,11 @@ export default function SalesOrdersPage() {
           onConfirm={handlePicked}
         />
       )}
+      {/* ผลส่งของจากใบสั่งขาย: ใบสั่งผลิตที่ส่งไม่ครบ → เลือกขั้นของชิ้นที่เหลือ (ของกลางเดียวกับลิ้นชักใบสั่งขาย) */}
+      <ERPModal open={!!soShip} onClose={() => setSoShip(null)} size="md" title="🚚 ผูกใบสั่งขาย + ใบสั่งผลิตแล้ว"
+        footer={<button onClick={() => setSoShip(null)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg">เสร็จ</button>}>
+        {soShip && <ShipResultPanel r={soShip} />}
+      </ERPModal>
 
       {/* เพิ่มลูกค้าใหม่ — ของกลางตัวเดียวกับที่ใช้เพิ่มผู้จำหน่าย (กรอกได้ครบทุกช่อง 4 หน้า)
           สร้างเสร็จ → เลือกให้ในใบเลย ไม่ต้องมาค้นหาใหม่ */}
