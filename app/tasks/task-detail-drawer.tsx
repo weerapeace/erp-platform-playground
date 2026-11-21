@@ -807,7 +807,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </>)}
 
           {tab === "content" && (
-            <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />
+            <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} taskTitle={d.title} />
           )}
         </div>
 

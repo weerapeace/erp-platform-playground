@@ -16,9 +16,12 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { type PushToast } from "@/components/toast";
 import {
   CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
-  listContent, createContent, updateContent,
+  listContent, createContent, updateContent, addContentAttachment,
   type ContentItem, type ContentStatus, type BrandOption, postTypeLabel,
 } from "./data";
+
+import { loadBriefBoardItems, type BriefImage, type BriefNote } from "./brief-board-items";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 const ContentDrawer = dynamic(() => import("./content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
@@ -29,8 +32,10 @@ function StatusChip({ status }: { status: ContentStatus }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
-export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
+export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle }: {
   taskId: string; brandId: string | null; brands: BrandOption[]; pushToast: ToastFn;
+  /** ชื่องาน (ตั้งชื่อคอนเทนต์ที่สร้างจากกระดานบรีฟ) */
+  taskTitle?: string;
 }) {
   const t = useT();
   const { platforms } = useCreativeOptions();
@@ -50,14 +55,41 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
   // สร้างคอนเทนต์ใหม่ผูกงานนี้ (brand ตามงาน) → เปิด drawer ให้กรอกแคปชั่นต่อ
   const [form, setForm] = useState({ title: "", post_type: "image", platforms: [] as string[] });
   const [saving, setSaving] = useState(false);
-  const openCreate = () => { setForm({ title: "", post_type: "image", platforms: [] }); setCreateOpen(true); };
+  // โหมด "จากกระดานบรีฟ" (เจ้าของเลือก 2026-11-21): ติ๊กรูปบนกระดาน → แนบเข้าคอนเทนต์ · โน้ตบนกระดาน → ร่างแคปชั่น
+  const [brief, setBrief] = useState<{ images: BriefImage[]; notes: BriefNote[] } | null>(null);
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [pickImg, setPickImg] = useState<Set<string>>(new Set());
+  const [captionDraft, setCaptionDraft] = useState("");
+  const openCreate = () => { setBrief(null); setForm({ title: "", post_type: "image", platforms: [] }); setCreateOpen(true); };
+  const openFromBrief = async () => {
+    setForm({ title: taskTitle ? `${taskTitle} — ${t("จากบรีฟ", "from brief")}` : "", post_type: "image", platforms: [] });
+    setBrief({ images: [], notes: [] }); setPickImg(new Set()); setCaptionDraft(""); setCreateOpen(true); setBriefLoading(true);
+    try {
+      const b = await loadBriefBoardItems(taskId);
+      setBrief(b); setPickImg(new Set(b.images.map((x) => x.r2_key)));
+      setCaptionDraft(b.notes.map((n) => n.text).join("\n"));
+    } catch (e) { pushToast("error", (e as Error).message); }
+    finally { setBriefLoading(false); }
+  };
   const doCreate = async () => {
     if (!form.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     setSaving(true);
     try {
-      const { id } = await createContent({ title: form.title.trim(), task_id: taskId, brand_id: brandId, post_type: form.post_type || null, platforms: form.platforms });
+      const cap = captionDraft.trim();
+      const { id } = await createContent({
+        title: form.title.trim(), task_id: taskId, brand_id: brandId, post_type: form.post_type || null, platforms: form.platforms,
+        ...(brief ? { brief: cap || null, captions: cap ? form.platforms.map((p) => ({ platform: p, caption: cap })) : undefined } : {}),
+      });
+      // รูปจากกระดานบรีฟ → แนบด้วย r2 key เดิม (ไม่อัปซ้ำ · ไม่เปลือง R2 เพิ่ม)
+      if (brief) {
+        let failed = 0;
+        for (const img of brief.images.filter((x) => pickImg.has(x.r2_key))) {
+          try { await addContentAttachment(id, { kind: "image", r2_key: img.r2_key, file_name: img.r2_key.split("/").pop() ?? null }); } catch { failed++; }
+        }
+        if (failed) pushToast("error", t(`แนบรูปไม่สำเร็จ ${failed} รูป — แนบเพิ่มในคอนเทนต์ได้`, `${failed} image(s) failed to attach — add them in the content`));
+      }
       setCreateOpen(false); await load(); setOpenId(id);
-      pushToast("success", t("สร้างคอนเทนต์แล้ว — กรอกแคปชั่นต่อได้เลย", "Content created — add captions next"));
+      pushToast("success", brief ? t("สร้างคอนเทนต์จากกระดานบรีฟแล้ว — ตรวจแคปชั่นต่อได้เลย", "Content created from the brief board — review captions next") : t("สร้างคอนเทนต์แล้ว — กรอกแคปชั่นต่อได้เลย", "Content created — add captions next"));
     } catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
   };
 
@@ -73,6 +105,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
         <p className="text-sm font-semibold text-slate-700">📱 {t("คอนเทนต์ของงานนี้", "Content for this task")} ({items.length})</p>
         <div className="flex items-center gap-2">
           <button onClick={() => setAttachOpen(true)} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔗 {t("แนบที่มีอยู่", "Attach existing")}</button>
+          <button onClick={() => void openFromBrief()} title={t("หยิบรูป/โน้ตจากกระดานบรีฟมาสร้างคอนเทนต์", "Create content from the brief board's images and notes")} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 bg-violet-50 rounded-lg hover:bg-violet-100">🎨 {t("จากกระดานบรีฟ", "From brief board")}</button>
           <button onClick={openCreate} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "New content")}</button>
         </div>
       </div>
@@ -109,7 +142,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
         )}
 
       {/* สร้างคอนเทนต์ใหม่ (ผูกงานนี้) */}
-      <ERPModal open={createOpen} onClose={() => setCreateOpen(false)} title={t("สร้างคอนเทนต์ (พ่วงงานนี้)", "New content (linked to this task)")} size="md"
+      <ERPModal open={createOpen} onClose={() => setCreateOpen(false)} title={brief ? t("สร้างคอนเทนต์จากกระดานบรีฟ", "New content from brief board") : t("สร้างคอนเทนต์ (พ่วงงานนี้)", "New content (linked to this task)")} size={brief ? "lg" : "md"}
         footer={<>
           <button onClick={() => setCreateOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
           <button onClick={doCreate} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังสร้าง...", "Creating...") : t("สร้าง", "Create")}</button>
@@ -127,6 +160,30 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast }: {
             </div>
             <p className="text-[11px] text-slate-400 mt-1">{t("เลือกแพลตฟอร์มก่อน แล้วค่อยเขียนแคปชั่นต่อแพลตฟอร์มในหน้าถัดไป", "Pick platforms first, then write per-platform captions next")}</p>
           </div>
+          {brief && (briefLoading ? <p className="text-sm text-slate-400">{t("กำลังโหลดกระดานบรีฟ…", "Loading brief board…")}</p> : (<>
+            <div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-400">{t("รูปจากกระดานบรีฟ", "Images from brief board")} ({pickImg.size}/{brief.images.length})</label>
+                {brief.images.length > 0 && <button type="button" onClick={() => setPickImg(pickImg.size === brief.images.length ? new Set() : new Set(brief.images.map((x) => x.r2_key)))} className="ml-auto text-[11px] text-violet-600 hover:underline">{pickImg.size === brief.images.length ? t("ไม่เลือกเลย", "Select none") : t("เลือกทั้งหมด", "Select all")}</button>}
+              </div>
+              {brief.images.length === 0 ? <p className="text-xs text-slate-400 mt-1">{t("กระดานบรีฟยังไม่มีรูปที่เก็บไว้ (ลิงก์ Pinterest/TikTok ไม่นับ)", "The brief board has no stored images yet (Pinterest/TikTok links don't count)")}</p> : (
+                <div className="mt-1 grid grid-cols-4 sm:grid-cols-6 gap-1.5">
+                  {brief.images.map((img) => { const on = pickImg.has(img.r2_key); return (
+                    <button key={img.r2_key} type="button" onClick={() => setPickImg((s) => { const n = new Set(s); if (on) n.delete(img.r2_key); else n.add(img.r2_key); return n; })}
+                      className={`relative aspect-square rounded-lg overflow-hidden border-2 ${on ? "border-violet-500" : "border-transparent opacity-60"}`}>
+                      <img src={r2ImageUrl(img.r2_key, 200) ?? ""} alt="" className="h-full w-full object-cover bg-slate-100" />
+                      {on && <span className="absolute right-1 top-1 h-4 w-4 rounded-full bg-violet-600 text-[10px] leading-4 text-white">✓</span>}
+                    </button>
+                  ); })}
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="text-xs text-slate-400">{t("ร่างแคปชั่น (จากโน้ตบนกระดาน · ใส่ทุกแพลตฟอร์มที่เลือก แก้ต่อได้ในหน้าถัดไป)", "Caption draft (from board notes · used for every selected platform, editable next)")}</label>
+              <textarea value={captionDraft} onChange={(e) => setCaptionDraft(e.target.value)} rows={4} placeholder={t("กระดานยังไม่มีโน้ต — พิมพ์ร่างแคปชั่นเองได้", "No notes on the board — type a draft caption")}
+                className="w-full mt-1 text-sm border border-slate-200 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-violet-200" />
+            </div>
+          </>))}
         </div>
       </ERPModal>
 
