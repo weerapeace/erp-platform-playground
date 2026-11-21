@@ -15,9 +15,9 @@
  * ห้าม import "@/..." ที่นี่
  */
 
-export type DriftKey = "images" | "description" | "options" | "price";
-export const DRIFT_KEYS: readonly DriftKey[] = ["images", "description", "options", "price"];
-export const DRIFT_LABEL: Record<DriftKey, string> = { images: "รูป", description: "รายละเอียด", options: "ชื่อตัวเลือก (สี/ไซซ์)", price: "ราคา" };
+export type DriftKey = "title" | "images" | "description" | "options" | "price";
+export const DRIFT_KEYS: readonly DriftKey[] = ["title", "images", "description", "options", "price"];
+export const DRIFT_LABEL: Record<DriftKey, string> = { title: "ชื่อสินค้า", images: "รูป", description: "รายละเอียด", options: "ชื่อตัวเลือก (สี/ไซซ์)", price: "ราคา" };
 
 /** same = ตรง · diff = ไม่ตรง · unknown = บอกไม่ได้ (ไม่นับเป็นปัญหา) */
 export type DriftState = "same" | "diff" | "unknown";
@@ -42,9 +42,9 @@ export type DriftItem = {
 
 // ───────── ค่ากลาง 2 ฝั่ง ─────────
 export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null };
-export type SystemValues = { description: string; imageRefs: string[]; variants: SysVariant[] };
+export type SystemValues = { description: string; imageRefs: string[]; variants: SysVariant[]; /** ชื่อที่จะส่ง (lib/listing-title) */ title?: string };
 export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null };
-export type ShopValues = { description: string; imageCount: number; imageSig: string; variants: ShopVariant[]; /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[] };
+export type ShopValues = { /** ชื่อบนร้าน */ title?: string; description: string; imageCount: number; imageSig: string; variants: ShopVariant[]; /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[] };
 /** ref รูปฝั่งระบบ → ลิงก์รูปย่อ ("r2:<key>" = คลังรูปเรา · http = ลิงก์ตรง) */
 export function refImageUrl(ref: string, w = 400): string {
   return ref.startsWith("r2:") ? `/api/r2-image?key=${encodeURIComponent(ref.slice(3))}&w=${w}` : ref;
@@ -187,8 +187,16 @@ export function priceWarning(sys: SystemValues, shop: ShopValues): string | null
 }
 
 /** เทียบครบ 4 เรื่อง (ยังไม่ตัดสินว่าส่งได้ไหม — ฝั่ง server ใส่ sendable/cannot ตามร้าน) */
+/** ชื่อสินค้า — เทียบตรงตัว (ย่อช่องว่างซ้ำ) · ระบบไม่มีชื่อ/ร้านไม่ส่งชื่อมา = บอกไม่ได้ */
+export function compareTitle(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  const a = String(shop.title ?? "").replace(/\s+/g, " ").trim(), b = String(sys.title ?? "").replace(/\s+/g, " ").trim();
+  if (!b || shop.title == null) return { key: "title", state: "unknown", summary: "เทียบชื่อไม่ได้", before: a || "—", after: b || "—" };
+  if (a === b) return { key: "title", state: "same", summary: "ชื่อตรง", before: a, after: b };
+  return { key: "title", state: "diff", summary: "ชื่อไม่ตรง", before: a || "(ว่าง)", after: b };
+}
+
 export function compareAll(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot">[] {
-  return [compareImages(sys, shop, sync), compareDescription(sys, shop), compareOptions(sys, shop), comparePrice(sys, shop)];
+  return [compareTitle(sys, shop), compareImages(sys, shop, sync), compareDescription(sys, shop), compareOptions(sys, shop), comparePrice(sys, shop)];
 }
 
 /** เรื่องที่ไม่ตรง (ป้าย) */

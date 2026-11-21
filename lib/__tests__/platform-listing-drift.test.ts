@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compareAll, compareDescription, compareImages, compareOptions, comparePrice, descImages, descLines, driftBadgeText, driftIssues, lineDiff, listSig, looksHtml, normText, plainText,
+  compareAll, compareDescription, compareImages, compareTitle, compareOptions, comparePrice, descImages, descLines, driftBadgeText, driftIssues, lineDiff, listSig, looksHtml, normText, plainText,
   type ShopValues, type SystemValues,
 } from "@/lib/platform-listing-drift";
 
@@ -154,5 +154,13 @@ describe("หัวข้อย่อย", () => {
     expect(descLines("<ul><li>วัสดุ: PU</li></ul>")).toEqual(["• วัสดุ: PU"]);
     const d = lineDiff(["- วัสดุ: PU", "- ช่องหลัก 1 ช่อง"], descLines("<ul><li>วัสดุ: PU</li><li>ช่องหลัก 1 ช่อง</li></ul>"));
     expect(d.changes).toBe(0);
+  });
+});
+
+describe("ชื่อสินค้า", () => {
+  it("ชื่อต่าง = ไม่ตรง · ต่างแค่ช่องว่างซ้ำ = ตรง · ร้านไม่ส่งชื่อ = บอกไม่ได้", () => {
+    expect(compareTitle(sys({ title: "กระเป๋า พร้อมพวงกุญแจ LY22" }), shop({ title: "กระเป๋า LY22" })).state).toBe("diff");
+    expect(compareTitle(sys({ title: "กระเป๋า  LY22" }), shop({ title: "กระเป๋า LY22" })).state).toBe("same");
+    expect(compareTitle(sys({ title: "กระเป๋า LY22" }), shop({})).state).toBe("unknown");
   });
 });

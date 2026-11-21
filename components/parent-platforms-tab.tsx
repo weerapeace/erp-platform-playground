@@ -60,7 +60,7 @@ type Platform = { id: string; code: string; name_th: string; icon_key: string | 
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
 type Account = { label: string | null; is_active: boolean; external_shop_id?: string | null };
 type Parent = { code?: string; name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null; brand_id?: string | null; brand_name?: string | null };
-type Matched = Record<string, { id?: string; external_id: string | null }>;
+type Matched = Record<string, { id?: string; external_id: string | null; title?: string | null }>;
 /** ร้านที่เช็กกับร้านจริงได้ (ดึงเฉพาะตัวที่เปลี่ยน · app/api/platform-catalog/refresh-changed) */
 const SHOP_CHECKABLE = new Set(["lazada", "shopee", "tiktok"]);
 
@@ -273,7 +273,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
         // ร้านที่มีตัวสร้าง: ค่าที่จะส่งจริงจากตัวประกอบข้อมูลของร้าน (ดึงจากสินค้าให้แล้ว) · ร้านอื่น = ค่าในร่าง
         const rd = !onSale && hasCreatePreview(p.code) ? readiness[p.code] : undefined;
         const rdv = rd && !rd.error ? rd : null;   // ตรวจสำเร็จ
-        const name = rdv?.title || d.title || parent?.name_platform || parent?.name_th || "—";
+        // ลงขายแล้ว = ชื่อบนร้านจริง (รอบดึงสินค้าล่าสุด) · ยังไม่ลง = ชื่อที่จะส่ง
+        //   🐛 2026-11-21 LY22: เดิมโชว์ชื่อในร่าง (ชื่อเวอร์ชันเก่า) ทั้งที่ลงขายแล้ว → ดูเหมือนตรงกับระบบ
+        const shopTitle = onSale && onShop?.title ? onShop.title : null;
+        const name = shopTitle || rdv?.title || d.title || parent?.name_platform || parent?.name_th || "—";
         const auto = (mappings[p.id] ?? "").trim();            // หมวดของร้านนี้จากหมวดกลาง
         const catValue = rdv?.category || d.category_path || auto || "— ยังไม่ตั้ง";
         const fromCentral = !rdv && !d.category_path && !!auto;   // เติมมาจากหมวดกลาง (ยังไม่ได้ override)
@@ -361,7 +364,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
               )}
             </div>
             <div className="p-3 grid sm:grid-cols-2 gap-y-1.5 gap-x-4">
-              <Row label="ชื่อ" value={name} />
+              <Row label={shopTitle ? "ชื่อบนร้าน" : "ชื่อ"} value={name} />
               <Row label="หมวดหมู่" value={catValue} warn={catValue === "— ยังไม่ตั้ง"} hint={fromCentral ? "จากหมวดกลาง" : undefined} />
               <Row label={rdv ? "รูปที่จะส่ง" : "รูปที่เลือกส่ง"} value={`${imgCount} รูป`} warn={!imgCount} hint={rdv && !d.image_keys?.length && imgCount ? "จากสินค้า" : undefined} />
               <Row label="ร้าน" value={acct?.is_active ? (acct.label || "มีร้าน") : "ยังไม่มีร้าน"} warn={!acct?.is_active}
