@@ -362,7 +362,7 @@
 ### หน้าอัปเดตให้ตรง รอบ 3 (2026-11-21 · เจ้าของเลือกข้อ 1-4)
 - **รูปในรายละเอียด** (เรื่องใหม่ `desc_images`) = "รูป Description" ของ Parent SKU (asset_usages parent_sku_description) เทียบรูปย่อ 2 ฝั่ง
   - TikTok: ฝากกับ TikTok (DESCRIPTION_IMAGE · ตอนกดยืนยัน) แล้วต่อท้ายรายละเอียดแทนรูปเดิม · Lazada: ฝาก /image/migrate แล้วต่อท้าย
-  - LINE: /api/line-shopping/desc-images เฉพาะสินค้าที่ปิดขาย (ต่อท้ายได้อย่างเดียว — มีรูปเดิมต้องติ๊ก "รายละเอียด" ด้วย) · Shopee: ส่งไม่ได้ (ต้องมีสิทธิ์ extended description)
+  - LINE: /api/line-shopping/desc-images เฉพาะสินค้าที่ปิดขาย (ต่อท้ายได้อย่างเดียว — มีรูปเดิมต้องติ๊ก "รายละเอียด" ด้วย) · Shopee: ส่งผ่าน /api/shopee/listing-edit desc_images (route ฝากรูป scene desc แทนทั้งชุด · ร้าน LM มีสิทธิ์ extended แล้ว · 8ac19307)
 - **เว้นบรรทัดตามจริง** ในหน้าเทียบ (`plainText(..., { keepBlank })` · บรรทัดว่างไม่นับว่าต่าง)
 - **ตารางตัวเลือก** รูป · สี · ราคา 2 ฝั่ง (`variantTable`) ใต้แถว "ชื่อตัวเลือก"
 - **รูปตัวเลือก** (เรื่องใหม่ `variant_images`) ส่งได้ TikTok (skus images ชั้นหลัก ต้องครบทุกค่า) · Lazada (รูปแรกของแต่ละ SKU · planLazadaSkuMedia) · LINE (imageUrl ต่อตัวเลือก) · Shopee ดูอย่างเดียว

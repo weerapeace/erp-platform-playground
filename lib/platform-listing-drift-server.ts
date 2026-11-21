@@ -111,7 +111,9 @@ const sysOf = (sys: SystemValues, code: string | null) => (code ? sys.variants.f
 
 function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListingView): Ctx {
   const variants: ShopVariant[] = v.hasModel ? v.models.map((m) => ({ code: m.sku, label: m.label ?? "", price: m.originalPrice ?? m.price, image: m.image })) : [{ code: null, label: "", price: v.originalPrice ?? v.price }];
-  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images, descImageUrls: [] };
+  // รูปในรายละเอียด (extended description) — ตัวอ่านสดของ Shopee ส่งมาให้แล้ว (descriptionImages)
+  const descImgs = v.descriptionImages ?? [];
+  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images, descImageUrls: descImgs.map((x) => x.url ?? x.id) };
   const imgPlan = () => planShopeeImages(v, base.sys.imageRefs);
   const descPlan = () => planShopeeEdit(v, { description: base.sys.description });
   const titlePlan = () => planShopeeEdit(v, { name: base.sys.title ?? "" });
@@ -128,7 +130,7 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       : k === "images" ? errs(imgPlan().errors)
       : k === "description" ? (!v.descriptionEditable ? "Shopee: สินค้านี้ใช้รายละเอียดแบบมีรูป — แก้ใน Seller Centre" : errs(descPlan().errors))
       : k === "options" ? OPT_CANNOT.shopee
-      : k === "desc_images" ? "Shopee: ใส่รูปในรายละเอียดได้เฉพาะร้านที่ Shopee เปิดสิทธิ์ (ร้านนี้ยังไม่มี) — ใส่ในรูปสินค้าแทน"
+      : k === "desc_images" ? null
       : k === "variant_images" ? "Shopee: ระบบยังเปลี่ยนรูปตัวเลือกให้ไม่ได้ — แก้ใน Seller Centre"
       : errs(pricePlan().errors),
     build: async (keys) => {
@@ -145,8 +147,10 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
         if (p.body.item_name != null || p.body.description != null) { body.before = { name: v.name, description: v.description }; body.edit = { name: p.body.item_name ?? null, description: p.body.description ?? null }; }
       }
       if (keys.includes("images")) { const p = imgPlan(); if (p.changed) body.images = { before_ids: v.imageIds, refs: p.refs }; }
+      // รูปในรายละเอียด: route ฝากรูป (scene desc · คงสัดส่วน) แล้วแทนทั้งชุด · ข้อความคงเดิมถ้าไม่ได้ติ๊ก "รายละเอียด"
+      if (keys.includes("desc_images") && base.sys.descImageRefs?.length) body.desc_images = { before_ids: descImgs.map((x) => x.id), refs: base.sys.descImageRefs };
       const edit = body.edit as { name: string | null; description: string | null } | undefined;
-      if (edit || body.images) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : ""].filter(Boolean).join(" + "), body });
+      if (edit || body.images || body.desc_images) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : "", body.desc_images ? "รูปในรายละเอียด" : ""].filter(Boolean).join(" + "), body });
       return calls;
     },
   };
