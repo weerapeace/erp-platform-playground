@@ -182,7 +182,7 @@ describe("รายละเอียดจาก Parent SKU (เจ้าขอ
     const pr = parent({ platform_description: "ข้อความเก่า Larkspur", platform_description_live: "Fleur De Juillet ใหม่\n- วัสดุ: PU" });
     expect(pickListingDescription("ข้อความเก่า  Larkspur", pr, "Lazada")).toEqual({ text: "Fleur De Juillet ใหม่\n- วัสดุ: PU", src: "Platform Description ของ Parent SKU" });
     expect(pickListingDescription("พิมพ์เองสำหรับร้าน", pr, "Lazada")).toEqual({ text: "พิมพ์เองสำหรับร้าน", src: "แก้ไว้สำหรับ Lazada" });
-    expect(pickListingDescription("", parent({ platform_description: "เก่า" }), "Shopee").src).toBe("รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)");
+    expect(pickListingDescription("", parent({ platform_description: "เก่า", platform_description_live: null }), "Shopee").src).toBe("รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)");
     const { preview: p } = planLazadaCreate({ ...base, parent: pr, skus: [sku("A-01", "ดำ", 100)], draft: draftWith({}, "ข้อความเก่า Larkspur") });
     expect(p.description.value).toContain("Fleur De Juillet ใหม่");
     expect(p.description.src).toBe("Platform Description ของ Parent SKU");

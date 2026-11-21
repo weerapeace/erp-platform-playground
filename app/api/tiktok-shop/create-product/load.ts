@@ -4,6 +4,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadListingContexts } from "@/lib/product-listing-context";
+import { loadFieldHistoryValues } from "@/lib/field-history";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { ttsErrorText, ttsGetBrands, ttsShopWarehouseId } from "@/lib/tiktok-shop";
 import { planTiktokCreate, ttsCategoryIdOf, type TtsAttrDef, type TtsCreatePreview, type TtsCreateSku } from "@/lib/tiktok-create-plan";
@@ -46,7 +47,10 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
   ]);
   const it = items[0];
   if (!it) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
-  const { data: pRow } = await admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle();
+  const [{ data: pRow }, descHist] = await Promise.all([
+    admin.from("parent_skus_v2").select("brand_id, description, platform_description, weight_g").eq("id", parentId).maybeSingle(),
+    loadFieldHistoryValues(admin, "parent_skus_v2", parentId, "platform_description"),   // ร่างที่ตรงค่าเก่า = สำเนา (lib/listing-description)
+  ]);
   const pr = (pRow ?? {}) as Row;
   const brandId = str(pr.brand_id) || null;
   const { data: bRow } = brandId ? await admin.from("brands").select("name").eq("id", brandId).maybeSingle() : { data: null };
@@ -104,7 +108,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
   const { preview, payload } = planTiktokCreate({
     parent: {
       id: parentId, code: str(p.code), name_th: str(p.name_th) || null, name_platform: str(p.name_platform) || null,
-      description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
+      description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description), platform_description_history: descHist,
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height },
     },
     skus: ((skus ?? []) as Row[]).map((s): TtsCreateSku => ({

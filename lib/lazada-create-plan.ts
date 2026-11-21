@@ -29,6 +29,7 @@
  *   ช่องของหมวด = ร่าง → ค่าเริ่มต้นของร้าน/ข้อมูลสินค้า (lib/listing-attr-defaults · ui_config) → ที่ AI/จับคำเดาไว้ (extra.lazada_attr_guess { at, ai, values })
  *   รูปในรายละเอียด = ร่าง extra.lazada_desc_images [ref] (เลือก/เรียงเอง · [] = ไม่ใส่) → รูปสินค้าทั้งหมด (≤ 20) ต่อท้ายข้อความ · route ฝากรูปกับ Lazada ก่อนส่ง
  */
+import { pickListingDescription } from "@/lib/listing-description";
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { lazAttrEditable, lazNormAttr, linesToHighlights, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 import { skuImageKeys, type SkuImageSource } from "@/lib/sku-gallery-images";
@@ -65,6 +66,8 @@ export type LazCreateParent = {
   warranty?: string | null;
   /** Platform Description ที่ป๊อป Parent SKU โชว์ (คำนวณสด · loadParentComputedTexts) — มาก่อนคอลัมน์ platform_description ที่เป็นค่าเก่า */
   platform_description_live?: string | null;
+  /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า ไม่ใช่ที่คนแก้ */
+  platform_description_history?: string[] | null;
   /** รูป Description ของ Parent SKU (r2 key เรียงตามที่จัด) — รูปในรายละเอียดอัตโนมัติ */
   desc_image_keys?: string[] | null;
   size?: { l: number | null; w: number | null; h: number | null } | null;
@@ -152,22 +155,8 @@ export const lazCategoryIdOf = (path: unknown): string | null => {
 /** รูปนี้อยู่บน Lazada แล้วไหม (ไม่ต้องฝากซ้ำ) */
 export const isLazadaImage = (ref: string) => { try { return LAZADA_IMG_HOST.test(new URL(ref).hostname); } catch { return false; } };
 
-const normDesc = (s: string) => s.replace(/\s+/g, " ").trim();
-/**
- * เลือกรายละเอียดที่จะส่งร้าน (ใช้ร่วม Lazada + Shopee):
- *   ร่างที่ "แก้เอง" → Platform Description สด (ตัวเดียวกับป๊อป Parent SKU) → คอลัมน์ platform_description → รายละเอียดสินค้า
- * ร่างที่ตรงกับคอลัมน์เก่า = ตัวเตรียมร่างคัดลอกมาเอง (ไม่ใช่ที่คนแก้) → ไม่นับ ใช้ค่าสดแทน
- */
-export function pickListingDescription(draftDesc: string, p: { platform_description: string | null; description: string | null; platform_description_live?: string | null }, platformName: string): { text: string; src: string } {
-  const live = String(p.platform_description_live ?? ""), stored = String(p.platform_description ?? ""), main = String(p.description ?? "");
-  const copies = new Set([stored, main].map(normDesc).filter(Boolean));
-  const edited = !!draftDesc.trim() && !copies.has(normDesc(draftDesc)) && normDesc(draftDesc) !== normDesc(live);
-  if (edited) return { text: draftDesc, src: `แก้ไว้สำหรับ ${platformName}` };
-  if (live.trim()) return { text: live, src: "Platform Description ของ Parent SKU" };
-  if (stored.trim()) return { text: stored, src: "รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)" };
-  if (main.trim()) return { text: main, src: "รายละเอียดสินค้า" };
-  return { text: "", src: "ยังไม่มีรายละเอียด" };
-}
+// เลือกรายละเอียดที่จะส่งร้าน — ย้ายไปของกลาง lib/listing-description (ใช้ร่วม 4 ร้าน · รู้จักค่าเก่าของคอลัมน์)
+export { pickListingDescription } from "@/lib/listing-description";
 
 /** รายละเอียด → HTML ที่ Lazada รับ (ข้อความ → ย่อหน้า · ตัดรูปนอก Lazada ทิ้ง) */
 export function lazDescriptionHtml(raw: string): string {

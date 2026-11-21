@@ -23,6 +23,8 @@ import { copiedLabel } from "@/lib/listing-copy-map";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
+import { pickListingDescription } from "@/lib/listing-description";
+import { loadFieldHistoryValues } from "@/lib/field-history";
 import { MAX_LINE_DESC_IMAGES } from "@/lib/line-listing-edit";
 import { giftFromExtra, type GiftSetting } from "@/lib/line-gift";
 
@@ -94,12 +96,13 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const platform_id = (pf as { id?: string } | null)?.id;
   if (!platform_id) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" };
 
-  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }] = await Promise.all([
+  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g, platform_category_id").eq("id", parentSkuId).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, description_image_keys, platform_product_id").eq("parent_sku_id", parentSkuId).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentSkuId).eq("is_active", true).order("code"),
     // 🛡️ กันซ้ำ (บทเรียน JEAN08 ถูกสร้างซ้ำ 6 รายการ ก.ค. 2026): มีรายการบน LINE ที่จับคู่สินค้านี้อยู่แล้ว · ไม่นับตัวที่ร้านลบไปแล้ว
     admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parentSkuId).or(LIVE_LISTING_OR).limit(1),
+    loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "platform_description"),   // ร่างที่ตรงค่าเก่า = สำเนา (lib/listing-description)
   ]);
   if (!parent) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
   const p = parent as Record<string, unknown>;
@@ -129,10 +132,12 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
     : catPath === mappedPath ? "หมวดกลางของสินค้า → หมวด LINE" : "เลือกไว้สำหรับ LINE";
 
   const descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? ""), dDesc = String(d.description ?? "");
-  const descRaw = dDesc || descPf || descMain;
-  const descText = noteToHtml(descRaw, LINE_DESC_HTML);
+  // คัดลอกจากร้านต้นทาง (ลงร้านอื่นจากรายการนี้) = ตั้งใจ ใช้ร่าง · นอกนั้น ตัวเลือกกลาง: ร่างที่คนแก้เอง → Platform Description (สำเนาค่าเก่า = ไม่นับ)
   const descCopied = dDesc.trim() ? copiedLabel(extra, "description", dDesc) : null;
-  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : descCopied ? descCopied : dDesc && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ LINE" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
+  const pick = descCopied ? { text: dDesc, src: descCopied } : pickListingDescription(dDesc, { platform_description: descPf, description: descMain, platform_description_history: descHist }, "LINE");
+  const descRaw = pick.text;
+  const descText = noteToHtml(descRaw, LINE_DESC_HTML);
+  const descSrc = pick.src;
 
   const brandVal = str(extra.brand) || brandName;
   const brandCopied = str(extra.brand) ? copiedLabel(extra, "brand", str(extra.brand)) : null;

@@ -26,6 +26,7 @@
  */
 import { noteToHtml, isHtmlNote } from "@/lib/rich-note";
 import { splitSkus } from "@/lib/lazada-create-plan";
+import { pickListingDescription } from "@/lib/listing-description";
 import { ttsAttrPayload, type TtsAttrField, type TtsAttrState, type TtsAttrVal, type TtsCategoryRules } from "@/lib/tiktok-attrs";
 import type { TtsSizeMeta } from "@/lib/tiktok-size-chart";
 import { isTiktokImageUrl, TTS_DESC_MAX, TTS_MAX_IMAGES, TTS_PRICE_MAX, TTS_PRICE_MIN, TTS_TITLE_MAX, TTS_TITLE_MIN, ttsTitleLength } from "@/lib/tiktok-listing-edit";
@@ -44,6 +45,8 @@ export type TtsCreateSku = {
 export type TtsCreateParent = {
   id: string; code: string; name_th: string | null; name_platform: string | null;
   description: string | null; platform_description: string | null;
+  /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า */
+  platform_description_history?: string[] | null;
   weight_g: number | null; box: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type TtsCreateDraft = {
@@ -151,10 +154,11 @@ export function planTiktokCreate(input: {
   if (!categoryId) missing.push("หมวด TikTok");
 
   // ---------- รายละเอียด ----------
-  const dDesc = String(d?.description ?? ""), descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? "");
-  const descRaw = dDesc.trim() ? dDesc : descPf.trim() ? descPf : descMain;
+  // ตัวเลือกกลาง: ร่างที่คนแก้เอง → Platform Description (ร่างที่เป็นสำเนา/สำเนาค่าเก่า = ไม่นับ) — lib/listing-description
+  const pick = pickListingDescription(String(d?.description ?? ""), p, "TikTok");
+  const descRaw = pick.text;
   const desc = descRaw.trim() ? ttsCreateDescriptionHtml(descRaw) : { html: "", cut: 0 };
-  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : dDesc.trim() && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ TikTok" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
+  const descSrc = pick.src;
   if (!desc.html.replace(/<[^>]+>/g, "").trim()) missing.push("รายละเอียดสินค้า");
   if (desc.html.length > TTS_DESC_MAX) missing.push(`รายละเอียดยาวเกิน ${TTS_DESC_MAX.toLocaleString()} ตัวอักษร (รวมโค้ดจัดรูปแบบ)`);
   if (desc.cut) warnings.push(`รูปในรายละเอียด ${desc.cut} รูปไม่ได้ส่ง (TikTok รับเฉพาะรูปที่ฝากกับ TikTok) — เพิ่มทีหลังได้ในลิ้นชักสินค้าบนร้าน`);

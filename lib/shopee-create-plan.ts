@@ -23,7 +23,8 @@
  *   ช่องบังคับของหมวด = ร่าง extra.shopee_attrs → ค่าจากสินค้าแบบหมวดเดียวกัน (เฉพาะช่องบังคับ) · น้ำหนัก = ร่าง extra.shopee_weight → น้ำหนักสินค้า
  */
 import { noteToText } from "@/lib/rich-note";
-import { pickListingDescription, splitSkus } from "@/lib/lazada-create-plan";
+import { splitSkus } from "@/lib/lazada-create-plan";
+import { pickListingDescription } from "@/lib/listing-description";
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
@@ -63,6 +64,8 @@ export type ShopeeCreateParent = {
   warranty?: string | null;
   /** Platform Description ที่ป๊อป Parent SKU โชว์ (คำนวณสด · loadParentComputedTexts) — มาก่อนคอลัมน์ platform_description ที่เป็นค่าเก่า */
   platform_description_live?: string | null;
+  /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า */
+  platform_description_history?: string[] | null;
   /** จำนวนรูป Description ของ Parent (Shopee ยังส่งไม่ได้ — บอกเฉย ๆ) */
   desc_image_count?: number;
   size?: { l: number | null; w: number | null; h: number | null } | null;
