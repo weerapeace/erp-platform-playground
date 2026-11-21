@@ -21,6 +21,8 @@
  * เจ้าของขอ 2026-11-21 ("ถ้าเปลี่ยนรูป/รายละเอียด/สี/ราคา แล้วร้านไม่ตรง เช็กได้ไหม + ปุ่มเปลี่ยนให้เลย"):
  *   ร้านที่ลงขายแล้ว → ป้าย "ไม่ตรงระบบ: รูป · ราคา …" / "ตรงกับระบบ" + ปุ่ม "อัปเดตให้ตรง" (MatchSystemDialog — เทียบก่อน/หลังแล้วค่อยยืนยันส่ง)
  *   ผลตรวจ = /api/platform-catalog/drift (ของกลาง lib/platform-listing-drift-server) · เปิดแท็บแล้วผลเก่าเกิน 20 ชม. = ตรวจใหม่เอง
+ * เจ้าของเลือก 2026-11-21 ข้อ 3 (บั๊ก LY22 ลง Lazada ทางอื่นแล้วแต่ขึ้น "พร้อมลง"): แถวร้านที่เช็กได้ (Lazada/Shopee/TikTok) บอก "ข้อมูลร้าน X ก่อน"
+ *      + ปุ่ม "เช็กกับร้าน" (POST /api/product-platforms/shop-check · ดึงเฉพาะตัวที่เปลี่ยนแล้วจับคู่) · ข้อมูลเก่าเกิน 2 ชม. → "ลงร้านนี้" เป็น "เช็กกับร้านก่อนลง"
  * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · MatchSystemDialog · ProductPlatformManager · PlatformDraftEditorModal · AddToPlatformWizard · ListingDrawer · ListingLinks
  */
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -35,6 +37,7 @@ import { isSellingPlatform } from "@/lib/selling-platforms";
 import { hasCreatePreview } from "@/lib/platform-create-registry";
 import { splitPlatformsByConnection } from "@/lib/platform-visibility";
 import { readinessText, type CreateReadiness } from "@/lib/platform-create-readiness";
+import { catalogAgeText, isCatalogStale } from "@/lib/catalog-refresh-plan";
 import { ListingLinks } from "@/components/platform-catalog/listing-links";
 import { DRIFT_STALE_HOURS, driftBadgeText, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
 
@@ -58,6 +61,8 @@ type Draft = { title?: string | null; category_path?: string | null; image_keys?
 type Account = { label: string | null; is_active: boolean; external_shop_id?: string | null };
 type Parent = { code?: string; name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null; brand_id?: string | null; brand_name?: string | null };
 type Matched = Record<string, { id?: string; external_id: string | null }>;
+/** ร้านที่เช็กกับร้านจริงได้ (ดึงเฉพาะตัวที่เปลี่ยน · app/api/platform-catalog/refresh-changed) */
+const SHOP_CHECKABLE = new Set(["lazada", "shopee", "tiktok"]);
 
 const isOnSaleOf = (d: Draft | undefined, m: Matched[string] | undefined) =>
   !!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id) || !!m;
@@ -85,6 +90,8 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [checkingDrift, setCheckingDrift] = useState(false);
   const [matchFor, setMatchFor] = useState<{ listingId: string; name: string } | null>(null);
   const driftSeqRef = useRef(0);
+  const [freshness, setFreshness] = useState<Record<string, string | null>>({});   // platform code → ข้อมูลร้านสดถึงเมื่อไร
+  const [checkingShop, setCheckingShop] = useState<string | null>(null);              // platform code ที่กำลังเช็กกับร้าน
   const { can } = useAuth();
   const toast = useToast();
   const canAdd = can("products.platforms.edit");
@@ -132,7 +139,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
     if (!parentId) return;
     setLoading(true);
     try {
-      const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
+      const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentId)}&with=freshness`).then((r) => r.json());
       const pfs = (j.platforms ?? []) as Platform[];
       const ds = (j.drafts ?? {}) as Record<string, Draft>;
       const accts = (j.accounts ?? {}) as Record<string, Account>;
@@ -141,6 +148,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setPlatforms(pfs); setDrafts(ds); setAccounts(accts); setMatched(ms); setHiddenCodes(hid);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setParent((j.parent ?? null) as Parent | null);
+      setFreshness((j.catalog_freshness ?? {}) as Record<string, string | null>);
       lastLoadRef.current = Date.now();
       loadedForRef.current = parentId;
       // ตรวจเฉพาะร้านที่โชว์ + มีตัวสร้าง + สินค้านี้ยังไม่อยู่บนร้าน
@@ -192,6 +200,23 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
     } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${(e as Error).message}`); }
     finally { setHidingCode(null); }
   }, [parent, toast, load]);
+
+  // เช็กกับร้านตอนนี้ (ดึงเฉพาะตัวที่เปลี่ยน แล้วดูว่าสินค้านี้อยู่บนร้านไหม) · thenAdd = ไม่เจอแล้วเปิดตัวช่วยลงสินค้าต่อ
+  const checkShop = useCallback(async (p: Platform, thenAdd = false) => {
+    if (!parentId) return;
+    setCheckingShop(p.code);
+    try {
+      const j = await apiFetch("/api/product-platforms/shop-check", { method: "POST", body: JSON.stringify({ parent_sku_id: parentId, platform_code: p.code }) }).then((r) => r.json()) as
+        { error: string | null; on_shop: { external_id: string | null } | null; fresh_at: string | null; refreshed: { ok: boolean; error: string | null } | null };
+      if (j.error) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${j.error}`); return; }
+      if (j.fresh_at) setFreshness((f) => ({ ...f, [p.code]: j.fresh_at }));
+      if (j.on_shop) { toast.success(`เจอสินค้านี้บน ${p.name_th} แล้ว${j.on_shop.external_id ? ` (#${j.on_shop.external_id})` : ""} — จับคู่ให้แล้ว ไม่ต้องลงซ้ำ`); void load(); return; }
+      if (j.refreshed && !j.refreshed.ok) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${j.refreshed.error ?? "ไม่ทราบสาเหตุ"} — ยังไม่แน่ใจว่ามีบนร้านหรือยัง`); return; }
+      toast.success(`ยังไม่มีบน ${p.name_th} (เช็กกับร้านเมื่อสักครู่)`);
+      if (thenAdd) setAddOn(p.code);
+    } catch (e) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setCheckingShop(null); }
+  }, [parentId, toast, load]);
 
   if (!parentId) return <div className="text-sm text-slate-400 py-8 text-center">บันทึกสินค้าก่อน แล้วค่อยตั้งค่าการขายแต่ละแพลตฟอร์ม</div>;
   if (loading && loadedForRef.current !== parentId) return <div className="text-sm text-slate-400 py-8 text-center">กำลังโหลด…</div>;
@@ -259,6 +284,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
         const drIssues = dr && !dr.error ? dr.issues : [];
         const drDiff = dr && !dr.error ? (dr.items ?? []).filter((i) => i.state === "diff") : [];
         const openMatch = () => { if (onShop?.id) setMatchFor({ listingId: onShop.id, name: p.name_th }); };
+        // เช็กกับร้านจริงได้ (ยังไม่อยู่บนร้าน · เชื่อมร้านแล้ว) — ข้อมูลร้านเก่าเกิน 2 ชม. = เตือน + ต้องเช็กก่อนลง
+        const checkable = SHOP_CHECKABLE.has(p.code) && !onSale && !!acct?.is_active && !isBrandHidden;
+        const freshAt = freshness[p.code] ?? null;
+        const stale = checkable && isCatalogStale(freshAt, Date.now());
         return (
           <div key={p.id} className={`rounded-xl border border-slate-200 overflow-hidden ${isBrandHidden ? "opacity-70" : ""}`}>
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
@@ -284,8 +313,21 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
                   <span className="truncate max-w-[18rem]">{dr.error ? "เทียบกับระบบไม่ได้" : driftBadgeText(drIssues)}</span>
                 </button>
               ) : checkingDrift ? <span className="text-[11px] text-slate-400">กำลังเทียบกับระบบ…</span> : null)}
+              {stale && (
+                <span title="รายการสินค้าจากร้านนี้ในระบบยังไม่อัปเดต — ถ้าเพิ่งลงสินค้านี้ทางอื่น (เช่น BigSeller) ระบบอาจยังไม่รู้ กดเช็กกับร้านก่อน"
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
+                  <Icon name="clock" />ข้อมูลร้าน {catalogAgeText(freshAt, Date.now())}
+                </span>
+              )}
               {extId && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{extId}</span>}
               <span className="ml-auto" />
+              {checkable && canAdd && (
+                <button type="button" disabled={checkingShop === p.code} onClick={() => void checkShop(p)}
+                  title={`ถาม ${p.name_th} ตอนนี้ว่ามีสินค้านี้แล้วหรือยัง (อ่านจากร้านอย่างเดียว · เจอแล้วจับคู่ให้)`}
+                  className="inline-flex items-center gap-1 text-xs border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-lg px-2 py-1.5 disabled:opacity-50">
+                  <span className={checkingShop === p.code ? "inline-flex animate-spin" : "inline-flex"}><Icon name="refresh" /></span>{checkingShop === p.code ? "กำลังเช็ก…" : "เช็กกับร้าน"}
+                </button>
+              )}
               {/* ลงขายแล้ว → ลิงก์ไปดูสินค้าที่ร้านจริง (หน้าร้าน + หลังร้าน) — ของกลาง lib/platform-links */}
               {onSale && extId && <ListingLinks platformCode={p.code} externalProductId={extId} shopRef={acct?.external_shop_id ?? null} />}
               {/* ซ่อน/แสดงร้านนี้ทั้งแบรนด์ (ไม่โชว์กับร้านที่สินค้านี้ขายอยู่ — ของที่ขายอยู่ห้ามหาย) */}
@@ -296,10 +338,13 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
                   <Icon name={isBrandHidden ? "view" : "hide"} />{isBrandHidden ? "แสดงร้านนี้" : "ซ่อน"}
                 </button>
               )}
-              {showAdd && !isBrandHidden && (
+              {showAdd && !isBrandHidden && (stale ? (
+                <button type="button" disabled={checkingShop === p.code} onClick={() => void checkShop(p, true)} title="ข้อมูลร้านยังไม่อัปเดต — เช็กกับร้านก่อนว่ายังไม่มีสินค้านี้ แล้วเปิดตัวช่วยลงสินค้า (กันลงซ้ำ)"
+                  className="text-xs border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5 disabled:opacity-50">เช็กกับร้านก่อนลง</button>
+              ) : (
                 <button type="button" onClick={() => setAddOn(p.code)} title="ตรวจความครบ แล้วลงสินค้านี้ขึ้นร้าน (หรือบันทึกร่าง)"
                   className="text-xs border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5">ลงร้านนี้</button>
-              )}
+              ))}
               {onShop?.id ? (
                 <>
                   {drIssues.length > 0 && (
@@ -319,7 +364,8 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
               <Row label="ชื่อ" value={name} />
               <Row label="หมวดหมู่" value={catValue} warn={catValue === "— ยังไม่ตั้ง"} hint={fromCentral ? "จากหมวดกลาง" : undefined} />
               <Row label={rdv ? "รูปที่จะส่ง" : "รูปที่เลือกส่ง"} value={`${imgCount} รูป`} warn={!imgCount} hint={rdv && !d.image_keys?.length && imgCount ? "จากสินค้า" : undefined} />
-              <Row label="ร้าน" value={acct?.is_active ? (acct.label || "มีร้าน") : "ยังไม่มีร้าน"} warn={!acct?.is_active} />
+              <Row label="ร้าน" value={acct?.is_active ? (acct.label || "มีร้าน") : "ยังไม่มีร้าน"} warn={!acct?.is_active}
+                hint={checkable ? `ข้อมูลร้าน ${catalogAgeText(freshAt, Date.now())}` : undefined} />
               {drDiff.length > 0 && (
                 <div className="sm:col-span-2 flex flex-wrap gap-1 pt-1">
                   {drDiff.map((i) => <span key={i.key} className="max-w-full truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">{i.summary}</span>)}

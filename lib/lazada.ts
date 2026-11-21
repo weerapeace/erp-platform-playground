@@ -290,9 +290,11 @@ export function planLazAppClear(current: LazAppCurrent, locked: boolean): { ok: 
 
 // ---- สินค้าบนร้าน (อ่านอย่างเดียว · ดึงเข้าหน้า "สินค้าบนแพลตฟอร์ม") ----
 // GET /products/get · filter=all (ไม่รวมที่ลบแล้ว) · ได้ครั้งละไม่เกิน 50 ตัว
-export async function lazGetProducts(gateway: LazGateway, accessToken: string, opts: { offset?: number; limit?: number; filter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {
+// updateAfter (ISO 8601) = เฉพาะตัวที่แก้/สร้างหลังเวลานี้ — ดึง "เฉพาะตัวที่เปลี่ยน" (app/api/platform-catalog/refresh-changed)
+export async function lazGetProducts(gateway: LazGateway, accessToken: string, opts: { offset?: number; limit?: number; filter?: string; updateAfter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {
   const j = await lazApiGet(gateway, "/products/get", accessToken, {
     filter: opts.filter ?? "all", offset: String(opts.offset ?? 0), limit: String(Math.min(50, opts.limit ?? 50)),
+    ...(opts.updateAfter ? { update_after: opts.updateAfter } : {}),
   });
   const data = j.data as { products?: Record<string, unknown>[]; total_products?: number | string } | undefined;
   return { products: data?.products ?? [], total: Number(data?.total_products ?? 0) || 0 };

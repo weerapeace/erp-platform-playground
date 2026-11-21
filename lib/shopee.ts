@@ -226,9 +226,13 @@ export function shopeeItemListOf(j: Obj): ShopeeItemPage {
   return { items, total: num(r.total_count) ?? 0, hasNext: r.has_next_page === true, nextOffset: num(r.next_offset) ?? 0 };
 }
 
-export async function shopeeGetItemList(accessToken: string, shopId: string | number, args: { status: string; offset: number; pageSize: number }): Promise<ShopeeItemPage> {
+/** updateTimeFrom/To (unix วินาที) = เฉพาะตัวที่แก้ในช่วงนี้ — ดึง "เฉพาะตัวที่เปลี่ยน" (app/api/platform-catalog/refresh-changed) · ไม่ส่ง = ทั้งหมด */
+export async function shopeeGetItemList(accessToken: string, shopId: string | number, args: { status: string; offset: number; pageSize: number; updateTimeFrom?: number; updateTimeTo?: number }): Promise<ShopeeItemPage> {
   return shopeeItemListOf(await shopeeFetch("/api/v2/product/get_item_list", {
-    accessToken, shopId, query: { offset: args.offset, page_size: Math.min(100, Math.max(1, args.pageSize)), item_status: args.status },
+    accessToken, shopId, query: {
+      offset: args.offset, page_size: Math.min(100, Math.max(1, args.pageSize)), item_status: args.status,
+      ...(args.updateTimeFrom ? { update_time_from: args.updateTimeFrom } : {}), ...(args.updateTimeTo ? { update_time_to: args.updateTimeTo } : {}),
+    },
   }));
 }
 

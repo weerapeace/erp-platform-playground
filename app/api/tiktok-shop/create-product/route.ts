@@ -21,6 +21,7 @@ import { upsertCatalogListings } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
 import { loadTiktokCreate, type TtsLastAttempt } from "./load";
 import { ttsGetProductRetry, ttsUploadRef } from "../shared";
+import { guardNotOnShop } from "../../platform-catalog/refresh-changed";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,6 +56,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const done = (key: string, label: string, detail?: string) => steps.push({ key, label, state: "ok", ...(detail ? { detail } : {}) });
   const bad = (key: string, label: string, detail: string) => steps.push({ key, label, state: "fail", detail });
   const stop = (error: string, status: number) => NextResponse.json({ ok: false, error, steps }, { status });
+
+  // 🛡️ กันลงซ้ำ (เจ้าของเลือก 2026-11-21 · บั๊ก LY22): เช็กกับร้านก่อน — ดึงเฉพาะตัวที่เปลี่ยนแล้วจับคู่ (ลงทางอื่น เช่น BigSeller แล้วระบบยังไม่รู้) · app/api/platform-catalog/refresh-changed
+  const shopGuard = await guardNotOnShop(admin, "tiktok", "TikTok", parentId, 10_000);
+  if (shopGuard) { bad("shop_check", "เช็กกับร้าน", shopGuard.error); return stop(shopGuard.error, shopGuard.status); }
+  done("shop_check", "เช็กกับร้าน", "ยังไม่มีสินค้านี้บนร้าน");
 
   const r = await loadTiktokCreate(admin, parentId, actorId);
   if (!r.ok) { bad("check", "ตรวจข้อมูล", r.error); return stop(r.error, r.status); }

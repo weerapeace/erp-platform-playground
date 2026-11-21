@@ -22,6 +22,7 @@ import { upsertCatalogListings } from "@/lib/platform-catalog-sync";
 import { LAZADA_CREATE_LIVE } from "@/lib/platform-create-registry";
 import { loadLazadaCreate } from "./load";
 import { lazWithRetry } from "../shared";
+import { guardNotOnShop } from "../../platform-catalog/refresh-changed";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,6 +55,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const actorId = user?.id ?? null; const actorName = user?.email ?? null;
   const admin = supabaseAdmin();
+
+  // 🛡️ กันลงซ้ำ (เจ้าของเลือก 2026-11-21 · บั๊ก LY22): เช็กกับร้านก่อน — ดึงเฉพาะตัวที่เปลี่ยนแล้วจับคู่ (ลงทางอื่น เช่น BigSeller แล้วระบบยังไม่รู้) · app/api/platform-catalog/refresh-changed
+  const shopGuard = await guardNotOnShop(admin, "lazada", "Lazada", parentId);
+  if (shopGuard) return NextResponse.json({ ok: false, error: shopGuard.error }, { status: shopGuard.status });
 
   const r = await loadLazadaCreate(admin, parentId, actorId);
   if (!r.ok) return NextResponse.json({ ok: false, error: r.error }, { status: r.status });
