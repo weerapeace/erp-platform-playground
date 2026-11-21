@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!UUID.test(id)) return NextResponse.json({ data: null, error: "รหัสงานไม่ถูกต้อง" }, { status: 400 });
 
   const r = await loadTaskImages(supabaseAdmin(), id, {
-    parentCols: ", introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm, warranty, weight_g, platform_category_id",
+    parentCols: ", introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm, warranty, weight_g, category_id, category_name",
     skuCols: ", color_platform_th, color_platform_en, list_price, fake_price",
   });
   if (!r.ok) return NextResponse.json({ data: null, error: r.status === 404 ? r.error : friendlyDbError(r.error) }, { status: r.status });
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       introduction: str(row.introduction), description: str(row.description), english_description: str(row.english_description),
       size: l || h || t ? { length: l, height: h, thickness: t } : null,
       // ช่องเพิ่มสำหรับรายการ "ยังขาดอะไร" ในลิ้นชักงาน (lib/task-readiness)
-      warranty: str(row.warranty), weight_g: num(row.weight_g), platform_category_id: row.platform_category_id != null ? String(row.platform_category_id) : null,
+      warranty: str(row.warranty), weight_g: num(row.weight_g), category_id: row.category_id != null ? String(row.category_id) : null, category_name: str(row.category_name),
       parent_images: p.images.length, description_images: p.description.length, thumbs: p.images.slice(0, 6).map((x) => x.key),
       skus: p.skus.map((s) => {
         const sr = sRow.get(s.id) ?? {};

@@ -6,7 +6,7 @@ const full: ReadinessParent = {
   introduction: null, description: "หนังแท้\nขนาด 20 ซม.", english_description: "Genuine leather\nSize 20 cm",
   size: { length: 20, height: 15, thickness: 8 }, parent_images: 3, description_images: 0,
   skus: [{ code: "LY22-BK", color_th: "ดำ", color_en: "Black", list_price: 590, fake_price: 990, images: 2 }],
-  warranty: "1 ปี", weight_g: 400, platform_category_id: "c1",
+  warranty: "1 ปี", weight_g: 400, category_id: "c1",
 };
 
 describe("taskReadiness", () => {
@@ -16,7 +16,7 @@ describe("taskReadiness", () => {
     expect(readinessSummary(items)).toEqual({ done: 9, total: 9, missing: 0 });
   });
   it("จับข้อที่ขาด + บอก Parent ที่ต้องแก้", () => {
-    const p: ReadinessParent = { ...full, warranty: null, weight_g: null, skus: [{ ...full.skus[0], fake_price: null }], platform_category_id: null };
+    const p: ReadinessParent = { ...full, warranty: null, weight_g: null, skus: [{ ...full.skus[0], fake_price: null }], category_id: null };
     const items = taskReadiness([p], DEFAULT_READINESS, { platforms: ["shopee", "line"], listed: { shopee: true, line: false } });
     const bad = items.filter((i) => !i.ok).map((i) => i.key).sort();
     expect(bad).toEqual(["category", "platform", "price", "size", "warranty"]);

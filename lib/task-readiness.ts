@@ -21,7 +21,9 @@ export const READINESS_DEFS: { key: ReadinessKey; label: string; label_en: strin
   { key: "size", label: "ขนาด / น้ำหนัก", label_en: "Size / weight", hint: "ใส่ขนาด (กว้าง×สูง×หนา) และน้ำหนัก" },
   { key: "color", label: "ชื่อสีไทย/อังกฤษ", label_en: "Color names", hint: "ทุก SKU มีชื่อสีไทยและอังกฤษ ถูกภาษา" },
   { key: "platform", label: "ลงครบทุก Platform", label_en: "All platforms listed", hint: "ทุกร้านที่เลือกในงานลงสินค้าแล้ว" },
-  { key: "category", label: "หมวดหมู่ร้าน", label_en: "Shop category", hint: "ตั้งหมวดหมู่ Platform ของ Parent แล้ว" },
+  // หมวดหมู่ร้านบนแต่ละ Platform เลือกตอนลงสินค้า (ตัวช่วยลงร้าน) ไม่ได้เก็บที่ Parent — ช่อง platform_category_id ใช้แค่ 1/1,472 รุ่น
+  // จึงเช็ก "หมวดหมู่สินค้า" ของ Parent (category_id · มีข้อมูล 1,442/1,472) แทน — แก้หลังตรวจข้อมูลจริง 2026-11-21
+  { key: "category", label: "หมวดหมู่สินค้า", label_en: "Product category", hint: "ตั้งหมวดหมู่สินค้าของ Parent แล้ว (หมวดบนร้านเลือกตอนลงสินค้า)" },
 ];
 /** ค่าเริ่มต้น (ยังไม่ตั้ง) = ชุดที่เจ้าของเลือก 2026-11-21 */
 export const DEFAULT_READINESS: ReadinessKey[] = ["desc", "warranty", "price", "sku", "img", "size", "color", "platform", "category"];
@@ -42,8 +44,8 @@ export function readinessKeysFor(rules: ReadinessRules | null, taskType: string 
   return rules?.default ?? DEFAULT_READINESS;
 }
 
-/** ข้อมูล Parent ที่ใช้เช็ก = ข้อมูลตรวจเร็ว + ช่องเพิ่ม (รับประกัน/น้ำหนัก/หมวดร้าน) */
-export type ReadinessParent = QuickCheckParent & { warranty?: string | null; weight_g?: number | null; platform_category_id?: string | null };
+/** ข้อมูล Parent ที่ใช้เช็ก = ข้อมูลตรวจเร็ว + ช่องเพิ่ม (รับประกัน/น้ำหนัก/หมวดสินค้า) */
+export type ReadinessParent = QuickCheckParent & { warranty?: string | null; weight_g?: number | null; category_id?: string | null; category_name?: string | null };
 /** สถานะลงร้าน: code ร้าน → ลงครบทุกรุ่นไหม (ร้านที่ระบบลงสินค้าไม่ได้ = ไม่อยู่ใน map) · null = ยังโหลดไม่เสร็จ */
 export type PlatformListed = Record<string, boolean> | null;
 
@@ -90,7 +92,7 @@ export function taskReadiness(parents: ReadinessParent[], keys: ReadinessKey[], 
       if (def.key === "size" && !(Number(p.weight_g) > 0)) fail(p, "ยังไม่ใส่น้ำหนัก");
       if (def.key === "warranty" && !String(p.warranty ?? "").trim()) fail(p, "ยังไม่ตั้งข้อมูลรับประกัน");
       if (def.key === "sku" && !p.skus.length) fail(p, "ยังไม่มี SKU");
-      if (def.key === "category" && !p.platform_category_id) fail(p, "ยังไม่ตั้งหมวดหมู่ร้าน");
+      if (def.key === "category" && !p.category_id) fail(p, "ยังไม่ตั้งหมวดหมู่สินค้า");
     }
     out.push(item);
   }
