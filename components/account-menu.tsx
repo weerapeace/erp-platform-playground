@@ -19,7 +19,6 @@ import { LangToggle, useT } from "@/components/i18n";
 import { openPipWindow, pipSupported } from "@/components/pip-window";
 import { DEPLOY_PIP_SIZE } from "@/lib/deploy-queue";
 import { ThemeSync } from "@/components/theme-sync";
-import { ProfileEditor } from "@/components/profile-editor";
 import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
@@ -30,6 +29,8 @@ import { DevicePreviewModal } from "@/components/device-preview";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
 import dynamic from "next/dynamic";
 // สวิตช์ตัว Pet อยู่ในเมนูที่กดเปิด → โหลดตอนเปิดเมนู (ไม่ถ่วงทุกหน้า · ลดขนาดโครงแอป 2026-11-20)
+// หน้าแก้โปรไฟล์อยู่ในป๊อปที่กดเปิด → โหลดตอนเปิด
+const ProfileEditor = dynamic(() => import("@/components/profile-editor").then((m) => m.ProfileEditor), { ssr: false });
 const WorkPopupFloatToggle = dynamic(() => import("@/components/work-popup/float").then((m) => m.WorkPopupFloatToggle), { ssr: false });
 // เปิดหน้าใหม่ให้เช็กหลังส่งขึ้นร้าน (ค่าตั้งต่อคน · components/push-open) — โหลดเมื่อเปิดหน้าตั้งค่า
 const PushOpenSettingsModal = dynamic(() => import("@/components/push-open").then((m) => m.PushOpenSettingsModal), { ssr: false });

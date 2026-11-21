@@ -23,10 +23,12 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { useCanHover } from "@/lib/use-can-hover";
-import { ImageFreeCropModal } from "@/components/image-crop-picker";
+import dynamic from "next/dynamic";
 import { prepareResizedImage } from "@/components/image-attach";
-import { StraightenModal } from "./straighten-modal";
-import { WebCameraModal } from "./web-camera";
+// ป๊อปครอป / ดัดให้ตรง / กล้องในเว็บ โหลดตอนเปิดใช้ครั้งแรก — ไม่ถ่วงทุกหน้าที่มีช่องอัปรูป (ลดขนาดโค้ด 2026-11-21)
+const ImageFreeCropModal = dynamic(() => import("@/components/image-crop-picker").then((m) => m.ImageFreeCropModal), { ssr: false });
+const StraightenModal = dynamic(() => import("./straighten-modal").then((m) => m.StraightenModal), { ssr: false });
+const WebCameraModal = dynamic(() => import("./web-camera").then((m) => m.WebCameraModal), { ssr: false });
 
 export type PhotoCaptureOptions = {
   onFiles: (files: File[]) => void | Promise<void>;
