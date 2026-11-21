@@ -40,7 +40,9 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import { TaskPlatformListing } from "./task-platform-listing";
-import { TaskBriefBoard, TaskReferenceBoard, taskReferenceUrl } from "./task-reference-board";
+import { TaskBriefBoard } from "./task-reference-board";
+import { copyText } from "@/components/copy-button";
+import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { InfoHint } from "@/components/info-hint";
@@ -169,7 +171,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [imagesOpen, setImagesOpen] = useState(false); // ป๊อปดูรูปอย่างเดียว (แบ่งกลุ่ม Parent/SKU/Description/คอนเทนต์)
   const [quickOpen, setQuickOpen] = useState(false);   // แผงตรวจสินค้าเร็ว (ดูอย่างเดียว + อนุมัติ/ตีกลับ)
-  const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
+  const [refEdit, setRefEdit] = useState(false);  // เปิดตัวแก้โน้ตอ้างอิง (ใต้รายละเอียดงาน — แท็บอ้างอิงเลิกใช้ 2026-11-21 · กระดาน = กระดานบรีฟ)
+  const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
   const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
   const [refSaving, setRefSaving] = useState(false);
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
@@ -196,9 +199,16 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   useEffect(() => { load(); }, [load]);
   // sync เนื้อหาอ้างอิงตอนเปลี่ยนงาน (ไม่ override ระหว่างพิมพ์)
   useEffect(() => { setRefHtml(detail?.reference_html ?? ""); }, [detail?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const saveRef = async () => { if (!detail) return; setRefSaving(true); try { await updateTask(detail.id, { reference_html: refHtml }); pushToast("success", t("บันทึกอ้างอิงแล้ว", "Reference saved")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setRefSaving(false); } };
+  const saveRef = async () => { if (!detail) return; setRefSaving(true); try { await updateTask(detail.id, { reference_html: refHtml }); pushToast("success", t("บันทึกอ้างอิงแล้ว", "Reference saved")); setRefEdit(false); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setRefSaving(false); } };
 
   const refresh = async () => { await load(); await onChanged(); };
+  // คัดลอกลิงก์งาน = ลิงก์เต็มในระบบ /tasks?task=<id> (หน้างานเปิดลิ้นชักนี้ให้เอง) — เจ้าของขอ 2026-11-21
+  const copyTaskLink = async () => {
+    if (!detail) return;
+    const url = `${window.location.origin}/tasks?task=${encodeURIComponent(detail.id)}`;
+    if (await copyText(url)) pushToast("success", t(`คัดลอกลิงก์งาน ${detail.title} แล้ว`, `Copied link to ${detail.title}`));
+    else pushToast("error", t("คัดลอกไม่สำเร็จ — ลองใหม่", "Copy failed — try again"));
+  };
   const startEdit = () => {
     const d = detail; if (!d) return;
     setEf({ task_type: d.task_type ?? "", priority: d.priority, brand_id: d.brand_id ?? "", due_date: d.due_date ?? "", platforms: d.platforms ?? [] });
@@ -290,6 +300,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <span className="ml-2 inline-flex align-middle"><PlanLinkedBadge kind="task" id={d.id} className="inline-flex h-6 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100" /></span>
           </div>
           <div className="flex items-center gap-1">
+            <button onClick={copyTaskLink} title={t("คัดลอกลิงก์เปิดงานนี้", "Copy link to this task")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="link" /><span className="hidden sm:inline">{t("ลิงก์", "Link")}</span></button>
             <button onClick={() => setQuickOpen(true)} title={t("ตรวจสินค้าเร็ว: Description · สี · ราคา · รูป (ดูอย่างเดียว)", "Quick product check: description, colors, prices, images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="inspect" />{t("ตรวจเร็ว", "Quick check")}</button>
             <button onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (ดูอย่างเดียว)", "View all task images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
@@ -319,7 +330,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
           <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100" style={{ borderColor: dividerColorOf(dth) }}>
-            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0], ["reference", t("📎 อ้างอิง", "📎 Reference"), (d.reference_html ?? "").trim() ? 1 : 0]] as const).map(([k, label, count]) => (
+            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
               <button key={k} onClick={() => setTab(k)} style={tab === k ? { background: `${dth.accent}1f`, color: dth.accent } : undefined} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "" : "text-slate-500 hover:bg-slate-50"}`}>
                 {label}{count > 0 && <span className="text-[11px] rounded-full px-1.5" style={tab === k ? { background: `${dth.accent}33`, color: dth.accent } : { background: "#e2e8f0", color: "#475569" }}>{count}</span>}
               </button>
@@ -351,6 +362,28 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                       className="text-xs font-medium text-white bg-violet-600 rounded px-2.5 py-1 hover:bg-violet-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
                   </div>
                 </div>
+              )}
+
+              {/* โน้ตอ้างอิง (reference_html) — ย้ายมาจากแท็บอ้างอิงที่เลิกใช้ (เจ้าของเลือก 2026-11-21) · มีโน้ต = โชว์ (คลิกแก้) · ไม่มี = ปุ่มเพิ่มเล็ก ๆ */}
+              {refEdit ? (
+                <div className="bg-white rounded-lg p-3 border border-violet-200 space-y-2">
+                  <p className="text-xs text-slate-400">📝 {t("โน้ตอ้างอิง — หัวข้อ/ลิสต์/ลิงก์/รูป (วาง Ctrl+V)", "Reference notes — headings, lists, links, images (paste Ctrl+V)")}</p>
+                  <RichTextEditor value={refHtml} onChange={setRefHtml} minHeight={180}
+                    placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
+                    onUploadImage={async (f) => { const r = await uploadResizedImage(f, { folder: "creative-tasks", max: 1600 }); return r2ImageUrl(r.r2_key) ?? ""; }} />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => { setRefHtml(d.reference_html ?? ""); setRefEdit(false); }} className="text-xs text-slate-500 hover:underline">{t("ยกเลิก", "Cancel")}</button>
+                    <button type="button" onClick={saveRef} disabled={refSaving} className="text-xs font-medium text-white bg-violet-600 rounded px-2.5 py-1 hover:bg-violet-700 disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
+                  </div>
+                </div>
+              ) : (d.reference_html ?? "").trim() ? (
+                <div role="button" tabIndex={0} onClick={() => setRefEdit(true)} onKeyDown={(e) => { if (e.key === "Enter") setRefEdit(true); }}
+                  className="w-full text-left bg-slate-50 rounded-lg p-3 text-sm hover:bg-slate-100 transition-colors group cursor-pointer">
+                  <p className="text-xs text-slate-400 mb-1">📝 {t("โน้ตอ้างอิง", "Reference notes")} <span className="opacity-0 group-hover:opacity-100 text-slate-300">✎</span></p>
+                  <div className="prose prose-sm max-w-none text-slate-600 [&_img]:max-h-48" dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(d.reference_html) }} />
+                </div>
+              ) : (
+                <button type="button" onClick={() => setRefEdit(true)} className="text-xs text-slate-400 hover:text-violet-700">+ {t("โน้ตอ้างอิง", "Reference notes")}</button>
               )}
 
               {/* กระดานบรีฟ — แทนช่องแนบรูปบรีฟเดิม (เจ้าของเลือก 2026-11-21) · รูปบรีฟเดิม (reference_images) ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก ไม่ลบของเดิม */}
@@ -592,11 +625,6 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     </div>
                   )}
 
-                  {/* กระดานอ้างอิง — ทางลัดไปแท็บอ้างอิง / เปิดเต็มจอ */}
-                  <div style={{ order: tOrderOf("platform") }} className="flex gap-1.5">
-                    <button type="button" onClick={() => setTab("reference")} className="flex-1 h-8 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">🎨 {t("กระดานอ้างอิง", "Reference board")}</button>
-                    <a href={taskReferenceUrl(d.id)} target="_blank" rel="noreferrer" title={t("เปิดเต็มจอ (แท็บใหม่)", "Open full screen (new tab)")} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-xs text-slate-500 hover:bg-slate-50">⛶</a>
-                  </div>
 
                   {/* ข้อมูลอื่น — แต่ละช่องเป็นส่วนเดี่ยว ซ่อน/จัดลำดับได้ (↑↓ ที่ 🎨) */}
                   {!isHidden(dth, "task_type") && (<div style={{ order: tOrderOf("task_type") }} className="pt-2 border-t border-slate-100">
@@ -703,20 +731,6 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           {tab === "content" && (
             <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />
           )}
-          {tab === "reference" && (
-            <div className="p-5">
-            <TaskReferenceBoard taskId={d.id} hasNotes={!!(d.reference_html ?? "").trim()} notes={
-            <div className="space-y-2">
-              <p className="text-xs text-slate-400">{t("โน้ต/ข้อมูลอ้างอิงของงานนี้ — ใส่หัวข้อ/ลิสต์/ลิงก์/รูปได้ (วาง Ctrl+V)", "Notes / references for this task — headings, lists, links, images (paste Ctrl+V)")}</p>
-              <RichTextEditor value={refHtml} onChange={setRefHtml} minHeight={320}
-                placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
-                onUploadImage={async (f) => { const r = await uploadResizedImage(f, { folder: "creative-tasks", max: 1600 }); return r2ImageUrl(r.r2_key) ?? ""; }} />
-              <div className="flex justify-end">
-                <button onClick={saveRef} disabled={refSaving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
-              </div>
-            </div>} />
-            </div>
-          )}
         </div>
 
         {assetPickerOpen && (
@@ -742,6 +756,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         )}
         {/* footer actions — งานที่มีงานย่อย: คนทั่วไปเห็นสถานะอ่านอย่างเดียว (สถานะมาจากงานย่อย) · แอดมิน/ผจก.ยังกดได้ */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
+          {/* คัดลอกลิงก์งาน (เปิดลิ้นชักงานนี้ตรง ๆ) */}
+          <button type="button" onClick={copyTaskLink} title={t("คัดลอกลิงก์เปิดงานนี้", "Copy link to this task")} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 inline-flex items-center gap-1.5 shrink-0"><Icon name="link" />{t("คัดลอกลิงก์", "Copy link")}</button>
           {hasSubtasks && !isManager ? (
             <div className="w-full flex items-center justify-center gap-2 flex-wrap">
               <span className="text-sm text-slate-400">{t("สถานะ", "Status")}:</span>

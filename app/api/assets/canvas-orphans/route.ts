@@ -22,6 +22,7 @@ import { getR2Binding, r2ListObjects, r2MoveToTrash } from "@/lib/r2";
 import { r2KeysReferencedBatch } from "@/lib/r2-refs";
 import { writeAudit } from "@/lib/audit";
 import { actorId } from "../shared";
+import { extractKeys } from "@/lib/canvas-r2-keys";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,17 +55,6 @@ function uploadedFromKey(key: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-/** ดึงคีย์ R2 ในโฟลเดอร์กระดานทุกตัวที่ปรากฏในข้อความ (ทั้งแบบตรง และแบบ encode ใน ?key=) */
-function extractKeys(text: string, out: Set<string>) {
-  if (!text) return;
-  const plain = /canvassketch\/[A-Za-z0-9_\-./]+/g;
-  let m: RegExpExecArray | null;
-  while ((m = plain.exec(text))) out.add(m[0]);
-  const enc = /key=([A-Za-z0-9%_\-.]+)/g;
-  while ((m = enc.exec(text))) {
-    try { const k = decodeURIComponent(m[1]); if (k.startsWith(PREFIX)) out.add(k); } catch { /* ข้าม */ }
-  }
-}
 
 async function analyze(minAgeDays: number): Promise<{ report: CanvasOrphanReport; eligibleKeys: CanvasOrphan[] } | { error: string; status: number }> {
   const admin = supabaseAdmin();

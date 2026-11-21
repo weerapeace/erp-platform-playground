@@ -15,6 +15,7 @@ import { Icon } from "@/components/icon";
 import { StorageProviderBadge } from "@/components/storage-rules";
 import type { OtherStorageUsage } from "@/lib/storage-policy";
 import { CanvasCleanupModal } from "./canvas-cleanup-modal";
+import { BoardUsagePanel } from "./board-usage-panel";
 
 type Usage = {
   bucket: string;
@@ -46,6 +47,7 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);   // กางรายละเอียดรายโฟลเดอร์
   const [cleanupOpen, setCleanupOpen] = useState(false);   // ป๊อปล้างรูปกระดานที่ไม่ได้ใช้
+  const [boardsOpen, setBoardsOpen] = useState(false);   // กางรูปกระดานแยกตามกระดาน
   const [others, setOthers] = useState<OtherStorageUsage | null>(null);   // Supabase + Drive
 
   const load = useCallback(async () => {
@@ -120,11 +122,18 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
       {open && usage && (
         <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
           {usage.folders.map((f) => (
-            <div key={f.prefix} className="flex items-center gap-2">
-              <span className="w-40 shrink-0 truncate text-[11px] text-slate-600" title={f.prefix}>{label(f.prefix)}</span>
-              <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400 rounded-full" style={{ width: `${Math.max(2, Math.round((f.bytes / max) * 100))}%` }} /></div>
-              <span className="w-20 shrink-0 text-right text-[11px] font-medium text-slate-700">{formatBytes(f.bytes)}</span>
-              <span className="w-16 shrink-0 text-right text-[10px] text-slate-400">{f.count.toLocaleString()}</span>
+            <div key={f.prefix}>
+              <div className="flex items-center gap-2">
+                <span className="w-40 shrink-0 truncate text-[11px] text-slate-600" title={f.prefix}>{label(f.prefix)}</span>
+                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400 rounded-full" style={{ width: `${Math.max(2, Math.round((f.bytes / max) * 100))}%` }} /></div>
+                <span className="w-20 shrink-0 text-right text-[11px] font-medium text-slate-700">{formatBytes(f.bytes)}</span>
+                <span className="w-16 shrink-0 text-right text-[10px] text-slate-400">{f.count.toLocaleString()}</span>
+              </div>
+              {/* รูปกระดาน → กางดูแยกตามกระดาน (กระดานไหนกิน R2 เท่าไหร่) */}
+              {f.prefix === "canvassketch" && (
+                <button type="button" onClick={() => setBoardsOpen((s) => !s)} className="ml-2 text-[11px] text-violet-600 hover:underline">{boardsOpen ? t("ย่อรายกระดาน ▲", "Hide boards ▲") : t("แยกตามกระดาน ▾", "By board ▾")}</button>
+              )}
+              {f.prefix === "canvassketch" && boardsOpen && <BoardUsagePanel canManage={canManage} onOpenCleanup={() => setCleanupOpen(true)} pushToast={pushToast} />}
             </div>
           ))}
         </div>

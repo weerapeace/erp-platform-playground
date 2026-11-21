@@ -6,7 +6,7 @@
  * ดึงจาก /api/parent-skus/[id]/overview (guardApi products.view) + /api/parent-skus/[id]/links
  */
 import { useEffect, useState, useCallback, type ReactNode } from "react";
-import { taskReferenceUrl } from "@/app/tasks/task-reference-board";
+import { taskBriefUrl } from "@/app/tasks/task-reference-board";
 import { apiFetch } from "@/lib/api";
 import { postTypeLabel } from "@/lib/creative-tasks";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -76,7 +76,7 @@ function CreativeItemsModal({ parentId, onClose }: { parentId: string; onClose: 
               <div className="text-xs font-medium text-slate-500 mb-1.5">🗂 งาน/ถ่าย/โพสต์ ({data.tasks.length})</div>
               {List(data.tasks, (t) => t.task_type, "— ยังไม่มีงาน —", (tk) => (<>
                 <a href={`/tasks?task=${encodeURIComponent(tk.id)}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-violet-600 hover:underline shrink-0">เปิดงาน</a>
-                <a href={taskReferenceUrl(tk.id)} target="_blank" rel="noopener noreferrer" title="กระดานอ้างอิงของงานนี้" className="text-[11px] text-violet-600 hover:underline shrink-0">🎨 อ้างอิง</a>
+                <a href={taskBriefUrl(tk.id)} target="_blank" rel="noopener noreferrer" title="กระดานบรีฟของงานนี้" className="text-[11px] text-violet-600 hover:underline shrink-0">🎨 กระดานบรีฟ</a>
               </>))}
             </section>
             <section>
