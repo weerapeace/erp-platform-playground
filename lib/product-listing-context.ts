@@ -147,7 +147,9 @@ export async function loadListingContext(admin: Admin, parentId: string): Promis
   // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน) · ตัวที่ยังอยู่บนร้านมาก่อนตัวที่ร้านลบแล้ว
   //   🐛 2026-11-21: เดิมได้ตัวแรกที่เจอ → BBP03 TikTok ได้รายการที่ร้านลบไปแล้ว (ปุ่ม "จัดการบนร้าน" เปิดตัวที่ไม่อยู่บนร้าน + ไม่มีป้ายเทียบกับระบบ)
   const matchedListings: ListingContext["matchedListings"] = {};
-  for (const l of ((matchedL ?? []) as Row[]).sort((a, b) => Number(isGoneStatus(a.status as string | null)) - Number(isGoneStatus(b.status as string | null)))) {
+  //   ลำดับ: เปิดขาย → ปิดขาย/ซ่อน (เช่น Shopee unlist) → ร้านลบแล้ว
+  const rank = (st: unknown) => { const s = String(st ?? "").toLowerCase(); return isGoneStatus(s) ? 2 : /unlist|inactive|deactivat|banned|deleted|draft/.test(s) ? 1 : 0; };
+  for (const l of ((matchedL ?? []) as Row[]).sort((a, b) => rank(a.status) - rank(b.status))) {
     const pid = String(l.platform_id);
     if (!matchedListings[pid]) matchedListings[pid] = { id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null };
   }
