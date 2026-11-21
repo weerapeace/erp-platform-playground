@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import {
-  compareAll, driftIssues, listSig, type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
+  compareAll, driftIssues, listSig, plainText, type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
 } from "@/lib/platform-listing-drift";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { loadLazadaCreate } from "@/app/api/lazada/create-product/load";
@@ -49,6 +49,8 @@ export type DriftFail = { ok: false; error: string; status: number };
 type Ctx = {
   code: string; listingId: string; parentId: string | null;
   sys: SystemValues; shop: ShopValues; sync: SysSync | null;
+  /** รายละเอียดฝั่งระบบมาจาก "ร่างของร้านที่แก้ไว้" → note เตือน · block = ร่างมีข้อความของสินค้าอื่น ห้ามส่ง */
+  descGuard: { note: string | null; block: string | null };
   /** เหตุผลที่ส่งเรื่องนี้ไม่ได้ (null = ส่งได้) */
   cannot: (key: DriftKey) => string | null;
   /** ประกอบคำสั่งของเรื่องที่เลือก (ตามลำดับที่ร้านต้องการ) */
@@ -64,31 +66,31 @@ const OPT_CANNOT: Record<string, string> = {
 
 // ───────── ค่าฝั่งระบบ (ตัวประกอบข้อมูลของตัวช่วยลงสินค้า) ─────────
 const vals = (r: Record<string, string> | undefined | null) => Object.values(r ?? {}).map((x) => String(x ?? ""));
-async function systemValues(admin: Admin, code: string, parentId: string, userId: string | null): Promise<{ ok: true; sys: SystemValues } | { ok: false; error: string }> {
+async function systemValues(admin: Admin, code: string, parentId: string, userId: string | null): Promise<{ ok: true; sys: SystemValues; descSrc: string } | { ok: false; error: string }> {
   if (code === "line_shopping") {
     const b = await buildLineCreate(admin, parentId);
     if (!b.ok) return { ok: false, error: b.error };
     const p = b.preview;
-    return { ok: true, sys: { description: p.description.value, imageRefs: p.images.keys.map((k) => `r2:${k}`), variants: p.variants.map((v) => ({ code: v.code, values: v.options, price: v.price || null, pay: v.price ? v.price - (v.discount || 0) : null })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.keys.map((k) => `r2:${k}`), variants: p.variants.map((v) => ({ code: v.code, values: v.options, price: v.price || null, pay: v.price ? v.price - (v.discount || 0) : null })) } };
   }
   if (code === "shopee") {
     const r = await loadShopeeCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
   }
   if (code === "lazada") {
     const r = await loadLazadaCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
     // ราคาลด: เทียบ/ส่งเฉพาะเมื่อระบบมีราคาลด (ล้างราคาลดบน Lazada ผ่านระบบไม่ได้)
-    return { ok: true, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
   }
   if (code === "tiktok") {
     const r = await loadTiktokCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
   }
   return { ok: false, error: "ร้านนี้ยังตรวจไม่ได้" };
 }
@@ -261,7 +263,8 @@ async function loadCtx(admin: Admin, listingId: string, userId: string | null): 
   const sysR = await systemValues(admin, code, row.matched_parent_sku_id, userId);
   if (!sysR.ok) return { ok: false, error: `อ่านข้อมูลสินค้าในระบบไม่ได้: ${sysR.error}`, status: 400 };
   const sync = (row.raw?.sys_sync && typeof row.raw.sys_sync === "object" ? row.raw.sys_sync : null) as SysSync | null;
-  const base = { code, listingId, parentId: row.matched_parent_sku_id, sys: sysR.sys, sync };
+  const descGuard = await descriptionGuard(admin, code, row.matched_parent_sku_id, row.platform_id, sysR.descSrc);
+  const base = { code, listingId, parentId: row.matched_parent_sku_id, sys: sysR.sys, sync, descGuard };
 
   if (code === "shopee") {
     const r = await loadShopeeListingLive(admin, listingId, userId);
@@ -296,8 +299,34 @@ async function loadCtx(admin: Admin, listingId: string, userId: string | null): 
   return { ok: true, row, ctx: lineCtx(base, state, fresh.row as Record<string, unknown>) };
 }
 
+/**
+ * รายละเอียดฝั่งระบบมาจากร่างของร้านที่ "แก้ไว้" (ตัวเตรียมข้อมูลถือว่าร่างชนะ Platform Description) → ต้องเตือน
+ * 🐛 2026-11-21 LY22: ร่าง Lazada/Shopee เตรียมไว้ตอนข้อความสินค้ายังเป็นของ LY21 (คัดลอกมา) → หลังแก้สินค้า ร่างค้างข้อความเก่า
+ *    แต่ถูกนับเป็น "แก้เอง" → หน้าเทียบจะส่งข้อความ LY21 ทับ LY22 · ร่างมีข้อความขึ้นต้นเหมือนสินค้าอื่น = ห้ามส่ง (ไม่แตะร่าง ให้คนแก้)
+ */
+async function descriptionGuard(admin: Admin, code: string, parentId: string, platformId: string, descSrc: string): Promise<Ctx["descGuard"]> {
+  if (!/^แก้ไว้สำหรับ/.test(descSrc)) return { note: null, block: null };
+  const shop = ({ shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE" } as Record<string, string>)[code] ?? code;
+  const note = `ตรวจก่อนส่ง: รายละเอียดฝั่งระบบมาจากร่าง ${shop} ที่แก้ไว้ ไม่ใช่ Platform Description ล่าสุดของสินค้า (แก้ได้ที่ปุ่ม "ร่างในระบบ")`;
+  try {
+    const { data: d } = await admin.from("platform_listing_drafts").select("description").eq("parent_sku_id", parentId).eq("platform_id", platformId).maybeSingle();
+    const head = plainText((d as { description?: string | null } | null)?.description ?? "").replace(/\s+/g, " ").trim().slice(0, 60).replace(/[\\%_]/g, (c) => `\\${c}`);
+    if (head.length < 40) return { note, block: null };
+    const [a, b] = await Promise.all([
+      admin.from("parent_skus_v2").select("code").neq("id", parentId).ilike("platform_description", `${head}%`).limit(5),
+      admin.from("parent_skus_v2").select("code").neq("id", parentId).ilike("description", `${head}%`).limit(5),
+    ]);
+    const others = [...new Set([...(a.data ?? []), ...(b.data ?? [])].map((r) => String((r as { code?: string }).code ?? "")).filter(Boolean))];
+    if (!others.length) return { note, block: null };
+    return { note, block: `ห้ามส่ง: ร่าง ${shop} ของสินค้านี้มีรายละเอียดขึ้นต้นเหมือนสินค้าอื่น (${others.slice(0, 4).join(", ")}${others.length > 4 ? " …" : ""}) — น่าจะคัดลอกมาผิดรุ่น แก้ร่างที่ปุ่ม "ร่างในระบบ" ก่อน` };
+  } catch { return { note, block: null }; }
+}
+
 function itemsOf(ctx: Ctx): DriftItem[] {
-  return compareAll(ctx.sys, ctx.shop, ctx.sync).map((it) => {
+  return compareAll(ctx.sys, ctx.shop, ctx.sync).map((raw) => {
+    // รายละเอียดจากร่างที่แก้ไว้ → เตือน (ไม่ติ๊กไว้ให้) · ร่างมีข้อความของสินค้าอื่น → ห้ามส่ง
+    const it = raw.key === "description" && ctx.descGuard.note ? { ...raw, note: [ctx.descGuard.note, raw.note].filter(Boolean).join(" · ") } : raw;
+    if (it.key === "description" && ctx.descGuard.block && (it.state === "diff" || it.state === "unknown")) return { ...it, sendable: false, cannot: ctx.descGuard.block };
     if (it.state !== "diff" && it.state !== "unknown") return { ...it, sendable: false, cannot: null };
     if (it.key === "images" && it.state === "unknown" && !ctx.sys.imageRefs.length) return { ...it, sendable: false, cannot: null };
     if (it.state === "unknown" && it.key !== "images") return { ...it, sendable: false, cannot: null };

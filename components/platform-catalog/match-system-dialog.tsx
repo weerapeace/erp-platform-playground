@@ -60,7 +60,8 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   const apply = useCallback((c: Check) => {
     setCheck(c);
     // ราคาไม่ติ๊กไว้ให้ก่อน — ร้านมักตั้งราคาเต็มสูงไว้ทำโปร ต้องให้คนดูแล้วติ๊กเอง
-    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price").map((i) => i.key)));
+    // เรื่องที่มีคำเตือน "ตรวจก่อนส่ง" (เช่น รายละเอียดมาจากร่างที่แก้ไว้) ก็ไม่ติ๊กไว้ให้
+    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price" && !i.note?.startsWith("ตรวจก่อนส่ง")).map((i) => i.key)));
     onChanged?.(c);
   }, [onChanged]);
 
@@ -154,6 +155,11 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-700">ตรวจไม่สำเร็จ: {error}</div>
       ) : check ? (
         <div className="space-y-2 text-sm">
+          {items.filter((i) => i.cannot?.startsWith("ห้ามส่ง")).map((i) => (
+            <div key={`block-${i.key}`} className="flex items-start gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+              <Icon name="warning" /><span>{DRIFT_LABEL[i.key]}: {i.cannot}</span>
+            </div>
+          ))}
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full min-w-[34rem] text-left">
               <thead className="bg-slate-50 text-xs text-slate-500">
