@@ -17,11 +17,14 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
+import { PushOpenGearButton, usePushOpen } from "@/components/push-open";
 import { apiFetch } from "@/lib/api";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
 
-type Check = { listing_id: string; platform_code: string; items: DriftItem[]; issues: DriftKey[]; checked_at: string };
+type Check = { listing_id: string; platform_code: string; items: DriftItem[]; issues: DriftKey[]; checked_at: string; external_product_id?: string | null; shop_ref?: string | null; listing_status?: string | null };
+/** ชื่อร้านสั้น (แจ้งผลของตัวเปิดหน้าให้เช็ก) */
+const SHOP_LABEL: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE" };
 type Call = { url: string; body: Record<string, unknown>; label: string };
 type Step = { label: string; state: "wait" | "run" | "ok" | "fail"; error?: string };
 
@@ -45,6 +48,7 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   footerExtra?: React.ReactNode;
 }) {
   const toast = useToast();
+  const pushOpen = usePushOpen();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState<Check | null>(null);
@@ -77,7 +81,10 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   const tickN = picked.size;
 
   const send = async () => {
-    if (!listingId || !tickN) return;
+    if (!listingId || !tickN || !check) return;
+    // เปิดหน้าให้เช็กหลังส่ง (ของกลาง push-open · ตั้งค่าต่อคน ค่าเริ่มต้นปิด) — ต้องเรียกก่อน await (ยังอยู่ในจังหวะกด)
+    const session = pushOpen.prepare([{ code: check.platform_code }]);
+    let opened = false;
     setSending(true); setSteps(null);
     const keys = [...picked];
     try {
@@ -100,11 +107,24 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
       const doneKeys = failed ? [] : keys;
       const m = await apiFetch("/api/platform-catalog/drift", { method: "POST", body: JSON.stringify({ action: "mark", listing_id: listingId, keys: doneKeys }) }).then((r) => r.json()).catch(() => null);
       if (m?.check) apply(m.check as Check);
-      if (st.some((s) => s.state === "ok")) onSent?.();
+      if (st.some((s) => s.state === "ok")) {
+        onSent?.();
+        // TikTok แก้รูป/รายละเอียด/ชื่อตัวเลือก = ส่งตรวจใหม่ · ปิดขายอยู่ = ลูกค้ายังไม่เห็น
+        const status = String(check.listing_status ?? "").toLowerCase();
+        const review = check.platform_code === "tiktok" && keys.some((k) => k !== "price");
+        session.finish([{
+          code: check.platform_code, shopName: SHOP_LABEL[check.platform_code] ?? shopName, productId: check.external_product_id ?? null, label: shopName,
+          state: review ? "review" : /unlist|inactive|deactivat/.test(status) ? "hidden" : "live", shopRef: check.shop_ref ?? null,
+        }]);
+        opened = true;
+      }
       if (failed) toast.error("ส่งไม่ครบ — ดูรายการที่ไม่สำเร็จในหน้าต่าง");
       else toast.success(`ส่งขึ้น ${shopName} แล้ว${skipped.length ? ` (ข้าม ${skipped.length} เรื่อง)` : ""}`);
     } catch (e) { toast.error(`ส่งไม่สำเร็จ: ${(e as Error).message}`); }
-    finally { setSending(false); }
+    finally {
+      if (!opened) session.finish([]);   // ไม่ได้ส่งอะไรสำเร็จ → ปิดแท็บที่เปิดรอไว้
+      setSending(false);
+    }
   };
 
   const toggle = (k: DriftKey) => setPicked((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -121,6 +141,7 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
           {footerExtra}
           <span className="ml-auto" />
           <button type="button" onClick={onClose} disabled={sending} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ปิด</button>
+          {canPublish && <PushOpenGearButton />}
           {canPublish ? (
             <button type="button" onClick={() => void send()} disabled={!tickN || sending || loading}
               className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{sending ? "กำลังส่ง…" : `ยืนยันส่งที่ติ๊ก (${tickN})`}</button>

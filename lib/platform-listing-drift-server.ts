@@ -41,6 +41,8 @@ export type DriftCall = { url: string; body: Record<string, unknown>; label: str
 export type DriftCheck = {
   ok: true; listing_id: string; platform_code: string; parent_sku_id: string | null;
   items: DriftItem[]; issues: DriftKey[]; checked_at: string;
+  /** ไว้เปิดหน้าให้เช็กหลังส่ง (ของกลาง push-open) — รหัสสินค้าบนร้าน · รหัสร้าน · สถานะบนร้าน */
+  external_product_id?: string | null; shop_ref?: string | null; listing_status?: string | null;
 };
 export type DriftFail = { ok: false; error: string; status: number };
 
@@ -327,7 +329,11 @@ export async function checkListingDrift(admin: Admin, listingId: string, userId:
     const items = itemsOf(r.ctx);
     const issues = driftIssues(items);
     await saveCheck(admin, { listing_id: listingId, parent_sku_id: r.ctx.parentId, platform_code: r.ctx.code, items, issues, error: null });
-    return { ok: true, listing_id: listingId, platform_code: r.ctx.code, parent_sku_id: r.ctx.parentId, items, issues, checked_at: new Date().toISOString() };
+    const { data: acct } = r.row.brand_id ? await admin.from("platform_accounts").select("external_shop_id").eq("brand_id", r.row.brand_id).eq("platform_id", r.row.platform_id).maybeSingle() : { data: null };
+    return {
+      ok: true, listing_id: listingId, platform_code: r.ctx.code, parent_sku_id: r.ctx.parentId, items, issues, checked_at: new Date().toISOString(),
+      external_product_id: r.row.external_product_id, shop_ref: (acct as { external_shop_id?: string | null } | null)?.external_shop_id ?? null, listing_status: r.row.status,
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message || "ตรวจไม่สำเร็จ", status: 500 };
   }
