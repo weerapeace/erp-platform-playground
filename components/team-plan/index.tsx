@@ -190,7 +190,10 @@ export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: 
         {filterChip("star", <><Icon name="star" /> งานหลักวันนี้</>, open.filter((t) => isStarredToday(t.plan)).length)}
         {filterChip("waiting", <><Icon name="waiting" /> รอคนอื่น</>, open.filter((t) => t.plan.waiting).length)}
         {filterChip("overdue", <><Icon name="warning" /> เกินกำหนด</>, open.filter((t) => isOverdue(t.due_at)).length)}
-        <button type="button" onClick={() => void load()} title="โหลดใหม่" className="ml-auto h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50"><Icon name="refresh" /></button>
+        {/* ปุ่มปฏิทินรวม (เจ้าของขอคืน 2026-11-21) · ซ่อนเมื่อถูกฝังใน /calendar เอง กันวนซ้อน */}
+        {!(initialView === "calendar" && !isTop) && <a href="/calendar?cal=all" data-split-href="/calendar?cal=all" title="ปฏิทินรวมทุกแผนก — งานทีม · Task · คอนเทนต์ · ผลิต · ใบงานออกแบบ · บิล ในปฏิทินเดียว ลากเปลี่ยนวันได้"
+          className="ml-auto inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-violet-50 px-2 text-xs font-medium text-violet-700 hover:bg-violet-100"><Icon name="calendar" /> ปฏิทินรวม</a>}
+        <button type="button" onClick={() => void load()} title="โหลดใหม่" className={`${initialView === "calendar" && !isTop ? "ml-auto " : ""}h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-500 hover:bg-slate-50`}><Icon name="refresh" /></button>
       </div>
       {/* 🏷 กรองตามแท็ก (โชว์เมื่อมีงานที่ใส่แท็ก) */}
       {tagCounts.length > 0 && (
