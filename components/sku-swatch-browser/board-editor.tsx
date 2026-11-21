@@ -25,6 +25,8 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { chipCode, LABEL_POSITION_TH, LABEL_POSITIONS, overlapRatio, remapToCrop, rotateRect90, sortColumnOrder, sortReadingOrder, splitRect, type LabelPosition, type PctRect, type Pt } from "@/lib/sku-swatch";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { useUserPref } from "@/lib/use-user-pref";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
+import { Icon } from "@/components/icon";
 import { fitAtPoint, imageSize, readPhotoChips, readPhotoLabels, sampleColors, tempId, useColorNamer, type DraftChip, type DraftPhoto } from "./swatch-tools";
 
 /** ราคาโดยประมาณต่อรูป (บาท) — ตรงกับ costHint ใน lib/paid-services ("ai.swatch_read") · วัดจริง 2026-11-14 ≈ ฿0.09 */
@@ -93,14 +95,27 @@ export function useBoardDraft() {
     setPhotos((p) => [...p, ...added]);
     setCur(added[0].key);
     touch();
-    if (added.length > 1) toast.success(`เพิ่ม ${added.length} รูปแล้ว`);
+    // ใส่ผิดรูป → กดย้อนกลับได้ (ยังไม่อัปโหลด — แค่เอาออกจากร่าง)
+    const keys = new Set(added.map((a) => a.key));
+    toast.undo(added.length > 1 ? `เพิ่ม ${added.length} รูปแล้ว` : "เพิ่มรูปแล้ว", () => {
+      setPhotos((p) => { const n = p.filter((x) => !keys.has(x.key)); setCur((c) => (c && keys.has(c) ? n[0]?.key ?? null : c)); return n; });
+      setChipsNow(chipsRef.current.filter((x) => !keys.has(x.photo)));
+    });
   };
   const removePhoto = (key: string) => {
+    const at = photos.findIndex((x) => x.key === key);
+    const gone = photos[at];
+    const goneChips = chipsRef.current.filter((x) => x.photo === key);
     const n = photos.filter((x) => x.key !== key);
     setPhotos(n);
     if (cur === key) setCur(n[0]?.key ?? null);
     setChipsNow(chipsRef.current.filter((x) => x.photo !== key));
     touch();
+    if (gone) toast.undo(goneChips.length ? `ลบรูปแล้ว (พร้อม ${goneChips.length} ชิ้น)` : "ลบรูปแล้ว", () => {
+      setPhotos((p) => { const r = [...p]; r.splice(Math.min(at, r.length), 0, gone); return r; });
+      setChipsNow([...chipsRef.current, ...goneChips]);
+      setCur(key);
+    });
   };
   const movePhoto = (key: string, d: -1 | 1) => {
     setPhotos((p) => {
@@ -314,7 +329,9 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
   const [over, setOver] = useState<"main" | "tile" | null>(null);
   const [labelPos, setLabelPos] = useState<LabelPosition>("auto");
   const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { onOverlay?.(!!cropKey || !!askFind || !!askName); }, [cropKey, askFind, askName, onOverlay]);
+  // มือถือ: ถ่ายรูปแผงตรง / เลือกจากคลัง / กล้องในเว็บ (ของกลาง photo-capture · ถาดตรวจรูป ครอป/ดัดให้ตรง · ย่อ ≤2400px)
+  const cap = usePhotoCapture({ onFiles: (fs) => draft.addFiles(fs) });
+  useEffect(() => { onOverlay?.(!!cropKey || !!askFind || !!askName || cap.overlayOpen); }, [cropKey, askFind, askName, cap.overlayOpen, onOverlay]);
 
   // ── ขนาด: ลากแถบใต้รูป (สูง/เตี้ย · เฉพาะป๊อป) + เส้นกลาง (แผงชิ้นกว้าง/แคบ · ลากสุด = ซ่อน) — จำต่อคน ──
   const [saved, saveLayout] = useUserPref<EditorLayout>("swatch_editor_layout", LAYOUT_DEFAULT, parseLayout);
@@ -344,7 +361,7 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       const t = e.target as HTMLElement | null;
-      if (!selId || cropKey || askFind || t?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t?.tagName ?? "")) return;
+      if (!selId || cropKey || askFind || cap.overlayOpen || t?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(t?.tagName ?? "")) return;
       if (document.querySelector("[role=dialog] [role=dialog], [data-confirm-open]")) return;
       e.preventDefault();
       const here = chips.filter((c) => c.photo === photo?.key);
@@ -355,18 +372,18 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selId, cropKey, askFind, chips, photo, draft, setSelId]);
+  }, [selId, cropKey, askFind, cap.overlayOpen, chips, photo, draft, setSelId]);
 
   // วางรูป Ctrl+V = เพิ่มรูป (เฉพาะตอนไม่มีป๊อปอื่นเปิด)
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (cropKey || askFind) return;
+      if (cropKey || askFind || cap.overlayOpen) return;
       const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
       if (files.length) { e.preventDefault(); void draft.addFiles(files); }
     };
     document.addEventListener("paste", onPaste);
     return () => document.removeEventListener("paste", onPaste);
-  }, [draft, cropKey, askFind]);
+  }, [draft, cropKey, askFind, cap.overlayOpen]);
 
   const here = useMemo(() => chips.filter((c) => c.photo === photo?.key), [chips, photo]);
   const selected = chips.find((c) => c.id === selId) ?? null;
@@ -420,8 +437,14 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
       })}
       <button type="button" onClick={() => fileRef.current?.click()}
         className={`shrink-0 w-[104px] h-[68px] rounded-lg border-2 border-dashed text-[11.5px] leading-tight transition ${over === "tile" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-300 text-slate-500 hover:border-indigo-300 hover:text-indigo-600"}`}>
-        {over === "tile" ? "⬇ วางรูปตรงนี้" : <>+ เพิ่มรูป<br /><span className="text-[10.5px] text-slate-400">หรือลากรูปมาวาง</span></>}
+        {over === "tile" ? "⬇ วางรูปตรงนี้" : <>+ เพิ่มรูป<br /><span className="text-[10.5px] text-slate-400">{cap.touch ? "จากคลัง" : "หรือลากรูปมาวาง"}</span></>}
       </button>
+      {cap.touch && photos.length > 0 && (
+        <button type="button" onClick={cap.openCamera}
+          className="shrink-0 w-[104px] h-[68px] rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/60 text-[11.5px] leading-tight text-blue-700">
+          <Icon name="camera" /> ถ่ายรูป<br /><span className="text-[10.5px] text-blue-500">เพิ่มอีกรูป</span>
+        </button>
+      )}
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ""; void draft.addFiles(f); }} />
     </div>
   );
@@ -474,8 +497,13 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
       onClick={() => fileRef.current?.click()}
       className={`rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center min-h-[220px] ${over ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50 hover:border-indigo-300"}`}>
       <div className="text-center text-sm text-slate-500 p-6">
-        <div className="text-3xl mb-1">🖼️</div>ลากรูปมาวาง · กด Ctrl+V · หรือคลิกเพื่อเลือกไฟล์ (เลือกได้หลายรูป)
+        <div className="text-3xl mb-1">🖼️</div>
+        {cap.touch ? <>
+          <div className="mb-3">ใส่รูปแผงผ้า (ได้หลายรูป)</div>
+          <PhotoCaptureButtons capture={cap} className="w-full max-w-xs mx-auto" />
+        </> : <>ลากรูปมาวาง · กด Ctrl+V · หรือคลิกเพื่อเลือกไฟล์ (เลือกได้หลายรูป)</>}
         <div className="text-[11px] text-slate-400 mt-1">ถ่ายให้ตรง ไม่เอียง · ครอปให้เหลือเฉพาะแผงก่อนจะตีกรอบง่ายขึ้น</div>
+        {!cap.touch && <PhotoCaptureButtons capture={cap} className="mt-2" />}
       </div>
     </div>
   ) : (
@@ -546,6 +574,7 @@ export function BoardEditor({ draft, codes, onCreateSku, onOverlay, layout = "mo
         title="ตั้งชื่อสีใหม่ทั้งรูป?" message="ทุกชิ้นบนรูปนี้มีชื่อแล้ว — จะแทนชื่อทั้งหมด (รวมชื่อที่พิมพ์เองหรือที่ AI ตั้งไว้) ด้วยชื่อจากสี่เหลี่ยมสี (สีที่ใกล้ที่สุดในทะเบียนสีกลาง)" confirmText="แทนทั้งหมด" cancelText="ไม่แทน"
         onConfirm={() => { const k = askName; setAskName(null); if (k) { const n = draft.nameFromColors(k, true); toast.success(n ? `ตั้งชื่อสีใหม่ ${n} ชิ้น` : "ชื่อตรงกับสีอยู่แล้ว"); } }} />
 
+      {cap.ui}
       {cropPhoto && (
         <ImageFreeCropModal open src={cropPhoto.src} onClose={() => setCropKey(null)}
           title="✂️ ครอป / หมุนรูปแผง"

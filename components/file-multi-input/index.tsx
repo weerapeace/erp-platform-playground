@@ -25,6 +25,7 @@ import { fileRefName, isPdfRef } from "@/lib/file-ref";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { useFileDrop } from "@/components/file-drop";
 import { filePasteOwner } from "@/components/file-input";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 
 const ACCEPT_DROP = ["image/", "application/pdf"];
 const accepted = (f: File) => ACCEPT_DROP.some((p) => (f.type || "").startsWith(p)) || /\.pdf$/i.test(f.name);
@@ -130,6 +131,8 @@ export function FileMultiInput({
     return () => { window.removeEventListener("paste", onPaste); if (filePasteOwner.cur === me) filePasteOwner.cur = null; };
   }, [blocked, pasteFromPage]);
 
+  // มือถือ: ปุ่มถ่ายรูป / เลือกไฟล์ (ของกลาง photo-capture · ย่อรูป ≤2400px ก่อนส่ง · PDF ส่งตามเดิม)
+  const cap = usePhotoCapture({ onFiles: (fs) => handleFilesRef.current(fs), libraryAccept: "image/jpeg,image/png,image/webp,image/gif,application/pdf", disabled: blocked });
   const removeAt = (i: number) => onChange(keys.filter((_, idx) => idx !== i));
   const over = drop.over === "m";
 
@@ -171,7 +174,12 @@ export function FileMultiInput({
               </div>
             );
           })}
-          {!disabled && keys.length < max && !uploading && (
+          {!disabled && keys.length < max && !uploading && cap.touch && (
+            <div className="col-span-3 rounded-md border-2 border-dashed border-slate-200 p-2">
+              <PhotoCaptureButtons capture={cap} size="sm" libraryLabel="เลือกไฟล์" webLink={false} />
+            </div>
+          )}
+          {!disabled && keys.length < max && !uploading && !cap.touch && (
             <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadDisabled}
               className={`h-24 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed px-2 text-center disabled:opacity-50 ${over ? "border-blue-400 text-blue-700" : "border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600"} ${keys.length === 0 ? "col-span-3" : ""}`}>
               <span className="text-xl">{over ? "📥" : "📎"}</span>
@@ -187,6 +195,7 @@ export function FileMultiInput({
       <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
         disabled={uploadDisabled || uploading} className="hidden"
         onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) void handleFiles(fs); }} />
+      {cap.ui}
       {err && <div className="mt-1 text-[11px] text-red-600">⚠ {err}</div>}
       {uploadDeniedMessage && <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
     </div>

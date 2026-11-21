@@ -15,6 +15,8 @@ import { useT } from "@/components/i18n";
 import { askDuplicateUploads, uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { UploadProgress, imageStepProgress, type UploadProgressState } from "@/components/upload-progress";
 import { imageOpenErrorFor, toDecodableImage } from "@/lib/image-decode";
+// ⚠️ import วนกัน (photo-capture ใช้ prepareResizedImage จากไฟล์นี้) — ปลอดภัย เรียกใช้ในฟังก์ชันเท่านั้น
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
@@ -112,6 +114,8 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดงอยู่
   const handleRef = useRef(handleFiles); handleRef.current = handleFiles;
+  // มือถือ: ปุ่มถ่ายรูป/เลือกจากคลัง (ของกลาง photo-capture) · ช่องนี้ย่อรูปเองอยู่แล้ว → maxSide 0
+  const cap = usePhotoCapture({ onFiles: (fs) => handleFiles(fs), maxSide: 0 });
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? "")) return;
@@ -129,7 +133,8 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {up ? <UploadProgress {...up} className="text-left" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
+        {up ? <UploadProgress {...up} className="text-left" /> : cap.touch ? <PhotoCaptureButtons capture={cap} size="sm" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span> <PhotoCaptureButtons capture={cap} className="ml-1" /></>}
+        {cap.ui}
       </div>
       {!hideList && images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">
@@ -137,7 +142,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
             <div key={im.id} className="relative group">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}&w=320`} alt={im.file_name ?? ""} onClick={() => setLbIndex(i)} title="กดเพื่อดูเต็มจอ" className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-              <button onClick={() => void onDelete(im.id)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
+              <button onClick={() => void onDelete(im.id)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>
             </div>
           ))}
         </div>
@@ -184,6 +189,8 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดง (ไม่ดักตอนพิมพ์ใน input/textarea)
   const handleRef = useRef(handleFiles); handleRef.current = handleFiles;
+  // มือถือ: ปุ่มถ่ายรูป/เลือกจากคลัง (ของกลาง photo-capture) · ช่องนี้ย่อรูปเองอยู่แล้ว → maxSide 0
+  const cap = usePhotoCapture({ onFiles: (fs) => handleFiles(fs), maxSide: 0, disabled });
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       if (disabled) return;
@@ -204,7 +211,8 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {up ? <UploadProgress {...up} className="text-left" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
+        {up ? <UploadProgress {...up} className="text-left" /> : cap.touch ? <PhotoCaptureButtons capture={cap} size="sm" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span> <PhotoCaptureButtons capture={cap} className="ml-1" /></>}
+        {cap.ui}
       </div>
       {err && <p className="text-[11px] text-red-500 mt-1">{err}</p>}
       {value.length > 0 && (
@@ -213,7 +221,7 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
             <div key={`${k}-${i}`} className="relative group">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=320`} alt="" onClick={() => setLbIndex(i)} title="กดเพื่อดูเต็มจอ" className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-              {!disabled && <button type="button" onClick={() => removeAt(i)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>}
+              {!disabled && <button type="button" onClick={() => removeAt(i)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>}
             </div>
           ))}
         </div>

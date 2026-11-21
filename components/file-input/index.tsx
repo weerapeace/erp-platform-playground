@@ -21,6 +21,7 @@ import { useFileRefUrl } from "@/components/file-ref";
 import { fileRefName, isPdfRef } from "@/lib/file-ref";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { useFileDrop } from "@/components/file-drop";
+import { usePhotoCapture, PhotoCaptureButtons } from "@/components/photo-capture";
 
 const ACCEPT_INPUT = "image/jpeg,image/png,image/webp,image/gif,application/pdf";
 const ACCEPT_DROP = ["image/", "application/pdf"];
@@ -124,6 +125,8 @@ export function FileInput({
     window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("paste", onPaste); if (filePasteOwner.cur === me) filePasteOwner.cur = null; };
   }, [blocked, pasteFromPage]);
+  // มือถือ: ปุ่มถ่ายรูป / เลือกไฟล์ (ของกลาง photo-capture · ย่อรูป ≤2400px ก่อนส่ง · PDF ส่งตามเดิม)
+  const cap = usePhotoCapture({ onFiles: (fs) => handleFilesRef.current(fs), multiple: !!multiple, libraryAccept: ACCEPT_INPUT, disabled: blocked });
   const hoverProps = {
     onPointerEnter: () => { filePasteOwner.cur = meRef.current; },
     onPointerLeave: () => { if (filePasteOwner.cur === meRef.current) filePasteOwner.cur = null; },
@@ -168,6 +171,11 @@ export function FileInput({
           </div>
         ) : progress ? (
           <div className="h-20 flex items-center px-3">{progress}</div>
+        ) : cap.touch ? (
+          <div className="p-2.5 text-center">
+            <PhotoCaptureButtons capture={cap} size="sm" libraryLabel="เลือกไฟล์" webLink={false} />
+            <div className="mt-1.5 text-[10px] text-slate-400">{hint ?? "รูป หรือ PDF"}</div>
+          </div>
         ) : (
           <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadDisabled}
             className={`w-full h-20 flex flex-col items-center justify-center gap-1 ${over ? "text-blue-700" : "text-slate-500 hover:text-orange-600"}`}>
@@ -180,6 +188,7 @@ export function FileInput({
       <input ref={fileRef} type="file" accept={ACCEPT_INPUT} multiple={!!multiple}
         disabled={uploadDisabled || uploading} className="hidden"
         onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) void handleFiles(fs); }} />
+      {cap.ui}
       {err && <div className="mt-1 text-[11px] text-red-600">⚠ {err}</div>}
       {uploadDeniedMessage && <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
     </div>

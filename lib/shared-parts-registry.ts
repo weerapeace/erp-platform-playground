@@ -474,8 +474,16 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "image-attach", label: "แนบรูปหลายรูป", code: "ImageAttach", category: "file",
     source: { path: "components/image-attach" },
-    what: "แนบรูปหลายรูป: ลากวาง วาง (Ctrl+V) หรือเลือกไฟล์ ย่อขนาดให้",
+    what: "แนบรูปหลายรูป: ลากวาง วาง (Ctrl+V) หรือเลือกไฟล์ ย่อขนาดให้ · มือถือมีปุ่มถ่ายรูป (PhotoCapture)",
     when: "คอมเมนต์ งาน โน้ต ที่แนบรูปได้หลายรูป",
+  },
+  {
+    key: "photo-capture", label: "ถ่ายรูปจากมือถือ/กล้อง", code: "PhotoCapture", category: "file",
+    source: { path: "components/photo-capture" },
+    what: "มือถือ: ปุ่ม ถ่ายรูป (เปิดกล้องตรง) + เลือกจากคลัง + กล้องในเว็บมีเส้นกริด · ถาดตรวจรูปก่อนใส่ (ถ่ายต่อเนื่อง · ครอป/หมุน · ดัดรูปเอียงให้ตรง 4 มุม · ลบแล้วย้อนกลับได้) · ย่อรูป ≤2400px ก่อนส่ง · PC มีเว็บแคม = ลิงก์เล็ก",
+    when: "ช่องอัปรูปที่คนอาจกดจากโทรศัพท์ — เสียบในช่องอัปของกลางแล้ว (ImageAttach · FileInput · FileMultiInput · กล่องรูปแผงผ้า Swatch)",
+    notWhen: "ไม่อัปโหลดเอง — ผู้เรียกอัปตามทางเดิม · ไฟล์งานใหญ่ (AI/PSD) → DriveUploadBox · เลือกรูปที่มีในคลัง R2 → AssetPicker",
+    doc: "photo-capture.md",
   },
   {
     key: "image-manager", label: "จัดการรูปสินค้า", code: "ImageManager", category: "file",
