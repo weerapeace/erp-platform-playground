@@ -16,7 +16,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit, auditDiff } from "@/lib/audit";
 import { lastPrices, nextOrderNo } from "../shared";
 import { actorOf, loadLineShipState } from "../ship-lines";
-import { doRenumber, planMerge, recompute } from "./plan";
+import { doMerge, doRenumber, planMerge, recompute } from "./plan";
 
 export const dynamic = "force-dynamic";
 type Row = Record<string, unknown>;
@@ -67,42 +67,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const now = new Date().toISOString();
 
   if (action === "merge") {
-    const p = await planMerge(admin, b?.ids ?? [], b?.fill_prices !== false);
-    if (typeof p === "string") return bad(p);
-    if (p.problems.length) return bad(`รวมไม่ได้: ${p.problems.join(" · ")}`);
-    const tid = String(p.target.id), tno = String(p.target.order_no);
-    let next = p.lines.filter((l) => l.order_no === tno).length;
-    for (const o of p.others) {
-      const oid = String(o.id), ono = String(o.order_no);
-      const mine = p.lines.filter((l) => l.order_no === ono);
-      for (const l of mine) {
-        next += 1;
-        const { data: cur } = await admin.from("so_order_lines").select("merged_from_order_id").eq("id", l.id).maybeSingle();
-        await admin.from("so_order_lines").update({ order_id: tid, line_no: next, merged_from_order_id: (cur as Row | null)?.merged_from_order_id ?? oid }).eq("id", l.id);
-      }
-      await admin.from("manufacturing_orders").update({ so_order_id: tid, so_order_no: tno }).eq("so_order_id", oid);
-      // ใบที่ถูกรวมย้ายไปเป็นใบรองที่รวมไว้แล้ว ให้ชี้ใบหลักใหม่ด้วย (แยกคืนครั้งเดียวได้ครบ)
-      await admin.from("so_orders").update({ merged_into_id: tid }).eq("merged_into_id", oid);
-      await admin.from("so_orders").update({
-        status: "cancelled", cancelled_at: now, cancel_reason: `รวมเข้า ${tno}`, merged_into_id: tid, merged_from_no: ono,
-        order_no: `${ono}·รวม`, updated_at: now,
-      }).eq("id", oid);
-      await writeAudit(admin, { action: "so_order.merged_away", entityType: "so_order", entityId: oid, actorId: me.id, actorName: me.name,
-        metadata: { order_no: ono, into: tno, changes: auditDiff({ status: o.status, order_no: ono }, { status: "cancelled", order_no: `${ono}·รวม` }) } });
-    }
-    const filled = p.lines.filter((l) => l.new_price != null);
-    for (const l of filled) await admin.from("so_order_lines").update({ unit_price: l.new_price, note: null }).eq("id", l.id).eq("unit_price", 0);
-    const due = p.others.concat(p.target).map((o) => (o.due_date as string) || "").filter(Boolean).sort()[0] || null;
-    if (due && !p.target.due_date) await admin.from("so_orders").update({ due_date: due }).eq("id", tid);
-    const totals = await recompute(admin, tid);
-    await writeAudit(admin, { action: "so_order.merge", entityType: "so_order", entityId: tid, actorId: me.id, actorName: me.name,
-      metadata: { order_no: tno, merged: p.others.map((o) => o.order_no), lines: p.lines.length,
-        prices_filled: filled.map((l) => ({ sku: l.sku, price: l.new_price, from: l.price_from })),
-        changes: auditDiff({ grand_total: n(p.target.grand_total) }, { grand_total: totals?.grand_total ?? null }) } });
-    // เลื่อนเลขใบถัดไปขึ้นมาแทนช่องว่าง (เจ้าของสั่ง "ปรับเลขที่ใบสั่งขายให้หน่อย")
-    const renumbered: { from: string; to: string }[] = [];
-    for (const r of p.renumber) { const x = await doRenumber(admin, r.id, me); if (x) renumbered.push(x); }
-    return NextResponse.json({ ok: true, order_no: tno, id: tid, merged: p.others.length, prices_filled: filled.length, grand_total: totals?.grand_total ?? null, renumbered });
+    const r = await doMerge(admin, b?.ids ?? [], b?.fill_prices !== false, me);
+    if (typeof r === "string") return bad(r);
+    return NextResponse.json(r);
   }
 
   if (action === "unmerge") {
