@@ -67,7 +67,7 @@ export function TaskReferenceBoard({ taskId, notes, hasNotes, height = "60vh", s
 //  • กระดานกลาง CanvasSketch ห้องแยก entity_type=creative_task_brief (คนละห้องกับกระดานอ้างอิง)
 //  • รูปบรีฟที่แนบไว้แบบเดิม (reference_images) → ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก (กระดานยังไม่เคยบันทึก) ครั้งเดียว
 //    ไม่ลบรูปชุดเดิมในฐานข้อมูล (เก็บไว้เป็นสำรอง) · ลบรูปบนกระดานแล้วไม่ถูกเติมกลับ (กระดานบันทึกแล้ว)
-//  • พับ/ขยายได้ จำค่าต่อเครื่อง · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
+//  • ค่าเริ่มต้นพับซ่อน · กดขยายแล้วจำค่าต่อเครื่อง · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
 // ============================================================
 export const TASK_BRIEF_ENTITY = "creative_task_brief";
 export const taskBriefUrl = (taskId: string) => `${taskReferenceUrl(taskId)}?board=brief`;
@@ -82,8 +82,8 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
   foldable?: boolean;
 }) {
   const t = useT();
-  const [folded, setFolded] = useState(false);
-  useEffect(() => { if (!foldable) return; try { setFolded(localStorage.getItem(BRIEF_FOLD_KEY) === "1"); } catch { /* ไม่มี storage = ขยายไว้ */ } }, [foldable]);
+  const [folded, setFolded] = useState(foldable); // ค่าเริ่มต้น = พับซ่อน (เจ้าของสั่ง 2026-11-21) · กดขยายแล้วจำค่าต่อเครื่อง
+  useEffect(() => { if (!foldable) return; try { setFolded(localStorage.getItem(BRIEF_FOLD_KEY) !== "0"); } catch { /* ไม่มี storage = พับไว้ */ } }, [foldable]);
   const toggleFold = () => setFolded((f) => { const n = !f; try { localStorage.setItem(BRIEF_FOLD_KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; });
 
   const controlsRef = useRef<CanvasSketchControls | null>(null);
