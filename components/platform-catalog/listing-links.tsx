@@ -15,15 +15,37 @@ import { listingLinks } from "@/lib/platform-links";
 
 const BTN = "inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50 hover:text-violet-700";
 
-export function ListingLinks({ platformCode, externalProductId, shopRef, className = "" }: {
+const ICON_BTN = "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-violet-700";
+
+export function ListingLinks({ platformCode, externalProductId, shopRef, className = "", compact = false }: {
   platformCode: string;
   externalProductId: string | null | undefined;
   /** platform_accounts.external_shop_id ของแบรนด์ (ลิงก์ร้าน / @handle / Shop ID) */
   shopRef?: string | null;
   className?: string;
+  /** true = ปุ่มไอคอนล้วน เรียงแถวเดียว (ชื่อปุ่มอยู่ใน tooltip) — การ์ดร้านในแท็บแพลตฟอร์ม · ไม่ส่ง = หน้าตาเดิม */
+  compact?: boolean;
 }) {
   const l = listingLinks(platformCode, externalProductId, shopRef);
   if (!l.storefront && !l.sellerCenter && !l.storefrontHint) return null;
+  if (compact) {
+    return (
+      <span className={`inline-flex items-center gap-1 ${className}`}>
+        {l.storefront
+          ? <a href={l.storefront} target="_blank" rel="noopener noreferrer" className={ICON_BTN} title={`ดูหน้าร้าน (ที่ลูกค้าเห็น) — ${l.storefront}`} aria-label="ดูหน้าร้าน"><Icon name="store" /></a>
+          : l.storefrontHint && <span className={`${ICON_BTN} border-amber-200 bg-amber-50 text-amber-700`} title={`ดูหน้าร้านไม่ได้ — ${l.storefrontHint}`} aria-label="ดูหน้าร้านไม่ได้"><Icon name="info" /></span>}
+        {l.sellerCenter && (
+          <a href={l.sellerCenter} target="_blank" rel="noopener noreferrer" className={ICON_BTN} aria-label={l.sellerLabel}
+            title={l.sellerExact ? `เปิดหน้าแก้สินค้านี้ใน ${l.sellerLabel}` : `${l.sellerLabel} — ไม่มีลิงก์เข้าสินค้าตรง เปิดหน้าแรกแล้วค้นรหัส #${externalProductId ?? ""}`}>
+            <Icon name="settings" />
+          </a>
+        )}
+        {l.sellerCenter && !l.sellerExact && externalProductId && (
+          <span className={ICON_BTN}><CopyButton value={String(externalProductId)} title={`คัดลอกรหัส #${externalProductId} ไว้ค้นในหลังร้าน`} className="!h-full !w-full" /></span>
+        )}
+      </span>
+    );
+  }
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
       {l.storefront

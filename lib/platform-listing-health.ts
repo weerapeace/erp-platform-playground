@@ -232,6 +232,52 @@ export function summarizeListing(platformCode: string, raw: unknown, fallbackPri
   const s = summarizeRaw(platformCode, obj(raw) ?? {}, fallbackPrice);
   return isGoneStatus(status) ? { ...s, state: "gone" } : s;
 }
+/** ตัวเลือก 1 ตัวบนร้าน (สำหรับพรีวิวหน้าร้าน) */
+export type ListingShopVariant = { label: string; sku: string | null; price: number | null; salePrice: number | null; stock: number | null; image: string | null };
+/** รูป + ตัวเลือกที่ร้านส่งมา (ไว้พรีวิวหน้าร้าน) — ร้านที่ไม่ส่งรูป (Lazada) = images ว่าง */
+export type ListingShopDetail = { images: string[]; variants: ListingShopVariant[] };
+
+/**
+ * อ่านรูปทั้งหมด + ราคาต่อตัวเลือกจาก raw (พรีวิวหน้าร้านในแท็บแพลตฟอร์มของ Parent SKU)
+ * LINE = รูปครบทุกใบ · Shopee = รูปปก + รูปตัวเลือก · TikTok/เว็บ = รูปปก · Lazada = ไม่มีรูป (ไม่เก็บ)
+ */
+export function listingShopDetail(platformCode: string, raw: unknown): ListingShopDetail {
+  const r = obj(raw) ?? {};
+  const uniq = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))];
+  const sale = (price: number | null, s: number | null) => (s != null && s > 0 && (price == null || s < price) ? s : null);
+  if (platformCode === "line_shopping" && obj(r.line)) {
+    const line = obj(r.line)!;
+    const vars = arr(line.variants).map(obj).filter((v): v is Obj => !!v);
+    return {
+      images: uniq(arr(line.imageUrls).map(str)),
+      variants: vars.map((v) => {
+        const price = num(v.price);
+        const label = arr(v.options).map(obj).map((o) => str(o?.value)).filter(Boolean).join(" / ");
+        return { label: label || (str(v.sku) ?? ""), sku: str(v.sku), price, salePrice: sale(price, num(v.discountedPrice)), stock: num(v.availableNumber), image: str(v.imageUrl) };
+      }),
+    };
+  }
+  if (platformCode === "lazada" && obj(r.lazada)) {
+    const skus = arr(obj(r.lazada)!.skus).map(obj).filter((v): v is Obj => !!v);
+    return { images: [], variants: skus.map((v) => { const price = num(v.price); return { label: str(v.label) ?? (str(v.seller_sku) ?? ""), sku: str(v.seller_sku), price, salePrice: sale(price, num(v.special_price)), stock: num(v.available) ?? num(v.quantity), image: null }; }) };
+  }
+  if (platformCode === "tiktok" && obj(r.tiktok)) {
+    const tt = obj(r.tiktok)!;
+    const skus = arr(tt.skus).map(obj).filter((v): v is Obj => !!v);
+    return { images: uniq([str(tt.image)]), variants: skus.map((v) => ({ label: str(v.label) ?? (str(v.seller_sku) ?? ""), sku: str(v.seller_sku), price: num(v.price), salePrice: null, stock: num(v.stock), image: null })) };
+  }
+  if (platformCode === "shopee" && obj(r.shopee)) {
+    const sp = obj(r.shopee)!;
+    const models = arr(sp.models).map(obj).filter((v): v is Obj => !!v);
+    return {
+      images: uniq([str(sp.image), ...models.map((m) => str(m.image))]),
+      variants: models.map((m) => { const price = num(m.original_price) ?? num(m.price); return { label: str(m.label) ?? (str(m.sku) ?? ""), sku: str(m.sku), price, salePrice: sale(price, num(m.price)), stock: num(m.stock), image: str(m.image) }; }),
+    };
+  }
+  if (platformCode === "website" && obj(r.website)) return { images: uniq([str(obj(r.website)!.image)]), variants: [] };
+  return { images: [], variants: [] };
+}
+
 function summarizeRaw(platformCode: string, r: Obj, fallbackPrice: number | null): ListingShopSummary {
   if (platformCode === "line_shopping") return summarizeLine(r, fallbackPrice);
   if (platformCode === "lazada" && obj(r.lazada)) return summarizeLazada(r, fallbackPrice);

@@ -11,7 +11,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { isGoneStatus } from "@/lib/platform-listing-health";
+import { isGoneStatus, listingShopDetail, summarizeListing, type ListingShopSummary, type ListingShopVariant } from "@/lib/platform-listing-health";
 import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/listing-hidden-platforms";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -24,6 +24,11 @@ export type ListingVariant = {
   image_key: string | null; is_active: boolean; sale_ok: boolean;
   has_price: boolean; has_image: boolean; inherited_image: boolean;
   option_name: string | null; option_value: string | null;
+};
+/** สินค้าบนร้านที่จับคู่สินค้านี้อยู่ (ต่อร้าน) + พรีวิวหน้าร้านจากรอบดึงล่าสุด (รูป/ราคา/สถานะ — lib/platform-listing-health) */
+export type MatchedListing = {
+  id: string; title: string | null; external_id: string | null; sku_code: string | null;
+  status: string | null; summary: ListingShopSummary; images: string[]; shop_variants: ListingShopVariant[]; imported_at: string | null;
 };
 export type ListingPlatform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities: Record<string, unknown> };
 export type ListingAccount = { label: string | null; is_active: boolean; external_shop_id: string | null };
@@ -43,7 +48,7 @@ export type ListingContext = {
   images: ListingImage[];
   descImages: ListingImage[];
   accounts: Record<string, ListingAccount>;
-  matchedListings: Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }>;
+  matchedListings: Record<string, MatchedListing>;
   /** ร้านที่แบรนด์สั่งซ่อนในแท็บแพลตฟอร์ม (platform code · lib/listing-hidden-platforms) */
   hiddenPlatformCodes: string[];
 };
@@ -142,16 +147,26 @@ export async function loadListingContext(admin: Admin, parentId: string): Promis
     // แกลเลอรีจริงของ Parent SKU ("รูปภาพเพิ่มเติม") — เก็บใน erp_playground_attachments (ไม่ใช่ product_image_slots)
     admin.from("erp_playground_attachments").select("file_path, is_primary, sort_order").eq("entity_type", "parent_skus_v2").eq("entity_id", parentId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
     // สินค้าบนร้าน (platform_catalog_listings) ที่จับคู่กับสินค้านี้อยู่ — ต่อแพลตฟอร์ม
-    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code, status").eq("matched_parent_sku_id", parentId),
+    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code, status, price, raw, last_imported_at").eq("matched_parent_sku_id", parentId),
   ]);
   // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน) · ตัวที่ยังอยู่บนร้านมาก่อนตัวที่ร้านลบแล้ว
   //   🐛 2026-11-21: เดิมได้ตัวแรกที่เจอ → BBP03 TikTok ได้รายการที่ร้านลบไปแล้ว (ปุ่ม "จัดการบนร้าน" เปิดตัวที่ไม่อยู่บนร้าน + ไม่มีป้ายเทียบกับระบบ)
   const matchedListings: ListingContext["matchedListings"] = {};
+  const codeById = new Map((platforms as ListingPlatform[]).map((p) => [p.id, p.code]));
   //   ลำดับ: เปิดขาย → ปิดขาย/ซ่อน (เช่น Shopee unlist) → ร้านลบแล้ว
   const rank = (st: unknown) => { const s = String(st ?? "").toLowerCase(); return isGoneStatus(s) ? 2 : /unlist|inactive|deactivat|banned|deleted|draft/.test(s) ? 1 : 0; };
   for (const l of ((matchedL ?? []) as Row[]).sort((a, b) => rank(a.status) - rank(b.status))) {
     const pid = String(l.platform_id);
-    if (!matchedListings[pid]) matchedListings[pid] = { id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null };
+    if (matchedListings[pid]) continue;
+    // พรีวิวหน้าร้าน (เจ้าของขอ 2026-11-21): รูป/ราคา/สถานะจากรอบดึงสินค้าล่าสุด — ไม่ถามร้านเพิ่ม
+    const code = codeById.get(pid) ?? "";
+    const status = (l.status as string) ?? null;
+    const detail = listingShopDetail(code, l.raw);
+    matchedListings[pid] = {
+      id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null,
+      status, summary: summarizeListing(code, l.raw, l.price == null ? null : Number(l.price), status),
+      images: detail.images.slice(0, 20), shop_variants: detail.variants.slice(0, 50), imported_at: (l.last_imported_at as string) ?? null,
+    };
   }
   const pRow = (parent ?? {}) as Row;
   const categoryId = (pRow.category_id as string) ?? null;

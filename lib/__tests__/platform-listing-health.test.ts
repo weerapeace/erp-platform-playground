@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  effectivePrice, discountPct, priceFlags,
+  effectivePrice, discountPct, priceFlags, listingShopDetail,
   summarizeListing, shopStateOf, duplicateCounts, duplicateKey, countsAsDuplicate, inShopTab, inShopQueue, notListedTrustworthy,
   LOW_STOCK_MAX, LISTING_GONE_STATUS, isUnmatched, type ShopItem,
 } from "@/lib/platform-listing-health";
@@ -214,5 +214,23 @@ describe("ไม่อยู่บนร้านแล้ว (status removed)",
     expect(inShopTab(item({ state: "selling" }), "gone")).toBe(false);
     const ok = item({ matched_parent_sku_id: "p1" });
     expect(notListedTrustworthy([ok, g, g, g])).toBe(true);
+  });
+});
+
+describe("listingShopDetail (พรีวิวหน้าร้าน)", () => {
+  it("LINE: รูปครบ + ราคาลดต่อตัวเลือก", () => {
+    const d = listingShopDetail("line_shopping", { line: { imageUrls: ["a", "b", "a"], variants: [{ sku: "LY22-01", price: 1790, discountedPrice: 590, availableNumber: 0, options: [{ name: "สี", value: "ดำ (01)" }], imageUrl: "v1" }] } });
+    expect(d.images).toEqual(["a", "b"]);
+    expect(d.variants[0]).toEqual({ label: "ดำ (01)", sku: "LY22-01", price: 1790, salePrice: 590, stock: 0, image: "v1" });
+  });
+  it("Shopee: รูปปก + รูปตัวเลือก · price ต่ำกว่า original = ราคาลด", () => {
+    const d = listingShopDetail("shopee", { shopee: { image: "c", models: [{ sku: "X-02", label: "สี: ขาว", price: 990, original_price: 1790, stock: 3, image: "m" }] } });
+    expect(d.images).toEqual(["c", "m"]);
+    expect(d.variants[0].salePrice).toBe(990);
+    expect(d.variants[0].price).toBe(1790);
+  });
+  it("Lazada ไม่มีรูป · ไม่รู้จักร้าน = ว่าง", () => {
+    expect(listingShopDetail("lazada", { lazada: { skus: [{ label: "สี: ชมพู", price: 1790, special_price: 590, seller_sku: "LY22-03", available: 1 }] } })).toEqual({ images: [], variants: [{ label: "สี: ชมพู", sku: "LY22-03", price: 1790, salePrice: 590, stock: 1, image: null }] });
+    expect(listingShopDetail("instagram", {})).toEqual({ images: [], variants: [] });
   });
 });
