@@ -96,7 +96,7 @@ const sysOf = (sys: SystemValues, code: string | null) => (code ? sys.variants.f
 
 function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListingView): Ctx {
   const variants: ShopVariant[] = v.hasModel ? v.models.map((m) => ({ code: m.sku, label: m.label ?? "", price: m.originalPrice ?? m.price })) : [{ code: null, label: "", price: v.originalPrice ?? v.price }];
-  const shop: ShopValues = { description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants };
+  const shop: ShopValues = { description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images };
   const imgPlan = () => planShopeeImages(v, base.sys.imageRefs);
   const descPlan = () => planShopeeEdit(v, { description: base.sys.description });
   const priceRows = shopeePriceRowsFromView(v);
@@ -129,7 +129,7 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
 
 function lazadaCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: LazadaListingView): Ctx {
   const shop: ShopValues = {
-    description: v.description, imageCount: v.images.length, imageSig: listSig(v.images),
+    description: v.description, imageCount: v.images.length, imageSig: listSig(v.images), imageUrls: v.images,
     variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, price: s.price, ...(base.sys.variants.some((x) => x.special !== undefined) ? { special: s.specialPrice } : {}) })),
   };
   const before = lazadaEditStateFromView(v);
@@ -164,7 +164,7 @@ function tiktokCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: TiktokListin
   const baseUris = media.images.map((i) => i.uri);
   const baseDesc = v.pendingDescription ?? v.description;
   const shop: ShopValues = {
-    description: baseDesc, imageCount: baseUris.length, imageSig: listSig(baseUris),
+    description: baseDesc, imageCount: baseUris.length, imageSig: listSig(baseUris), imageUrls: media.images.map((i) => i.url),
     variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, values: s.attrs.map((a) => a.valueName ?? "").filter(Boolean), price: s.price })),
   };
   const mediaPlan = () => planTiktokMedia(baseUris, media.pkg, base.sys.imageRefs, media.pkg);
@@ -223,7 +223,7 @@ function lineCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, state: LineEditSt
     return (Array.isArray(rv?.options) ? rv!.options as Record<string, unknown>[] : []).map((o) => String(o.value ?? "").trim()).filter(Boolean);
   };
   const shop: ShopValues = {
-    description: state.description, imageCount: state.images.length, imageSig: listSig(state.images),
+    description: state.description, imageCount: state.images.length, imageSig: listSig(state.images), imageUrls: state.images,
     variants: state.variants.map((x) => ({ code: x.sku, label: x.label, values: valuesOf(x.id), price: x.price, pay: x.pay })),
   };
   const merged = (keys: DriftKey[]): LineEditState => ({
@@ -306,7 +306,9 @@ function itemsOf(ctx: Ctx): DriftItem[] {
 }
 
 async function saveCheck(admin: Admin, c: { listing_id: string; parent_sku_id: string | null; platform_code: string; items: DriftItem[] | null; issues: DriftKey[]; error: string | null }) {
-  await admin.from("platform_listing_drift").upsert({ ...c, checked_at: new Date().toISOString() }, { onConflict: "listing_id" });
+  // รูป/ข้อความเต็มใช้แค่ตอนเปิดหน้าเทียบ (ตรวจสด) — ไม่จดลงตาราง กันตารางบวม
+  const items = c.items?.map(({ media: _m, text: _t, ...rest }) => rest) ?? null;
+  await admin.from("platform_listing_drift").upsert({ ...c, items, checked_at: new Date().toISOString() }, { onConflict: "listing_id" });
 }
 
 /** ตรวจ 1 รายการบนร้าน (ดึงสดทั้ง 2 ฝั่ง) + จดผล · ไม่ throw */

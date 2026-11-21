@@ -34,13 +34,21 @@ export type DriftItem = {
   /** กดส่งให้ตรงได้ไหม (ร้านรองรับ + ไม่ติดกฎ) · ไม่ได้ = cannot บอกเหตุผล */
   sendable: boolean;
   cannot?: string | null;
+  /** รูป: ลิงก์รูปตามลำดับ บนร้าน / หลังส่ง (เฉพาะตอนตรวจสด · ไม่จดลงตาราง) */
+  media?: { before: string[]; after: string[] };
+  /** รายละเอียด: ข้อความเต็ม 2 ฝั่ง (HTML หรือข้อความล้วน · เฉพาะตอนตรวจสด · ไม่จดลงตาราง) */
+  text?: { before: string; after: string };
 };
 
 // ───────── ค่ากลาง 2 ฝั่ง ─────────
 export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null };
 export type SystemValues = { description: string; imageRefs: string[]; variants: SysVariant[] };
 export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null };
-export type ShopValues = { description: string; imageCount: number; imageSig: string; variants: ShopVariant[] };
+export type ShopValues = { description: string; imageCount: number; imageSig: string; variants: ShopVariant[]; /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[] };
+/** ref รูปฝั่งระบบ → ลิงก์รูปย่อ ("r2:<key>" = คลังรูปเรา · http = ลิงก์ตรง) */
+export function refImageUrl(ref: string, w = 400): string {
+  return ref.startsWith("r2:") ? `/api/r2-image?key=${encodeURIComponent(ref.slice(3))}&w=${w}` : ref;
+}
 /** จำตอนส่งรูปจากระบบสำเร็จ (raw.sys_sync) */
 export type SysSync = { images_sys?: string | null; images_shop?: string | null; images_at?: string | null };
 
@@ -79,6 +87,9 @@ export function shopVariantOf(shop: ShopVariant[], code: string): ShopVariant | 
 
 // ───────── เทียบทีละเรื่อง ─────────
 export function compareImages(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot"> {
+  return { ...compareImagesCore(sys, shop, sync), media: { before: shop.imageUrls ?? [], after: sys.imageRefs.map((r) => refImageUrl(r)) } };
+}
+function compareImagesCore(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot"> {
   const sysSig = listSig(sys.imageRefs);
   const before = `${shop.imageCount} รูป`, after = `${sys.imageRefs.length} รูป`;
   if (!sys.imageRefs.length) return { key: "images", state: "unknown", summary: "ระบบยังไม่มีรูป", before, after, note: "สินค้านี้ยังไม่มีรูปที่จะส่ง" };
@@ -96,6 +107,9 @@ export function compareImages(sys: SystemValues, shop: ShopValues, sync: SysSync
 }
 
 export function compareDescription(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  return { ...compareDescriptionCore(sys, shop), text: { before: shop.description ?? "", after: sys.description ?? "" } };
+}
+function compareDescriptionCore(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
   const a = normText(shop.description), b = normText(sys.description);
   const before = short(plainText(shop.description), 80) || "(ว่าง)", after = short(plainText(sys.description), 80) || "(ว่าง)";
   if (!b) return { key: "description", state: "unknown", summary: "ระบบยังไม่มีรายละเอียด", before, after };
@@ -183,5 +197,34 @@ export const driftIssues = (items: readonly Pick<DriftItem, "key" | "state">[]):
 export function driftBadgeText(issues: readonly DriftKey[]): string {
   return issues.length ? `ไม่ตรงระบบ: ${issues.map((k) => DRIFT_LABEL[k].replace(/\s*\(.*\)$/, "")).join(" · ")}` : "ตรงกับระบบ";
 }
+// ───────── เทียบรายละเอียดทีละบรรทัด (หน้าเทียบก่อนส่ง) ─────────
+export type DiffLine = { text: string; changed: boolean };
+/** แบ่งเป็นบรรทัดอ่านง่าย (ตัดแท็ก · ตัดบรรทัดว่าง) */
+export const descLines = (s: string | null | undefined): string[] => plainText(s).split(/\n/).map((l) => l.trim()).filter(Boolean);
+/**
+ * เทียบบรรทัดซ้าย (บนร้าน) กับขวา (หลังส่ง) — LCS ตามข้อความล้วน (ไม่สนช่องว่าง/ตัวพิมพ์)
+ * left.changed = บรรทัดนี้จะหายจากร้าน · right.changed = บรรทัดนี้จะเพิ่มเข้าไป
+ */
+export function lineDiff(a: string[], b: string[]): { left: DiffLine[]; right: DiffLine[]; changes: number } {
+  const na = a.map(normText), nb = b.map(normText);
+  const n = a.length, m = b.length;
+  // ตาราง LCS (รายละเอียดสินค้าไม่กี่ร้อยบรรทัด — n·m เล็ก)
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = na[i] === nb[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const keepA = new Set<number>(), keepB = new Set<number>();
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (na[i] === nb[j]) { keepA.add(i); keepB.add(j); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+  }
+  const left = a.map((t, i) => ({ text: t, changed: !keepA.has(i) }));
+  const right = b.map((t, j) => ({ text: t, changed: !keepB.has(j) }));
+  return { left, right, changes: left.filter((l) => l.changed).length + right.filter((r) => r.changed).length };
+}
+/** ลิงก์รูปในรายละเอียด (HTML) */
+export const descImages = (html: string | null | undefined): string[] =>
+  [...String(html ?? "").matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]);
+/** มีแท็ก HTML ไหม */
+export const looksHtml = (s: string | null | undefined): boolean => /<(p|br|div|ul|ol|li|img|h\d|strong|b|span)\b/i.test(String(s ?? ""));
+
 /** ตรวจไว้นานแค่ไหนถึงควรตรวจใหม่ (ชม.) */
 export const DRIFT_STALE_HOURS = 20;

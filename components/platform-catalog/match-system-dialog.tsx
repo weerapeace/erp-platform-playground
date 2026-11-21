@@ -8,15 +8,18 @@
  *   1) เปิด = GET /api/platform-catalog/drift?listing_id (ดึงสดทั้งร้าน + ระบบ) → 4 เรื่อง รูป/รายละเอียด/ชื่อตัวเลือก/ราคา
  *   2) ติ๊กเรื่องที่จะส่ง (ไม่ตรง + ร้านรองรับ ติ๊กไว้ให้ก่อน · เรื่องที่ส่งไม่ได้บอกเหตุผล)
  *   3) ยืนยัน = POST build (ประกอบคำสั่งใหม่จากข้อมูลสด) → ยิงไป API แก้สินค้าบนร้านเดิมทีละคำสั่ง (ตรวจชนกัน/สิทธิ์/ลงประวัติที่ปลายทาง)
+ *   รูป = รูปย่อ 2 แถวตามลำดับ (บนร้าน / หลังส่ง) + กดดูรูปใหญ่ (ImageLightbox) · รายละเอียด = เต็ม 2 ฝั่ง วางเทียบ + ไฮไลต์บรรทัดที่ต่าง + ดูแบบที่ขึ้นบนร้าน (เจ้าของเลือก 2026-11-21 ข้อ 1-3)
  *   4) สำเร็จ = POST mark (จำชุดรูปที่ส่ง) → ตรวจใหม่ให้เห็นผล
  * การส่งขึ้นร้านย้อนอัตโนมัติไม่ได้ → หน้านี้คือหน้ายืนยันก่อนส่ง (ต้องกดยืนยันเอง) · ไม่แตะสต๊อก
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
+import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { apiFetch } from "@/lib/api";
-import { DRIFT_LABEL, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
+import { sanitizeRichHtml } from "@/lib/sanitize-html";
+import { DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
 
 type Check = { listing_id: string; platform_code: string; items: DriftItem[]; issues: DriftKey[]; checked_at: string };
 type Call = { url: string; body: Record<string, unknown>; label: string };
@@ -109,7 +112,7 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   const sorted = useMemo(() => [...items].sort((a, b) => (a.state === "diff" ? 0 : 1) - (b.state === "diff" ? 0 : 1)), [items]);
 
   return (
-    <ERPModal open={open} onClose={() => { if (!sending) onClose(); }} size="lg" closeOnBackdrop={!sending}
+    <ERPModal open={open} onClose={() => { if (!sending) onClose(); }} size="xl" closeOnBackdrop={!sending}
       title={`อัปเดต ${shopName} ให้ตรงกับระบบ`}
       description={check ? (diffN ? `ไม่ตรงกับระบบ ${diffN} เรื่อง — ติ๊กเรื่องที่จะส่ง แล้วกดยืนยัน (ยังไม่ส่งจนกว่าจะกด)` : "ทุกเรื่องตรงกับระบบแล้ว") : "กำลังเทียบข้อมูลบนร้านกับระบบ…"}
       footer={
@@ -137,7 +140,8 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sorted.map((it) => (
-                  <tr key={it.key} className={it.state === "diff" ? "" : "text-slate-500"}>
+                  <Fragment key={it.key}>
+                  <tr className={it.state === "diff" ? "" : "text-slate-500"}>
                     <td className="px-2 py-2 align-top">
                       {canTick(it) && canPublish ? <input type="checkbox" checked={picked.has(it.key)} onChange={() => toggle(it.key)} disabled={sending} aria-label={`ส่ง${DRIFT_LABEL[it.key]}`} /> : null}
                     </td>
@@ -164,8 +168,21 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                           )}
                         </div>
                       )}
+                      {/* รูป/รายละเอียดที่ตรงอยู่แล้ว = ซ่อนรายละเอียดไว้ กดดูได้ */}
+                      {it.state !== "diff" && ((it.key === "images" && (it.media?.before.length || it.media?.after.length)) || (it.key === "description" && it.text)) ? (
+                        <button type="button" className="mt-1 block text-[11px] text-violet-700 hover:underline" onClick={() => setOpenRows((s) => { const n = new Set(s); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; })}>
+                          {openRows.has(it.key) ? "ซ่อน" : it.key === "images" ? "ดูรูป" : "ดูรายละเอียดเต็ม"}
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
+                  {(it.state === "diff" || openRows.has(it.key)) && it.key === "images" && it.media && (it.media.before.length > 0 || it.media.after.length > 0) && (
+                    <tr><td /><td colSpan={3} className="px-2 pb-3"><ImagesCompare before={it.media.before} after={it.media.after} shopName={shopName} /></td></tr>
+                  )}
+                  {(it.state === "diff" || openRows.has(it.key)) && it.key === "description" && it.text && (
+                    <tr><td /><td colSpan={3} className="px-2 pb-3"><DescCompare before={it.text.before} after={it.text.after} /></td></tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -189,5 +206,113 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
         </div>
       ) : null}
     </ERPModal>
+  );
+}
+
+// ───────── รูป: 2 แถวเรียงตามลำดับ (บนร้าน / หลังส่ง) + กดดูรูปใหญ่ ─────────
+// เจ้าของขอ 2026-11-21 "อยากให้โชว์รูปด้วย" (ข้อ 1) · ตัวดูรูปเต็มจอ = ImageLightbox (ของกลาง)
+function ImagesCompare({ before, after, shopName }: { before: string[]; after: string[]; shopName: string }) {
+  const [idx, setIdx] = useState(-1);
+  const all: LightboxImage[] = useMemo(() => [
+    ...before.map((url, i) => ({ url, group: "shop", label: `บน ${shopName} ตอนนี้ · รูป ${i + 1}/${before.length}${i === 0 ? " (ปก)" : ""}` })),
+    ...after.map((url, i) => ({ url, group: "sys", label: `หลังส่ง (ตามระบบ) · รูป ${i + 1}/${after.length}${i === 0 ? " (ปก)" : ""}` })),
+  ], [before, after, shopName]);
+  const strip = (urls: string[], offset: number, label: string) => (
+    <div>
+      <div className="mb-1 text-[11px] text-slate-500">{label} ({urls.length})</div>
+      {urls.length ? (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {urls.map((u, i) => (
+            <button key={`${i}-${u}`} type="button" onClick={() => setIdx(offset + i)} title="กดเพื่อดูรูปใหญ่"
+              className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-50 cursor-zoom-in">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={u} alt="" loading="lazy" className="h-full w-full object-cover" />
+              <span className="absolute left-0.5 top-0.5 rounded bg-white/85 px-1 text-[10px] text-slate-700">{i + 1}{i === 0 ? " ปก" : ""}</span>
+            </button>
+          ))}
+        </div>
+      ) : <div className="text-[11px] text-slate-400">ไม่มีรูป</div>}
+    </div>
+  );
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+      {strip(before, 0, `บน ${shopName} ตอนนี้`)}
+      {strip(after, before.length, "หลังส่ง (ตามระบบ)")}
+      <ImageLightbox images={all} index={idx} onClose={() => setIdx(-1)} onIndex={setIdx} thumbnails
+        groups={[{ key: "shop", label: `บน ${shopName} ตอนนี้` }, { key: "sys", label: "หลังส่ง (ตามระบบ)" }]} />
+    </div>
+  );
+}
+
+// ───────── รายละเอียด: เต็ม 2 ฝั่ง วางเทียบซ้าย-ขวา + ไฮไลต์บรรทัดที่ต่าง · ดูแบบที่ขึ้นบนร้าน (ข้อ 2, 3) ─────────
+type DescMode = "side" | "shop" | "sys" | "diff" | "look";
+const isPhoneNow = () => typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches;
+const RICH_CLS = "tiptap-content text-[13px] leading-relaxed text-slate-700 [overflow-wrap:anywhere] [&_img]:max-w-full [&_img]:rounded [&_li]:my-0 [&_p]:my-0 [&_p:empty]:h-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5";
+
+function DescCompare({ before, after }: { before: string; after: string }) {
+  const [phone] = useState(isPhoneNow);
+  const [mode, setMode] = useState<DescMode>(phone ? "diff" : "side");
+  const [lookSide, setLookSide] = useState<"sys" | "shop">("sys");
+  const diff = useMemo(() => lineDiff(descLines(before), descLines(after)), [before, after]);
+  const modes: [DescMode, string][] = phone
+    ? [["diff", "เฉพาะที่ต่าง"], ["shop", "บนร้าน"], ["sys", "หลังส่ง"], ["look", "แบบบนร้าน"]]
+    : [["side", "วางเทียบ"], ["diff", "เฉพาะที่ต่าง"], ["look", "แบบที่ขึ้นบนร้าน"]];
+  const lines = (ls: { text: string; changed: boolean }[], tone: "del" | "add") => (
+    <div className="max-h-80 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-[12px] leading-relaxed">
+      {ls.length ? ls.map((l, i) => (
+        <div key={i} className={l.changed ? (tone === "del" ? "bg-rose-50 text-rose-800 line-through decoration-rose-300" : "bg-emerald-50 text-emerald-800") : "text-slate-700"}>{l.text}</div>
+      )) : <div className="text-slate-400">(ว่าง)</div>}
+    </div>
+  );
+  const look = (src: string) => {
+    const imgs = looksHtml(src) ? [] : descImages(src);
+    return (
+      <div className="max-h-96 overflow-auto rounded-md border border-slate-200 bg-white p-3">
+        {looksHtml(src)
+          ? <div className={RICH_CLS} dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(src) }} />
+          : <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-700 [overflow-wrap:anywhere]">{src.trim() || "(ว่าง)"}</div>}
+        {imgs.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{imgs.map((u) => <img key={u} src={u} alt="" className="h-16 rounded border border-slate-200" />)}</div>}
+      </div>
+    );
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {modes.map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setMode(k)} aria-pressed={mode === k}
+            className={`h-7 rounded-md border px-2 text-[11px] ${mode === k ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600"}`}>{l}</button>
+        ))}
+        <span className="ml-auto text-[11px] text-slate-500">ต่าง {diff.changes.toLocaleString()} บรรทัด · <span className="rounded bg-rose-50 px-1 text-rose-700 line-through">จะหาย</span> <span className="rounded bg-emerald-50 px-1 text-emerald-700">จะเพิ่ม</span></span>
+      </div>
+      {mode === "side" && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div><div className="mb-1 text-[11px] text-slate-500">บนร้านตอนนี้ · {descLines(before).join("").length.toLocaleString()} ตัวอักษร</div>{lines(diff.left, "del")}</div>
+          <div><div className="mb-1 text-[11px] text-slate-500">หลังส่ง (ตามระบบ) · {descLines(after).join("").length.toLocaleString()} ตัวอักษร</div>{lines(diff.right, "add")}</div>
+        </div>
+      )}
+      {mode === "shop" && lines(diff.left, "del")}
+      {mode === "sys" && lines(diff.right, "add")}
+      {mode === "diff" && (
+        <div className="max-h-80 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-[12px] leading-relaxed">
+          {diff.changes ? (
+            <>
+              {diff.left.filter((l) => l.changed).map((l, i) => <div key={`d${i}`} className="bg-rose-50 text-rose-800"><span className="mr-1 font-mono">−</span><span className="line-through decoration-rose-300">{l.text}</span></div>)}
+              {diff.right.filter((l) => l.changed).map((l, i) => <div key={`a${i}`} className="bg-emerald-50 text-emerald-800"><span className="mr-1 font-mono">+</span>{l.text}</div>)}
+            </>
+          ) : <div className="text-slate-500">ข้อความเหมือนกัน (ต่างแค่การจัดรูปแบบ/ช่องว่าง)</div>}
+        </div>
+      )}
+      {mode === "look" && (
+        <div className="space-y-1.5">
+          <div className="flex gap-1.5">
+            {(["sys", "shop"] as const).map((k) => (
+              <button key={k} type="button" onClick={() => setLookSide(k)} aria-pressed={lookSide === k}
+                className={`h-7 rounded-md border px-2 text-[11px] ${lookSide === k ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600"}`}>{k === "sys" ? "หลังส่ง (ตามระบบ)" : "บนร้านตอนนี้"}</button>
+            ))}
+          </div>
+          {look(lookSide === "sys" ? after : before)}
+        </div>
+      )}
+    </div>
   );
 }

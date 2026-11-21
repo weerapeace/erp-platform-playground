@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compareAll, compareDescription, compareImages, compareOptions, comparePrice, driftBadgeText, driftIssues, listSig, normText, plainText,
+  compareAll, compareDescription, compareImages, compareOptions, comparePrice, descImages, descLines, driftBadgeText, driftIssues, lineDiff, listSig, looksHtml, normText, plainText,
   type ShopValues, type SystemValues,
 } from "@/lib/platform-listing-drift";
 
@@ -123,5 +123,28 @@ describe("รวม", () => {
     expect(driftIssues(items)).toEqual(["images", "description"]);
     expect(driftBadgeText(["images", "options"])).toBe("ไม่ตรงระบบ: รูป · ชื่อตัวเลือก");
     expect(driftBadgeText([])).toBe("ตรงกับระบบ");
+  });
+});
+
+describe("หน้าเทียบ: รูป + รายละเอียดเต็ม", () => {
+  it("รูป: ส่งลิงก์ทั้ง 2 ฝั่ง (รูปในระบบ r2: → ลิงก์รูปย่อ)", () => {
+    const r = compareImages(sys(), shop({ imageUrls: ["https://x/1.jpg"] }), null);
+    expect(r.media?.before).toEqual(["https://x/1.jpg"]);
+    expect(r.media?.after[0]).toBe("/api/r2-image?key=a&w=400");
+  });
+  it("รายละเอียด: ส่งข้อความเต็มทั้ง 2 ฝั่ง", () => {
+    expect(compareDescription(sys(), shop()).text?.after).toContain("<p>");
+  });
+  it("เทียบทีละบรรทัด: บรรทัดที่หาย/เพิ่ม ไม่สนช่องว่าง", () => {
+    const d = lineDiff(["หัวข้อ", "ขนาด 30 cm", "ประกัน 1 ปี"], ["หัวข้อ ", "ขนาด 31 cm", "ประกัน 1 ปี", "ส่งฟรี"]);
+    expect(d.left.map((l) => l.changed)).toEqual([false, true, false]);
+    expect(d.right.map((l) => l.changed)).toEqual([false, true, false, true]);
+    expect(d.changes).toBe(3);
+  });
+  it("แบ่งบรรทัดจาก HTML + หารูปในรายละเอียด", () => {
+    expect(descLines("<p>หนึ่ง</p><ul><li>สอง</li></ul>")).toEqual(["หนึ่ง", "สอง"]);
+    expect(descImages('<p>x</p><img class="a" src="https://cdn/a.jpg">')).toEqual(["https://cdn/a.jpg"]);
+    expect(looksHtml("ข้อความล้วน")).toBe(false);
+    expect(looksHtml("<p>x</p>")).toBe(true);
   });
 });
