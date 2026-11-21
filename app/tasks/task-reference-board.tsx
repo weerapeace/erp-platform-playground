@@ -20,6 +20,8 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
   loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
 
+/** รูปที่วางบนกระดานบรีฟ/อ้างอิงของงาน ย่อเหลือด้านยาว 600px (webp) ก่อนเก็บขึ้น R2 — เจ้าของเลือก 2026-11-21 ไม่อยากเปลือง R2 */
+export const TASK_BOARD_IMAGE_MAX = 600;
 /** ชนิดกระดานในตาราง erp_canvas_sketches (สิทธิ์ = tasks.view / tasks.edit ที่ /api/canvas-sketch) */
 export const TASK_REF_ENTITY = "creative_task_ref";
 /** ลิงก์หน้าเต็มจอของกระดานอ้างอิงงาน — ใช้จากที่อื่น (Parent SKU · การ์ดงาน) */
@@ -56,7 +58,7 @@ export function TaskReferenceBoard({ taskId, notes, hasNotes, height = "60vh", s
         )}
       </div>
       {sub === "board"
-        ? <CanvasSketch entityType={TASK_REF_ENTITY} entityId={taskId} height={height} collab />
+        ? <CanvasSketch entityType={TASK_REF_ENTITY} entityId={taskId} height={height} collab imageMaxPx={TASK_BOARD_IMAGE_MAX} />
         : notes}
     </div>
   );
@@ -121,7 +123,7 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
           )}
         </span>
       </div>
-      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab controlsRef={controlsRef} onReady={onReady} />}
+      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab controlsRef={controlsRef} onReady={onReady} imageMaxPx={TASK_BOARD_IMAGE_MAX} />}
     </div>
   );
 }

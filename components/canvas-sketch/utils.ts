@@ -53,15 +53,16 @@ export function mergeById(a: any[], b: any[]): any[] {
 }
 
 // ย่อรูป (จาก dataURL base64) ให้ด้านยาวสุด ≤ max px ก่อนอัป R2 — กันไฟล์ใหญ่เกินลิมิต + กระดานเบา (PNG คงโปร่งใส)
-export async function resizeDataUrl(dataURL: string, mime: string, max = 1600): Promise<{ blob: Blob; type: string }> {
+/** opts.type = บังคับชนิดไฟล์ผลลัพธ์ (เช่น "image/webp" — เล็กกว่า png มาก คงพื้นใส) · เบราว์เซอร์ทำไม่ได้จะได้ png แทน (ดู type ที่คืน) */
+export async function resizeDataUrl(dataURL: string, mime: string, max = 1600, opts?: { type?: string; quality?: number }): Promise<{ blob: Blob; type: string }> {
   const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL; });
   let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
   if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
   const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
   canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
-  const type = mime === "image/png" ? "image/png" : "image/jpeg";
-  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), type, 0.85));
-  return { blob, type };
+  const type = opts?.type ?? (mime === "image/png" ? "image/png" : "image/jpeg");
+  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), type, opts?.quality ?? 0.85));
+  return { blob, type: blob?.type || type };
 }
 
 /**

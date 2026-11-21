@@ -73,8 +73,11 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false, imageMaxPx,
 }: {
+  /** ย่อรูปที่วาง/ลากลงกระดานให้ด้านยาวไม่เกินกี่ px ก่อนเก็บขึ้น R2 (ค่าเดิม 1600) — ค่าเล็ก (เช่น 600) = เก็บเป็น webp ประหยัด ~90%
+   *  ใช้กับกระดานที่รูปเป็นแค่บรีฟ/อ้างอิงคร่าว ๆ (กระดานบรีฟ/อ้างอิงของงาน) · ไม่กระทบรูปที่อยู่บน R2 อยู่แล้ว */
+  imageMaxPx?: number;
   entityType: string;
   entityId:   string;
   editable?:  boolean;
@@ -311,8 +314,9 @@ export function CanvasSketch({
       void (async () => {
         try {
           const mime = (url.match(/^data:([^;]+);base64,/)?.[1]) || "image/png";
-          const { blob, type } = await resizeDataUrl(url, mime, 1600); // ย่อ ≤1600px → ผ่านลิมิต 5MB + เบา
-          const ext = type === "image/png" ? "png" : "jpg";
+          const small = !!imageMaxPx && imageMaxPx < 1600; // โหมดประหยัด → webp ด้านยาว ≤imageMaxPx
+          const { blob, type } = await resizeDataUrl(url, mime, imageMaxPx || 1600, small ? { type: "image/webp", quality: 0.8 } : undefined); // ย่อ ≤1600px → ผ่านลิมิต 5MB + เบา
+          const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
           const fd = new FormData();
           fd.append("file", new File([blob], `cv-${fid}.${ext}`, { type }));
           fd.append("folder", "canvassketch");
@@ -339,7 +343,7 @@ export function CanvasSketch({
         finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
       })();
     }
-  }, [editable, queueSave, broadcastFiles]);
+  }, [editable, queueSave, broadcastFiles, imageMaxPx]);
   hoistRef.current = hoistImages; // ให้ effect โหลด (proactive hoist ตอนเปิด) เรียกได้โดยไม่ผูก dependency
 
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
