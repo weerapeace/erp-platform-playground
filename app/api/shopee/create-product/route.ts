@@ -19,7 +19,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { ShopeeApiError, shopeeAddItem, shopeeErrorText, shopeeInitTierVariation, shopeeItemToCatalogItem, shopeeUnlistItems } from "@/lib/shopee";
 import { shopeeUnlistErrors } from "@/lib/shopee-listing-edit";
-import { shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve, type ShopeeCreatePreview } from "@/lib/shopee-create-plan";
+import { shopeeCreateDescImageRefs, shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve, type ShopeeCreatePreview } from "@/lib/shopee-create-plan";
 import { upsertCatalogListings, type CatalogSyncItem } from "@/lib/platform-catalog-sync";
 import { creatorOf, type CreateStep } from "@/lib/platform-create-registry";
 import { loadShopeeCreate, type ShopeeLastAttempt } from "./load";
@@ -118,6 +118,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     try { idOf.set(ref, (await shopeeUploadRef(ref)).imageId); }
     catch (e) { optErr = (e as Error).message; break; }
   }
+  // รูปในรายละเอียด (ไม่บังคับ) — ฝากไม่ได้ = ตัดรูปนั้น · ไม่เหลือ = ส่งข้อความอย่างเดียว
+  const descRefs = shopeeCreateDescImageRefs(r.payload);
+  let descErr: string | null = null;
+  for (const ref of descRefs.filter((x) => !idOf.has(x))) {
+    try { idOf.set(ref, (await shopeeUploadRef(ref)).imageId); }
+    catch (e) { descErr = (e as Error).message; }
+  }
+  const descOk = descRefs.filter((x) => idOf.has(x)).length;
+  if (descRefs.length) {
+    if (descOk === descRefs.length) done("desc_images", `ฝากรูปในรายละเอียด ${descOk}/${descRefs.length}`);
+    else steps.push({ key: "desc_images", label: `ฝากรูปในรายละเอียด ${descOk}/${descRefs.length}`, state: "skip", detail: descOk ? `ฝากไม่ได้บางรูป (${descErr ?? "ไม่ทราบสาเหตุ"}) — ส่งเท่าที่ฝากได้` : `ฝากไม่ได้ (${descErr ?? "ไม่ทราบสาเหตุ"}) — ส่งเป็นข้อความอย่างเดียว` });
+  }
   const resolved = shopeeCreateResolve(r.payload, idOf);
   if (r.payload.tier && shopeeCreateOptionImageRefs(r.payload).length) {
     if (resolved.optionImages) done("option_images", "รูปตัวเลือก (สี)");
@@ -196,5 +208,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       error: `สร้างสินค้า #${itemId} บน Shopee แล้ว (ปิดขาย · ลูกค้ายังไม่เห็น) แต่สร้างตัวเลือกไม่สำเร็จ: ${tierError} — เพิ่มตัวเลือกใน Seller Centre หรือลบสินค้านี้แล้วลงใหม่ (ระบบไม่สร้างซ้ำให้อัตโนมัติ)`,
     }, { status: 502 });
   }
-  return NextResponse.json({ ok: true, product_id: itemId, display: displayRes, warnings, uploaded: idOf.size, steps, error: null });
+  return NextResponse.json({ ok: true, product_id: itemId, display: displayRes, warnings, uploaded: idOf.size, steps, error: null,
+    desc_images: descRefs.length ? { ok: descOk > 0, present: descOk, total: descRefs.length, error: descOk ? null : descErr } : null });
 }

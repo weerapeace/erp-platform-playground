@@ -179,6 +179,22 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
 
   const exOnShop = ((onShop ?? []) as Row[])[0];
   const [attrRules, liveDesc, descImgs, descHist, nameHist] = await Promise.all([rulesP, liveDescP, descImgsP, descHistP, nameHistP]);
+  // รูปในรายละเอียด: ชุดที่เลือกไว้ในร่าง Lazada (ข้อ 3) + ความกว้างรูปจากคลังรูป (ข้อ 2 เตือนรูปไม่คม) — พลาด = ไม่มีปุ่ม/ไม่เตือน
+  const [lazadaDescImages, imageWidths] = await Promise.all([
+    (async () => {
+      const { data: lzPf } = await admin.from("erp_platforms").select("id").eq("code", "lazada").maybeSingle();
+      const lzId = (lzPf as { id?: string } | null)?.id; if (!lzId) return null;
+      const { data: lzDraft } = await admin.from("platform_listing_drafts").select("extra").eq("parent_sku_id", parentId).eq("platform_id", lzId).maybeSingle();
+      const v = ((lzDraft as { extra?: Record<string, unknown> } | null)?.extra ?? {}).lazada_desc_images;
+      return Array.isArray(v) ? v.map((x) => String(x ?? "")).filter(Boolean) : null;
+    })().catch(() => null),
+    (async () => {
+      const keys = [...new Set([...descImgs, ...it.images.map((x) => x.key)])].slice(0, 150);
+      if (!keys.length) return {} as Record<string, number>;
+      const { data } = await admin.from("assets").select("r2_key, width").in("r2_key", keys);
+      return Object.fromEntries(((data ?? []) as { r2_key: string; width: number | null }[]).filter((a) => a.width).map((a) => [a.r2_key, Number(a.width)]));
+    })().catch(() => ({} as Record<string, number>)),
+  ]);
   const numOr = (v: unknown) => (v == null || v === "" ? null : Number(v) || null);
   const { preview, payload } = planShopeeCreate({
     parent: {
@@ -186,7 +202,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
       description: pr.description == null ? null : String(pr.description), platform_description: pr.platform_description == null ? null : String(pr.platform_description),
       weight_g: pr.weight_g == null ? null : Number(pr.weight_g), box: { l: p.box_length, w: p.box_width, h: p.box_height }, brand_name: p.brand_name,
       warranty: pr.warranty == null ? null : String(pr.warranty), size: { l: numOr(pr.size_length_cm), w: numOr(pr.size_thickness_cm), h: numOr(pr.size_height_cm) },
-      platform_description_live: liveDesc, platform_description_history: descHist, name_history: nameHist, desc_image_count: descImgs.length,
+      platform_description_live: liveDesc, platform_description_history: descHist, name_history: nameHist, desc_image_count: descImgs.length, desc_image_keys: descImgs,
     },
     skus: ((skus ?? []) as Row[]).map((s): ShopeeCreateSku => ({
       id: str(s.id), code: str(s.code), color_th: (s.color_th as string) ?? null, color: (s.color as string) ?? null, color_platform_th: (s.color_platform_th as string) ?? null,
@@ -195,7 +211,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
     draft, category, candidates, galleryKeys: it.images.map((x) => x.key), attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template, channels,
-    onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules,
+    onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules, lazadaDescImages, imageWidths,
   });
   if (preview.on_shop) blockers.push(`มีบน Shopee แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);
   const lastAttempt: ShopeeLastAttempt | null = d && (d.last_sync_status || d.platform_product_id)

@@ -203,9 +203,16 @@ export function ShopeeCreatePreviewEditor({ parentId, canEdit, onLoaded }: {
           <div className="min-w-0">
             <ListingDescriptionBox platformName="Shopee" text={pv.description.value} src={pv.description.src} canEdit={canEdit} saving={saving} required
               onSave={(v) => void patch({ description: v.trim() || null }, "บันทึกรายละเอียดแล้ว", { description: pv.description.value || null })}
-              note={<><Icon name="image" /> รูปในรายละเอียด: {pv.description.imagesAllowed === true ? "ร้านนี้ได้สิทธิ์ใส่รูปจาก Shopee แล้ว — ตอนนี้ยังส่งเป็นข้อความอย่างเดียว"
-                : pv.description.imagesAllowed === false ? "สินค้าบนร้านเป็นรายละเอียดแบบข้อความ — ยังไม่พบว่าร้านได้สิทธิ์ใส่รูปในรายละเอียด (Shopee เปิดให้บางร้าน) · ส่งเป็นข้อความ"
-                : "ส่งเป็นข้อความอย่างเดียว"}{pv.description.parentImages > 0 ? ` · Parent SKU มีรูป Description ${pv.description.parentImages} รูป (ส่งได้เมื่อร้านได้สิทธิ์)` : ""}</>} />
+              note={<><Icon name="image" /> รูปในรายละเอียด: ร้านนี้ได้สิทธิ์ใส่รูปแล้ว — ส่งเป็นข้อความ + รูปต่อท้าย (ฝากรูปไม่ได้ = ส่งข้อความอย่างเดียว)</>}
+              images={pv.descImages ? { ...pv.descImages, parentId, parentCode: pv.parent_code,
+                onSave: (refs) => void patchExtra({ shopee_desc_images: refs }, refs.length ? "บันทึกรูปในรายละเอียดแล้ว" : "เอารูปในรายละเอียดออกแล้ว"),
+                onReset: () => void dropExtra(["shopee_desc_images"], "กลับไปใช้รูปอัตโนมัติ"),
+                // ข้อ 3: ใช้รูปชุดเดียวกับ Lazada (เฉพาะที่เลือกไว้ในร่าง Lazada และยังไม่เหมือนกัน)
+                actions: pv.descImages.lazadaRefs && pv.descImages.lazadaRefs.join("|") !== pv.descImages.refs.join("|")
+                  ? [{ label: "ใช้รูปชุดเดียวกับ Lazada", onClick: () => void patchExtra({ shopee_desc_images: pv.descImages.lazadaRefs!.slice(0, pv.descImages.max) }, "ใช้รูปชุดเดียวกับ Lazada แล้ว") }] : undefined,
+                // ข้อ 2: เตือนรูปไม่คม
+                warning: pv.descImages.lowRes.length ? `รูปที่ ${pv.descImages.lowRes.map((r) => pv.descImages.refs.indexOf(r) + 1).filter((n) => n > 0).join(", ")} กว้างไม่ถึง 800px — บนร้านอาจไม่คม` : null,
+              } : undefined} />
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  shopeeCreateDescImageRefs,
   planShopeeCreate, shopeeAttrFieldsOf, shopeeAttrPayload, shopeeAttrStateOf, shopeeBrandMatches, shopeeCategoryIdOf, shopeeCreateImageRefs,
   shopeeCreateLimitsOf, shopeePickCategory, shopeeTemplateOf, shopeeUniqueCategories, SHOPEE_CREATE_STOCK,
   shopeeCreateMainImageRefs, shopeeCreateOptionImageRefs, shopeeCreateResolve,
@@ -253,5 +254,37 @@ describe("Shopee ลงสินค้าใหม่ — แผน", () => {
     const { preview: pv } = plan({ onShop: "999", parent: { ...PARENT, brand_name: "Pixie Dustie" } });
     expect(pv.on_shop).toBe("999");
     expect(pv.brand.id).toBe(0);
+  });
+});
+
+describe("รูปในรายละเอียด (เจ้าของเลือก 2026-11-21 แบบ A + ข้อ 1-3)", () => {
+  const descRefsOf = (add: Record<string, unknown>) => (((add.description_info as any)?.extended_description?.field_list ?? []) as any[]);
+  test("อัตโนมัติ = รูป Description ของ Parent SKU ต่อท้ายข้อความ (extended) · ใช้ชุด Lazada ได้ · เตือนรูปไม่คม", () => {
+    const { preview: pv, payload } = plan({ parent: { ...PARENT, desc_image_keys: ["library/d1.jpeg", "library/d2.jpeg"] }, lazadaDescImages: ["r2:library/d2.jpeg"], imageWidths: { "library/d1.jpeg": 640, "library/d2.jpeg": 1200 } });
+    expect(pv.descImages).toMatchObject({ refs: ["r2:library/d1.jpeg", "r2:library/d2.jpeg"], custom: false, src: "รูป Description ของ Parent SKU (2 รูป)", lazadaRefs: ["r2:library/d2.jpeg"], lowRes: ["r2:library/d1.jpeg"] });
+    expect(payload.add_item.description_type).toBe("extended");
+    const fl = descRefsOf(payload.add_item);
+    expect(fl[0]).toEqual({ field_type: "text", text: payload.add_item.description });
+    expect(fl.slice(1)).toEqual([{ field_type: "image", image_info: { image_ref: "r2:library/d1.jpeg" } }, { field_type: "image", image_info: { image_ref: "r2:library/d2.jpeg" } }]);
+    expect(shopeeCreateDescImageRefs(payload)).toEqual(["r2:library/d1.jpeg", "r2:library/d2.jpeg"]);
+    expect(pv.warnings.some((w) => w.includes("กว้างไม่ถึง 800px"))).toBe(true);
+  });
+  test("ข้อ 1: ไม่มีรูป Description = รูปสินค้า · เลือกไม่ใส่รูป = ข้อความอย่างเดียว", () => {
+    const auto = plan().preview;
+    expect(auto.descImages.src).toBe("รูปสินค้าทั้งหมด (สินค้านี้ยังไม่มีรูป Description)");
+    expect(auto.descImages.refs).toEqual(auto.images.refs);
+    const none = plan({ draft: { title: null, description: null, category_path: null, platform_product_id: null, image_keys: null, extra: { shopee_desc_images: [] } } });
+    expect(none.preview.descImages).toMatchObject({ refs: [], custom: true, src: "เลือกไม่ใส่รูป" });
+    expect(none.payload.add_item.description_type).toBeUndefined();
+    expect(none.payload.add_item.description_info).toBeUndefined();
+  });
+  test("ฝากรูปแล้ว: แทนเป็น image_id · ฝากไม่ได้ = ตัดรูปนั้น · ไม่เหลือสักรูป = กลับเป็นข้อความ", () => {
+    const { payload } = plan({ parent: { ...PARENT, desc_image_keys: ["library/d1.jpeg", "library/d2.jpeg"] } });
+    const part = shopeeCreateResolve(payload, new Map([["r2:library/d2.jpeg", "D2"]]));
+    expect(descRefsOf(part.add_item).filter((f) => f.field_type === "image")).toEqual([{ field_type: "image", image_info: { image_id: "D2" } }]);
+    const none = shopeeCreateResolve(payload, new Map());
+    expect(none.add_item.description_type).toBeUndefined();
+    expect(none.add_item.description_info).toBeUndefined();
+    expect(payload.add_item.description_type).toBe("extended");   // ต้นฉบับไม่ถูกแก้
   });
 });

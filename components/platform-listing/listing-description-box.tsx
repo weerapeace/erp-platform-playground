@@ -21,6 +21,10 @@ export type DescImagesProps = {
   onSave: (refs: string[]) => void;
   /** กลับไปใช้รูปอัตโนมัติ (ลบที่เลือกเองในร่าง) */
   onReset: () => void;
+  /** ปุ่มเพิ่มเติมข้างหัวข้อ เช่น "ใช้รูปชุดเดียวกับ Lazada" (Shopee) */
+  actions?: { label: string; onClick: () => void }[];
+  /** ข้อความเตือนใต้ชุดรูป เช่น รูปไม่คม */
+  warning?: string | null;
 };
 
 export function ListingDescriptionBox({ platformName, text, html, src, canEdit, saving, required, maxLen, onSave, note, images }: {
@@ -102,6 +106,7 @@ export function ListingDescriptionBox({ platformName, text, html, src, canEdit, 
                 {imgDirty && <button type="button" onClick={() => setImgs(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>}
                 {!imgDirty && curImgs.length > 0 && <button type="button" disabled={saving} onClick={() => images.onSave([])} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ไม่ใส่รูป</button>}
                 {!imgDirty && images.custom && <button type="button" disabled={saving} onClick={images.onReset} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">กลับไปใช้รูปอัตโนมัติ</button>}
+                {!imgDirty && images.actions?.map((a) => <button key={a.label} type="button" disabled={saving} onClick={a.onClick} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">{a.label}</button>)}
               </div>
             )}
           </div>
@@ -110,6 +115,7 @@ export function ListingDescriptionBox({ platformName, text, html, src, canEdit, 
               onOpen={() => {}} onAdd={() => { setPicker(true); sys.load(); }} canAdd={canEdit} note="ระบบฝากรูปกับร้านให้ตอนลง" />
           ) : <p className="text-xs text-slate-400">ไม่มีรูปในรายละเอียด</p>}
           <div className="mt-1 text-[11px] text-slate-400">มาจาก: {imgDirty ? "ที่เลือกตอนนี้ (ยังไม่บันทึก)" : images.src}</div>
+          {images.warning && !imgDirty && <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-700"><Icon name="warning" />{images.warning}</p>}
           <ListingImagePicker open={picker} onClose={() => setPicker(false)} mode="product" title={`เลือกรูปใส่รายละเอียด ${platformName}`}
             description={`เลือกได้อีก ${Math.max(0, images.max - curImgs.length)} รูป`} matchedParent={images.parentId} matchedCode={images.parentCode}
             sysImages={sys.images} isUsed={(ref) => curImgs.includes(ref)} full={curImgs.length >= images.max}

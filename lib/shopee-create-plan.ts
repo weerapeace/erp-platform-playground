@@ -38,6 +38,13 @@ export const SHOPEE_CREATE_MAX_MODELS = 50;
 export const SHOPEE_CREATE_MAX_TIERS = 2;
 const MODEL_SKU_MAX = 100;
 const DEFAULT_IMAGES_MAX = 9;
+/**
+ * รูปในรายละเอียด (Shopee "extended description" — ร้าน whitelist · ร้าน Louis Montini ได้สิทธิ์แล้ว เช็กสด 2026-11-21: สินค้าเดิม 4/4 เป็นแบบมีรูป)
+ * เจ้าของเลือก 2026-11-21 แบบ A (รูปต่อท้ายข้อความ) + ข้อ 1 (ไม่มีรูป Description = รูปสินค้า) · 2 (เตือนรูปไม่คม) · 3 (ใช้ชุดเดียวกับ Lazada)
+ * จำนวนสูงสุดยังไม่ยืนยันจากเอกสาร Shopee → ตั้ง 12 ไว้ก่อน (เกิน = Shopee ตอบเหตุผล) · รูปกว้างไม่ถึง 800px = เตือน
+ */
+export const SHOPEE_DESC_MAX_IMAGES = 12;
+export const SHOPEE_DESC_MIN_WIDTH = 800;
 /** ✅ ลองจริง 2026-11-15 (MGW318 2 รูป): Shopee ปฏิเสธ "The number of product images must be between 3 and 9" → อย่างน้อย 3 (ร้านบอกช่วงเองได้ใน get_item_limit) */
 export const SHOPEE_MIN_IMAGES = 3;
 const DEFAULT_DESC_MAX = 3000;
@@ -70,8 +77,10 @@ export type ShopeeCreateParent = {
   platform_description_history?: string[] | null;
   /** ชื่อเวอร์ชันเก่า (name_th/name_platform จากประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (lib/listing-title) */
   name_history?: string[] | null;
-  /** จำนวนรูป Description ของ Parent (Shopee ยังส่งไม่ได้ — บอกเฉย ๆ) */
+  /** จำนวนรูป Description ของ Parent */
   desc_image_count?: number;
+  /** รูป Description ของ Parent SKU (r2 key เรียงตามที่จัด) — รูปในรายละเอียดอัตโนมัติ */
+  desc_image_keys?: string[] | null;
   size?: { l: number | null; w: number | null; h: number | null } | null;
 };
 export type ShopeeCreateDraft = {
@@ -273,7 +282,9 @@ export type ShopeeCreateField<T> = { value: T; src: string };
 export type ShopeeCreatePreview = {
   parent_id: string; parent_code: string;
   name: ShopeeCreateField<string>;
-  description: ShopeeCreateField<string> & { /** จำนวนรูป Description ของ Parent SKU (Shopee ยังส่งไม่ได้) */ parentImages: number; /** ร้านใส่รูปในรายละเอียดได้ไหม (Shopee เปิดสิทธิ์ extended description): true = สินค้าแบบใช้รูปในรายละเอียด · false = สินค้าแบบเป็นข้อความ (ยังไม่พบสิทธิ์) · null = ไม่มีสินค้าแบบ */ imagesAllowed: boolean | null };
+  /** รูปในรายละเอียด (ต่อท้ายข้อความ) · lazadaRefs = ชุดที่เลือกไว้ในร่าง Lazada (ปุ่ม "ใช้ชุดเดียวกับ Lazada") · lowRes = รูปที่กว้างไม่ถึง 800px */
+  descImages: { refs: string[]; custom: boolean; src: string; max: number; lazadaRefs: string[] | null; lowRes: string[] };
+  description: ShopeeCreateField<string> & { /** จำนวนรูป Description ของ Parent SKU */ parentImages: number; /** ร้านใส่รูปในรายละเอียดได้ไหม (Shopee เปิดสิทธิ์ extended description): true = สินค้าแบบใช้รูปในรายละเอียด · false = สินค้าแบบเป็นข้อความ (ยังไม่พบสิทธิ์) · null = ไม่มีสินค้าแบบ */ imagesAllowed: boolean | null };
   /** ชื่อสีที่เลือกได้ (Color Platform [TH] ของ SKU ในสินค้านี้ → ชื่อสีปกติ) */
   colorChoices: string[];
   category: { id: string | null; label: string | null; kind: ShopeeCategoryKind | null; src: string; candidates: ShopeeCategoryPick[] };
@@ -311,6 +322,10 @@ export function planShopeeCreate(input: {
   template: ShopeeTemplate | null; onShop: string | null;
   /** ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ui_config) · null/ไม่ส่ง = ค่าเริ่มต้นของระบบ DEFAULT_ATTR_RULES */
   attrRules?: AttrDefaultRule[] | null;
+  /** รูปในรายละเอียดที่เลือกไว้ในร่าง Lazada (extra.lazada_desc_images) — ข้อ 3 */
+  lazadaDescImages?: string[] | null;
+  /** ความกว้างรูป (r2 key → px) จากคลังรูป — ข้อ 2 เตือนรูปไม่คม */
+  imageWidths?: Record<string, number> | null;
   /** ขนส่งของร้าน (get_channel_list) · null = ดึงไม่ได้ (ใช้ของสินค้าแบบอย่างเดียว) */
   channels?: ShopeeChannel[] | null;
 }): { preview: ShopeeCreatePreview; payload: { add_item: Record<string, unknown>; tier: Record<string, unknown> | null } } {
@@ -428,6 +443,16 @@ export function planShopeeCreate(input: {
   //   🐛 ลองจริง 2026-11-15: MGW318 ร่างมีแค่ 2 รูป (ปกสินค้า + ปก SKU) ทั้งที่แกลเลอรีมีอีก 4 → Shopee ปฏิเสธ (ต้อง ≥ 3) — เดิมใช้รูปในร่างอย่างเดียว
   const refs = picked.length ? [...new Set(picked)].slice(0, imagesMax) : listingDefaultImages(poolKeys, draftKeysRaw, imagesMax).map(r2);
   const imgSrc = picked.length ? "เลือกไว้สำหรับ Shopee" : draftKeysRaw.length ? "รูปในร่าง + รูปสินค้าในระบบ (อัตโนมัติ)" : "รูปสินค้าในระบบ ลำดับเดียวกับหน้า Parent SKU (อัตโนมัติ)";
+  // ---------- รูปในรายละเอียด (ต่อท้ายข้อความ · แบบ A) ----------
+  //   เลือกเอง (extra.shopee_desc_images · [] = ไม่ใส่) → รูป Description ของ Parent SKU → ไม่มี = รูปสินค้าทั้งหมด (ข้อ 1)
+  const descPicked = Array.isArray(extra.shopee_desc_images) ? [...new Set((extra.shopee_desc_images as unknown[]).map(str).filter(Boolean))] : null;
+  const parentDescRefs = [...new Set((p.desc_image_keys ?? []).map(str).filter(Boolean))].map(r2);
+  const descRefs = (descPicked ?? (parentDescRefs.length ? parentDescRefs : autoRefs)).slice(0, SHOPEE_DESC_MAX_IMAGES);
+  const descImgSrc = descPicked ? (descPicked.length ? "เลือกไว้สำหรับ Shopee" : "เลือกไม่ใส่รูป")
+    : parentDescRefs.length ? `รูป Description ของ Parent SKU (${parentDescRefs.length} รูป)` : "รูปสินค้าทั้งหมด (สินค้านี้ยังไม่มีรูป Description)";
+  const widthOf = (ref: string) => input.imageWidths?.[ref.replace(/^r2:/, "")] ?? null;
+  const descLowRes = descRefs.filter((r) => { const w = widthOf(r); return w != null && w < SHOPEE_DESC_MIN_WIDTH; });
+  if (descLowRes.length) warnings.push(`รูปในรายละเอียด ${descLowRes.length} รูป กว้างไม่ถึง ${SHOPEE_DESC_MIN_WIDTH}px — บนร้านอาจไม่คม`);
   const imagesMin = Math.max(SHOPEE_MIN_IMAGES, L?.imagesMin ?? 0);
   if (refs.length < imagesMin) missing.push(`รูปสินค้าต้องมีอย่างน้อย ${imagesMin} รูป (Shopee บังคับ · ตอนนี้ ${refs.length} รูป) — เพิ่มรูปในแท็บรูปของหน้านี้ หรือเพิ่มรูปสินค้าที่หน้า Parent SKU`);
   else if (refs.length < 5) warnings.push(`มีรูป ${refs.length} รูป — แนะนำอย่างน้อย 5 รูป (Shopee รับได้ ${imagesMax})`);
@@ -494,6 +519,11 @@ export function planShopeeCreate(input: {
   const add_item: Record<string, unknown> = {
     item_name: name,
     description: desc,
+    // รูปในรายละเอียด: แบบ extended (ข้อความ + รูปต่อท้าย) · route ฝากรูปแล้วแทน image_ref เป็น image_id · ฝากไม่ได้สักรูป = กลับเป็นข้อความอย่างเดียว
+    ...(descRefs.length ? { description_type: "extended", description_info: { extended_description: { field_list: [
+      { field_type: "text", text: desc },
+      ...descRefs.map((ref) => ({ field_type: "image", image_info: { image_ref: ref } })),
+    ] } } } : {}),
     original_price: dims.length ? (prices.length ? Math.min(...prices) : 0) : (variants[0]?.price ?? 0),
     weight: weight ?? 0,
     category_id: categoryId ? Number(categoryId) : 0,
@@ -521,7 +551,8 @@ export function planShopeeCreate(input: {
     preview: {
       parent_id: p.id, parent_code: p.code,
       name: { value: name, src: nameSrc },
-      description: { value: desc, src: descSrc, parentImages: p.desc_image_count ?? 0, imagesAllowed: input.template?.descType === "extended" ? true : input.template?.descType === "normal" ? false : null },
+      descImages: { refs: descRefs, custom: descPicked != null, src: descImgSrc, max: SHOPEE_DESC_MAX_IMAGES, lazadaRefs: input.lazadaDescImages?.length ? input.lazadaDescImages : null, lowRes: descLowRes },
+      description: { value: desc, src: descSrc, parentImages: parentDescRefs.length || (p.desc_image_count ?? 0), imagesAllowed: input.template?.descType === "extended" ? true : input.template?.descType === "normal" ? false : null },
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },
@@ -555,6 +586,17 @@ export function shopeeCreateResolve(payload: { add_item: Record<string, unknown>
   const { image_ref_list: _drop, ...restImg } = img as Record<string, unknown>;
   void _drop;
   add.image = { ...restImg, image_id_list: ids };
+  // รูปในรายละเอียด: แทน ref → image_id · ฝากไม่ได้ = ตัดรูปนั้น · ไม่เหลือสักรูป = ข้อความอย่างเดียว (description_type normal)
+  const ext = obj(obj(add.description_info)?.extended_description);
+  if (ext) {
+    const fl = arrOf(ext.field_list).flatMap((f) => {
+      if (str(f.field_type) !== "image") return [f];
+      const id = idOf.get(str(obj(f.image_info)?.image_ref));
+      return id ? [{ field_type: "image", image_info: { image_id: id } }] : [];
+    });
+    if (fl.some((f) => str(f.field_type) === "image")) ext.field_list = fl;
+    else { delete add.description_info; delete add.description_type; }
+  }
   if (!payload.tier) return { add_item: add, tier: null, optionImages: false };
   const tier = JSON.parse(JSON.stringify(payload.tier)) as Record<string, unknown>;
   const optRefs = shopeeCreateOptionImageRefs(payload);
@@ -567,6 +609,12 @@ export function shopeeCreateResolve(payload: { add_item: Record<string, unknown>
   }
   return { add_item: add, tier, optionImages: allOk };
 }
+
+/** รูปในรายละเอียดที่ต้องฝาก (ไม่บังคับ — ฝากไม่ได้ = ตัดรูปนั้น · ไม่เหลือสักรูป = ส่งข้อความอย่างเดียว) */
+export const shopeeCreateDescImageRefs = (payload: { add_item: Record<string, unknown> }): string[] => {
+  const fl = arrOf(obj(obj(payload.add_item.description_info)?.extended_description)?.field_list);
+  return [...new Set(fl.map((f) => str(obj(f.image_info)?.image_ref)).filter(Boolean))];
+};
 
 /** รูปทั้งหมดที่ต้องฝากกับ Shopee ก่อนส่ง (รูปสินค้า + รูปตัวเลือก · ไม่ซ้ำ) — ใช้ตอนลงจริง (5B) */
 export function shopeeCreateImageRefs(payload: { add_item: Record<string, unknown>; tier: Record<string, unknown> | null }): string[] {
