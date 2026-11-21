@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
 import { syncEndedCurrentContracts } from "@/lib/payroll-contract-lifecycle";
+import { syncCompanyMenuForEmployees } from "@/lib/line-company-server";
 
 const TABLE = "employees";
 // ดึงทุกคอลัมน์ (เหมือนแอปเก่า) — field ใหม่ที่เพิ่มใน DB ก็ติดมาอัตโนมัติ
@@ -240,6 +241,8 @@ export async function syncUserAccountOnEmploymentChange(employeeId: string, stat
       metadata: { employee_id: employeeId, employment_status: String(status ?? "") },
     });
   }
+  // ไลน์: ฐานข้อมูลปลดผูกให้แล้ว (trigger) → เปลี่ยนเมนูล่างจอไลน์บริษัทเป็นเมนูกลาง
+  await syncCompanyMenuForEmployees(admin, [employeeId]);
 }
 
 export async function updateEmployee(id: string, body: Record<string, unknown>): Promise<EmployeeRow | null> {

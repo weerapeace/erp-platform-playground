@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { syncCompanyMenuForEmployees } from "@/lib/line-company-server";
 import { nextEmployeeCode, bumpCode } from "@/lib/employee-code";
 import { staffGroupOf, type StaffGroup } from "@/lib/staff-group";
 
@@ -214,5 +215,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const c = cur as Record<string, unknown>;
   await writeAudit(admin, { action: "deactivate", entityType: "employees", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { from: "work-board", code: c.employee_code, name: [c.first_name_th, c.last_name_th].filter(Boolean).join(" "), was: c.employment_status } });
+  await syncCompanyMenuForEmployees(admin, [id]);   // ไลน์ถูกปลดผูกที่ฐานข้อมูลแล้ว → สลับเมนูไลน์บริษัท
   return NextResponse.json({ data: { id }, error: null });
 }

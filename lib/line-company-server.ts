@@ -90,6 +90,27 @@ export async function syncCompanyMenuFor(admin: Admin, lineUserId: string): Prom
   }
 }
 
+/**
+ * พนักงานเปลี่ยนสถานะ (ลาออก/ปิดใช้งาน/กลับมาทำงาน) → สลับเมนูล่างจอของไลน์ที่เคยผูกกับคนเหล่านี้
+ * การปลดผูกเองทำที่ฐานข้อมูล (trigger employees_left_unlink_line · migration 202612220200) — ที่นี่แค่เปลี่ยนเมนูใน LINE
+ * best-effort ไม่โยน error (ไม่ให้การบันทึกลาออกล้มเพราะ LINE)
+ */
+export async function syncCompanyMenuForEmployees(admin: Admin, employeeIds: string[]): Promise<void> {
+  const ids = [...new Set(employeeIds.filter(Boolean))];
+  if (ids.length === 0) return;
+  try {
+    const cfg = await loadLineConfig(admin);
+    if (!companyBot(cfg)) return;   // ยังไม่ใช้ไลน์บริษัท = ไม่มีเมนูให้สลับ
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data } = await admin.from("line_memberships").select("line_user_id")
+      .in("employee_id", ids).or(`status.in.(linked,blocked),unlinked_at.gte.${since}`).limit(200);
+    const users = [...new Set(((data ?? []) as { line_user_id?: string }[]).map((r) => String(r.line_user_id ?? "")).filter(isLineUserId))];
+    for (const u of users) await syncCompanyMenuFor(admin, u);
+  } catch (e) {
+    console.warn("[line-company] sync menu (employees)", e instanceof Error ? e.message : e);
+  }
+}
+
 // ---------------------------------------------------------------- รับ event
 
 /**

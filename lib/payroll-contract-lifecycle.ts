@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { syncCompanyMenuForEmployees } from "@/lib/line-company-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -50,6 +51,7 @@ export async function closeEmployeesWithoutActiveCurrentContract(admin: Admin, e
     .in("id", employeesToClose)
     .eq("employment_status", "active");
   if (employeeError) throw new Error(employeeError.message);
+  await syncCompanyMenuForEmployees(admin, employeesToClose);   // ไลน์ถูกปลดผูกที่ฐานข้อมูลแล้ว → สลับเมนูไลน์บริษัท
 
   return employeesToClose.length;
 }
@@ -75,6 +77,7 @@ export async function resignEmployeesWithoutActiveCurrentContract(
     if (employeeError) throw new Error(employeeError.message);
     resignedCount += 1;
   }
+  await syncCompanyMenuForEmployees(admin, employeesToResign);   // ไลน์ถูกปลดผูกที่ฐานข้อมูลแล้ว → สลับเมนูไลน์บริษัท
 
   return resignedCount;
 }
