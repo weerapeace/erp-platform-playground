@@ -19,6 +19,7 @@ import { computeMatchSuggestions } from "@/lib/platform-match-server";
 import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/listing-hidden-platforms";
 import { loadSkuStock } from "@/lib/sku-stock";
 import { loadReadiness } from "@/lib/platform-readiness-store";
+import { loadStoredDrift } from "@/lib/platform-listing-drift-server";
 import { WEBSITE, buildCell, emptyCell, listableMissing, type CellListing, type CrossRow, type CrossShop, type CrossShopResponse } from "@/lib/platform-cross-shop";
 import type { SkuLite } from "@/lib/platform-variant-match";
 
@@ -74,11 +75,20 @@ export async function loadCrossShop(admin: Admin, brandId: string, opts: { sugge
   }
 
   // ร้าน: เปิดตรวจ = มีบัญชีร้านของแบรนด์ หรือมีรายการบนร้าน · แบรนด์สั่งซ่อน = hidden
-  const [listingsByPf, web, readyMap] = await Promise.all([
+  const [listingsByPf, web, readyMap, driftRows] = await Promise.all([
     Promise.all(pfRows.map((p) => (p.code === WEBSITE ? Promise.resolve([]) : loadListingsWithRaw(admin, p.id, brandId)))),
     loadWebListings(admin, parentIds),
     loadReadiness(admin, parentIds),
+    loadStoredDrift(admin, parentIds),
   ]);
+  // ผลเทียบกับระบบ (ร้านที่ลงแล้ว) ต่อ (รุ่น, ร้าน) — ใช้รายการล่าสุดที่ตรวจ
+  const driftBy = new Map<string, Record<string, NonNullable<CrossRow["drift"]>[string]>>();
+  for (const d of driftRows) {
+    if (!d.parent_sku_id) continue;
+    const m = driftBy.get(d.parent_sku_id) ?? driftBy.set(d.parent_sku_id, {}).get(d.parent_sku_id)!;
+    const prev = m[d.platform_code];
+    if (!prev || prev.at < d.checked_at) m[d.platform_code] = { listing_id: d.listing_id, issues: d.issues, at: d.checked_at, error: d.error };
+  }
   const shops: CrossShop[] = pfRows.map((p, i) => ({
     code: p.code, name: p.name_th,
     state: hidden.has(p.code) ? "hidden" : p.code === WEBSITE ? (web.size ? "on" : "noshop") : withAccount.has(p.id) || listingsByPf[i].length ? "on" : "noshop",
@@ -153,6 +163,8 @@ export async function loadCrossShop(admin: Admin, brandId: string, opts: { sugge
       }
       if (Object.keys(ready).length) row.ready = ready;
     }
+    const dr = driftBy.get(p.id);
+    if (dr) row.drift = dr;
     return row;
   });
   return { brand: brand ? { id: (brand as { id: string }).id, name: String((brand as { name: string | null }).name ?? "") } : null, shops, rows, unmatched };

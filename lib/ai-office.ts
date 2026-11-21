@@ -129,6 +129,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/platform-readiness/route.ts", "lib/platform-create-readiness-server.ts", "lib/platform-readiness-store.ts"],
   },
   {
+    id: "platform-drift", zone: "sales", kind: "auto", icon: "🔁",
+    title: "ผู้เทียบร้านกับระบบ", titleEn: "Listing drift checker",
+    does: "ตอนกลางคืนเทียบสินค้าที่ลงร้านแล้วกับข้อมูลในระบบ (รูป รายละเอียด ชื่อตัวเลือก ราคา) แล้วจดว่าร้านไหนไม่ตรง ให้แท็บแพลตฟอร์มและหน้าเช็กข้ามร้านขึ้นป้าย",
+    trigger: `${DAILY} 00:15-04:45 (ทุก 30 นาที)`, cron: "/api/cron/platform-drift", everyHours: 24,
+    can: ["อ่านข้อมูลสินค้าในระบบและบนร้าน", "จดผลเทียบ"], cannot: ["ส่งข้อมูลขึ้นร้าน", "แก้ข้อมูลสินค้า", "แตะสต๊อก"],
+    source: "บันทึกรอบล่าสุด + ตาราง platform_listing_drift", href: "/master/platform-catalog",
+    files: ["app/api/cron/platform-drift/route.ts", "lib/platform-listing-drift-server.ts", "lib/platform-listing-drift.ts"],
+  },
+  {
     id: "platform-cross-daily", zone: "sales", kind: "auto", icon: "🧾",
     title: "ผู้สรุปเช็กข้ามร้าน", titleEn: "Cross-shop daily digest",
     does: "ทุกเช้าดูว่ามีรุ่นที่ยังไม่ลงบางร้าน หรือราคาบนร้านไม่ตรงระบบ เพิ่มขึ้นจากเมื่อวานไหม แล้วแจ้งกระดิ่ง",

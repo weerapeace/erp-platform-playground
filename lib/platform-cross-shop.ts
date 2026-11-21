@@ -18,6 +18,7 @@ import { matchVariantSku, shopVariantsOf, expectedLinePrice, linePriceDiff, type
 import { shopeeTextLength } from "@/lib/shopee-listing-edit";
 import { TTS_TITLE_MAX, ttsTitleLength } from "@/lib/tiktok-listing-edit";
 import { LAZADA_NAME_MAX } from "@/lib/lazada-listing-edit";
+import { DRIFT_LABEL, type DriftKey } from "@/lib/platform-listing-drift";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
@@ -25,7 +26,7 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const num = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 // ───────── เรื่องที่ตรวจ ─────────
-export type CrossDim = "status" | "price" | "title" | "details" | "stock" | "variants";
+export type CrossDim = "status" | "price" | "title" | "details" | "stock" | "variants" | "sync";
 export const CROSS_DIMS: { key: CrossDim; label: string; icon: string; why: string }[] = [
   { key: "status", label: "ลงร้านไหนแล้ว", icon: "layout-grid", why: "สินค้ารุ่นนี้อยู่บนร้านไหนแล้ว ร้านไหนยังไม่ลง" },
   { key: "price", label: "ราคา", icon: "cash", why: "ราคาบนร้าน เทียบราคาที่ระบบจะส่ง (ราคาขาย/ราคาเต็มของ SKU)" },
@@ -33,6 +34,7 @@ export const CROSS_DIMS: { key: CrossDim; label: string; icon: string; why: stri
   { key: "details", label: "รายละเอียด", icon: "list-details", why: "รูป · หมวด · น้ำหนัก บนร้าน (ร้านที่ไม่ส่งข้อมูลมา = ขีด)" },
   { key: "stock", label: "สต๊อก", icon: "packages", why: "สต๊อกบนแต่ละร้าน เทียบกันเอง + เทียบระบบ (ดูอย่างเดียว BigSeller ยังคุมสต๊อก)" },
   { key: "variants", label: "ตัวเลือก", icon: "palette", why: "สี/ไซซ์บนร้าน เทียบ SKU ที่เปิดขายในระบบ" },
+  { key: "sync", label: "ตรงกับระบบ", icon: "refresh", why: "รูป · รายละเอียด · ชื่อตัวเลือก · ราคา บนร้าน เทียบกับที่ระบบจะส่ง (ตรวจทุกคืน + ตอนเปิดแท็บแพลตฟอร์มของสินค้า) · กดช่อง = เทียบสดแล้วเลือกส่งให้ตรง" },
 ];
 
 /** เพดานความยาวชื่อสินค้าต่อร้าน (0 = ไม่ตรวจ) */
@@ -92,7 +94,9 @@ export type CrossOur = {
   weight_g: number | null;
   box: boolean;
 };
-export type CrossRow = { id: string; code: string; name: string | null; name_platform: string | null; cover_key: string | null; our: CrossOur; cells: Record<string, CrossCell>; ready?: Record<string, CrossReady> };
+/** ผลเทียบ "ร้านที่ลงแล้ว ตรงกับระบบไหม" ที่จดไว้ (ตาราง platform_listing_drift · lib/platform-listing-drift-server) */
+export type CrossDrift = { listing_id: string; issues: DriftKey[]; at: string; error: string | null };
+export type CrossRow = { id: string; code: string; name: string | null; name_platform: string | null; cover_key: string | null; our: CrossOur; cells: Record<string, CrossCell>; ready?: Record<string, CrossReady>; drift?: Record<string, CrossDrift> };
 export type CrossShop = { code: string; name: string; state: "on" | "hidden" | "noshop" };
 export type CrossShopResponse = {
   brand: { id: string; name: string } | null;
@@ -203,6 +207,12 @@ export function cellIssues(dim: CrossDim, row: CrossRow, code: string, brandName
   }
   if (c.st === "none" || c.st === "maybe") return [];
   if (code === WEBSITE) return [];   // หน้าร้านเว็บ: ตรวจได้แค่ "ลงแล้วหรือยัง" (ราคา/ชื่อ ใช้ข้อมูลระบบตรง ๆ อยู่แล้ว)
+  if (dim === "sync") {
+    const d = row.drift?.[code];
+    if (!d) return [{ tone: "info", text: "ยังไม่ได้เทียบ" }];
+    if (d.error) return [{ tone: "info", text: "เทียบไม่ได้" }];
+    return d.issues.map((k) => ({ tone: k === "price" ? "danger" as const : "warning" as const, text: `${DRIFT_LABEL[k].replace(/s*(.*)$/, "")}ไม่ตรง` }));
+  }
   if (dim === "price") {
     if (c.pay_diff) out.push({ tone: "danger", text: `ราคาจ่ายไม่ตรง ${c.pay_diff} ตัวเลือก` });
     if (c.full_diff) out.push({ tone: "info", text: `ราคาเต็มไม่ตรง ${c.full_diff} ตัวเลือก` });

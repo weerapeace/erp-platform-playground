@@ -35,6 +35,15 @@ import type { FakePriceRow } from "@/components/fake-price-dialog";
 const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 const ListingDrawer = dynamic(() => import("./listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
 const FakePriceDialog = dynamic(() => import("@/components/fake-price-dialog").then((m) => m.FakePriceDialog), { ssr: false });
+// หน้าเทียบ "บนร้าน → ตามระบบ" แล้วส่งให้ตรง (ของกลาง · ตัวเดียวกับแท็บแพลตฟอร์มของ Parent SKU)
+const MatchSystemDialog = dynamic(() => import("./match-system-dialog").then((m) => m.MatchSystemDialog), { ssr: false });
+/** ร้านที่เทียบกับระบบได้ (= DRIFT_PLATFORMS ฝั่งเซิร์ฟเวอร์) */
+const DRIFT_CODES = ["shopee", "lazada", "tiktok", "line_shopping"];
+type MatchItem = { lid: string; code: string; shop: string };
+/** รายการที่ "ไม่ตรงกับระบบ" ของรุ่นที่ให้มา (ทุกร้านที่ลงแล้ว) — ไว้ไล่แก้ตามคิว */
+const driftQueueOf = (rows: CrossRow[], shopCodes: string[]): { lid: string; code: string; shopCode: string }[] =>
+  rows.flatMap((r) => shopCodes.filter((c) => DRIFT_CODES.includes(c) && (r.drift?.[c]?.issues.length ?? 0) > 0)
+    .map((c) => ({ lid: r.drift![c].listing_id, code: r.code, shopCode: c })));
 
 /** ราคาบนร้านไม่ตรงระบบ (ข้อ 3) — ลูกค้าจ่ายไม่ตรง หรือราคาเต็มไม่ตรง (TikTok เทียบราคาเต็มไม่ได้จริง → นับแค่ราคาจ่าย) */
 const priceMismatch = (r: CrossRow, code: string): boolean => {
@@ -172,6 +181,16 @@ function CellView({ dim, row, code, brandName, shopCodes }: { dim: CrossDim; row
       </div>
     );
   }
+  if (dim === "sync") {
+    const d = row.drift?.[code];
+    if (!DRIFT_CODES.includes(code)) return <span className="text-[11px] text-slate-400">—</span>;
+    return (
+      <div className="leading-tight" title={d ? `เทียบล่าสุด ${new Date(d.at).toLocaleString("th-TH")}${d.error ? `\nเทียบไม่ได้: ${d.error}` : ""}\nกดเพื่อเทียบสดและเลือกส่งให้ตรง` : "ยังไม่ได้เทียบ — กดเพื่อเทียบสด"}>
+        {d && !d.error && !d.issues.length ? <div className="text-[11px] text-emerald-600">ตรงกับระบบ</div> : lines(issues)}
+        {d && d.issues.length > 0 && <div className="text-[11px] text-violet-700 underline decoration-dotted">อัปเดตให้ตรง</div>}
+      </div>
+    );
+  }
   if (dim === "price") {
     return (
       <div className="leading-tight">
@@ -226,6 +245,7 @@ function cellExport(dim: CrossDim, row: CrossRow, code: string, brandName: strin
     : dim === "title" ? (c.title ?? "")
     : dim === "details" ? `รูป ${c.images ?? "-"} · หมวด ${c.category == null ? "-" : c.category ? "มี" : "ไม่มี"} · น้ำหนัก ${c.weight ?? "-"}`
     : dim === "stock" ? String(c.stock ?? "ไม่รู้")
+    : dim === "sync" ? (row.drift?.[code] && !row.drift[code].error && !row.drift[code].issues.length ? "ตรงกับระบบ" : "")
     : `${c.vars} ตัวเลือก`;
   return issues ? `${head} — ${issues}` : head;
 }
@@ -252,6 +272,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [addFor, setAddFor] = useState<{ parents: AddWizardParent[]; codes: string[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [matchQ, setMatchQ] = useState<{ items: MatchItem[]; i: number; changed: boolean } | null>(null);   // ตรงกับระบบ: ไล่อัปเดตทีละรายการ
   const [exporting, setExporting] = useState(false);
   const canEditProducts = can("products.edit");
   const [dupFor, setDupFor] = useState<{ row: CrossRow; code: string } | null>(null);                 // ข้อ 8 ดูตัวซ้ำ
@@ -419,9 +440,21 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
     // Website = หน้าร้านเว็บของเรา → เปิด Parent SKU (แท็บ "เว็บไซต์" เพิ่ม/เผยแพร่ขึ้นหน้าร้าน)
     if (code === WEBSITE) { window.open(`/master/parent-skus?open=${encodeURIComponent(r.id)}`, "_blank", "noopener"); return; }
     if (c.listings > 1 && c.dups.length) { setDupFor({ row: r, code }); return; }   // ลงซ้ำ → ดูทุกตัวก่อน
+    // ตรงกับระบบ: ลงแล้ว → หน้าเทียบก่อน/หลัง (เทียบสด) แทนลิ้นชัก
+    if (dim === "sync" && DRIFT_CODES.includes(code) && (c.st !== "none" && c.st !== "maybe")) {
+      const lid = r.drift?.[code]?.listing_id ?? c.lid;
+      if (lid) { setMatchQ({ items: [{ lid, code: r.code, shop: names[code] ?? code }], i: 0, changed: false }); return; }
+    }
     const lid = c.lid ?? c.maybe?.lid ?? null;
     if (lid) setOpenId(lid);
-  }, []);
+  }, [dim, names]);
+  const startMatchQueue = useCallback((rows: CrossRow[]) => {
+    const items = driftQueueOf(rows, on).map((x) => ({ lid: x.lid, code: x.code, shop: names[x.shopCode] ?? x.shopCode }));
+    if (items.length) setMatchQ({ items, i: 0, changed: false });
+  }, [on, names]);
+  const closeMatch = useCallback(() => {
+    setMatchQ((q) => { if (q?.changed) void swr.revalidate(true); return null; });
+  }, [swr]);
 
   if (!brandId) return <EmptyState title="เลือกแบรนด์ก่อน" hint="เช็กข้ามร้านดูทีละแบรนด์ — เลือกแบรนด์ที่แถบซ้าย" />;
   if (!data && swr.loading) return <LoadingState label="กำลังรวมข้อมูลทุกร้าน… (ครั้งแรกอาจใช้ 5-15 วินาที)" />;
@@ -444,7 +477,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex gap-1.5 overflow-x-auto px-3 pt-3 pb-2 [scrollbar-width:none]">
           {CROSS_DIMS.map((d) => (
-            <button key={d.key} type="button" onClick={() => setDim(d.key)} aria-pressed={dim === d.key} title={d.why}
+            <button key={d.key} type="button" onClick={() => { setDim(d.key); if (d.key === "sync" && presence === "missing") setPresence(""); }} aria-pressed={dim === d.key} title={d.why}
               className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm whitespace-nowrap ${dim === d.key ? "border-violet-300 bg-violet-50 font-medium text-violet-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
               <Icon value={`i:${d.icon}`} />{d.label}
             </button>
@@ -471,6 +504,12 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
               <input type="checkbox" checked={onlyIssues} onChange={(e) => setOnlyIssues(e.target.checked)} />
               มีปัญหาเท่านั้น <span className="tabular-nums text-slate-400">{issueCount.toLocaleString()}</span>
             </label>
+          )}
+          {dim === "sync" && driftQueueOf(filtered, on).length > 0 && (
+            <button type="button" onClick={() => startMatchQueue(filtered)} title="เปิดหน้าเทียบก่อน/หลังทีละรายการที่ไม่ตรงกับระบบ — กดยืนยันส่งเองทีละรายการ"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-300 px-3 text-sm text-violet-800 hover:bg-violet-50">
+              <Icon value="i:list-check" />ไล่อัปเดตให้ตรง ({driftQueueOf(filtered, on).length.toLocaleString()})
+            </button>
           )}
           <button type="button" disabled={exporting || !filtered.length} onClick={() => void doExport(filtered, "filtered_all")}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
@@ -548,6 +587,12 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
             title="เปิดตัวช่วยลงสินค้า — สร้างเป็นร่างก่อน ไม่ขึ้นร้านจนกว่าจะกดยืนยันในตัวช่วย"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-violet-500 px-3 text-sm text-white hover:bg-violet-400">
             <Icon name="upload" />ลงร้านที่ขาด ({selMissing.n.toLocaleString()})
+          </button>
+        )}
+        {dim === "sync" && driftQueueOf(selRows, on).length > 0 && (
+          <button type="button" onClick={() => startMatchQueue(selRows)} title="เปิดหน้าเทียบก่อน/หลังทีละรายการ (รุ่นที่ติ๊ก × ร้านที่ไม่ตรง) — กดยืนยันส่งเองทีละรายการ"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-3 text-sm text-slate-800 hover:bg-slate-100">
+            <Icon value="i:list-check" />ไล่อัปเดตให้ตรง ({driftQueueOf(selRows, on).length.toLocaleString()})
           </button>
         )}
         {canPublish && priceShops.some((s) => s.rows.length) && (
@@ -679,6 +724,21 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
           onClose={() => { setAddFor(null); setSelected(new Set()); }} onDone={() => void swr.revalidate(true)} />
       )}
       <ListingDrawer listingId={openId} onClose={() => setOpenId(null)} canPublish={canPublish} onChanged={() => void swr.revalidate(true)} />
+      {matchQ && (() => {
+        const cur = matchQ.items[matchQ.i];
+        const go = (i: number) => setMatchQ((q) => (q && i >= 0 && i < q.items.length ? { ...q, i } : q));
+        return (
+          <MatchSystemDialog key={cur.lid} open listingId={cur.lid} shopName={`${cur.shop} · ${cur.code}`} canPublish={canPublish}
+            onSent={() => setMatchQ((q) => (q ? { ...q, changed: true } : q))} onClose={closeMatch}
+            footerExtra={matchQ.items.length > 1 ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+                <button type="button" disabled={matchQ.i === 0} onClick={() => go(matchQ.i - 1)} className="h-9 rounded-lg border border-slate-200 px-2.5 hover:bg-slate-50 disabled:opacity-40">ก่อนหน้า</button>
+                <span className="tabular-nums">{matchQ.i + 1}/{matchQ.items.length}</span>
+                <button type="button" disabled={matchQ.i >= matchQ.items.length - 1} onClick={() => go(matchQ.i + 1)} className="h-9 rounded-lg border border-violet-300 px-2.5 text-violet-800 hover:bg-violet-50 disabled:opacity-40">ถัดไป</button>
+              </span>
+            ) : undefined} />
+        );
+      })()}
     </div>
   );
 }

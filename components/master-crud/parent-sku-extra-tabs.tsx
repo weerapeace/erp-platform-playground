@@ -45,10 +45,17 @@ const ParentPriceTab = dynamic(() => import("@/components/parent-price-tab").the
 const ParentPackingTab = dynamic(() => import("@/components/packing-station/packaging").then((m) => m.ParentPackingTab), { ssr: false });
 // ป้าย "ต้องแก้ N อย่าง" ท้ายแถบเครื่องมือ (ใหม่ 2026-11-11) — กฎ lib/parent-health
 const ParentHealthBadge = dynamic(() => import("@/components/parent-health-badge").then((m) => m.ParentHealthBadge), { ssr: false });
+// แถบเตือนหลังบันทึก "ลงอยู่ N ร้าน · ไม่ตรงระบบ M ร้าน — ส่งการแก้ไขไปด้วยไหม?" (ใหม่ 2026-11-21)
+const ParentShopDriftNotice = dynamic(() => import("@/components/platform-catalog/parent-shop-drift-notice").then((m) => m.ParentShopDriftNotice), { ssr: false });
 
 /** ของเสริมท้ายแถบเครื่องมือของ Parent SKU (ชุดกลาง — หน้า /master/parent-skus + MasterRecordDrawer) */
 export function parentSkuToolbarExtra(): NonNullable<MasterCRUDConfig["toolbarExtra"]> {
-  return ({ recordId, version, goto }) => <ParentHealthBadge parentId={recordId} version={version} goto={goto} />;
+  return ({ recordId, version, goto }) => (
+    <>
+      <ParentHealthBadge parentId={recordId} version={version} goto={goto} />
+      <ParentShopDriftNotice parentId={recordId} version={version} goto={goto} />
+    </>
+  );
 }
 
 export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]> {

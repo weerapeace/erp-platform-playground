@@ -18,7 +18,10 @@
  *   2) "ซ่อนร้านนี้" ทั้งแบรนด์ (เช่น Instagram ที่เชื่อมไว้แค่โพสต์) — lib/listing-hidden-platforms · ร้านที่ซ่อนไม่อยู่ใน "ลงทุกร้าน"
  *   3) ป้ายต่อแถว "พร้อมลง / ขาด N: …" — GET /api/product-platforms/create-readiness (ตัวประกอบข้อมูลตัวเดียวกับตัวช่วย · คำขอเดียวทุกร้าน)
  *      กดป้าย = เปิดหน้าแก้ของร้านนั้น · ตรวจตอนเปิดแท็บ / หลังแก้ / กดรีเฟรช (ไม่ตรวจซ้ำตอนสลับหน้าต่าง — ตัวตรวจถามร้านจริง)
- * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · ProductPlatformManager · PlatformDraftEditorModal · AddToPlatformWizard · ListingDrawer · ListingLinks
+ * เจ้าของขอ 2026-11-21 ("ถ้าเปลี่ยนรูป/รายละเอียด/สี/ราคา แล้วร้านไม่ตรง เช็กได้ไหม + ปุ่มเปลี่ยนให้เลย"):
+ *   ร้านที่ลงขายแล้ว → ป้าย "ไม่ตรงระบบ: รูป · ราคา …" / "ตรงกับระบบ" + ปุ่ม "อัปเดตให้ตรง" (MatchSystemDialog — เทียบก่อน/หลังแล้วค่อยยืนยันส่ง)
+ *   ผลตรวจ = /api/platform-catalog/drift (ของกลาง lib/platform-listing-drift-server) · เปิดแท็บแล้วผลเก่าเกิน 20 ชม. = ตรวจใหม่เอง
+ * ของกลาง: /api/product-platforms (guardApi products.platforms.view) · MatchSystemDialog · ProductPlatformManager · PlatformDraftEditorModal · AddToPlatformWizard · ListingDrawer · ListingLinks
  */
 import { useEffect, useRef, useState, useCallback } from "react";
 import dynamic from "next/dynamic";
@@ -33,6 +36,11 @@ import { hasCreatePreview } from "@/lib/platform-create-registry";
 import { splitPlatformsByConnection } from "@/lib/platform-visibility";
 import { readinessText, type CreateReadiness } from "@/lib/platform-create-readiness";
 import { ListingLinks } from "@/components/platform-catalog/listing-links";
+import { DRIFT_STALE_HOURS, driftBadgeText, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
+
+/** ร้านที่เทียบกับระบบได้ (ตรงกับ DRIFT_PLATFORMS ฝั่งเซิร์ฟเวอร์) */
+const DRIFT_CODES = ["shopee", "lazada", "tiktok", "line_shopping"];
+type DriftRow = { listing_id: string; platform_code: string; issues: DriftKey[]; items: DriftItem[] | null; error: string | null; checked_at: string };
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -42,6 +50,8 @@ const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/
 const PlatformDraftEditorModal = dynamic(() => import("@/components/platform-listing/draft-editor-modal").then((m) => m.PlatformDraftEditorModal), { ssr: false });
 // ลิ้นชักสินค้าบนร้าน (ของกลาง — ตัวเดียวกับหน้าสินค้าบนแพลตฟอร์ม) · เปิดเมื่อสินค้านี้มีรายการบนร้านจับคู่อยู่
 const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
+// หน้าเทียบ "บนร้าน → ตามระบบ" แล้วส่งให้ตรง (ของกลาง)
+const MatchSystemDialog = dynamic(() => import("@/components/platform-catalog/match-system-dialog").then((m) => m.MatchSystemDialog), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
@@ -71,6 +81,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [hidingCode, setHidingCode] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<Record<string, CreateReadiness>>({});   // platform code → ความพร้อมลง
   const [checkingReady, setCheckingReady] = useState(false);
+  const [drift, setDrift] = useState<Record<string, DriftRow>>({});      // listing id → ผลเทียบกับระบบล่าสุด
+  const [checkingDrift, setCheckingDrift] = useState(false);
+  const [matchFor, setMatchFor] = useState<{ listingId: string; name: string } | null>(null);
+  const driftSeqRef = useRef(0);
   const { can } = useAuth();
   const toast = useToast();
   const canAdd = can("products.platforms.edit");
@@ -95,6 +109,25 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
     finally { if (seq === readySeqRef.current) setCheckingReady(false); }
   }, [parentId]);
 
+  // ร้านที่ลงขายแล้ว ตรงกับระบบไหม — อ่านผลที่จดไว้ก่อน · ผลเก่า/ยังไม่เคยตรวจ = ตรวจสด (ดึงจากร้านจริง) ตามหลัง ไม่บล็อกแท็บ
+  const loadDrift = useCallback(async (listed: string[]) => {
+    if (!parentId || !listed.length) { setDrift({}); return; }
+    const seq = ++driftSeqRef.current;
+    const toMap = (rows: DriftRow[]) => Object.fromEntries(rows.map((r) => [r.listing_id, r]));
+    try {
+      const j = await apiFetch(`/api/platform-catalog/drift?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
+      if (seq !== driftSeqRef.current) return;
+      const m = toMap((j.rows ?? []) as DriftRow[]);
+      setDrift(m);
+      const stale = listed.some((id) => !m[id] || Date.now() - Date.parse(m[id].checked_at) > DRIFT_STALE_HOURS * 3600_000);
+      if (!stale) return;
+      setCheckingDrift(true);
+      const k = await apiFetch("/api/platform-catalog/drift", { method: "POST", body: JSON.stringify({ action: "recheck", parent_sku_id: parentId }) }).then((r) => r.json());
+      if (seq === driftSeqRef.current && !k.error) setDrift(toMap((k.rows ?? []) as DriftRow[]));
+    } catch { /* ป้ายไม่ขึ้นก็ยังใช้แท็บได้ */ }
+    finally { if (seq === driftSeqRef.current) setCheckingDrift(false); }
+  }, [parentId]);
+
   const load = useCallback(async (opts?: { readiness?: boolean }) => {
     if (!parentId) return;
     setLoading(true);
@@ -113,9 +146,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       // ตรวจเฉพาะร้านที่โชว์ + มีตัวสร้าง + สินค้านี้ยังไม่อยู่บนร้าน
       if (opts?.readiness !== false) {
         void loadReadiness(pfs.filter((p) => hasCreatePreview(p.code) && !!accts[p.id]?.is_active && !hid.includes(p.code) && !isOnSaleOf(ds[p.id], ms[p.id])).map((p) => p.code));
+        void loadDrift(pfs.filter((p) => DRIFT_CODES.includes(p.code) && !!ms[p.id]?.id).map((p) => ms[p.id]!.id!));
       }
     } catch { /* ignore */ } finally { setLoading(false); }
-  }, [parentId, loadReadiness]);
+  }, [parentId, loadReadiness, loadDrift]);
   const refreshAll = useCallback(() => { void load(); }, [load]);
   useEffect(() => { setReadiness({}); void load(); }, [load]);
 
@@ -220,6 +254,11 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
         const fromCentral = !rdv && !d.category_path && !!auto;   // เติมมาจากหมวดกลาง (ยังไม่ได้ override)
         const imgCount = rdv ? rdv.images : d.image_keys?.length ?? 0;
         const badge = rd ? readinessText(rd) : null;
+        // ลงขายแล้ว → ตรงกับระบบไหม
+        const dr = onShop?.id && DRIFT_CODES.includes(p.code) ? drift[onShop.id] : undefined;
+        const drIssues = dr && !dr.error ? dr.issues : [];
+        const drDiff = dr && !dr.error ? (dr.items ?? []).filter((i) => i.state === "diff") : [];
+        const openMatch = () => { if (onShop?.id) setMatchFor({ listingId: onShop.id, name: p.name_th }); };
         return (
           <div key={p.id} className={`rounded-xl border border-slate-200 overflow-hidden ${isBrandHidden ? "opacity-70" : ""}`}>
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
@@ -236,6 +275,15 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
               ) : checkingReady && !onSale && hasCreatePreview(p.code) && !!acct?.is_active && !isBrandHidden ? (
                 <span className="text-[11px] text-slate-400">กำลังตรวจความครบ…</span>
               ) : null}
+              {/* ลงขายแล้ว: ตรงกับระบบไหม (รูป/รายละเอียด/ชื่อตัวเลือก/ราคา) — กด = หน้าเทียบก่อนส่ง */}
+              {onShop?.id && DRIFT_CODES.includes(p.code) && (dr ? (
+                <button type="button" onClick={openMatch}
+                  title={dr.error ? `เทียบไม่สำเร็จ: ${dr.error}` : `ตรวจล่าสุด ${new Date(dr.checked_at).toLocaleString("th-TH")}\nกดเพื่อดูความต่าง`}
+                  className={`inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${dr.error ? "border-slate-200 bg-white text-slate-500" : drIssues.length ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  <Icon name={dr.error ? "info" : drIssues.length ? "warning" : "done"} />
+                  <span className="truncate max-w-[18rem]">{dr.error ? "เทียบกับระบบไม่ได้" : driftBadgeText(drIssues)}</span>
+                </button>
+              ) : checkingDrift ? <span className="text-[11px] text-slate-400">กำลังเทียบกับระบบ…</span> : null)}
               {extId && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{extId}</span>}
               <span className="ml-auto" />
               {/* ลงขายแล้ว → ลิงก์ไปดูสินค้าที่ร้านจริง (หน้าร้าน + หลังร้าน) — ของกลาง lib/platform-links */}
@@ -254,6 +302,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
               )}
               {onShop?.id ? (
                 <>
+                  {drIssues.length > 0 && (
+                    <button type="button" onClick={openMatch} title="ดูสิ่งที่ไม่ตรง แล้วเลือกส่งข้อมูลตามระบบขึ้นร้าน (ถามยืนยันก่อนส่ง)"
+                      className="text-xs border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 rounded-lg px-2.5 py-1.5">อัปเดตให้ตรง</button>
+                  )}
                   <button type="button" onClick={() => setManage(p.id)} title="ร่างในระบบ (ชื่อ/หมวด/รูป ที่จะส่งขึ้นร้าน)"
                     className="text-xs border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg px-2.5 py-1.5">ร่างในระบบ</button>
                   <button type="button" onClick={() => setOpenListing(onShop.id ?? null)} title="เปิดสินค้าบนร้าน — แก้ชื่อ/รูป/ราคา/เปิด-ปิดขาย (ร้านที่รองรับ)"
@@ -268,6 +320,11 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
               <Row label="หมวดหมู่" value={catValue} warn={catValue === "— ยังไม่ตั้ง"} hint={fromCentral ? "จากหมวดกลาง" : undefined} />
               <Row label={rdv ? "รูปที่จะส่ง" : "รูปที่เลือกส่ง"} value={`${imgCount} รูป`} warn={!imgCount} hint={rdv && !d.image_keys?.length && imgCount ? "จากสินค้า" : undefined} />
               <Row label="ร้าน" value={acct?.is_active ? (acct.label || "มีร้าน") : "ยังไม่มีร้าน"} warn={!acct?.is_active} />
+              {drDiff.length > 0 && (
+                <div className="sm:col-span-2 flex flex-wrap gap-1 pt-1">
+                  {drDiff.map((i) => <span key={i.key} className="max-w-full truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">{i.summary}</span>)}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -287,6 +344,11 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
             ? `▴ ซ่อน ${hidden.length} ช่องทางที่ยังไม่เชื่อมร้าน`
             : `▾ ซ่อนไว้ ${hidden.length} ช่องทางที่แบรนด์นี้ยังไม่เชื่อมร้าน (${hidden.map((p) => p.name_th).join(", ")}) · แสดง`}
         </button>
+      )}
+      {matchFor && (
+        <MatchSystemDialog open listingId={matchFor.listingId} shopName={matchFor.name} canPublish={canPublish}
+          onChanged={(c) => setDrift((m) => ({ ...m, [c.listing_id]: { listing_id: c.listing_id, platform_code: c.platform_code, issues: c.issues, items: c.items, error: null, checked_at: c.checked_at } }))}
+          onClose={() => setMatchFor(null)} />
       )}
       {openListing && (
         <ListingDrawer listingId={openListing} canPublish={canPublish} onClose={() => { setOpenListing(null); void load(); }} />

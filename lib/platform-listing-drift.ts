@@ -1,0 +1,164 @@
+/**
+ * "ร้านที่ลงขายแล้ว ตรงกับระบบไหม" — กติกาเทียบ (pure · ใช้ได้ทั้งหน้าเว็บ/หลังบ้าน/เทสต์) — ของกลาง
+ * เจ้าของขอ 2026-11-21: "ถ้าเราเปลี่ยนรูป แก้รายละเอียด แก้สี แก้ราคา แล้วมีร้านที่ไม่ตรง เช็คได้ไหม + มีปุ่มกดเปลี่ยนให้เลย"
+ *
+ * ค่าฝั่งระบบ = "ที่ระบบจะส่งถ้าลงร้านนี้วันนี้" (ตัวประกอบข้อมูลตัวเดียวกับตัวช่วยลงสินค้า · lib/<ร้าน>-create-plan)
+ * ค่าฝั่งร้าน = ดึงสดจากร้าน (ตัวอ่านเดียวกับลิ้นชักสินค้าบนร้าน)
+ * ตัวประกอบ/ส่ง = lib/platform-listing-drift-server · หน้าเทียบก่อนส่ง = components/platform-catalog/match-system-dialog
+ *
+ * 4 เรื่อง:
+ *   images      รูปสินค้า — ที่อยู่รูปบนร้านไม่ใช่ที่อยู่ในระบบ เทียบตรงไม่ได้ → จำ "ชุดรูปที่ส่งจากระบบ" ไว้ตอนส่ง (sys_sync)
+ *               ยังไม่เคยส่งจากระบบ = เทียบได้แค่จำนวน (เท่ากัน = "ไม่รู้" ไม่นับเป็นปัญหา)
+ *   description รายละเอียด — ตัดแท็ก HTML/ช่องว่างทิ้งแล้วเทียบข้อความ
+ *   options     ชื่อตัวเลือก (สี/ไซซ์) ต่อ SKU — จับคู่ด้วยรหัส SKU บนร้าน
+ *   price       ราคาต่อตัวเลือก
+ * ห้าม import "@/..." ที่นี่
+ */
+
+export type DriftKey = "images" | "description" | "options" | "price";
+export const DRIFT_KEYS: readonly DriftKey[] = ["images", "description", "options", "price"];
+export const DRIFT_LABEL: Record<DriftKey, string> = { images: "รูป", description: "รายละเอียด", options: "ชื่อตัวเลือก (สี/ไซซ์)", price: "ราคา" };
+
+/** same = ตรง · diff = ไม่ตรง · unknown = บอกไม่ได้ (ไม่นับเป็นปัญหา) */
+export type DriftState = "same" | "diff" | "unknown";
+export type DriftRow = { label: string; before: string; after: string };
+export type DriftItem = {
+  key: DriftKey;
+  state: DriftState;
+  /** สรุปสั้น (ป้าย) */
+  summary: string;
+  before: string;
+  after: string;
+  rows?: DriftRow[];
+  note?: string | null;
+  /** กดส่งให้ตรงได้ไหม (ร้านรองรับ + ไม่ติดกฎ) · ไม่ได้ = cannot บอกเหตุผล */
+  sendable: boolean;
+  cannot?: string | null;
+};
+
+// ───────── ค่ากลาง 2 ฝั่ง ─────────
+export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null };
+export type SystemValues = { description: string; imageRefs: string[]; variants: SysVariant[] };
+export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null };
+export type ShopValues = { description: string; imageCount: number; imageSig: string; variants: ShopVariant[] };
+/** จำตอนส่งรูปจากระบบสำเร็จ (raw.sys_sync) */
+export type SysSync = { images_sys?: string | null; images_shop?: string | null; images_at?: string | null };
+
+// ───────── ตัวช่วย ─────────
+const ENT: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'" };
+/** ข้อความล้วนสำหรับเทียบ: ตัดแท็ก + แปลงอักขระ HTML + ตัดช่องว่าง/ขึ้นบรรทัดทั้งหมด · ตัวพิมพ์เล็ก */
+export function normText(s: string | null | undefined): string {
+  return String(s ?? "")
+    .replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, " ")
+    .replace(/&(#?\w+);/g, (m, k: string) => ENT[k.toLowerCase()] ?? (k.startsWith("#") && /^#\d+$/.test(k) ? String.fromCharCode(Number(k.slice(1))) : m))
+    .replace(/[\s​ ]+/g, "").toLowerCase();
+}
+/** ข้อความอ่านง่าย (ตัดแท็ก ย่อช่องว่าง) ไว้โชว์ */
+export function plainText(s: string | null | undefined): string {
+  return String(s ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|li|div|h\d)>/gi, "\n").replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n+/g, "\n").trim();
+}
+const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
+/** ลายเซ็นสั้นของรายการ (FNV-1a 32 บิต) */
+export function listSig(xs: readonly string[]): string {
+  let h = 0x811c9dc5;
+  for (const ch of xs.join("\n")) { h ^= ch.codePointAt(0)!; h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+const normCode = (s: string | null | undefined) => String(s ?? "").trim().toUpperCase();
+const normVal = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+const money = (n: number | null | undefined) => (n == null ? "—" : `฿${Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`);
+const samePrice = (a: number | null | undefined, b: number | null | undefined) => (a == null || b == null ? a == b : Math.abs(a - b) < 0.005);
+
+/** ตัวเลือกบนร้านของ SKU นี้ (จับคู่ด้วยรหัส) */
+export function shopVariantOf(shop: ShopVariant[], code: string): ShopVariant | null {
+  const c = normCode(code);
+  return shop.find((v) => normCode(v.code) === c) ?? (shop.length === 1 && !shop[0].code ? shop[0] : null);
+}
+
+// ───────── เทียบทีละเรื่อง ─────────
+export function compareImages(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot"> {
+  const sysSig = listSig(sys.imageRefs);
+  const before = `${shop.imageCount} รูป`, after = `${sys.imageRefs.length} รูป`;
+  if (!sys.imageRefs.length) return { key: "images", state: "unknown", summary: "ระบบยังไม่มีรูป", before, after, note: "สินค้านี้ยังไม่มีรูปที่จะส่ง" };
+  if (sync?.images_sys) {
+    const sysChanged = sync.images_sys !== sysSig, shopChanged = !!sync.images_shop && sync.images_shop !== shop.imageSig;
+    if (!sysChanged && !shopChanged) return { key: "images", state: "same", summary: "รูปตรง", before, after, note: sync.images_at ? `ส่งจากระบบล่าสุด ${sync.images_at.slice(0, 10)}` : null };
+    return {
+      key: "images", state: "diff", before, after,
+      summary: sysChanged ? "รูปในระบบเปลี่ยนหลังส่งล่าสุด" : "รูปบนร้านถูกเปลี่ยน",
+      note: sysChanged && shopChanged ? "ทั้งรูปในระบบและบนร้านเปลี่ยน" : sysChanged ? "เปลี่ยนรูปที่สินค้าหลังส่งขึ้นร้านครั้งล่าสุด" : "มีคนแก้รูปบนร้านหลังส่งจากระบบ",
+    };
+  }
+  if (shop.imageCount !== sys.imageRefs.length) return { key: "images", state: "diff", summary: `รูป: บนร้าน ${shop.imageCount} · ระบบ ${sys.imageRefs.length}`, before, after, note: "ยังไม่เคยส่งรูปจากระบบ — จำนวนรูปไม่เท่ากัน" };
+  return { key: "images", state: "unknown", summary: "ยังไม่เคยส่งรูปจากระบบ", before, after, note: "จำนวนรูปเท่ากัน แต่ยังบอกไม่ได้ว่าเป็นรูปชุดเดียวกัน — กดส่งครั้งแรกแล้วระบบจะจำไว้เทียบรอบหน้า" };
+}
+
+export function compareDescription(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  const a = normText(shop.description), b = normText(sys.description);
+  const before = short(plainText(shop.description), 80) || "(ว่าง)", after = short(plainText(sys.description), 80) || "(ว่าง)";
+  if (!b) return { key: "description", state: "unknown", summary: "ระบบยังไม่มีรายละเอียด", before, after };
+  if (a === b) return { key: "description", state: "same", summary: "รายละเอียดตรง", before, after };
+  return { key: "description", state: "diff", summary: "รายละเอียดต่าง", before, after, note: `บนร้าน ${plainText(shop.description).length.toLocaleString()} ตัวอักษร · ระบบ ${plainText(sys.description).length.toLocaleString()} ตัวอักษร` };
+}
+
+/** ตัวเลือกไม่ตรง = ค่าตัวเลือกในระบบ (สี/ไซซ์) ไม่อยู่ในชื่อตัวเลือกบนร้าน */
+export function optionRows(sys: SystemValues, shop: ShopValues): DriftRow[] {
+  const rows: DriftRow[] = [];
+  for (const v of sys.variants) {
+    const vals = v.values.map((x) => x.trim()).filter(Boolean);
+    if (!vals.length) continue;
+    const sv = shopVariantOf(shop.variants, v.code);
+    if (!sv) { rows.push({ label: v.code, before: "(ไม่มีตัวเลือกนี้บนร้าน)", after: vals.join(" · ") }); continue; }
+    const hay = sv.values?.length ? sv.values.map(normVal) : [normVal(sv.label)];
+    const ok = vals.every((x) => hay.some((h) => (sv.values?.length ? h === normVal(x) : h.includes(normVal(x)))));
+    if (!ok) rows.push({ label: v.code, before: sv.values?.length ? sv.values.join(" · ") : sv.label || "—", after: vals.join(" · ") });
+  }
+  return rows;
+}
+export function compareOptions(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  const withVals = sys.variants.filter((v) => v.values.some((x) => x.trim()));
+  if (!withVals.length) return { key: "options", state: "unknown", summary: "ไม่มีตัวเลือก", before: "—", after: "—" };
+  const rows = optionRows(sys, shop);
+  if (!rows.length) return { key: "options", state: "same", summary: "ชื่อตัวเลือกตรง", before: `${withVals.length} ตัวเลือก`, after: `${withVals.length} ตัวเลือก` };
+  return { key: "options", state: "diff", summary: `ชื่อตัวเลือกไม่ตรง ${rows.length}`, before: rows.map((r) => r.before).slice(0, 3).join(", "), after: rows.map((r) => r.after).slice(0, 3).join(", "), rows };
+}
+
+/** ราคาไม่ตรงต่อตัวเลือก — เทียบเฉพาะช่องที่ทั้ง 2 ฝั่งมี (price · special · pay) */
+export function priceRows(sys: SystemValues, shop: ShopValues): DriftRow[] {
+  const rows: DriftRow[] = [];
+  const fmt = (x: { price: number | null; special?: number | null; pay?: number | null }) =>
+    [money(x.price), x.special != null ? `ลด ${money(x.special)}` : "", x.pay != null && !samePrice(x.pay, x.price) ? `จ่าย ${money(x.pay)}` : ""].filter(Boolean).join(" · ");
+  for (const v of sys.variants) {
+    if (v.price == null) continue;
+    const sv = shopVariantOf(shop.variants, v.code);
+    if (!sv) continue;
+    const diff = !samePrice(sv.price, v.price)
+      || (v.special !== undefined && sv.special !== undefined && !samePrice(sv.special ?? null, v.special ?? null))
+      || (v.pay !== undefined && sv.pay !== undefined && !samePrice(sv.pay ?? null, v.pay ?? null));
+    if (diff) rows.push({ label: v.code, before: fmt(sv), after: fmt(v) });
+  }
+  return rows;
+}
+export function comparePrice(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  const priced = sys.variants.filter((v) => v.price != null && shopVariantOf(shop.variants, v.code));
+  if (!priced.length) return { key: "price", state: "unknown", summary: "เทียบราคาไม่ได้", before: "—", after: "—", note: "ไม่มีตัวเลือกที่รหัสตรงกัน หรือระบบยังไม่มีราคา" };
+  const rows = priceRows(sys, shop);
+  if (!rows.length) return { key: "price", state: "same", summary: "ราคาตรง", before: `${priced.length} ตัวเลือก`, after: `${priced.length} ตัวเลือก` };
+  return { key: "price", state: "diff", summary: rows.length === 1 ? `ราคา ${rows[0].before} → ${rows[0].after}` : `ราคาไม่ตรง ${rows.length} ตัวเลือก`, before: rows[0].before, after: rows[0].after, rows };
+}
+
+/** เทียบครบ 4 เรื่อง (ยังไม่ตัดสินว่าส่งได้ไหม — ฝั่ง server ใส่ sendable/cannot ตามร้าน) */
+export function compareAll(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot">[] {
+  return [compareImages(sys, shop, sync), compareDescription(sys, shop), compareOptions(sys, shop), comparePrice(sys, shop)];
+}
+
+/** เรื่องที่ไม่ตรง (ป้าย) */
+export const driftIssues = (items: readonly Pick<DriftItem, "key" | "state">[]): DriftKey[] => items.filter((i) => i.state === "diff").map((i) => i.key);
+/** ข้อความป้าย "ไม่ตรงระบบ: รูป · ราคา" */
+export function driftBadgeText(issues: readonly DriftKey[]): string {
+  return issues.length ? `ไม่ตรงระบบ: ${issues.map((k) => DRIFT_LABEL[k].replace(/\s*\(.*\)$/, "")).join(" · ")}` : "ตรงกับระบบ";
+}
+/** ตรวจไว้นานแค่ไหนถึงควรตรวจใหม่ (ชม.) */
+export const DRIFT_STALE_HOURS = 20;
