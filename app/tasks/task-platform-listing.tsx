@@ -25,20 +25,24 @@ const MAX_PARENTS = 5; // งานส่วนใหญ่มี 1-2 รุ่�
 const onSale = (d: Draft | undefined, matched: unknown) =>
   (!!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id)) || !!matched;
 
-export function TaskPlatformListing({ platforms, parents, brandId, compact = false }: {
-  platforms: string[]; parents: ParentRef[]; brandId?: string | null;
-  /** แบบกะทัดรัด (ลิ้นชักงาน 2026-11-21): ป้ายร้านมีขอบเขียว=ลงแล้ว/แดง=ยังไม่ลง · ปุ่ม "＋ ลงร้าน" เล็กต่อท้ายแถว */
-  compact?: boolean;
-}) {
-  const t = useT();
+export type PlatformListedStatus = {
+  /** code → จำนวน Parent ที่ลงแล้ว · null = ยังไม่รู้ (กำลังโหลด / ไม่มีสิทธิ์ / ไม่มี Parent) */
+  listed: Record<string, number> | null;
+  /** ร้านที่ระบบลงสินค้าได้ (ไม่ซ่อน) */
+  known: Set<string>;
+  list: ParentRef[];
+  total: number;
+  reload: () => Promise<void>;
+};
+
+/** สถานะลงร้านของ Parent ในงาน — ใช้ร่วม: แถบ Platform (TaskPlatformListing) + รายการ "ยังขาดอะไร" (lib/task-readiness) · โหลดครั้งเดียวที่ลิ้นชัก */
+export function usePlatformListedStatus(parents: ParentRef[]): PlatformListedStatus {
   const { can } = useAuth();
   const canView = can("products.platforms.view" as Parameters<typeof can>[0]);
   const list = useMemo(() => parents.slice(0, MAX_PARENTS), [parents]);
   const parentKey = list.map((p) => p.id).join(",");
-  // code → จำนวน Parent ที่ลงแล้ว · null = ยังไม่รู้ / ไม่มีร้านนี้ในระบบลงสินค้า
   const [listed, setListed] = useState<Record<string, number> | null>(null);
   const [known, setKnown] = useState<Set<string>>(new Set());
-  const [open, setOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!canView || list.length === 0) { setListed(null); return; }
@@ -64,6 +68,20 @@ export function TaskPlatformListing({ platforms, parents, brandId, compact = fal
   }, [canView, list]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, [parentKey, canView]);
+  return { listed, known, list, total: list.length, reload: load };
+}
+
+export function TaskPlatformListing({ platforms, parents, brandId, compact = false, status }: {
+  platforms: string[]; parents: ParentRef[]; brandId?: string | null;
+  /** แบบกะทัดรัด (ลิ้นชักงาน 2026-11-21): ป้ายร้านมีขอบเขียว=ลงแล้ว/แดง=ยังไม่ลง · ปุ่ม "＋ ลงร้าน" เล็กต่อท้ายแถว */
+  compact?: boolean;
+  /** สถานะที่หน้าแม่โหลดไว้แล้ว (usePlatformListedStatus) — ไม่ส่ง = โหลดเอง */
+  status?: PlatformListedStatus;
+}) {
+  const t = useT();
+  const own = usePlatformListedStatus(status ? [] : parents);
+  const { listed, known, list, reload: load } = status ?? own;
+  const [open, setOpen] = useState(false);
 
   const total = list.length;
   const ready = listed !== null && total > 0;
