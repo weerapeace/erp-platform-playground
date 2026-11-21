@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyDueAt, countTargets, coverFromRaw, isApplyDue, isRevertDue, listingOnSale, nextCampaignStatus, restoreCover, sameImageRef, stillInReview, swapCover, validateCampaign,
+  applyDueAt, countTargets, coverFromRaw, isApplyDue, isRevertDue, listingOnSale, nextCampaignStatus, restoreCover, sameImageRef, stillInReview, swapCover, checkReverted, isRevertCheckDue, validateCampaign,
   type CampaignTiming,
 } from "@/lib/promo-cover";
 
@@ -112,5 +112,24 @@ describe("ตรวจค่า + สถานะชุด", () => {
     expect(stillInReview("review", "https://th-live.slatic.net/p/promo.jpg", "https://sg-test-11.slatic.net/p/promo.jpg", "https://th-live.slatic.net/p/old.jpg")).toBe(false);
     expect(stillInReview("applied", "old", "promo", "old")).toBe(false);
     expect(stillInReview("review", "other", "promo", "old")).toBe(false);
+  });
+
+  it("เช็กซ้ำหลังย้อน: เวลาที่ต้องรอรายร้าน", () => {
+    const now = Date.parse("2026-11-21T12:00:00Z");
+    expect(isRevertCheckDue("tiktok", "2026-11-21T10:30:00Z", now)).toBe(true);
+    expect(isRevertCheckDue("tiktok", "2026-11-21T11:30:00Z", now)).toBe(false);
+    expect(isRevertCheckDue("lazada", "2026-11-21T00:00:00Z", now)).toBe(false);
+    expect(isRevertCheckDue("lazada", "2026-11-20T11:00:00Z", now)).toBe(true);
+    expect(isRevertCheckDue("shopee", "2026-11-01T00:00:00Z", now)).toBe(false);
+  });
+
+  it("เช็กซ้ำหลังย้อน: ผลบนร้าน", () => {
+    const base = { original: "old", applied: "promo", revertedAt: "2026-11-21T00:00:00Z", now: Date.parse("2026-11-21T12:00:00Z"), same: (a: string, b: string) => a === b };
+    expect(checkReverted({ ...base, current: "old", reviewing: false, rejected: [] }).verdict).toBe("ok");
+    expect(checkReverted({ ...base, current: "promo", reviewing: true, rejected: [] }).verdict).toBe("wait");
+    expect(checkReverted({ ...base, current: "promo", reviewing: false, rejected: [] }).verdict).toBe("stuck");
+    expect(checkReverted({ ...base, current: "old", reviewing: false, rejected: ["รูปไม่ชัด"] }).verdict).toBe("stuck");
+    expect(checkReverted({ ...base, current: "someone", reviewing: false, rejected: [] }).verdict).toBe("changed");
+    expect(checkReverted({ ...base, now: Date.parse("2026-11-25T00:00:00Z"), current: "promo", reviewing: true, rejected: [] }).verdict).toBe("stuck");
   });
 });

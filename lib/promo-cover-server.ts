@@ -17,7 +17,8 @@ import { ruleRecipients } from "@/lib/notify-recipients";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import {
   ALERT_STATUS, ON_SHOP, PLATFORM_LABEL, PROMO_PLATFORMS, backupKeyOf, coverFromRaw, framedKeyOf, isApplyDue, isPromoPlatform, isRevertDue, listingOnSale,
-  nextCampaignStatus, restoreCover, sameImageRef, stillInReview, STILL_IN_REVIEW, swapCover, type CampaignStatus, type CampaignTiming, type PromoPlatform, type TargetStatus,
+  nextCampaignStatus, restoreCover, sameImageRef, stillInReview, STILL_IN_REVIEW, swapCover, checkReverted, isRevertCheckDue, REVERT_CHECK_AFTER_H,
+  REVERT_CHECK_OK, REVERT_CHECK_CHANGED, type RevertCheck, type CampaignStatus, type CampaignTiming, type PromoPlatform, type TargetStatus,
 } from "@/lib/promo-cover";
 // ร้านตลาด — ตัวช่วยเดียวกับลิ้นชักสินค้าบนร้าน
 import { shopeeUpdateItem, shopeeErrorText } from "@/lib/shopee";
@@ -461,9 +462,82 @@ async function saveOutcome(admin: Admin, t: TargetRow, o: Outcome, kind: "apply"
     patch.applied_at = now; patch.before_refs = o.before_refs ?? null; patch.before_cover_url = o.before_cover_url ?? t.before_cover_url;
     patch.backup_key = o.backup_key ?? null; patch.applied_ref = o.applied_ref ?? null; patch.notified_at = null;
   }
-  if (o.status === "reverted") patch.reverted_at = now;
+  if (o.status === "reverted") { patch.reverted_at = now; patch.revert_checked_at = null; }   // ย้อนรอบใหม่ = ต้องเช็กบนร้านใหม่
   if (ALERT_STATUS.has(o.status)) patch.notified_at = null;
   await admin.from("promo_cover_targets").update(patch).eq("id", t.id);
+}
+
+// ───────── เช็กซ้ำหลังย้อน (TikTok/Lazada ต้องตรวจรูปเดิมอีกรอบ) ─────────
+export type VerifyResult = { checked: number; ok: number; waiting: number; stuck: number; skipped: number; timedOut: boolean };
+
+/** ดูบนร้านจริง 1 รายการ (อ่านอย่างเดียว) → ผลเช็ก · โหลดไม่ได้ = null (ลองรอบหน้า) */
+async function readRevertState(admin: Admin, t: TargetRow): Promise<RevertCheck | null> {
+  if (t.platform === "lazada") {
+    const live = await loadLazListingLive(admin, t.target_key, null);
+    if (!live.ok) return null;
+    const view = lazadaListingView(live.item);
+    if (!view) return null;
+    const active = String(view.status ?? "").toLowerCase() === "active";
+    return checkReverted({
+      current: view.images[0], original: strList((t.before_refs as { images?: unknown } | null)?.images)[0], applied: t.applied_ref,
+      reviewing: false, rejected: active ? [] : view.rejectReasons, revertedAt: t.reverted_at,
+    });
+  }
+  if (t.platform === "tiktok") {
+    const live = await loadTtsListingLive(admin, t.target_key, null);
+    if (!live.ok) return null;
+    const view = await ttsViewWithReview(live.accessToken, live.cipher, live.detail);
+    if (!view) return null;
+    const failed = view.auditStatus === "FAILED";
+    return checkReverted({
+      current: view.imageUris[0], original: strList((t.before_refs as { uris?: unknown } | null)?.uris)[0], applied: t.applied_ref,
+      reviewing: !failed && (view.auditStatus === "AUDITING" || view.status === "PENDING" || !!view.pendingImages),
+      rejected: failed ? (view.rejectReasons.length ? view.rejectReasons : ["TikTok ไม่ผ่านการตรวจ"]) : [], revertedAt: t.reverted_at,
+      same: (a, b) => a === b,
+    });
+  }
+  return null;
+}
+
+/**
+ * ตัวตั้งเวลา: รายการที่ย้อนแล้วบน TikTok (หลัง 1 ชม.) / Lazada (หลัง 24 ชม.) → ดูบนร้านว่าปกเดิมขึ้นจริงไหม
+ *   ขึ้นแล้ว = จด · ร้านยังตรวจ = ดูรอบหน้า · ร้านไม่ผ่าน/ปกโปรค้าง = "ย้อนไม่ผ่าน" + แจ้งเตือน (กดลองใหม่ได้ในหน้า)
+ */
+export async function verifyReverts(admin: Admin, opts: { budgetMs: number; actor: Actor; now?: number }): Promise<VerifyResult> {
+  const started = Date.now();
+  const now = opts.now ?? Date.now();
+  const res: VerifyResult = { checked: 0, ok: 0, waiting: 0, stuck: 0, skipped: 0, timedOut: false };
+  const minAge = Math.min(...Object.values(REVERT_CHECK_AFTER_H).filter((h): h is number => h != null));
+  const { data } = await admin.from("promo_cover_targets").select(TARGET_COLS).eq("status", "reverted").is("revert_checked_at", null)
+    .in("platform", Object.keys(REVERT_CHECK_AFTER_H)).lt("reverted_at", new Date(now - minAge * 3600_000).toISOString()).order("reverted_at").limit(40);
+  const due = ((data ?? []) as TargetRow[]).filter((t) => isRevertCheckDue(t.platform, t.reverted_at, now));
+  const stuckCampaigns = new Set<string>();
+  for (const t of due) {
+    if (Date.now() - started > opts.budgetMs) { res.timedOut = true; break; }
+    let r: RevertCheck | null = null;
+    try { r = await readRevertState(admin, t); } catch (e) { console.warn(`[promo-cover] เช็กหลังย้อนไม่ได้: ${errText(e)}`); }
+    if (!r) { res.skipped++; continue; }
+    res.checked++;
+    const at = new Date().toISOString();
+    if (r.verdict === "wait") { res.waiting++; continue; }
+    if (r.verdict === "ok" || r.verdict === "changed") {
+      res.ok++;
+      await admin.from("promo_cover_targets").update({ revert_checked_at: at, error: r.verdict === "ok" ? REVERT_CHECK_OK : REVERT_CHECK_CHANGED, updated_at: at }).eq("id", t.id);
+      continue;
+    }
+    res.stuck++;
+    stuckCampaigns.add(t.campaign_id);
+    // ย้อนไม่ผ่าน → ปุ่ม "ลองใหม่" (retry) ตั้งกลับเป็น applied แล้วย้อนอีกรอบ · applied_ref/before_refs เดิมยังอยู่
+    await admin.from("promo_cover_targets").update({ status: "revert_failed", error: r.reason ?? "ย้อนไม่ผ่าน", revert_checked_at: at, notified_at: null, updated_at: at }).eq("id", t.id);
+    await auditListing(admin, t, opts.actor, "revert", { ok: false, status: "revert_failed", error: r.reason ?? null, verify: true, old: t.before_cover_url, new: t.applied_ref });
+  }
+  for (const id of stuckCampaigns) {
+    const { data: c } = await admin.from("promo_cover_campaigns").select(CAMPAIGN_COLS).eq("id", id).maybeSingle();
+    if (!c) continue;
+    // สถานะชุดคงเดิม (จบแล้วก็จบ) — รายการขึ้น "ต้องดู N" เอง · ปุ่มลองใหม่ใช้กับชุดที่จบแล้วได้ (route retry ตั้งชุดกลับเป็น live)
+    await notifyFailures(admin, c as CampaignRow, []);
+  }
+  return res;
 }
 
 /** ส่งปกโปร 1 รายการ (ยิงร้านจริง) */

@@ -56,6 +56,34 @@ export const ON_SHOP: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["applie
 export const ALERT_STATUS: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["failed", "revert_failed", "conflict"]);
 /** ย้อนตอนร้าน (TikTok/Lazada) ยังตรวจปกโปรไม่เสร็จ — บนร้านยังเป็นปกเดิม ถ้าถือว่า "ย้อนแล้ว" ปกโปรจะขึ้นค้างหลังตรวจเสร็จ → รอแล้วลองใหม่ */
 export const STILL_IN_REVIEW = "ร้านยังตรวจปกโปรไม่เสร็จ (บนร้านยังเป็นปกเดิม) — ระบบจะลองย้อนใหม่ทุก 15 นาทีจนร้านตรวจเสร็จ · ถ้าร้านไม่ผ่านปกโปร กด \"ย้อนทับเลย\"";
+/** เช็กซ้ำหลังย้อน (ร้านที่ต้องตรวจรูป) — รอกี่ชั่วโมงหลังย้อนค่อยดูบนร้าน · ตรวจนานเกินนี้ = แจ้งเตือน */
+export const REVERT_CHECK_AFTER_H: Partial<Record<PromoPlatform, number>> = { tiktok: 1, lazada: 24 };
+export const REVERT_CHECK_GIVE_UP_H = 72;
+export function isRevertCheckDue(platform: PromoPlatform, revertedAt: string | null | undefined, now = Date.now()): boolean {
+  const h = REVERT_CHECK_AFTER_H[platform];
+  const t = revertedAt ? Date.parse(revertedAt) : NaN;
+  return h != null && Number.isFinite(t) && now - t >= h * 3600_000;
+}
+export type RevertCheck = { verdict: "ok" | "wait" | "stuck" | "changed"; reason?: string };
+/**
+ * ผลบนร้านหลังย้อน: ok = ปกเดิมขึ้นแล้ว · wait = ร้านยังตรวจ (ดูใหม่รอบหน้า) · stuck = ร้านไม่ผ่าน/ปกโปรยังค้าง (แจ้งเตือน) · changed = มีคนเปลี่ยนรูปแรกเอง (จบ ไม่ทับ)
+ */
+export function checkReverted(i: { current: string | null | undefined; original: string | null | undefined; applied: string | null | undefined; reviewing: boolean; rejected: readonly string[]; revertedAt: string | null | undefined; now?: number; same?: (a: string, b: string) => boolean }): RevertCheck {
+  const same = i.same ?? ((a: string, b: string) => sameImageRef(a, b));
+  if (i.rejected.length) return { verdict: "stuck", reason: `ร้านไม่ผ่านรูปเดิม: ${i.rejected[0]}`.slice(0, 300) };
+  if (i.reviewing) {
+    const t = i.revertedAt ? Date.parse(i.revertedAt) : NaN;
+    if (Number.isFinite(t) && (i.now ?? Date.now()) - t > REVERT_CHECK_GIVE_UP_H * 3600_000) return { verdict: "stuck", reason: `ร้านตรวจรูปเดิมนานเกิน ${REVERT_CHECK_GIVE_UP_H / 24} วัน — เข้าไปดูที่หลังร้าน` };
+    return { verdict: "wait" };
+  }
+  if (!i.current) return { verdict: "stuck", reason: "บนร้านไม่มีรูปแรก — เข้าไปดูที่หลังร้าน" };
+  if (i.original && same(i.current, i.original)) return { verdict: "ok" };
+  if (i.applied && same(i.current, i.applied)) return { verdict: "stuck", reason: "ปกโปรยังอยู่บนร้าน (ร้านไม่เปลี่ยนกลับเป็นปกเดิม) — กดลองใหม่" };
+  return { verdict: "changed" };
+}
+export const REVERT_CHECK_OK = "ร้านตรวจแล้ว — ปกเดิมขึ้นร้านแล้ว";
+export const REVERT_CHECK_CHANGED = "หลังย้อน มีคนเปลี่ยนรูปแรกบนร้านเองแล้ว (ไม่ใช่ปกโปรของเรา)";
+
 /** ร้านยังตรวจไม่เสร็จไหม: สถานะ review + รูปแรกบนร้านยังเป็นปกเดิม (ไม่ใช่ปกโปร) */
 export function stillInReview(status: TargetStatus, current: string | null | undefined, applied: string | null | undefined, original: string | null | undefined, same: (a: string, b: string) => boolean = (a, b) => sameImageRef(a, b)): boolean {
   if (status !== "review" || !current || !original) return false;
