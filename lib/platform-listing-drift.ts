@@ -110,19 +110,26 @@ export function optionRows(sys: SystemValues, shop: ShopValues): DriftRow[] {
     const vals = v.values.map((x) => x.trim()).filter(Boolean);
     if (!vals.length) continue;
     const sv = shopVariantOf(shop.variants, v.code);
-    if (!sv) { rows.push({ label: v.code, before: "(ไม่มีตัวเลือกนี้บนร้าน)", after: vals.join(" · ") }); continue; }
+    if (!sv) continue;   // ไม่มีตัวเลือกนี้บนร้าน = เรื่องโครงตัวเลือก (เช็กข้ามร้าน "ตัวเลือก") ไม่ใช่ชื่อไม่ตรง
     const hay = sv.values?.length ? sv.values.map(normVal) : [normVal(sv.label)];
-    const ok = vals.every((x) => hay.some((h) => (sv.values?.length ? h === normVal(x) : h.includes(normVal(x)))));
+    // ชื่อในระบบบางร้านต่อรหัสไว้กันชื่อซ้ำ เช่น "ดำ (01)" → เทียบแค่ "ดำ"
+    const ok = vals.every((x) => { const c = normVal(coreValue(x)); return hay.some((h) => (sv.values?.length ? h === c || h === normVal(x) : h.includes(c))); });
     if (!ok) rows.push({ label: v.code, before: sv.values?.length ? sv.values.join(" · ") : sv.label || "—", after: vals.join(" · ") });
   }
   return rows;
 }
+/** ค่าตัวเลือกแกนหลัก — ตัดวงเล็บท้าย (รหัสที่ระบบต่อไว้กันชื่อซ้ำ) */
+export const coreValue = (x: string): string => x.replace(/\s*\([^()]*\)\s*$/, "").trim() || x.trim();
 export function compareOptions(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
   const withVals = sys.variants.filter((v) => v.values.some((x) => x.trim()));
   if (!withVals.length) return { key: "options", state: "unknown", summary: "ไม่มีตัวเลือก", before: "—", after: "—" };
+  const onShop = withVals.filter((v) => shopVariantOf(shop.variants, v.code));
+  const missing = withVals.length - onShop.length;
+  const missNote = missing ? `ไม่มีบนร้าน ${missing} ตัวเลือก (ดูเรื่อง "ตัวเลือก" ในเช็กข้ามร้าน)` : null;
+  if (!onShop.length) return { key: "options", state: "unknown", summary: "รหัสตัวเลือกไม่ตรงกับร้าน", before: "—", after: "—", note: missNote };
   const rows = optionRows(sys, shop);
-  if (!rows.length) return { key: "options", state: "same", summary: "ชื่อตัวเลือกตรง", before: `${withVals.length} ตัวเลือก`, after: `${withVals.length} ตัวเลือก` };
-  return { key: "options", state: "diff", summary: `ชื่อตัวเลือกไม่ตรง ${rows.length}`, before: rows.map((r) => r.before).slice(0, 3).join(", "), after: rows.map((r) => r.after).slice(0, 3).join(", "), rows };
+  if (!rows.length) return { key: "options", state: "same", summary: "ชื่อตัวเลือกตรง", before: `${onShop.length} ตัวเลือก`, after: `${onShop.length} ตัวเลือก`, note: missNote };
+  return { key: "options", state: "diff", summary: `ชื่อตัวเลือกไม่ตรง ${rows.length}`, before: rows.map((r) => r.before).slice(0, 3).join(", "), after: rows.map((r) => r.after).slice(0, 3).join(", "), rows, note: missNote };
 }
 
 /** ราคาไม่ตรงต่อตัวเลือก — เทียบเฉพาะช่องที่ทั้ง 2 ฝั่งมี (price · special · pay) */
@@ -146,7 +153,23 @@ export function comparePrice(sys: SystemValues, shop: ShopValues): Omit<DriftIte
   if (!priced.length) return { key: "price", state: "unknown", summary: "เทียบราคาไม่ได้", before: "—", after: "—", note: "ไม่มีตัวเลือกที่รหัสตรงกัน หรือระบบยังไม่มีราคา" };
   const rows = priceRows(sys, shop);
   if (!rows.length) return { key: "price", state: "same", summary: "ราคาตรง", before: `${priced.length} ตัวเลือก`, after: `${priced.length} ตัวเลือก` };
-  return { key: "price", state: "diff", summary: rows.length === 1 ? `ราคา ${rows[0].before} → ${rows[0].after}` : `ราคาไม่ตรง ${rows.length} ตัวเลือก`, before: rows[0].before, after: rows[0].after, rows };
+  return { key: "price", state: "diff", summary: rows.length === 1 ? `ราคา ${rows[0].before} → ${rows[0].after}` : `ราคาไม่ตรง ${rows.length} ตัวเลือก`, before: rows[0].before, after: rows[0].after, rows, note: priceWarning(sys, shop) };
+}
+/**
+ * คำเตือนก่อนส่งราคา (หน้าเทียบไม่ติ๊กราคาไว้ให้ก่อน — ร้านมักตั้งราคาเต็มสูงไว้ทำโปร)
+ * ลูกค้าจ่ายแพงขึ้น · ราคาขีดฆ่า/ส่วนลดจะหาย · ราคาเปลี่ยนเกิน 30%
+ */
+export function priceWarning(sys: SystemValues, shop: ShopValues): string | null {
+  const w = new Set<string>();
+  for (const v of sys.variants) {
+    const sv = v.price != null ? shopVariantOf(shop.variants, v.code) : null;
+    if (!sv || sv.price == null || v.price == null) continue;
+    const shopPay = sv.pay ?? sv.special ?? sv.price, sysPay = v.pay ?? v.special ?? v.price;
+    if (sysPay > shopPay + 0.005) w.add("ลูกค้าจะจ่ายแพงขึ้น");
+    if (shopPay < sv.price - 0.005 && !(sysPay < v.price - 0.005)) w.add("ราคาขีดฆ่า/ส่วนลดบนร้านจะหาย");
+    if (Math.abs(v.price - sv.price) / sv.price > 0.3) w.add("ราคาเปลี่ยนเกิน 30%");
+  }
+  return w.size ? `ตรวจก่อนส่ง: ${[...w].join(" · ")} (ร้านอาจตั้งราคาเต็มไว้ทำโปร)` : null;
 }
 
 /** เทียบครบ 4 เรื่อง (ยังไม่ตัดสินว่าส่งได้ไหม — ฝั่ง server ใส่ sendable/cannot ตามร้าน) */

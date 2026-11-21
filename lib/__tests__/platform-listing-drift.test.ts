@@ -77,9 +77,15 @@ describe("ชื่อตัวเลือก", () => {
     const r = compareOptions(sys(), shop({ variants: [{ code: "LY22-BK", label: "x", values: ["ดำด้าน"], price: 1 }, { code: "LY22-CR", label: "x", values: ["ครีม"], price: 1 }] }));
     expect(r.rows?.[0]).toMatchObject({ label: "LY22-BK", before: "ดำด้าน", after: "ดำ" });
   });
-  it("ไม่มีตัวเลือกนี้บนร้าน = แจ้ง", () => {
+  it("ไม่มีตัวเลือกนี้บนร้าน = ไม่นับว่าชื่อไม่ตรง แต่บอกไว้ในหมายเหตุ", () => {
     const r = compareOptions(sys(), shop({ variants: [{ code: "LY22-BK", label: "สี: ดำ", price: 1190 }] }));
-    expect(r.rows?.[0].before).toContain("ไม่มีตัวเลือกนี้");
+    expect(r.state).toBe("same");
+    expect(r.note).toContain("ไม่มีบนร้าน 1");
+  });
+  it("ชื่อในระบบที่ต่อรหัสไว้ เช่น \"ดำ (01)\" เทียบแค่ \"ดำ\"", () => {
+    const s = sys({ variants: [{ code: "B-01", values: ["ดำ (01)"], price: 1 }, { code: "B-02", values: ["กรมท่า (02)"], price: 1 }] });
+    const r = compareOptions(s, shop({ variants: [{ code: "B-01", label: "สี: ดำ", price: 1 }, { code: "B-02", label: "Variation: สีกรมท่า | B-02", price: 1 }] }));
+    expect(r.state).toBe("same");
   });
 });
 
@@ -97,6 +103,13 @@ describe("ราคา", () => {
     const s = sys({ variants: [{ code: "A", values: [], price: 1890, pay: 890 }] });
     expect(comparePrice(s, shop({ variants: [{ code: "A", label: "", price: 1890, pay: 990 }] })).state).toBe("diff");
     expect(comparePrice(s, shop({ variants: [{ code: "A", label: "", price: 1890, pay: 890 }] })).state).toBe("same");
+  });
+  it("เตือนก่อนส่ง: ร้านตั้งราคาเต็มไว้ทำโปร → ลูกค้าจ่ายแพงขึ้น + ขีดฆ่าหาย", () => {
+    const s = sys({ variants: [{ code: "A", values: [], price: 850, pay: 850 }] });
+    const r = comparePrice(s, shop({ variants: [{ code: "A", label: "", price: 1700, pay: 750 }] }));
+    expect(r.note).toContain("ลูกค้าจะจ่ายแพงขึ้น");
+    expect(r.note).toContain("ขีดฆ่า");
+    expect(r.note).toContain("เกิน 30%");
   });
   it("สินค้าไม่มีตัวเลือกบนร้าน (รหัสว่าง) ใช้ตัวเดียวของระบบ", () => {
     const s = sys({ variants: [{ code: "A", values: [], price: 500 }] });

@@ -52,7 +52,8 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
 
   const apply = useCallback((c: Check) => {
     setCheck(c);
-    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff").map((i) => i.key)));
+    // ราคาไม่ติ๊กไว้ให้ก่อน — ร้านมักตั้งราคาเต็มสูงไว้ทำโปร ต้องให้คนดูแล้วติ๊กเอง
+    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price").map((i) => i.key)));
     onChanged?.(c);
   }, [onChanged]);
 
@@ -149,7 +150,7 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                     <td className="px-2 py-2 align-top text-slate-600 break-words">{it.before}</td>
                     <td className="px-2 py-2 align-top break-words">
                       {it.after}
-                      {it.note && <div className="mt-1 text-[11px] text-slate-500">{it.note}</div>}
+                      {it.note && <div className={`mt-1 text-[11px] ${it.note.startsWith("ตรวจก่อนส่ง") ? "inline-flex items-start gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" : "text-slate-500"}`}>{it.note.startsWith("ตรวจก่อนส่ง") && <Icon name="warning" />}{it.note}</div>}
                       {it.cannot && it.state !== "same" && <div className="mt-1 inline-flex items-start gap-1 text-[11px] text-amber-700"><Icon name="warning" />{it.cannot}</div>}
                       {it.rows && it.rows.length > 0 && (
                         <div className="mt-1">

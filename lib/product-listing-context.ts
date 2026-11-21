@@ -11,6 +11,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { isGoneStatus } from "@/lib/platform-listing-health";
 import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/listing-hidden-platforms";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -141,11 +142,12 @@ export async function loadListingContext(admin: Admin, parentId: string): Promis
     // แกลเลอรีจริงของ Parent SKU ("รูปภาพเพิ่มเติม") — เก็บใน erp_playground_attachments (ไม่ใช่ product_image_slots)
     admin.from("erp_playground_attachments").select("file_path, is_primary, sort_order").eq("entity_type", "parent_skus_v2").eq("entity_id", parentId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
     // สินค้าบนร้าน (platform_catalog_listings) ที่จับคู่กับสินค้านี้อยู่ — ต่อแพลตฟอร์ม
-    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code").eq("matched_parent_sku_id", parentId),
+    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code, status").eq("matched_parent_sku_id", parentId),
   ]);
-  // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน)
+  // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน) · ตัวที่ยังอยู่บนร้านมาก่อนตัวที่ร้านลบแล้ว
+  //   🐛 2026-11-21: เดิมได้ตัวแรกที่เจอ → BBP03 TikTok ได้รายการที่ร้านลบไปแล้ว (ปุ่ม "จัดการบนร้าน" เปิดตัวที่ไม่อยู่บนร้าน + ไม่มีป้ายเทียบกับระบบ)
   const matchedListings: ListingContext["matchedListings"] = {};
-  for (const l of ((matchedL ?? []) as Row[])) {
+  for (const l of ((matchedL ?? []) as Row[]).sort((a, b) => Number(isGoneStatus(a.status as string | null)) - Number(isGoneStatus(b.status as string | null)))) {
     const pid = String(l.platform_id);
     if (!matchedListings[pid]) matchedListings[pid] = { id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null };
   }
