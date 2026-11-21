@@ -1531,7 +1531,7 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "canvas-sketch", label: "กระดานวาด", code: "CanvasSketch", category: "feature",
     source: { path: "components/canvas-sketch" },
     what: "กระดานแบบ miro วางรูป กล่อง ลูกศร ข้อความ วาดอิสระ · มีการ์ดโฟลเดอร์ (folder-card) ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง",
-    when: "งานที่ต้องวาดมือ แปะรูป วางการ์ดสินค้า/งาน/คอนเทนต์ หรือจัดโซนอิสระ (กระดานแคมเปญ · ใบงานออกแบบ · บอร์ดจ่ายงาน)",
+    when: "งานที่ต้องวาดมือ แปะรูป วางการ์ดสินค้า/งาน/คอนเทนต์ หรือจัดโซนอิสระ (กระดานแคมเปญ · ใบงานออกแบบ · บอร์ดจ่ายงาน · กระดานอ้างอิงของงาน TaskReferenceBoard)",
     notWhen: "ผังขั้นตอน/ผังตัดสินใจแบบกล่องต่อเส้น → ใช้กระดาน flowchart (FlowchartBoard)",
     doc: "canvas-sketch.md", sameJob: "drawing-board", primary: true,
   },

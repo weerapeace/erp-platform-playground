@@ -133,6 +133,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
   const t = useT();
   const [editing, setEditing] = useState<{ kind: "parent" | "sku"; id: string } | null>(null);
   const [undoTarget, setUndoTarget] = useState<TaskChange | null>(null);
+  const [allOpen, setAllOpen] = useState(false); // ป๊อป "ดูทั้งหมด" ของสิ่งที่แก้
   const [busy, setBusy] = useState(false);
   // งานรูปคำอธิบาย/เขียนคำอธิบาย → คำอธิบายอยู่ที่ Parent เท่านั้น · งานรูปภาพ → Parent + SKU ที่ผูกกับงาน
   const showSkus = approveTarget === "sku_media";
@@ -244,9 +245,23 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
         ) : changes.length === 0 ? (
           <p className="text-xs text-slate-400">{t("ยังไม่มี — กด \"แก้ที่สินค้า\" แล้วแก้รูป/คำอธิบาย ระบบจะจดมาไว้ตรงนี้", "Nothing yet — press \"Edit product\", change images/description and they'll appear here")}</p>
         ) : (
-          <ChangeList changes={changes} canUndo={canUndo} onUndo={setUndoTarget} />
+          <>
+            {/* โชว์แค่รายการล่าสุด (API เรียงใหม่→เก่า) — ที่เหลือกดเปิดป๊อป · เจ้าของขอ 2026-11-21 */}
+            <ChangeList changes={changes.slice(0, 1)} canUndo={canUndo} onUndo={setUndoTarget} />
+            {changes.length > 1 && (
+              <button type="button" onClick={() => setAllOpen(true)}
+                className="mt-1.5 w-full h-8 rounded-lg border border-slate-200 bg-white text-xs font-medium text-violet-700 hover:bg-violet-50">
+                {t(`ดูทั้งหมด (${changes.length} รายการ)`, `View all (${changes.length})`)} ›
+              </button>
+            )}
+          </>
         )}
       </div>
+      {allOpen && changes && (
+        <ERPModal open onClose={() => setAllOpen(false)} title={t(`สิ่งที่แก้ในงานนี้ (${changes.length})`, `Changes in this task (${changes.length})`)} size="md" defaultExpanded={false}>
+          <ChangeList changes={changes} canUndo={canUndo} onUndo={setUndoTarget} />
+        </ERPModal>
+      )}
 
       {imagesOpen && (
         <TaskImagesViewer taskId={taskId} title={taskTitle || parents[0]?.code || ""} onClose={() => setImagesOpen(false)}

@@ -1,0 +1,102 @@
+"use client";
+
+// ============================================================
+// ชิปแพลตฟอร์มในลิ้นชักงาน + สถานะ "ลงแล้ว / ยังไม่ลง" + ปุ่มลงสินค้าขึ้นร้าน
+//  • สถานะอ่านจาก /api/product-platforms?parent_sku_id= (ตัวเดียวกับแท็บแพลตฟอร์มใน Parent SKU) ทีละ Parent ของงาน
+//  • ปุ่มเปิดตัวช่วยลงสินค้าตัวกลาง (AddToPlatformWizard) — ติ๊กร้านที่งานระบุ + ยังไม่ลงไว้ให้ · ร้านที่มีแล้วตัวช่วยข้ามให้เอง
+//  • ไม่มีสิทธิ์ดูแพลตฟอร์มสินค้า / งานไม่มี Parent → ชิปธรรมดาเหมือนเดิม
+// เจ้าของขอ 2026-11-21
+// ============================================================
+import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useAuth } from "@/components/auth";
+import { useT } from "@/components/i18n";
+import { apiFetch } from "@/lib/api";
+import { PlatformChip } from "./platform-chip";
+
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
+
+type Pf = { id: string; code: string };
+type Draft = { status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
+type ParentRef = { id: string; code: string | null; name?: string | null };
+const MAX_PARENTS = 5; // งานส่วนใหญ่มี 1-2 รุ่น — กันยิงเยอะเกิน
+
+/** เหมือนแท็บแพลตฟอร์มใน Parent SKU: ลงแล้ว = ร่างเผยแพร่/ซิงก์สำเร็จ/มีรหัสบนร้าน หรือจับคู่รายการบนร้านได้ */
+const onSale = (d: Draft | undefined, matched: unknown) =>
+  (!!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id)) || !!matched;
+
+export function TaskPlatformListing({ platforms, parents, brandId }: { platforms: string[]; parents: ParentRef[]; brandId?: string | null }) {
+  const t = useT();
+  const { can } = useAuth();
+  const canView = can("products.platforms.view" as Parameters<typeof can>[0]);
+  const list = useMemo(() => parents.slice(0, MAX_PARENTS), [parents]);
+  const parentKey = list.map((p) => p.id).join(",");
+  // code → จำนวน Parent ที่ลงแล้ว · null = ยังไม่รู้ / ไม่มีร้านนี้ในระบบลงสินค้า
+  const [listed, setListed] = useState<Record<string, number> | null>(null);
+  const [known, setKnown] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!canView || list.length === 0) { setListed(null); return; }
+    try {
+      const results = await Promise.all(list.map((p) =>
+        apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(p.id)}`).then((r) => r.ok ? r.json() : null).catch(() => null)));
+      const cnt: Record<string, number> = {};
+      const codes = new Set<string>();
+      for (const j of results) {
+        if (!j || j.error) continue;
+        const pfs = (j.platforms ?? []) as Pf[];
+        const ds = (j.drafts ?? {}) as Record<string, Draft>;
+        const ms = (j.matchedListings ?? {}) as Record<string, unknown>;
+        const hidden = new Set((j.hiddenPlatformCodes ?? []) as string[]);
+        for (const pf of pfs) {
+          if (hidden.has(pf.code)) continue;
+          codes.add(pf.code);
+          if (onSale(ds[pf.id], ms[pf.id])) cnt[pf.code] = (cnt[pf.code] ?? 0) + 1;
+        }
+      }
+      setKnown(codes); setListed(cnt);
+    } catch { setListed(null); }
+  }, [canView, list]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, [parentKey, canView]);
+
+  const total = list.length;
+  const ready = listed !== null && total > 0;
+  // ร้านในงานที่ระบบลงสินค้าได้ และยังลงไม่ครบทุกรุ่น
+  const missing = ready ? platforms.filter((c) => known.has(c) && (listed![c] ?? 0) < total) : [];
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5">
+        {platforms.map((code) => {
+          if (!ready || !known.has(code)) return <PlatformChip key={code} code={code} />;
+          const n = listed![code] ?? 0;
+          const done = n >= total;
+          return (
+            <span key={code} className="inline-flex items-center gap-1" title={done ? t("ลงร้านนี้แล้ว", "Listed on this shop") : t("ยังไม่ได้ลงร้านนี้", "Not listed yet")}>
+              <PlatformChip code={code} />
+              <span className={`text-[10px] font-medium rounded-full px-1.5 py-0.5 ${done ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                {done ? `✓ ${t("ลงแล้ว", "Listed")}` : total > 1 && n > 0 ? `${n}/${total}` : t("ยังไม่ลง", "Not yet")}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      {ready && (
+        <button type="button" onClick={() => setOpen(true)}
+          className={`mt-2 w-full h-8 rounded-lg border text-xs font-medium ${missing.length ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+          🛒 {missing.length
+            ? t(`ลงสินค้าขึ้นร้าน (${missing.length} ร้านที่ยังไม่ลง)`, `List on shops (${missing.length} not listed)`)
+            : t("ลงสินค้าขึ้นร้าน", "List on shops")}
+        </button>
+      )}
+      {open && (
+        <AddToPlatformWizard open brandId={brandId ?? null}
+          parents={list.map((p) => ({ id: p.id, code: p.code ?? "", name: p.name ?? null }))}
+          initialPlatformCodes={missing}
+          onClose={() => setOpen(false)} onDone={() => void load()} />
+      )}
+    </div>
+  );
+}

@@ -5,7 +5,8 @@
  * เห็นทุกด้านของสินค้าในหน้าเดียว: SKU ลูก · สต๊อก · ลงขายแพลตฟอร์ม · ยอดขาย · ทุกรายการที่ผูกกับรุ่นนี้ (ParentLinkedRecords)
  * ดึงจาก /api/parent-skus/[id]/overview (guardApi products.view) + /api/parent-skus/[id]/links
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { taskReferenceUrl } from "@/app/tasks/task-reference-board";
 import { apiFetch } from "@/lib/api";
 import { postTypeLabel } from "@/lib/creative-tasks";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -50,7 +51,7 @@ function CreativeItemsModal({ parentId, onClose }: { parentId: string; onClose: 
       .then((j) => setData(j.error ? null : j)).catch(() => setData(null)).finally(() => setLoading(false));
   }, [parentId]);
   const badge = (s: string | null) => s ? <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 shrink-0">{s}</span> : null;
-  const List = <T extends { id: string; title: string | null; status: string | null }>(items: T[], meta: (x: T) => string | null, empty: string) => (
+  const List = <T extends { id: string; title: string | null; status: string | null }>(items: T[], meta: (x: T) => string | null, empty: string, extra?: (x: T) => ReactNode) => (
     items.length === 0 ? <div className="text-xs text-slate-400 px-1 py-2">{empty}</div> : (
       <div className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
         {items.map((x) => (
@@ -58,6 +59,7 @@ function CreativeItemsModal({ parentId, onClose }: { parentId: string; onClose: 
             <span className="flex-1 truncate text-slate-700">{x.title || "(ไม่มีชื่อ)"}</span>
             {meta(x) && <span className="text-[11px] text-slate-400 shrink-0">{meta(x)}</span>}
             {badge(x.status)}
+            {extra?.(x)}
           </div>
         ))}
       </div>
@@ -72,7 +74,10 @@ function CreativeItemsModal({ parentId, onClose }: { parentId: string; onClose: 
           <div className="space-y-4">
             <section>
               <div className="text-xs font-medium text-slate-500 mb-1.5">🗂 งาน/ถ่าย/โพสต์ ({data.tasks.length})</div>
-              {List(data.tasks, (t) => t.task_type, "— ยังไม่มีงาน —")}
+              {List(data.tasks, (t) => t.task_type, "— ยังไม่มีงาน —", (tk) => (<>
+                <a href={`/tasks?task=${encodeURIComponent(tk.id)}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-violet-600 hover:underline shrink-0">เปิดงาน</a>
+                <a href={taskReferenceUrl(tk.id)} target="_blank" rel="noopener noreferrer" title="กระดานอ้างอิงของงานนี้" className="text-[11px] text-violet-600 hover:underline shrink-0">🎨 อ้างอิง</a>
+              </>))}
             </section>
             <section>
               <div className="text-xs font-medium text-slate-500 mb-1.5">📝 คอนเทนต์ ({data.content.length})</div>

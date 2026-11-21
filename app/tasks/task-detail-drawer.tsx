@@ -39,6 +39,8 @@ import { WorkJobLinkBox } from "./work-job-link-box";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
+import { TaskPlatformListing } from "./task-platform-listing";
+import { TaskReferenceBoard, taskReferenceUrl } from "./task-reference-board";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
 import { InfoHint } from "@/components/info-hint";
@@ -588,9 +590,15 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   {/* แพลตฟอร์มที่ลง */}
                   {!isHidden(dth, "platform") && d.platforms && d.platforms.length > 0 && (
                     <div style={{ order: tOrderOf("platform") }}><p className="text-[10px] text-slate-400 mb-1">Platform</p>
-                      <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <PlatformChip key={p} code={p} />)}</div>
+                      <TaskPlatformListing platforms={d.platforms} parents={parentList} brandId={d.brand_id} />
                     </div>
                   )}
+
+                  {/* กระดานอ้างอิง — ทางลัดไปแท็บอ้างอิง / เปิดเต็มจอ */}
+                  <div style={{ order: tOrderOf("platform") }} className="flex gap-1.5">
+                    <button type="button" onClick={() => setTab("reference")} className="flex-1 h-8 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">🎨 {t("กระดานอ้างอิง", "Reference board")}</button>
+                    <a href={taskReferenceUrl(d.id)} target="_blank" rel="noreferrer" title={t("เปิดเต็มจอ (แท็บใหม่)", "Open full screen (new tab)")} className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-xs text-slate-500 hover:bg-slate-50">⛶</a>
+                  </div>
 
                   {/* ข้อมูลอื่น — แต่ละช่องเป็นส่วนเดี่ยว ซ่อน/จัดลำดับได้ (↑↓ ที่ 🎨) */}
                   {!isHidden(dth, "task_type") && (<div style={{ order: tOrderOf("task_type") }} className="pt-2 border-t border-slate-100">
@@ -698,7 +706,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />
           )}
           {tab === "reference" && (
-            <div className="p-5 space-y-2">
+            <div className="p-5">
+            <TaskReferenceBoard taskId={d.id} hasNotes={!!(d.reference_html ?? "").trim()} notes={
+            <div className="space-y-2">
               <p className="text-xs text-slate-400">{t("โน้ต/ข้อมูลอ้างอิงของงานนี้ — ใส่หัวข้อ/ลิสต์/ลิงก์/รูปได้ (วาง Ctrl+V)", "Notes / references for this task — headings, lists, links, images (paste Ctrl+V)")}</p>
               <RichTextEditor value={refHtml} onChange={setRefHtml} minHeight={320}
                 placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
@@ -706,6 +716,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <div className="flex justify-end">
                 <button onClick={saveRef} disabled={refSaving} style={{ background: btnBg(dth) }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
               </div>
+            </div>} />
             </div>
           )}
         </div>
