@@ -30,10 +30,11 @@ export function isEditedListingDescription(draftDesc: string, p: ListingDescript
 }
 
 export function pickListingDescription(draftDesc: string, p: ListingDescriptionSource, platformName: string): { text: string; src: string } {
-  const live = String(p.platform_description_live ?? ""), stored = String(p.platform_description ?? ""), main = String(p.description ?? "");
+  // ตัดช่องว่างหัว-ท้าย (สูตรขึ้นต้นด้วย "  " ทุกรุ่น — Lazada แปลงเป็น &nbsp; หน้าข้อความ)
+  const live = String(p.platform_description_live ?? "").trim(), stored = String(p.platform_description ?? "").trim(), main = String(p.description ?? "").trim();
   if (isEditedListingDescription(draftDesc, p)) return { text: draftDesc, src: `แก้ไว้สำหรับ ${platformName}` };
-  if (live.trim()) return { text: live, src: "Platform Description ของ Parent SKU" };
-  if (stored.trim()) return { text: stored, src: p.platform_description_live === undefined ? "Platform Description ของ Parent SKU" : "รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)" };
-  if (main.trim()) return { text: main, src: "รายละเอียดสินค้า" };
+  if (live) return { text: live, src: "Platform Description ของ Parent SKU" };
+  if (stored) return { text: stored, src: p.platform_description_live === undefined ? "Platform Description ของ Parent SKU" : "รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)" };
+  if (main) return { text: main, src: "รายละเอียดสินค้า" };
   return { text: "", src: "ยังไม่มีรายละเอียด" };
 }

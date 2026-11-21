@@ -18,5 +18,11 @@ describe("pickListingDescription", () => {
     expect(pickListingDescription("", { platform_description: "ใหม่", description: null }, "LINE").src).toBe("Platform Description ของ Parent SKU");
     expect(pickListingDescription("", { platform_description: "เก่า", description: null, platform_description_live: null }, "Shopee").src).toBe("รายละเอียดสำหรับแพลตฟอร์ม (ค่าที่เก็บไว้)");
     expect(pickListingDescription("", { platform_description: null, description: null }, "LINE")).toEqual({ text: "", src: "ยังไม่มีรายละเอียด" });
+    // ค่าสดขึ้นต้นด้วยช่องว่าง (Lazada กลายเป็น &nbsp;) → ตัดหัว-ท้าย
+    expect(pickListingDescription("", { platform_description: "x", description: null, platform_description_live: "  
+
+Fleur
+บรรทัด 2  " }, "Lazada").text).toBe("Fleur
+บรรทัด 2");
   });
 });
