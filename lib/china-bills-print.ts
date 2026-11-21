@@ -30,7 +30,9 @@ export type CbPrintBill = {
   status: string; note: string;
 };
 /** บัญชีธนาคารร้าน (ช่องที่ role นั้นอ่านไม่ได้ = ว่าง) */
-export type CbBank = { bank: string; account: string; name: string };
+export type CbBank = { bank: string; account: string; name: string; phone?: string };
+/** เบอร์ร้าน "a / b, c" → รายเบอร์ (แยกบรรทัด ไม่ตัดกลางเบอร์) */
+export const cbPhones = (raw?: string): string[] => String(raw ?? "").split(/[/,;|\n]/).map((x) => x.trim()).filter(Boolean);
 
 const num = (v: unknown) => { const n = Number(String(v ?? "").replace(/,/g, "")); return Number.isFinite(n) ? n : 0; };
 const str = (v: unknown) => (v == null ? "" : String(v)).trim();
@@ -61,10 +63,12 @@ export type CbPrintOpts = {
   fee: boolean;
   /** บัญชีธนาคารร้านใต้ชื่อร้าน */
   bank: boolean;
+  /** เบอร์ร้าน (เจ้าของขอ 2026-11-21) · เปิดบัญชีด้วย = แถว "โทร" ในกล่องบัญชี · ปิดบัญชี = บรรทัดเล็กใต้ชื่อร้าน */
+  phone: boolean;
   /** ขนาดตัวอักษรต่อส่วน (px) · 0 = ตามตัวอักษรหลัก */
   sz: Record<CbSizePart, number>;
 };
-const OPT_DEFAULTS = { rate: true, calc: true, fee: true, bank: false };
+const OPT_DEFAULTS = { rate: true, calc: true, fee: true, bank: false, phone: false };
 export function cbPrintOpts(s: ListPrintSettings): CbPrintOpts {
   const o = (s.opts ?? {}) as Record<string, unknown>;
   const b = (k: keyof typeof OPT_DEFAULTS) => (typeof o[k] === "boolean" ? (o[k] as boolean) : OPT_DEFAULTS[k]);
@@ -73,7 +77,7 @@ export function cbPrintOpts(s: ListPrintSettings): CbPrintOpts {
     const n = Math.round(Number(raw[key]));
     return [key, Number.isFinite(n) && n >= CB_SIZE_MIN && n <= CB_SIZE_MAX ? n : 0];
   })) as Record<CbSizePart, number>;
-  return { rate: b("rate"), calc: b("calc"), fee: b("fee"), bank: b("bank"), sz };
+  return { rate: b("rate"), calc: b("calc"), fee: b("fee"), bank: b("bank"), phone: b("phone"), sz };
 }
 
 // ---------- คอลัมน์ / กลุ่ม / เรียง / แบบสำเร็จรูป ----------
@@ -104,9 +108,9 @@ const presetCols = (on: string[]) => CB_PRINT_COLUMNS.map((c) => ({ key: c.key, 
 // แบบสำเร็จรูปไม่แตะขนาดแยกส่วน (sz) — ใช้ค่าที่ผู้ใช้ตั้งไว้
 type PresetDef = { id: string; name: string; on: string[]; signature: boolean; opts: Omit<CbPrintOpts, "sz"> };
 const PRESET_DEFS: PresetDef[] = [
-  { id: "cb-full", name: "สรุปครบ (เรท + ค่าโอน)", on: ["no", "date", "amount", "fee", "total", "rate", "thb"], signature: true, opts: { rate: true, calc: true, fee: true, bank: false } },
-  { id: "cb-plain", name: "ยอดบิลอย่างเดียว", on: ["no", "date", "status", "amount"], signature: false, opts: { rate: false, calc: false, fee: false, bank: false } },
-  { id: "cb-transfer", name: "ใบให้คนโอน (มีบัญชีร้าน)", on: ["no", "amount", "fee", "total", "remain"], signature: true, opts: { rate: false, calc: false, fee: true, bank: true } },
+  { id: "cb-full", name: "สรุปครบ (เรท + ค่าโอน)", on: ["no", "date", "amount", "fee", "total", "rate", "thb"], signature: true, opts: { rate: true, calc: true, fee: true, bank: false, phone: false } },
+  { id: "cb-plain", name: "ยอดบิลอย่างเดียว", on: ["no", "date", "status", "amount"], signature: false, opts: { rate: false, calc: false, fee: false, bank: false, phone: false } },
+  { id: "cb-transfer", name: "ใบให้คนโอน (มีบัญชีร้าน)", on: ["no", "amount", "fee", "total", "remain"], signature: true, opts: { rate: false, calc: false, fee: true, bank: true, phone: true } },
 ];
 export const cbPrintPresets = (): ListPrintPreset[] => PRESET_DEFS.map((p) => ({
   id: p.id, name: p.name, settings: { signature: p.signature, columns: presetCols(p.on), opts: { ...p.opts } },
@@ -190,13 +194,19 @@ export function buildChinaBillsPrint(input: {
 
   // กล่องบัญชีธนาคารร้าน: ธนาคาร / เลขที่ / ชื่อ · เลขบัญชีห้ามตัดบรรทัด (เจ้าของขอ รุ่น 2)
   const bankOf = (r: CRow) => (r.supplierId ? input.banks?.get(r.supplierId) : undefined);
+  const phonesOf = (r: CRow) => (o.phone && !r.thb ? cbPhones(bankOf(r)?.phone) : []);
+  const phoneHtml = (ps: string[]) => `<span class="ph">${ps.map((p) => `<span>${esc(p)}</span>`).join("")}</span>`;
   const bankBox = (r: CRow) => {
-    if (!o.bank || r.thb) return "";
+    if (r.thb) return "";
+    const ps = phonesOf(r);
+    // ปิดบัญชีแต่เปิดเบอร์ → บรรทัดเล็กใต้ชื่อร้าน · ร้านไม่มีเบอร์ = ไม่โชว์อะไร
+    if (!o.bank) return ps.length ? `<div class="bk ph-line"><span class="k">โทร</span>${phoneHtml(ps)}</div>` : "";
     const b = bankOf(r);
     const rows: string[] = [];
     if (b?.bank) rows.push(`<span class="k">ธนาคาร</span><span>${esc(b.bank)}</span>`);
     rows.push(b?.account ? `<span class="k">เลขที่</span><span class="no">${esc(b.account)}</span>` : `<span class="k">เลขที่</span><span class="none">ยังไม่มีเลขบัญชี</span>`);
     if (b?.name) rows.push(`<span class="k">ชื่อ</span><span>${esc(b.name)}</span>`);
+    if (ps.length) rows.push(`<span class="k">โทร</span>${phoneHtml(ps)}`);
     return `<div class="bk">${rows.join("")}</div>`;
   };
   const cellsOf = (r: CRow): Record<string, string> => {
@@ -286,7 +296,7 @@ export function buildChinaBillsPrint(input: {
     const acc = bankOf(r)?.account || "ยังไม่มีเลขบัญชี";
     // เลขบัญชี = ตัวพิมพ์ดีดหนา วัดจริง ~0.57em + letter-spacing 0.02em
     return textMm("เลขที่", bankPx) + textMm(acc, bankPx, 0.6) + BANK_BOX_MM + CELL_PAD_MM;
-  }) : [])));
+  }) : []), ...live(sorted).flatMap((r) => phonesOf(r)).map((p) => textMm("เลขที่", bankPx) + textMm(p, bankPx) + BANK_BOX_MM + CELL_PAD_MM)));
   widthHints.shop = { min: shopMin };
   const shopFlex = !!shop && !userW.has("shop");
   if (shop) { shop.minMm = shopMin; if (shopFlex) shop.widthMm = shopMin; }
@@ -388,6 +398,8 @@ const CB_PRINT_CSS = `
 .bk .k { color: #94a3b8; white-space: nowrap; }
 .bk .no { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; color: #0f172a; white-space: nowrap; letter-spacing: 0.02em; }
 .bk .none { color: #b45309; }
+.bk .ph span { display: block; white-space: nowrap; }
+.bk.ph-line { background: transparent; border: 0; padding: 0; color: #475569; }
 .tag { font-size: 0.75em; padding: 0 1.2mm; border: 1px solid #c4b5fd; color: #6d28d9; border-radius: 1mm; }
 .est { color: #b45309; }
 .wait { color: #b45309; font-size: 0.85em; font-weight: 400; }

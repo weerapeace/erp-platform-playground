@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyListPrintPreset, cleanListPrintSettings } from "@/lib/list-print";
 import { billInFilter, billNeedsSlip, billPaidRmb, billRemainRmb, billStatus3, rateForRmb } from "@/lib/china-pay";
 import {
-  CB_PRINT_COLUMNS, buildChinaBillsPrint, cbBillsFromApi, cbPrintColumnsFor, cbPrintDefaults, cbPrintOpts, cbPrintPresets, cbPrintTitle,
+  CB_PRINT_COLUMNS, buildChinaBillsPrint, cbBillsFromApi, cbPrintColumnsFor, cbPrintDefaults, cbPrintOpts, cbPrintPresets, cbPrintTitle, cbPhones,
   type CbBank, type CbPrintBill,
 } from "@/lib/china-bills-print";
 
@@ -117,6 +117,22 @@ describe("china bills print", () => {
     // ตัวใหญ่ขึ้น → ช่องร้านต้องกว้างขึ้นตาม
     const big = build(three, { opts: { bank: true, sz: { bank: 20 } } }, 5.2, banks);
     expect(big.widthHints.shop.min!).toBeGreaterThan(r.widthHints.shop.min!);
+  });
+
+  it("phone switch: row in bank box, small line when bank off, split numbers, nothing for shops without phone", () => {
+    const banks = new Map<string, CbBank>([
+      ["s1", { bank: "中国农业银行", account: "622 848", name: "王俊武", phone: "020-86911567 / 020-86934670" }],
+      ["s2", { bank: "", account: "", name: "", phone: "" }],
+    ]);
+    expect(cbPhones("020-1 / 020-2,020-3")).toEqual(["020-1", "020-2", "020-3"]);
+    expect(build(three, { opts: { bank: true } }, 5.2, banks).html).not.toContain(">โทร<");
+    const withBank = build(three, { opts: { bank: true, phone: true } }, 5.2, banks).html;
+    expect(withBank).toContain(`<span class="k">โทร</span><span class="ph"><span>020-86911567</span><span>020-86934670</span></span>`);
+    expect(withBank.match(/>โทร</g)?.length).toBe(1);   // s2 ไม่มีเบอร์ = ไม่โชว์
+    const noBank = build(three, { opts: { bank: false, phone: true } }, 5.2, banks).html;
+    expect(noBank).toContain(`class="bk ph-line"`);
+    expect(noBank).not.toContain("622 848");
+    expect(cbPrintPresets().find((p) => p.id === "cb-transfer")!.settings.opts).toMatchObject({ bank: true, phone: true });
   });
 
   it("calc box has its own switch; part sizes and money cells never wrap", () => {

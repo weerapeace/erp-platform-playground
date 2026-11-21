@@ -121,7 +121,7 @@ function ChinaBillsPrintView() {
   const [banks, setBanks] = useState<Map<string, CbBank>>(new Map());
   const supIds = useMemo(() => [...new Set(bills.map((b) => b.supplierId).filter(Boolean) as string[])].sort().join(","), [bills]);
   useEffect(() => {
-    if (!o.bank || !supIds) return;
+    if ((!o.bank && !o.phone) || !supIds) return;
     let on = true;
     const ids = supIds.split(",").filter((id) => !banks.has(id));
     if (!ids.length) return;
@@ -132,13 +132,13 @@ function ChinaBillsPrintView() {
           const m = new Map(prev);
           list.forEach((j, i) => {
             const p = j?.data;
-            m.set(ids[i], { bank: String(p?.bank_name_brief ?? "").trim(), account: String(p?.account_number ?? "").trim(), name: String(p?.bank_account_name ?? "").trim() });
+            m.set(ids[i], { bank: String(p?.bank_name_brief ?? "").trim(), account: String(p?.account_number ?? "").trim(), name: String(p?.bank_account_name ?? "").trim(), phone: String(p?.phone ?? "").trim() });
           });
           return m;
         });
       });
     return () => { on = false; };
-  }, [o.bank, supIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [o.bank, o.phone, supIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const defaultTitle = cbPrintTitle(onlyPicks && picks ? "" : filter);
   const scopeText = onlyPicks && picks ? "เฉพาะบิลที่ติ๊กไว้" : `ตัวกรอง: ${filter}`;
@@ -198,6 +198,8 @@ function ChinaBillsPrintView() {
         <Check checked={o.fee} onChange={(fee) => setOpts({ fee })}>ค่าโอน</Check>
         {!o.fee && <p className="mb-1 ml-6 text-[11px] text-slate-400">ปิดอยู่ = ยอดทุกจุดไม่รวมค่าโอน</p>}
         <Check checked={o.bank} onChange={(bank) => setOpts({ bank })}>บัญชีธนาคารร้าน</Check>
+        <Check checked={o.phone} onChange={(phone) => setOpts({ phone })}>เบอร์ร้าน</Check>
+        {o.phone && <p className="mb-1 ml-6 text-[11px] text-slate-400">ร้านที่ยังไม่มีเบอร์ = ไม่โชว์ · เติมเบอร์ได้ที่เมนู “ร้านค้าจีน”</p>}
       </Section>
 
       <Section title="ขนาดแต่ละส่วน" hint={`ลาก = ตั้งเอง · ตัวอักษรหลัก ${s.fontPx}px`}>
@@ -206,7 +208,7 @@ function ChinaBillsPrintView() {
             <Icon value="i:alert-triangle" className="mr-1" />ตัวเลขกว้างเกินกระดาษ — ลองแนวนอน หรือลดขนาดตัวอักษร/ตัวเลขเงิน
           </p>
         )}
-        {CB_SIZE_PARTS.filter((p) => (p.key !== "bank" || o.bank) && (p.key !== "calc" || (o.rate && o.calc))).map((p) => {
+        {CB_SIZE_PARTS.filter((p) => (p.key !== "bank" || o.bank || o.phone) && (p.key !== "calc" || (o.rate && o.calc))).map((p) => {
           const custom = o.sz[p.key];
           return (
             <label key={p.key} className="flex items-center gap-2 py-0.5 text-xs text-slate-600">
