@@ -13,6 +13,7 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { copyText } from "@/components/copy-button";
 import type { LineSystemDef, LineSlotDef, LineSlotKey } from "@/lib/line-registry";
+import { LineCompanySection } from "./company-section";
 
 /** บอท 1 ตัว (บอทหลัก + บอทเสริม) — ค่าความลับมาแค่ "…4 ตัวท้าย" */
 type BotRow = {
@@ -235,6 +236,9 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
               </div>
             </div>
           )}
+
+          {/* ---- ไลน์บริษัท (แชท 1:1 พนักงาน+ลูกค้า · เมนูล่างจอต่อคน) ---- */}
+          <LineCompanySection />
 
           {/* ---- กลุ่มปลายทาง (ทุก slot) ---- */}
           <div>

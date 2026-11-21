@@ -10,6 +10,8 @@
  *  (เก็บรูป → AI อ่าน → กล่องพักรอคนยืนยัน → ตอบกลับในกลุ่ม) · ทำใน after() เพื่อตอบ 200 ให้ LINE ทันที
  *
  * งานที่ 4 "ไอเดียจากไลน์": รูป/ลิงก์/ข้อความในกลุ่ม slot design_idea → กล่องรอคัดในหน้าไอเดีย (lib/design-idea-line)
+ * งานที่ 6 "ไลน์บริษัท": แชท 1:1 ของบอทที่ตั้งเป็นไลน์บริษัท (line_config.company_bot) → lib/line-company-server
+ *  (แยกคน พนักงาน/ลูกค้า/ไม่รู้จัก · ตอบปุ่มเมนูล่างจอ · ส่งแชทลูกค้าต่อเข้าห้องแชทรวม) — docs/line-company-oa.md
  * งานที่ 3 "งานออกแบบจากไลน์": ข้อความ+รูปในกลุ่ม slot design_intake → ของกลาง lib/design-line-inbox
  *  (ของคนเดิมใน 5 นาที = ร่างเดียว → AI เดาชื่อ/แบรนด์/วันส่ง → กล่อง "จากไลน์" บน Design Dashboard → ตอบกลับในกลุ่ม)
  *
@@ -33,6 +35,7 @@ import { DESIGN_IDEA_SLOT, handleIdeaEvents, pickIdeaEvents } from "@/lib/design
 import { MAIN_BOT, isLineBotKey, lineBot, lineBotKeyFor, lineConfigForBot, type LineBotView, type LineConfig } from "@/lib/line-send";
 import { pickLineChatEvents } from "@/lib/chat/line";
 import { ingestLineChatEvents } from "@/lib/chat/line-server";
+import { companyBot, companyBotKeyOf, handleCompanyEvents, pickCompanyEvents } from "@/lib/line-company-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -116,6 +119,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const ideaEvents = lineBotKeyFor(cur, DESIGN_IDEA_SLOT) === bot.key ? pickIdeaEvents(botCfg, events) : [];
     if (ideaEvents.length > 0) {
       after(() => handleIdeaEvents(admin, botCfg, ideaEvents).catch((e) => console.error("[line-webhook] idea inbox", e)));
+    }
+
+    // งานที่ 6 "ไลน์บริษัท": บอทที่ตั้งเป็นไลน์บริษัท → แยกคน (พนักงาน/ลูกค้า/ไม่รู้จัก) ตอบปุ่มเมนู สลับเมนูล่างจอ
+    //   แล้วส่งเฉพาะแชทลูกค้า/คนไม่รู้จักต่อเข้าห้องแชทรวม (lib/line-company-server) · ต้องตรวจลายเซ็นผ่าน
+    if (secret && companyBotKeyOf(cur) === bot.key && companyBot(cur)) {
+      const companyEvents = pickCompanyEvents(events);
+      if (companyEvents.length > 0) {
+        after(() => handleCompanyEvents(admin, cur, bot, companyEvents)
+          .then((forChat) => (forChat.length ? ingestLineChatEvents(admin, bot, forChat, true) : 0))
+          .then(() => undefined)
+          .catch((e) => console.error("[line-webhook] company", e)));
+      }
+      return NextResponse.json({ ok: true });
     }
 
     // งานที่ 5 "ห้องแชทรวม": แชท 1:1 จากลูกค้า (ไม่ใช่กลุ่ม) ของ OA ที่ติ๊ก "รับแชทลูกค้า" → /chat (lib/chat/line-server)

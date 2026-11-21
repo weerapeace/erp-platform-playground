@@ -813,6 +813,22 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "chat-inbox.md",
   },
   {
+    key: "line-identity", label: "ตัวแยกคนในไลน์ (พนักงาน/ลูกค้า)", code: "lib/line-identity", category: "notify",
+    source: { path: "lib/line-identity" },
+    what: "บอกว่าคนไลน์คนนี้เป็นพนักงานคนไหน ลูกค้าร้านไหน ถูกระงับ หรือไม่รู้จัก — อ่าน line_memberships + line_customer_links",
+    when: "ทุกงานที่บอทต้องรู้ว่าใครทักมาก่อนให้ข้อมูลส่วนตัว (ไลน์บริษัท · สลิป · งานเหมา · ออเดอร์ลูกค้า)",
+    notWhen: "ห้ามค้น line_user_id เองในแต่ละงาน · หน้าที่โชว์ตัวเงินต้องตรวจ ID token ใหม่ (verifyLineIdToken) ไม่ใช่เชื่อ userId จากแชตอย่างเดียว",
+    doc: "line-company-oa.md",
+  },
+  {
+    key: "line-company", label: "ไลน์บริษัท (เมนูล่างจอต่อคน)", code: "lib/line-company", category: "notify",
+    source: { path: "lib/line-company" },
+    what: "LINE OA ตัวเดียวให้พนักงาน+ลูกค้าทักแชท · เมนูล่างจอ 3 ชุดสลับตามคน · ปุ่มเมนู = postback cmp=… ตอบฟรี · แชทลูกค้าส่งต่อห้องแชทรวม",
+    when: "เพิ่มปุ่ม/งานใหม่ให้พนักงานหรือลูกค้าในไลน์ → เพิ่มใน COMPANY_MENUS + companyReplyText (lib/line-company) แล้วกดสร้างเมนูใหม่ในศูนย์ LINE",
+    notWhen: "ห้ามทำบอท/ตัวรับไลน์ตัวที่ 2 สำหรับพนักงานหรือลูกค้า · ห้ามพิมพ์ตัวเงินในแชต",
+    doc: "line-company-oa.md",
+  },
+  {
     key: "bell-switch", label: "สวิตช์เปิด/ปิดกระดิ่งที่ส่งตรง", code: "lib/bell-switch", category: "notify",
     source: { path: "lib/bell-switch" },
     what: "เช็กว่าแอดมินปิดกระดิ่งเรื่องนี้ไว้ไหม ก่อนส่งกระดิ่งที่โค้ดส่งตรง (ไม่ผ่านกฎ) · สวิตช์อยู่ในแผงกระดิ่งของแผนผังการทำงาน",

@@ -17,7 +17,8 @@ const getSharp = async (): Promise<SharpFn> => { const m = (await import("sharp"
 // ---- ฟอนต์ ----
 const FONT_DIR = path.join(os.tmpdir(), "erp-fonts");
 const fontFiles = new Map<number, Promise<string>>();
-function fontFile(weight: 400 | 600): Promise<string> {
+/** ไฟล์ฟอนต์ Sarabun (TTF) สำหรับวาดตัวหนังสือไทยด้วย sharp — ใช้ร่วมกับรูปเมนูไลน์บริษัท (lib/line-company-server) */
+export function fontFile(weight: 400 | 600): Promise<string> {
   let p = fontFiles.get(weight);
   if (!p) {
     p = (async () => {

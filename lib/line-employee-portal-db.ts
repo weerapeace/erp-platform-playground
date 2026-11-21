@@ -2,6 +2,7 @@ import { APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { writeAudit } from "@/lib/audit";
 import { LINE_INVITE_TTL_DAYS, lineInviteLink, signLineInviteToken, verifyLineInviteToken, type LineInvite } from "@/lib/line-invite-token";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { syncCompanyMenuFor } from "@/lib/line-company-server";
 
 type Row = Record<string, unknown>;
 
@@ -249,6 +250,8 @@ async function linkLineToEmployee(employee: Row, profile: Row, meta: Record<stri
     entityId: text(row?.id),
     metadata: { employee_id: text(employee.id), line_user_id: lineUserId, ...meta },
   });
+  // ไลน์บริษัท: สลับเมนูล่างจอเป็นเมนูพนักงานทันที (ไม่ได้ก็ไม่เป็นไร — ได้ตอนเพิ่มเพื่อน/สร้างเมนูใหม่)
+  await syncCompanyMenuFor(admin, lineUserId);
 
   return row ? normalizeMember(row) : null;
 }
@@ -455,5 +458,7 @@ export async function updateLineMemberStatus(id: string, action: LineMemberActio
       next_status: text(updated?.status),
     },
   });
+  // ไลน์บริษัท: ถอนผูก/ระงับ = กลับเป็นเมนูกลาง · คืนสิทธิ์ = เมนูพนักงาน
+  await syncCompanyMenuFor(admin, text(before.line_user_id));
   return updated ? normalizeMember(updated) : null;
 }

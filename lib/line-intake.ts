@@ -42,6 +42,20 @@ export async function lineReply(token: string, replyToken: string | undefined, t
   } catch { /* ตอบไม่ได้ก็ไม่เป็นไร — ข้อมูลอยู่ใน ERP แล้ว */ }
 }
 
+/** ตอบกลับหลายก้อน (ข้อความ/การ์ด · ไม่เกิน 5) — reply ฟรี ไม่นับโควตา · คืนว่าสำเร็จไหม (โทเคนตอบกลับใช้ได้ครั้งเดียว ~1 นาที) */
+export async function lineReplyMessages(token: string, replyToken: string | undefined, messages: Record<string, unknown>[]): Promise<boolean> {
+  if (!token || !replyToken || messages.length === 0) return false;
+  try {
+    const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ replyToken, messages: messages.slice(0, 5) }),
+      signal: AbortSignal.timeout(10000),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
 /** ชื่อที่โชว์ในไลน์ของคนส่งในกลุ่ม */
 export async function lineMemberName(token: string, groupId: string, userId: string | undefined): Promise<string | null> {
   if (!userId) return null;
