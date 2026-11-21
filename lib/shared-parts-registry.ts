@@ -1686,6 +1686,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "push-open", label: "เปิดหน้าให้เช็กหลังส่งขึ้นร้าน", code: "usePushOpen", category: "feature",
+    source: { path: "components/push-open" },
+    what: "กดส่งขึ้นร้าน → เปิดแท็บรอไว้ทันที (ไม่โดนบล็อก) ส่งเสร็จพาไปหน้าสินค้า / Seller Center ตามที่ผู้ใช้ตั้ง (ต่อคน · แยกรายร้านได้) · หน้าสินค้ายังไม่พร้อม = Seller Center แทน + เหตุผล · เกิน 5 หน้า/เบราว์เซอร์บล็อก = ปุ่มในแจ้งผล · ส่งไม่ผ่าน = ปิดแท็บเอง · หน้าตั้งค่า PushOpenSettingsModal (เมนูโปรไฟล์) + ปุ่ม PushOpenGearButton · กติกา pure lib/push-open · ลิงก์จาก lib/platform-links",
+    when: "ทุกปุ่มที่ส่ง/แก้สินค้าบนร้าน (ตัวช่วยลงสินค้า · อัปเดตให้ตรง · เปลี่ยนรูปปก …) — เรียก prepare() ทันทีตอนกด (ก่อน await) แล้ว finish(รายการที่สำเร็จ)",
+    notWhen: "ปุ่มดูหน้าร้าน/Seller Center ของรายการเดียว (ให้ใช้ ListingLinks) · งานหลังบ้าน/ตั้งเวลา (ไม่มีคนกด เปิดแท็บไม่ได้)",
+    doc: "push-open.md",
+  },
+  {
     key: "media-upload-field", label: "ช่องอัปรูป/วิดีโอ 1 ไฟล์", code: "MediaUploadField", category: "file",
     source: { path: "components/media-upload-field" },
     what: "ช่องใส่รูป (หรือวิดีโอสั้น) 1 ไฟล์ — อัปโหลด · ลากวาง · คลิกช่องแล้ว Ctrl+V วางรูปที่คัดลอกไว้ · เลือกจากคลังรูป · ไฟล์ใหญ่มีแถบ % · layout stack = รูปเต็มกว้าง ปุ่มใต้รูป (คอลัมน์แคบ)",

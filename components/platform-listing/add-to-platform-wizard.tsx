@@ -44,6 +44,8 @@ import { normalizePriceRule } from "@/lib/platform-listing-builder";
 import { creatorOf, hasCreatePreview, liveCreateEndpoint, type CreateStep } from "@/lib/platform-create-registry";
 import { listingLinks } from "@/lib/platform-links";
 import { useUserPref } from "@/lib/use-user-pref";
+import { PushOpenGearButton, usePushOpen } from "@/components/push-open";
+import type { PushedState } from "@/lib/push-open";
 import { ResultBurst, resultTone } from "@/components/result-burst";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
@@ -67,7 +69,7 @@ export type AddWizardParent = { id: string; code: string; name: string | null };
 /** รายการบนร้านต้นทางที่ใช้เป็นต้นแบบ (ลงร้านอื่นจากรายการนี้) */
 export type CopySourceRef = { listing_id: string; platform_code: string; platform_name?: string | null };
 /** code + product_id = ลงบนร้านแล้ว → ปุ่ม "เปิดในหลังร้าน" (เจ้าของเลือก 2026-11-21 ข้อ 3 · ลิงก์จาก lib/platform-links) */
-type Outcome = { parent_id: string; platform: string; ok: boolean; text: string; steps?: CreateStep[]; code?: string; productId?: string | null };
+type Outcome = { parent_id: string; platform: string; ok: boolean; text: string; steps?: CreateStep[]; code?: string; productId?: string | null; state?: PushedState };
 
 /** ร้านที่เลือก "หลังลงเสร็จ เปิด/ปิดขาย" ได้ = มีตัวสร้างที่ลงขายจริง (LINE · Shopee · Lazada) — TikTok ลงเป็นร่างเสมอ */
 const hasDisplayChoice = (code: string): boolean => { const c = creatorOf(code); return !!c && c.mode !== "draft"; };
@@ -102,6 +104,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
 }) {
   const { can } = useAuth();
   const toast = useToast();
+  // เปิดหน้าใหม่ให้เช็กหลังส่งขึ้นร้าน (ของกลาง components/push-open · เจ้าของเลือก 2026-11-21 แบบ A) · Shop ID ต่อร้าน = ลิงก์หน้าสินค้า Shopee
+  const pushOpen = usePushOpen();
+  const [shopRefs, setShopRefs] = useState<Record<string, string | null>>({});
   const canEdit = can("products.platforms.edit");
   const canPublish = can("products.platforms.publish" as Parameters<typeof can>[0]);
   const canTask = can("tasks.create" as Parameters<typeof can>[0]);
@@ -159,6 +164,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
       // ลงร้านอื่น: ร้านต้นทางไม่ใช่ปลายทาง
       const sel = ((j.platforms ?? []) as Pf[]).filter((p) => isSellingPlatform(p.code) && !sourceCodes.has(p.code));
       setPfs(sel);
+      const accts = (j.accounts ?? {}) as Record<string, { external_shop_id?: string | null }>;
+      setShopRefs(Object.fromEntries(sel.map((p) => [p.code, accts[p.id]?.external_shop_id ?? null])));
       const init = new Set(initialPlatformCodes.filter((c) => sel.some((p) => p.code === c)));
       setPicked(init);
       setReal(new Set(sel.filter((p) => init.has(p.code) && liveCreateEndpoint(p.code) && canPublish).map((p) => p.code)));
@@ -302,6 +309,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   // ---------- ขั้น 3: ลง ----------
   const run = async () => {
     if (needTyped && typed.trim() !== ADD_CONFIRM_WORD) { toast.warning(`พิมพ์ "${ADD_CONFIRM_WORD}" ก่อนลงจริง`); return; }
+    // ⚠️ ต้องอยู่ก่อน await แรก (ยังอยู่ในจังหวะกด) — เปิดแท็บรอไว้ ส่งเสร็จพาไปหน้าที่เลือก (ปิดฟีเจอร์ = ไม่เปิดอะไร)
+    const pushSession = pushOpen.prepare(plan.filter((x) => x.decision === "publish" && liveCreateEndpoint(x.pf.code)).map((x) => ({ code: x.pf.code })));
     setRunning(true); stopRef.current = false;
     const res: Outcome[] = [];
     const rule = normalizePriceRule({ mode, pct: Number(pct) });
@@ -356,7 +365,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
             const gfText = gf?.manual && gf.want ? ` · ของขวัญ: ไปติ๊กเองใน LINE (${gf.want.status === "gift_only" ? "เฉพาะของขวัญ" : "เปิด"}${gf.want.categories.length ? ` · ${gf.want.categories.join(", ")}` : ""})` : "";
             const dp = j.display as { ok: boolean; status: "onsale" | "hide"; error?: string | null } | null | undefined;
             const dpText = dp ? (dp.ok ? (dp.status === "onsale" ? " · เปิดขายแล้ว" : " · ปิดขายไว้") : ` · เปิดขายไม่สำเร็จ (ยังปิดขายอยู่)${dp.error ? `: ${dp.error}` : ""}`) : "";
-            const link = { code: pf.code, productId: j.product_id ? String(j.product_id) : null };
+            // สถานะบนร้านหลังส่ง → หน้าสินค้าพร้อมไหม (ร่าง/ปิดขาย/Lazada รอตรวจ = เปิด Seller Center แทน)
+            const state: PushedState = j.draft ? "draft" : pf.code === "lazada" ? "review" : !dp ? "live" : dp.ok && dp.status === "onsale" ? "live" : "hidden";
+            const link = { code: pf.code, productId: j.product_id ? String(j.product_id) : null, state };
             if (j.draft) { res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, ...link, text: `สร้างฉบับร่างบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""} · ยังไม่ขึ้นขาย — ตรวจ/กรอกช่องที่เหลือ/แก้สต๊อกเป็นจำนวนจริง (ร่างใส่ไว้ 1 ชิ้น) แล้วกดเผยแพร่ในหลังร้าน${Array.isArray(j.warnings) && j.warnings.length ? ` · ${(j.warnings as string[]).slice(0, 2).join(" · ")}` : ""}` }); }
             else res.push({ parent_id: id, platform: pf.name_th, ok: true, steps, ...link, text: `ลงบนร้านแล้ว${j.product_id ? ` (#${j.product_id})` : ""}${dpText}${gfText}${diText}` });
           }
@@ -367,6 +378,9 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
     } finally {
       setRunning(false);
       setOutcomes(res);
+      pushSession.finish(res.filter((o) => o.ok && o.code && o.productId).map((o) => ({
+        code: o.code!, shopName: o.platform, productId: o.productId!, label: nameOf(o.parent_id), state: o.state, shopRef: shopRefs[o.code!] ?? null,
+      })));
       onDone?.();
     }
   };
@@ -436,7 +450,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                       const lk = listingLinks(o.code, o.productId);
                       return lk.sellerCenter ? (
                         <a href={lk.sellerCenter} target="_blank" rel="noreferrer" className="mt-1 inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs text-slate-700 hover:bg-slate-50">
-                          <Icon name="external-link" />เปิดในหลังร้าน{lk.sellerExact ? "" : ` (ค้นรหัส #${o.productId})`}
+                          <Icon name="open" />เปิดในหลังร้าน{lk.sellerExact ? "" : ` (ค้นรหัส #${o.productId})`}
                         </a>
                       ) : null;
                     })()}
@@ -685,6 +699,8 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
               </div>
             ) : (
               <>
+                {/* ข้อ 3: เปลี่ยนการเปิดหน้าให้เช็กได้ทันที (ค่าตั้งต่อคน · เมนูโปรไฟล์ก็มี) */}
+                {summary.publish > 0 && <div className="flex justify-end"><PushOpenGearButton /></div>}
                 <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
                   {pickedPfs.map((p) => {
                     const mine = plan.filter((x) => x.pf.code === p.code);

@@ -31,6 +31,8 @@ import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INST
 import dynamic from "next/dynamic";
 // สวิตช์ตัว Pet อยู่ในเมนูที่กดเปิด → โหลดตอนเปิดเมนู (ไม่ถ่วงทุกหน้า · ลดขนาดโครงแอป 2026-11-20)
 const WorkPopupFloatToggle = dynamic(() => import("@/components/work-popup/float").then((m) => m.WorkPopupFloatToggle), { ssr: false });
+// เปิดหน้าใหม่ให้เช็กหลังส่งขึ้นร้าน (ค่าตั้งต่อคน · components/push-open) — โหลดเมื่อเปิดหน้าตั้งค่า
+const PushOpenSettingsModal = dynamic(() => import("@/components/push-open").then((m) => m.PushOpenSettingsModal), { ssr: false });
 import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
 import { InstallAppMenuItem, InstallAppModal, SoloInstallSection } from "@/components/install-app";
@@ -90,6 +92,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
   const [profileOpen, setProfileOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);   // ความปลอดภัยเป็น popup (ไม่ออกจากหน้า)
   const [keysOpen, setKeysOpen] = useState(false);           // คีย์ลัด (Keyboard Shortcuts)
+  const [pushOpenOpen, setPushOpenOpen] = useState(false);   // หลังส่งขึ้นร้าน: เปิดหน้าให้เช็ก (components/push-open)
   const [cur, setCur] = useState<string | null>(getTheme());
   const [qrOpen, setQrOpen] = useState(false);                       // ป๊อป QR เปิดบนแท็บเล็ต/มือถือ
   const [qrLayout, setQrLayout] = useState<DeviceLayout>("tablet");  // QR สำหรับเครื่องแบบไหน
@@ -242,6 +245,11 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
       {/* ป๊อปเตือนงานเด้งเป็นแจ้งเตือนของเบราว์เซอร์ (มุมจอ) — ตั้งรายเครื่อง */}
       <BrowserPushToggle />
 
+      <MenuSection label={t("ลงสินค้า", "Listing")} />
+      <button type="button" onClick={() => { close(); setPushOpenOpen(true); }} className={ROW}>
+        <Icon name="open" /> <span className="flex-1">{t("หลังส่งขึ้นร้าน: เปิดหน้าให้เช็ก", "After publishing: open a page to check")}</span>
+      </button>
+
       <MenuSection label={t("อุปกรณ์และแอป", "Devices and app")} />
       {/* ติดตั้งแอปบนเครื่อง — โหมดแอปมีชุดมุมมองอุปกรณ์ด้านล่างแทน */}
       {!device && <InstallAppMenuItem onClick={() => { close(); setInstallOpen(true); }} />}
@@ -341,6 +349,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
 
       {/* คีย์ลัด — ตัวเดียวกับปุ่มในแถบข้าง */}
       <KeyboardShortcutsModal open={keysOpen} onClose={() => setKeysOpen(false)} />
+      {pushOpenOpen && <PushOpenSettingsModal open onClose={() => setPushOpenOpen(false)} />}
     </div>
   );
 }
