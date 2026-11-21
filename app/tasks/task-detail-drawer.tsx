@@ -28,7 +28,7 @@ import { PublishModal } from "./publish-modal";
 import { TeamFill } from "./team-picker";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, densityPad, densityGap, drawerBgStyle, subCardBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityPad, densityGap, drawerBgStyle, subCardBgStyle, orderedKeys, accentCss, btnBg, progressBg, dividerColorOf } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -42,6 +42,7 @@ import { PlatformChip } from "./platform-chip";
 import { TaskPlatformListing } from "./task-platform-listing";
 import { TaskBriefBoard } from "./task-reference-board";
 import { copyText } from "@/components/copy-button";
+import { Popover } from "@/components/popover";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { TaskContentTab } from "./task-content-tab";
 import { HoverImage } from "@/components/hover-image";
@@ -86,10 +87,11 @@ function QuickField({ label, value, dot, highlight, active, onOpen, onClose, edi
       </div>
     );
   }
+  // แบบกะทัดรัด (เจ้าของเลือก 2026-11-21): หัวข้อซ้าย · ค่าขวา บรรทัดเดียว
   return (
-    <button type="button" onClick={onOpen} title="คลิกเพื่อแก้" className="min-w-0 text-left group rounded-md -mx-1 px-1 py-0.5 hover:bg-violet-50/60 transition-colors">
-      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
-      <p className={`text-sm font-medium flex items-center gap-1.5 ${highlight ? "text-red-600" : "text-slate-800"}`}>
+    <button type="button" onClick={onOpen} title="คลิกเพื่อแก้" className="w-full min-w-0 text-left group rounded-md -mx-1 px-1 py-1 hover:bg-violet-50/60 transition-colors flex items-baseline gap-2">
+      <p className="w-[76px] shrink-0 text-[11px] text-slate-400 truncate">{label}</p>
+      <p className={`min-w-0 flex-1 text-sm font-medium flex items-center gap-1.5 ${highlight ? "text-red-600" : "text-slate-800"}`}>
         {dot && value && <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: dot || "#cbd5e1" }} />}
         {highlight && "⚠ "}<span className="truncate">{value || "—"}</span>
         <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100 shrink-0">✎</span>
@@ -105,11 +107,11 @@ function MultiAssigneeField({ list, canEdit, onSave }: { list: SubtaskAssignee[]
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const ids = list.map((a) => a.id);
   return (
-    <div className="min-w-0">
-      <p className="text-xs text-slate-400 mb-0.5">{t("ผู้รับผิดชอบ", "Assignees")}</p>
+    <div className={`min-w-0 ${editing ? "" : "flex items-center gap-2"}`}>
+      <p className={editing ? "text-xs text-slate-400 mb-0.5" : "w-[76px] shrink-0 text-[11px] text-slate-400"}>{t("ผู้รับผิดชอบ", "Assignees")}</p>
       {!editing ? (
         <button type="button" onClick={() => canEdit && setEditing(true)} title={canEdit ? t("คลิกเพื่อแก้", "Click to edit") : undefined}
-          className={`min-w-0 text-left group rounded-md -mx-1 px-1 py-0.5 ${canEdit ? "hover:bg-violet-50/60" : "cursor-default"} transition-colors w-full`}>
+          className={`min-w-0 flex-1 text-left group rounded-md -mx-1 px-1 py-0.5 ${canEdit ? "hover:bg-violet-50/60" : "cursor-default"} transition-colors`}>
           {list.length ? (
             <span className="flex flex-wrap items-center gap-1">{list.map((a) => <AssigneeChip key={a.id} a={a} />)}
               {canEdit && <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100">✎</span>}</span>
@@ -171,6 +173,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [imagesOpen, setImagesOpen] = useState(false); // ป๊อปดูรูปอย่างเดียว (แบ่งกลุ่ม Parent/SKU/Description/คอนเทนต์)
   const [quickOpen, setQuickOpen] = useState(false);   // แผงตรวจสินค้าเร็ว (ดูอย่างเดียว + อนุมัติ/ตีกลับ)
+  const [descTab, setDescTab] = useState<"text" | "notes">("text"); // กล่องรายละเอียด: แท็บ ข้อความ / โน้ตอ้างอิง
+  const [filesOpen, setFilesOpen] = useState<boolean | null>(null); // กล่องไฟล์/Drive (null = ตามว่ามีไฟล์ไหม)
   const [refEdit, setRefEdit] = useState(false);  // เปิดตัวแก้โน้ตอ้างอิง (ใต้รายละเอียดงาน — แท็บอ้างอิงเลิกใช้ 2026-11-21 · กระดาน = กระดานบรีฟ)
   const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
   const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
@@ -179,12 +183,17 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [submitNudge, setSubmitNudge] = useState(false); // เด้งเตือนเล็ก ๆ หลังแนบงาน (งานไม่มีงานย่อย) ให้ส่งงานเลย
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
   const { theme: dth, update: dthUpdate } = useDrawerTheme("task");   // ธีม drawer (ต่อคน)
+  // ลำดับเริ่มต้นตามที่เจ้าของจัด 2026-11-21 — ซ้าย: รายละเอียด > กระดานบรีฟ > งานย่อย > ความคิดเห็น · ขวา: … > ไฟล์/Drive
+  // (ลำดับรวมเป็นชุดเดียว แต่ละคอลัมน์เรียงเฉพาะส่วนของตัวเองด้วย CSS order · ผู้ใช้จัด/ซ่อนเองได้ที่ 🎨)
   const DRAWER_SECTIONS = [
+    { key: "desc", label: t("รายละเอียด / โน้ต (ซ้าย)", "Details / notes (left)") }, { key: "board", label: t("กระดานบรีฟ (ซ้าย)", "Brief board (left)") },
+    { key: "subtasks", label: t("งานย่อย + สินค้า (ซ้าย)", "Subtasks + products (left)") }, { key: "comments", label: t("ความคิดเห็น (ซ้าย)", "Comments (left)") },
     { key: "cover", label: t("รูปปก", "Cover") }, { key: "due_date", label: t("กำหนดส่ง", "Due date") },
     { key: "brand", label: t("แบรนด์", "Brand") }, { key: "platform", label: "Platform" },
     { key: "task_type", label: t("ประเภทงาน", "Task type") }, { key: "assignee", label: t("ผู้รับผิดชอบ", "Assignee") },
     { key: "reviewer", label: t("ผู้ตรวจ", "Reviewer") }, { key: "assigned_by", label: t("ผู้มอบหมาย", "Assigned by") },
     { key: "campaign", label: t("แคมเปญ", "Campaign") }, { key: "parent", label: "Parent SKU" },
+    { key: "files", label: t("ไฟล์ / Drive", "Files / Drive") },
   ];
   const tSecOrder = orderedKeys(dth, DRAWER_SECTIONS.map((s) => s.key));
   const tOrderOf = (k: string) => tSecOrder.indexOf(k);   // ลำดับส่วนคอลัมน์ขวา (CSS order) ตามที่ผู้ใช้จัด
@@ -278,7 +287,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const parentImg = parentList.find((p) => p.image_key)?.image_key ?? null;
   const coverKey = parentImg || d.cover_image_r2_key;
   const coverFromParent = !!parentImg;
-  const hasSubtasks = (d.subtasks?.length ?? 0) > 0;   // มีงานย่อย → ซ่อนกล่องแนบระดับงานหลัก
+  const hasSubtasks = (d.subtasks?.length ?? 0) > 0;
+  const fileCount = d.attachments.length + (d.drive_folder_url ? 1 : 0) + (d.final_asset_url ? 1 : 0) + (d.published_url ? 1 : 0);
+  const filesOpenEff = filesOpen ?? fileCount > 0;   // ยังไม่มีไฟล์ = พับไว้
 
   return (
     <>
@@ -304,6 +315,21 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <button onClick={() => setQuickOpen(true)} title={t("ตรวจสินค้าเร็ว: Description · สี · ราคา · รูป (ดูอย่างเดียว)", "Quick product check: description, colors, prices, images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="inspect" />{t("ตรวจเร็ว", "Quick check")}</button>
             <button onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (ดูอย่างเดียว)", "View all task images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
+            {/* admin: ย้อน/ตั้งสถานะอิสระ (เห็นเฉพาะ admin) — อยู่ในเมนู ⋯ */}
+            {isAdmin && (
+              <Popover align="right" panelClassName="w-72 p-3"
+                trigger={(toggle) => <button type="button" onClick={toggle} title={t("เมนูแอดมิน", "Admin menu")} aria-label={t("เมนูแอดมิน", "Admin menu")} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100">⋯</button>}>
+                {(close) => (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-amber-700">🔧 admin · {t("ย้อน/ตั้งสถานะ", "Set status")}</p>
+                    <select value={d.status} disabled={busy} onChange={async (e) => { const to = e.target.value; if (to && to !== d.status && (await askConfirm({ title: `${t("เปลี่ยนสถานะเป็น", "Set status to")} "${statusMeta(to).label}"?`, variant: "danger" }))) { close(); handleForceStatus(to); } }} className="w-full h-8 px-2 text-xs border border-amber-200 rounded-lg bg-white">
+                      {allStatuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                    <p className="text-[11px] text-amber-600">{t("บังคับเปลี่ยน ข้ามกฎ workflow · บันทึกประวัติ", "Force change, bypasses workflow · audited")}</p>
+                  </div>
+                )}
+              </Popover>
+            )}
             {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ {t("แก้ไข", "Edit")}</button>}
             <button onClick={() => setConfirmDel(true)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
@@ -341,7 +367,18 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           {tab === "task" && (<>
           <div className={`flex ${twoCol ? (dth.swap ? "flex-row-reverse" : "flex-row") : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
-            <div className={`flex-1 min-w-0 w-full ${densityCls(dth.density)}`}>
+            <div className={`flex-1 min-w-0 w-full flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)}`}>
+              {/* รายละเอียดงาน + โน้ตอ้างอิง = กล่องเดียว สลับด้วยแท็บเล็ก (เจ้าของเลือก 2026-11-21) */}
+              <div style={{ order: tOrderOf("desc") }} className="space-y-1.5">
+                <div className="flex items-center gap-1">
+                  {(["text", "notes"] as const).map((k) => (
+                    <button key={k} type="button" onClick={() => setDescTab(k)} className={`h-6 px-2 rounded-md text-[11px] font-medium ${descTab === k ? "bg-violet-100 text-violet-700" : "text-slate-500 hover:bg-slate-100"}`}>
+                      {k === "text" ? t("รายละเอียดงาน", "Details") : t("โน้ตอ้างอิง", "Reference notes")}
+                      {k === "notes" && !!(d.reference_html ?? "").trim() && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-violet-500 align-middle" />}
+                    </button>
+                  ))}
+                </div>
+              {descTab === "text" ? (<>
               {/* รายละเอียดงาน — คลิกเพื่อแก้ได้ (เซฟทันที) */}
               {descEdit === null ? (
                 <button type="button" onClick={() => setDescEdit(d.description ?? "")}
@@ -363,7 +400,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                 </div>
               )}
-
+              </>) : (<>
               {/* โน้ตอ้างอิง (reference_html) — ย้ายมาจากแท็บอ้างอิงที่เลิกใช้ (เจ้าของเลือก 2026-11-21) · มีโน้ต = โชว์ (คลิกแก้) · ไม่มี = ปุ่มเพิ่มเล็ก ๆ */}
               {refEdit ? (
                 <div className="bg-white rounded-lg p-3 border border-violet-200 space-y-2">
@@ -385,11 +422,17 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               ) : (
                 <button type="button" onClick={() => setRefEdit(true)} className="text-xs text-slate-400 hover:text-violet-700">+ {t("โน้ตอ้างอิง", "Reference notes")}</button>
               )}
+              </>)}
+              </div>
 
+              {!isHidden(dth, "board") && (<div style={{ order: tOrderOf("board") }}>
               {/* กระดานบรีฟ — แทนช่องแนบรูปบรีฟเดิม (เจ้าของเลือก 2026-11-21) · รูปบรีฟเดิม (reference_images) ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก ไม่ลบของเดิม */}
               <TaskBriefBoard key={d.id} taskId={d.id}
                 seedImageUrls={(d.reference_images ?? []).map((k) => r2ImageUrl(k)).filter((u): u is string => !!u)} />
+              </div>)}
 
+              {/* งานย่อย + สินค้าที่ผูก (จัดลำดับเป็นชุดเดียว) */}
+              <div style={{ order: tOrderOf("subtasks") }} className={`flex flex-col ${densityGap(dth.density)}`}>
               {/* 🔁 โหมดใหม่ + ไม่มีงานย่อยรูป/คำอธิบาย → แก้ที่สินค้าจากหน้างานเลย (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
               <TaskDirectPanel task={d} pushToast={pushToast}
                 canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
@@ -432,7 +475,202 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                 ) : null;
               })()}
+              </div>
 
+              {/* ความคิดเห็น — ย้ายเข้าคอลัมน์ซ้ายตามที่เจ้าของจัด 2026-11-21 */}
+              {!isHidden(dth, "comments") && (<div style={{ order: tOrderOf("comments") }}>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
+            <div className="space-y-2 mb-3">
+              {d.comments.map((c) => {
+                const mine = !!user?.id && c.author_id === user.id;
+                return (
+                  <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span>
+                      {cmtEdit?.id !== c.id && (mine || isManager) && (
+                        <span className="ml-auto flex items-center gap-1.5 text-xs">
+                          {cmtDelAsk === c.id ? (
+                            <>
+                              <button onClick={() => void removeComment(c.id)} disabled={cmtBusy} className="h-6 px-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{t("ยืนยันลบ", "Delete")}</button>
+                              <button onClick={() => setCmtDelAsk(null)} disabled={cmtBusy} className="h-6 px-2 rounded border border-slate-200 text-slate-500">{t("ไม่ลบ", "Cancel")}</button>
+                            </>
+                          ) : (
+                            <>
+                              {mine && <button onClick={() => { setCmtDelAsk(null); setCmtEdit({ id: c.id, body: c.body }); }} title={t("แก้ไข", "Edit")} className="text-slate-300 hover:text-blue-600">✏️</button>}
+                              <button onClick={() => setCmtDelAsk(c.id)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-rose-600">🗑</button>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    {cmtEdit?.id === c.id ? (
+                      <div className="space-y-1.5">
+                        <textarea value={cmtEdit.body} autoFocus rows={2} onChange={(e) => setCmtEdit({ ...cmtEdit, body: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === "Escape") setCmtEdit(null); }}
+                          className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                        <div className="flex justify-end gap-1.5">
+                          <button onClick={() => setCmtEdit(null)} disabled={cmtBusy} className="h-7 px-2.5 text-xs border border-slate-200 rounded-lg text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+                          <button onClick={() => void saveCommentEdit()} disabled={cmtBusy || !cmtEdit.body.trim()} className="h-7 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{t("บันทึก", "Save")}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
+                    )}
+                  </div>
+                );
+              })}
+              {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
+            </div>
+            <div className="flex gap-2">
+              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
+              <button onClick={sendComment} style={{ background: btnBg(dth) }} className="h-9 px-4 text-sm font-medium text-white rounded-lg shrink-0">{t("ส่ง", "Send")}</button>
+            </div>
+            {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
+            <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+              <span className="text-[11px] text-slate-400">🔔 {t("แจ้งถึง", "Notify")}:</span>
+              {mentionUsers.map((u) => (
+                <span key={u.id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">{u.name}
+                  <button onClick={() => setMentionUsers((xs) => xs.filter((x) => x.id !== u.id))} className="text-violet-300 hover:text-red-500">✕</button></span>
+              ))}
+              <div className="w-40"><UserPicker value={mentionAdding} onChange={(v) => { if (v && !mentionUsers.some((x) => x.id === v.id)) setMentionUsers((xs) => [...xs, v]); setMentionAdding(null); }} disableCreate /></div>
+            </div>
+              </div>)}
+            </div>
+
+            {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
+            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 flex flex-col ${densityPad(dth.density)} gap-1.5 bg-slate-50/40 border-slate-100`} style={{ borderColor: dividerColorOf(dth) }}>
+              {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
+              {!isHidden(dth, "cover") && (
+              <div style={{ order: tOrderOf("cover") }}>
+                {coverKey ? (
+                  <div className="relative rounded-lg overflow-hidden border border-slate-200">
+                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" onClick={() => setImagesOpen(true)} title={t("กดดูรูปทั้งหมด", "View all images")} className="w-full h-32 object-contain bg-white cursor-zoom-in" />
+                    {coverFromParent && <span className="absolute top-1.5 left-1.5 text-[9px] bg-black/55 text-white px-1 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
+                    <button type="button" onClick={() => setCoverEdit((v) => !v)} title={t("เปลี่ยนรูปปก", "Change cover")} className="absolute top-1.5 right-1.5 text-[10px] bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded px-1.5 py-0.5">✎</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-16 rounded-lg border-2 border-dashed border-slate-200 text-xs text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover")}</button>
+                )}
+                {coverEdit && (
+                  <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-2 space-y-2">
+                    <p className="text-[10px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority")}</p>
+                    <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
+                    <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-[11px] text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
+                  </div>
+                )}
+              </div>
+              )}
+              {editing && ef ? (
+                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3" style={{ order: 1 }}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={priorityOptions()} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><BrandSelect brands={brands} value={ef.brand_id} onChange={(v) => setEf({ ...ef, brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
+                    <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
+                    <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ / ผู้ตรวจ (หลายคน) แก้ที่ช่องในโหมดดู", "Edit assignees / reviewers (multiple) in view mode")}</div>
+                  </div>
+                  <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => {
+                      const on = ef.platforms.includes(p.value);
+                      const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
+                      const hex = p.color && /^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : null;
+                      const offStyle = !on && hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined;
+                      const cls = on ? "bg-violet-600 text-white border-violet-600" : hex ? "" : "bg-white text-slate-600 border-slate-200";
+                      return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${cls}`} style={offStyle}>
+                        {img ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : p.icon ? <span className="leading-none">{p.icon}</span> : null}
+                        {p.label}
+                      </button>;
+                    })}</div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+                    <button onClick={saveEdit} disabled={busy} style={{ background: btnBg(dth) }} className="h-8 px-4 text-sm text-white rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* กำหนดส่ง — เด่น (ซ่อนถ้าไม่มี · กดแก้/เพิ่มได้) */}
+                  {!isHidden(dth, "due_date") && (<div style={{ order: tOrderOf("due_date") }}>
+                  {qf === "due_date" ? (
+                    <div><p className="text-xs text-slate-400 mb-0.5">{t("กำหนดส่ง", "Due date")}</p>
+                      <div className="flex items-start gap-1"><div className="flex-1"><ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} /></div>
+                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
+                    </div>
+                  ) : d.due_date ? (
+                    <button type="button" onClick={() => setQf("due_date")} className={`w-full text-left rounded-md -mx-1 px-1 py-1 flex items-baseline gap-2 transition-colors ${isOverdue(d) ? "bg-red-50 hover:bg-red-100" : "hover:bg-violet-50/60"}`}>
+                      <p className="w-[76px] shrink-0 text-[11px] text-slate-400">{t("กำหนดส่ง", "Due date")}</p>
+                      <p className={`text-sm font-bold ${isOverdue(d) ? "text-red-600" : "text-slate-800"}`}>{isOverdue(d) && "⚠ "}{d.due_date}</p>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setQf("due_date")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เพิ่มกำหนดส่ง", "Add due date")}</button>
+                  )}
+                  </div>)}
+
+                  {/* แบรนด์ — โลโก้เด่น */}
+                  {!isHidden(dth, "brand") && (<div style={{ order: tOrderOf("brand") }}>{qf === "brand" ? (
+                    <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
+                      <div className="flex items-start gap-1"><div className="flex-1"><BrandSelect brands={brands} value={d.brand_id} onChange={(v) => saveQuick({ brand_id: v || null })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
+                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
+                    </div>
+                  ) : d.brand_id ? (
+                    <button type="button" onClick={() => setQf("brand")} className="w-full flex items-center gap-2 rounded-md -mx-1 px-1 py-1 hover:bg-violet-50/60">
+                      <p className="w-[76px] shrink-0 text-left text-[11px] text-slate-400">{t("แบรนด์", "Brand")}</p>
+                      {brandLogo
+                        ? <img src={`/api/r2-image?key=${encodeURIComponent(brandLogo)}&w=64`} alt="" className="h-6 w-6 rounded object-contain bg-white border border-slate-100 shrink-0" />
+                        : <span className="h-6 w-6 rounded flex items-center justify-center text-white text-[11px] font-bold shrink-0" style={{ background: brandColor || "#cbd5e1" }}>{(d.brand_label || "?").slice(0, 1)}</span>}
+                      <span className="min-w-0 text-sm font-semibold text-slate-800 truncate">{d.brand_label}</span>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setQf("brand")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เลือกแบรนด์", "Set brand")}</button>
+                  )}</div>)}
+
+                  {/* แพลตฟอร์มที่ลง */}
+                  {!isHidden(dth, "platform") && d.platforms && d.platforms.length > 0 && (
+                    <div style={{ order: tOrderOf("platform") }}><p className="text-[11px] text-slate-400 mb-1">Platform</p>
+                      <TaskPlatformListing platforms={d.platforms} parents={parentList} brandId={d.brand_id} compact />
+                    </div>
+                  )}
+
+
+                  {/* ข้อมูลอื่น — แต่ละช่องเป็นส่วนเดี่ยว ซ่อน/จัดลำดับได้ (↑↓ ที่ 🎨) */}
+                  {!isHidden(dth, "task_type") && (<div style={{ order: tOrderOf("task_type") }} className="pt-2 border-t border-slate-100">
+                    <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
+                      active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
+                      editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
+                  </div>)}
+                  {!isHidden(dth, "assignee") && (<div style={{ order: tOrderOf("assignee") }}><MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
+                    onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} /></div>)}
+                  {!isHidden(dth, "reviewer") && (<div style={{ order: tOrderOf("reviewer") }}><QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
+                    active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
+                    editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} /></div>)}
+                  {!isHidden(dth, "assigned_by") && (<div style={{ order: tOrderOf("assigned_by") }}><QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
+                    active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
+                    editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} /></div>)}
+                  {!isHidden(dth, "campaign") && (<div style={{ order: tOrderOf("campaign") }}><QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
+                    active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
+                    editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} /></div>)}
+                  {!isHidden(dth, "parent") && (<div style={{ order: tOrderOf("parent") }}><QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                    active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
+                    editor={
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap gap-1">
+                          {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><button type="button" onClick={() => setOpenParentId(p.id)} title={t("เปิดดูสินค้า", "Open product")} className="hover:text-violet-700 hover:underline">{p.code || p.name}</button><button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                          {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+                        </div>
+                        <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
+                      </div>
+                    } /></div>)}
+                </>
+              )}
+
+              {/* ไฟล์ / Drive — ย้ายมาคอลัมน์ขวา · ยังไม่มีไฟล์ = พับไว้ (เจ้าของสั่ง 2026-11-21) */}
+              {!isHidden(dth, "files") && (<div style={{ order: tOrderOf("files") }} className="rounded-lg border border-slate-200 bg-white">
+                <button type="button" onClick={() => setFilesOpen(!filesOpenEff)} className="w-full flex items-center gap-1.5 px-2.5 py-2 text-left text-xs text-slate-600 hover:bg-slate-50 rounded-lg">
+                  <span className="text-slate-400">{filesOpenEff ? "▾" : "▸"}</span>
+                  <span className="font-medium">{t("ไฟล์ / Drive", "Files / Drive")}</span>
+                  <span className="text-[11px] text-slate-400">{fileCount > 0 ? `(${fileCount})` : t("— ยังไม่มี", "— none yet")}</span>
+                </button>
+                {filesOpenEff && (<div className="px-2.5 pb-2.5 space-y-3">
               {/* สร้างโฟลเดอร์ Google Drive + อัปไฟล์แนบขึ้น Drive (ถ้ายังไม่มีโฟลเดอร์) */}
               {!d.drive_folder_url && (
                 <div className="inline-flex items-center gap-1.5">
@@ -523,140 +761,15 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   ))}
                   {d.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีลิงก์แนบ", "No attachments yet")}</p>}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2">
                   <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ (ไม่บังคับ)", "Label (optional)")} />
                   <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์ Drive/URL", "Paste Drive/URL link")} />
                   <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">{t("แนบ", "Attach")}</button>
                 </div>
               </div>
               </>)}
-            </div>
-
-            {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
-            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} bg-slate-50/40 border-slate-100`} style={{ borderColor: dividerColorOf(dth) }}>
-              {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
-              {!isHidden(dth, "cover") && (
-              <div style={{ order: tOrderOf("cover") }}>
-                {coverKey ? (
-                  <div className="relative rounded-lg overflow-hidden border border-slate-200">
-                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" onClick={() => setImagesOpen(true)} title={t("กดดูรูปทั้งหมด", "View all images")} className="w-full h-32 object-contain bg-white cursor-zoom-in" />
-                    {coverFromParent && <span className="absolute top-1.5 left-1.5 text-[9px] bg-black/55 text-white px-1 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
-                    <button type="button" onClick={() => setCoverEdit((v) => !v)} title={t("เปลี่ยนรูปปก", "Change cover")} className="absolute top-1.5 right-1.5 text-[10px] bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded px-1.5 py-0.5">✎</button>
-                  </div>
-                ) : (
-                  <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-16 rounded-lg border-2 border-dashed border-slate-200 text-xs text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover")}</button>
-                )}
-                {coverEdit && (
-                  <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-2 space-y-2">
-                    <p className="text-[10px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority")}</p>
-                    <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
-                    <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-[11px] text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
-                  </div>
-                )}
-              </div>
-              )}
-              {editing && ef ? (
-                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3" style={{ order: 1 }}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
-                    <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={priorityOptions()} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
-                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><BrandSelect brands={brands} value={ef.brand_id} onChange={(v) => setEf({ ...ef, brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
-                    <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
-                    <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ / ผู้ตรวจ (หลายคน) แก้ที่ช่องในโหมดดู", "Edit assignees / reviewers (multiple) in view mode")}</div>
-                  </div>
-                  <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
-                    <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => {
-                      const on = ef.platforms.includes(p.value);
-                      const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
-                      const hex = p.color && /^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : null;
-                      const offStyle = !on && hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined;
-                      const cls = on ? "bg-violet-600 text-white border-violet-600" : hex ? "" : "bg-white text-slate-600 border-slate-200";
-                      return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${cls}`} style={offStyle}>
-                        {img ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : p.icon ? <span className="leading-none">{p.icon}</span> : null}
-                        {p.label}
-                      </button>;
-                    })}</div>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
-                    <button onClick={saveEdit} disabled={busy} style={{ background: btnBg(dth) }} className="h-8 px-4 text-sm text-white rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  {/* กำหนดส่ง — เด่น (ซ่อนถ้าไม่มี · กดแก้/เพิ่มได้) */}
-                  {!isHidden(dth, "due_date") && (<div style={{ order: tOrderOf("due_date") }}>
-                  {qf === "due_date" ? (
-                    <div><p className="text-xs text-slate-400 mb-0.5">{t("กำหนดส่ง", "Due date")}</p>
-                      <div className="flex items-start gap-1"><div className="flex-1"><ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} /></div>
-                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
-                    </div>
-                  ) : d.due_date ? (
-                    <button type="button" onClick={() => setQf("due_date")} className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${isOverdue(d) ? "border-red-200 bg-red-50 hover:bg-red-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
-                      <p className="text-[10px] text-slate-400">{t("กำหนดส่ง", "Due date")}</p>
-                      <p className={`text-base font-bold ${isOverdue(d) ? "text-red-600" : "text-slate-800"}`}>{isOverdue(d) && "⚠ "}{d.due_date}</p>
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => setQf("due_date")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เพิ่มกำหนดส่ง", "Add due date")}</button>
-                  )}
-                  </div>)}
-
-                  {/* แบรนด์ — โลโก้เด่น */}
-                  {!isHidden(dth, "brand") && (<div style={{ order: tOrderOf("brand") }}>{qf === "brand" ? (
-                    <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
-                      <div className="flex items-start gap-1"><div className="flex-1"><BrandSelect brands={brands} value={d.brand_id} onChange={(v) => saveQuick({ brand_id: v || null })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></div>
-                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
-                    </div>
-                  ) : d.brand_id ? (
-                    <button type="button" onClick={() => setQf("brand")} className="w-full flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50">
-                      {brandLogo
-                        ? <img src={`/api/r2-image?key=${encodeURIComponent(brandLogo)}&w=120`} alt="" className="h-10 w-10 rounded-lg object-contain bg-white border border-slate-100 shrink-0" />
-                        : <span className="h-10 w-10 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: brandColor || "#cbd5e1" }}>{(d.brand_label || "?").slice(0, 1)}</span>}
-                      <div className="min-w-0 text-left"><p className="text-[10px] text-slate-400">{t("แบรนด์", "Brand")}</p><p className="text-sm font-semibold text-slate-800 truncate">{d.brand_label}</p></div>
-                    </button>
-                  ) : (
-                    <button type="button" onClick={() => setQf("brand")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เลือกแบรนด์", "Set brand")}</button>
-                  )}</div>)}
-
-                  {/* แพลตฟอร์มที่ลง */}
-                  {!isHidden(dth, "platform") && d.platforms && d.platforms.length > 0 && (
-                    <div style={{ order: tOrderOf("platform") }}><p className="text-[10px] text-slate-400 mb-1">Platform</p>
-                      <TaskPlatformListing platforms={d.platforms} parents={parentList} brandId={d.brand_id} />
-                    </div>
-                  )}
-
-
-                  {/* ข้อมูลอื่น — แต่ละช่องเป็นส่วนเดี่ยว ซ่อน/จัดลำดับได้ (↑↓ ที่ 🎨) */}
-                  {!isHidden(dth, "task_type") && (<div style={{ order: tOrderOf("task_type") }} className="pt-2 border-t border-slate-100">
-                    <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
-                      active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
-                      editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
-                  </div>)}
-                  {!isHidden(dth, "assignee") && (<div style={{ order: tOrderOf("assignee") }}><MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
-                    onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} /></div>)}
-                  {!isHidden(dth, "reviewer") && (<div style={{ order: tOrderOf("reviewer") }}><QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
-                    active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
-                    editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} /></div>)}
-                  {!isHidden(dth, "assigned_by") && (<div style={{ order: tOrderOf("assigned_by") }}><QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
-                    active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
-                    editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} /></div>)}
-                  {!isHidden(dth, "campaign") && (<div style={{ order: tOrderOf("campaign") }}><QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
-                    active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
-                    editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} /></div>)}
-                  {!isHidden(dth, "parent") && (<div style={{ order: tOrderOf("parent") }}><QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
-                    active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
-                    editor={
-                      <div className="space-y-1.5">
-                        <div className="flex flex-wrap gap-1">
-                          {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><button type="button" onClick={() => setOpenParentId(p.id)} title={t("เปิดดูสินค้า", "Open product")} className="hover:text-violet-700 hover:underline">{p.code || p.name}</button><button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
-                          {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
-                        </div>
-                        <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
-                      </div>
-                    } /></div>)}
-                </>
-              )}
-
+                </div>)}
+              </div>)}
             </div>
           </div>
 
@@ -668,64 +781,6 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           )}
 
-          {/* ความคิดเห็น — section เต็มกว้างใต้ 2 คอลัมน์ */}
-          <div className="border-t border-slate-100 px-5 py-4" style={{ borderColor: dividerColorOf(dth) }}>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
-            <div className="space-y-2 mb-3">
-              {d.comments.map((c) => {
-                const mine = !!user?.id && c.author_id === user.id;
-                return (
-                  <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span>
-                      {cmtEdit?.id !== c.id && (mine || isManager) && (
-                        <span className="ml-auto flex items-center gap-1.5 text-xs">
-                          {cmtDelAsk === c.id ? (
-                            <>
-                              <button onClick={() => void removeComment(c.id)} disabled={cmtBusy} className="h-6 px-2 rounded bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{t("ยืนยันลบ", "Delete")}</button>
-                              <button onClick={() => setCmtDelAsk(null)} disabled={cmtBusy} className="h-6 px-2 rounded border border-slate-200 text-slate-500">{t("ไม่ลบ", "Cancel")}</button>
-                            </>
-                          ) : (
-                            <>
-                              {mine && <button onClick={() => { setCmtDelAsk(null); setCmtEdit({ id: c.id, body: c.body }); }} title={t("แก้ไข", "Edit")} className="text-slate-300 hover:text-blue-600">✏️</button>}
-                              <button onClick={() => setCmtDelAsk(c.id)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-rose-600">🗑</button>
-                            </>
-                          )}
-                        </span>
-                      )}
-                    </div>
-                    {cmtEdit?.id === c.id ? (
-                      <div className="space-y-1.5">
-                        <textarea value={cmtEdit.body} autoFocus rows={2} onChange={(e) => setCmtEdit({ ...cmtEdit, body: e.target.value })}
-                          onKeyDown={(e) => { if (e.key === "Escape") setCmtEdit(null); }}
-                          className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                        <div className="flex justify-end gap-1.5">
-                          <button onClick={() => setCmtEdit(null)} disabled={cmtBusy} className="h-7 px-2.5 text-xs border border-slate-200 rounded-lg text-slate-600">{t("ยกเลิก", "Cancel")}</button>
-                          <button onClick={() => void saveCommentEdit()} disabled={cmtBusy || !cmtEdit.body.trim()} className="h-7 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{t("บันทึก", "Save")}</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
-                    )}
-                  </div>
-                );
-              })}
-              {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
-            </div>
-            <div className="flex gap-2">
-              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
-              <button onClick={sendComment} style={{ background: btnBg(dth) }} className="h-9 px-4 text-sm font-medium text-white rounded-lg shrink-0">{t("ส่ง", "Send")}</button>
-            </div>
-            {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
-            <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-              <span className="text-[11px] text-slate-400">🔔 {t("แจ้งถึง", "Notify")}:</span>
-              {mentionUsers.map((u) => (
-                <span key={u.id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">{u.name}
-                  <button onClick={() => setMentionUsers((xs) => xs.filter((x) => x.id !== u.id))} className="text-violet-300 hover:text-red-500">✕</button></span>
-              ))}
-              <div className="w-40"><UserPicker value={mentionAdding} onChange={(v) => { if (v && !mentionUsers.some((x) => x.id === v.id)) setMentionUsers((xs) => [...xs, v]); setMentionAdding(null); }} disableCreate /></div>
-            </div>
-          </div>
           </>)}
 
           {tab === "content" && (
@@ -744,20 +799,11 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             }} />
         )}
 
-        {/* admin: ย้อน/ตั้งสถานะอิสระ (เห็นเฉพาะ admin) */}
-        {isAdmin && (
-          <div className="border-t border-amber-100 bg-amber-50/50 px-6 py-2 shrink-0 flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-amber-700">🔧 admin · {t("ย้อน/ตั้งสถานะ", "Set status")}:</span>
-            <select value={d.status} disabled={busy} onChange={async (e) => { const to = e.target.value; if (to && to !== d.status && (await askConfirm({ title: `${t("เปลี่ยนสถานะเป็น", "Set status to")} "${statusMeta(to).label}"?`, variant: "danger" }))) handleForceStatus(to); }} className="h-8 px-2 text-xs border border-amber-200 rounded-lg bg-white">
-              {allStatuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-            <span className="text-[11px] text-amber-600">{t("(บังคับเปลี่ยน ข้ามกฎ workflow · บันทึกประวัติ)", "(force change, bypasses workflow · audited)")}</span>
-          </div>
-        )}
-        {/* footer actions — งานที่มีงานย่อย: คนทั่วไปเห็นสถานะอ่านอย่างเดียว (สถานะมาจากงานย่อย) · แอดมิน/ผจก.ยังกดได้ */}
+        {/* footer actions — งานที่มีงานย่อย: คนทั่วไปเห็นสถานะอ่านอย่างเดียว (สถานะมาจากงานย่อย) · แอดมิน/ผจก.ยังกดได้
+            (แอดมิน ย้อน/ตั้งสถานะ ย้ายไปเมนู ⋯ ที่หัวลิ้นชัก 2026-11-21) */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
-          {/* คัดลอกลิงก์งาน (เปิดลิ้นชักงานนี้ตรง ๆ) */}
-          <button type="button" onClick={copyTaskLink} title={t("คัดลอกลิงก์เปิดงานนี้", "Copy link to this task")} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 inline-flex items-center gap-1.5 shrink-0"><Icon name="link" />{t("คัดลอกลิงก์", "Copy link")}</button>
+          {/* คัดลอกลิงก์งาน — ไอคอนเล็ก (หัวลิ้นชักมีปุ่มลิงก์อยู่แล้ว) */}
+          <button type="button" onClick={copyTaskLink} title={t("คัดลอกลิงก์เปิดงานนี้", "Copy link to this task")} aria-label={t("คัดลอกลิงก์", "Copy link")} className="h-9 w-9 text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 inline-flex items-center justify-center shrink-0"><Icon name="link" /></button>
           {hasSubtasks && !isManager ? (
             <div className="w-full flex items-center justify-center gap-2 flex-wrap">
               <span className="text-sm text-slate-400">{t("สถานะ", "Status")}:</span>

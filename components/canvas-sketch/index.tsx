@@ -73,8 +73,10 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false, imageMaxPx,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
 }: {
+  /** คำแนะนำวิธีใช้เหลือไอคอน ? (ชี้ดู) แทนบรรทัดยาว — สำหรับกระดานในพื้นที่แคบ */
+  compactHelp?: boolean;
   /** ย่อรูปที่วาง/ลากลงกระดานให้ด้านยาวไม่เกินกี่ px ก่อนเก็บขึ้น R2 (ค่าเดิม 1600) — ค่าเล็ก (เช่น 600) = เก็บเป็น webp ประหยัด ~90%
    *  ใช้กับกระดานที่รูปเป็นแค่บรีฟ/อ้างอิงคร่าว ๆ (กระดานบรีฟ/อ้างอิงของงาน) · ไม่กระทบรูปที่อยู่บน R2 อยู่แล้ว */
   imageMaxPx?: number;
@@ -1048,9 +1050,17 @@ export function CanvasSketch({
     <div className={fill ? "flex h-full min-h-0 flex-col gap-1.5" : "space-y-1.5"}>
       <div className={`flex flex-wrap items-center gap-2${!fill && stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
         style={!fill && stickyTop != null ? { top: stickyTop } : undefined}>
+        {compactHelp ? (
+          // โหมดคำแนะนำย่อ (กระดานที่อยู่ในพื้นที่แคบ เช่น ลิ้นชักงาน) — เหลือไอคอน ? ชี้ดูวิธีใช้
+          <span className="flex-1 min-w-0">
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[11px] text-slate-400 cursor-help"
+              title={t("วางรูป / ลิงก์ YouTube · Pinterest · TikTok = copy แล้วกด Ctrl+V ในกระดาน · กล่อง=R · ลูกศร=A · ข้อความ=T · วาด=P", "Paste image / YouTube · Pinterest · TikTok link = copy then Ctrl+V on board · Box=R · Arrow=A · Text=T · Draw=P")}>?</span>
+          </span>
+        ) : (
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
           {t("🖼 วางรูป / ลิงก์ YouTube · Pinterest · TikTok = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image / YouTube · Pinterest · TikTok link = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
         </span>
+        )}
         {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
             <span className="text-slate-400">{t("ขนาดอักษร", "Font size")}</span>

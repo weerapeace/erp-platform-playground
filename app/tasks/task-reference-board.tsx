@@ -68,7 +68,6 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-slate-400">🎨 {t("กระดานบรีฟ", "Brief board")}</span>
-        {!folded && <span className="text-[11px] text-slate-400">{t("วางรูป Ctrl+V · ลิงก์ · โน้ต · ย้อน Ctrl+Z", "Paste images, links, notes · Undo Ctrl+Z")}</span>}
         <span className="ml-auto inline-flex items-center gap-1.5">
           {foldable && (
             <button type="button" onClick={toggleFold} className="inline-flex items-center h-7 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
@@ -82,7 +81,7 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
           )}
         </span>
       </div>
-      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab controlsRef={controlsRef} onReady={onReady} imageMaxPx={TASK_BOARD_IMAGE_MAX} />}
+      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab compactHelp controlsRef={controlsRef} onReady={onReady} imageMaxPx={TASK_BOARD_IMAGE_MAX} />}
     </div>
   );
 }

@@ -25,7 +25,11 @@ const MAX_PARENTS = 5; // งานส่วนใหญ่มี 1-2 รุ่�
 const onSale = (d: Draft | undefined, matched: unknown) =>
   (!!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id)) || !!matched;
 
-export function TaskPlatformListing({ platforms, parents, brandId }: { platforms: string[]; parents: ParentRef[]; brandId?: string | null }) {
+export function TaskPlatformListing({ platforms, parents, brandId, compact = false }: {
+  platforms: string[]; parents: ParentRef[]; brandId?: string | null;
+  /** แบบกะทัดรัด (ลิ้นชักงาน 2026-11-21): ป้ายร้านมีขอบเขียว=ลงแล้ว/แดง=ยังไม่ลง · ปุ่ม "＋ ลงร้าน" เล็กต่อท้ายแถว */
+  compact?: boolean;
+}) {
   const t = useT();
   const { can } = useAuth();
   const canView = can("products.platforms.view" as Parameters<typeof can>[0]);
@@ -65,6 +69,37 @@ export function TaskPlatformListing({ platforms, parents, brandId }: { platforms
   const ready = listed !== null && total > 0;
   // ร้านในงานที่ระบบลงสินค้าได้ และยังลงไม่ครบทุกรุ่น
   const missing = ready ? platforms.filter((c) => known.has(c) && (listed![c] ?? 0) < total) : [];
+
+  if (compact) {
+    return (
+      <div className="flex flex-wrap items-center gap-1">
+        {platforms.map((code) => {
+          if (!ready || !known.has(code)) return <PlatformChip key={code} code={code} />;
+          const n = listed![code] ?? 0;
+          const done = n >= total;
+          return (
+            <span key={code} title={done ? t("ลงร้านนี้แล้ว", "Listed on this shop") : t("ยังไม่ได้ลงร้านนี้", "Not listed yet")}
+              className={`inline-flex items-center gap-0.5 rounded-full ring-1 ${done ? "ring-emerald-300" : "ring-rose-300"}`}>
+              <PlatformChip code={code} />
+              <span className={`pr-1.5 text-[10px] font-medium ${done ? "text-emerald-600" : "text-rose-500"}`}>{done ? "✓" : total > 1 && n > 0 ? `${n}/${total}` : "✕"}</span>
+            </span>
+          );
+        })}
+        {ready && (
+          <button type="button" onClick={() => setOpen(true)} title={t("ลงสินค้าขึ้นร้าน", "List on shops")}
+            className={`h-6 px-2 rounded-full border text-[11px] font-medium ${missing.length ? "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>
+            ＋ {t("ลงร้าน", "List")}{missing.length ? ` (${missing.length})` : ""}
+          </button>
+        )}
+        {open && (
+          <AddToPlatformWizard open brandId={brandId ?? null}
+            parents={list.map((p) => ({ id: p.id, code: p.code ?? "", name: p.name ?? null }))}
+            initialPlatformCodes={missing}
+            onClose={() => setOpen(false)} onDone={() => void load()} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
