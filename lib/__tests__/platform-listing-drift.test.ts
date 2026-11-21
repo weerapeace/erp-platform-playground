@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  compareAll, compareDescription, compareImages, compareTitle, compareOptions, comparePrice, descImages, descLines, driftBadgeText, driftIssues, lineDiff, listSig, looksHtml, normText, plainText,
+  compareAll, compareDescImages, compareDescription, compareImages, compareTitle, compareVariantImages, variantTable, compareOptions, comparePrice, descImages, descLines, driftBadgeText, driftIssues, lineDiff, listSig, looksHtml, normText, plainText,
   type ShopValues, type SystemValues,
 } from "@/lib/platform-listing-drift";
 
@@ -162,5 +162,34 @@ describe("ชื่อสินค้า", () => {
     expect(compareTitle(sys({ title: "กระเป๋า พร้อมพวงกุญแจ LY22" }), shop({ title: "กระเป๋า LY22" })).state).toBe("diff");
     expect(compareTitle(sys({ title: "กระเป๋า  LY22" }), shop({ title: "กระเป๋า LY22" })).state).toBe("same");
     expect(compareTitle(sys({ title: "กระเป๋า LY22" }), shop({})).state).toBe("unknown");
+  });
+});
+
+describe("เว้นบรรทัด + รูปในรายละเอียด + ตัวเลือก (เจ้าของเลือก 1-4)", () => {
+  it("descLines เก็บบรรทัดว่างตามจริง (ว่างติดกันเหลือ 1) · บรรทัดว่างไม่นับว่าต่าง", () => {
+    expect(descLines("หัว\n\n\n\nย่อหน้า 2")).toEqual(["หัว", "", "ย่อหน้า 2"]);
+    expect(descLines("<p>หนึ่ง</p><p><br></p><p>สอง</p>")).toEqual(["หนึ่ง", "", "สอง"]);
+    expect(lineDiff(["ก", "", "ข"], ["ก", "ข"]).changes).toBe(0);
+  });
+  it("รูปในรายละเอียด: ระบบมี 2 รูป ร้านไม่มี = ไม่ตรง · ทั้งคู่ไม่มี = ตรง · ส่งแล้วจำชุดไว้", () => {
+    const s = sys({ descImageRefs: ["r2:d1", "r2:d2"] });
+    const r = compareDescImages(s, shop(), null);
+    expect(r.state).toBe("diff");
+    expect(r.media?.after[0]).toBe("/api/r2-image?key=d1&w=400");
+    expect(compareDescImages(sys(), shop(), null).state).toBe("same");
+    const shopWith = shop({ descImageUrls: ["https://cdn/x.jpg", "https://cdn/y.jpg"] });
+    expect(compareDescImages(s, shopWith, null).state).toBe("unknown");
+    expect(compareDescImages(s, shopWith, { desc_images_sys: listSig(["r2:d1", "r2:d2"]), desc_images_shop: listSig(["https://cdn/x.jpg", "https://cdn/y.jpg"]) }).state).toBe("same");
+  });
+  it("รูปตัวเลือก: ร้านไม่มีรูปทั้งที่ระบบมี = ไม่ตรง · มีทั้งคู่ยังไม่เคยส่ง = บอกไม่ได้", () => {
+    const s = sys({ variants: [{ code: "A", values: ["ดำ"], price: 1, image: "r2:a" }] });
+    expect(compareVariantImages(s, shop({ variants: [{ code: "A", label: "", price: 1, image: null }] }), null).state).toBe("diff");
+    expect(compareVariantImages(s, shop({ variants: [{ code: "A", label: "", price: 1, image: "https://x" }] }), null).state).toBe("unknown");
+  });
+  it("ตารางตัวเลือก: รูป/ชื่อ/ราคา 2 ฝั่ง + ธงชื่อไม่ตรง/ราคาไม่ตรง/ไม่มีรูป", () => {
+    const s = sys({ variants: [{ code: "A", values: ["ดำ (01)"], price: 890, image: "r2:a" }] });
+    const t = variantTable(s, shop({ variants: [{ code: "A", label: "สี: Black", price: 990, image: null }] }));
+    expect(t[0]).toMatchObject({ code: "A", nameDiff: true, priceDiff: true, imageMissing: true });
+    expect(t[0].sys.image).toBe("/api/r2-image?key=a&w=200");
   });
 });

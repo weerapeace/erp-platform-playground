@@ -14,7 +14,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import {
-  compareAll, driftIssues, listSig, plainText, type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
+  compareAll, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
+  type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
 } from "@/lib/platform-listing-drift";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { loadLazadaCreate } from "@/app/api/lazada/create-product/load";
@@ -24,8 +25,14 @@ import { loadShopeeListingLive } from "@/app/api/shopee/shared";
 import { loadLazListingLive } from "@/app/api/lazada/shared";
 import { loadTtsListingLive, ttsViewWithReview } from "@/app/api/tiktok-shop/shared";
 import { planShopeeEdit, planShopeeImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
-import { foreignDescImages, lazadaEditStateFromView, lazadaListingView, lazadaPriceRowsFromView, planLazadaEdit, planLazadaPrices, type LazadaListingView } from "@/lib/lazada-listing-edit";
-import { planTiktokDescription, planTiktokMedia, planTiktokPrices, planTiktokTitle, tiktokMediaBase, tiktokPriceBlock, tiktokPriceRowsFromView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
+import {
+  foreignDescImages, lazadaEditStateFromView, lazadaListingView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazMigrateImageXml, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia,
+  type LazadaEditState, type LazadaListingView,
+} from "@/lib/lazada-listing-edit";
+import { lazErrorText, lazMigrateImage, type LazGateway } from "@/lib/lazada";
+import { ttsErrorText, ttsUploadImage } from "@/lib/tiktok-shop";
+import { publicImageUrl } from "@/lib/line-shopping-server";
+import { planTiktokDescription, planTiktokMedia, planTiktokPrices, planTiktokTitle, tiktokDescImageSrc, tiktokMediaBase, tiktokPriceBlock, tiktokPriceRowsFromView, type TiktokListingView } from "@/lib/tiktok-listing-edit";
 import { planTiktokSkuEdit, tiktokOptNameKey, tiktokOptionGroups, tiktokSkuFormOf, tiktokSkuSignature } from "@/lib/tiktok-sku-edit";
 import { lineGetProduct } from "@/lib/line-shopping";
 import { lineApiKey } from "@/lib/line-shopping-server";
@@ -57,8 +64,8 @@ type Ctx = {
   titleHistory: string[];
   /** เหตุผลที่ส่งเรื่องนี้ไม่ได้ (null = ส่งได้) */
   cannot: (key: DriftKey) => string | null;
-  /** ประกอบคำสั่งของเรื่องที่เลือก (ตามลำดับที่ร้านต้องการ) */
-  build: (keys: DriftKey[]) => DriftCall[];
+  /** ประกอบคำสั่งของเรื่องที่เลือก (ตามลำดับที่ร้านต้องการ) · รูปในรายละเอียดของ TikTok/Lazada ฝากกับร้านตอนนี้ (ยังไม่แก้สินค้า) */
+  build: (keys: DriftKey[]) => Promise<DriftCall[]>;
 };
 
 const errs = (xs: string[] | undefined) => (xs?.length ? xs.join(" · ") : null);
@@ -75,26 +82,26 @@ async function systemValues(admin: Admin, code: string, parentId: string, userId
     const b = await buildLineCreate(admin, parentId);
     if (!b.ok) return { ok: false, error: b.error };
     const p = b.preview;
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.keys.map((k) => `r2:${k}`), variants: p.variants.map((v) => ({ code: v.code, values: v.options, price: v.price || null, pay: v.price ? v.price - (v.discount || 0) : null })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.keys.map((k) => `r2:${k}`), variants: p.variants.map((v) => ({ code: v.code, values: v.options, price: v.price || null, pay: v.price ? v.price - (v.discount || 0) : null, image: v.image_key ? `r2:${v.image_key}` : null })) } };
   }
   if (code === "shopee") {
     const r = await loadShopeeCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })) } };
   }
   if (code === "lazada") {
     const r = await loadLazadaCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
     // ราคาลด: เทียบ/ส่งเฉพาะเมื่อระบบมีราคาลด (ล้างราคาลดบน Lazada ผ่านระบบไม่ได้)
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, image: v.image_refs?.[0] ?? v.image_ref, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
   }
   if (code === "tiktok") {
     const r = await loadTiktokCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })) } };
   }
   return { ok: false, error: "ร้านนี้ยังตรวจไม่ได้" };
 }
@@ -103,8 +110,8 @@ async function systemValues(admin: Admin, code: string, parentId: string, userId
 const sysOf = (sys: SystemValues, code: string | null) => (code ? sys.variants.find((v) => v.code.trim().toUpperCase() === code.trim().toUpperCase()) : sys.variants.length === 1 ? sys.variants[0] : undefined);
 
 function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListingView): Ctx {
-  const variants: ShopVariant[] = v.hasModel ? v.models.map((m) => ({ code: m.sku, label: m.label ?? "", price: m.originalPrice ?? m.price })) : [{ code: null, label: "", price: v.originalPrice ?? v.price }];
-  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images };
+  const variants: ShopVariant[] = v.hasModel ? v.models.map((m) => ({ code: m.sku, label: m.label ?? "", price: m.originalPrice ?? m.price, image: m.image })) : [{ code: null, label: "", price: v.originalPrice ?? v.price }];
+  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images, descImageUrls: [] };
   const imgPlan = () => planShopeeImages(v, base.sys.imageRefs);
   const descPlan = () => planShopeeEdit(v, { description: base.sys.description });
   const titlePlan = () => planShopeeEdit(v, { name: base.sys.title ?? "" });
@@ -121,8 +128,10 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       : k === "images" ? errs(imgPlan().errors)
       : k === "description" ? (!v.descriptionEditable ? "Shopee: สินค้านี้ใช้รายละเอียดแบบมีรูป — แก้ใน Seller Centre" : errs(descPlan().errors))
       : k === "options" ? OPT_CANNOT.shopee
+      : k === "desc_images" ? "Shopee: ใส่รูปในรายละเอียดได้เฉพาะร้านที่ Shopee เปิดสิทธิ์ (ร้านนี้ยังไม่มี) — ใส่ในรูปสินค้าแทน"
+      : k === "variant_images" ? "Shopee: ระบบยังเปลี่ยนรูปตัวเลือกให้ไม่ได้ — แก้ใน Seller Centre"
       : errs(pricePlan().errors),
-    build: (keys) => {
+    build: async (keys) => {
       const calls: DriftCall[] = [];
       if (keys.includes("price")) {
         const plan = pricePlan();
@@ -143,11 +152,15 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
   };
 }
 
-function lazadaCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: LazadaListingView): Ctx {
+function lazadaCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: LazadaListingView, live: { gateway: LazGateway; accessToken: string }): Ctx {
   const shop: ShopValues = {
-    title: v.name, description: v.description, imageCount: v.images.length, imageSig: listSig(v.images), imageUrls: v.images,
-    variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, price: s.price, ...(base.sys.variants.some((x) => x.special !== undefined) ? { special: s.specialPrice } : {}) })),
+    title: v.name, description: v.description, imageCount: v.images.length, imageSig: listSig(v.images), imageUrls: v.images, descImageUrls: descImages(v.description),
+    variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, price: s.price, image: s.images[0] ?? null, ...(base.sys.variants.some((x) => x.special !== undefined) ? { special: s.specialPrice } : {}) })),
   };
+  // รูปตัวเลือก: ระบบแก้ได้ "รูปแรก" ของแต่ละ SKU (รูปที่เหลือคงเดิม) — ตัวแก้เดิมของลิ้นชัก (planLazadaSkuMedia)
+  const skuBefore = lazadaSkuMediaFromView(v);
+  const skuAfter = skuBefore.map((r) => { const s = sysOf(base.sys, r.sellerSku); return s?.image ? { ...r, images: [s.image, ...r.images.slice(1)] } : r; });
+  const skuPlan = () => planLazadaSkuMedia(skuBefore, skuAfter, v.imageVariation);
   const before = lazadaEditStateFromView(v);
   const after = (keys: DriftKey[]) => ({
     ...before,
@@ -170,26 +183,65 @@ function lazadaCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: LazadaListin
       : k === "images" ? errs(planLazadaEdit(before, after(["images"])).errors)
       : k === "description" ? (foreignDescImages(base.sys.description).length ? "Lazada: รายละเอียดในระบบมีรูปที่ยังไม่ได้ฝากกับ Lazada — แก้ในลิ้นชักสินค้าบนร้าน" : errs(planLazadaEdit(before, after(["description"])).errors))
       : k === "options" ? OPT_CANNOT.lazada
+      : k === "variant_images" ? errs(skuPlan().errors)
+      : k === "desc_images" ? null
       : errs(pricePlan().errors),
-    build: (keys) => {
+    build: async (keys) => {
       const calls: DriftCall[] = [];
       const ek = keys.filter((k) => k === "title" || k === "images" || k === "description");
-      if (ek.length && Object.keys(planLazadaEdit(before, after(ek)).fields).length) calls.push({ url: "/api/lazada/listing-edit", label: ek.map((k) => (k === "title" ? "ชื่อ" : k === "images" ? "รูป" : "รายละเอียด")).join(" + "), body: { listing_id: base.listingId, before, edit: after(ek) } });
+      const edit: LazadaEditState = after(ek);
+      // รูปในรายละเอียด: ฝากรูปกับ Lazada ก่อน (/image/migrate · ยังไม่แก้สินค้า) แล้วต่อท้ายรายละเอียดแทนรูปเดิม
+      if (keys.includes("desc_images") && base.sys.descImageRefs?.length) {
+        const urls: string[] = [];
+        for (const ref of base.sys.descImageRefs) {
+          const key = ref.startsWith("r2:") ? ref.slice(3) : null;
+          if (!key) { urls.push(ref); continue; }
+          try { urls.push(await lazMigrateImage(live.gateway, live.accessToken, lazMigrateImageXml(`${publicImageUrl(key)}&w=1500`))); }
+          catch (e) { throw new Error(`ฝากรูปในรายละเอียดกับ Lazada ไม่สำเร็จ (${urls.length + 1}/${base.sys.descImageRefs.length}): ${lazErrorText(e)} — ยังไม่ได้แก้อะไรบนร้าน`); }
+        }
+        edit.description = withDescImages(edit.description, urls);
+      }
+      const vi = keys.includes("variant_images");
+      const textChanged = Object.keys(planLazadaEdit(before, edit).fields).length > 0;
+      const labels = [...ek.map((k) => (k === "title" ? "ชื่อ" : k === "images" ? "รูป" : "รายละเอียด")), ...(keys.includes("desc_images") ? ["รูปในรายละเอียด"] : []), ...(vi ? ["รูปตัวเลือก"] : [])];
+      if (textChanged || vi) calls.push({ url: "/api/lazada/listing-edit", label: labels.join(" + "), body: { listing_id: base.listingId, before, edit, ...(vi ? { sku_before: skuBefore, sku_edit: skuAfter } : {}) } });
       if (keys.includes("price") && pricePlan().changes.length) calls.push({ url: "/api/lazada/listing-prices", label: "ราคา", body: { listing_id: base.listingId, before: priceBase, edit: priceEdit() } });
       return calls;
     },
   };
 }
 
-function tiktokCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: TiktokListingView): Ctx {
+/** รูปจากคลังรูปในระบบ → ฝากกับ TikTok เป็นรูปในรายละเอียด (DESCRIPTION_IMAGE) → ลิงก์ TikTok พร้อมขนาด (ตัวเดียวกับปุ่มแทรกรูปในลิ้นชัก) */
+async function ttsDescImageFromRef(accessToken: string, ref: string): Promise<string> {
+  const key = ref.startsWith("r2:") ? ref.slice(3) : null;
+  if (!key) return ref;
+  const res = await fetch(`${publicImageUrl(key)}&w=1500`, { cache: "no-store" });
+  const ct = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (!res.ok || !ct.startsWith("image/")) throw new Error(`โหลดรูปไม่ได้ (HTTP ${res.status})`);
+  const bytes = await res.arrayBuffer();
+  const name = `${key.split("/").pop()?.replace(/\.[a-z0-9]+$/i, "") || "image"}.${ct === "image/png" ? "png" : ct === "image/webp" ? "webp" : "jpg"}`;
+  let r;
+  try { r = await ttsUploadImage(accessToken, bytes, name, ct, "DESCRIPTION_IMAGE"); }
+  catch (e) { throw new Error(ttsErrorText(e)); }
+  if (!r.url) throw new Error("TikTok ไม่ส่งลิงก์รูปกลับมา");
+  return tiktokDescImageSrc(r.url, r.width, r.height);
+}
+/** รายละเอียด (HTML/ข้อความ) → เอารูปเดิมออก แล้วต่อรูปชุดใหม่ท้ายรายละเอียด */
+function withDescImages(desc: string, srcs: string[]): string {
+  const html = looksHtml(desc) ? desc : desc.split(/\n/).map((l) => `<p>${l.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") || "<br>"}</p>`).join("");
+  const stripped = html.replace(/<img\b[^>]*>/gi, "").replace(/<p>\s*<\/p>/gi, "");
+  return `${stripped}${srcs.map((s) => `<p><img src="${s}" /></p>`).join("")}`;
+}
+
+function tiktokCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: TiktokListingView, live: { accessToken: string }): Ctx {
   const media = tiktokMediaBase(v);
   const baseUris = media.images.map((i) => i.uri);
   const baseDesc = v.pendingDescription ?? v.description;
   const baseTitle = v.pendingTitle ?? v.title;
   const titlePlan = () => planTiktokTitle(baseTitle, base.sys.title ?? "");
   const shop: ShopValues = {
-    title: baseTitle, description: baseDesc, imageCount: baseUris.length, imageSig: listSig(baseUris), imageUrls: media.images.map((i) => i.url),
-    variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, values: s.attrs.map((a) => a.valueName ?? "").filter(Boolean), price: s.price })),
+    title: baseTitle, description: baseDesc, imageCount: baseUris.length, imageSig: listSig(baseUris), imageUrls: media.images.map((i) => i.url), descImageUrls: descImages(baseDesc),
+    variants: v.skus.map((s) => ({ code: s.sellerSku, label: s.label, values: s.attrs.map((a) => a.valueName ?? "").filter(Boolean), price: s.price, image: s.attrs.find((a) => a.img)?.img?.url ?? null })),
   };
   const mediaPlan = () => planTiktokMedia(baseUris, media.pkg, base.sys.imageRefs, media.pkg);
   const descPlan = () => planTiktokDescription(baseDesc, base.sys.description);
@@ -216,7 +268,19 @@ function tiktokCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: TiktokListin
     for (const [k, w] of set) if (names[k] !== w) return { names, conflict: k };
     return { names, conflict: null };
   };
-  const skuPlan = () => planTiktokSkuEdit(groups, { ...form0, names: optForm().names }, { status: v.status, hasDraft: v.hasDraft });
+  // รูปตัวเลือก: ชั้นหลัก (สี) ต้องมีรูปครบทุกค่า (กฎ TikTok) — ค่าละ 1 รูปจากรูปตัวเลือกในระบบของ SKU ที่รหัสตรงกัน
+  const primary = groups.find((g) => g.key === form0.primary) ?? null;
+  const vimg = (): { images: Record<string, string | null>; missing: string[] } => {
+    const images = { ...form0.images }, missing: string[] = [];
+    for (const val of primary?.values ?? []) {
+      const sku = v.skus.find((s) => val.skuIds.includes(s.skuId));
+      const ref = sku ? sysOf(base.sys, sku.sellerSku)?.image ?? null : null;
+      if (ref) images[val.key] = ref; else missing.push(val.name);
+    }
+    return { images, missing };
+  };
+  const skuForm = (keys: DriftKey[]) => ({ ...form0, names: keys.includes("options") ? optForm().names : form0.names, images: keys.includes("variant_images") ? vimg().images : form0.images });
+  const skuPlan = (keys: DriftKey[] = ["options"]) => planTiktokSkuEdit(groups, skuForm(keys), { status: v.status, hasDraft: v.hasDraft });
   const priceBase = tiktokPriceRowsFromView(v);
   const priceEdit = () => priceBase.map((r) => { const s = sysOf(base.sys, r.sellerSku); return s?.price != null ? { ...r, price: s.price } : r; });
   const pricePlan = () => planTiktokPrices(priceBase, priceEdit());
@@ -225,17 +289,38 @@ function tiktokCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: TiktokListin
     cannot: (k) => k === "title" ? errs(titlePlan().errors)
       : k === "images" ? errs(mediaPlan().errors)
       : k === "description" ? errs(descPlan().errors)
-      : k === "options" ? (groups.length ? errs(skuPlan().errors) : "สินค้านี้บน TikTok ไม่มีตัวเลือก")
+      : k === "options" ? (groups.length ? errs(skuPlan(["options"]).errors) : "สินค้านี้บน TikTok ไม่มีตัวเลือก")
+      : k === "variant_images" ? (!primary ? "สินค้านี้บน TikTok ไม่มีตัวเลือก" : vimg().missing.length ? `TikTok ต้องมีรูปครบทุก${primary.name} — ระบบยังไม่มีรูปของ ${vimg().missing.join(", ")}` : errs(skuPlan(["variant_images"]).errors))
+      : k === "desc_images" ? null
       : (tiktokPriceBlock(v) ?? errs(pricePlan().errors)),
-    build: (keys) => {
+    build: async (keys) => {
       const calls: DriftCall[] = [];
       if (keys.includes("price") && pricePlan().changes.length) calls.push({ url: "/api/tiktok-shop/listing-prices", label: "ราคา", body: { listing_id: base.listingId, before: priceBase, edit: priceEdit() } });
       const body: Record<string, unknown> = { listing_id: base.listingId };
       const labels: string[] = [];
       if (keys.includes("title")) { const p = titlePlan(); if (p.changed) { body.before_title = baseTitle; body.title = p.title; labels.push("ชื่อ"); } }
-      if (keys.includes("description")) { const p = descPlan(); if (p.changed) { body.before_description = baseDesc; body.description = p.html; labels.push("รายละเอียด"); } }
+      // รายละเอียด (+ รูปในรายละเอียด: ฝากกับ TikTok แบบ DESCRIPTION_IMAGE ก่อน แล้วต่อท้ายแทนรูปเดิม · ยังไม่แก้สินค้า)
+      let descHtml = keys.includes("description") ? base.sys.description : null;
+      if (keys.includes("desc_images") && base.sys.descImageRefs?.length) {
+        const srcs: string[] = [];
+        for (const ref of base.sys.descImageRefs) {
+          try { srcs.push(await ttsDescImageFromRef(live.accessToken, ref)); }
+          catch (e) { throw new Error(`ฝากรูปในรายละเอียดกับ TikTok ไม่สำเร็จ (${srcs.length + 1}/${base.sys.descImageRefs.length}): ${(e as Error).message} — ยังไม่ได้แก้อะไรบนร้าน`); }
+        }
+        descHtml = withDescImages(descHtml ?? baseDesc, srcs);
+        labels.push("รูปในรายละเอียด");
+      }
+      if (descHtml != null) {
+        const p = planTiktokDescription(baseDesc, descHtml);
+        if (p.errors.length) throw new Error(`รายละเอียด TikTok ไม่ผ่าน: ${p.errors.join(" · ")}`);
+        if (p.changed) { body.before_description = baseDesc; body.description = p.html; if (keys.includes("description")) labels.push("รายละเอียด"); }
+      }
       if (keys.includes("images")) { const p = mediaPlan(); if (p.imagesChanged) { body.media = { before_uris: baseUris, before_pkg: media.pkg, images: p.images, pkg: media.pkg }; labels.push("รูป"); } }
-      if (keys.includes("options") && groups.length) { const p = skuPlan(); if (p.namesChanged) { body.skus = { before_sig: tiktokSkuSignature(v.skus), primary: form0.primary, images: form0.images, names: optForm().names }; labels.push("ชื่อตัวเลือก"); } }
+      const sk = keys.filter((k) => k === "options" || k === "variant_images");
+      if (sk.length && groups.length) {
+        const p = skuPlan(sk);
+        if (p.namesChanged || p.imagesChanged) { const f = skuForm(sk); body.skus = { before_sig: tiktokSkuSignature(v.skus), primary: f.primary, images: f.images, names: f.names }; if (p.namesChanged) labels.push("ชื่อตัวเลือก"); if (p.imagesChanged) labels.push("รูปตัวเลือก"); }
+      }
       if (labels.length) calls.push({ url: "/api/tiktok-shop/listing-edit", label: labels.join(" + "), body });
       return calls;
     },
@@ -248,25 +333,46 @@ function lineCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, state: LineEditSt
     const rv = rawVars.find((x) => String(x.id ?? "") === id);
     return (Array.isArray(rv?.options) ? rv!.options as Record<string, unknown>[] : []).map((o) => String(o.value ?? "").trim()).filter(Boolean);
   };
+  const shopDescImgs = descImages(state.description);
   const shop: ShopValues = {
-    title: state.name, description: state.description, imageCount: state.images.length, imageSig: listSig(state.images), imageUrls: state.images,
-    variants: state.variants.map((x) => ({ code: x.sku, label: x.label, values: valuesOf(x.id), price: x.price, pay: x.pay })),
+    title: state.name, description: state.description, imageCount: state.images.length, imageSig: listSig(state.images), imageUrls: state.images, descImageUrls: shopDescImgs,
+    variants: state.variants.map((x) => ({ code: x.sku, label: x.label, values: valuesOf(x.id), price: x.price, pay: x.pay, image: x.imageUrl })),
   };
-  const merged = (keys: DriftKey[]): LineEditState => ({
-    ...state,
-    ...(keys.includes("title") && base.sys.title ? { name: base.sys.title } : {}),
-    ...(keys.includes("images") ? { images: base.sys.imageRefs } : {}),
-    ...(keys.includes("description") ? { description: base.sys.description } : {}),
-    ...(keys.includes("price") ? { variants: state.variants.map((x) => { const s = sysOf(base.sys, x.sku); return s?.price != null ? { ...x, price: s.price, pay: s.pay ?? s.price } : x; }) } : {}),
-  });
+  const merged = (keys: DriftKey[]): LineEditState => {
+    const vi = keys.includes("variant_images"), pr = keys.includes("price");
+    return {
+      ...state,
+      ...(keys.includes("title") && base.sys.title ? { name: base.sys.title } : {}),
+      ...(keys.includes("images") ? { images: base.sys.imageRefs } : {}),
+      ...(keys.includes("description") ? { description: base.sys.description } : {}),
+      ...(vi || pr ? {
+        variants: state.variants.map((x) => {
+          const s = sysOf(base.sys, x.sku); if (!s) return x;
+          return { ...x, ...(pr && s.price != null ? { price: s.price, pay: s.pay ?? s.price } : {}), ...(vi && s.image ? { imageUrl: s.image } : {}) };
+        }),
+      } : {}),
+    };
+  };
+  const displayOn = rawLine?.isDisplay !== false;
   return {
     ...base, shop,
-    cannot: (k) => (k === "options" ? OPT_CANNOT.line_shopping : errs(planLineEdit(state, merged([k])).errors)),
-    build: (keys) => {
-      const ek = keys.filter((k) => k !== "options");
+    cannot: (k) => k === "options" ? OPT_CANNOT.line_shopping
+      // LINE ใส่รูปในรายละเอียดได้ผ่านแกลเลอรีชั่วคราว → เฉพาะสินค้าที่ปิดขาย (route /api/line-shopping/desc-images)
+      : k === "desc_images" ? (displayOn ? "LINE: ใส่รูปในรายละเอียดได้เฉพาะสินค้าที่ปิดขาย (กฎของ LINE) — ปิดขายชั่วคราวในลิ้นชักสินค้าบนร้านก่อนแล้วค่อยส่ง" : null)
+      : errs(planLineEdit(state, merged([k])).errors),
+    build: async (keys) => {
+      const calls: DriftCall[] = [];
+      const ek = keys.filter((k) => k !== "options" && k !== "desc_images");
       const plan = planLineEdit(state, merged(ek));
-      if (!Object.keys(plan.fields).length && !plan.prices) return [];
-      return [{ url: "/api/line-shopping/listing-edit", label: ek.map((k) => (k === "title" ? "ชื่อ" : k === "images" ? "รูป" : k === "description" ? "รายละเอียด" : "ราคา")).join(" + "), body: { listing_id: base.listingId, edit: merged(ek) } }];
+      if (Object.keys(plan.fields).length || plan.prices || plan.variantDetails) {
+        calls.push({ url: "/api/line-shopping/listing-edit", label: ek.map((k) => (k === "title" ? "ชื่อ" : k === "images" ? "รูป" : k === "description" ? "รายละเอียด" : k === "variant_images" ? "รูปตัวเลือก" : "ราคา")).join(" + "), body: { listing_id: base.listingId, edit: merged(ek) } });
+      }
+      if (keys.includes("desc_images") && base.sys.descImageRefs?.length) {
+        // LINE ต่อรูปท้ายรายละเอียดได้อย่างเดียว (ลบรูปเดิมไม่ได้) → มีรูปเดิมอยู่ ต้องเขียนรายละเอียดใหม่ (ติ๊ก "รายละเอียด") ไปด้วย
+        if (shopDescImgs.length && !keys.includes("description")) throw new Error(`LINE ต่อรูปท้ายรายละเอียดได้อย่างเดียว ลบรูปเดิม ${shopDescImgs.length} รูปไม่ได้ — ติ๊ก "รายละเอียด" ด้วย เพื่อเขียนรายละเอียดใหม่ก่อนต่อรูป`);
+        calls.push({ url: "/api/line-shopping/desc-images", label: "รูปในรายละเอียด", body: { listing_id: base.listingId, image_keys: base.sys.descImageRefs.map((r) => (r.startsWith("r2:") ? r.slice(3) : r)).slice(0, 15) } });
+      }
+      return calls;
     },
   };
 }
@@ -286,11 +392,13 @@ async function loadCtx(admin: Admin, listingId: string, userId: string | null): 
   const sysR = await systemValues(admin, code, row.matched_parent_sku_id, userId);
   if (!sysR.ok) return { ok: false, error: `อ่านข้อมูลสินค้าในระบบไม่ได้: ${sysR.error}`, status: 400 };
   const sync = (row.raw?.sys_sync && typeof row.raw.sys_sync === "object" ? row.raw.sys_sync : null) as SysSync | null;
-  const [descGuard, title] = await Promise.all([
+  const [descGuard, title, descRefs] = await Promise.all([
     descriptionGuard(admin, code, row.matched_parent_sku_id, row.platform_id, sysR.descSrc),
     systemTitle(admin, code, row.matched_parent_sku_id, row.platform_id),
+    loadDescImageRefs(admin, row.matched_parent_sku_id),
   ]);
   sysR.sys.title = title.text;
+  sysR.sys.descImageRefs = descRefs;
   const base = { code, listingId, parentId: row.matched_parent_sku_id, sys: sysR.sys, sync, descGuard, titleHistory: title.history };
 
   if (code === "shopee") {
@@ -303,14 +411,14 @@ async function loadCtx(admin: Admin, listingId: string, userId: string | null): 
     if (!r.ok) return r;
     const v = lazadaListingView(r.item);
     if (!v) return { ok: false, error: "อ่านสินค้าจาก Lazada ไม่ได้", status: 502 };
-    return { ok: true, row, ctx: lazadaCtx(base, v) };
+    return { ok: true, row, ctx: lazadaCtx(base, v, { gateway: r.gateway, accessToken: r.accessToken }) };
   }
   if (code === "tiktok") {
     const r = await loadTtsListingLive(admin, listingId, userId);
     if (!r.ok) return r;
     const v = await ttsViewWithReview(r.accessToken, r.cipher, r.detail);
     if (!v) return { ok: false, error: "อ่านสินค้าจาก TikTok ไม่ได้", status: 502 };
-    return { ok: true, row, ctx: tiktokCtx(base, v) };
+    return { ok: true, row, ctx: tiktokCtx(base, v, { accessToken: r.accessToken }) };
   }
   // LINE — ไม่มีตัวดึงสดในลิ้นชัก: ดึงจาก LINE แล้วอัปเดตสำเนาในระบบ (route แก้สินค้า LINE ใช้สำเนานี้เป็น "ก่อนแก้")
   const pid = String(row.external_product_id ?? "").trim();
@@ -367,6 +475,21 @@ async function systemTitle(admin: Admin, code: string, parentId: string, platfor
 }
 const normTitle = (s: string | null | undefined) => String(s ?? "").replace(/\s+/g, " ").trim();
 
+/** เรื่องรูป (เทียบที่อยู่รูปตรง ๆ ไม่ได้) = "บอกไม่ได้" ก็ติ๊กส่งครั้งแรกได้ แล้วระบบจำชุดที่ส่งไว้เทียบรอบหน้า */
+const FIRST_SEND_KEYS: DriftKey[] = ["images", "desc_images", "variant_images"];
+
+/** รูปในรายละเอียดของ Parent SKU ("รูป Description" — asset_usages module parent_sku_description → assets.r2_key · ลำดับตามที่จัด) */
+async function loadDescImageRefs(admin: Admin, parentId: string): Promise<string[]> {
+  try {
+    const { data: us } = await admin.from("asset_usages").select("asset_id, sort_order").eq("module", "parent_sku_description").eq("record_id", parentId).order("sort_order", { ascending: true });
+    const ids = ((us ?? []) as { asset_id: string }[]).map((u) => u.asset_id).filter(Boolean);
+    if (!ids.length) return [];
+    const { data: as } = await admin.from("assets").select("id, r2_key").in("id", ids);
+    const keyOf = new Map(((as ?? []) as { id: string; r2_key: string | null }[]).map((a) => [a.id, String(a.r2_key ?? "").trim()]));
+    return [...new Set(ids.map((id) => keyOf.get(id) ?? "").filter(Boolean))].map((k) => `r2:${k}`);
+  } catch { return []; }
+}
+
 function itemsOf(ctx: Ctx): DriftItem[] {
   return compareAll(ctx.sys, ctx.shop, ctx.sync).map((raw) => {
     // รายละเอียดจากร่างที่แก้ไว้ → เตือน (ไม่ติ๊กไว้ให้) · ร่างมีข้อความของสินค้าอื่น → ห้ามส่ง
@@ -379,7 +502,9 @@ function itemsOf(ctx: Ctx): DriftItem[] {
     if (it.key === "description" && ctx.descGuard.block && (it.state === "diff" || it.state === "unknown")) return { ...it, sendable: false, cannot: ctx.descGuard.block };
     if (it.state !== "diff" && it.state !== "unknown") return { ...it, sendable: false, cannot: null };
     if (it.key === "images" && it.state === "unknown" && !ctx.sys.imageRefs.length) return { ...it, sendable: false, cannot: null };
-    if (it.state === "unknown" && it.key !== "images") return { ...it, sendable: false, cannot: null };
+    if (it.key === "desc_images" && it.state === "unknown" && !ctx.sys.descImageRefs?.length) return { ...it, sendable: false, cannot: null };
+    if (it.key === "variant_images" && it.state === "unknown" && !ctx.sys.variants.some((x) => x.image)) return { ...it, sendable: false, cannot: null };
+    if (it.state === "unknown" && !FIRST_SEND_KEYS.includes(it.key)) return { ...it, sendable: false, cannot: null };
     let cannot: string | null;
     try { cannot = ctx.cannot(it.key); } catch (e) { cannot = (e as Error).message || "ตรวจไม่ได้"; }
     return { ...it, sendable: !cannot, cannot };
@@ -388,7 +513,7 @@ function itemsOf(ctx: Ctx): DriftItem[] {
 
 async function saveCheck(admin: Admin, c: { listing_id: string; parent_sku_id: string | null; platform_code: string; items: DriftItem[] | null; issues: DriftKey[]; error: string | null }) {
   // รูป/ข้อความเต็มใช้แค่ตอนเปิดหน้าเทียบ (ตรวจสด) — ไม่จดลงตาราง กันตารางบวม
-  const items = c.items?.map(({ media: _m, text: _t, ...rest }) => rest) ?? null;
+  const items = c.items?.map(({ media: _m, text: _t, table: _tb, ...rest }) => rest) ?? null;
   await admin.from("platform_listing_drift").upsert({ ...c, items, checked_at: new Date().toISOString() }, { onConflict: "listing_id" });
 }
 
@@ -426,19 +551,26 @@ export async function buildDriftCalls(admin: Admin, listingId: string, keys: Dri
   const skipped: { key: DriftKey; reason: string }[] = [];
   const ok = keys.filter((k) => {
     const it = items.find((i) => i.key === k);
-    if (!it || (it.state !== "diff" && !(k === "images" && it.state === "unknown"))) { skipped.push({ key: k, reason: "ตรงกับระบบแล้ว" }); return false; }
+    if (!it || (it.state !== "diff" && !(FIRST_SEND_KEYS.includes(k) && it.state === "unknown"))) { skipped.push({ key: k, reason: "ตรงกับระบบแล้ว" }); return false; }
     if (!it.sendable) { skipped.push({ key: k, reason: it.cannot ?? "ส่งไม่ได้" }); return false; }
     return true;
   });
-  return { ok: true, calls: ok.length ? r.ctx.build(ok) : [], skipped, items };
+  try { return { ok: true, calls: ok.length ? await r.ctx.build(ok) : [], skipped, items }; }
+  catch (e) { return { ok: false, error: (e as Error).message || "ประกอบคำสั่งไม่สำเร็จ", status: 400 }; }
 }
 
 /** หลังส่งสำเร็จ: จำชุดรูปที่ส่งจากระบบ (ไว้เทียบรอบหน้า) แล้วตรวจใหม่ */
 export async function markDriftSent(admin: Admin, listingId: string, keys: DriftKey[], userId: string | null): Promise<DriftCheck | DriftFail> {
-  if (keys.includes("images")) {
+  if (keys.some((k) => FIRST_SEND_KEYS.includes(k))) {
     const r = await loadCtx(admin, listingId, userId);
     if (r.ok) {
-      const sync: SysSync = { ...(r.ctx.sync ?? {}), images_sys: listSig(r.ctx.sys.imageRefs), images_shop: r.ctx.shop.imageSig, images_at: new Date().toISOString() };
+      const c = r.ctx;
+      const sync: SysSync = {
+        ...(c.sync ?? {}),
+        ...(keys.includes("images") ? { images_sys: listSig(c.sys.imageRefs), images_shop: c.shop.imageSig, images_at: new Date().toISOString() } : {}),
+        ...(keys.includes("desc_images") ? { desc_images_sys: listSig(c.sys.descImageRefs ?? []), desc_images_shop: listSig(c.shop.descImageUrls ?? descImages(c.shop.description)) } : {}),
+        ...(keys.includes("variant_images") ? { vimg_sys: sysVariantImageSig(c.sys), vimg_shop: shopVariantImageSig(c.shop) } : {}),
+      };
       const { data } = await admin.from("platform_catalog_listings").select("raw").eq("id", listingId).maybeSingle();
       const raw = ((data as { raw?: Record<string, unknown> | null } | null)?.raw ?? {}) as Record<string, unknown>;
       await admin.from("platform_catalog_listings").update({ raw: { ...raw, sys_sync: sync } }).eq("id", listingId);

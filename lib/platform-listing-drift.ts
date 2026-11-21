@@ -15,9 +15,12 @@
  * ห้าม import "@/..." ที่นี่
  */
 
-export type DriftKey = "title" | "images" | "description" | "options" | "price";
-export const DRIFT_KEYS: readonly DriftKey[] = ["title", "images", "description", "options", "price"];
-export const DRIFT_LABEL: Record<DriftKey, string> = { title: "ชื่อสินค้า", images: "รูป", description: "รายละเอียด", options: "ชื่อตัวเลือก (สี/ไซซ์)", price: "ราคา" };
+export type DriftKey = "title" | "images" | "description" | "desc_images" | "options" | "variant_images" | "price";
+export const DRIFT_KEYS: readonly DriftKey[] = ["title", "images", "description", "desc_images", "options", "variant_images", "price"];
+export const DRIFT_LABEL: Record<DriftKey, string> = {
+  title: "ชื่อสินค้า", images: "รูป", description: "รายละเอียด", desc_images: "รูปในรายละเอียด",
+  options: "ชื่อตัวเลือก (สี/ไซซ์)", variant_images: "รูปตัวเลือก", price: "ราคา",
+};
 
 /** same = ตรง · diff = ไม่ตรง · unknown = บอกไม่ได้ (ไม่นับเป็นปัญหา) */
 export type DriftState = "same" | "diff" | "unknown";
@@ -38,19 +41,40 @@ export type DriftItem = {
   media?: { before: string[]; after: string[] };
   /** รายละเอียด: ข้อความเต็ม 2 ฝั่ง (HTML หรือข้อความล้วน · เฉพาะตอนตรวจสด · ไม่จดลงตาราง) */
   text?: { before: string; after: string };
+  /** ตัวเลือก: ตารางรายตัวเลือก รูป · สี · ราคา 2 ฝั่ง (เฉพาะตอนตรวจสด · ไม่จดลงตาราง) */
+  table?: VariantTableRow[];
+};
+export type VariantTableRow = {
+  code: string;
+  shop: { label: string; image: string | null; price: number | null; pay?: number | null; special?: number | null } | null;
+  sys: { label: string; image: string | null; price: number | null; pay?: number | null; special?: number | null };
+  nameDiff: boolean; priceDiff: boolean; imageMissing: boolean;
 };
 
 // ───────── ค่ากลาง 2 ฝั่ง ─────────
-export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null };
-export type SystemValues = { description: string; imageRefs: string[]; variants: SysVariant[]; /** ชื่อที่จะส่ง (lib/listing-title) */ title?: string };
-export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null };
-export type ShopValues = { /** ชื่อบนร้าน */ title?: string; description: string; imageCount: number; imageSig: string; variants: ShopVariant[]; /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[] };
+/** image = ref รูปตัวเลือกฝั่งระบบ ("r2:<key>") */
+export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null; image?: string | null };
+export type SystemValues = {
+  description: string; imageRefs: string[]; variants: SysVariant[]; /** ชื่อที่จะส่ง (lib/listing-title) */ title?: string;
+  /** รูปในรายละเอียด (รูป Description ของ Parent SKU · "r2:<key>") */ descImageRefs?: string[];
+};
+/** image = ลิงก์รูปตัวเลือกบนร้าน */
+export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null; image?: string | null };
+export type ShopValues = {
+  /** ชื่อบนร้าน */ title?: string; description: string; imageCount: number; imageSig: string; variants: ShopVariant[];
+  /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[];
+  /** ลิงก์รูปในรายละเอียดบนร้าน (ไม่ส่ง = หาจาก <img> ในรายละเอียด) */ descImageUrls?: string[];
+};
 /** ref รูปฝั่งระบบ → ลิงก์รูปย่อ ("r2:<key>" = คลังรูปเรา · http = ลิงก์ตรง) */
 export function refImageUrl(ref: string, w = 400): string {
   return ref.startsWith("r2:") ? `/api/r2-image?key=${encodeURIComponent(ref.slice(3))}&w=${w}` : ref;
 }
 /** จำตอนส่งรูปจากระบบสำเร็จ (raw.sys_sync) */
-export type SysSync = { images_sys?: string | null; images_shop?: string | null; images_at?: string | null };
+export type SysSync = {
+  images_sys?: string | null; images_shop?: string | null; images_at?: string | null;
+  desc_images_sys?: string | null; desc_images_shop?: string | null;
+  vimg_sys?: string | null; vimg_shop?: string | null;
+};
 
 // ───────── ตัวช่วย ─────────
 const ENT: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", "#39": "'" };
@@ -62,10 +86,13 @@ export function normText(s: string | null | undefined): string {
     .replace(/[\s​ ]+/g, "").toLowerCase();
 }
 /** ข้อความอ่านง่าย (ตัดแท็ก ย่อช่องว่าง) ไว้โชว์ · หัวข้อย่อย (<li>) ขึ้นต้นด้วย "• " ให้เห็นว่าเป็นข้อ ๆ */
-export function plainText(s: string | null | undefined): string {
-  return String(s ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<li\b[^>]*>/gi, "\n• ").replace(/<\/(p|li|div|h\d)>/gi, "\n").replace(/<[^>]*>/g, " ")
+export function plainText(s: string | null | undefined, opts: { keepBlank?: boolean } = {}): string {
+  const t = String(s ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<li\b[^>]*>/gi, "\n• ").replace(opts.keepBlank ? /<\/(p|div|h\d)>/gi : /<\/(p|li|div|h\d)>/gi, "\n").replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
-    .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n+/g, "\n").trim();
+    .replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n");
+  // keepBlank = เว้นบรรทัด/ย่อหน้าตามจริง (บรรทัดว่างติดกันหลายบรรทัดเหลือ 1) — หน้าเทียบก่อนส่ง (เจ้าของ 2026-11-21 "อยากให้ preview เว้นบรรทัด")
+  // หัวข้อย่อยต่อจากย่อหน้า (</p><ul><li>) ไม่ใช่บรรทัดว่างที่ตั้งใจเว้น
+  return (opts.keepBlank ? t.replace(/\n{3,}/g, "\n\n").replace(/\n\n• /g, "\n• ") : t.replace(/\n+/g, "\n")).trim();
 }
 const short = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n)}…` : s);
 /** ลายเซ็นสั้นของรายการ (FNV-1a 32 บิต) */
@@ -195,8 +222,66 @@ export function compareTitle(sys: SystemValues, shop: ShopValues): Omit<DriftIte
   return { key: "title", state: "diff", summary: "ชื่อไม่ตรง", before: a || "(ว่าง)", after: b };
 }
 
+/**
+ * รูปในรายละเอียด (รูป Description ของ Parent SKU) — ที่อยู่รูปบนร้านเทียบกับในระบบตรง ๆ ไม่ได้ (เหมือนรูปสินค้า)
+ * จำชุดที่ส่งจากระบบ (sys_sync.desc_images_*) · ยังไม่เคยส่ง = เทียบจำนวน
+ */
+export function compareDescImages(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot"> {
+  const refs = sys.descImageRefs ?? [];
+  const urls = shop.descImageUrls ?? descImages(shop.description);
+  const base = { key: "desc_images" as const, before: `${urls.length} รูป`, after: `${refs.length} รูป`, media: { before: urls, after: refs.map((r) => refImageUrl(r)) } };
+  if (!refs.length && !urls.length) return { ...base, state: "same", summary: "ไม่มีรูปในรายละเอียด" };
+  if (!refs.length) return { ...base, state: "unknown", summary: "ระบบไม่มีรูปในรายละเอียด", note: "เพิ่มรูป Description ที่ Parent SKU ถ้าอยากให้ทุกร้านมีรูปชุดเดียวกัน" };
+  const sysSig = listSig(refs), shopSig = listSig(urls);
+  if (sync?.desc_images_sys) {
+    const same = sync.desc_images_sys === sysSig && (!sync.desc_images_shop || sync.desc_images_shop === shopSig);
+    return same ? { ...base, state: "same", summary: "รูปในรายละเอียดตรง" } : { ...base, state: "diff", summary: "รูปในรายละเอียดเปลี่ยนหลังส่งล่าสุด" };
+  }
+  if (urls.length !== refs.length) return { ...base, state: "diff", summary: `รูปในรายละเอียด: บนร้าน ${urls.length} · ระบบ ${refs.length}`, note: "ยังไม่เคยส่งรูปในรายละเอียดจากระบบ (เทียบได้แค่จำนวน)" };
+  return { ...base, state: "unknown", summary: "ยังไม่เคยส่งรูปในรายละเอียดจากระบบ", note: "จำนวนรูปเท่ากัน แต่ยังบอกไม่ได้ว่าเป็นชุดเดียวกัน" };
+}
+
+/** ลายเซ็นรูปตัวเลือกฝั่งระบบ / ฝั่งร้าน (รหัส:รูป ตามลำดับรหัส) */
+export const sysVariantImageSig = (sys: SystemValues) => listSig(sys.variants.filter((v) => v.image).map((v) => `${v.code.trim().toUpperCase()}:${v.image}`).sort());
+export const shopVariantImageSig = (shop: ShopValues) => listSig(shop.variants.filter((v) => v.image).map((v) => `${String(v.code ?? "").trim().toUpperCase()}:${v.image}`).sort());
+/**
+ * รูปตัวเลือก — เทียบที่อยู่รูปตรง ๆ ไม่ได้ · จำชุดที่ส่งจากระบบ (sys_sync.vimg_*)
+ * ยังไม่เคยส่ง: ตัวเลือกบนร้านที่ "ไม่มีรูป" ทั้งที่ระบบมี = ไม่ตรง · ไม่งั้นบอกไม่ได้
+ */
+export function compareVariantImages(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot"> {
+  const withImg = sys.variants.filter((v) => v.image && shopVariantOf(shop.variants, v.code));
+  const base = { key: "variant_images" as const, before: `${shop.variants.filter((v) => v.image).length} รูป`, after: `${withImg.length} รูป` };
+  if (!withImg.length) return { ...base, state: "unknown", summary: "ระบบไม่มีรูปตัวเลือก" };
+  if (sync?.vimg_sys) {
+    const same = sync.vimg_sys === sysVariantImageSig(sys) && (!sync.vimg_shop || sync.vimg_shop === shopVariantImageSig(shop));
+    return same ? { ...base, state: "same", summary: "รูปตัวเลือกตรง" } : { ...base, state: "diff", summary: "รูปตัวเลือกเปลี่ยนหลังส่งล่าสุด" };
+  }
+  const missing = withImg.filter((v) => !shopVariantOf(shop.variants, v.code)?.image);
+  if (missing.length) return { ...base, state: "diff", summary: `ตัวเลือกบนร้านไม่มีรูป ${missing.length}`, rows: missing.map((v) => ({ label: v.code, before: "(ไม่มีรูป)", after: "รูปตามระบบ" })) };
+  return { ...base, state: "unknown", summary: "ยังไม่เคยส่งรูปตัวเลือกจากระบบ", note: "ดูรูปเทียบในตารางตัวเลือก — กดส่งครั้งแรกแล้วระบบจะจำไว้เทียบรอบหน้า" };
+}
+
+/** ตารางตัวเลือก รูป · สี · ราคา 2 ฝั่ง (เรียงตามระบบ) — แสดงใต้เรื่อง "ชื่อตัวเลือก" */
+export function variantTable(sys: SystemValues, shop: ShopValues): VariantTableRow[] {
+  const bad = new Set(optionRows(sys, shop).map((r) => r.label));
+  const badPrice = new Set(priceRows(sys, shop).map((r) => r.label));
+  return sys.variants.map((v) => {
+    const sv = shopVariantOf(shop.variants, v.code);
+    return {
+      code: v.code,
+      shop: sv ? { label: sv.values?.length ? sv.values.join(" · ") : sv.label, image: sv.image ?? null, price: sv.price, pay: sv.pay, special: sv.special } : null,
+      sys: { label: v.values.filter((x) => x.trim()).join(" · ") || v.code, image: v.image ? refImageUrl(v.image, 200) : null, price: v.price, pay: v.pay, special: v.special },
+      nameDiff: bad.has(v.code), priceDiff: badPrice.has(v.code), imageMissing: !!v.image && !!sv && !sv.image,
+    };
+  });
+}
+
 export function compareAll(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot">[] {
-  return [compareTitle(sys, shop), compareImages(sys, shop, sync), compareDescription(sys, shop), compareOptions(sys, shop), comparePrice(sys, shop)];
+  const options = compareOptions(sys, shop);
+  return [
+    compareTitle(sys, shop), compareImages(sys, shop, sync), compareDescription(sys, shop), compareDescImages(sys, shop, sync),
+    { ...options, table: variantTable(sys, shop) }, compareVariantImages(sys, shop, sync), comparePrice(sys, shop),
+  ];
 }
 
 /** เรื่องที่ไม่ตรง (ป้าย) */
@@ -207,8 +292,8 @@ export function driftBadgeText(issues: readonly DriftKey[]): string {
 }
 // ───────── เทียบรายละเอียดทีละบรรทัด (หน้าเทียบก่อนส่ง) ─────────
 export type DiffLine = { text: string; changed: boolean };
-/** แบ่งเป็นบรรทัดอ่านง่าย (ตัดแท็ก · ตัดบรรทัดว่าง) */
-export const descLines = (s: string | null | undefined): string[] => plainText(s).split(/\n/).map((l) => l.trim()).filter(Boolean);
+/** แบ่งเป็นบรรทัดอ่านง่าย (ตัดแท็ก) · เว้นบรรทัด/ย่อหน้าตามจริง ("" = บรรทัดว่าง · ว่างติดกันเหลือ 1) */
+export const descLines = (s: string | null | undefined): string[] => plainText(s, { keepBlank: true }).split(/\n/).map((l) => l.trim());
 /**
  * เทียบบรรทัดซ้าย (บนร้าน) กับขวา (หลังส่ง) — LCS ตามข้อความล้วน (ไม่สนช่องว่าง/ตัวพิมพ์)
  * left.changed = บรรทัดนี้จะหายจากร้าน · right.changed = บรรทัดนี้จะเพิ่มเข้าไป
@@ -226,8 +311,9 @@ export function lineDiff(a: string[], b: string[]): { left: DiffLine[]; right: D
     if (na[i] === nb[j]) { keepA.add(i); keepB.add(j); i++; j++; }
     else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
   }
-  const left = a.map((t, i) => ({ text: t, changed: !keepA.has(i) }));
-  const right = b.map((t, j) => ({ text: t, changed: !keepB.has(j) }));
+  // บรรทัดว่าง = เว้นวรรคเฉย ๆ ไม่นับว่าต่าง
+  const left = a.map((t, i) => ({ text: t, changed: !!t.trim() && !keepA.has(i) }));
+  const right = b.map((t, j) => ({ text: t, changed: !!t.trim() && !keepB.has(j) }));
   return { left, right, changes: left.filter((l) => l.changed).length + right.filter((r) => r.changed).length };
 }
 /** ลิงก์รูปในรายละเอียด (HTML) */

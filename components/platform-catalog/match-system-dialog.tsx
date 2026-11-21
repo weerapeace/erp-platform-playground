@@ -20,7 +20,7 @@ import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { PushOpenGearButton, usePushOpen } from "@/components/push-open";
 import { apiFetch } from "@/lib/api";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
-import { DRIFT_KEYS, DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey } from "@/lib/platform-listing-drift";
+import { DRIFT_KEYS, DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey, type VariantTableRow } from "@/lib/platform-listing-drift";
 
 type Check = { listing_id: string; platform_code: string; items: DriftItem[]; issues: DriftKey[]; checked_at: string; external_product_id?: string | null; shop_ref?: string | null; listing_status?: string | null };
 /** ชื่อร้านสั้น (แจ้งผลของตัวเปิดหน้าให้เช็ก) */
@@ -32,7 +32,9 @@ const REVIEW_NOTE: Record<string, string> = {
   tiktok: "TikTok: ส่งชื่อ/รูป/รายละเอียด/ชื่อตัวเลือก แล้ว TikTok ต้องตรวจใหม่ (ปกติไม่เกิน 1 วัน) ระหว่างนั้นร้านยังขายของเดิม · ราคามีผลทันที · ส่งหลายเรื่องพร้อมกัน = ตรวจรอบเดียว",
   lazada: "Lazada: แก้ชื่อ/รูป/รายละเอียดแล้วอาจต้องรอ Lazada ตรวจ (Pending QC) · ราคามีผลทันที",
 };
-const canTick = (it: DriftItem) => it.sendable && (it.state === "diff" || (it.key === "images" && it.state === "unknown"));
+/** เรื่องรูป: "บอกไม่ได้" ก็ติ๊กส่งครั้งแรกได้ (ระบบจำชุดที่ส่งไว้เทียบรอบหน้า) */
+const FIRST_SEND: DriftKey[] = ["images", "desc_images", "variant_images"];
+const canTick = (it: DriftItem) => it.sendable && (it.state === "diff" || (FIRST_SEND.includes(it.key) && it.state === "unknown"));
 
 export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClose, onChanged, onSent, footerExtra }: {
   open: boolean;
@@ -215,15 +217,19 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                         </div>
                       )}
                       {/* รูป/รายละเอียดที่ตรงอยู่แล้ว = ซ่อนรายละเอียดไว้ กดดูได้ */}
-                      {it.state !== "diff" && ((it.key === "images" && (it.media?.before.length || it.media?.after.length)) || (it.key === "description" && it.text)) ? (
+                      {it.state !== "diff" && (((it.key === "images" || it.key === "desc_images") && (it.media?.before.length || it.media?.after.length)) || (it.key === "description" && it.text) || (it.key === "options" && it.table?.length)) ? (
                         <button type="button" className="mt-1 block text-[11px] text-violet-700 hover:underline" onClick={() => setOpenRows((s) => { const n = new Set(s); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; })}>
-                          {openRows.has(it.key) ? "ซ่อน" : it.key === "images" ? "ดูรูป" : "ดูรายละเอียดเต็ม"}
+                          {openRows.has(it.key) ? "ซ่อน" : it.key === "description" ? "ดูรายละเอียดเต็ม" : it.key === "options" ? "ดูตารางตัวเลือก" : "ดูรูป"}
                         </button>
                       ) : null}
                     </td>
                   </tr>
-                  {(it.state === "diff" || openRows.has(it.key)) && it.key === "images" && it.media && (it.media.before.length > 0 || it.media.after.length > 0) && (
+                  {(it.state === "diff" || openRows.has(it.key)) && (it.key === "images" || it.key === "desc_images") && it.media && (it.media.before.length > 0 || it.media.after.length > 0) && (
                     <tr><td /><td colSpan={3} className="px-2 pb-3"><ImagesCompare before={it.media.before} after={it.media.after} shopName={shopName} /></td></tr>
+                  )}
+                  {/* ตารางตัวเลือก รูป · สี · ราคา 2 ฝั่ง (เจ้าของ 2026-11-21 ข้อ 3) — โชว์เมื่อชื่อ/รูป/ราคาตัวเลือกไม่ตรง หรือกดดู */}
+                  {it.key === "options" && it.table && it.table.length > 0 && (openRows.has("options") || items.some((x) => (x.key === "options" || x.key === "variant_images" || x.key === "price") && x.state === "diff")) && (
+                    <tr><td /><td colSpan={3} className="px-2 pb-3"><VariantTable rows={it.table} shopName={shopName} /></td></tr>
                   )}
                   {(it.state === "diff" || openRows.has(it.key)) && it.key === "description" && it.text && (
                     <tr><td /><td colSpan={3} className="px-2 pb-3"><DescCompare before={it.text.before} after={it.text.after} /></td></tr>
@@ -304,8 +310,10 @@ function DescCompare({ before, after }: { before: string; after: string }) {
     : [["side", "วางเทียบ"], ["diff", "เฉพาะที่ต่าง"], ["look", "แบบที่ขึ้นบนร้าน"]];
   const lines = (ls: { text: string; changed: boolean }[], tone: "del" | "add") => (
     <div className="max-h-80 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-[12px] leading-relaxed">
-      {ls.length ? ls.map((l, i) => (
-        <div key={i} className={l.changed ? (tone === "del" ? "bg-rose-50 text-rose-800 line-through decoration-rose-300" : "bg-emerald-50 text-emerald-800") : "text-slate-700"}>{l.text}</div>
+      {ls.some((l) => l.text) ? ls.map((l, i) => (
+        // บรรทัดว่าง = เว้นบรรทัดจริง (เจ้าของ 2026-11-21 "อยากให้ preview เว้นบรรทัด")
+        l.text ? <div key={i} className={l.changed ? (tone === "del" ? "bg-rose-50 text-rose-800 line-through decoration-rose-300" : "bg-emerald-50 text-emerald-800") : "text-slate-700"}>{l.text}</div>
+          : <div key={i} className="h-3" aria-hidden />
       )) : <div className="text-slate-400">(ว่าง)</div>}
     </div>
   );
@@ -358,6 +366,68 @@ function DescCompare({ before, after }: { before: string; after: string }) {
           {look(lookSide === "sys" ? after : before)}
         </div>
       )}
+    </div>
+  );
+}
+
+// ───────── ตัวเลือก: ตารางรูป · สี · ราคา 2 ฝั่ง (เจ้าของเลือก 2026-11-21 ข้อ 3) ─────────
+const bahtTxt = (n: number | null | undefined) => (n == null ? "—" : `฿${Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 })}`);
+function priceCell(x: { price: number | null; pay?: number | null; special?: number | null }) {
+  const pay = x.pay ?? x.special;
+  return pay != null && x.price != null && pay < x.price - 0.005
+    ? <><span>{bahtTxt(pay)}</span> <span className="text-[11px] text-slate-400 line-through">{bahtTxt(x.price)}</span></>
+    : <span>{bahtTxt(x.price)}</span>;
+}
+function VariantTable({ rows, shopName }: { rows: VariantTableRow[]; shopName: string }) {
+  const [idx, setIdx] = useState(-1);
+  // รูปทั้งหมดในตาราง (บนร้าน → หลังส่ง ต่อแถว) ไว้เปิดดูรูปใหญ่
+  const pics: LightboxImage[] = useMemo(() => rows.flatMap((r) => [
+    ...(r.shop?.image ? [{ url: r.shop.image, label: `${r.code} · บน ${shopName} ตอนนี้` }] : []),
+    ...(r.sys.image ? [{ url: r.sys.image, label: `${r.code} · หลังส่ง (ตามระบบ)` }] : []),
+  ]), [rows, shopName]);
+  const open = (url: string | null | undefined) => { if (url) setIdx(pics.findIndex((p) => p.url === url)); };
+  const thumb = (url: string | null | undefined, warn = false) => url
+    // eslint-disable-next-line @next/next/no-img-element
+    ? <button type="button" onClick={() => open(url)} className={`h-10 w-10 shrink-0 overflow-hidden rounded border bg-slate-50 cursor-zoom-in ${warn ? "border-amber-400" : "border-slate-200"}`}><img src={url} alt="" loading="lazy" className="h-full w-full object-cover" /></button>
+    : <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded border text-[10px] ${warn ? "border-amber-300 bg-amber-50 text-amber-700" : "border-dashed border-slate-200 text-slate-400"}`}>ไม่มีรูป</span>;
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[30rem] text-left text-xs">
+          <thead className="text-[11px] text-slate-500">
+            <tr><th className="px-1.5 py-1">SKU</th><th className="px-1.5 py-1">บน {shopName} ตอนนี้</th><th className="px-1.5 py-1">หลังส่ง (ตามระบบ)</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.code} className="align-middle">
+                <td className="px-1.5 py-1.5 font-mono text-[11px] text-slate-600">{r.code}</td>
+                <td className="px-1.5 py-1.5">
+                  {r.shop ? (
+                    <div className="flex items-center gap-2">
+                      {thumb(r.shop.image, r.imageMissing)}
+                      <div className="min-w-0">
+                        <div className={r.nameDiff ? "rounded bg-rose-50 px-1 text-rose-800 line-through decoration-rose-300" : "text-slate-700"}>{r.shop.label || "—"}</div>
+                        <div className={r.priceDiff ? "rounded bg-rose-50 px-1 text-rose-800" : "text-slate-500"}>{priceCell(r.shop)}</div>
+                      </div>
+                    </div>
+                  ) : <span className="text-[11px] text-slate-400">ไม่มีตัวเลือกนี้บนร้าน</span>}
+                </td>
+                <td className="px-1.5 py-1.5">
+                  <div className="flex items-center gap-2">
+                    {thumb(r.sys.image)}
+                    <div className="min-w-0">
+                      <div className={r.nameDiff ? "rounded bg-emerald-50 px-1 text-emerald-800" : "text-slate-700"}>{r.sys.label}</div>
+                      <div className={r.priceDiff ? "rounded bg-emerald-50 px-1 text-emerald-800" : "text-slate-500"}>{priceCell(r.sys)}</div>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-1 text-[11px] text-slate-500">แดง = จะหาย/เปลี่ยน · เขียว = หลังส่ง · กรอบส้ม = ตัวเลือกบนร้านยังไม่มีรูป · กดรูปเพื่อดูใหญ่ · ส่งแยกเรื่องได้ที่แถว "ชื่อตัวเลือก" "รูปตัวเลือก" "ราคา"</div>
+      <ImageLightbox images={pics} index={idx} onClose={() => setIdx(-1)} onIndex={setIdx} />
     </div>
   );
 }
