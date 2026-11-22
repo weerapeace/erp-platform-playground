@@ -96,7 +96,7 @@ export default function TaskBriefCanvas({ taskId, brandId = null, taskTitle, hei
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[k.parent, k.sku, k.content, k.section]} />
+        <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[k.parent, k.sku, k.content, k.section, k.cardStyle]} />
         {picked.length > 0 && (
           <button type="button" onClick={() => void createFromSelection()} disabled={busy}
             className="h-9 px-3 inline-flex items-center gap-1 text-sm font-medium rounded-lg text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">

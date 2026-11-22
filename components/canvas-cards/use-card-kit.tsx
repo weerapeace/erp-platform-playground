@@ -19,10 +19,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import dynamic from "next/dynamic";
 import { useT, useLang } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { ERPModal } from "@/components/modal";
 import { ContentCreateModal, type ContentCreatePreset, type ContentCreatedResult } from "@/app/tasks/content/content-create-modal";
 import { useContentRefs } from "./use-content-refs";
+import { CardStyleModal, type SavedCardPreset } from "./card-style-modal";
+import { CARD_STYLE_PREF, CARD_STYLE_PRESETS_PREF, cardStyleTeamKey, defaultCardStyle, normalizeCardStyleMap, styledTexts, type CardStyleMap, type CardValues, type StyledCardType, valuesFromSnapshot } from "./card-style";
+import { briefLines } from "./skeletons";
 import { usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -85,7 +89,7 @@ const ASSET_FIELD_OPTS: { key: AssetFieldKey; labelTh: string; labelEn: string }
 /** ชนิดการ์ดที่ชุดนี้จัดการ (ดับเบิลคลิกแล้วเปิดป๊อปให้) */
 export const CARD_KIT_KINDS = ["sku", "parent_sku", "marketing_sku", "task", "content", "trend", "design_sheet", "asset", "folder", "table"] as const;
 
-export type CardKitItemKey = "sku" | "parent" | "marketing" | "task" | "content" | "trend" | "designSheet" | "section" | "table" | "folder" | "asset" | "cards";
+export type CardKitItemKey = "sku" | "parent" | "marketing" | "task" | "content" | "trend" | "designSheet" | "section" | "table" | "folder" | "asset" | "cards" | "cardStyle";
 
 export type CardKitOptions = {
   sketchRef: MutableRefObject<CanvasSketchControls | null>;
@@ -234,6 +238,21 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
   // 🔗 Ref ของคอนเทนต์ ↔ กระดาน (เชื่อม/ลากเส้น/วางจาก drawer/ถามตอนลบ) — ซิงก์การ์ดหลังเปลี่ยน (ref กันลำดับประกาศ)
   const syncContentRef = useRef<() => Promise<void>>(async () => {});
+  // 🎨 ตั้งค่าการ์ด (ของฉัน + ค่าของกระดาน) — ./card-style · ป๊อป ./card-style-modal
+  const boardKey = campaign ? `campaign:${campaign.id}` : task ? `task:${task.id}` : null;
+  const [styleMine, setStyleMine] = useState<CardStyleMap>({});
+  const [styleTeam, setStyleTeam] = useState<CardStyleMap>({});
+  const [stylePresets, setStylePresets] = useState<SavedCardPreset[]>([]);
+  const [styleOpen, setStyleOpen] = useState(false);
+  const canTeamStyle = usePermission("products.edit") && !!boardKey;
+  const styleRef = useRef<{ mine: CardStyleMap; team: CardStyleMap }>({ mine: {}, team: {} });
+  styleRef.current = { mine: styleMine, team: styleTeam };
+  const cardValuesRef = useRef<Map<string, CardValues>>(new Map());   // ค่าล่าสุดจากรอบซิงก์ (คอนเทนต์/งาน) — key = kind:id[:platform]
+  useEffect(() => {
+    apiFetch(`/api/user-prefs?key=${CARD_STYLE_PREF}`).then((r) => r.json()).then((j) => setStyleMine(normalizeCardStyleMap(j?.value))).catch(() => {});
+    apiFetch(`/api/user-prefs?key=${CARD_STYLE_PRESETS_PREF}`).then((r) => r.json()).then((j) => { if (Array.isArray(j?.value)) setStylePresets(j.value as SavedCardPreset[]); }).catch(() => {});
+    if (boardKey) apiFetch(`/api/ui-config?key=${encodeURIComponent(cardStyleTeamKey(boardKey))}`).then((r) => r.json()).then((j) => setStyleTeam(normalizeCardStyleMap(j?.value))).catch(() => {});
+  }, [boardKey]);
   const { onSelection: refsOnSelection, placeMissing: refsPlaceMissing, onContentChange: refsOnContentChange, bar: refsBar } = useContentRefs(sketchRef, { pushToast, t, onChanged: () => { void syncContentRef.current(); } });
   pushToastRef.current = pushToast as (v: "success" | "error" | "info", m: string) => void;
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
@@ -410,7 +429,8 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
         ? shown.map((s) => `${(s.status === "approved" || s.status === "posted" || s.status === "done") ? "☑" : "☐"} ${s.title}`).join("\n") + (subs.length > 6 ? `\n… ${tt("อีก", "+")} ${subs.length - 6}` : "")
         : `— ${tt("ยังไม่มีงานย่อย", "No subtasks yet")} —`;
       const text = `✅ ${data.title ?? ""}\n${data.task_no ?? ""}\n\n${tt("งานย่อย", "Subtasks")} (${subs.length})\n${subLines}`;
-      return { text, data: { subtasks: subs.map((s) => ({ title: s.title })) } };
+      cardValuesRef.current.set(`task:${id}`, { title: `✅ ${data.title ?? ""}`, no: String(data.task_no ?? ""), count: `${tt("งานย่อย", "Subtasks")} (${subs.length})`, subs: subs.length ? subs.map((s) => `${(s.status === "approved" || s.status === "posted" || s.status === "done") ? "☑" : "☐"} ${s.title}`).join("\n") : "" });
+      return { ...(data.styled ? {} : { text }), data: { subtasks: subs.map((s) => ({ title: s.title })) } };
     });
   }, [sketchRef]);
   // ③ ซิงค์การ์ดคอนเทนต์ (ข้อความ: แคปชั่นย่อ/เวลาโพสต์/สถานะ) — สะท้อนการแก้ใน Drawer
@@ -421,6 +441,11 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       try {
         const c = await getContent(id);
         refsByCid.set(id, { links: c.ref_links ?? [], images: c.ref_image_keys ?? [] });
+        const refN = (c.ref_links?.length ?? 0) + (c.ref_image_keys?.length ?? 0);
+        const cv: CardValues = { title: `📱 ${c.title ?? ""}`, no: [c.content_no, c.status].filter(Boolean).join(" · "), sched: c.scheduled_at ? `🗓 ${String(c.scheduled_at).slice(0, 16).replace("T", " ")}` : "",
+          plat: (c.platforms ?? []).join(" · "), brief: briefLines(c.brief, 20).join("\n"), ref: refN ? `🔗 Ref ${refN}` : "", cap: c.captions[0]?.caption ?? "" };
+        cardValuesRef.current.set(`content:${id}`, cv);
+        if (data.platform) cardValuesRef.current.set(`content:${id}:${data.platform}`, { ...cv, plat: String(data.platform), cap: c.captions.find((x) => x.platform === data.platform)?.caption ?? "" });
         const cover = c.cover_image_url ?? null;   // รูปหน้าปก (สื่อแนบ/SKU/งาน) — โผล่บนการ์ด + อัปเดตเมื่อแนบรูปทีหลัง
         const plat = data.platform as string | undefined;
         if (plat) {
@@ -428,9 +453,9 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
           // รูปที่เลือกของแพลตฟอร์มนี้ (เรียง: [0]=รูปใหญ่, ที่เหลือ=รูปเล็กแถวล่าง) · ไม่เลือก = [] → เอารูปออก
           const images = (c.platform_images?.[plat] ?? []).map((k) => r2ImageUrl(k, 480)).filter(Boolean) as string[];
           const ps = c.post_status?.[plat] ?? null;   // สถานะโพสต์ต่อแพลตฟอร์ม → โชว์เด่น + สีขอบ
-          return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap, ps), data: { title: c.title, platform: plat }, images, stroke: postStatusStyle(ps).stroke };
+          return { ...(data.styled ? {} : { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap, ps) }), data: { title: c.title, platform: plat }, images, stroke: postStatusStyle(ps).stroke };
         }
-        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null, brief: c.brief ?? null, refCount: (c.ref_links?.length ?? 0) + (c.ref_image_keys?.length ?? 0) }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
+        return { ...(data.styled ? {} : { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null, brief: c.brief ?? null, refCount: refN }) }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }
     });
     // Ref ที่เพิ่มใน drawer แต่ยังไม่อยู่บนกระดาน → วางข้างการ์ด + เส้นเชื่อม
@@ -448,7 +473,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       if (kind !== "design_sheet" || !id) return null;
       const s = map.get(id); if (!s) return null;
       return {
-        text: dsCardText(s, dsLabel(s.status)),
+        ...(sketchStyled(id) ? {} : { text: dsCardText(s, dsLabel(s.status)) }),
         data: { code: s.code, name: s.name, brand_name: s.brand_name, status: s.status },
         imageUrl: s.cover_url ? (withImageWidth(s.cover_url, 480) ?? s.cover_url) : null,
         stroke: dsColor(s.status),
@@ -467,7 +492,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       if (kind !== "trend" || !tid) return null;
       const x = map.get(tid); if (!x) return null;
       return {
-        text: trendCardText(x),
+        ...(sketchStyled(tid) ? {} : { text: trendCardText(x) }),
         data: { title: x.title, heat: x.heat ?? null },
         imageUrl: x.cover_url ? (withImageWidth(x.cover_url, 560) ?? x.cover_url) : null,
       };
@@ -542,8 +567,61 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const boardReadyRef = useRef(false);
   useEffect(() => { if (boardReadyRef.current) void syncDesignSheetCards(); }, [dsMeta, syncDesignSheetCards]);
 
-  const onBoardReady = useCallback(() => { boardReadyRef.current = true; void syncTaskCards(); void syncContentCards(); void syncDesignSheetCards(); void syncTrendCards(); void placePendingDesignSheets(); void placePendingTrends(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, syncTrendCards, placePendingDesignSheets, placePendingTrends]);
-  const syncAll = useCallback(async () => { await syncTaskCards(); await syncContentCards(); await syncDesignSheetCards(); await syncTrendCards(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, syncTrendCards]);
+  // 🎨 วาดข้อความการ์ดตามตั้งค่า (เฉพาะใบที่ค่าเปลี่ยน — เทียบ styleSig) · ไม่มีตั้งค่าแล้วแต่เคยตั้ง = กลับเป็นข้อความเดิมก้อนเดียว
+  const restyleCards = useCallback(async () => {
+    const sk = sketchRef.current; if (!sk) return;
+    const { mine, team } = styleRef.current;
+    await sk.setCardTexts(({ kind, id, data }) => {
+      const type = kind as StyledCardType;
+      if (!["content", "task", "sku", "parent_sku", "trend", "design_sheet"].includes(type)) return null;
+      const style = mine[type] ?? team[type] ?? null;
+      const v = cardValuesRef.current.get(`${kind}:${id}${data.platform ? `:${data.platform}` : ""}`) ?? valuesFromSnapshot(type, data);
+      if (!style) {
+        if (!data.styled) return null;
+        const def = styledTexts(defaultCardStyle(type), v);
+        return { texts: [{ text: def.map((x) => x.text).join("\n"), fontSize: 14, fontFamily: 5, strokeColor: String(def[0]?.strokeColor ?? "#1e293b"), role: "all" }], flag: { styled: false, styleSig: null } };
+      }
+      const sig = JSON.stringify([style, v]);
+      if (data.styled && data.styleSig === sig) return null;
+      const texts = styledTexts(style, v).map((x) => ({ ...x, role: x.key }));
+      return { texts, align: style.align, gap: style.gap, width: style.width, ...(style.bg === "plain" ? { bg: "#ffffff", stroke: "#94a3b8" } : {}), flag: { styled: true, styleSig: sig } };
+    });
+  }, [sketchRef]);
+  // การ์ดที่เพิ่งวาง/เปลี่ยน → ทำหน้าตาตามตั้งค่า (รอนิ่ง 0.8 วิ · เฉพาะเมื่อมีตั้งค่า · ใบที่เหมือนเดิมข้าม)
+  const restyleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onKitContentChange = useCallback((els: Record<string, unknown>[]) => {
+    refsOnContentChange(els);
+    const { mine, team } = styleRef.current;
+    if (!Object.keys(mine).length && !Object.keys(team).length) return;
+    if (restyleTimer.current) clearTimeout(restyleTimer.current);
+    restyleTimer.current = setTimeout(() => { void restyleCards(); }, 800);
+  }, [refsOnContentChange, restyleCards]);
+  const saveCardStyle = async (scope: "mine" | "team", map: CardStyleMap) => {
+    const prev = scope === "mine" ? styleMine : styleTeam;
+    const write = async (m: CardStyleMap) => {
+      if (scope === "mine") { await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: CARD_STYLE_PREF, value: m }) }); setStyleMine(m); styleRef.current = { ...styleRef.current, mine: m }; }
+      else {
+        const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: cardStyleTeamKey(boardKey!), value: m }) });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || t("บันทึกค่าของกระดานไม่สำเร็จ", "Couldn't save the board setting"));
+        setStyleTeam(m); styleRef.current = { ...styleRef.current, team: m };
+      }
+      await restyleCards();
+    };
+    try {
+      await write(map);
+      undoToast.undo(t("อัปเดตหน้าตาการ์ดแล้ว", "Card style updated"), async () => { try { await write(prev); } catch (e) { pushToast("error", (e as Error).message); } });
+    } catch (e) { pushToast("error", (e as Error).message); throw e; }
+  };
+  const saveCardPresets = async (list: SavedCardPreset[]) => {
+    setStylePresets(list);
+    await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: CARD_STYLE_PRESETS_PREF, value: list }) }).catch(() => {});
+  };
+  // การ์ดใบนี้ตั้งค่าหน้าตาไว้แล้ว (ซิงก์ไม่ต้องทับข้อความ)
+  function sketchStyled(id: string | null | undefined): boolean {
+    return !!id && (sketchRef.current?.listCards() ?? []).some((c) => String(c.data.id) === String(id) && !!c.data.styled);
+  }
+  const onBoardReady = useCallback(() => { boardReadyRef.current = true; void Promise.all([syncTaskCards(), syncContentCards(), syncDesignSheetCards(), syncTrendCards()]).then(() => restyleCards()); void placePendingDesignSheets(); void placePendingTrends(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, syncTrendCards, placePendingDesignSheets, placePendingTrends, restyleCards]);
+  const syncAll = useCallback(async () => { await syncTaskCards(); await syncContentCards(); await syncDesignSheetCards(); await syncTrendCards(); await restyleCards(); }, [syncTaskCards, syncContentCards, syncDesignSheetCards, syncTrendCards, restyleCards]);
   // สลับภาษา → รีเฟรชข้อความบนการ์ด (การ์ดเป็น snapshot · ข้าม mount แรก ให้ onReady จัดการ)
   const { lang } = useLang();
   const langMountRef = useRef(false);
@@ -562,6 +640,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
     folder: { icon: "📁", label: t("โฟลเดอร์", "Folder"), hint: t("การ์ดลัดเปิดโฟลเดอร์ในเครื่อง", "Shortcut to a local folder"), onClick: () => setFolderOpen(true) },
     asset: { icon: "🖼️", label: t("รูปจากคลัง", "Library image"), hint: t("รูปจากคลังไฟล์กลาง", "From the asset library"), onClick: () => { setAssetSel([]); setAssetOpen(true); } },
     cards: { icon: "🗂️", label: t("การ์ดบนกระดาน", "Cards on board"), hint: t("รายการการ์ดทั้งหมด", "List every card"), onClick: openCards },
+    cardStyle: { icon: <Icon value="i:palette" />, label: t("ตั้งค่าการ์ด", "Card settings"), hint: t("ฟอนต์ ขนาด สี บรรทัดที่โชว์ ต่อชนิดการ์ด", "Fonts, sizes, colors and lines per card type"), onClick: () => setStyleOpen(true) },
   };
   const ui = (
     <>
@@ -831,5 +910,5 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
         : <button type="button" onClick={() => { zoneTargetRef.current = zone.id; setCSeed(null); setContentOpen(true); }} className="h-8 rounded-full bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700">＋ {t("คอนเทนต์", "Content")}</button>}
     </div>
   ) : null;
-  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui: <>{ui}{zoneBar}{refsBar}</>, onSelection, onContentChange: refsOnContentChange };
+  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui: <>{ui}{zoneBar}{refsBar}<CardStyleModal open={styleOpen} onClose={() => setStyleOpen(false)} mine={styleMine} team={styleTeam} canTeam={canTeamStyle} presets={stylePresets} onSave={saveCardStyle} onSavePresets={saveCardPresets} /></>, onSelection, onContentChange: onKitContentChange };
 }

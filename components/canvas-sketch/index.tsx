@@ -76,7 +76,11 @@ export type CanvasSketchControls = {
   connect: (fromId: string, toId: string, customData?: Record<string, unknown>) => Promise<string | null>;
   /** วางลิงก์เป็นกล่องฝัง (Pinterest/TikTok/YouTube…) หรือกล่องลิงก์ ที่จุดบนกระดาน (พิกัดจริง) · คืน id ของกล่องที่วาง (ตามลำดับลิงก์) */
   placeLinks: (urls: string[], at: { x: number; y: number }, customData?: (url: string) => Record<string, unknown>) => Promise<string[]>;
+  /** เปลี่ยนข้อความในการ์ดเป็นหลายบรรทัด (ฟอนต์/ขนาด/สีต่อบรรทัด) — คงกรอบ (id เดิม · เส้นที่ผูกไม่หลุด) + รูปในการ์ด · กรอบสูงพอดีข้อความ
+   *  build คืน null = ไม่แตะการ์ดใบนั้น · คืนจำนวนการ์ดที่เปลี่ยน */
+  setCardTexts: (build: (card: { kind: string; id: string; data: Record<string, unknown> }) => CardTextsSpec | null) => Promise<number>;
 };
+export type CardTextsSpec = { texts: { text: string; fontSize: number; fontFamily: number; strokeColor: string; role: string }[]; align?: "left" | "center" | "right"; gap?: number; width?: number; bg?: string | null; stroke?: string | null; flag?: Record<string, unknown> };
 
 export function CanvasSketch({
   entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, onContentChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
@@ -529,6 +533,45 @@ export function CanvasSketch({
         }
         if (editable) queueSave();
         return out;
+      },
+      // ข้อความหลายบรรทัดในการ์ด (ตั้งค่าการ์ด) — กรอบเดิมคงอยู่ (เส้น Ref ไม่หลุด) · รูปในการ์ดอยู่บน ข้อความเรียงต่อด้านล่าง
+      setCardTexts: async (build) => {
+        const api = apiRef.current; if (!api) return 0;
+        const lib: any = await import("@excalidraw/excalidraw");
+        const all = ((api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements()) as any[]);
+        const groups = new Map<string, any[]>();
+        for (const el of all) { if (el?.isDeleted) continue; const gid = el?.groupIds?.[0]; const d = el?.customData; if (!gid || !d?.kind) continue; const a = groups.get(gid) ?? []; a.push(el); groups.set(gid, a); }
+        const kill = new Set<string>(); const patched = new Map<string, any>(); const added: any[] = [];
+        let n = 0;
+        for (const [, els] of groups) {
+          const rect = els.find((e) => e.type === "rectangle"); if (!rect) continue;
+          const d = rect.customData as Record<string, unknown>;
+          let spec: CardTextsSpec | null = null;
+          try { spec = build({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); } catch { spec = null; }
+          if (!spec || !spec.texts.length) continue;
+          n++;
+          const PAD = 12, W = spec.width ?? rect.width ?? 260, gap = spec.gap ?? 4;
+          const imgs = els.filter((e) => e.type === "image");
+          for (const e of els) if (e.type === "text") kill.add(e.id);
+          let y = imgs.length ? Math.max(...imgs.map((e) => (e.y ?? 0) + (e.height ?? 0))) + 8 : (rect.y ?? 0) + PAD;
+          for (const tx of spec.texts) {
+            const [el] = lib.convertToExcalidrawElements([{ type: "text", x: (rect.x ?? 0) + PAD, y, text: tx.text, fontSize: tx.fontSize, fontFamily: tx.fontFamily, strokeColor: tx.strokeColor,
+              textAlign: spec.align ?? "left", groupIds: rect.groupIds, customData: { ...d, role: tx.role } }]);
+            // จัดชิดกลาง/ขวาภายในกรอบ (กล่องข้อความกว้างตามตัวอักษร)
+            const w = el.width ?? 0, inner = W - PAD * 2;
+            const x = spec.align === "center" ? (rect.x ?? 0) + PAD + Math.max(0, (inner - w) / 2) : spec.align === "right" ? (rect.x ?? 0) + PAD + Math.max(0, inner - w) : (rect.x ?? 0) + PAD;
+            added.push({ ...el, x });
+            y += (el.height ?? tx.fontSize * 1.25) + gap;
+          }
+          const h = Math.max(60, y - (rect.y ?? 0) + PAD - gap);
+          patched.set(rect.id, { ...rect, width: W, height: h, ...(spec.bg ? { backgroundColor: spec.bg } : {}), ...(spec.stroke ? { strokeColor: spec.stroke } : {}),
+            customData: { ...d, ...(spec.flag ?? {}) }, version: (rect.version ?? 0) + 1 });
+        }
+        if (!n) return 0;
+        const next = all.map((e) => kill.has(e.id) ? { ...e, isDeleted: true, version: (e.version ?? 0) + 1 } : patched.get(e.id) ?? e);
+        api.updateScene({ elements: [...next, ...added] });
+        if (editable) queueSave();
+        return n;
       },
       // แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม+วางที่ตำแหน่งเดิม) — ใช้ re-render ตารางหลังแก้
       replaceCard: async (match, skeletons) => {

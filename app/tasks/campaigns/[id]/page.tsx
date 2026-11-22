@@ -132,6 +132,7 @@ export default function CampaignCanvasPage() {
               { icon: <Icon value="i:magnet" />, label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
               k.content, k.trend,
               ...(kit.canDesign ? [k.designSheet] : []),
+              k.cardStyle,
             ]} />
             <ToolMenu label={t("เครื่องมือ", "Tools")} icon={<Icon value="i:tools" />} tone="teal" items={[k.section, k.table, k.folder, k.asset]} />
             <ToolMenu label={t("ข้อมูล", "Info")} icon={<Icon value="i:clipboard-list" />} tone="slate" items={[
