@@ -1069,13 +1069,13 @@ export function DesignDashboard() {
             <span>{t("ใบงานเปล่า", "Blank job")}<span className="block text-[11px] text-slate-400">{t("กรอกเองตามฟอร์มเดิม", "Fill in the usual form")}</span></span>
           </button>
           <button type="button" role="menuitem" className={`${menuItem} items-start`} onClick={() => { setAddMenuOpen(false); setFromLibraryOpen(true); }}>
-            <Icon value="📚" className="mt-0.5" />
+            <Icon value="i:books" className="mt-0.5 text-indigo-500" />
             <span>{t("จาก Design Library", "From Design Library")}<span className="block text-[11px] text-slate-400">{t("เลือกสูตร → ได้ใบงานพร้อมรูป/หมุด/ตารางสี/ตีราคา", "Pick a recipe → job with images, pins, colors, costing")}</span></span>
           </button>
         </>);
         return isPhone
           ? <BottomSheet open={addMenuOpen} onClose={() => setAddMenuOpen(false)} title={t("เพิ่มงาน", "Add job")} backKey="dd-add"><div className="space-y-0.5 pb-1" role="menu">{items}</div></BottomSheet>
-          : <FloatingDropdown anchorRef={addMenuAnchorRef} open={addMenuOpen} onClose={() => setAddMenuOpen(false)} minWidth={280} maxWidth={320}><div className="p-1" role="menu">{items}</div></FloatingDropdown>;
+          : <FloatingDropdown anchorRef={addMenuAnchorRef} open={addMenuOpen} onClose={() => setAddMenuOpen(false)} minWidth={280} maxWidth={320}><div className="rounded-lg border border-slate-200 bg-white p-1 shadow-2xl" role="menu">{items}</div></FloatingDropdown>;
       })()}
       {fromLibraryOpen && (
         <NewSheetFromLibraryModal open onClose={() => setFromLibraryOpen(false)} defaultBrandId={selectedBrandId}
