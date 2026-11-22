@@ -5,7 +5,7 @@
  * ค่าเก็บเป็น mm เสมอ · ช่องกรอกแสดงตามหน่วยที่เลือก (mm/cm)
  */
 import { useT } from "@/components/i18n";
-import { toMm, type PrintType } from "./data";
+import { toMm, type NestingItem, type PrintType } from "./data";
 import { unitScale, type Settings } from "./nest-utils";
 import { NumInput } from "./num-input";
 import { StepInput } from "@/components/step-input";
@@ -35,7 +35,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls = "h-8 w-full rounded-lg border border-slate-300 px-2 text-sm";
 
-export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onPrintType }: {
+/** โหมดเรียงแถวทั้งแผ่นจะเหลือช่องว่างไหม (เจ้าของขอเตือน 2026-11-22) → ข้อความเตือน หรือ null */
+export function rowsGapWarning(s: Settings, items: NestingItem[], t: (th: string, en: string) => string): string | null {
+  if (s.layout !== "rows" || items.length < 2) return null;
+  const sizes = new Set(items.map((it) => `${it.size.mode}:${it.size.mode === "natural" ? "" : Math.round(Number(it.size.value) * 10)}:${it.file?.sha ?? it.key}`));
+  if (!s.rows_new_row && sizes.size > 1)
+    return t("ลายขนาดต่างกันจะอยู่แถวเดียวกัน แล้วเหลือช่องว่างใต้ลายที่เตี้ยกว่า",
+      "Artwork of different sizes will share a row, leaving gaps under the shorter ones");
+  if (s.rows_new_row && s.fill && items.some((it) => !(it.fill_pct > 0)))
+    return t("ลายที่เติม 0% ขึ้นแถวใหม่ทุกไฟล์ แถวที่ไม่ครบจะว่างท้ายแถว",
+      "Artwork with 0% fill starts a new row per file, so unfinished rows stay empty at the end");
+  return null;
+}
+
+export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onPrintType, items = [] }: {
+  items?: NestingItem[];
   settings: Settings;
   onChange: (patch: Partial<Settings>) => void;
   printTypes: PrintType[];
@@ -45,6 +59,7 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
   const t = useT();
   const s = settings;
   const u = s.unit;
+  const gapWarn = rowsGapWarning(s, items, t);
   const fromLen = (v: number | null) => (v == null ? null : v * unitScale(u));
   // ช่องความยาว: ปุ่ม −/+ · ลูกกลิ้ง · ↑↓ ทีละ 1 mm (Shift = 1 cm) — เจ้าของขอ
   const lenNum = (mm: number | null | undefined) => (mm == null ? null : +(mm / unitScale(u)).toFixed(4));
@@ -125,6 +140,15 @@ export function SettingsPanel({ settings, onChange, printTypes, printTypeId, onP
             <input type="checkbox" checked={s.rows_new_row} onChange={(e) => onChange({ rows_new_row: e.target.checked })} />
             {t("แต่ละไฟล์เริ่มแถวใหม่", "Start each file on a new row")}
           </label>
+        )}
+        {gapWarn && (
+          <div className="mt-1.5 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+            {gapWarn} — {t("ถ้าอยากให้แผ่นเต็ม เลือก “แทรกให้ประหยัด” แล้วกด ▤ เรียงเป็นแถว เฉพาะลายที่ต้องการ", "for a fuller sheet, choose “Tight nesting” and press ▤ Rows only on the artwork you want")}
+            <button type="button" onClick={() => onChange({ layout: "nest" })}
+              className="ml-1 rounded border border-amber-300 bg-white px-1.5 py-0.5 font-medium hover:bg-amber-100">
+              {t("เปลี่ยนเป็นแทรกให้ประหยัด", "Switch to tight nesting")}
+            </button>
+          </div>
         )}
       </div>
 

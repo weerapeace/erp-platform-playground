@@ -942,7 +942,7 @@ export function NestingEditor({ id }: { id: string }) {
         <aside className="w-full shrink-0 space-y-4 lg:w-[380px]">
           <section className="rounded-xl border border-slate-200 bg-white p-4">
             <h3 className="mb-3 text-sm font-semibold text-slate-800">{t("แผ่นงาน", "Sheet")}</h3>
-            <SettingsPanel settings={settings} onChange={patchSettings} printTypes={printTypes} printTypeId={printTypeId}
+            <SettingsPanel settings={settings} items={items} onChange={patchSettings} printTypes={printTypes} printTypeId={printTypeId}
               onPrintType={(pt) => { setPrintTypeId(pt?.id ?? null); if (pt) patchSettings(sheetFromPrintType(pt)); }} />
           </section>
           <section className="rounded-xl border border-slate-200 bg-white p-4">

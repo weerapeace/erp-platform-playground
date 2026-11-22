@@ -355,14 +355,35 @@ export function ItemsPanel({
       )}
     </div>
   );
-  const rowsBtn = (it: NestingItem) => settings.layout !== "rows" && (
-    <button type="button" onClick={() => patch(it.key, { rows: !it.rows })}
-      title={t("เรียงลายนี้เป็นแถวตรงแนวที่ต้นแผ่น (ทั้งลายหันทางเดียว · หมุน 90° ได้ถ้าได้มากกว่า) ลายอื่นแทรกที่ว่างที่เหลือ — ตัดง่าย",
-        "Lay this artwork out in straight rows at the start of the sheet (all facing one way · turned 90° if more fit); other artwork fills the rest — easy to cut")}
-      className={`rounded border px-2 py-0.5 text-xs ${it.rows ? "border-violet-400 bg-violet-100 font-semibold text-violet-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
-      ▤ {t("เรียงเป็นแถว", "Rows")}
-    </button>
-  );
+  // ปุ่มโชว์ตลอด (เจ้าของเลือก 2026-11-22) — โหมด "เรียงเป็นแถว" ทั้งแผ่น = ทุกลายเรียงแถวอยู่แล้ว ปุ่มติดสีให้เห็นแต่กดไม่ได้
+  const allRows = settings.layout === "rows";
+  const rowsBtn = (it: NestingItem) => {
+    const on = allRows || !!it.rows;
+    return (
+      <button type="button" onClick={() => { if (!allRows) patch(it.key, { rows: !it.rows }); }} aria-pressed={on} aria-disabled={allRows}
+        title={allRows
+          ? t("ตอนนี้ตั้ง “เรียงเป็นแถว” ทั้งแผ่น ทุกลายจึงเรียงแถวอยู่แล้ว — ถ้าจะเลือกเฉพาะบางลาย เปลี่ยนรูปแบบการจัดเป็น “แทรกให้ประหยัด”",
+            "The whole sheet is set to “Rows”, so every artwork is in rows — to pick only some, switch the layout to “Tight nesting”")
+          : t("เรียงลายนี้เป็นแถวตรงแนวที่ต้นแผ่น (ทั้งลายหันทางเดียว · หมุน 90° ได้ถ้าได้มากกว่า) ลายอื่นแทรกที่ว่างที่เหลือ — ตัดง่าย",
+            "Lay this artwork out in straight rows at the start of the sheet (all facing one way · turned 90° if more fit); other artwork fills the rest — easy to cut")}
+        className={`rounded border px-2 py-0.5 text-xs ${on ? "border-violet-400 bg-violet-100 font-semibold text-violet-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"} ${allRows ? "cursor-default opacity-60" : ""}`}>
+        ▤ {t("เรียงเป็นแถว", "Rows")}
+      </button>
+    );
+  };
+  const rowCount = allRows ? items.length : items.filter((it) => it.rows).length;
+  // ข้อ 1: เรียงแถวทั้งหมด / ล้าง — ย้อนได้ด้วยปุ่ม "ย้อนกลับ" ข้าง ๆ (จำค่าก่อนกด)
+  const [rowsUndo, setRowsUndo] = useState<Record<string, boolean> | null>(null);
+  const setAllRows = (on: boolean) => {
+    setRowsUndo(Object.fromEntries(items.map((it) => [it.key, !!it.rows])));
+    onChange(items.map((it) => ({ ...it, rows: on })));
+  };
+  const undoRows = () => {
+    if (!rowsUndo) return;
+    onChange(items.map((it) => (it.key in rowsUndo ? { ...it, rows: rowsUndo[it.key] } : it)));
+    setRowsUndo(null);
+  };
+
   const splitBtn = (it: NestingItem, c: Ctx) => !it.piece && it.file && !c.miss && c.info && !c.info.error && (
     <button type="button" onClick={() => onSplit(it.key)} disabled={!canSplit || busy}
       title={canSplit ? t("ภาพเดียวมีหลายส่วน (เช่น ช้าง + ตัวหนังสือ) → แยกเป็นหลายชิ้น", "One image with several parts (e.g. elephant + text) → split into pieces")
@@ -508,6 +529,30 @@ export function ItemsPanel({
         </>
       ) : cards}
 
+      {items.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded bg-violet-50 px-2 py-0.5 text-violet-700">
+            {t(`เรียงแถว ${rowCount} ลาย · แทรก ${items.length - rowCount} ลาย`, `Rows: ${rowCount} · Nested: ${items.length - rowCount}`)}
+          </span>
+          {!allRows && (
+            <>
+              <button type="button" onClick={() => setAllRows(true)} disabled={busy || rowCount === items.length}
+                className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                ▤ {t("เรียงแถวทั้งหมด", "All in rows")}
+              </button>
+              <button type="button" onClick={() => setAllRows(false)} disabled={busy || rowCount === 0}
+                className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                {t("ล้าง", "Clear")}
+              </button>
+              {rowsUndo && (
+                <button type="button" onClick={undoRows} className="rounded px-2 py-0.5 text-violet-700 hover:bg-violet-50">
+                  <Icon value="i:arrow-back-up" className="mr-0.5" />{t("ย้อนกลับ", "Undo")}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       {fill && items.length > 0 && (
         <div className="mt-2 flex items-center gap-2 text-xs">
           <span className={`rounded px-2 py-0.5 ${Math.abs(totalPct - 100) < 0.01 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
