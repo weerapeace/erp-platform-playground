@@ -147,6 +147,8 @@ export const CONTENT_STATUS_META: Record<ContentStatus, { label: string; label_e
   published: { label: "โพสต์แล้ว",    label_en: "Published", cls: "bg-emerald-50 text-emerald-700 border-emerald-200",dot: "bg-emerald-500" },
   cancelled: { label: "ยกเลิก",      label_en: "Cancelled", cls: "bg-slate-100 text-slate-400 border-slate-200",     dot: "bg-slate-300" },
 };
+/** คอนเทนต์ที่นับว่า "พร้อม/เสร็จ" ในความคืบหน้าของงาน (ยกเลิก = ไม่นับทั้งตัวตั้งและตัวหาร) */
+export const CONTENT_DONE: ReadonlySet<ContentStatus> = new Set<ContentStatus>(["ready", "scheduled", "published"]);
 export const contentStatusLabel = (k: ContentStatus) => { const m = CONTENT_STATUS_META[k]; return m ? tr(m.label, m.label_en) : k; };
 
 export const POST_TYPES: { value: string; label: string; label_en: string; icon: string }[] = [
@@ -172,3 +174,8 @@ export const HASHTAG_CATEGORIES: { value: string; label: string; label_en: strin
   { value: "trend",    label: "เทรนด์",        label_en: "Trend" },
   { value: "general",  label: "ทั่วไป",        label_en: "General" },
 ];
+
+/** งานย่อยเลิกใช้แล้ว (เจ้าของสั่ง 2026-11-22) — ใช้รายการคอนเทนต์ของงานแทน
+ *  ซ่อน: รายการ "งานย่อยของฉัน" (คิวงาน/ภาพรวม) + แท็บตั้งค่า · ข้อมูลเดิมยังอยู่ ดู/จัดการได้ในแถบพับ "งานย่อยเดิม" ของลิ้นชักงาน
+ *  ย้อนกลับ = ตั้งเป็น false */
+export const SUBTASKS_RETIRED = true;

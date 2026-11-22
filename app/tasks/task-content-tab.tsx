@@ -6,16 +6,16 @@
 // สร้างใหม่ผูกงานอัตโนมัติ · แนบคอนเทนต์ที่มีอยู่ · ถอดออกจากงาน
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, platformLabel } from "./use-options";
 import { askConfirm } from "@/components/modal/ask-dialog";
-import { type PushToast } from "@/components/toast";
+import { type PushToast, useToast } from "@/components/toast";
 import {
-  CONTENT_STATUS_META, POST_TYPES, contentStatusLabel,
+  CONTENT_STATUS_META, CONTENT_DONE, POST_TYPES, contentStatusLabel,
   listContent, createContent, updateContent, addContentAttachment,
   type ContentItem, type ContentStatus, type BrandOption, postTypeLabel,
 } from "./data";
@@ -32,12 +32,17 @@ function StatusChip({ status }: { status: ContentStatus }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{contentStatusLabel(status)}</span>;
 }
 
-export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle }: {
+export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle, compact = false, onChanged }: {
   taskId: string; brandId: string | null; brands: BrandOption[]; pushToast: ToastFn;
   /** ชื่องาน (ตั้งชื่อคอนเทนต์ที่สร้างจากกระดานบรีฟ) */
   taskTitle?: string;
+  /** โหมดย่อ = กล่องรายการคอนเทนต์บนสุดของลิ้นชักงาน (คู่กับ Parent SKU · เจ้าของเลือก 2026-11-22) — เปลี่ยนสถานะจากรายการได้ */
+  compact?: boolean;
+  /** แจ้งหน้าแม่เมื่อรายการ/สถานะคอนเทนต์เปลี่ยน (ให้แถบความคืบหน้าคำนวณใหม่) */
+  onChanged?: () => void;
 }) {
   const t = useT();
+  const toast = useToast();
   const { platforms } = useCreativeOptions();
   const [items, setItems] = useState<ContentItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,12 +50,27 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle }
   const [createOpen, setCreateOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
 
+  const onChangedRef = useRef(onChanged); onChangedRef.current = onChanged;
+  const loadedOnce = useRef(false);
   const load = useCallback(async () => {
-    setLoading(true);
-    try { setItems(await listContent({ task_id: taskId })); } catch (e) { pushToast("error", (e as Error).message); }
+    if (!loadedOnce.current) setLoading(true);
+    try { setItems(await listContent({ task_id: taskId })); if (loadedOnce.current) onChangedRef.current?.(); loadedOnce.current = true; } catch (e) { pushToast("error", (e as Error).message); }
     finally { setLoading(false); }
   }, [taskId, pushToast]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadedOnce.current = false; load(); }, [load]);
+
+  // เปลี่ยนสถานะจากรายการ (โหมดย่อ) + ปุ่มย้อนกลับในแจ้งผล · ประวัติ (audit) บันทึกฝั่ง server
+  const changeStatus = async (c: ContentItem, to: ContentStatus) => {
+    if (to === c.status) return;
+    const from = c.status;
+    setItems((xs) => xs.map((x) => (x.id === c.id ? { ...x, status: to } : x)));
+    try {
+      await updateContent(c.id, { status: to }); await load();
+      toast.undo(t(`"${c.title}" → ${contentStatusLabel(to)}`, `"${c.title}" → ${contentStatusLabel(to)}`), async () => {
+        try { await updateContent(c.id, { status: from }); await load(); } catch (e) { pushToast("error", (e as Error).message); }
+      });
+    } catch (e) { pushToast("error", (e as Error).message); await load(); }
+  };
 
   // สร้างคอนเทนต์ใหม่ผูกงานนี้ (brand ตามงาน) → เปิด drawer ให้กรอกแคปชั่นต่อ
   const [form, setForm] = useState({ title: "", post_type: "image", platforms: [] as string[] });
@@ -99,8 +119,36 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle }
     catch (e) { pushToast("error", (e as Error).message); }
   };
 
+  const live = items.filter((c) => c.status !== "cancelled");
+  const doneCount = live.filter((c) => CONTENT_DONE.has(c.status)).length;
+
   return (
-    <div className="p-5 space-y-3">
+    <div className={compact ? "space-y-1.5" : "p-5 space-y-3"}>
+      {compact ? (<>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-slate-400">{t("คอนเทนต์", "Content")}{live.length > 0 && <> · <span className={doneCount === live.length ? "text-emerald-600 font-medium" : "text-slate-600 font-medium"}>{doneCount}/{live.length}</span> {t("พร้อม", "ready")}</>}</span>
+          <span className="ml-auto inline-flex items-center gap-1">
+            <button onClick={() => void openFromBrief()} title={t("สร้างคอนเทนต์จากรูป/โน้ตบนกระดานบรีฟ", "Create content from the brief board")} className="h-6 px-2 text-[11px] text-violet-700 border border-violet-200 bg-violet-50 rounded-md hover:bg-violet-100">🎨 {t("จากบรีฟ", "From brief")}</button>
+            <button onClick={() => setAttachOpen(true)} title={t("แนบคอนเทนต์ที่มีอยู่", "Attach existing content")} className="h-6 px-2 text-[11px] text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">🔗</button>
+            <button onClick={openCreate} className="h-6 px-2 text-[11px] text-white bg-violet-600 rounded-md hover:bg-violet-700">＋ {t("เพิ่ม", "Add")}</button>
+          </span>
+        </div>
+        {loading ? <div className="h-16 rounded-lg bg-slate-100 animate-pulse" />
+          : items.length === 0 ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">{t("ยังไม่มีคอนเทนต์ — กด ＋ เพิ่ม หรือสร้างจากกระดานบรีฟ", "No content yet — add one or create from the brief board")}</p>
+          : (
+            <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
+              {items.map((c) => (
+                <div key={c.id} className={`flex items-center gap-2 px-2.5 py-1.5 ${c.status === "cancelled" ? "opacity-50" : ""}`}>
+                  <button onClick={() => setOpenId(c.id)} className="min-w-0 flex-1 text-left text-[13px] text-slate-700 hover:text-violet-700 truncate" title={c.title}>{c.title}</button>
+                  <select value={c.status} onChange={(e) => void changeStatus(c, e.target.value as ContentStatus)} aria-label={t("สถานะคอนเทนต์", "Content status")}
+                    className={`h-6 shrink-0 rounded-full border px-2 text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-violet-200 ${(CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft).cls}`}>
+                    {(Object.keys(CONTENT_STATUS_META) as ContentStatus[]).map((k) => <option key={k} value={k}>{contentStatusLabel(k)}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+      </>) : (<>
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-slate-700">📱 {t("คอนเทนต์ของงานนี้", "Content for this task")} ({items.length})</p>
         <div className="flex items-center gap-2">
@@ -140,6 +188,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle }
             ))}
           </div>
         )}
+      </>)}
 
       {/* สร้างคอนเทนต์ใหม่ (ผูกงานนี้) */}
       <ERPModal open={createOpen} onClose={() => setCreateOpen(false)} title={brief ? t("สร้างคอนเทนต์จากกระดานบรีฟ", "New content from brief board") : t("สร้างคอนเทนต์ (พ่วงงานนี้)", "New content (linked to this task)")} size={brief ? "lg" : "md"}

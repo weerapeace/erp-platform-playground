@@ -14,7 +14,7 @@ export {
   STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
   TASK_TYPES, PLATFORMS, TRANSITIONS, PRIMARY_ACTIONS, STATUS_PROGRESS,
   ALL_STATUSES, canTransition,
-  CONTENT_STATUS_META, POST_TYPES, HASHTAG_CATEGORIES, splitPostTypes, joinPostTypes,
+  CONTENT_STATUS_META, CONTENT_DONE, POST_TYPES, HASHTAG_CATEGORIES, splitPostTypes, joinPostTypes,
   priorityLabel, approvalLabel, assetLabel, statusLabelFb, contentStatusLabel, postTypeLabel,
 } from "@/lib/creative-tasks";
 

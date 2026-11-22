@@ -60,6 +60,7 @@ import {
   type Campaign, type BrandOption, type MySubtask,
 } from "./data";
 import { Icon } from "@/components/icon";
+import { SUBTASKS_RETIRED } from "@/lib/creative-tasks";
 // 📂 ประวัติไฟล์ — โหลดเมื่อเปิดมุมมองนี้เท่านั้น (ไม่ถ่วงหน้างานหลัก)
 const FileHistoryView = dynamic(() => import("./file-history-view").then((m) => m.FileHistoryView), { ssr: false });
 
@@ -512,7 +513,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
   return (
     <div className="space-y-3">
       {/* งานย่อยของฉัน */}
-      {subtasks.length > 0 && (
+      {!SUBTASKS_RETIRED && subtasks.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({subtasks.length})</p>
           <div className="space-y-3">

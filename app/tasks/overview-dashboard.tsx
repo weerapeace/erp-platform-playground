@@ -30,6 +30,7 @@ import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
 import type { UserPickerValue } from "@/components/pickers";
 import { subStatusDot, subStatusLabel } from "./subtask-status";
+import { SUBTASKS_RETIRED } from "@/lib/creative-tasks";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 // จำนวนคอลัมน์การ์ดสรุปบนจอใหญ่ = จำนวนใบที่โชว์ (ซ่อนบางใบแล้วที่เหลือขยายเต็มแถว)
@@ -371,7 +372,7 @@ export function OverviewDashboard({
       </div>
 
       {/* งานย่อยของฉัน — แบนเนอร์ / รายการเต็ม (เมื่อกดการ์ด "งานของฉัน") */}
-      {mySubs.length > 0 && (
+      {!SUBTASKS_RETIRED && mySubs.length > 0 && (
         filter === "mine" ? (
           <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
             <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>

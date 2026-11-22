@@ -193,7 +193,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   // (ลำดับรวมเป็นชุดเดียว แต่ละคอลัมน์เรียงเฉพาะส่วนของตัวเองด้วย CSS order · ผู้ใช้จัด/ซ่อนเองได้ที่ 🎨)
   const DRAWER_SECTIONS = [
     { key: "desc", label: t("รายละเอียด / โน้ต (ซ้าย)", "Details / notes (left)") }, { key: "board", label: t("กระดานบรีฟ (ซ้าย)", "Brief board (left)") },
-    { key: "subtasks", label: t("งานย่อย + สินค้า (ซ้าย)", "Subtasks + products (left)") }, { key: "comments", label: t("ความคิดเห็น (ซ้าย)", "Comments (left)") },
+    { key: "subtasks", label: t("สินค้าที่เกี่ยวข้อง / งานย่อยเดิม (ซ้าย)", "Related products / old subtasks (left)") }, { key: "comments", label: t("ความคิดเห็น (ซ้าย)", "Comments (left)") },
     { key: "cover", label: t("รูปปก", "Cover") }, { key: "due_date", label: t("กำหนดส่ง", "Due date") },
     { key: "brand", label: t("แบรนด์", "Brand") }, { key: "platform", label: "Platform" },
     { key: "task_type", label: t("ประเภทงาน", "Task type") }, { key: "assignee", label: t("ผู้รับผิดชอบ", "Assignee") },
@@ -379,7 +379,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
           <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100" style={{ borderColor: dividerColorOf(dth) }}>
-            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
+            {([["task", t("📋 งาน", "📋 Task"), 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
               <button key={k} onClick={() => setTab(k)} style={tab === k ? { background: `${dth.accent}1f`, color: dth.accent } : undefined} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "" : "text-slate-500 hover:bg-slate-50"}`}>
                 {label}{count > 0 && <span className="text-[11px] rounded-full px-1.5" style={tab === k ? { background: `${dth.accent}33`, color: dth.accent } : { background: "#e2e8f0", color: "#475569" }}>{count}</span>}
               </button>
@@ -388,6 +388,26 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
           {tab === "task" && (<>
+          {/* แถบบนสุด 2 ช่อง: Parent SKU | รายการคอนเทนต์ (เจ้าของเลือก 2026-11-22) — จอแคบเรียงบน-ล่าง */}
+          <div className={`grid gap-3 px-5 pt-3 pb-1 ${twoCol ? "grid-cols-2" : "grid-cols-1"}`}>
+            <div className="min-w-0 flex flex-col gap-2">
+              {/* 🔁 แก้ที่สินค้าจากหน้างาน (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
+              <TaskDirectPanel task={d} pushToast={pushToast}
+                canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
+                canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
+                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }}
+                // 🙋 งานยังไม่มีผู้รับผิดชอบเลย → ปุ่มแก้กลายเป็น "รับงาน + แก้ที่สินค้า" (เจ้าของเลือก 2026-11-11)
+                onClaim={!isClosed && !!user?.id && !d.assignee_id && (d.assignees ?? []).length === 0
+                  ? async () => { await claimTask(d.id); await refresh(); } : undefined} />
+              {/* 📦 Parent SKU — ยังไม่มี = แนะนำจาก SKU ลูก / เลือก / สร้างใหม่ แล้วผูกเข้างาน */}
+              <TaskParentBox task={d} pushToast={pushToast} onOpen={setOpenParentId}
+                canEdit={!isClosed && can("tasks.edit" as Parameters<typeof can>[0])}
+                onSetParents={async (ids) => { await updateTask(d.id, { parent_sku_ids: ids }); await refresh(); }} />
+            </div>
+            <div className="min-w-0">
+              <TaskContentTab compact taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} taskTitle={d.title} onChanged={() => void refresh()} />
+            </div>
+          </div>
           <div className={`flex ${twoCol ? (dth.swap ? "flex-row-reverse" : "flex-row") : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
             <div className={`flex-1 min-w-0 w-full flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)}`}>
@@ -456,27 +476,24 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {/* งานย่อย + สินค้าที่ผูก (จัดลำดับเป็นชุดเดียว) */}
               <div style={{ order: tOrderOf("subtasks") }} className={`flex flex-col ${densityGap(dth.density)}`}>
-              {/* 🔁 โหมดใหม่ + ไม่มีงานย่อยรูป/คำอธิบาย → แก้ที่สินค้าจากหน้างานเลย (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
-              <TaskDirectPanel task={d} pushToast={pushToast}
-                canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
-                canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
-                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }}
-                // 🙋 งานยังไม่มีผู้รับผิดชอบเลย → ปุ่มแก้กลายเป็น "รับงาน + แก้ที่สินค้า" (เจ้าของเลือก 2026-11-11 · 11/14 งานโหมดใหม่ไม่มีผู้รับผิดชอบ)
-                onClaim={!isClosed && !!user?.id && !d.assignee_id && (d.assignees ?? []).length === 0
-                  ? async () => { await claimTask(d.id); await refresh(); } : undefined} />
-
               {/* 🛠 งานชุดรุ่นที่ผูกกับงานนี้ (หน้า SKU การตลาด) — ไม่ผูก = ไม่โชว์ */}
               <WorkJobLinkBox taskId={d.id} />
 
-              {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
-              <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}
-                taskType={d.task_type} taskCreatedAt={d.created_at} parents={d.parent_skus ?? []} skus={d.skus ?? []}
-                onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
-
-              {/* 📦 Parent SKU — เห็นทันทีใกล้ "สินค้าที่เกี่ยวข้อง" · ยังไม่มี = แนะนำจาก SKU ลูก / เลือก / สร้างใหม่ แล้วผูกเข้างาน */}
-              <TaskParentBox task={d} pushToast={pushToast} onOpen={setOpenParentId}
-                canEdit={!isClosed && can("tasks.edit" as Parameters<typeof can>[0])}
-                onSetParents={async (ids) => { await updateTask(d.id, { parent_sku_ids: ids }); await refresh(); }} />
+              {/* งานย่อย — เลิกใช้แล้ว (เจ้าของสั่ง 2026-11-22) · เหลือแถบพับ "งานย่อยเดิม" เฉพาะงานที่มีของเดิม (ข้อมูลไม่หาย จัดการต่อได้) */}
+              {(d.subtasks?.length ?? 0) > 0 && (
+                <details className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-xs text-slate-500">
+                    {t("งานย่อยเดิม", "Old subtasks")} {d.subtasks!.length} {t("รายการ", "items")}
+                    {(() => { const open = d.subtasks!.filter((s) => !["approved", "done", "canceled", "cancelled"].includes(String(s.status))).length; return open ? <span className="ml-1 text-amber-600">· {t(`ค้าง ${open}`, `${open} open`)}</span> : null; })()}
+                    <span className="ml-1 text-slate-400">— {t("เลิกใช้แล้ว ใช้รายการคอนเทนต์ด้านบนแทน", "retired, use the content list above")}</span>
+                  </summary>
+                  <div className="px-2 pb-2">
+                    <SubtaskManager taskId={d.id} brandId={d.brand_id} subCardStyle={subCardBgStyle(dth)} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees}
+                      taskType={d.task_type} taskCreatedAt={d.created_at} parents={d.parent_skus ?? []} skus={d.skus ?? []}
+                      onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }} />
+                  </div>
+                </details>
+              )}
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {
