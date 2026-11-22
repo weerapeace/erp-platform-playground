@@ -20,6 +20,7 @@ import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel, type DeliveryBillApi, type DeliveryBillStatus } from "@/components/delivery-bill-panel";
+import { FxRateQuickModal } from "@/components/fx-rate-quick";
 import { SellerBillPanel, type SellerBillPanelApi, type BillLineMoney, type BillLinkMap } from "@/components/seller-bill-panel";
 import { SaveBar } from "@/components/save-bar";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
@@ -33,7 +34,7 @@ import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSte
 import { RevisionHistory } from "./revision-history";
 import { pvNoNeedsRenumber, reviseReasonFor, ADMIN_NO_REASON } from "@/lib/voucher-revision";
 
-type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null };
+type Detail = { header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate?: number | null; ref_fx_date?: string | null };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const SHIP_LABEL: Record<ShipMethod, string> = { none: "ไม่คิดค่าส่ง", cube: "📦 ตามคิว (CBM)", weight: "⚖️ ตามน้ำหนัก (กก.)" };
 const SOURCE_BADGE: Record<string, { text: string; cls: string }> = {
@@ -128,6 +129,8 @@ export default function PurchaseVoucherFormPage() {
   const onDbStatus = useCallback((s: DeliveryBillStatus) => { dbStatusRef.current = s; setDbStatus(s); }, []);
   const [dbAsk, setDbAsk] = useState<{ kind: "unsaved" | "ship0"; next: "confirm" | "revise" } | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
+  const [fxOpen, setFxOpen] = useState(false);
+  const [fxDailyDate, setFxDailyDate] = useState<string | null>(null);   // ตั้งเรทกลางวันนี้จากหน้านี้แล้ว → ป้ายเรทเก่าหายทันที   // ★ 2026-11-22 แบบ B: แตะเรทในกล่องยอดเงิน → เปลี่ยนเรท (ใบนี้ / เรทกลางวันนี้)
   const onPanelStatus = useCallback((s: { pending: boolean; undecided: number; bills: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided && p.bills === s.bills ? p : s)), []);
   // ★ 2026-11-15 รอบ 4 (เจ้าของ: "ตารางล่างไม่ค่อยจำเป็น เอาไปรวมกับอันบน · อยากได้ view รวมทุกอันเป็นตาราง และดูแบบแยกบิล")
   //   แยกตามบิล = แผงบิลร้าน (แถวบาง + ฿/ชิ้น · ยอด ฿) + กล่อง "ไม่มีบิล" · รวมเป็นตาราง = ตารางเดียวทุกรายการ + คอลัมน์ "บิล" · จำในเครื่อง
@@ -877,7 +880,7 @@ export default function PurchaseVoucherFormPage() {
               <aside className={`space-y-3 ${hd.status === "draft" || editing ? "xl:sticky xl:top-4 xl:self-start" : ""}`}>
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
-                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
+                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} refFxDate={fxDailyDate ?? data?.ref_fx_date ?? null} docDate={h.voucher_date} onEditFx={readonly ? undefined : () => setFxOpen(true)} dirty={dirty} saving={saving || reviseBusy}
                     onSave={() => void save()} onConfirm={editing ? () => preCheck("revise") : () => void askConfirm()} onSetGoodsThb={readonly ? undefined : setGoodsThb}
                     revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
                 )}
@@ -992,6 +995,7 @@ export default function PurchaseVoucherFormPage() {
           <p className="text-[11px] text-slate-400 mt-2">กด รวมก่อน = ไปหน้ารายการแล้วเปิดขั้นรวมโดยติ๊กใบเหล่านี้ไว้ให้ (ตรวจได้ก่อนกดรวม)</p>
         </ERPModal>
       )}
+      <FxRateQuickModal open={fxOpen} onClose={() => setFxOpen(false)} currency={currency} value={h.fx_rate} refDate={h.voucher_date} onApply={(r) => setHeader({ fx_rate: String(r) })} onDailyChanged={setFxDailyDate} />
       {/* ★ 2026-11-22 ใบส่งของ: ยังไม่บันทึก / ค่าส่ง ฿0 — ถามก่อนยืนยันหรือบันทึกการแก้ไข */}
       {dbAsk && (
         <ERPModal open onClose={() => !dbBusy && setDbAsk(null)} size="sm" storageKey="pv-delivery-precheck"

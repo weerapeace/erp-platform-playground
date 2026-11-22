@@ -13,6 +13,7 @@ import { Icon } from "@/components/icon";
 import { formatDate } from "@/lib/date";
 import { fmtMoney } from "@/lib/landed-cost";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
+import { RateStaleChip } from "@/components/fx-rate-quick";
 import { canConfirm, fxAbnormal, fxDeviationPct, fxDeviationText, nextSteps, type CheckItem } from "@/lib/purchase-voucher-checklist";
 import type { PoPayment, VoucherHeader } from "@/lib/purchase-voucher-server";
 
@@ -113,7 +114,7 @@ function SectionTitle({ icon, children }: { icon: string; children: React.ReactN
  * ★ 2026-11-15 เจ้าของ: "อยากให้เตือนเวลาพิมพ์เกินไปเยอะ" — ระหว่างพิมพ์บอกเรทที่จะได้ · เรทต่างจากเรทวันที่ใบเกิน 10%
  *   กด Enter แล้วยังไม่เปลี่ยน ถามก่อน [ใช้ยอดนี้จริง] / [แก้ใหม่] (เกณฑ์ = FX_WARN_PCT ใน lib/purchase-voucher-checklist)
  */
-function GoodsThbRow({ t, sym, rate, refFx, onSet }: { t: Totals; sym: string; rate: number; refFx: number | null; onSet?: (thb: number) => void }) {
+function GoodsThbRow({ t, sym, rate, refFx, onSet, onEditFx, refFxDate, docDate }: { t: Totals; sym: string; rate: number; refFx: number | null; onSet?: (thb: number) => void; onEditFx?: () => void; refFxDate?: string | null; docDate?: string | null }) {
   const [edit, setEdit] = useState<string | null>(null);
   const [ask, setAsk] = useState<number | null>(null);   // ยอดที่ทำให้เรทผิดปกติ — รอให้ตอบก่อน
   const foreignAmt = t.subtotal_foreign;
@@ -135,8 +136,13 @@ function GoodsThbRow({ t, sym, rate, refFx, onSet }: { t: Totals; sym: string; r
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
-        <dt className="text-slate-500 tabular-nums">{sym}{fmtMoney(foreignAmt)} × <span className={fxAbnormal(dev) ? "text-red-600 font-semibold" : "text-slate-700"}
-          title={fxAbnormal(dev) && refFx ? fxDeviationText(dev as number, refFx) : "เรทแปลงเป็นบาท (แก้ที่หัวใบ)"}>{rate || "—"}</span></dt>
+        <dt className="text-slate-500 tabular-nums">{sym}{fmtMoney(foreignAmt)} × {onEditFx ? (
+          /* ★ 2026-11-22 แบบ B: แตะเรท → ตัวเปลี่ยนเรท (เฉพาะใบนี้ / ตั้งเป็นเรทกลางวันนี้) */
+          <button type="button" onClick={onEditFx} className={`underline decoration-dotted underline-offset-2 hover:text-sky-700 ${fxAbnormal(dev) ? "text-red-600 font-semibold" : "text-sky-800"}`}
+            title={fxAbnormal(dev) && refFx ? `${fxDeviationText(dev as number, refFx)} — แตะเพื่อเปลี่ยนเรท` : "แตะเพื่อเปลี่ยนเรท (เฉพาะใบนี้ หรือตั้งเป็นเรทกลางวันนี้)"}>{rate || "—"} <Icon name="edit" mode="line" size={12} className="inline -mt-0.5" /></button>
+        ) : <span className={fxAbnormal(dev) ? "text-red-600 font-semibold" : "text-slate-700"}
+          title={fxAbnormal(dev) && refFx ? fxDeviationText(dev as number, refFx) : "เรทแปลงเป็นบาท (แก้ที่หัวใบ)"}>{rate || "—"}</span>}
+          {onEditFx && <RateStaleChip rateDate={refFxDate} refDate={docDate} className="ml-1 align-middle" />}</dt>
         <dd className="tabular-nums">
           {edit != null ? (
             <input autoFocus type="number" inputMode="decimal" step="any" min={0} value={edit} onChange={(e) => setEdit(e.target.value)}
@@ -197,7 +203,7 @@ function ShipRow({ t, onSet }: { t: Totals; onSet?: (thb: number | null) => void
   );
 }
 
-function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb, onSetShip }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; refFx: number | null; onSetGoodsThb?: (thb: number) => void; onSetShip?: (thb: number | null) => void }) {
+function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb, onSetShip, onEditFx, refFxDate, docDate }: { t: Totals; foreign: boolean; sym: string; fxRate: string | number | null; refFx: number | null; onSetGoodsThb?: (thb: number) => void; onSetShip?: (thb: number | null) => void; onEditFx?: () => void; refFxDate?: string | null; docDate?: string | null }) {
   const disc = t.discount_foreign ?? 0;
   const cur = foreign ? sym : "฿";
   return (
@@ -207,7 +213,7 @@ function MoneySection({ t, foreign, sym, fxRate, refFx, onSetGoodsThb, onSetShip
         {disc > 0 && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้าก่อนลด</dt><dd className="tabular-nums">{cur}{fmtMoney(t.subtotal_foreign + disc)}</dd></div>}
         {disc > 0 && <div className="flex justify-between text-red-600"><dt>ส่วนลดรวม</dt><dd className="tabular-nums">−{cur}{fmtMoney(disc)}{foreign && (t.discount_thb ?? 0) > 0 ? <span className="ml-1 text-[11px] text-red-400">(฿{fmtMoney(t.discount_thb)})</span> : null}</dd></div>}
         {foreign
-          ? <GoodsThbRow t={t} sym={sym} rate={Number(fxRate) || 0} refFx={refFx} onSet={onSetGoodsThb} />
+          ? <GoodsThbRow t={t} sym={sym} rate={Number(fxRate) || 0} refFx={refFx} onSet={onSetGoodsThb} onEditFx={onEditFx} refFxDate={refFxDate} docDate={docDate} />
           : <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า{disc > 0 ? " สุทธิ" : ""}</dt><dd className="tabular-nums font-medium text-slate-800">฿{fmtMoney(t.subtotal_thb)}</dd></div>}
         <ExtraRows t={t} foreign={foreign} sym={sym} fxRate={fxRate} />
         <ShipRow t={t} onSet={onSetShip} />
@@ -235,10 +241,12 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null, onSetShip, hideSave = false }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null, onSetShip, hideSave = false, onEditFx, refFxDate = null, docDate = null }: {
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   /** เรทอ้างอิง (เรทหยวนวันที่ใบ) — ใช้เตือนเรทผิดปกติ · ไม่มี = ไม่เทียบ */
   refFx?: number | null;
+  /** ★ 2026-11-22 แตะเรทในกล่องยอดเงิน → ตัวเปลี่ยนเรท (components/fx-rate-quick) · ไม่ส่ง = เรทอ่านอย่างเดียว */
+  onEditFx?: () => void; refFxDate?: string | null; docDate?: string | null;
   dirty: boolean; saving: boolean; onSave: () => void; onConfirm: () => void;
   /** แก้ยอดค่าสินค้าบาท → หน้าใบคิดเรทใหม่ (ใบร่างสกุลต่างประเทศ) */
   onSetGoodsThb?: (thb: number) => void;
@@ -257,7 +265,7 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
         <SectionTitle icon="inspect">ตรวจก่อนยืนยัน<CheckChip items={items} /></SectionTitle>
         <div className="-mx-2"><CheckList items={items} /></div>
       </div>
-      <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} onSetShip={onSetShip} />
+      <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} onSetShip={onSetShip} onEditFx={onEditFx} refFxDate={refFxDate} docDate={docDate} />
       <div className="bg-slate-800 text-white px-4 py-2.5 flex items-baseline justify-between gap-2">
         <span className="text-sm text-slate-200">รวมทั้งสิ้น</span>
         <span className="text-xl font-bold tabular-nums">฿{fmtMoney(totals.grand_total_thb)}</span>

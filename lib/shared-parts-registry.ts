@@ -238,6 +238,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "money-input.md",
   },
   {
+    key: "fx-rate-quick", label: "ตัวตั้งเรทเงินวันนี้", code: "FxRateQuickModal", category: "input",
+    source: { path: "components/fx-rate-quick" },
+    what: "ป๊อปเปลี่ยนเรท ฿/สกุลต่างประเทศของเอกสาร · ติ๊ก \"ตั้งเป็นเรทกลางวันนี้ด้วย\" = อัปเดตเรทหยวนกลาง (daily_rates) ผ่าน API กลาง /api/master-v2/daily-rates · บอกเรทกลางล่าสุด + ป้าย \"เรทกลางเก่า n วัน\" (RateStaleChip · เกิน 3 วัน) · ตั้งเรทกลางแล้วมีปุ่มย้อนกลับ · กติกาใน lib/daily-rate",
+    when: "เอกสารที่มีเรทแปลงเงิน (ใบสำคัญรับ · ต่อไป PO / บิลจีน) และอยากให้คนออกเอกสารอัปเดตเรทกลางได้ทันที",
+    notWhen: "เอกสารที่ล็อกแล้ว (ยืนยัน/ไม่มีสิทธิ์แก้) · หน้าจัดการเรทเต็ม (ประวัติ/ลบ) ยังอยู่ที่แอปโอนเงินจีน แท็บเรท",
+    doc: "fx-rate-quick.md",
+  },
+  {
     key: "date-input", label: "ช่องวันที่", code: "DateInput", category: "input",
     source: { path: "components/date-input" },
     what: "ช่องเลือกวันที่/เวลา แบบ 24 ชั่วโมง ใช้เหมือนกันทุกหน้า · คลิกช่องมีปุ่มลัด วันนี้/พรุ่งนี้/+7 วัน/สิ้นเดือน (เวลาไทย) · เลือกช่วงวันที่ในปฏิทินเดียว = DateRangeInput (components/date-input/range · คลิก/ลาก + ปุ่ม 7 วัน/เดือนนี้/เดือนก่อน)",

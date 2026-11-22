@@ -116,6 +116,14 @@ export async function fxRateForDate(admin: Admin, date: string | null): Promise<
   const r = (data ?? [])[0] as Row | undefined;
   return r && num(r.rate) > 0 ? num(r.rate) : null;
 }
+/** ★ 2026-11-22 เหมือน fxRateForDate + วันที่ของเรท (หน้าใบเตือน "เรทกลางเก่า n วัน" · lib/daily-rate) */
+export async function fxRateInfoForDate(admin: Admin, date: string | null): Promise<{ rate: number; rate_date: string } | null> {
+  let q = admin.from("daily_rates").select("rate, rate_date").not("is_active", "is", false).order("rate_date", { ascending: false }).limit(1);
+  if (date) q = q.lte("rate_date", date);
+  const { data } = await q;
+  const r = (data ?? [])[0] as Row | undefined;
+  return r && num(r.rate) > 0 ? { rate: num(r.rate), rate_date: String(r.rate_date ?? "").slice(0, 10) } : null;
+}
 
 /** สร้างใบร่างจากใบรับ GR หลายใบ → คืน id ใบสำคัญ (โยน Error เมื่อข้อมูลไม่ผ่าน) */
 export async function prefillFromGrs(admin: Admin, grIds: string[], actorName: string | null): Promise<string> {
@@ -308,7 +316,7 @@ export async function systemPrices(admin: Admin, skuIds: string[], partnerId: st
 }
 
 /** อ่านใบ + รายการ (พร้อมรหัส/รูป/ค่าจากตัวแม่) — null เมื่อไม่พบ */
-export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate: number | null } | null> {
+export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ header: VoucherHeader; lines: VoucherLine[]; ref_fx_rate: number | null; ref_fx_date: string | null } | null> {
   const { data: v } = await admin.from("purchase_vouchers_v2").select("*").eq("id", voucherId).maybeSingle();
   if (!v) return null;
   const { data: ls } = await admin.from("purchase_voucher_lines_v2").select("*").eq("voucher_id", voucherId).not("is_active", "is", false).order("sort_order");
@@ -365,8 +373,8 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   }
   // ★ 2026-11-15 เรทอ้างอิง = เรทหยวนของวันที่ใบ (แอปโอนเงินจีน daily_rates) → หน้าใบเตือนเมื่อเรทต่างเกิน 10% (lib/purchase-voucher-checklist)
   //   เฉพาะใบหยวน — daily_rates เป็นเรทหยวนอย่างเดียว เทียบกับสกุลอื่นไม่ได้
-  const ref_fx_rate = isCNY(String((v as Row).currency ?? "")) ? await fxRateForDate(admin, (v as Row).voucher_date ? String((v as Row).voucher_date) : null) : null;
-  return { header: toHeader(v as Row, grNos, poNos, poPayments), lines, ref_fx_rate };
+  const refInfo = isCNY(String((v as Row).currency ?? "")) ? await fxRateInfoForDate(admin, (v as Row).voucher_date ? String((v as Row).voucher_date) : null) : null;
+  return { header: toHeader(v as Row, grNos, poNos, poPayments), lines, ref_fx_rate: refInfo?.rate ?? null, ref_fx_date: refInfo?.rate_date ?? null };
 }
 
 /**
