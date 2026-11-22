@@ -1224,6 +1224,18 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       {/* กล่อง "หน้าใน ERP": เลือกหน้าจากเมนูจริง (ของกลาง components/menu-page-picker) — ปุ่ม "หน้าใน ERP" = สร้างใหม่ · "เปลี่ยนหน้า" บนกล่อง = เปลี่ยน */}
       <MenuPagePickerModal open={!!pagePick} onClose={() => setPagePick(null)}
         current={pagePickNode ? { href: pagePickNode.data.href, app: pagePickNode.data.app ?? "" } : null}
+        existing={pagePick && !pagePick.id ? nodes.filter((n) => n.type === "page" && n.data.href).map((n) => n.data.href!) : undefined}
+        // เพิ่มกล่องใหม่ = เลือกได้หลายหน้า → วางเป็นตาราง 3 คอลัมน์กลางจอ ทีเดียว (Ctrl+Z ครั้งเดียวย้อนทั้งชุด · เจ้าของเลือก 2026-11-22 แบบ A)
+        onPickMany={pagePick && !pagePick.id ? (pages) => {
+          setPagePick(null);
+          const r = wrapRef.current?.getBoundingClientRect();
+          const c = r ? rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) : { x: 0, y: 0 };
+          const cols = Math.min(3, pages.length), W = FLOW_KIND_META.page.w + 40, H = FLOW_KIND_META.page.h + 40;
+          const rows = Math.ceil(pages.length / cols);
+          const made = pages.map((p, i) => makeFlowNode("page", { x: c.x + ((i % cols) - (cols - 1) / 2) * W, y: c.y + (Math.floor(i / cols) - (rows - 1) / 2) * H }, t,
+            { label: p.label, href: p.href, app: p.app || undefined, appName: p.app ? p.appName : undefined, icon: p.icon || undefined }));
+          setNodes((ns) => [...ns.map((x) => (x.selected ? { ...x, selected: false } : x)), ...toRFNodes({ ...EMPTY_FLOW_SCENE, nodes: made }, new Set(made.map((m) => m.id)))]);
+        } : undefined}
         onPick={(p) => {
           const id = pagePick?.id;
           setPagePick(null);

@@ -8,6 +8,8 @@
 // หน้าที่อยู่หลายแอป = โผล่ทุกแอป → เลือกจากแอปไหน ได้ชื่อแอปนั้น · ตรรกะล้วน + เทสต์: lib/menu-pages.ts
 //
 // ใช้:      <MenuPagePickerModal open={open} onClose={…} onPick={(p) => …} current={{ href, app }} />
+//           เลือกหลายหน้า (2026-11-22): ส่ง onPickMany={(pages) => …} = ติ๊กได้หลายแถว · ติ๊กหัวแอป = ทั้งแอป · ปุ่ม "เพิ่ม N หน้า"
+//           existing={[href…]} = หน้าที่มีอยู่แล้ว (ขึ้นป้าย "มีแล้ว" · ยังติ๊กซ้ำได้) — ไม่ส่ง onPickMany = เลือกทีละหน้าแบบเดิม
 //           p = { href, label, icon, app, appName, appIcon }
 //           useMenuPages(enabled) = ข้อมูลเมนูชุดเดียวกัน (ไว้เช็กว่าหน้ายังอยู่ในเมนูไหม / ชื่อแอปล่าสุด)
 // ใช้เมื่อ:  อยากให้ผู้ใช้ชี้ไปหน้าใดหน้าหนึ่งในระบบ (เช่น กล่อง "หน้าใน ERP" ในกระดาน flowchart)
@@ -59,10 +61,14 @@ export function useMenuPages(enabled: boolean): MenuData & { status: Status; err
   return { ...data, status, error, reload };
 }
 
-export function MenuPagePickerModal({ open, onClose, onPick, current, title }: {
+export function MenuPagePickerModal({ open, onClose, onPick, onPickMany, existing, current, title }: {
   open: boolean;
   onClose: () => void;
   onPick: (page: MenuPage) => void;
+  /** เลือกหลายหน้า (ส่งมา = แถวมีช่องติ๊ก + ปุ่มยืนยัน) */
+  onPickMany?: (pages: MenuPage[]) => void;
+  /** ลิงก์หน้าที่มีอยู่แล้ว → ป้าย "มีแล้ว" */
+  existing?: string[];
   /** หน้าที่เลือกอยู่ตอนนี้ (ไฮไลต์ให้) */
   current?: { href?: string | null; app?: string | null } | null;
   title?: string;
@@ -71,10 +77,15 @@ export function MenuPagePickerModal({ open, onClose, onPick, current, title }: {
   const { menus, apps, status, error, reload } = useMenuPages(open);
   const [q, setQ] = useState("");
   const [only, setOnly] = useState<string | null>(null);   // กรองแอปเดียว (null = ทุกแอป)
+  const [picked, setPicked] = useState<Map<string, MenuPage>>(new Map());   // เลือกหลายหน้า: key = แอป|ลิงก์
+  const multi = !!onPickMany;
+  const keyOf = (p: MenuPage) => `${p.app}|${p.href}`;
+  const has = useMemo(() => new Set(existing ?? []), [existing]);
+  const toggle = (ps: MenuPage[], on: boolean) => setPicked((m) => { const n = new Map(m); for (const p of ps) { if (on) n.set(keyOf(p), p); else n.delete(keyOf(p)); } return n; });
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!open) return;
-    setQ(""); setOnly(null);
+    setQ(""); setOnly(null); setPicked(new Map());
     const f = setTimeout(() => searchRef.current?.focus(), 80);   // ป๊อปกลางย้ายโฟกัสไปที่ตัวป๊อปตอนเปิด → รอแล้วค่อยวางเคอร์เซอร์ที่ช่องค้น
     return () => clearTimeout(f);
   }, [open]);
@@ -116,17 +127,23 @@ export function MenuPagePickerModal({ open, onClose, onPick, current, title }: {
               {groups.map((g) => (
                 <div key={g.app || "-"}>
                   <div className="sticky top-0 z-[1] flex items-center gap-1.5 border-b border-slate-100 bg-slate-50 px-3 py-1.5 text-[12px] font-semibold text-slate-600">
+                    {multi && (() => { const n = g.pages.filter((p) => picked.has(keyOf(p))).length; return (
+                      <input type="checkbox" checked={n === g.pages.length} ref={(el) => { if (el) el.indeterminate = n > 0 && n < g.pages.length; }}
+                        onChange={() => toggle(g.pages, n !== g.pages.length)} aria-label={t(`เลือกทุกหน้าในแอป ${g.appName}`, `Select every page in ${g.appName}`)} className="h-4 w-4 accent-violet-600" />
+                    ); })()}
                     {g.appIcon ? <Icon value={g.appIcon} /> : <Icon value="i:apps" />}{g.appName}
                     <span className="font-normal text-slate-400">· {g.pages.length}</span>
                   </div>
                   {g.pages.map((p) => (
-                    <button key={p.href} type="button" onClick={() => onPick(p)}
-                      className={`flex w-full items-center gap-2 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 ${isCur(p) ? "bg-violet-50" : "hover:bg-slate-50"}`}>
+                    <button key={p.href} type="button" onClick={() => (multi ? toggle([p], !picked.has(keyOf(p))) : onPick(p))} aria-pressed={multi ? picked.has(keyOf(p)) : undefined}
+                      className={`flex w-full items-center gap-2 border-b border-slate-100 px-3 py-2 text-left last:border-b-0 ${isCur(p) || (multi && picked.has(keyOf(p))) ? "bg-violet-50" : "hover:bg-slate-50"}`}>
+                      {multi && <input type="checkbox" readOnly tabIndex={-1} checked={picked.has(keyOf(p))} className="pointer-events-none h-4 w-4 shrink-0 accent-violet-600" aria-hidden="true" />}
                       <span className="w-6 shrink-0 text-center text-[15px]">{p.icon ? <Icon value={p.icon} /> : <Icon value="i:link" />}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[13px] text-slate-800">{p.label}</span>
                         <span className="block truncate font-mono text-[11px] text-slate-400">{p.href}</span>
                       </span>
+                      {has.has(p.href) && <span className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">{t("มีแล้ว", "Already added")}</span>}
                       {isCur(p) && <span className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-medium text-white">{t("เลือกอยู่", "Selected")}</span>}
                     </button>
                   ))}
@@ -134,6 +151,15 @@ export function MenuPagePickerModal({ open, onClose, onPick, current, title }: {
               ))}
             </div>
           )}
+        {multi && (
+          <div className="flex items-center gap-2 border-t border-slate-100 pt-2">
+            <span className="text-[12px] text-slate-500">{t(`เลือก ${picked.size} หน้า`, `${picked.size} selected`)}</span>
+            {picked.size > 0 && <button type="button" onClick={() => setPicked(new Map())} className="text-[12px] text-slate-500 underline">{t("ล้าง", "Clear")}</button>}
+            <span className="flex-1" />
+            <button type="button" disabled={!picked.size} onClick={() => onPickMany!([...picked.values()])}
+              className="h-9 rounded-lg bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-700 disabled:opacity-40">{t(`เพิ่ม ${picked.size} หน้า`, `Add ${picked.size} pages`)}</button>
+          </div>
+        )}
         <p className="text-[11px] text-slate-500">{t("หน้าที่อยู่หลายแอปจะโผล่ทุกแอป — เลือกจากแอปไหน ก็ใช้ชื่อแอปนั้น", "Pages in several apps show under each — the app you pick it from is the one shown")}</p>
       </div>
     </ERPModal>

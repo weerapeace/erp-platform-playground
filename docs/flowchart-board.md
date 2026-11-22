@@ -191,3 +191,5 @@ const FlowchartBoard = dynamic(() => import("@/components/flowchart-board").then
 
 - (2026-11-22) แก้: ลากกรอบเลือกจากในกรอบโซนยังเลือกตัวกรอบ (onSelectionStart ไม่ยิงตอน selectionOnDrag) → อ่าน `userSelectionActive` จากที่เก็บของ React Flow + เอากรอบโซนออกตอนลากจบ
 - (2026-11-22) สีเส้น: เลือกเส้นแล้วมีจุดสี 7 สี (ตามชุดสีกระดาน) + สีเอง (ColorPanel) + กลับตามสไตล์ · `FlowSceneEdge.color` · หัวลูกศรสีเดียวกัน · รูปที่บันทึกตามสีด้วย
+
+- (2026-11-22) ปุ่ม "หน้าใน ERP" เลือกได้หลายหน้า (MenuPagePickerModal `onPickMany` · ป้ายมีแล้ว · ติ๊กทั้งแอป) → วางการ์ดเป็นตาราง 3 คอลัมน์กลางจอ ทีเดียว ย้อนครั้งเดียว
