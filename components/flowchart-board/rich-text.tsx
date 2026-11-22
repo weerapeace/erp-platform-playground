@@ -13,6 +13,7 @@ import { Icon } from "@/components/icon";
 import { ColorPicker } from "@/components/color-picker";
 import { RICH_SIZES, sanitizeRich, type FlowAlign, type RichWrap } from "@/lib/flowchart-rich";
 import { FontSelect, type FontOption } from "@/components/font-select";
+import { TextFormatBar, applyTextShortcut, domTextAdapter, isInTextBar, useLinkRequest } from "@/components/text-format-bar";
 import { WEB_FONT_NAMES, webFontOptions } from "@/components/website-text-pickers";
 
 const RECENT_KEY = "flowchart-recent-colors";
@@ -104,12 +105,7 @@ export function RichEditor({ initialHtml, boxW, boxH, textColor, onDone, t }: {
   onDone: (html: string | null, size?: { w: number; h: number }) => void; t: (th: string, en: string) => string;
 }) {
   const ed = useRef<HTMLDivElement>(null);
-  const range = useRef<Range | null>(null);
-  const lastSpan = useRef<HTMLSpanElement | null>(null);
   const done = useRef(false);
-  const [panel, setPanel] = useState(false);
-  const [color, setColor] = useState(textColor);
-  const [, force] = useState(0);
 
   useEffect(() => {
     const el = ed.current; if (!el) return;
@@ -118,12 +114,6 @@ export function RichEditor({ initialHtml, boxW, boxH, textColor, onDone, t }: {
     const r = document.createRange(); r.selectNodeContents(el);
     const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r);
     try { document.execCommand("styleWithCSS", false, "true"); } catch { /* เบราว์เซอร์เก่า */ }
-    const onSel = () => {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount && el.contains(sel.anchorNode)) { range.current = sel.getRangeAt(0).cloneRange(); lastSpan.current = null; force((n) => n + 1); }
-    };
-    document.addEventListener("selectionchange", onSel);
-    return () => document.removeEventListener("selectionchange", onSel);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const finish = (save: boolean) => {
@@ -131,70 +121,20 @@ export function RichEditor({ initialHtml, boxW, boxH, textColor, onDone, t }: {
     const el = ed.current;
     onDone(save && el ? el.innerHTML : null, save && el ? { w: el.offsetWidth + 8, h: el.offsetHeight + 8 } : undefined);
   };
-  const restore = () => {
-    const el = ed.current; if (!el) return;
-    el.focus();
-    const r = range.current;
-    if (r && el.contains(r.commonAncestorContainer)) { const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r); }
-  };
-  const exec = (cmd: string, val?: string) => { restore(); try { document.execCommand(cmd, false, val); } catch { /* ไม่รองรับ */ } };
-  const state = (cmd: string) => { try { return document.queryCommandState(cmd); } catch { return false; } };
-
-  /** ใส่สไตล์ให้คำที่เลือก (ไม่เลือก = ทั้งกล่อง) โดยไม่ต้องย้ายโฟกัส — ใช้กับสี/ขนาด (ลากสีรัว ๆ = แก้ span เดิม ไม่ซ้อนใหม่) */
-  const styleRange = (prop: "color" | "fontSize", val: string) => {
-    const el = ed.current; if (!el) return;
-    if (lastSpan.current && el.contains(lastSpan.current)) { lastSpan.current.style[prop] = val; return; }
-    let r = range.current;
-    if (!r || r.collapsed || !el.contains(r.commonAncestorContainer)) { r = document.createRange(); r.selectNodeContents(el); }
-    const frag = r.extractContents();
-    frag.querySelectorAll("span").forEach((sp) => { (sp as HTMLSpanElement).style[prop] = ""; });
-    const sp = document.createElement("span");
-    sp.style[prop] = val;
-    sp.appendChild(frag);
-    r.insertNode(sp);
-    const nr = document.createRange(); nr.selectNodeContents(sp);
-    range.current = nr; lastSpan.current = sp;
-  };
-
+  const [linkReq, askLink] = useLinkRequest();
+  const [ready, setReady] = useState(false);
+  useEffect(() => { setReady(true); }, []);
   const key = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); finish(false); }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); finish(true); }
+    if (ed.current) applyTextShortcut(e, domTextAdapter(ed.current), askLink);
   };
-  // เครื่องมือ = ไม่ขโมยโฟกัสจากช่องพิมพ์ (ยกเว้นช่องกรอก/ตัวเลือก)
-  const keepFocus = (e: React.MouseEvent) => { const tg = e.target as HTMLElement; if (!/^(INPUT|SELECT|OPTION)$/.test(tg.tagName)) e.preventDefault(); };
-
-  const tools: ReactNode = (
-    <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-md" onMouseDown={keepFocus}>
-      <IconBtn icon="i:bold" title={t("ตัวหนา (Ctrl+B)", "Bold (Ctrl+B)")} on={state("bold")} onClick={() => exec("bold")} />
-      <IconBtn icon="i:italic" title={t("ตัวเอียง (Ctrl+I)", "Italic (Ctrl+I)")} on={state("italic")} onClick={() => exec("italic")} />
-      <IconBtn icon="i:underline" title={t("ขีดเส้นใต้ (Ctrl+U)", "Underline (Ctrl+U)")} on={state("underline")} onClick={() => exec("underline")} />
-      <IconBtn icon="i:strikethrough" title={t("ขีดฆ่า", "Strikethrough")} on={state("strikeThrough")} onClick={() => exec("strikeThrough")} />
-      <Sep />
-      <SizeSelect title={t("ขนาดตัวอักษร (ไม่เลือกคำ = ทั้งกล่อง)", "Font size (no selection = whole box)")} onPick={(px) => { styleRange("fontSize", `${px}px`); restore(); }} />
-      <Sep />
-      <IconBtn icon="i:align-left" title={t("ชิดซ้าย", "Align left")} on={state("justifyLeft")} onClick={() => exec("justifyLeft")} />
-      <IconBtn icon="i:align-center" title={t("กึ่งกลาง", "Center")} on={state("justifyCenter")} onClick={() => exec("justifyCenter")} />
-      <IconBtn icon="i:align-right" title={t("ชิดขวา", "Align right")} on={state("justifyRight")} onClick={() => exec("justifyRight")} />
-      <IconBtn icon="i:list" title={t("รายการ (bullet)", "Bulleted list")} on={state("insertUnorderedList")} onClick={() => exec("insertUnorderedList")} />
-      <Sep />
-      <button type="button" title={t("สีตัวอักษร (ไม่เลือกคำ = ทั้งกล่อง)", "Text color (no selection = whole box)")} onClick={() => setPanel((v) => !v)}
-        className={`${IB} relative ${panel ? IBon : ""}`}>
-        <Icon value="i:text-color" /><span className="absolute bottom-1 left-1.5 right-1.5 h-[3px] rounded" style={{ background: color }} />
-      </button>
-      <IconBtn icon="i:clear-formatting" title={t("ล้างรูปแบบคำที่เลือก", "Clear formatting")} onClick={() => { exec("removeFormat"); exec("unlink"); }} />
-    </div>
-  );
-
   return (
     <div className="nodrag nowheel nopan absolute left-1 top-1 z-20"
-      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) finish(true); }}>
-      <div className="absolute bottom-full left-0 mb-1.5 w-max max-w-[420px]">
-        {tools}
-        {panel && (
-          <div className="absolute left-0 top-full mt-1" onMouseDown={keepFocus}>
-            <ColorPanel value={color} t={t} onChange={(hex) => { setColor(hex); styleRange("color", hex); }} />
-          </div>
-        )}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null) && !isInTextBar(e.relatedTarget)) finish(true); }}>
+      {/* แถบจัดข้อความ = ของกลาง components/text-format-bar (เจ้าของสั่ง 2026-11-22) · มือถือติดเหนือแป้นพิมพ์ */}
+      <div className="absolute bottom-full left-0 mb-1.5">
+        {ready && ed.current && <TextFormatBar t={t} adapter={domTextAdapter(ed.current)} linkRequest={linkReq} />}
       </div>
       <div ref={ed} contentEditable suppressContentEditableWarning role="textbox" aria-multiline="true"
         title={t("ลากคลุมคำแล้วกดปุ่มด้านบน · คลิกข้างนอก / Ctrl+Enter = บันทึก · Esc = ยกเลิก · ลากขอบขวา = ขยายกว้าง", "Select words then use the bar · click outside / Ctrl+Enter to save · Esc to cancel")}

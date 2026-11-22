@@ -83,7 +83,7 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowSty
     const rows = (n.data.items ?? []).filter((i) => i.text.trim()).map((i) =>
       `<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.35;margin-top:3px">`
       + `<span style="flex:none;width:12px;height:12px;margin-top:2px;border:1.5px solid ${strokeC};border-radius:3px;background:${i.done ? strokeC : "#fff"}"></span>`
-      + `<span style="color:${i.done ? "#94a3b8" : p.text};${i.done ? "text-decoration:line-through;" : ""}word-break:break-word">${esc(i.text)}</span></div>`).join("");
+      + `<span style="color:${i.done ? "#94a3b8" : p.text};${i.done ? "text-decoration:line-through;" : ""}word-break:break-word">${i.rich ? sanitizeRich(i.rich) : esc(i.text)}</span></div>`).join("");
     text = `<div style="width:100%;text-align:left"><div style="display:flex;justify-content:space-between;gap:6px;font-size:13px;font-weight:700;color:${p.text}"><span>${esc(title) || "&nbsp;"}</span><span style="font-weight:400;font-size:11px;color:${p.sub}">${pr.done}/${pr.total}</span></div>${rows}</div>`;
   } else {
     text = labelHtml;

@@ -1234,6 +1234,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "พิมพ์ข้อความมีหัวข้อ ตัวหนา สี ตาราง รูป (เก็บเป็น HTML)",
   },
   {
+    key: "text-format-bar", label: "แถบจัดข้อความตอนพิมพ์", code: "TextFormatBar", category: "input",
+    source: { path: "components/text-format-bar", names: ["TextFormatBar", "domTextAdapter", "useTextFormatTarget", "applyTextShortcut"] },
+    what: "แถบตัวหนา/เอียง/ขีด/ขนาด/สี/ไฮไลต์/จัดชิด/รายการ/ลิงก์ ที่ขึ้นมาแทนเครื่องมือเดิมตอนกำลังพิมพ์หรือคลุมดำ · ปุ่มลัด Ctrl+B/I/U/K (แป้นไทยได้) · มือถือติดเหนือแป้นพิมพ์",
+    when: "ช่องพิมพ์ข้อความจัดรูปแบบแบบ contentEditable (กระดาน flowchart: กล่อง · ข้อในรายการงาน · ชื่อการ์ด) · ตัวแก้แบบอื่นส่ง adapter ของตัวเอง",
+    notWhen: "ช่องกรอกข้อความล้วน (input/textarea) · กล่องข้อความยาวที่มีตาราง/รูป → RichTextEditor",
+    doc: "text-format-bar.md",
+  },
+  {
     key: "inline-edit", label: "โชว์ค่าก่อน กดถึงแก้", code: "InlineEdit", category: "input",
     source: { path: "components/inline-edit" },
     what: "โชว์ค่าเป็นข้อความสะอาด กดแล้วค่อยกลายเป็นช่องกรอก กันพิมพ์ทับเผลอ · InlineField (2026-11-16) = แบบเดียวกันแต่ตัวกรอกเป็นอะไรก็ได้ (วัน+เวลา · เลือกคน · แท็ก · ตัวเลือก): มีค่าแล้วล็อก ดับเบิลคลิก/แตะ 2 ครั้งถึงแก้ · ว่างกดใส่ได้เลย",

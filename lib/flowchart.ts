@@ -55,7 +55,8 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** rule = กล่อง "ที่เก็บ" ผูกกับกฎที่เก็บจริง (erp_storage_rules.rule_key · หน้า /master/storage-rules) → กระดานเตือนเมื่อแผนไม่ตรงกฎ */
 /** rich = ข้อความจัดรูปแบบ (HTML ชุดเล็ก ผ่าน sanitizeRich เสมอ · label = ข้อความล้วนคู่กัน) · align = จัดชิดทั้งกล่อง · fill/stroke = สีพื้น/เส้นขอบกำหนดเอง #rrggbb (ทับสีชุด) — lib/flowchart-rich */
 /** ข้อในกล่อง "รายการงาน" · by/at = ใครติ๊กเสร็จ เมื่อไหร่ (ISO) — เอาติ๊กออก = ลบ by/at */
-export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; at?: string };
+/** rich = ข้อความจัดรูปแบบของข้อ (ตัวหนา/สี/ลิงก์ · ผ่าน sanitizeRich) — text = ข้อความล้วนคู่กันเสมอ */
+export type FlowTodo = { id: string; text: string; rich?: string; done?: boolean; by?: string; at?: string };
 /** items = ข้อของกล่อง "รายการงาน" */
 /** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
 /** style = สไตล์ของกล่อง (lib/flowchart-styles · ไม่มี = ตามกระดาน) */
@@ -212,6 +213,7 @@ export function cleanTodos(raw: unknown): FlowTodo[] {
     const id = str(o.id).slice(0, 40);
     if (!id || ids.has(id)) continue;
     const it: FlowTodo = { id, text: str(o.text).slice(0, 300) };
+    const rich = sanitizeRich(o.rich); if (rich && rich.length <= 2000) it.rich = rich;
     if (o.done === true) {
       it.done = true;
       if (typeof o.by === "string" && o.by.trim()) it.by = o.by.trim().slice(0, 80);
@@ -230,7 +232,7 @@ export function todoProgress(items: FlowTodo[] | undefined): { done: number; tot
 }
 /** ติ๊ก / เอาติ๊กออก 1 ข้อ — ติ๊ก = จำชื่อคน + เวลา · เอาออก = ลบทิ้ง */
 export function toggleTodo(items: FlowTodo[], id: string, done: boolean, by: string, at = new Date().toISOString()): FlowTodo[] {
-  return items.map((i) => (i.id !== id ? i : done ? { id: i.id, text: i.text, done: true, ...(by ? { by } : {}), at } : { id: i.id, text: i.text }));
+  return items.map((i) => (i.id !== id ? i : done ? { id: i.id, text: i.text, ...(i.rich ? { rich: i.rich } : {}), done: true, ...(by ? { by } : {}), at } : { id: i.id, text: i.text, ...(i.rich ? { rich: i.rich } : {}) }));
 }
 export type OpenTodo = { nodeId: string; box: string; item: FlowTodo };
 /** "งานค้างทั้งผัง": ทุกข้อที่ยังไม่ติ๊กในทุกกล่องรายการงาน (เรียงตามกล่องบน→ล่าง ซ้าย→ขวา) */
