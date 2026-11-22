@@ -1726,6 +1726,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "listing-card", label: "การ์ดสินค้าบนร้าน (รูปใหญ่ / รูปเล็ก)", code: "ListingCard · ShopStateBadge", category: "feature",
+    source: { path: "components/platform-catalog/listing-card" },
+    what: "การ์ด 1 รายการบนร้าน — รูปจากร้าน · ป้ายสถานะร้าน (ขายอยู่/ใกล้หมด/หมด/ปิดขาย/ไม่อยู่บนร้านแล้ว + สต๊อก) · ซ้ำ ×N · ส่วนลด % · ชื่อ · รหัส · ราคาจ่ายจริง · ส่วนท้ายใส่ปุ่มเอง · variant \"full\" รูปเต็มใบ / \"compact\" รูปเล็กซ้าย (แบบ B แท็บจับคู่) · ShopStateBadge = ป้ายสถานะร้าน ใช้ในตาราง/กล่องตัวซ้ำด้วย",
+    when: "ทุกที่ที่โชว์สินค้าบนร้านเป็นการ์ด (แท็บจับคู่ · มุมมองหน้าร้าน · โหมดจับคู่ทีละตัว · แผงสินค้าบนเว็บ) — คู่กับ MiniTable layout=\"cards\" + cardPick",
+    notWhen: "การ์ดสินค้าในระบบเรา (Parent SKU) ไม่ใช่รายการบนร้าน",
+    doc: "platform-catalog.md",
+  },
+  {
     key: "push-open", label: "เปิดหน้าให้เช็กหลังส่งขึ้นร้าน", code: "usePushOpen", category: "feature",
     source: { path: "components/push-open" },
     what: "กดส่งขึ้นร้าน → เปิดแท็บรอไว้ทันที (ไม่โดนบล็อก) ส่งเสร็จพาไปหน้าสินค้า / Seller Center ตามที่ผู้ใช้ตั้ง (ต่อคน · แยกรายร้านได้) · หน้าสินค้ายังไม่พร้อม = Seller Center แทน + เหตุผล · เกิน 5 หน้า/เบราว์เซอร์บล็อก = ปุ่มในแจ้งผล · ส่งไม่ผ่าน = ปิดแท็บเอง · หน้าตั้งค่า PushOpenSettingsModal (เมนูโปรไฟล์) + ปุ่ม PushOpenGearButton · กติกา pure lib/push-open · ลิงก์จาก lib/platform-links",

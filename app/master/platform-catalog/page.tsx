@@ -26,7 +26,7 @@ import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
-import { IgnoreDialog, IGNORE_REASON_DUP } from "@/components/platform-catalog/ignore-dialog";
+import { IgnoreDialog, IGNORE_REASON_DUP, IGNORE_REASON_DISCONTINUED } from "@/components/platform-catalog/ignore-dialog";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { isSellingPlatform } from "@/lib/selling-platforms";
@@ -185,6 +185,8 @@ export default function PlatformCatalogPage() {
   // ไม่ต้องจับคู่ (ข้าม) — ติ๊กหลายตัว + ป๊อปเลือกเหตุผล
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [ignoreTarget, setIgnoreTarget] = useState<string[] | null>(null);
+  const [ignoreDefault, setIgnoreDefault] = useState<string | undefined>(undefined);   // ปุ่ม "เลิกขาย" = เลือกเหตุผล "เลิกขายแล้ว" ไว้ก่อน
+  const askIgnore = (ids: string[], reason?: string) => { setIgnoreDefault(reason); setIgnoreTarget(ids); };
   const [ignoreBusy, setIgnoreBusy] = useState(false);
   const [dupKeepAsk, setDupKeepAsk] = useState(false);   // ป๊อปยืนยัน "เก็บตัวนี้ · ที่เหลือไม่ต้องจับคู่ (ซ้ำบนร้าน)"
   // รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (โหลดตามหลังตาราง) + การ์ด/ตาราง + เรียง (จำในเครื่อง)
@@ -201,10 +203,11 @@ export default function PlatformCatalogPage() {
   const [lastPref, setLastPref] = useUserPref<{ platformId?: string; brandId?: string }>("platform_catalog_last", {}, parseLast);
   const lastPrefRef = useRef(lastPref);
   lastPrefRef.current = lastPref;
-  // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน · ค่าเดียวกับมุมมองหน้าร้าน) · พับแถบซ้าย = +1 ใบ
-  const gallery = useGalleryColumns("platform-catalog-cards", 6, CARD_GAP);
-  const isPhone = useMediaQuery("(max-width: 639px)");   // มือถือ: การ์ดกว้างอย่างน้อย 150px (≈2 ใบต่อแถว) อ่านชื่อ/ราคาได้
-  const cardGrid = galleryTemplate(sideCollapsed && isWide ? gallery.cols + 1 : gallery.cols, CARD_GAP, isPhone ? 150 : undefined);
+  // การ์ดต่อแถว (ของกลาง GalleryColumns · Ctrl + ลูกกลิ้งบนกริด = ย่อ/ขยาย · จำต่อคน) · พับแถบซ้าย = +1 ใบ
+  //   แท็บจับคู่ใช้การ์ดแบบ B รูปเล็ก (เจ้าของเลือก 2026-11-22) → จำนวนต่อแถวแยกจากมุมมองหน้าร้าน (การ์ดรูปใหญ่ key "platform-catalog-cards")
+  const gallery = useGalleryColumns("platform-catalog-match-cards", 3, CARD_GAP);
+  const isPhone = useMediaQuery("(max-width: 639px)");   // มือถือ: การ์ดกว้างอย่างน้อย 260px (= 1 ใบต่อแถว) ชื่อ 2 บรรทัด + ปุ่มไม่เบียด
+  const cardGrid = galleryTemplate(sideCollapsed && isWide ? gallery.cols + 1 : gallery.cols, CARD_GAP, isPhone ? 260 : 240);
   // เปิด/ปิดขายบน LINE (สวิตช์ในแถว/การ์ด/แถบเลือกหลายตัว) → อัปเดตสถานะในหน้าเลย ไม่ต้องโหลดใหม่
   const disp = useLineDisplay((results) => {
     setSumm((m) => {
@@ -390,6 +393,8 @@ export default function PlatformCatalogPage() {
   const shownRows = useMemo(() => !shopFilter ? matchRows
     : shopFilter === "price" ? matchRows.filter((l) => priceFlags(summ[l.id]).length > 0)
     : matchRows.filter((l) => summ[l.id]?.state === shopFilter), [matchRows, shopFilter, summ]);
+  // ปิดขายบนร้าน + ยังไม่จับคู่ → ปุ่ม "ตั้งเลิกขายทั้งหมดที่ปิดขาย" (ส่วนใหญ่คือของที่เลิกขายแล้ว เช่น Shopee Louis Montini 168 ตัว)
+  const hiddenUnmatched = useMemo(() => shopFilter !== "hidden" ? [] : shownRows.filter((l) => { const s = statusOf(l); return s === "guess" || s === "none"; }), [shopFilter, shownRows, statusOf]);
   // ร้านนี้ส่งสถานะ/สต๊อก/รูปมาไหม (ไฟล์ export ของ Shopee = ไม่ส่ง → ซ่อนคอลัมน์/ชิปที่ใช้ไม่ได้)
   const summList = useMemo(() => Object.values(summ), [summ]);
   const hasShopData = summList.some((s) => s.state !== "nodata");
@@ -444,11 +449,15 @@ export default function PlatformCatalogPage() {
     if (ids.length === 0) return false;
     setIgnoreBusy(true);
     let updated = 0, skipped = 0;
+    const changed: string[] = [];
+    // เหตุผลเดิม (ไว้ย้อนกลับตอนกด "เอากลับมาจับคู่" พลาด)
+    const prevReason = new Map(listings.filter((l) => ids.includes(l.id)).map((l) => [l.id, l.match_ignore_reason ?? IGNORE_REASON_DISCONTINUED]));
     try {
       for (let i = 0; i < ids.length; i += 500) {
         const r = await apiFetch("/api/platform-catalog/ignore", { method: "POST", body: JSON.stringify({ listing_ids: ids.slice(i, i + 500), ignored, reason }) });
         const j = await r.json(); if (j.error) throw new Error(j.error);
         const patch = new Map(((j.results ?? []) as ({ listing_id: string } & IgnorePatch)[]).map((x) => [x.listing_id, x]));
+        changed.push(...patch.keys());
         setListings((ls) => ls.map((l) => { const p = patch.get(l.id); return p ? { ...l, match_ignored: p.match_ignored, match_ignore_reason: p.match_ignore_reason, match_ignored_at: p.match_ignored_at } : l; }));
         setOpenListing((o) => { const p = o && patch.get(o.id); return p ? { ...o!, match_ignored: p.match_ignored, match_ignore_reason: p.match_ignore_reason, match_ignored_at: p.match_ignored_at } : o; });
         updated += j.updated ?? 0; skipped += j.skipped ?? 0;
@@ -456,8 +465,18 @@ export default function PlatformCatalogPage() {
       setExpanded((s) => { const n = new Set(s); ids.forEach((id) => n.delete(id)); return n; });
       setSelected(new Set());
       if (!quiet) {
-        const head = ignored ? `ตั้งไม่ต้องจับคู่ ${updated.toLocaleString()} รายการแล้ว` : `เลิกข้าม ${updated.toLocaleString()} รายการ — กลับไปรอจับคู่`;
-        toast.success(skipped ? `${head} · ข้ามไป ${skipped} รายการ (จับคู่อยู่แล้ว/ไม่ได้ข้าม)` : head);
+        const label = reason === IGNORE_REASON_DISCONTINUED ? "เลิกขายแล้ว" : "ไม่ต้องจับคู่";
+        const head = ignored ? `ตั้ง${label} ${updated.toLocaleString()} รายการ` : `เอากลับมาจับคู่ ${updated.toLocaleString()} รายการ`;
+        const msg = skipped ? `${head} · ข้ามไป ${skipped} รายการ (จับคู่อยู่แล้ว/ไม่ได้ตั้งไว้)` : head;
+        // ย้อนกลับได้: ตั้งแล้ว → เอากลับมา · เอากลับมาแล้ว → ตั้งกลับด้วยเหตุผลเดิม (แยกตามเหตุผล)
+        if (changed.length === 0) toast.success(msg);
+        else if (ignored) toast.undo(msg, async () => { await saveIgnore(changed, false, null); });
+        else toast.undo(msg, async () => {
+          const byReason = new Map<string, string[]>();
+          for (const id of changed) { const r = prevReason.get(id) ?? IGNORE_REASON_DISCONTINUED; byReason.set(r, [...(byReason.get(r) ?? []), id]); }
+          for (const [r, g] of byReason) await saveIgnore(g, true, r, true);
+          toast.success(`ตั้งกลับแล้ว ${changed.length.toLocaleString()} รายการ`);
+        });
       }
       return updated > 0;
     } catch (e) { toast.error(`บันทึกไม่สำเร็จ${updated ? ` (ทำไปแล้ว ${updated} รายการ)` : ""}: ${(e as Error).message}`); return false; }
@@ -922,11 +941,21 @@ export default function PlatformCatalogPage() {
         {canEdit && <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0">เปลี่ยน</button>}
       </span>
     );
-    if (st === "ignored") return (
-      <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
-        <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 truncate" title={l.match_ignore_reason ?? ""}>🚫 ไม่ต้องจับคู่{l.match_ignore_reason ? ` · ${l.match_ignore_reason}` : ""}</span>
-        {canEdit && <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore([l.id], false, null)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50">เลิกข้าม</button>}
-      </span>
+    if (st === "ignored") {
+      const quit = l.match_ignore_reason === IGNORE_REASON_DISCONTINUED;
+      return (
+        <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
+          <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-slate-100 border border-dashed border-slate-300 rounded px-1.5 py-0.5 truncate" title={l.match_ignore_reason ?? ""}>
+            <Icon name="ban" />{quit ? "เลิกขายแล้ว" : `ไม่ต้องจับคู่${l.match_ignore_reason ? ` · ${l.match_ignore_reason}` : ""}`}
+          </span>
+          {canEdit && <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore([l.id], false, null)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50">เอากลับมาจับคู่</button>}
+        </span>
+      );
+    }
+    // ยังไม่จับคู่ → ปุ่ม "เลิกขาย" (ป๊อปเลือกเหตุผล "เลิกขายแล้ว" ไว้ก่อน เปลี่ยนเหตุผลได้)
+    const quitBtn = canEdit && (
+      <button type="button" disabled={ignoreBusy} onClick={() => askIgnore([l.id], IGNORE_REASON_DISCONTINUED)} title="เลิกขายแล้ว / ไม่ต้องจับคู่ — เอากลับมาได้ทุกเมื่อ"
+        className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50"><Icon name="ban" />เลิกขาย</button>
     );
     const top = suggestions[l.id]?.[0];
     if (st === "guess" && top) return (
@@ -934,13 +963,15 @@ export default function PlatformCatalogPage() {
         <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} title={`${top.name ?? ""} · ${top.score}% ${top.reason}`}
           className="text-xs font-mono text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 truncate hover:bg-sky-100">{top.code} ?</button>
         {canEdit && <button type="button" disabled={busy} onClick={() => confirmTop(l)} className="h-7 px-2.5 text-xs text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50 shrink-0">{busy ? "…" : "ยืนยัน"}</button>}
+        {quitBtn}
       </span>
     );
     return (
-      <span onClick={stop}>
-        <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} className="h-7 px-2.5 text-xs text-amber-700 border border-amber-200 bg-amber-50/60 rounded-md hover:bg-amber-50">
+      <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
+        <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} className="h-7 px-2.5 text-xs text-amber-700 border border-amber-200 bg-amber-50/60 rounded-md hover:bg-amber-50 shrink-0">
           {suggestLoading ? "กำลังเดา…" : "🔍 จับคู่"}
         </button>
+        {quitBtn}
       </span>
     );
   };
@@ -1418,6 +1449,16 @@ export default function PlatformCatalogPage() {
                   )}
                 </div>
               )}
+              {canEdit && hiddenUnmatched.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <Icon name="info" />
+                  <span className="flex-1 min-w-[14rem]">ปิดขายบนร้านและยังไม่จับคู่ {hiddenUnmatched.length.toLocaleString()} รายการ — ถ้าเลิกขายแล้ว ตั้งทีเดียวได้ (ไม่นับใน “ยังไม่จับคู่” · เอากลับมาได้ทุกเมื่อ)</span>
+                  <button type="button" disabled={ignoreBusy} onClick={() => askIgnore(hiddenUnmatched.map((l) => l.id), IGNORE_REASON_DISCONTINUED)}
+                    className="h-8 px-3 inline-flex items-center gap-1.5 text-sm whitespace-nowrap text-slate-700 border border-slate-300 bg-white rounded-lg hover:bg-slate-100 disabled:opacity-50">
+                    <Icon name="ban" />ตั้งเลิกขายทั้งหมดที่ปิดขาย ({hiddenUnmatched.length.toLocaleString()})
+                  </button>
+                </div>
+              )}
               <div ref={layout === "cards" ? gallery.wheelRef : undefined}>
               <MiniTable
                 rows={shownRows} columns={cols} rowKey={(l) => l.id} onRowClick={openRow}
@@ -1425,7 +1466,7 @@ export default function PlatformCatalogPage() {
                 renderCard={(l) => {
                   const s = summ[l.id];
                   return (
-                    <ListingCard footer={matchCell(l, true)} badges={(
+                    <ListingCard variant="compact" footer={matchCell(l, true)} badges={(
                       <>
                         {priceFlagText(s) && <span className="inline-flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" title={priceFlagText(s)}><Icon name="warning" />{priceFlagText(s)}</span>}
                         {platformCode === "line_shopping" && s && s.display != null && s.state !== "gone" && (
@@ -1450,7 +1491,7 @@ export default function PlatformCatalogPage() {
                   <MatchCandidates suggestions={suggestions[l.id]} loading={suggestLoading} currentId={l.matched_parent_sku_id}
                     canEdit={canEdit} busy={busyIds.has(l.id)} onPick={(p) => void saveMatch(l.id, p)}
                     onUnmatch={l.matched_parent_sku_id ? () => void saveMatch(l.id, null) : undefined}
-                    onIgnore={!l.matched_parent_sku_id && !l.match_ignored ? () => setIgnoreTarget([l.id]) : undefined} />
+                    onIgnore={!l.matched_parent_sku_id && !l.match_ignored ? () => askIgnore([l.id]) : undefined} />
                 )}
                 searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""} ${l.matched_code ?? ""}`}
                 searchPlaceholder="ค้นหาชื่อ / SKU / รหัสบนร้าน / รหัสในระบบ"
@@ -1518,7 +1559,7 @@ export default function PlatformCatalogPage() {
       />
 
       <IgnoreDialog
-        open={!!ignoreTarget && ignoreTargetRows.length > 0} count={ignoreTargetRows.length} busy={ignoreBusy}
+        open={!!ignoreTarget && ignoreTargetRows.length > 0} count={ignoreTargetRows.length} busy={ignoreBusy} defaultReason={ignoreDefault}
         sample={ignoreTargetRows.map((l) => l.title || l.sku_code || l.external_product_id || "—")}
         onClose={() => setIgnoreTarget(null)}
         onConfirm={(reason) => { void saveIgnore(ignoreTargetRows.map((l) => l.id), true, reason).then((ok) => { if (ok) setIgnoreTarget(null); }); }}
@@ -1537,10 +1578,10 @@ export default function PlatformCatalogPage() {
             <button type="button" disabled={bulkBusy} onClick={() => setBulkAsk("selected")} className="h-8 px-3 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">✓ ยืนยันคู่ที่ระบบเดา ({selGuess.length.toLocaleString()})</button>
           )}
           {selIgnorable.length > 0 && (
-            <button type="button" disabled={ignoreBusy} onClick={() => setIgnoreTarget(selIgnorable)} className="h-8 px-3 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50">🚫 ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
+            <button type="button" disabled={ignoreBusy} onClick={() => askIgnore(selIgnorable)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50"><Icon name="ban" />เลิกขาย / ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
           )}
           {selIgnored.length > 0 && (
-            <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">↩ เลิกข้าม ({selIgnored.length.toLocaleString()})</button>
+            <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50"><Icon name="arrow-back-up" />เอากลับมาจับคู่ ({selIgnored.length.toLocaleString()})</button>
           )}
           {selGone.length > 0 && (
             <button type="button" disabled={goneBusy} onClick={() => void clearGone(selGone)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"><Icon name="delete" />ล้างที่ไม่อยู่บนร้าน ({selGone.length.toLocaleString()})</button>
@@ -1599,7 +1640,7 @@ export default function PlatformCatalogPage() {
               <MatchCandidates suggestions={modalSugs ?? undefined} loading={modalSugs === null} currentId={openListing.matched_parent_sku_id}
                 canEdit={canEdit} busy={busyIds.has(openListing.id)} onPick={(p) => void saveMatch(openListing.id, p)}
                 onUnmatch={openListing.matched_parent_sku_id ? () => void saveMatch(openListing.id, null) : undefined}
-                onIgnore={!openListing.matched_parent_sku_id && !openListing.match_ignored ? () => setIgnoreTarget([openListing.id]) : undefined} />
+                onIgnore={!openListing.matched_parent_sku_id && !openListing.match_ignored ? () => askIgnore([openListing.id]) : undefined} />
             </div>
 
             {/* ชื่อ+รหัสซ้ำบนร้าน → เก็บไว้ตัวเดียว */}

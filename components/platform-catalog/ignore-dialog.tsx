@@ -11,19 +11,23 @@ import { ERPModal } from "@/components/modal";
 
 /** เหตุผล "ซ้ำบนร้าน" — ปุ่ม "เก็บตัวนี้" ในป๊อปรายละเอียดใช้คำเดียวกัน */
 export const IGNORE_REASON_DUP = "สินค้าซ้ำบนร้าน";
-export const IGNORE_REASONS = ["งานบริการ/รับผลิต", "เลิกขายแล้ว", IGNORE_REASON_DUP, "ชุด/โปรโมชัน (ไม่มีสินค้าเดี่ยว)"];
+/** เหตุผล "เลิกขาย" — ปุ่ม "เลิกขาย" ในแถว/การ์ด และ "ตั้งเลิกขายทั้งหมดที่ปิดขาย" เปิดป๊อปโดยเลือกตัวนี้ไว้ก่อน */
+export const IGNORE_REASON_DISCONTINUED = "เลิกขายแล้ว";
+export const IGNORE_REASONS = ["งานบริการ/รับผลิต", IGNORE_REASON_DISCONTINUED, IGNORE_REASON_DUP, "ชุด/โปรโมชัน (ไม่มีสินค้าเดี่ยว)"];
 const OTHER = "__other";
 const LAST_KEY = "platform-catalog:ignore-reason";
 const TYPED_OVER = 100;
 const TYPED_WORD = "ยืนยัน";
 
-export function IgnoreDialog({ open, count, sample, busy, onClose, onConfirm }: {
+export function IgnoreDialog({ open, count, sample, busy, defaultReason, onClose, onConfirm }: {
   open: boolean;
   /** จำนวนรายการที่จะตั้งว่าไม่ต้องจับคู่ */
   count: number;
   /** ชื่อสินค้าตัวอย่าง (โชว์ไม่เกิน 5) */
   sample?: string[];
   busy?: boolean;
+  /** เลือกเหตุผลนี้ไว้ก่อน (เช่น ปุ่ม "เลิกขาย") — ไม่ใส่ = เหตุผลที่ใช้ล่าสุด */
+  defaultReason?: string;
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }) {
@@ -33,12 +37,12 @@ export function IgnoreDialog({ open, count, sample, busy, onClose, onConfirm }: 
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
-    let last = "";
-    try { last = localStorage.getItem(LAST_KEY) ?? ""; } catch { /* โหมดส่วนตัว */ }
+    let last = defaultReason ?? "";
+    if (!last) try { last = localStorage.getItem(LAST_KEY) ?? ""; } catch { /* โหมดส่วนตัว */ }
     if (last && !IGNORE_REASONS.includes(last)) { setPick(OTHER); setOther(last); }
     else { setPick(last || IGNORE_REASONS[0]); setOther(""); }
     setTyped(""); setErr(null);
-  }, [open]);
+  }, [open, defaultReason]);
 
   const needTyped = count > TYPED_OVER;
   const submit = () => {
@@ -52,7 +56,7 @@ export function IgnoreDialog({ open, count, sample, busy, onClose, onConfirm }: 
   return (
     <ERPModal open={open} onClose={() => { if (!busy) onClose(); }} size="sm" defaultExpanded={false} storageKey="platform-catalog-ignore"
       title={count > 1 ? `ไม่ต้องจับคู่ ${count.toLocaleString()} รายการ` : "ไม่ต้องจับคู่ตัวนี้"}
-      description="ใช้กับของที่ไม่มีในระบบเราจริง ๆ — ไม่นับใน “ยังไม่จับคู่” และระบบจะไม่เดาคู่ให้อีก · เลิกข้ามได้ทุกเมื่อ"
+      description="ใช้กับของที่เลิกขายหรือไม่มีในระบบเราจริง ๆ — ไม่นับใน “ยังไม่จับคู่” และระบบจะไม่เดาคู่ให้อีก · เอากลับมาจับคู่ได้ทุกเมื่อ"
       footer={(
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={busy} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>

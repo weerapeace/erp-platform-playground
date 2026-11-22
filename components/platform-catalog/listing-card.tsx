@@ -49,35 +49,70 @@ export type ListingCardData = {
 
 const baht = (n: number) => `฿${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
 
-export function ListingCard({ data: d, footer, badges }: { data: ListingCardData; footer?: ReactNode; badges?: ReactNode }) {
+/**
+ * variant: "full" (ค่าเริ่ม) = รูปเต็มใบ · "compact" = รูปเล็กซ้าย ข้อมูลขวา (แบบ B — แท็บจับคู่ เจ้าของเลือก 2026-11-22)
+ *   ข้อมูลชุดเดียวกัน ป้ายเดียวกัน — ต่างแค่การจัดวาง
+ */
+export function ListingCard({ data: d, footer, badges, variant = "full" }: { data: ListingCardData; footer?: ReactNode; badges?: ReactNode; variant?: "full" | "compact" }) {
   const disc = discountPct(d);
   const pay = d.salePrice ?? d.price;
+  const compact = variant === "compact";
+  const dupBadge = !!d.dupCount && d.dupCount > 1 && (
+    <span className="rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700"
+      title={`บนร้านมีสินค้าชื่อและรหัสเหมือนกัน ${d.dupCount} ชิ้น`}>ซ้ำ ×{d.dupCount}</span>
+  );
+  const image = d.image
+    // ไม่อยู่บนร้านแล้ว = รูปจางขาวดำ (ยังโชว์ไว้ให้จำได้ว่าตัวไหน)
+    ? <img src={d.image} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover ${d.state === "gone" ? "opacity-50 grayscale" : ""}`} />
+    : <div className={`flex h-full flex-col items-center justify-center text-slate-300 ${compact ? "text-[10px]" : "gap-1 text-xs"}`}><Icon name="image" className={compact ? "text-lg" : "text-2xl"} />ไม่มีรูป</div>;
+  const sku = <span className="min-w-0 truncate font-mono text-[11px] text-slate-400">{d.sku || "ไม่มี SKU"} · #{d.externalId || "—"}</span>;
+  const priceLine = (
+    <div className={`flex items-baseline gap-1.5 ${compact ? "" : "mt-auto"}`}>
+      {pay != null ? <span className={`text-sm font-semibold ${d.salePrice != null ? "text-rose-600" : "text-slate-800"}`}>{baht(pay)}</span> : <span className="text-sm text-slate-300">—</span>}
+      {d.salePrice != null && d.price != null && <span className="text-[11px] text-slate-400 line-through">{baht(d.price)}</span>}
+      {!!d.variants && d.variants > 1 && <span className="ml-auto whitespace-nowrap text-[11px] text-slate-400">{d.variants.toLocaleString()} ตัวเลือก</span>}
+    </div>
+  );
+  const footerBox = footer && <div className="border-t border-slate-100 px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{footer}</div>;
+
+  if (compact) return (
+    <div className="flex h-full flex-col" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 150px" }}>
+      <div className="flex flex-1 gap-2.5 p-2.5">
+        <div className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-md bg-slate-50">
+          {image}
+          {disc > 0 && <span className="absolute bottom-0.5 right-0.5 rounded bg-rose-600 px-1 text-[10px] font-medium text-white">-{disc}%</span>}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="line-clamp-2 text-[13px] leading-snug text-slate-800" title={d.title ?? ""}>{d.title || "—"}</div>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {d.state && d.state !== "nodata" && <ShopStateBadge state={d.state} stock={d.stock} />}
+            {dupBadge}
+            {sku}
+          </div>
+          {priceLine}
+          {badges}
+        </div>
+      </div>
+      {footerBox}
+    </div>
+  );
+
   return (
     // content-visibility: การ์ดนอกจอไม่ต้องวาด (ร้านใหญ่ ~1,000 ใบ ยังเลื่อนลื่น)
     <div className="flex h-full flex-col" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 330px" }}>
       <div className="relative aspect-square bg-slate-50">
-        {d.image
-          // ไม่อยู่บนร้านแล้ว = รูปจางขาวดำ (ยังโชว์ไว้ให้จำได้ว่าตัวไหน)
-          ? <img src={d.image} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover ${d.state === "gone" ? "opacity-50 grayscale" : ""}`} />
-          : <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-slate-300"><Icon name="image" className="text-2xl" />ไม่มีรูป</div>}
+        {image}
         {d.state && d.state !== "nodata" && <ShopStateBadge state={d.state} stock={d.stock} className="absolute bottom-1.5 left-1.5" />}
-        {!!d.dupCount && d.dupCount > 1 && (
-          <span className="absolute right-1.5 top-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700"
-            title={`บนร้านมีสินค้าชื่อและรหัสเหมือนกัน ${d.dupCount} ชิ้น`}>ซ้ำ ×{d.dupCount}</span>
-        )}
+        {dupBadge && <span className="absolute right-1.5 top-1.5">{dupBadge}</span>}
         {disc > 0 && <span className="absolute bottom-1.5 right-1.5 rounded bg-rose-600 px-1.5 py-0.5 text-[11px] font-medium text-white">-{disc}%</span>}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-2.5">
         <div className="line-clamp-2 min-h-[2.5rem] text-[13px] leading-snug text-slate-800" title={d.title ?? ""}>{d.title || "—"}</div>
-        <div className="truncate font-mono text-[11px] text-slate-400">{d.sku || "ไม่มี SKU"} · #{d.externalId || "—"}</div>
-        <div className="mt-auto flex items-baseline gap-1.5">
-          {pay != null ? <span className={`text-sm font-semibold ${d.salePrice != null ? "text-rose-600" : "text-slate-800"}`}>{baht(pay)}</span> : <span className="text-sm text-slate-300">—</span>}
-          {d.salePrice != null && d.price != null && <span className="text-[11px] text-slate-400 line-through">{baht(d.price)}</span>}
-          {!!d.variants && d.variants > 1 && <span className="ml-auto whitespace-nowrap text-[11px] text-slate-400">{d.variants.toLocaleString()} ตัวเลือก</span>}
-        </div>
+        <div className="flex">{sku}</div>
+        {priceLine}
         {badges}
       </div>
-      {footer && <div className="border-t border-slate-100 px-2.5 py-2" onClick={(e) => e.stopPropagation()}>{footer}</div>}
+      {footerBox}
     </div>
   );
 }
