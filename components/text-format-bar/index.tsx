@@ -31,6 +31,8 @@ export type TextFormatAdapter = {
   link: (url: string | null) => void;
   /** ลิงก์ของคำที่เลือกอยู่ (ไว้แก้/เอาออก) */
   currentLink?: () => string | null;
+  /** ตัวแก้ทำคำสั่งนี้ได้ไหม (ไม่ได้ = ซ่อนปุ่ม เช่น Tiptap ไม่มีจัดชิด) · ไม่ส่ง = ได้ทุกอย่าง */
+  supports?: (cmd: TextCmd | "color" | "highlight" | "size" | "link") => boolean;
 };
 
 export const TEXT_SIZES = [6, 8, 10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40];
@@ -123,8 +125,12 @@ const Sep = () => <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" />;
  *  dock: "auto" (ค่าเริ่ม) = จอสัมผัสติดเหนือแป้นพิมพ์ จอคอมวางตรงที่ผู้ใช้วาง · "never" = วางตรงที่วางเสมอ
  *  linkRequest = เพิ่มขึ้นเมื่อผู้ใช้กด Ctrl+K (ให้แถบเปิดช่องลิงก์)
  */
-export function TextFormatBar({ t, adapter, dock = "auto", linkRequest = 0, className = "" }: {
+export function TextFormatBar({ t, adapter, dock = "auto", linkRequest = 0, className = "", flat = false, extra }: {
   t: T; adapter: TextFormatAdapter; dock?: "auto" | "never"; linkRequest?: number; className?: string;
+  /** flat = ไม่มีกรอบลอย/เงา (ใช้เป็นแถบเครื่องมือในกล่องข้อความยาว) */
+  flat?: boolean;
+  /** ปุ่มเพิ่มต่อท้ายแถบ (เช่น หัวข้อ · ตาราง · รูป ของกล่องข้อความยาว) */
+  extra?: ReactNode;
 }) {
   const [panel, setPanel] = useState<null | "color" | "hilite" | "size" | "link">(null);
   const [url, setUrl] = useState("");
@@ -148,7 +154,8 @@ export function TextFormatBar({ t, adapter, dock = "auto", linkRequest = 0, clas
   }, [docked]);
 
   const keep = (e: React.MouseEvent | React.PointerEvent) => { const tg = e.target as HTMLElement; if (!/^(INPUT|SELECT|OPTION|TEXTAREA)$/.test(tg.tagName)) e.preventDefault(); e.stopPropagation(); };
-  const btn = (cmd: TextCmd, icon: string, th: string, en: string) => (
+  const can = (c: Parameters<NonNullable<TextFormatAdapter["supports"]>>[0]) => !adapter.supports || adapter.supports(c);
+  const btn = (cmd: TextCmd, icon: string, th: string, en: string) => !can(cmd) ? null : (
     <button key={cmd} type="button" title={t(th, en)} aria-label={t(th, en)} aria-pressed={adapter.active(cmd)} onClick={() => adapter.run(cmd)} className={`${IB} ${adapter.active(cmd) ? ON : ""}`}><Icon value={icon} /></button>
   );
   const toggle = (p: NonNullable<typeof panel>) => setPanel((v) => (v === p ? null : p));
@@ -158,27 +165,28 @@ export function TextFormatBar({ t, adapter, dock = "auto", linkRequest = 0, clas
 
   const bar: ReactNode = (
     <div data-text-format-bar="" onMouseDown={keep} onPointerDown={keep}
-      className={`relative ${docked ? "w-full" : "w-max max-w-[min(560px,calc(100vw-24px))]"} ${className}`}>
-      <div className={`flex items-center gap-0.5 rounded-lg border border-violet-200 bg-white p-1 shadow-md ${docked ? "overflow-x-auto" : "flex-wrap"}`}>
-        <span className="px-1 text-[10.5px] font-medium text-violet-600">{t("ข้อความ", "Text")}</span>
+      className={`relative ${docked ? "w-full" : flat ? "w-full" : "w-max max-w-[min(560px,calc(100vw-24px))]"} ${className}`}>
+      <div className={`flex items-center gap-0.5 ${flat ? "" : "rounded-lg border border-violet-200 bg-white p-1 shadow-md"} ${docked ? "overflow-x-auto" : "flex-wrap"}`}>
+        {!flat && <span className="px-1 text-[10.5px] font-medium text-violet-600">{t("ข้อความ", "Text")}</span>}
         {btn("bold", "i:bold", "ตัวหนา (Ctrl+B)", "Bold (Ctrl+B)")}
         {btn("italic", "i:italic", "ตัวเอียง (Ctrl+I)", "Italic (Ctrl+I)")}
         {btn("underline", "i:underline", "ขีดเส้นใต้ (Ctrl+U)", "Underline (Ctrl+U)")}
         {btn("strike", "i:strikethrough", "ขีดฆ่า", "Strikethrough")}
         <Sep />
-        <button type="button" title={t("ขนาดตัวอักษร", "Font size")} onClick={() => toggle("size")} className={`${IB} ${panel === "size" ? ON : ""}`}><Icon value="i:text-size" /><Icon value="i:chevron-down" /></button>
+        {can("size") && <button type="button" title={t("ขนาดตัวอักษร", "Font size")} onClick={() => toggle("size")} className={`${IB} ${panel === "size" ? ON : ""}`}><Icon value="i:text-size" /><Icon value="i:chevron-down" /></button>}
         <button type="button" title={t("สีตัวอักษร", "Text colour")} onClick={() => toggle("color")} className={`${IB} ${panel === "color" ? ON : ""}`}><Icon value="i:text-color" /></button>
-        <button type="button" title={t("ไฮไลต์", "Highlight")} onClick={() => toggle("hilite")} className={`${IB} ${panel === "hilite" ? ON : ""}`}>
+        {can("highlight") && <button type="button" title={t("ไฮไลต์", "Highlight")} onClick={() => toggle("hilite")} className={`${IB} ${panel === "hilite" ? ON : ""}`}>
           <span className="rounded px-1 text-[12px] font-semibold leading-5" style={{ background: "#fef08a" }}>A</span>
-        </button>
+        </button>}
         <Sep />
         {btn("alignLeft", "i:align-left", "ชิดซ้าย", "Align left")}
         {btn("alignCenter", "i:align-center", "กึ่งกลาง", "Center")}
         {btn("alignRight", "i:align-right", "ชิดขวา", "Align right")}
         {btn("list", "i:list", "รายการ", "Bulleted list")}
         <Sep />
-        <button type="button" title={t("ลิงก์ (Ctrl+K)", "Link (Ctrl+K)")} onClick={() => { setUrl(adapter.currentLink?.() ?? ""); toggle("link"); }} className={`${IB} ${panel === "link" ? ON : ""}`}><Icon value="i:link" /></button>
+        {can("link") && <button type="button" title={t("ลิงก์ (Ctrl+K)", "Link (Ctrl+K)")} onClick={() => { setUrl(adapter.currentLink?.() ?? ""); toggle("link"); }} className={`${IB} ${panel === "link" ? ON : ""}`}><Icon value="i:link" /></button>}
         {btn("clear", "i:clear-formatting", "ล้างรูปแบบ", "Clear formatting")}
+        {extra}
       </div>
       {panel && (
         <div className={`absolute left-0 z-10 rounded-lg border border-slate-200 bg-white p-2 shadow-lg ${docked ? "bottom-full mb-1" : "top-full mt-1"}`}>

@@ -5,6 +5,7 @@
 // bullet / หัวข้อ / ตัวหนา-เอียง-ขีดเส้นใต้ / ฟอนต์ / ขนาด / สี / ตาราง / รูป (วาง/ลาก → อัปโหลด)
 // เก็บเป็น HTML string · ใช้ช่องไหนก็ได้ทั้งระบบ
 // ใช้: <RichTextEditor value={html} onChange={setHtml} onUploadImage={fn} />
+// แถบตัวหนา/เอียง/ขีด/ขนาด/สี/ไฮไลต์/ลิงก์ = ของกลาง components/text-format-bar (หน้าตาเดียวกับกระดาน · 2026-11-22) ผ่าน tiptapTextAdapter
 // โน้ตสั้น: toolbar="basic" (หนา/เอียง/ธรรมดา/bullet/ลำดับเลข) + onBlur (บันทึกเองตอนคลิกออก) — ข้อความเดิมที่เป็นตัวหนังสือล้วนแปลงด้วย lib/rich-note
 // ============================================================
 
@@ -22,6 +23,8 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { Mark } from "@tiptap/core";
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
+import { TextFormatBar, applyTextShortcut, useLinkRequest, type TextFormatAdapter } from "@/components/text-format-bar";
+import { useT } from "@/components/i18n";
 
 // ---- รูปย่อ-ขยายได้: ลากมุมขวาล่าง + กว้างจำได้ (width attribute) ----
 function ImageNodeView({ node, updateAttributes, selected, editor }: NodeViewProps) {
@@ -77,9 +80,47 @@ const FontSize = Mark.create({
   },
 });
 
+// ---- BackgroundColor: ไฮไลต์ (ต่อจาก textStyle เหมือน FontSize) ----
+const BackgroundColor = Mark.create({
+  name: "backgroundColor",
+  addOptions() { return { types: ["textStyle"] }; },
+  addGlobalAttributes() {
+    return [{
+      types: ["textStyle"],
+      attributes: {
+        backgroundColor: {
+          default: null,
+          parseHTML: (el: HTMLElement) => el.style.backgroundColor || null,
+          renderHTML: (attrs: { backgroundColor?: string }) => (attrs.backgroundColor ? { style: `background-color:${attrs.backgroundColor}` } : {}),
+        },
+      },
+    }];
+  },
+});
+
+/** ตัวสั่งงานของแถบจัดข้อความกลาง สำหรับตัวแก้ Tiptap (ไม่มีจัดชิด — ซ่อนปุ่ม) */
+export function tiptapTextAdapter(editor: Editor): TextFormatAdapter {
+  const c = () => editor.chain().focus();
+  return {
+    run: (cmd) => {
+      if (cmd === "bold") c().toggleBold().run();
+      else if (cmd === "italic") c().toggleItalic().run();
+      else if (cmd === "underline") c().toggleUnderline().run();
+      else if (cmd === "strike") c().toggleStrike().run();
+      else if (cmd === "list") c().toggleBulletList().run();
+      else if (cmd === "clear") c().unsetAllMarks().run();
+    },
+    active: (cmd) => (cmd === "strike" ? editor.isActive("strike") : cmd === "list" ? editor.isActive("bulletList") : ["bold", "italic", "underline"].includes(cmd) ? editor.isActive(cmd) : false),
+    color: (hex) => { c().setColor(hex).run(); },
+    highlight: (hex) => { c().setMark("textStyle", { backgroundColor: hex }).run(); },
+    size: (px) => { c().setMark("textStyle", { fontSize: `${px}px` }).run(); },
+    link: (url) => { if (url) c().extendMarkRange("link").setLink({ href: url }).run(); else c().extendMarkRange("link").unsetLink().run(); },
+    currentLink: () => (editor.getAttributes("link").href as string | undefined) ?? null,
+    supports: (cmd) => !["alignLeft", "alignCenter", "alignRight"].includes(cmd),
+  };
+}
+
 const FONTS = ["", "Sarabun", "Tahoma", "Arial", "Times New Roman", "Courier New"];
-const SIZES = ["", "12px", "14px", "16px", "18px", "20px", "24px", "28px"];
-const COLORS = ["#0f172a", "#e11d48", "#2563eb", "#16a34a", "#d97706", "#7c3aed", "#64748b"];
 
 export function RichTextEditor({
   value, onChange, editable = true, placeholder, onUploadImage, minHeight = 160, toolbar = "full", onBlur,
@@ -97,6 +138,10 @@ export function RichTextEditor({
   onBlur?: () => void;
 }) {
   const onBlurRef = useRef(onBlur); onBlurRef.current = onBlur;
+  const t = useT();
+  const [linkReq, askLink] = useLinkRequest();
+  const askLinkRef = useRef(askLink); askLinkRef.current = askLink;
+  const editorRef = useRef<Editor | null>(null);
   const insertFiles = (editor: Editor | null, files: File[]) => {
     if (!onUploadImage || !editor) return;
     const imgs = files.filter((f) => f.type.startsWith("image/"));
@@ -113,7 +158,7 @@ export function RichTextEditor({
     extensions: [
       StarterKit,
       Underline,
-      TextStyle, FontSize, Color, FontFamily,
+      TextStyle, FontSize, BackgroundColor, Color, FontFamily,
       ResizableImage.configure({ inline: false, allowBase64: false }),
       Link.configure({ openOnClick: false, autolink: true }),
       Table.configure({ resizable: true }), TableRow, TableHeader, TableCell,
@@ -122,6 +167,8 @@ export function RichTextEditor({
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     onBlur: () => onBlurRef.current?.(),
     editorProps: {
+      // ปุ่มลัดแถบจัดข้อความ (Ctrl+B/I/U ตอนแป้นไทย · Ctrl+K ลิงก์)
+      handleKeyDown: (_view, event) => (editorRef.current ? applyTextShortcut(event, tiptapTextAdapter(editorRef.current), () => askLinkRef.current()) : false),
       attributes: { class: "tiptap-content focus:outline-none px-3 py-2", style: `min-height:${minHeight}px` },
       handlePaste: (_view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
@@ -143,7 +190,9 @@ export function RichTextEditor({
   }, [value, editor]);
   useEffect(() => { editor?.setEditable(editable); }, [editable, editor]);
 
+  editorRef.current = editor;
   if (!editor) return <div className="border border-slate-200 rounded-lg" style={{ minHeight }} />;
+  const adapter = tiptapTextAdapter(editor);
 
   const Btn = ({ on, active, label, title }: { on: () => void; active?: boolean; label: string; title?: string }) => (
     <button type="button" title={title} onMouseDown={(e) => { e.preventDefault(); on(); }}
@@ -154,12 +203,8 @@ export function RichTextEditor({
     <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
       {editable && (
         <div className="flex flex-wrap items-center gap-1 px-2 py-1 border-b border-slate-200 bg-slate-50">
-          <Btn on={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} label="B" title="ตัวหนา" />
-          <Btn on={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} label="I" title="ตัวเอียง" />
-          <Btn on={() => editor.chain().focus().unsetAllMarks().run()} label="ธรรมดา" title="กลับเป็นตัวธรรมดา" />
-          <span className="w-px h-5 bg-slate-200 mx-0.5" />
-          <Btn on={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} label="•" title="หัวข้อย่อย" />
-          <Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />
+          <TextFormatBar t={t} adapter={adapter} dock="never" flat linkRequest={linkReq}
+            extra={<Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />} />
           {placeholder && editor.isEmpty && <span className="ml-1 text-[11px] text-slate-400 truncate">{placeholder}</span>}
         </div>
       )}
@@ -171,32 +216,16 @@ export function RichTextEditor({
     <div className="border border-slate-200 rounded-lg overflow-hidden">
       {editable && (
         <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-b border-slate-200 bg-slate-50">
-          <Btn on={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} label="B" title="ตัวหนา" />
-          <Btn on={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} label="I" title="ตัวเอียง" />
-          <Btn on={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive("underline")} label="U" title="ขีดเส้นใต้" />
-          <Btn on={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive("strike")} label="S" title="ขีดทับ" />
+          <TextFormatBar t={t} adapter={adapter} dock="never" flat linkRequest={linkReq} className="!w-auto" />
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
           <Btn on={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive("heading", { level: 1 })} label="H1" />
           <Btn on={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive("heading", { level: 2 })} label="H2" />
-          <Btn on={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} label="•" title="หัวข้อย่อย" />
           <Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
           <select title="ฟอนต์" onChange={(e) => e.target.value ? editor.chain().focus().setFontFamily(e.target.value).run() : editor.chain().focus().unsetFontFamily().run()}
             className="h-7 px-1 text-xs border border-slate-200 rounded bg-white">
             {FONTS.map((f) => <option key={f} value={f}>{f || "ฟอนต์"}</option>)}
           </select>
-          <select title="ขนาด" onChange={(e) => editor.chain().focus().setMark("textStyle", { fontSize: e.target.value || null }).run()}
-            className="h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-            {SIZES.map((s) => <option key={s} value={s}>{s || "ขนาด"}</option>)}
-          </select>
-          <span className="inline-flex items-center gap-0.5">
-            {COLORS.map((c) => (
-              <button key={c} type="button" title="สี" onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().setColor(c).run(); }}
-                className="w-5 h-5 rounded border border-slate-200" style={{ backgroundColor: c }} />
-            ))}
-            <button type="button" title="ล้างสี" onMouseDown={(e) => { e.preventDefault(); editor.chain().focus().unsetColor().run(); }}
-              className="h-5 px-1 text-[10px] border border-slate-200 rounded text-slate-500">×สี</button>
-          </span>
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
           <Btn on={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} label="⊞" title="แทรกตาราง" />
           {onUploadImage && <Btn on={() => imgInput(editor, onUploadImage)} label="🖼" title="แทรกรูป" />}
