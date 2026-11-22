@@ -23,6 +23,7 @@ import { useT } from "@/components/i18n";
 import { PlatformChip } from "../platform-chip";
 import { FORMATS } from "./brand-platforms-modal";
 import { PostMockup } from "./post-mockup";
+import { Icon } from "@/components/icon";
 
 // original = คีย์ต้นฉบับเต็มบน Drive (drive:<id>) ของรูปย่อนี้ — มี = ตอนโพสต์ใช้ต้นฉบับได้ (ชัดกว่า)
 export type PostImage = { key: string; label?: string | null; type?: "image" | "video"; src?: string; original?: string };
@@ -137,15 +138,15 @@ export function PostConfirmModal({
   const lbKey = lb >= 0 ? photos[lb]?.key : undefined;
 
   return (
-    <ERPModal open onClose={onClose} size="xl" title={`🚀 ${t("ยืนยันการโพสต์", "Confirm post")}`}
+    <ERPModal open onClose={onClose} size="xl" title={t("ยืนยันการโพสต์", "Confirm post")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         {connected ? (
           <button onClick={doPublish} disabled={busy || storyNoMedia || (mode === "queue" && !runAtOk)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {busy ? t("กำลังส่ง...", "Sending...") : mode === "queue" ? `⏰ ${t("ตั้งคิวโพสต์", "Queue post")}` : `🚀 ${t("โพสต์เลย", "Post now")}`}
+            {busy ? t("กำลังส่ง...", "Sending...") : mode === "queue" ? <><Icon value="i:alarm" className="mr-1" />{t("ตั้งคิวโพสต์", "Queue post")}</> : <><Icon value="i:rocket" className="mr-1" />{t("โพสต์เลย", "Post now")}</>}
           </button>
         ) : (
-          <button onClick={onManual} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">📤 {t("คัดลอก + เปิดเพจ", "Copy + open")}</button>
+          <button onClick={onManual} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700"><Icon value="i:package-export" className="mr-1" />{t("คัดลอก + เปิดเพจ", "Copy + open")}</button>
         )}
       </>}>
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
@@ -163,7 +164,7 @@ export function PostConfirmModal({
           {/* ประเภทโพสต์ — เลือกก่อนยิงได้ (ค่าเริ่มต้นมาจากที่ตั้งในการ์ด/ค่าของแบรนด์) */}
           {fmtOpts.length > 0 && (
             <div>
-              <p className="text-[11px] text-slate-400 mb-1">🎬 {t("ลงเป็น", "Post as")}</p>
+              <p className="text-[11px] text-slate-400 mb-1"><Icon value="i:movie" className="mr-1" />{t("ลงเป็น", "Post as")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {[{ key: "", th: "อัตโนมัติ", en: "Auto" }, ...fmtOpts].map((f) => (
                   <button key={f.key || "auto"} type="button" onClick={() => setFmt(f.key)}
@@ -176,7 +177,7 @@ export function PostConfirmModal({
               {storyNoMedia && (
                 <p className="text-[11px] mt-1 text-rose-600">
                   {images.length === 0
-                    ? t("Story นี้ยังไม่มีไฟล์ — ใส่รูปหรือวิดีโอที่การ์ด 🖼 รูป/วิดีโอ ก่อน แล้วค่อยกดโพสต์ (ลิงก์ธรรมดาโพสต์อัตโนมัติไม่ได้)", "This story has no file yet — add an image/video first (plain links can't be auto-posted)")
+                    ? t("Story นี้ยังไม่มีไฟล์ — ใส่รูปหรือวิดีโอที่การ์ดรูป/วิดีโอ ก่อน แล้วค่อยกดโพสต์ (ลิงก์ธรรมดาโพสต์อัตโนมัติไม่ได้)", "This story has no file yet — add an image/video first (plain links can't be auto-posted)")
                     : t("เลือกรูปหรือวิดีโอ 1 ชิ้นด้านล่างก่อน แล้วค่อยกดโพสต์", "Select one image or video below first")}
                 </p>
               )}
@@ -237,12 +238,12 @@ export function PostConfirmModal({
                 })}
               </div>
             )}
-            {selHasVideo && !isStory && <p className="text-[11px] text-amber-600 mt-1.5">🎬 {t("มีวิดีโอถูกเลือก — จะโพสต์เป็นวิดีโอ (รูปที่เลือกจะไม่ถูกใช้)", "A video is selected — it posts as a video (images ignored)")}{platform === "instagram" ? t(" · IG ลงเป็น Reels", " · IG posts as Reels") : ""}</p>}
+            {selHasVideo && !isStory && <p className="text-[11px] text-amber-600 mt-1.5"><Icon value="i:movie" className="mr-1" />{t("มีวิดีโอถูกเลือก — จะโพสต์เป็นวิดีโอ (รูปที่เลือกจะไม่ถูกใช้)", "A video is selected — it posts as a video (images ignored)")}{platform === "instagram" ? t(" · IG ลงเป็น Reels", " · IG posts as Reels") : ""}</p>}
             {igBad.length > 0 && (
-              <p className="text-[11px] text-rose-600 mt-1.5">⚠ {t(`มี ${igBad.length} รูปที่สัดส่วนนอกช่วงที่ Instagram รับ (แนวตั้งสุด 4:5 · แนวนอนสุด 1.91:1) — โพสต์แล้ว IG จะปฏิเสธ · เอารูปนั้นออก หรือครอปใหม่ก่อน`, `${igBad.length} image(s) outside Instagram's 4:5–1.91:1 range — IG will reject them`)}</p>
+              <p className="text-[11px] text-rose-600 mt-1.5"><Icon value="i:alert-triangle" className="mr-1" />{t(`มี ${igBad.length} รูปที่สัดส่วนนอกช่วงที่ Instagram รับ (แนวตั้งสุด 4:5 · แนวนอนสุด 1.91:1) — โพสต์แล้ว IG จะปฏิเสธ · เอารูปนั้นออก หรือครอปใหม่ก่อน`, `${igBad.length} image(s) outside Instagram's 4:5–1.91:1 range — IG will reject them`)}</p>
             )}
             {sel.some((k) => sizeFor(k) && (sizeFor(k) as Size).width < minW) && (
-              <p className="text-[11px] text-amber-700 mt-1.5">💡 {t(`มีรูปที่กว้างไม่ถึง ${minW}px (ป้ายเหลือง) — ขึ้นแพลตฟอร์มแล้วอาจไม่คม · ใช้ไฟล์ต้นฉบับจาก Google Drive แทนได้`, `Some images are narrower than ${minW}px — use the original from Google Drive for sharper posts`)}</p>
+              <p className="text-[11px] text-amber-700 mt-1.5"><Icon value="i:bulb" className="mr-1" />{t(`มีรูปที่กว้างไม่ถึง ${minW}px (ป้ายเหลือง) — ขึ้นแพลตฟอร์มแล้วอาจไม่คม · ใช้ไฟล์ต้นฉบับจาก Google Drive แทนได้`, `Some images are narrower than ${minW}px — use the original from Google Drive for sharper posts`)}</p>
             )}
             {images.some((im) => im.original) && (
               <label className="mt-2 flex items-start gap-2 text-xs cursor-pointer">
@@ -255,7 +256,7 @@ export function PostConfirmModal({
             )}
             {onAddDriveImages && pushToast && (
               <div className="mt-2 rounded-lg border border-dashed border-slate-200 px-2.5 py-2">
-                <p className="text-[11px] text-slate-500">📁 {t("อยากได้ชัดที่สุด: ใช้ไฟล์ต้นฉบับจาก Google Drive (ไม่ถูกย่อ) — วางลิงก์รูปหรือโฟลเดอร์ แล้วระบบเลือกลงโพสต์ให้", "Sharpest: use original files from Google Drive — paste an image or folder link")}</p>
+                <p className="text-[11px] text-slate-500"><Icon value="i:folder" className="mr-1" />{t("อยากได้ชัดที่สุด: ใช้ไฟล์ต้นฉบับจาก Google Drive (ไม่ถูกย่อ) — วางลิงก์รูปหรือโฟลเดอร์ แล้วระบบเลือกลงโพสต์ให้", "Sharpest: use original files from Google Drive — paste an image or folder link")}</p>
                 <DriveImageAdd existingKeys={images.map((im) => im.key).filter((k) => k.startsWith("drive:"))} onAdd={addFromDrive} pushToast={pushToast} />
               </div>
             )}
@@ -265,7 +266,7 @@ export function PostConfirmModal({
           {!hasVideo && (igFeed || isStory) && finalMedia.length > 0 && (
             <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-slate-700">🖼 {igFeed ? t("ปรับรูปให้พอดี Instagram", "Fit images for Instagram") : t("ปรับรูปเป็นแนวตั้ง 9:16 (Story)", "Fit to 9:16 (Story)")}</span>
+                <span className="text-xs font-semibold text-slate-700"><Icon value="i:photo" className="mr-1" />{igFeed ? t("ปรับรูปให้พอดี Instagram", "Fit images for Instagram") : t("ปรับรูปเป็นแนวตั้ง 9:16 (Story)", "Fit to 9:16 (Story)")}</span>
                 {isStory && <label className="ml-auto inline-flex items-center gap-1.5 text-xs cursor-pointer"><input type="checkbox" checked={storyFitOn} onChange={(e) => setStoryFitOn(e.target.checked)} /> {t("ปรับ", "Fit")}</label>}
               </div>
               {(igFeed || storyFitOn) && (
@@ -317,7 +318,7 @@ export function PostConfirmModal({
                   <div className="pl-6 space-y-1">
                     <ERPDateTime24 value={runAt} onChange={setRunAt} />
                     {runAt && !runAtOk && <p className="text-[11px] text-rose-500">{t("ต้องเป็นเวลาข้างหน้า (อย่างน้อย 1 นาที)", "Must be at least 1 minute ahead")}</p>}
-                    <p className="text-[10px] text-slate-400">💡 {t("ระบบโพสต์ให้เองตามเวลา (ช้าได้ไม่เกิน ~5 นาที) ไม่ต้องเปิดเครื่องรอ · ใช้แคปชั่น/รูปตามที่เห็นตอนนี้ · ยกเลิก/ดูผลได้ที่กล่อง “คิวโพสต์อัตโนมัติ”", "Posts automatically on time (up to ~5 min late) · uses this caption/media · cancel or check in the Auto-post queue box")}</p>
+                    <p className="text-[10px] text-slate-400"><Icon value="i:bulb" className="mr-1" />{t("ระบบโพสต์ให้เองตามเวลา (ช้าได้ไม่เกิน ~5 นาที) ไม่ต้องเปิดเครื่องรอ · ใช้แคปชั่น/รูปตามที่เห็นตอนนี้ · ยกเลิก/ดูผลได้ที่กล่อง “คิวโพสต์อัตโนมัติ”", "Posts automatically on time (up to ~5 min late) · uses this caption/media · cancel or check in the Auto-post queue box")}</p>
                   </div>
                 )}
               </div>
@@ -327,7 +328,7 @@ export function PostConfirmModal({
 
         {/* ───── ขวา: ตัวอย่างหน้าตาโพสต์ (ใช้ PostMockup กลาง ตัวเดียวกับปุ่ม 👁 ในการ์ดแคปชั่น) ───── */}
         <div className="min-w-0 md:sticky md:top-0 md:self-start">
-          <p className="text-[11px] text-slate-400 mb-1">👁 {t("ตัวอย่างหน้าตาตอนขึ้นจริง", "Preview")}</p>
+          <p className="text-[11px] text-slate-400 mb-1"><Icon value="i:eye" className="mr-1" />{t("ตัวอย่างหน้าตาตอนขึ้นจริง", "Preview")}</p>
           <div className="rounded-xl bg-slate-100 p-3 max-h-[70vh] overflow-y-auto">
             {previewImages.length === 0 && !captionText.trim()
               ? <p className="text-xs text-slate-400 text-center py-8">{t("เลือกรูปก่อน แล้วตัวอย่างจะขึ้นตรงนี้", "Select media to see the preview")}</p>

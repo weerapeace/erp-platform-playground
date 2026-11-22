@@ -13,6 +13,7 @@ import { useT } from "@/components/i18n";
 import { DrawerShell } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import type { ToastVariant } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 type ToastType = ToastVariant;   // ชนิดกลาง (components/toast)
 
@@ -83,7 +84,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
         <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <h3 className="text-base font-semibold text-slate-900">📚 {t("คลังความรู้","Knowledge")}</h3>
+          <h3 className="text-base font-semibold text-slate-900"><Icon value="i:books" className="mr-1" />{t("คลังความรู้","Knowledge")}</h3>
           <button onClick={handleClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
         </div>
 
@@ -116,7 +117,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
                   <button onClick={save} disabled={busy} className="px-4 h-9 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">{busy ? t("กำลังบันทึก...","Saving...") : t("บันทึก","Save")}</button>
                   <button onClick={() => { autoSaveRef.current(); setEditing(false); }} disabled={busy} className="px-4 h-9 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">{t("ปิดแก้ไข","Done")}</button>
                   {/* สถานะบันทึกอัตโนมัติ (ทุก 10 วิ) */}
-                  <span className="text-xs text-slate-400">{dirty ? `💾 ${t("มีแก้ไข — จะบันทึกอัตโนมัติใน 10 วิ","Unsaved — auto-saves in 10s")}` : savedAt ? `✓ ${t("บันทึกอัตโนมัติแล้ว","Auto-saved")}` : t("บันทึกอัตโนมัติทุก 10 วิ","Auto-saves every 10s")}</span>
+                  <span className="text-xs text-slate-400">{dirty ? <><Icon value="i:device-floppy" className="mr-1" />{t("มีแก้ไข — จะบันทึกอัตโนมัติใน 10 วิ","Unsaved — auto-saves in 10s")}</> : savedAt ? `✓ ${t("บันทึกอัตโนมัติแล้ว","Auto-saved")}` : t("บันทึกอัตโนมัติทุก 10 วิ","Auto-saves every 10s")}</span>
                   <button onClick={remove} disabled={busy} className="ml-auto px-3 h-9 rounded-lg text-sm text-red-600 hover:bg-red-50">{t("ลบหน้า","Delete page")}</button>
                 </div>
               </div>
@@ -124,7 +125,7 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <h2 className="text-xl font-bold text-slate-900">{active.title}</h2>
-                  {canEdit && <button onClick={startEdit} className="h-8 px-2.5 shrink-0 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">✏️ {t("แก้ไข","Edit")}</button>}
+                  {canEdit && <button onClick={startEdit} className="h-8 px-2.5 shrink-0 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200"><Icon value="i:pencil" className="mr-1" />{t("แก้ไข","Edit")}</button>}
                 </div>
                 {active.body_html ? <RichTextEditor value={active.body_html} onChange={() => {}} editable={false} />
                   : <p className="text-sm text-slate-400 italic">{t("หน้านี้ยังไม่มีเนื้อหา","This page has no content yet")}{canEdit && ` — ${t("กดแก้ไขเพื่อเพิ่ม","click Edit to add content")}`}</p>}

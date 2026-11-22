@@ -10,6 +10,7 @@ import { useT, useLang } from "@/components/i18n";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { HelperPart, Placed } from "./sheet-view";
 import { fmt, fmtLen, type Unit } from "./nest-utils";
+import { Icon } from "@/components/icon";
 
 type Row = { tid: number; title: string; w: number; h: number; exact: number; filled: number; perSheet: { exact: number; filled: number }[] };
 
@@ -65,7 +66,7 @@ export function JobSummary({ parts, titles, perPart, sheets, unit }: {
       columns={columns}
       searchText={rows.length > 5 ? (r) => r.title : undefined}
       dense
-      title={<span>📊 {t("สรุปทั้งงาน", "Whole-job summary")} <span className="font-normal text-slate-500">
+      title={<span><Icon value="i:chart-bar" className="mr-1" />{t("สรุปทั้งงาน", "Whole-job summary")} <span className="font-normal text-slate-500">
         · {t(`${sheets.length} แผ่น`, `${sheets.length} sheet(s)`)} · {t(`รวม ${n0(tot.exact + tot.filled, lang)} ชิ้น`, `${n0(tot.exact + tot.filled, lang)} pcs total`)}
         {tot.filled ? ` (${t(`สั่ง ${n0(tot.exact, lang)} + เติม ${n0(tot.filled, lang)}`, `ordered ${n0(tot.exact, lang)} + filled ${n0(tot.filled, lang)}`)})` : ""}</span></span>}
       countUnit={t("ลาย", "designs")}

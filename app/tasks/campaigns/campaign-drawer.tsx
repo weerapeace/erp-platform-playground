@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { STATUS_META, statusLabelFb, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
 import { listOptions, type Option } from "../use-options";
 import { TaskDetailDrawer } from "../task-detail-drawer";
@@ -80,8 +81,8 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <span className="text-xs text-slate-500">{detail.task_count} {t("งานในแคมเปญ", "tasks in campaign")}</span>
               </div>
               <div className="flex items-center gap-1">
-                <button onClick={copyLink} title={t("คัดลอกลิงก์แคมเปญ (เปิดเข้าหน้านี้ได้เลย)", "Copy campaign link")} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">🔗 {t("คัดลอกลิงก์", "Copy link")}</button>
-                {!editing && <button onClick={startEdit} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">✏️ {t("แก้ไข", "Edit")}</button>}
+                <button onClick={copyLink} title={t("คัดลอกลิงก์แคมเปญ (เปิดเข้าหน้านี้ได้เลย)", "Copy campaign link")} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200"><Icon value="i:link" />{t("คัดลอกลิงก์", "Copy link")}</button>
+                {!editing && <button onClick={startEdit} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200"><Icon value="i:pencil" />{t("แก้ไข", "Edit")}</button>}
                 <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
               </div>
             </div>
@@ -103,8 +104,8 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">{t("การมองเห็น", "Visibility")}</label>
                     <div className="flex flex-wrap gap-1.5">
-                      {([["team", `👥 ${t("ทั้งทีม", "Team")}`], ["private", `🔒 ${t("ส่วนตัว", "Private")}`], ["shared", `🔗 ${t("แชร์เฉพาะคน", "Shared")}`]] as const).map(([v, lbl]) => (
-                        <button key={v} type="button" onClick={() => setEf({ ...ef, visibility: v })} className={`h-8 px-3 text-xs rounded-lg border ${ef.visibility === v ? "bg-violet-600 text-white border-violet-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+                      {([["team", "i:users", t("ทั้งทีม", "Team")], ["private", "i:lock", t("ส่วนตัว", "Private")], ["shared", "i:link", t("แชร์เฉพาะคน", "Shared")]] as const).map(([v, ic, lbl]) => (
+                        <button key={v} type="button" onClick={() => setEf({ ...ef, visibility: v })} className={`h-8 px-3 text-xs rounded-lg border ${ef.visibility === v ? "bg-violet-600 text-white border-violet-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><Icon value={ic} className="mr-1" />{lbl}</button>
                       ))}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1">{ef.visibility === "private" ? t("เห็นเฉพาะเจ้าของ (+ผู้ดูแลระบบ)", "Only owner (+admins)") : ef.visibility === "shared" ? t("เห็นเฉพาะเจ้าของ + คนที่เลือก (+ผู้ดูแลระบบ)", "Owner + selected people (+admins)") : t("เห็นได้ทั้งทีม", "Everyone in the team")}</p>

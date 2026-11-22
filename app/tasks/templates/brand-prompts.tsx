@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PromptEditor } from "@/components/prompt-editor";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { listBrands, listSubtaskTypes, listBrandPrompts, saveBrandPrompt, type BrandOption, type SubtaskType } from "../data";
 import { type PushToast } from "@/components/toast";
 import { BrandSelect } from "@/components/brand-select";
@@ -60,7 +61,7 @@ export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
             return (
               <div key={ty.key} className="border border-slate-200 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-sm font-medium text-slate-700">{ty.icon ?? "🧩"} {ty.label_th}</span>
+                  <span className="text-sm font-medium text-slate-700"><Icon value={ty.icon ?? "i:puzzle"} className="mr-1" />{ty.label_th}</span>
                   <span className="flex items-center gap-2">
                     {hasOverride ? <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{t("กำหนดเอง", "Custom")}</span> : <span className="text-[10px] text-slate-400">{t("ใช้ค่าเริ่มต้น", "Default")}</span>}
                     {hasOverride && <button onClick={() => save(ty, "")} className="text-[11px] text-rose-500 hover:underline">{t("กลับค่าเริ่มต้น", "Reset")}</button>}

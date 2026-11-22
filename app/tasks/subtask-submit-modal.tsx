@@ -17,6 +17,7 @@ import { useT } from "@/components/i18n";
 import { updateSubtask, addAttachment, deleteAttachment, type CreativeSubtask } from "./data";
 import type { PushToast } from "@/components/toast";
 import { ReviseModal } from "./subtask-forms";
+import { Icon } from "@/components/icon";
 
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
 export const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -70,11 +71,11 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
   return (
     <div className={`mt-2 border-t pt-2 ${isDesc ? "border-indigo-100" : "border-amber-100"}`}>
       <p className="text-[11px] text-slate-500 mb-1 flex items-center gap-1">
-        {isDesc ? `📂 ${tt("ใส่รูปเข้า Description", "Add to Description")}` : `🖼 ${tt("ใส่รูปเข้าแกลเลอรีสินค้า", "Add to product gallery")}`}
+        {isDesc ? <><Icon value="i:folder-open" className="mr-1" />{tt("ใส่รูปเข้า Description", "Add to Description")}</> : <><Icon value="i:photo" className="mr-1" />{tt("ใส่รูปเข้าแกลเลอรีสินค้า", "Add to product gallery")}</>}
         <span className="cursor-help text-slate-400 hover:text-violet-600"
           title={isDesc
             ? tt(`รูปที่ลากลงกล่องนี้จะเข้า "รูป Description" ของ ${label}\nต่อรูปเลือก: เพิ่มใหม่ หรือ แทน #N (แถวด้านบนมีเลขกำกับ)\nปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที · ถ้าไม่กด เข้าตอน 'อนุมัติ'`, `Images here go to ${label}'s Description.\nPer image: add new or replace #N.\n'Add now' applies immediately; otherwise on approval.`)
-            : tt(`รูปที่ลากลงกล่องนี้จะเข้า "แกลเลอรีสินค้า" ของ ${label}\nต่อรูปเลือก: เพิ่มใหม่ หรือ แทน #N (แถวด้านบนมีเลขกำกับ)\nรูปเดิมที่ถูกแทนเก็บเป็นเวอร์ชันเก่า กด 🕘 ดู/กู้คืน\nปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที · ถ้าไม่กด เข้าตอน 'อนุมัติ'`, `Images here go to ${label}'s gallery.\nPer image: add new or replace #N.\nReplaced images kept as versions — tap 🕘.\n'Add now' applies immediately; otherwise on approval.`)}
+            : tt(`รูปที่ลากลงกล่องนี้จะเข้า "แกลเลอรีสินค้า" ของ ${label}\nต่อรูปเลือก: เพิ่มใหม่ หรือ แทน #N (แถวด้านบนมีเลขกำกับ)\nรูปเดิมที่ถูกแทนเก็บเป็นเวอร์ชันเก่า กดปุ่ม 'รูปเก่าที่เคยถูกแทน' เพื่อดู/กู้คืน\nปุ่ม 'ใส่เข้าสินค้าเลย' = ใส่ทันที · ถ้าไม่กด เข้าตอน 'อนุมัติ'`, `Images here go to ${label}'s gallery.\nPer image: add new or replace #N.\nReplaced images kept as versions — tap 'Replaced versions'.\n'Add now' applies immediately; otherwise on approval.`)}
         >ⓘ</span>
       </p>
 
@@ -108,13 +109,13 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
                 <button type="button" onClick={() => onRemoveDraft(d.r2_key)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
               </div>
               <select value={curVal} onChange={(e) => setReplace(tk, d.r2_key, e.target.value)} className="text-[10px] border border-slate-200 rounded px-0.5 py-0.5 w-[76px]">
-                <option value={addNewVal}>➕ {tt("เพิ่มใหม่", "Add new")}</option>
+                <option value={addNewVal}>{tt("เพิ่มใหม่", "Add new")}</option>
                 {refSlots.map((s, i) => <option key={s.slot_id} value={replaceVal(s.slot_id)}>{tt(`แทน #${i + 1}`, `→ #${i + 1}`)}</option>)}
               </select>
             </div>
           ); })}
           <label className={`h-12 px-2 inline-flex items-center gap-1 rounded border border-dashed text-[11px] cursor-pointer ${isDesc ? "border-indigo-300 text-indigo-700 hover:bg-indigo-50" : "border-amber-300 text-amber-700 hover:bg-amber-50"}`}>
-            {uploading ? "⏳" : <>📥 {tt("ลากรูปมาใส่ / เลือกไฟล์", "Drop or pick images")}</>}
+            {uploading ? <Icon value="i:hourglass" /> : <><Icon value="i:package-import" className="mr-1" />{tt("ลากรูปมาใส่ / เลือกไฟล์", "Drop or pick images")}</>}
             <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) onAddDraft(e.target.files); e.target.value = ""; }} />
           </label>
           <CameraButton onFiles={(fs) => { if (fs.length) onAddDraft(fs); }} disabled={uploading} label={tt("ถ่ายรูป", "Camera")}
@@ -126,7 +127,7 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
             {canApplyNow && (
               <button type="button" onClick={onApplyNow} disabled={applying}
                 className="h-7 px-2.5 text-[11px] font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50 shrink-0">
-                {applying ? "⏳ " : "✅ "}{tt("ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)", "Add to product now")}
+                <Icon value={applying ? "i:hourglass" : "i:circle-check"} className="mr-1" />{tt("ใส่เข้าสินค้าเลย (ไม่รออนุมัติ)", "Add to product now")}
               </button>
             )}
           </div>
@@ -135,7 +136,7 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
 
       {/* รูปเก่าที่เคยถูกแทน — ดู/กู้คืน (เฉพาะแกลเลอรี · Description ยังไม่มีกู้คืน) */}
       {!isDesc && <>
-        <button type="button" onClick={loadVersions} className="mt-1.5 text-[10px] text-slate-500 hover:text-violet-700">🕘 {tt("รูปเก่าที่เคยถูกแทน", "Replaced versions")} {verOpen ? "▲" : "▼"}</button>
+        <button type="button" onClick={loadVersions} className="mt-1.5 text-[10px] text-slate-500 hover:text-violet-700"><Icon value="i:history" className="mr-1" />{tt("รูปเก่าที่เคยถูกแทน", "Replaced versions")} {verOpen ? "▲" : "▼"}</button>
         {verOpen && (versions === null ? <p className="text-[10px] text-slate-400 mt-0.5">{tt("กำลังโหลด…", "Loading…")}</p>
           : versions.length === 0 ? <p className="text-[10px] text-slate-400 italic mt-0.5">{tt("ยังไม่มีรูปที่ถูกแทน", "No replaced versions yet")}</p>
           : (
@@ -144,7 +145,7 @@ export function ProductImageBox({ tk, label, mode, refSlots, draft, uploading, o
                 <div key={i} className="flex flex-col items-center gap-0.5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={`/api/r2-image?key=${encodeURIComponent(v.old_r2_key)}&w=64`} alt="" onClick={() => onZoom?.(versions.map((x) => ({ url: `/api/r2-image?key=${encodeURIComponent(x.old_r2_key)}&w=1600`, label })), i)} className="h-10 w-10 object-cover rounded border border-slate-200 opacity-80 cursor-zoom-in" />
-                  <button type="button" onClick={() => restore(v.slot_id, v.old_r2_key)} className="text-[9px] text-violet-600 hover:underline">↩ {tt(`กู้คืน #${(v.slot ?? 0) + 1}`, `restore #${(v.slot ?? 0) + 1}`)}</button>
+                  <button type="button" onClick={() => restore(v.slot_id, v.old_r2_key)} className="text-[9px] text-violet-600 hover:underline"><Icon value="i:arrow-back-up" className="mr-1" />{tt(`กู้คืน #${(v.slot ?? 0) + 1}`, `restore #${(v.slot ?? 0) + 1}`)}</button>
                 </div>
               ))}
             </div>
@@ -460,11 +461,11 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           {canReview && <>
-            <button onClick={() => setReviseOpen(true)} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
+            <button onClick={() => setReviseOpen(true)} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 disabled:opacity-50"><Icon value="i:arrow-back-up" className="mr-1" />{t("ขอแก้", "Revise")}</button>
             <button onClick={doApprove} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
           </>}
-          {canSubmit && !platformConfirm && showImages && <button onClick={saveDraft} disabled={busy} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50">💾 {t("บันทึกร่าง", "Save draft")}</button>}
-          {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
+          {canSubmit && !platformConfirm && showImages && <button onClick={saveDraft} disabled={busy} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-50"><Icon value="i:device-floppy" className="mr-1" />{t("บันทึกร่าง", "Save draft")}</button>}
+          {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50"><Icon value="i:send" className="mr-1" />{t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
         </div>
       }>
       <div className="space-y-4">
@@ -480,7 +481,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{p.code}</span>
                     <span className="text-sm font-medium text-slate-700">{p.name_platform || p.name_th || "—"}</span>
-                    {ok ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("ครบ", "Complete")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่ครบ", "Incomplete")}</span>}
+                    {ok ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("ครบ", "Complete")}</span> : <span className="text-[10px] text-rose-600 ml-auto"><Icon value="i:alert-triangle" className="mr-1" />{t("ยังไม่ครบ", "Incomplete")}</span>}
                   </div>
                   {!ok && <p className="text-xs text-rose-600">{t("ต้องกรอก", "Required")}: {p.missing.map((m) => `${m}*`).join(", ")}</p>}
                   {/* intro โชว์บนสุดเฉพาะตอน "ไม่ได้" ตั้งเป็นฟิลด์บังคับ — ถ้าเป็นฟิลด์บังคับจะโชว์ตามลำดับที่จัดด้านล่างแทน (กันโชว์ซ้ำ/ผิดลำดับ) */}
@@ -493,7 +494,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                     <div key={f.key} className="border-t border-slate-100 pt-1.5">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <span className="text-[11px] font-medium text-slate-500">{f.label}{f.empty && <span className="text-rose-500">*</span>}</span>
-                        {!f.empty && f.value && <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(f.value); pushToast("success", t(`คัดลอก ${f.label} แล้ว`, `Copied ${f.label}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="shrink-0 text-[10px] text-violet-600 hover:text-violet-800 border border-violet-200 rounded px-1.5 py-0.5">📋 {t("คัดลอก", "Copy")}</button>}
+                        {!f.empty && f.value && <button type="button" onClick={async () => { try { await navigator.clipboard.writeText(f.value); pushToast("success", t(`คัดลอก ${f.label} แล้ว`, `Copied ${f.label}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="shrink-0 text-[10px] text-violet-600 hover:text-violet-800 border border-violet-200 rounded px-1.5 py-0.5"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอก", "Copy")}</button>}
                       </div>
                       {f.empty
                         ? <p className="text-[11px] text-rose-500 italic">— {t("ยังไม่กรอก", "not filled")}</p>
@@ -501,9 +502,9 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                     </div>
                   ))}
                   <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${ok ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
-                    ✏️ {ok ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกข้อมูลสินค้าที่ขาด", "Fill missing product details")}
+                    <Icon value="i:pencil" className="mr-1" />{ok ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกข้อมูลสินค้าที่ขาด", "Fill missing product details")}
                   </button>
-                  <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 mt-1">💡 {t('ถ้าต้องการสร้าง/แก้ SKU ของสินค้านี้ ให้กดปุ่ม "แก้รายละเอียดสินค้า" ด้านบนได้เลย', 'To create/edit SKUs for this product, use the button above')}</p>
+                  <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 mt-1"><Icon value="i:bulb" className="mr-1" />{t('ถ้าต้องการสร้าง/แก้ SKU ของสินค้านี้ ให้กดปุ่ม "แก้รายละเอียดสินค้า" ด้านบนได้เลย', 'To create/edit SKUs for this product, use the button above')}</p>
                 </div>
               ); })}
             {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("กรอกช่องบังคับ (*) ให้ครบทุกสินค้าก่อนถึงจะส่งงานได้", "Fill all required (*) fields on every product before you can submit")}</p>}
@@ -511,7 +512,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
         ) : (
           <>
             {canSubmit && !hasWork && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{hasParentTarget ? t("ใส่รูปในกล่องสินค้าอย่างน้อย 1 ก่อนกดส่งงาน", "Add at least one image to a product box before submitting") : t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
-            {canSubmit && hasWork && tickedNoImg.length > 0 && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">⚠ {t(`สินค้าที่ติ๊กไว้ต้องใส่รูปให้ครบก่อนส่ง: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`, `Add images to all ticked products before submitting: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`)}</p>}
+            {canSubmit && hasWork && tickedNoImg.length > 0 && <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"><Icon value="i:alert-triangle" className="mr-1" />{t(`สินค้าที่ติ๊กไว้ต้องใส่รูปให้ครบก่อนส่ง: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`, `Add images to all ticked products before submitting: ${tickedNoImg.map((tk) => labelMapRef.current[tk] ?? tk).join(", ")}`)}</p>}
             {/* กล่อง "รูปแนบงาน" บน — ซ่อนเมื่อมีสินค้าปลายทาง (หย่อนรูปในกล่องสินค้าด้านล่างแทน) */}
             {showImages && !hasParentTarget && (
               <div>
@@ -525,18 +526,18 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
             )}
             {/* งานเรียงพิมพ์ — ส่งงานเป็นลิงก์ Google Drive (ไม่ต้องผูกสินค้า) */}
             {isArrange && canSubmit && (
-              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">🖨️ {t("งานเรียงพิมพ์: วางลิงก์ Google Drive ของไฟล์ที่เรียงเสร็จในช่องลิงก์ด้านล่าง แล้วกดส่งงานได้เลย", "Arrange print: paste the Google Drive link of the arranged file below, then submit")}</p>
+              <p className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2"><Icon value="i:printer" className="mr-1" />{t("งานเรียงพิมพ์: วางลิงก์ Google Drive ของไฟล์ที่เรียงเสร็จในช่องลิงก์ด้านล่าง แล้วกดส่งงานได้เลย", "Arrange print: paste the Google Drive link of the arranged file below, then submit")}</p>
             )}
             {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── (งานเรียงพิมพ์ไม่เกี่ยวกับสินค้า → ซ่อน) */}
             {showImages && !isArrange && (
               <div className="border-t border-slate-100 pt-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-[11px] font-medium text-slate-500">{approveTarget === "cover" ? `🖼️ ${t("รูปปกต่อสินค้า (1 รูป/สินค้า)", "Cover image per product (1 each)")}` : `📤 ${t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}`}</p>
+                  <p className="text-[11px] font-medium text-slate-500">{approveTarget === "cover" ? <><Icon value="i:photo" className="mr-1" />{t("รูปปกต่อสินค้า (1 รูป/สินค้า)", "Cover image per product (1 each)")}</> : <><Icon value="i:package-export" className="mr-1" />{t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}</>}</p>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-[10px] text-slate-400">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
                     <button type="button" onClick={() => void saveImages()} disabled={savingImages}
                       className="h-6 px-2 text-[11px] font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">
-                      {savingImages ? "⏳" : "💾"} {t("บันทึก", "Save")}
+                      <Icon value={savingImages ? "i:hourglass" : "i:device-floppy"} className="mr-1" />{t("บันทึก", "Save")}
                     </button>
                   </div>
                 </div>
@@ -545,7 +546,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                   <input type="checkbox" checked={noParent} onChange={(e) => setNoParent(e.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
                   {t("ไม่ต้องแนบ Parent SKU (งานนี้ไม่ส่งเข้าสินค้า)", "No Parent SKU needed (don't send to products)")}
                 </label>
-                {needProductTarget && !hasProductTarget && <p className="text-[11px] text-rose-600 mb-2">⚠ {t("ต้องเลือก Parent SKU อย่างน้อย 1 ก่อนส่งงาน", "Pick at least one Parent SKU before submitting")}</p>}
+                {needProductTarget && !hasProductTarget && <p className="text-[11px] text-rose-600 mb-2"><Icon value="i:alert-triangle" className="mr-1" />{t("ต้องเลือก Parent SKU อย่างน้อย 1 ก่อนส่งงาน", "Pick at least one Parent SKU before submitting")}</p>}
                 {displayParents.length === 0 && parents !== null ? (
                   <p className="text-xs text-slate-400 italic mb-2">{t("งานนี้ยังไม่ผูก Parent SKU — กดเลือกด้านล่างได้", "No Parent SKU linked — add one below")}</p>
                 ) : displayParents.map((p) => {
@@ -556,7 +557,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                         <input type="checkbox" checked={pon} onChange={() => toggleSyncParent(p.id)} className="h-4 w-4 rounded border-slate-300 text-amber-600 cursor-pointer" />
                         <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">{p.code}</span>
                         <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
-                        <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
+                        <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0"><Icon value="i:pencil" className="mr-1" />{t("แก้สินค้า", "Edit product")}</button>
                       </div>
                       {/* กล่องรูปของ Parent SKU นี้ — แกลเลอรี + (ติ๊ก) Description · งานรูปคำอธิบาย = โชว์แค่ Description */}
                       {pon && (() => { const ptk = `parent:${p.id}`; const descOpen = isDescTask || (!hideDescOption && (descBoxOpen[ptk] ?? (draftFor(ptk, "description").length > 0))); return (
@@ -564,9 +565,9 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                           {!isDescTask && <ProductImageBox tk={ptk} label={p.code} mode="gallery" refSlots={galleryRef(ptk)} draft={draftFor(ptk, "gallery")} uploading={uploadingTk === `gallery#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#${ptk}`} onApplyNow={() => void applyNow(ptk, "gallery")} tt={t} onRestored={() => refreshGallery(ptk)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
                           {!isDescTask && !hideDescOption && <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
                             <input type="checkbox" checked={descOpen} onChange={(e) => setDescBoxOpen((m) => ({ ...m, [ptk]: e.target.checked }))} className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 cursor-pointer" />
-                            📂 {t("ส่งเข้า Description ด้วย", "Also send to Description")}
+                            <Icon value="i:folder-open" className="mr-1" />{t("ส่งเข้า Description ด้วย", "Also send to Description")}
                           </label>}
-                          {!isDescTask && hideDescOption && <p className="text-[10px] text-slate-400 italic">📂 {t("Description จัดการที่งานย่อย \"รูปคำอธิบาย\" แยกแล้ว", "Description handled by the separate description-image subtask")}</p>}
+                          {!isDescTask && hideDescOption && <p className="text-[10px] text-slate-400 italic"><Icon value="i:folder-open" className="mr-1" />{t("Description จัดการที่งานย่อย \"รูปคำอธิบาย\" แยกแล้ว", "Description handled by the separate description-image subtask")}</p>}
                           {descOpen && <ProductImageBox tk={ptk} label={p.code} mode="description" refSlots={descGalleries[ptk] ?? []} draft={draftFor(ptk, "description")} uploading={uploadingTk === `description#${ptk}`} onAddDraft={(f) => void addDraftImages(ptk, f, "description")} onRemoveDraft={(k) => removeDraftImage(ptk, k)} onReorder={(a, b) => reorderDraft(ptk, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `description#${ptk}`} onApplyNow={() => void applyNow(ptk, "description")} tt={t} onRestored={() => refreshDescGallery(p.id)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />}
                         </div>
                       ); })()}
@@ -580,11 +581,11 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                           <div key={s.id} className="space-y-1">
                             <div className="flex items-center gap-2 text-xs">
                               <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
-                              <HoverImage url={thumb} size={26} rounded="rounded" fallback="📦" />
+                              <HoverImage url={thumb} size={26} rounded="rounded" fallback={<Icon value="i:package" />} />
                               <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-                              {(s.color || s.color_en) && <span className="text-[10px] text-slate-500 shrink-0 bg-slate-50 border border-slate-200 rounded px-1">🎨 {t(s.color ?? s.color_en ?? "", s.color_en ?? s.color ?? "")}</span>}
+                              {(s.color || s.color_en) && <span className="text-[10px] text-slate-500 shrink-0 bg-slate-50 border border-slate-200 rounded px-1"><Icon value="i:palette" className="mr-1" />{t(s.color ?? s.color_en ?? "", s.color_en ?? s.color ?? "")}</span>}
                               <span className="text-slate-700 truncate flex-1">{s.name}</span>
-                              <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
+                              <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0"><Icon value="i:pencil" /></button>
                             </div>
                             {son
                               ? <ProductImageBox tk={`sku:${s.id}`} label={s.code} mode="gallery" refSlots={galleryRef(`sku:${s.id}`)} draft={draftFor(`sku:${s.id}`, "gallery")} uploading={uploadingTk === `gallery#sku:${s.id}`} onAddDraft={(f) => void addDraftImages(`sku:${s.id}`, f, "gallery")} onRemoveDraft={(k) => removeDraftImage(`sku:${s.id}`, k)} onReorder={(a, b) => reorderDraft(`sku:${s.id}`, a, b)} replaceMap={replaceMap} setReplace={setReplace} canApplyNow={canEditProduct} applying={applyingTk === `gallery#sku:${s.id}`} onApplyNow={() => void applyNow(`sku:${s.id}`, "gallery")} tt={t} onRestored={() => refreshGallery(`sku:${s.id}`)} onZoom={(imgs, i) => setSkuLb({ images: imgs, index: i })} />
@@ -592,7 +593,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                           </div>
                         ); })}
                         {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
-                        <p className="text-[10px] text-slate-400 pt-0.5">💡 {t('สร้าง/เพิ่ม SKU กดปุ่ม "แก้สินค้า" ด้านบน (ตัวแก้สินค้ามีตารางเพิ่ม SKU)', 'Create/add SKUs via "Edit product" above')}</p>
+                        <p className="text-[10px] text-slate-400 pt-0.5"><Icon value="i:bulb" className="mr-1" />{t('สร้าง/เพิ่ม SKU กดปุ่ม "แก้สินค้า" ด้านบน (ตัวแก้สินค้ามีตารางเพิ่ม SKU)', 'Create/add SKUs via "Edit product" above')}</p>
                       </div>}
                     </div>
                   );
@@ -603,7 +604,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
                     <button type="button" onClick={() => setAddParentOpen(false)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => setAddParentOpen(true)} className="text-xs text-amber-700 border border-amber-200 rounded-md px-2 py-1 hover:bg-amber-50">➕ {t("เลือก Parent SKU เพิ่ม", "Add Parent SKU")}</button>
+                  <button type="button" onClick={() => setAddParentOpen(true)} className="text-xs text-amber-700 border border-amber-200 rounded-md px-2 py-1 hover:bg-amber-50"><Icon value="i:plus" className="mr-1" />{t("เลือก Parent SKU เพิ่ม", "Add Parent SKU")}</button>
                 )}
               </div>
             )}
@@ -611,7 +612,7 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
               <div>
                 <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
                 <div className="space-y-1 mb-1.5">
-                  {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button type="button" title={t("คัดลอกที่อยู่", "Copy path")} onClick={async () => { try { await navigator.clipboard.writeText(a.url || a.label || ""); pushToast("success", t("คัดลอกที่อยู่แล้ว", "Path copied")); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="text-slate-400 hover:text-violet-700 border border-slate-200 rounded px-1 shrink-0">📋</button><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+                  {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1"><Icon value="i:link" className="mr-1" />{a.label || a.url}</a><button type="button" title={t("คัดลอกที่อยู่", "Copy path")} onClick={async () => { try { await navigator.clipboard.writeText(a.url || a.label || ""); pushToast("success", t("คัดลอกที่อยู่แล้ว", "Path copied")); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } }} className="text-slate-400 hover:text-violet-700 border border-slate-200 rounded px-1 shrink-0"><Icon value="i:clipboard-list" /></button><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
                   {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
                 </div>
                 <div className="flex gap-1.5">

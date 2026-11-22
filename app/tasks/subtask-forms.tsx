@@ -13,6 +13,7 @@ import { updateSubtask, deleteSubtask, listSubtaskTypes, subtaskTypeHint, POST_T
 import { askConfirm } from "@/components/modal/ask-dialog";
 import type { PushToast } from "@/components/toast";
 import { ContentTemplateModal } from "./subtask-content-modals";
+import { Icon } from "@/components/icon";
 
 // ฟอร์มเพิ่มงานย่อย — เลือก "ชนิดงานย่อย" ก่อน (งานรูปภาพ/เขียนคำอธิบาย/ฯลฯ) → เพิ่ม 1 งานย่อยของชนิดนั้น (ค่าตั้งครบ) · หรือ "เพิ่มเอง" (ชื่อ+ผู้รับผิดชอบ)
 export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
@@ -88,7 +89,7 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
             {types.map((ty) => (
               <button key={ty.key} type="button" disabled={!!applyingKey} onClick={() => pickType(ty)}
                 className="flex items-start gap-2 text-left border border-slate-200 rounded-lg px-3 py-2 hover:border-violet-300 hover:bg-white disabled:opacity-50">
-                <span className="text-base leading-none mt-0.5 shrink-0">{ty.icon || "🧩"}</span>
+                <span className="text-base leading-none mt-0.5 shrink-0"><Icon value={ty.icon || "i:puzzle"} /></span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-slate-700">{applyingKey === ty.key ? t("กำลังเพิ่ม...", "Adding...") : ty.label_th}</span>
                   <span className="block text-[11px] text-slate-400 leading-snug">{subtaskTypeHint(ty)}</span>
@@ -110,11 +111,11 @@ export function AddSubtaskForm({ onAdd, onAddType, pushToast }: {
         <button onClick={() => setMode("choose")} className="text-xs text-slate-500 hover:text-violet-700">← {t("เลือกชนิด", "Choose type")}</button>
         <button onClick={() => setMode("closed")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>
       </div>
-      <p className="text-sm font-medium text-slate-700">{selType.icon || "🧩"} {selType.label_th}</p>
+      <p className="text-sm font-medium text-slate-700"><Icon value={selType.icon || "i:puzzle"} className="mr-1" />{selType.label_th}</p>
       <div>
         <div className="flex items-center justify-between mb-1">
           <p className="text-[11px] text-slate-400">{t("แม่แบบคอนเทนต์ (ถ้ามี)", "Content template (optional)")}</p>
-          <button type="button" onClick={() => setTplModalOpen(true)} className="text-[11px] text-violet-600 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage")}</button>
+          <button type="button" onClick={() => setTplModalOpen(true)} className="text-[11px] text-violet-600 hover:underline"><Icon value="i:settings" className="mr-1" />{t("จัดการแม่แบบ", "Manage")}</button>
         </div>
         <select value={tplId} onChange={(e) => {
           const id = e.target.value; setTplId(id);
@@ -216,7 +217,7 @@ export function ReviseModal({ fields, images, busy, onCancel, onConfirm }: {
   const node = (
     <div className="fixed inset-0 z-[9998] bg-black/50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
-        <p className="text-base font-semibold text-slate-800">↩︎ {t("ขอแก้งานย่อย", "Request revision")}</p>
+        <p className="text-base font-semibold text-slate-800"><Icon value="i:arrow-back-up" className="mr-1" />{t("ขอแก้งานย่อย", "Request revision")}</p>
 
         {/* เลือกรูปที่ต้องแก้ — ติ๊กได้หลายรูป · เลือกแล้วพิมพ์เหตุผลเฉพาะรูปนั้นได้ */}
         {imgs.length > 0 && (
@@ -275,7 +276,7 @@ export function ReviseModal({ fields, images, busy, onCancel, onConfirm }: {
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onCancel} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={submit} disabled={busy || (!reason.trim() && picked.length === 0 && pickedImgs.length === 0)} className="h-9 px-4 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50">↩︎ {t("ส่งขอแก้", "Send")}</button>
+          <button onClick={submit} disabled={busy || (!reason.trim() && picked.length === 0 && pickedImgs.length === 0)} className="h-9 px-4 text-sm font-medium text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50"><Icon value="i:arrow-back-up" className="mr-1" />{t("ส่งขอแก้", "Send")}</button>
         </div>
       </div>
     </div>

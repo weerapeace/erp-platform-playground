@@ -31,6 +31,7 @@ import { usePushToast, useToast, type ToastVariant } from "@/components/toast";
 import { WIZARD_VISIBILITY_OPTIONS, wizardVisibilityOf, type WizardVisibility } from "@/lib/task-template-visibility";
 import { BrandSelect } from "@/components/brand-select";
 import { EmptyState, LoadingState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
 
 const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
 const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
@@ -42,7 +43,7 @@ export default function TemplatesPage() {
   const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
 
   return (
-    <StandaloneShell title={t("เทมเพลต & งานประจำ", "Templates & Recurring")} icon="🔁" accent="violet">
+    <StandaloneShell title={t("เทมเพลต & งานประจำ", "Templates & Recurring")} icon="i:repeat" accent="violet">
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -52,9 +53,9 @@ export default function TemplatesPage() {
           <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">← {t("งาน", "Tasks")}</a>
         </div>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
-          <button onClick={() => setTab("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("เทมเพลต", "Templates")}</button>
-          <button onClick={() => setTab("recurring")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "recurring" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🔁 {t("งานประจำ", "Recurring")}</button>
-          <button onClick={() => setTab("prompts")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "prompts" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📝 {t("Prompt ต่อแบรนด์", "Brand prompts")}</button>
+          <button onClick={() => setTab("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:clipboard-list" className="mr-1" />{t("เทมเพลต", "Templates")}</button>
+          <button onClick={() => setTab("recurring")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "recurring" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:repeat" className="mr-1" />{t("งานประจำ", "Recurring")}</button>
+          <button onClick={() => setTab("prompts")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "prompts" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:notes" className="mr-1" />{t("Prompt ต่อแบรนด์", "Brand prompts")}</button>
         </div>
       </div>
 
@@ -180,8 +181,8 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
                             <button onClick={(e) => { e.stopPropagation(); setDelId(tpl); }} className="text-xs text-slate-300 hover:text-red-500">{t("ลบ", "Delete")}</button>
                           </div>
                         </div>
-                        <p className="font-semibold text-slate-800">{tpl.icon ? `${tpl.icon} ` : ""}{tpl.name}</p>
-                        <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length} ${t("คอนเทนต์", "content")}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว", "d")}` : ""}</p>
+                        <p className="font-semibold text-slate-800">{tpl.icon ? <Icon value={tpl.icon} className="mr-1" /> : null}{tpl.name}</p>
+                        <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}{(tpl.content_items?.length ?? 0) > 0 ? <> · <Icon value="i:device-mobile" className="mr-1" />{tpl.content_items!.length} {t("คอนเทนต์", "content")}</> : ""}{tpl.due_offset_days != null ? <> · <Icon value="i:clock" className="mr-1" />+{tpl.due_offset_days}{t("ว", "d")}</> : ""}</p>
                         <label onClick={(e) => e.stopPropagation()} className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
                           {t("หน้าสร้างงาน:", "New task:")}
                           <select value={wizardVisibilityOf(tpl)} onChange={(e) => void setVisibility(tpl, e.target.value as WizardVisibility)}
@@ -241,7 +242,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
         <div className="mt-4 border-t border-slate-100 pt-4">
           <div className="flex items-center justify-between mb-2">
             <div>
-              <p className="text-sm font-semibold text-slate-700">📱 {t("คอนเทนต์ที่จะสร้าง", "Content to create")}</p>
+              <p className="text-sm font-semibold text-slate-700"><Icon value="i:device-mobile" className="mr-1" />{t("คอนเทนต์ที่จะสร้าง", "Content to create")}</p>
               <p className="text-xs text-slate-400">{t("เมื่อสร้างงานจากแม่แบบนี้ ระบบจะสร้างคอนเทนต์เหล่านี้ผูกกับงานให้อัตโนมัติ", "When a task is created from this template, these content items are auto-created and linked to the task")}</p>
             </div>
             <button type="button" onClick={() => setContentD([...contentItems, { title: "", post_type: "image", platforms: [] }])} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">＋ {t("เพิ่มคอนเทนต์", "Add content")}</button>
@@ -361,13 +362,13 @@ function RecurringTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
                   <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
                     <span className="text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{FREQ_LABEL()[r.frequency] ?? r.frequency}{r.interval_n > 1 ? ` ×${r.interval_n}` : ""}</span>
                     {r.template_label && <span>· {t("แม่แบบ", "Template")}: {r.template_label}</span>}
-                    {r.assignee_label && <span>· 👤 {r.assignee_label}</span>}
+                    {r.assignee_label && <span>· <Icon value="i:user" className="mr-1" />{r.assignee_label}</span>}
                     {r.next_run && <span>· {t("รอบถัดไป", "Next run")}: {r.next_run}</span>}
                     {r.end_date && <span>· {t("สิ้นสุด", "Ends")}: {r.end_date}</span>}
                   </div>
                 </div>
                 <button onClick={() => runNow(r)} className="h-8 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">▶ {t("สร้างเดี๋ยวนี้", "Run Now")}</button>
-                <button onClick={() => openEdit(r)} title={t("แก้ไขกฎงานประจำ", "Edit recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">✎ {t("แก้ไข", "Edit")}</button>
+                <button onClick={() => openEdit(r)} title={t("แก้ไขกฎงานประจำ", "Edit recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0"><Icon value="i:pencil" className="mr-1" />{t("แก้ไข", "Edit")}</button>
                 <button onClick={() => copyRule(r)} title={t("คัดลอกงานประจำ", "Copy recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">⧉ {t("คัดลอก", "Copy")}</button>
                 <button onClick={() => setDelId(r)} className="text-xs text-slate-300 hover:text-red-500 shrink-0">{t("ลบ", "Delete")}</button>
               </div>

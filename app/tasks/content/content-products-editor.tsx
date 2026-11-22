@@ -14,6 +14,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { getParentSkuChildren, type ParentSkuChild, type ContentProduct } from "../data";
 import { platformLabel } from "../use-options";
+import { Icon } from "@/components/icon";
 
 export type ProductLink = { platform: string; url: string };
 export type ExtraProduct = {
@@ -138,7 +139,7 @@ export function ExtraProductsEditor({ items, onChange, colorSource = "th", onMak
   return (
     <div>
       <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="text-[11px] font-medium text-slate-600">🛍 {t("สินค้าเพิ่มเติมในโพสต์", "More products in this post")}{items.length > 0 && <span className="ml-1 text-slate-400 font-normal">({items.length})</span>}</span>
+        <span className="text-[11px] font-medium text-slate-600"><Icon value="i:shopping-bag" className="mr-1" />{t("สินค้าเพิ่มเติมในโพสต์", "More products in this post")}{items.length > 0 && <span className="ml-1 text-slate-400 font-normal">({items.length})</span>}</span>
         {items.length > 1 && <span className="text-[10px] text-slate-400">{t("ลากที่ ⋮⋮ เพื่อสลับลำดับ", "Drag ⋮⋮ to reorder")}</span>}
       </div>
       {items.length > 0 && (
@@ -153,14 +154,14 @@ export function ExtraProductsEditor({ items, onChange, colorSource = "th", onMak
                 {thumb
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={thumb} alt="" className="h-9 w-9 rounded-md object-cover border border-slate-200 shrink-0" />
-                  : <div className="h-9 w-9 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 shrink-0">🛍</div>}
+                  : <div className="h-9 w-9 rounded-md bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 shrink-0"><Icon value="i:shopping-bag" /></div>}
                 <div className="min-w-0 flex-1">
                   <div className="font-mono text-[10px] text-slate-500 truncate">{code}{it.sku && it.parent ? <span className="text-slate-300"> · Parent {it.parent.code}</span> : null}{!it.sku && it.skuIds.length > 0 ? <span className="text-violet-500"> · {t(`เลือก ${it.skuIds.length} สี`, `${it.skuIds.length} colors`)}</span> : null}</div>
                   <div className="text-xs text-slate-800 truncate" title={name}>{name}</div>
                   {/* ชิปสี: กดเลือกได้หลายสี (1 สี = SKU เดี่ยว · ไม่เลือก = ทุกสี) */}
                   {it.parent && it.children.length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1 max-h-16 overflow-y-auto pr-0.5">
-                      <button type="button" onClick={() => allColors(i)} className={`h-6 px-2 rounded-full border text-[10px] font-medium ${!it.sku && !it.skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All")} ({it.children.length})</button>
+                      <button type="button" onClick={() => allColors(i)} className={`h-6 px-2 rounded-full border text-[10px] font-medium ${!it.sku && !it.skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}><Icon value="i:palette" className="mr-1" />{t("ทุกสี", "All")} ({it.children.length})</button>
                       {it.children.map((c) => { const on = it.sku?.id === c.id || it.skuIds.includes(c.id); const col = (colorSource === "en" ? c.color_en : c.color_th) ?? c.color_th ?? c.color_en; return (
                         <button key={c.id} type="button" title={c.code} onClick={() => toggleChild(i, c)}
                           className={`h-6 px-2 rounded-full border text-[10px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{col || c.code}</button>
@@ -168,8 +169,8 @@ export function ExtraProductsEditor({ items, onChange, colorSource = "th", onMak
                     </div>
                   )}
                 </div>
-                {onMakePrimary && <button type="button" onClick={() => onMakePrimary(i)} title={t("ตั้งเป็นสินค้าหลัก (สลับกับตัวหลักปัจจุบัน)", "Make primary (swap)")} className="h-7 w-7 rounded-md text-slate-400 hover:text-amber-500 hover:bg-amber-50 shrink-0">⭐</button>}
-                {onOpenParent && it.parent && <button type="button" onClick={() => onOpenParent(it.parent!.id)} title={t("เปิด drawer Parent", "Open Parent")} className="h-7 w-7 rounded-md text-violet-600 hover:bg-violet-50 shrink-0">↗</button>}
+                {onMakePrimary && <button type="button" onClick={() => onMakePrimary(i)} title={t("ตั้งเป็นสินค้าหลัก (สลับกับตัวหลักปัจจุบัน)", "Make primary (swap)")} className="h-7 w-7 rounded-md text-slate-400 hover:text-amber-500 hover:bg-amber-50 shrink-0"><Icon value="i:star" /></button>}
+                {onOpenParent && it.parent && <button type="button" onClick={() => onOpenParent(it.parent!.id)} title={t("เปิด drawer Parent", "Open Parent")} className="h-7 w-7 rounded-md text-violet-600 hover:bg-violet-50 shrink-0"><Icon value="i:external-link" /></button>}
                 <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} title={t("เอาออกจากโพสต์นี้", "Remove from this post")} className="h-7 w-7 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 shrink-0">✕</button>
               </div>
             );

@@ -9,6 +9,7 @@ import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "./use-options";
 import { DEFAULT_SKIP_SUBTASKS, loadProductModeCfg, saveProductModeCfg, type ProductEditMode, type ProductModeCfg } from "./product-edit-mode";
 import { listSubtaskTypes, type SubtaskType } from "./data";
+import { Icon } from "@/components/icon";
 
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${TH_MONTH[d.getMonth()]} ${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
@@ -46,13 +47,13 @@ export function ProductModeManager({ showToast }: { showToast: (m: string) => vo
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
-      <h3 className="text-sm font-semibold text-slate-800">🔁 {t("วิธีทำงานสินค้า (ต่อประเภทงาน)", "How product work is done (per task type)")}</h3>
+      <h3 className="text-sm font-semibold text-slate-800"><Icon value="i:repeat" className="mr-1" />{t("วิธีทำงานสินค้า (ต่อประเภทงาน)", "How product work is done (per task type)")}</h3>
       <div className="mt-1 text-xs text-slate-500 leading-relaxed space-y-0.5">
         <p><b className="text-slate-600">{t("โหมดเดิม", "Old mode")}</b> — {t("อัปโหลดรูปในงาน → เลือกตัวที่จะแทน → อนุมัติแล้วระบบค่อยส่งเข้าสินค้า", "Upload in the task → pick what to replace → pushed to the product on approval")}</p>
         <p><b className="text-slate-600">{t("โหมดใหม่", "New mode")}</b> — {t("กด \"แก้ที่สินค้า\" ในงาน แก้ SKU/Parent ตัวจริงเลย · ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ (ย้อนกลับได้)", "Press \"Edit product\" in the task to edit the real SKU/Parent · old versions are kept and changes summarised for the reviewer (undoable)")}</p>
-        <p className="text-amber-700">⚠ {t("โหมดใหม่: แก้แล้วขึ้นสินค้าจริงทันที — ถ้าสินค้าขายบนเว็บอยู่ ลูกค้าจะเห็นภายในไม่กี่นาที", "New mode: edits go live right away — if the product is on the website, customers see it within minutes")}</p>
+        <p className="text-amber-700"><Icon value="i:alert-triangle" className="mr-1" />{t("โหมดใหม่: แก้แล้วขึ้นสินค้าจริงทันที — ถ้าสินค้าขายบนเว็บอยู่ ลูกค้าจะเห็นภายในไม่กี่นาที", "New mode: edits go live right away — if the product is on the website, customers see it within minutes")}</p>
       </div>
-      {err && <p className="mt-2 text-xs text-red-600">⚠ {err}</p>}
+      {err && <p className="mt-2 text-xs text-red-600"><Icon value="i:alert-triangle" className="mr-1" />{err}</p>}
       {cfg === null ? (
         <div className="mt-3 space-y-2" aria-busy="true">{[0, 1, 2].map((i) => <div key={i} className="h-9 rounded-lg bg-slate-100 animate-pulse" />)}</div>
       ) : (
@@ -85,7 +86,7 @@ export function ProductModeManager({ showToast }: { showToast: (m: string) => vo
                             <button key={st.key} type="button" disabled={saving !== null} onClick={() => toggleSkip(ty.value, st.key)}
                               title={off ? t("ไม่สร้างงานย่อยนี้ (กดเพื่อให้มี)", "Not created (tap to keep)") : t("สร้างตามเทมเพลต (กดเพื่อไม่ต้องมี)", "Created from template (tap to skip)")}
                               className={`h-7 px-2.5 rounded-full border text-[11px] ${off ? "border-slate-200 bg-white text-slate-400 line-through" : "border-violet-200 bg-violet-50 text-violet-700"}`}>
-                              {st.icon ?? "🧩"} {t(st.label_th, st.label_en || st.label_th)}{off ? ` · ${t("ไม่มี", "skip")}` : ""}
+                              <Icon value={st.icon ?? "i:puzzle"} className="mr-1" />{t(st.label_th, st.label_en || st.label_th)}{off ? ` · ${t("ไม่มี", "skip")}` : ""}
                             </button>
                           );
                         })}

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPDateTime24 } from "@/components/form";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { type ToastVariant } from "@/components/toast";
 import { useSWRLite, invalidateSWR } from "@/lib/swr-lite";
 import { PlatformChip } from "../platform-chip";
@@ -24,13 +25,13 @@ export function fmtJobTime(iso: string | null | undefined): string {
   return `${d.toLocaleDateString("th-TH", { day: "numeric", month: "short" })} ${d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
 }
 
-export function jobStatusBadge(status: string, t: T): { cls: string; label: string } {
+export function jobStatusBadge(status: string, t: T): { cls: string; label: string; icon?: string } {
   switch (status) {
-    case "queued": return { cls: "bg-blue-50 text-blue-700 border-blue-200", label: `⏰ ${t("รอเวลา", "Queued")}` };
-    case "running": return { cls: "bg-violet-50 text-violet-700 border-violet-200", label: `⏳ ${t("กำลังโพสต์", "Posting")}` };
-    case "processing": return { cls: "bg-violet-50 text-violet-700 border-violet-200", label: `⏳ ${t("รอแพลตฟอร์มประมวลผล", "Processing")}` };
-    case "posted": return { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", label: `✅ ${t("โพสต์แล้ว", "Posted")}` };
-    case "failed": return { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⚠ ${t("ไม่สำเร็จ", "Failed")}` };
+    case "queued": return { cls: "bg-blue-50 text-blue-700 border-blue-200", icon: "i:alarm", label: t("รอเวลา", "Queued") };
+    case "running": return { cls: "bg-violet-50 text-violet-700 border-violet-200", icon: "i:hourglass", label: t("กำลังโพสต์", "Posting") };
+    case "processing": return { cls: "bg-violet-50 text-violet-700 border-violet-200", icon: "i:hourglass", label: t("รอแพลตฟอร์มประมวลผล", "Processing") };
+    case "posted": return { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: "i:circle-check", label: t("โพสต์แล้ว", "Posted") };
+    case "failed": return { cls: "bg-rose-50 text-rose-700 border-rose-300", icon: "i:alert-triangle", label: t("ไม่สำเร็จ", "Failed") };
     default: return { cls: "bg-slate-50 text-slate-500 border-slate-200", label: t("ยกเลิกแล้ว", "Cancelled") };
   }
 }
@@ -73,7 +74,7 @@ function JobRow({ job, t, actions, canEdit, latestCaption, extra }: {
       <div className="flex items-center gap-1.5 flex-wrap">
         <PlatformChip code={job.platform} />
         {fmt && <span className="text-slate-500">{fmt}</span>}
-        <span className={`px-1.5 py-px rounded-full border text-[10px] ${bd.cls}`}>{bd.label}</span>
+        <span className={`px-1.5 py-px rounded-full border text-[10px] ${bd.cls}`}>{bd.icon && <Icon value={bd.icon} className="mr-1" />}{bd.label}</span>
         <span className="text-slate-500">{job.status === "posted" ? fmtJobTime(job.posted_at) : fmtJobTime(job.run_at)}</span>
         {extra}
         <span className="ml-auto flex items-center gap-1.5">
@@ -85,7 +86,7 @@ function JobRow({ job, t, actions, canEdit, latestCaption, extra }: {
       {job.status === "failed" && job.last_error && <p className="mt-1 text-[11px] text-rose-600 whitespace-pre-wrap">{job.last_error}</p>}
       {captionStale && canEdit && (
         <p className="mt-1 text-[11px] text-amber-700">
-          ⚠ {t("แคปชั่นในการ์ดเปลี่ยนหลังตั้งคิว — คิวยังใช้ข้อความเดิม", "Caption changed after queuing — the queue still uses the old text")}{" "}
+          <Icon value="i:alert-triangle" className="mr-1" />{t("แคปชั่นในการ์ดเปลี่ยนหลังตั้งคิว — คิวยังใช้ข้อความเดิม", "Caption changed after queuing — the queue still uses the old text")}{" "}
           <button disabled={busy} onClick={() => actions.useCaption(job, latestCaption ?? "")} className="font-medium text-amber-800 underline disabled:opacity-50">{t("ใช้แคปชั่นล่าสุด", "Use latest caption")}</button>
         </p>
       )}
@@ -116,9 +117,9 @@ export function PublishQueueBox({ jobs, latestCaptions, canEdit, canQueueAll, on
   return (
     <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50/40 p-2 space-y-1.5">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-slate-700">📤 {t("คิวโพสต์อัตโนมัติ", "Auto-post queue")}</span>
+        <span className="text-xs font-semibold text-slate-700"><Icon value="i:package-export" className="mr-1" />{t("คิวโพสต์อัตโนมัติ", "Auto-post queue")}</span>
         {main.some((j) => ACTIVE.has(j.status)) && <span className="text-[10px] text-slate-500">{t("ระบบโพสต์ให้เองตามเวลา", "posts automatically on time")}</span>}
-        {canEdit && canQueueAll && <button onClick={onQueueAll} className="ml-auto h-7 px-2.5 text-[11px] font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">⏰ {t("ตั้งคิวทุกแพลตฟอร์ม", "Queue all platforms")}</button>}
+        {canEdit && canQueueAll && <button onClick={onQueueAll} className="ml-auto h-7 px-2.5 text-[11px] font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"><Icon value="i:alarm" className="mr-1" />{t("ตั้งคิวทุกแพลตฟอร์ม", "Queue all platforms")}</button>}
       </div>
       {main.length === 0
         ? <p className="text-[11px] text-slate-400">{t("ยังไม่มีคิว — กด “ตั้งคิวทุกแพลตฟอร์ม” หรือเลือก “ตั้งคิว” ในป๊อปโพสต์ของแต่ละแพลตฟอร์ม", "No queue yet — use “Queue all platforms” or “Queue” in each post popup")}</p>
@@ -160,7 +161,7 @@ export function QueueAllModal({ options, defaultRunAt, busy, onClose, onSubmit }
     platform: o.platform, format: o.format ?? null, caption_text: o.captionText, media: o.media, run_at: new Date(runAt).toISOString(),
   })));
   return (
-    <ERPModal open onClose={onClose} size="lg" title={`⏰ ${t("ตั้งคิวโพสต์ทุกแพลตฟอร์ม", "Queue all platforms")}`}
+    <ERPModal open onClose={onClose} size="lg" title={t("ตั้งคิวโพสต์ทุกแพลตฟอร์ม", "Queue all platforms")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={submit} disabled={busy || !runAtOk || sel.length === 0} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
@@ -195,7 +196,7 @@ export function QueueAllModal({ options, defaultRunAt, busy, onClose, onSubmit }
             );
           })}
         </div>
-        <p className="text-[10px] text-slate-400">💡 {t("แคปชั่น/รูป/รูปแบบ ใช้ตามที่ตั้งในการ์ดของแต่ละแพลตฟอร์มตอนนี้ · แพลตฟอร์มที่ไม่มีในรายการ (TikTok/YouTube/Pinterest/X) ยังต้องโพสต์เอง", "Uses each platform card's current caption/media/format · platforms not listed still need manual posting")}</p>
+        <p className="text-[10px] text-slate-400"><Icon value="i:bulb" className="mr-1" />{t("แคปชั่น/รูป/รูปแบบ ใช้ตามที่ตั้งในการ์ดของแต่ละแพลตฟอร์มตอนนี้ · แพลตฟอร์มที่ไม่มีในรายการ (TikTok/YouTube/Pinterest/X) ยังต้องโพสต์เอง", "Uses each platform card's current caption/media/format · platforms not listed still need manual posting")}</p>
       </div>
     </ERPModal>
   );
@@ -219,7 +220,7 @@ export function PublishQueueModal({ brandName, canEdit, onClose, onOpenContent, 
     { key: "posted", title: t("โพสต์แล้ว (3 วัน)", "Posted (3 days)"), rows: jobs.filter((j) => j.status === "posted") },
   ];
   return (
-    <ERPModal open onClose={onClose} size="lg" title={`📤 ${t("คิวโพสต์อัตโนมัติ", "Auto-post queue")}`}>
+    <ERPModal open onClose={onClose} size="lg" title={t("คิวโพสต์อัตโนมัติ", "Auto-post queue")}>
       {swr.error && !jobs.length ? <p className="text-sm text-rose-600">{t("โหลดคิวไม่สำเร็จ กรุณาลองใหม่", "Couldn't load the queue — try again")}</p>
         : !swr.data ? <p className="text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>
         : jobs.length === 0 ? <p className="text-sm text-slate-500">{t("ยังไม่มีคิว — ตั้งคิวได้จากป๊อป “โพสต์” ในคอนเทนต์แต่ละชิ้น", "No queued posts yet — queue from a content's post popup")}</p>

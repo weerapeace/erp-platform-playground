@@ -24,6 +24,7 @@ import { usePushToast } from "@/components/toast";
 import { taskCardSkeleton, tt } from "@/components/canvas-cards/skeletons";
 import { ToolMenu } from "@/components/canvas-cards/drawers";
 import { useCardKit } from "@/components/canvas-cards/use-card-kit";
+import { Icon } from "@/components/icon";
 
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -104,18 +105,18 @@ export default function CampaignCanvasPage() {
     const found = detail?.tasks.find((x) => x.id === tid); if (found) placeTaskCard(found);
   }, [detail, placeTaskCard]);
 
-  if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
+  if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="i:ad" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
   const k = kit.items;
   return (
-    <StandaloneShell title={name} icon="📣" accent="violet">
+    <StandaloneShell title={name} icon="i:ad" accent="violet">
       {/* GIF จิ้มเพื่อน — โผล่วิ่งบนหน้านี้ด้วย (ดูข้อความ/กดปิด · ตอบกลับทำที่หน้าแรก) */}
       <GifPokeLayer userId={user?.id ?? null} />
       {/* Top bar (sticky) -- อยู่ใต้หัวบาร์หลัก (top-14) */}
       <div className={`bg-white border-b border-slate-200 px-8 py-4 sticky z-20 ${embed ? "top-0" : "top-14"}`}>
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
-            <a href="/tasks" title={t("กลับหน้าแรก (คลิกกลาง = เปิดแท็บใหม่)", "Home (middle-click = new tab)")} className="h-8 px-2.5 inline-flex items-center gap-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">🏠 <span className="hidden sm:inline">{t("หน้าแรก", "Home")}</span></a>
+            <a href="/tasks" title={t("กลับหน้าแรก (คลิกกลาง = เปิดแท็บใหม่)", "Home (middle-click = new tab)")} className="h-8 px-2.5 inline-flex items-center gap-1 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0"><Icon value="i:home" /> <span className="hidden sm:inline">{t("หน้าแรก", "Home")}</span></a>
             <Link href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">{t("แคมเปญ", "Campaigns")}</Link>
             <span className="text-slate-300">›</span>
             <span className="font-semibold text-slate-900 truncate">{name}</span>
@@ -129,18 +130,18 @@ export default function CampaignCanvasPage() {
             {/* จัดปุ่มเป็นกลุ่มตามประเภท — เดิมเรียงยาว 14 ปุ่มจนแถบรก */}
             <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[
               k.sku, k.parent, k.marketing, k.task,
-              { icon: "🧲", label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
+              { icon: <Icon value="i:magnet" />, label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
               k.content, k.trend,
               ...(kit.canDesign ? [k.designSheet] : []),
             ]} />
-            <ToolMenu label={t("เครื่องมือ", "Tools")} icon="🧰" tone="teal" items={[k.section, k.table, k.folder, k.asset]} />
-            <ToolMenu label={t("ข้อมูล", "Info")} icon="📋" tone="slate" items={[
+            <ToolMenu label={t("เครื่องมือ", "Tools")} icon={<Icon value="i:tools" />} tone="teal" items={[k.section, k.table, k.folder, k.asset]} />
+            <ToolMenu label={t("ข้อมูล", "Info")} icon={<Icon value="i:clipboard-list" />} tone="slate" items={[
               k.cards,
-              { icon: "📚", label: t("ความรู้", "Knowledge"), hint: t("คลังความรู้ของทีม", "Team knowledge base"), onClick: () => setKnowledgeOpen(true) },
-              { icon: "📋", label: t("รายละเอียดแคมเปญ", "Campaign details"), hint: t("แก้ข้อมูล/งานในแคมเปญ", "Edit campaign info"), onClick: () => setDrawerOpen(true) },
+              { icon: <Icon value="i:books" />, label: t("ความรู้", "Knowledge"), hint: t("คลังความรู้ของทีม", "Team knowledge base"), onClick: () => setKnowledgeOpen(true) },
+              { icon: <Icon value="i:clipboard-list" />, label: t("รายละเอียดแคมเปญ", "Campaign details"), hint: t("แก้ข้อมูล/งานในแคมเปญ", "Edit campaign info"), onClick: () => setDrawerOpen(true) },
             ]} />
-            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"}</button>
-            <button onClick={toggleFs} title={fs ? t("ออกเต็มจอ", "Exit fullscreen") : t("เต็มจอ", "Fullscreen")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">⛶</button>
+            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"><Icon value={refreshing ? "i:hourglass" : "i:refresh"} /></button>
+            <button onClick={toggleFs} title={fs ? t("ออกเต็มจอ", "Exit fullscreen") : t("เต็มจอ", "Fullscreen")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value={fs ? "i:minimize" : "i:maximize"} /></button>
           </div>
         </div>
       </div>
@@ -155,19 +156,19 @@ export default function CampaignCanvasPage() {
           {dragPanelOpen && (
             <div className="absolute top-3 left-3 z-10 w-72 max-h-[70%] bg-white rounded-xl border border-slate-200 shadow-xl flex flex-col">
               <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
-                <span className="text-sm font-semibold text-slate-700">🧲 {t("ลากงานเข้ากระดาน", "Drag task to board")}</span>
+                <span className="text-sm font-semibold text-slate-700"><Icon value="i:magnet" className="mr-1" />{t("ลากงานเข้ากระดาน", "Drag task to board")}</span>
                 <button onClick={() => setDragPanelOpen(false)} className="h-6 w-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100">✕</button>
               </div>
               <p className="px-3 pt-2 text-[11px] text-slate-400">{t("ลากการ์ดไปวางบนกระดาน หรือกดเพื่อวางตรงกลาง", "Drag a card onto the board, or click to place it in the center")}</p>
               <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {(detail?.tasks ?? []).filter((t) => !boardTaskIds.has(t.id)).length === 0 ? (
-                  <p className="text-sm text-slate-400 italic p-2">{t("ทุกงานอยู่บนกระดานแล้ว 🎉", "All tasks are already on the board 🎉")}</p>
+                  <p className="text-sm text-slate-400 italic p-2">{t("ทุกงานอยู่บนกระดานแล้ว", "All tasks are already on the board")} <Icon value="i:confetti" /></p>
                 ) : (detail?.tasks ?? []).filter((t) => !boardTaskIds.has(t.id)).map((t) => (
                   <div key={t.id} draggable
                     onDragStart={(e) => { e.dataTransfer.setData("text/task-id", t.id); e.dataTransfer.effectAllowed = "copy"; }}
                     onClick={() => placeTaskCard(t)}
                     className="cursor-grab active:cursor-grabbing border border-slate-200 rounded-lg px-2.5 py-1.5 hover:border-violet-300 hover:bg-violet-50/40">
-                    <p className="text-sm text-slate-700 line-clamp-1">✅ {t.title}</p>
+                    <p className="text-sm text-slate-700 line-clamp-1"><Icon value="i:circle-check" className="mr-1" />{t.title}</p>
                     <p className="text-[11px] text-slate-400">{t.task_no} · {t.assignee_label || "—"}</p>
                   </div>
                 ))}
@@ -175,7 +176,7 @@ export default function CampaignCanvasPage() {
             </div>
           )}
         </div>
-        <p className="text-xs text-slate-400 mt-2">🗂 Section · 📦 SKU · ✅ Task · 📱 Content · 📐 {t("ใบงานออกแบบ", "Design sheet")} → <b>{t("ดับเบิลคลิกการ์ด", "Double-click a card")}</b>{t("เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ", " to view/manage · Scroll = zoom (shift+scroll = pan) · Auto-saved")}</p>
+        <p className="text-xs text-slate-400 mt-2"><Icon value="i:folders" className="mr-1" />Section · <Icon value="i:package" className="mr-1" />SKU · <Icon value="i:circle-check" className="mr-1" />Task · <Icon value="i:device-mobile" className="mr-1" />Content · <Icon value="i:ruler-measure" className="mr-1" />{t("ใบงานออกแบบ", "Design sheet")} → <b>{t("ดับเบิลคลิกการ์ด", "Double-click a card")}</b>{t("เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ", " to view/manage · Scroll = zoom (shift+scroll = pan) · Auto-saved")}</p>
       </div>
 
       {/* ป๊อปทั้งหมดของชุดการ์ดกลาง (เลือก/สร้าง/เปิดดูการ์ด) */}

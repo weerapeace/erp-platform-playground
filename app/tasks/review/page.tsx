@@ -4,15 +4,16 @@
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ReviewQueueView } from "../review-queue-view";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 
 export default function ReviewQueuePage() {
   const t = useT();
   return (
-    <StandaloneShell title={t("รอตรวจ/อนุมัติ", "Review queue")} icon="🟡" accent="violet">
+    <StandaloneShell title={t("รอตรวจ/อนุมัติ", "Review queue")} icon="i:hourglass" accent="violet">
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">🟡 {t("รอตรวจ/อนุมัติ", "Review queue")}</h1>
+            <h1 className="text-2xl font-bold text-slate-900"><Icon value="i:hourglass" className="mr-1" />{t("รอตรวจ/อนุมัติ", "Review queue")}</h1>
             <p className="text-slate-500 mt-1">{t("งานย่อยที่ส่งมารออนุมัติ · กด \"ดูงาน\" เพื่อดูรูปแล้วอนุมัติ/ตีกลับได้เลย", "Submitted subtasks awaiting approval · click \"View\" to see images then approve/return")}</p>
           </div>
           <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งาน", "Tasks")}</a>

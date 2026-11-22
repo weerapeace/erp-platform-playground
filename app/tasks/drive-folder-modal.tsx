@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { driveFolderInfo, driveFolderCheckDup, type DriveFolderInfo } from "./data";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 
 export type DriveCreateOpts = { destination_name: string; folder_name: string };
 
@@ -66,7 +67,7 @@ export function DriveFolderModal({ taskId, onClose, onStart, pushToast }: {
           <p className="text-sm text-slate-600">{t("จะสร้างโฟลเดอร์ของงานนี้ในโฟลเดอร์กลาง แล้วอัปไฟล์แนบขึ้น Drive · ยืนยันไหม?", "Create this task's folder in the shared Drive and upload attachments?")}</p>
         ) : (
           <div className="space-y-3">
-            <p className="text-xs text-slate-400">{t("โฟลเดอร์แม่", "Parent")}: <span className="text-slate-600">📁 {info.parent_name}</span></p>
+            <p className="text-xs text-slate-400">{t("โฟลเดอร์แม่", "Parent")}: <span className="text-slate-600"><Icon value="i:folder" className="mr-1" />{info.parent_name}</span></p>
             <label className="block">
               <span className="text-xs font-medium text-slate-500">{t("โฟลเดอร์ปลายทาง (เว้นว่าง = วางตรงในโฟลเดอร์แม่)", "Destination sub-folder (blank = directly in parent)")}</span>
               <input list="drive-dests" value={destination} onChange={(e) => setDestination(e.target.value)}
@@ -79,11 +80,11 @@ export function DriveFolderModal({ taskId, onClose, onStart, pushToast }: {
               <input value={folderName} onChange={(e) => setFolderName(e.target.value)}
                 className="mt-0.5 w-full h-9 border border-slate-200 rounded-lg px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
             </label>
-            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-md px-2.5 py-1.5 break-all">📁 {info.parent_name}{destination.trim() ? ` / ${destination.trim()}` : ""} / <b className="text-slate-700">{folderName.trim() || "…"}</b> /</div>
+            <div className="text-[11px] text-slate-500 bg-slate-50 rounded-md px-2.5 py-1.5 break-all"><Icon value="i:folder" className="mr-1" />{info.parent_name}{destination.trim() ? ` / ${destination.trim()}` : ""} / <b className="text-slate-700">{folderName.trim() || "…"}</b> /</div>
             {checking ? <p className="text-[11px] text-slate-400">{t("กำลังเช็กชื่อซ้ำ...", "Checking for duplicates...")}</p>
-              : dup ? <p className="text-[11px] text-amber-600">⚠ {t(`มี "${folderName.trim()}" อยู่แล้วในปลายทางนี้ — กดสร้างจะรวมเข้าโฟลเดอร์เดิม (รูปเก่าถูกเก็บเป็น Ver.)`, `"${folderName.trim()}" already exists here — creating merges into it (old files kept as Ver.)`)}</p>
+              : dup ? <p className="text-[11px] text-amber-600"><Icon value="i:alert-triangle" className="mr-1" />{t(`มี "${folderName.trim()}" อยู่แล้วในปลายทางนี้ — กดสร้างจะรวมเข้าโฟลเดอร์เดิม (รูปเก่าถูกเก็บเป็น Ver.)`, `"${folderName.trim()}" already exists here — creating merges into it (old files kept as Ver.)`)}</p>
               : null}
-            <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2">💡 {t("กดสร้างแล้วปิดหน้าต่างนี้ได้เลย — งานจะทำที่เบื้องหลัง มีแถบเล็ก ๆ มุมจอบอกว่าเสร็จหรือยัง", "After you press Create you can close this — it runs in the background; a small chip in the corner shows when it's done")}</p>
+            <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2"><Icon value="i:bulb" className="mr-1" />{t("กดสร้างแล้วปิดหน้าต่างนี้ได้เลย — งานจะทำที่เบื้องหลัง มีแถบเล็ก ๆ มุมจอบอกว่าเสร็จหรือยัง", "After you press Create you can close this — it runs in the background; a small chip in the corner shows when it's done")}</p>
           </div>
         )}
     </ERPModal>

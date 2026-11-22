@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { HoverCardWrap } from "@/components/hover-card";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { withImageWidth } from "@/lib/r2-image";
 import { helperFileUrl } from "@/lib/nesting-helper";
 import type { NestingItem } from "./data";
@@ -48,7 +49,7 @@ function Thumb({ d, size, helperReady, className = "" }: { d: JobDesign; size: n
       {src && !broken
         // eslint-disable-next-line @next/next/no-img-element
         ? <img src={src} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-contain" />
-        : <span className="text-slate-300" style={{ fontSize: Math.round(size * 0.45) }}>🖼</span>}
+        : <span className="text-slate-300" style={{ fontSize: Math.round(size * 0.45) }}><Icon value="i:photo" /></span>}
     </span>
   );
 }

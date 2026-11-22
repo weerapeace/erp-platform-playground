@@ -10,6 +10,7 @@ import { useT } from "@/components/i18n";
 import { CARD_COLORS } from "./overview-customizer";
 import { describeCond, type MetricDef, type MetricCond, type MetricDue } from "./metrics";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 type Opt = { value: string; label: string };
 const COLOR_NAMES = Object.keys(CARD_COLORS);
@@ -56,7 +57,7 @@ export function MetricCardsManager({ open, metrics, onChange, onClose, typeOptio
   ];
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title={t("📊 การ์ดเมตริกของฉัน", "📊 My metric cards")}
+    <ERPModal open={open} onClose={onClose} size="lg" title={t("การ์ดเมตริกของฉัน", "My metric cards")}
       footer={<button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">{t("เสร็จ", "Done")}</button>}>
       <p className="text-[11px] text-slate-400 mb-3">{t("สร้างการ์ดนับเลขตามเงื่อนไขที่อยากดู — กดการ์ดบนหน้าภาพรวมเพื่อกรองตาราง", "Create count cards by your own conditions — tap on the overview to filter")}</p>
 
@@ -65,12 +66,12 @@ export function MetricCardsManager({ open, metrics, onChange, onClose, typeOptio
         <div className="space-y-1.5 mb-4">
           {metrics.map((m) => (
             <div key={m.id} className={`flex items-center gap-2 p-2 rounded-lg border ${CARD_COLORS[m.color]?.box ?? CARD_COLORS.slate.box}`}>
-              <span className="text-lg shrink-0">{m.icon}</span>
+              <span className="text-lg shrink-0 inline-flex"><Icon value={m.icon} /></span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{m.label}</div>
                 <div className="text-[11px] opacity-70 truncate">{describeCond(m.cond, descOpt)}</div>
               </div>
-              <button onClick={() => setDraft(m)} className="text-xs text-slate-500 hover:text-violet-700 shrink-0">✎ {t("แก้", "Edit")}</button>
+              <button onClick={() => setDraft(m)} className="text-xs text-slate-500 hover:text-violet-700 shrink-0"><Icon value="i:pencil" className="mr-1" />{t("แก้", "Edit")}</button>
               <button onClick={() => onChange(metrics.filter((x) => x.id !== m.id))} className="text-xs text-slate-300 hover:text-red-500 shrink-0">✕</button>
             </div>
           ))}

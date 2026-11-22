@@ -84,7 +84,7 @@ export function HashtagInput({ value, onChange, brandId, platform, pushToast }: 
 
 // แถบปุ่มหัวคอลัมน์แคปชั่น — โชว์แค่ 3 ปุ่มที่ปักไว้ ที่เหลือซ่อนใน ⋯ (เลือกได้เองว่าจะโชว์อะไร)
 // จำเป็นรายคนที่ user_ui_prefs (key: content_caption_toolbar) → ใช้เครื่องอื่นก็ได้ค่าเดิม
-export type ToolAction = { key: string; label: string; onClick: () => void; primary?: boolean };
+export type ToolAction = { key: string; label: string; onClick: () => void; primary?: boolean; icon?: string };
 
 export const MAX_PINNED = 3;
 
@@ -119,7 +119,7 @@ export function CaptionToolbar({ actions, pinned, onSavePinned }: {
         <button key={a.key} onClick={a.onClick}
           className={a.primary
             ? "text-xs font-medium text-white bg-fuchsia-600 hover:bg-fuchsia-700 rounded-md px-2 py-1"
-            : "text-xs text-violet-700 hover:underline"}>{a.label}</button>
+            : "text-xs text-violet-700 hover:underline"}>{a.icon && <Icon value={a.icon} className="mr-1" />}{a.label}</button>
       ))}
       <div ref={boxRef} className="relative">
         <button type="button" onClick={() => setOpen((o) => !o)} title={t("เมนูเพิ่มเติม", "More")}
@@ -128,18 +128,18 @@ export function CaptionToolbar({ actions, pinned, onSavePinned }: {
           <div className="absolute right-0 top-full mt-1 z-30 min-w-[230px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
             {rest.map((a) => (
               <button key={a.key} type="button" onClick={() => { setOpen(false); a.onClick(); }}
-                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{a.label}</button>
+                className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">{a.icon && <Icon value={a.icon} className="mr-1" />}{a.label}</button>
             ))}
             <div className="border-t border-slate-100 mt-1 pt-1">
               <button type="button" onClick={() => setCfg((c) => !c)} className="w-full text-left px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-50">
-                ⚙️ {t("เลือกปุ่มที่โชว์ (3 ปุ่ม)", "Choose visible buttons (3)")}
+                <Icon value="i:settings" className="mr-1" />{t("เลือกปุ่มที่โชว์ (3 ปุ่ม)", "Choose visible buttons (3)")}
               </button>
               {cfg && (
                 <div className="px-3 py-1.5 space-y-1">
                   {actions.map((a) => (
                     <label key={a.key} className="flex items-center gap-2 text-xs text-slate-600">
                       <input type="checkbox" checked={pinned.includes(a.key)} onChange={() => togglePin(a.key)} />
-                      <span className="truncate">{a.label}</span>
+                      <span className="truncate">{a.icon && <Icon value={a.icon} className="mr-1" />}{a.label}</span>
                     </label>
                   ))}
                   <p className="text-[10px] text-slate-400">{t("ติ๊กได้ 3 ปุ่ม — ถ้าครบแล้วติ๊กเพิ่ม ตัวเก่าสุดจะถูกเอาออก", "Up to 3 — adding a 4th drops the oldest")}</p>
@@ -195,18 +195,18 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
   // (ถ้าแม่แบบมีแค่ {caption}/{hashtags} ก็ไม่ต้องโชว์ เพราะซ้ำกับช่องด้านบน = ต้นตอความรกเดิม)
   const tplAddsText = !!tpl && renderCaption(tpl.body, { caption: "", hashtags: "", ...sharedVars }).replace(/\s+/g, "").length > 0;
   const snippet = (cap.caption ?? "").split("\n").map((x) => x.trim()).find(Boolean) ?? "";
-  const stBadge = postStatus === "posted" ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", label: `✅ ${t("โพสต์แล้ว", "Posted")}` }
-    : postStatus === "scheduled" ? { cls: "bg-blue-50 text-blue-700 border-blue-200", label: `⏰ ${t("ตั้งเวลาแล้ว", "Scheduled")}` }
-    : postStatus === "failed" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⚠ ${t("โพสต์อัตโนมัติไม่สำเร็จ", "Auto-post failed")}` }
+  const stBadge = postStatus === "posted" ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", icon: "i:circle-check", label: t("โพสต์แล้ว", "Posted") }
+    : postStatus === "scheduled" ? { cls: "bg-blue-50 text-blue-700 border-blue-200", icon: "i:alarm", label: t("ตั้งเวลาแล้ว", "Scheduled") }
+    : postStatus === "failed" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", icon: "i:alert-triangle", label: t("โพสต์อัตโนมัติไม่สำเร็จ", "Auto-post failed") }
     : postStatus === "skip" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⊘ ${t("ข้าม", "Skip")}` }
     : { cls: "bg-white text-slate-400 border-slate-200", label: t("ยังไม่โพสต์", "Not posted") };
   // เมนู ⋯ = ของที่ไม่ได้ใช้ทุกครั้ง (ยุบออกจากหัวการ์ดเพื่อลดความรก)
-  const menuItems: { label: string; onClick: () => void }[] = [];
+  const menuItems: { label: string; icon?: string; onClick: () => void }[] = [];
   if (postUrl) menuItems.push({ label: `↗ ${t("ไปหน้าโพสต์", "Open post page")}`, onClick: () => window.open(postUrl, "_blank", "noopener") });
-  else if (onOpenSettings) menuItems.push({ label: `🔗 ${t("ตั้งลิงก์ไปหน้าโพสต์", "Set post link")}`, onClick: onOpenSettings });
+  else if (onOpenSettings) menuItems.push({ icon: "i:link", label: t("ตั้งลิงก์ไปหน้าโพสต์", "Set post link"), onClick: onOpenSettings });
   if (onApplyAll) menuItems.push({ label: `⇊ ${t("ใช้แคปชั่นนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}`, onClick: () => onApplyAll(cap.platform) });
   if (onPullFrom && (useCaption || useHashtags)) menuItems.push({ label: `⇈ ${t("ดึงแคปชั่นจากแพลตฟอร์มอื่น…", "Pull caption from another platform…")}`, onClick: onPullFrom });
-  if (onOpenSettings) menuItems.push({ label: `⚙️ ${t("ตั้งค่าแพลตฟอร์มนี้", "Platform settings")}`, onClick: onOpenSettings });
+  if (onOpenSettings) menuItems.push({ icon: "i:settings", label: t("ตั้งค่าแพลตฟอร์มนี้", "Platform settings"), onClick: onOpenSettings });
   if (onSetStatus && !draft) {
     if (postStatus === "skip") menuItems.push({ label: `↺ ${t("เลิกข้าม (กลับเป็นยังไม่โพสต์)", "Un-skip")}`, onClick: () => onSetStatus("todo") });
     else menuItems.push({ label: `⊘ ${t("ข้ามแพลตฟอร์มนี้", "Skip this platform")}`, onClick: () => onSetStatus("skip") });
@@ -224,9 +224,9 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
         {/* ⓘ คำแนะนำประจำแพลตฟอร์ม (เอาเมาส์ชี้/แตะ) — ข้อความตั้งที่ ⚙️ ตั้งค่าแพลตฟอร์ม → "คำแนะนำ" */}
         <InfoHint label={t("คำแนะนำสำหรับแพลตฟอร์มนี้", "Tips for this platform")} className="shrink-0 -ml-1 mr-1">
           {(setting?.note ?? "").trim()
-            ? <span className="whitespace-pre-wrap">💡 <b className="text-slate-700">{platformLabel(cap.platform)}</b><br />{setting?.note}</span>
+            ? <span className="whitespace-pre-wrap"><Icon value="i:bulb" className="mr-1" /><b className="text-slate-700">{platformLabel(cap.platform)}</b><br />{setting?.note}</span>
             : <span>{t("ยังไม่ได้ตั้งคำแนะนำสำหรับ", "No tips set for")} {platformLabel(cap.platform)}<br />
-                {onOpenSettings && <button type="button" onClick={onOpenSettings} className="mt-1 text-violet-700 hover:underline">⚙️ {t("ตั้งคำแนะนำ (ตั้งค่าแพลตฟอร์ม)", "Set tips (platform settings)")}</button>}
+                {onOpenSettings && <button type="button" onClick={onOpenSettings} className="mt-1 text-violet-700 hover:underline"><Icon value="i:settings" className="mr-1" />{t("ตั้งคำแนะนำ (ตั้งค่าแพลตฟอร์ม)", "Set tips (platform settings)")}</button>}
               </span>}
         </InfoHint>
         <button type="button" onClick={onToggle} className="flex items-center gap-2 min-w-0 flex-1 text-left">
@@ -252,7 +252,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
             {overLimit && (
               <button type="button" onClick={() => setPreviewOpen(true)} className="h-7 shrink-0 rounded-md border border-rose-300 bg-rose-50 px-1.5 text-[10px] font-medium text-rose-700"
                 title={lim.over > 0 ? t(`ยาวเกินลิมิต ${platformLabel(cap.platform)} ${lim.max?.toLocaleString("th-TH")} ตัวอักษร อยู่ ${lim.over.toLocaleString("th-TH")} ตัว`, `${lim.over} chars over the ${lim.max} limit`) : t(`แฮชแท็กเกิน ${lim.maxHashtags} อัน`, `Over ${lim.maxHashtags} hashtags`)}>
-                ⚠ {lim.over > 0 ? t(`เกิน ${lim.over.toLocaleString("th-TH")} ตัว`, `+${lim.over}`) : t(`#เกิน ${lim.hashtagsOver}`, `#+${lim.hashtagsOver}`)}
+                <Icon value="i:alert-triangle" className="mr-1" />{lim.over > 0 ? t(`เกิน ${lim.over.toLocaleString("th-TH")} ตัว`, `+${lim.over}`) : t(`#เกิน ${lim.hashtagsOver}`, `#+${lim.hashtagsOver}`)}
               </button>
             )}
           </>
@@ -268,31 +268,31 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
             {t("โพสต์แล้ว", "Posted")}
           </button>
         ) : (
-          <button type="button" onClick={onToggle} className="shrink-0"><span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${stBadge.cls}`}>{stBadge.label}</span></button>
+          <button type="button" onClick={onToggle} className="shrink-0"><span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${stBadge.cls}`}>{"icon" in stBadge && stBadge.icon && <Icon value={stBadge.icon} className="mr-1" />}{stBadge.label}</span></button>
         )}
         {open && menuItems.length > 0 && <div className="shrink-0"><RowMenu items={menuItems} /></div>}
       </div>
 
       {/* 👁 ป๊อปตัวอย่างโพสต์: รูปที่เลือก + ข้อความที่ประกอบแล้ว (ของกลาง ERPModal) */}
       <ERPModal open={previewOpen} onClose={() => setPreviewOpen(false)} size="sm"
-        title={`👁 ${t("ตัวอย่างที่จะโพสต์", "Post preview")} · ${platformLabel(cap.platform)}`}
+        title={`${t("ตัวอย่างที่จะโพสต์", "Post preview")} · ${platformLabel(cap.platform)}`}
         footer={<div className="flex items-center justify-between gap-2 w-full">
           <span className={`text-[11px] ${lim.over > 0 ? "text-rose-600 font-medium" : "text-slate-400"}`} title={PLATFORM_LIMITS[cap.platform]?.note ?? ""}>
             {useCaption ? <>
               {lim.chars.toLocaleString("th-TH")}{lim.max != null ? ` / ${lim.max.toLocaleString("th-TH")}` : ""} {t("ตัวอักษร", "chars")}
               {lim.maxHashtags != null ? <span className={lim.hashtagsOver > 0 ? " text-rose-600 font-medium" : ""}> · #{lim.hashtagCount}/{lim.maxHashtags}</span> : null}
             </> : t("ไม่ใช้แคปชั่น — ลงแค่รูป", "No caption — images only")}
-            {previewImgKeys.length ? ` · 🖼 ${previewImgKeys.length}` : ""}
+            {previewImgKeys.length ? <> · <Icon value="i:photo" className="mr-1" />{previewImgKeys.length}</> : ""}
           </span>
           <div className="flex gap-2">
-            {useCaption && !!preview.trim() && <button type="button" onClick={() => void copy()} className="h-9 px-3 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("คัดลอก", "Copy")}</button>}
+            {useCaption && !!preview.trim() && <button type="button" onClick={() => void copy()} className="h-9 px-3 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอก", "Copy")}</button>}
             <button type="button" onClick={() => setPreviewOpen(false)} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("ปิด", "Close")}</button>
           </div>
         </div>}>
         <div className="space-y-2">
           {overLimit && (
             <div className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">
-              ⚠ {lim.over > 0
+              <Icon value="i:alert-triangle" className="mr-1" />{lim.over > 0
                 ? t(`ข้อความยาว ${lim.chars.toLocaleString("th-TH")} ตัวอักษร เกินลิมิต ${platformLabel(cap.platform)} (${lim.max?.toLocaleString("th-TH")}) อยู่ ${lim.over.toLocaleString("th-TH")} ตัว — ต้องตัดก่อนโพสต์`, `${lim.chars} chars — ${lim.over} over the ${lim.max} limit`)
                 : t(`แฮชแท็ก ${lim.hashtagCount} อัน เกินที่ ${platformLabel(cap.platform)} รับ (${lim.maxHashtags}) — ตัดออก ${lim.hashtagsOver} อัน`, `${lim.hashtagCount} hashtags — ${lim.hashtagsOver} over the ${lim.maxHashtags} limit`)}
             </div>
@@ -340,12 +340,12 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
           )}
           {useCaption
             ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
-            : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in ⚙️ Platform settings)")}</p>}
+            : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ปุ่มตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in Platform settings)")}</p>}
           {useHashtags && <HashtagInput value={cap.hashtags} onChange={(v) => onChange({ hashtags: v })} brandId={brandId} platform={cap.platform} pushToast={pushToast} />}
           {/* ตัวอย่างจริง — เฉพาะเมื่อแม่แบบเติมข้อความเพิ่ม (ไม่งั้นซ้ำกับช่องบน) */}
           {useCaption && tplAddsText && (cap.caption ?? "").trim() && (
             <details className="group">
-              <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-violet-700 list-none">👁 {t("ดูตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</summary>
+              <summary className="text-[11px] text-slate-400 cursor-pointer hover:text-violet-700 list-none"><Icon value="i:eye" className="mr-1" />{t("ดูตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</summary>
               <pre className="mt-1 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
             </details>
           )}
@@ -363,7 +363,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
                         <button key={im.key} type="button" onClick={() => onToggleImage?.(im.key)} title={im.label ?? ""} className={`relative h-12 w-12 rounded-md overflow-hidden border-2 transition-all ${on ? "border-violet-500 ring-1 ring-violet-300" : "border-slate-200 opacity-60 hover:opacity-100"}`}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" className="w-full h-full object-cover" />
-                          {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                          {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded"><Icon value="i:movie" /></span>}
                           {isCover && <span className="absolute top-0.5 left-0.5 text-[9px] font-medium bg-amber-500 text-white px-1 rounded shadow">{t("ปก", "Cover")}</span>}
                           {on && <span className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-violet-600 text-white text-[10px] flex items-center justify-center shadow">✓</span>}
                         </button>
@@ -378,7 +378,7 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
                           <div key={key} className={`group/mi relative h-12 w-12 rounded-md overflow-hidden border-2 ${isMain ? "border-violet-500" : "border-slate-200"}`}>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={r2ImageUrl(key, 140) ?? ""} alt="" className="w-full h-full object-cover" />
-                            {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded">🎬</span>}
+                            {im.type === "video" && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-black/60 text-white px-1 rounded"><Icon value="i:movie" /></span>}
                             {isMain
                               ? <span className="absolute top-0.5 left-0.5 text-[9px] font-medium bg-amber-500 text-white px-1 rounded shadow" title={t("รูปปก (รูปแรกของโพสต์)", "Cover (first image of the post)")}>{t("ปก", "Cover")}</span>
                               : onSetMain && <button type="button" onClick={() => onSetMain(key)} title={t("ตั้งเป็นรูปปก", "Set as cover")} className="absolute inset-0 flex items-center justify-center bg-black/40 text-white text-[9px] font-medium opacity-0 group-hover/mi:opacity-100 transition-opacity">{t("ตั้งปก", "Set cover")}</button>}
@@ -437,7 +437,7 @@ export function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, 
   // ประมาณค่าใช้จ่าย: ยิง 1 ครั้งต่อคอนเทนต์ · รูป ≤7 ใบ ≈ 2,800 token/ใบ + ข้อความ ~600 (gpt-4o-mini, 36 บาท/USD)
   const estBaht = Math.max(0.01, contentCount * ((7 * 2800 + 600) * 0.15 / 1e6 + (platformLabels.length * 350) * 0.6 / 1e6) * 36);
   return (
-    <ERPModal open onClose={busy ? () => {} : onClose} size="md" title={t("✨ ให้ AI เขียนแคปชั่น", "✨ AI write captions")}
+    <ERPModal open onClose={busy ? () => {} : onClose} size="md" title={t("ให้ AI เขียนแคปชั่น", "AI write captions")}
       description={contentCount > 1
         ? t(`${contentCount} คอนเทนต์ที่เลือก — ใช้ prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม และบันทึกให้เลย`, `${contentCount} selected — uses each platform's prompt and saves automatically`)
         : t("ใช้ prompt ที่ตั้งไว้ของแต่ละแพลตฟอร์ม + อ่านรูปที่แนบ", "Uses each platform's prompt + reads attached images")}
@@ -447,7 +447,7 @@ export function AiCaptionModal({ platformLabels, filledCount, contentCount = 1, 
           <div className="flex items-center gap-2">
             <button onClick={onClose} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => onRun(extra, overwrite)} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700 disabled:opacity-50">
-              {busy ? t("กำลังเขียน...", "Writing...") : t("✨ เขียนเลย", "✨ Write")}
+              {busy ? t("กำลังเขียน...", "Writing...") : <><Icon value="i:sparkles" className="mr-1" />{t("เขียนเลย", "Write")}</>}
             </button>
           </div>
         </div>}>
@@ -553,10 +553,10 @@ export function PullCaptionModal({ target, caps, settings, onClose, onApply }: {
             </div>
           )}
           {willOverwrite.length > 0 && (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">⚠ {t(`${platformLabel(target)} มี${willOverwrite.join("และ")}อยู่แล้ว — จะถูกแทนที่ (ยังไม่บันทึกจนกว่าจะกดบันทึก)`, `${platformLabel(target)} already has ${willOverwrite.join(" and ")} — it will be replaced (not saved until you press Save)`)}</p>
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800"><Icon value="i:alert-triangle" className="mr-1" />{t(`${platformLabel(target)} มี${willOverwrite.join("และ")}อยู่แล้ว — จะถูกแทนที่ (ยังไม่บันทึกจนกว่าจะกดบันทึก)`, `${platformLabel(target)} already has ${willOverwrite.join(" and ")} — it will be replaced (not saved until you press Save)`)}</p>
           )}
           {(lim.over > 0 || lim.hashtagsOver > 0) && (
-            <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700">⚠ {lim.over > 0
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] text-rose-700"><Icon value="i:alert-triangle" className="mr-1" />{lim.over > 0
               ? t(`ยาว ${lim.chars.toLocaleString("th-TH")} ตัวอักษร เกินลิมิต ${platformLabel(target)} (${lim.max?.toLocaleString("th-TH")}) — ดึงมาแล้วต้องตัดให้สั้นลง`, `${lim.chars} chars — over the ${lim.max} limit; trim it after pulling`)
               : t(`แฮชแท็ก ${lim.hashtagCount} อัน เกินที่ ${platformLabel(target)} รับ (${lim.maxHashtags})`, `${lim.hashtagCount} hashtags — over the ${lim.maxHashtags} limit`)}</p>
           )}

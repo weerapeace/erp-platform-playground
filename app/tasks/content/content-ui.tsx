@@ -1,5 +1,6 @@
 "use client";
 // ชิ้นส่วน UI เล็กที่หน้าคอนเทนต์ + drawer คอนเทนต์ใช้ร่วม (แยกจาก content.tsx — Y1)
+import { Icon } from "@/components/icon";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { CONTENT_STATUS_META, contentStatusLabel, type ContentStatus } from "../data";
 import { useT } from "@/components/i18n";
@@ -11,7 +12,7 @@ export function StatusBadge({ status }: { status: ContentStatus }) {
 }
 
 // เมนู ⋯ เล็ก ๆ ท้ายหัวการ์ด (ของที่ไม่ได้ใช้ทุกครั้ง) · กดที่อื่นแล้วปิดเอง
-export function RowMenu({ items, label, up = false }: { items: { label: string; onClick: () => void }[]; label?: string; up?: boolean }) {
+export function RowMenu({ items, label, up = false }: { items: { label: string; icon?: string; onClick: () => void }[]; label?: string; up?: boolean }) {
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -28,7 +29,7 @@ export function RowMenu({ items, label, up = false }: { items: { label: string; 
       {open && (
         <div className={`absolute z-20 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 ${up ? "left-0 bottom-full mb-1" : "right-0 top-full mt-1"}`}>
           {items.map((it) => (
-            <button key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${label ? "text-sm text-slate-700" : "text-xs text-slate-700"}`}>{it.label}</button>
+            <button key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${label ? "text-sm text-slate-700" : "text-xs text-slate-700"}`}>{it.icon && <Icon value={it.icon} className="mr-1.5" />}{it.label}</button>
           ))}
         </div>
       )}

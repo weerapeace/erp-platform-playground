@@ -13,6 +13,7 @@ import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { createContent, addContentAttachment, type BrandOption } from "../data";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 type Props = {
   open: boolean; onClose: () => void;
@@ -74,7 +75,7 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
 
   const dLabel = day ? new Date(`${day}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "long", year: "numeric" }) : "";
   return (
-    <ERPModal open={open} onClose={onClose} title={`📖 ${t("สร้าง Story", "New Story")} · ${dLabel}`} size="sm"
+    <ERPModal open={open} onClose={onClose} title={`${t("สร้าง Story", "New Story")} · ${dLabel}`} size="sm"
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-pink-600 rounded-lg hover:bg-pink-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง Story", "Create")}</button>
@@ -93,8 +94,8 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
         <div>
           <span className="text-xs text-slate-500">{t("ประเภท", "Type")}</span>
           <div className="mt-1 flex gap-2">
-            {([["image", "🖼", t("รูปภาพ", "Image")], ["video", "🎬", t("วิดีโอ", "Video")]] as const).map(([k, ic, lb]) => (
-              <button key={k} type="button" onClick={() => setKind(k)} className={`h-10 flex-1 rounded-lg border text-sm font-medium ${kind === k ? "bg-pink-600 border-pink-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-pink-300"}`}>{ic} {lb}</button>
+            {([["image", "i:photo", t("รูปภาพ", "Image")], ["video", "i:movie", t("วิดีโอ", "Video")]] as const).map(([k, ic, lb]) => (
+              <button key={k} type="button" onClick={() => setKind(k)} className={`h-10 flex-1 rounded-lg border text-sm font-medium ${kind === k ? "bg-pink-600 border-pink-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-pink-300"}`}><Icon value={ic} className="mr-1" />{lb}</button>
             ))}
           </div>
         </div>
@@ -103,7 +104,7 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
           <div className="mt-1 space-y-1.5">
             <input ref={fileRef} type="file" accept={kind === "video" ? "video/*" : "image/*"} className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
             <button type="button" onClick={() => fileRef.current?.click()} className={`h-10 w-full rounded-lg border border-dashed text-sm ${file ? "border-pink-300 bg-pink-50 text-pink-700" : "border-slate-300 text-slate-500 hover:border-pink-300 hover:text-pink-700"}`}>
-              {file ? `📎 ${file.name}` : t(`⬆ อัปโหลด${kind === "video" ? "วิดีโอ" : "รูป"}จากเครื่อง`, "⬆ Upload from device")}
+              {file ? <><Icon value="i:paperclip" className="mr-1" />{file.name}</> : <><Icon value="i:upload" className="mr-1" />{t(`อัปโหลด${kind === "video" ? "วิดีโอ" : "รูป"}จากเครื่อง`, "Upload from device")}</>}
             </button>
             <div className="flex items-center gap-2 text-[11px] text-slate-400"><span className="h-px flex-1 bg-slate-200" />{t("หรือวางลิงก์ (Google Drive / อื่น ๆ)", "or paste a link")}<span className="h-px flex-1 bg-slate-200" /></div>
             <ERPInput value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/…" className="!h-10" />

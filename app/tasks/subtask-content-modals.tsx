@@ -13,6 +13,7 @@ import { useCreativeOptions } from "./use-options";
 import { updateSubtask, addAttachment, deleteAttachment, POST_TYPES, postTypeLabel, listContentTemplates, createContent, updateContent, deleteContent, getPlatformSettings, savePlatformSettings, type CreativeSubtask, type ContentItem, type PlatformSettings } from "./data";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import type { PushToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 // ป๊อปจัดการ "แม่แบบคอนเทนต์" — รายการ + สร้าง + แก้ + ลบ (ชื่อ + ประเภท + platforms หลายอัน + มอบหมาย)
 export function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: { pushToast: PushToast; onClose: () => void; onChanged: () => void; onPick: (id: string) => void }) {
@@ -63,8 +64,8 @@ export function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: 
                 {list.map((c) => (
                   <div key={c.id} className={`flex items-center gap-2 text-sm rounded-md border px-2 py-1 ${editId === c.id ? "border-violet-300 bg-violet-50/50" : "border-slate-200"}`}>
                     <span className="flex-1 truncate">{c.title} <span className="text-[10px] text-slate-400">· {(c.platforms ?? []).length} {t("แพลตฟอร์ม", "platforms")}</span></span>
-                    <button onClick={() => startEdit(c)} title={t("แก้ไข", "Edit")} className="text-slate-400 hover:text-violet-600">✎</button>
-                    <button onClick={() => void del(c)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-red-500">🗑</button>
+                    <button onClick={() => startEdit(c)} title={t("แก้ไข", "Edit")} className="text-slate-400 hover:text-violet-600"><Icon value="i:pencil" /></button>
+                    <button onClick={() => void del(c)} title={t("ลบ", "Delete")} className="text-slate-300 hover:text-red-500"><Icon value="i:trash" /></button>
                   </div>
                 ))}
               </div>
@@ -88,7 +89,7 @@ export function ContentTemplateModal({ pushToast, onClose, onChanged, onPick }: 
             </select>
           </div>
           <div>
-            <p className="text-[11px] text-slate-400 mb-1">📋 {t("บรีฟงาน / รายละเอียดงาน (โชว์บนสุดของป๊อปรายละเอียดงาน)", "Work brief (shown at top of the details popup)")}</p>
+            <p className="text-[11px] text-slate-400 mb-1"><Icon value="i:clipboard-list" className="mr-1" />{t("บรีฟงาน / รายละเอียดงาน (โชว์บนสุดของป๊อปรายละเอียดงาน)", "Work brief (shown at top of the details popup)")}</p>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={t("เช่น สเปกรูป/สิ่งที่ต้องส่ง/โทนงาน ของแม่แบบนี้", "e.g. image specs / deliverables / tone for this template")} className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-mono leading-relaxed resize-y bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-violet-300" />
           </div>
           <div>
@@ -152,15 +153,15 @@ export function ContentDetailsModal({ sub, taskId, reload, pushToast, onClose }:
       <div className="space-y-3">
         {brief.trim() && (
           <div className="rounded-lg bg-amber-50/70 border border-amber-200 p-2.5">
-            <p className="text-[11px] font-semibold text-amber-700 mb-1">📋 {t("บรีฟงาน", "Work brief")}{briefFrom ? ` · ${briefFrom}` : ""}</p>
+            <p className="text-[11px] font-semibold text-amber-700 mb-1"><Icon value="i:clipboard-list" className="mr-1" />{t("บรีฟงาน", "Work brief")}{briefFrom ? ` · ${briefFrom}` : ""}</p>
             <pre className="text-[11px] font-mono text-slate-700 whitespace-pre-wrap leading-relaxed">{brief}</pre>
           </div>
         )}
         <div className="flex items-start justify-between gap-2">
           <p className="text-[11px] text-slate-400 flex-1">{t("หมายเหตุ/สิ่งที่ต้องเตรียม ของคอนเทนต์นี้ แยกต่อแพลตฟอร์ม (คนทำงานเปิดดูได้)", "Notes / requirements for this content, per platform (visible to workers)")}</p>
-          <button onClick={() => setShowDefaults(true)} className="shrink-0 h-7 px-2.5 text-[11px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">⚙️ {t("ตั้งค่า default", "Set defaults")}</button>
+          <button onClick={() => setShowDefaults(true)} className="shrink-0 h-7 px-2.5 text-[11px] text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:settings" className="mr-1" />{t("ตั้งค่า default", "Set defaults")}</button>
         </div>
-        {prefilled && <p className="text-[11px] text-amber-600">✎ {t("เติมค่าเริ่มต้นจากหมายเหตุแพลตฟอร์มให้แล้ว — แก้เฉพาะงานนี้ได้", "Prefilled from platform defaults — edit for this content")}</p>}
+        {prefilled && <p className="text-[11px] text-amber-600"><Icon value="i:pencil" className="mr-1" />{t("เติมค่าเริ่มต้นจากหมายเหตุแพลตฟอร์มให้แล้ว — แก้เฉพาะงานนี้ได้", "Prefilled from platform defaults — edit for this content")}</p>}
         {platforms.length === 0 && <p className="text-sm text-slate-400 italic">{t("คอนเทนต์นี้ยังไม่ได้เลือกแพลตฟอร์ม", "This content has no platforms yet")}</p>}
         {platforms.map((p) => (
           <div key={p}>
@@ -272,9 +273,9 @@ export function ContentSubmitModal({ sub, taskId, reload, pushToast, canSubmit, 
           </div>
         </div>
         <div className="flex justify-end items-center gap-2">
-          {canSubmit && (imageAtts.length + linkAtts.length) === 0 && <span className="text-[11px] text-amber-600 mr-auto">⚠️ {t("แนบรูป หรือ path/ลิงก์ ก่อนอย่างน้อย 1 รายการ ถึงจะส่งงานได้", "Attach at least one image or path/link before submitting")}</span>}
+          {canSubmit && (imageAtts.length + linkAtts.length) === 0 && <span className="text-[11px] text-amber-600 mr-auto"><Icon value="i:alert-triangle" className="mr-1" />{t("แนบรูป หรือ path/ลิงก์ ก่อนอย่างน้อย 1 รายการ ถึงจะส่งงานได้", "Attach at least one image or path/link before submitting")}</span>}
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-          {canSubmit && <button onClick={submit} disabled={busy || (imageAtts.length + linkAtts.length) === 0} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "..." : `✅ ${t("ยืนยันส่งงาน", "Confirm submit")}`}</button>}
+          {canSubmit && <button onClick={submit} disabled={busy || (imageAtts.length + linkAtts.length) === 0} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "..." : <><Icon value="i:circle-check" className="mr-1" />{t("ยืนยันส่งงาน", "Confirm submit")}</>}</button>}
         </div>
       </div>
     </ERPModal>

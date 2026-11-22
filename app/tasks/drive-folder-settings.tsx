@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { askConfirm } from "@/components/modal/ask-dialog";
 
 type Info = { folder_id: string; name: string; url: string; configured: boolean; drive_configured: boolean; default_path: string };
@@ -41,12 +42,12 @@ export function DriveFolderSettings() {
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">🗂️ {t("โฟลเดอร์เก็บรูปปก (Google Drive)", "Cover image folder (Google Drive)")}</h2>
+        <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2"><Icon value="i:folders" />{t("โฟลเดอร์เก็บรูปปก (Google Drive)", "Cover image folder (Google Drive)")}</h2>
         <p className="text-sm text-slate-500 mt-1">{t("เวลาอนุมัติงาน \"เปลี่ยนปก\" ระบบจะเก็บรูปปกลงโฟลเดอร์นี้อัตโนมัติ", "Approved \"change cover\" images are saved to this folder automatically")}</p>
       </div>
 
       {info && !info.drive_configured && (
-        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ {t("ยังไม่ได้เชื่อม Google Drive (service account) — ตั้ง env ก่อน", "Google Drive (service account) not configured yet")}</p>
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><Icon value="i:alert-triangle" className="mr-1" />{t("ยังไม่ได้เชื่อม Google Drive (service account) — ตั้ง env ก่อน", "Google Drive (service account) not configured yet")}</p>
       )}
 
       {/* โฟลเดอร์ปัจจุบัน */}
@@ -54,7 +55,7 @@ export function DriveFolderSettings() {
         <p className="text-[11px] font-medium text-slate-400 uppercase tracking-wide mb-1">{t("โฟลเดอร์ที่ใช้อยู่", "Current folder")}</p>
         {info?.configured ? (
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-800">📁 {info.name || t("(ไม่มีชื่อ)", "(no name)")}</span>
+            <span className="text-sm font-semibold text-slate-800"><Icon value="i:folder" className="mr-1" />{info.name || t("(ไม่มีชื่อ)", "(no name)")}</span>
             {info.url && <a href={info.url} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline">↗ {t("เปิดใน Drive", "Open in Drive")}</a>}
             <button onClick={reset} disabled={busy} className="ml-auto text-xs text-slate-500 hover:text-rose-600 disabled:opacity-50">↺ {t("ใช้ค่าเริ่มต้น", "Use default")}</button>
           </div>
@@ -69,7 +70,7 @@ export function DriveFolderSettings() {
         <p className="text-[11px] text-slate-400">{t("วางลิงก์โฟลเดอร์ Drive หรือ ID — ต้องแชร์โฟลเดอร์นั้นให้ service account (สิทธิ์ Editor) ก่อน", "Paste a Drive folder link or ID — share it with the service account (Editor) first")}</p>
         <div className="flex gap-2">
           <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="https://drive.google.com/drive/folders/..." className="flex-1 h-9 border border-slate-200 rounded-lg px-3 text-sm font-mono" />
-          <button onClick={save} disabled={busy || !input.trim()} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 shrink-0">{busy ? "⏳" : t("บันทึก", "Save")}</button>
+          <button onClick={save} disabled={busy || !input.trim()} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 shrink-0">{busy ? <Icon value="i:hourglass" /> : t("บันทึก", "Save")}</button>
         </div>
       </div>
 

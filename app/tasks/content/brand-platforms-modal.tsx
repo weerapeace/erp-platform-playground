@@ -10,6 +10,7 @@ import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, createOption } from "../use-options";
 import { postFormatOptions } from "@/lib/social-publish/capabilities";
+import { Icon } from "@/components/icon";
 
 export type BrandPlatformMap = Record<string, string[]>;
 export type BrandFormatMap = Record<string, Record<string, string>>;   // brand → platform → รูปแบบโพสต์
@@ -77,7 +78,7 @@ export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, 
   };
 
   return (
-    <ERPModal open onClose={onClose} size="lg" title={t("🏷️ แบรนด์นี้ลงแพลตฟอร์มไหน", "Platforms per brand")}
+    <ERPModal open onClose={onClose} size="lg" title={t("แบรนด์นี้ลงแพลตฟอร์มไหน", "Platforms per brand")}
       description={t("ตั้งครั้งเดียว — สร้างคอนเทนต์ครั้งต่อไป เลือกแบรนด์แล้วระบบติ๊กให้อัตโนมัติ (ยังแก้รายใบได้)", "Set once — new content auto-selects these platforms per brand (still editable per item)")}
       footer={
         <div className="flex justify-end gap-2">
@@ -88,12 +89,12 @@ export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, 
         <div className="space-y-2 max-h-[60vh] overflow-y-auto">
           {/* แถบจัดการแพลตฟอร์ม: เพิ่มใหม่ตรงนี้ + ลิงก์ไปตั้งไอคอน/สี/ลำดับ */}
           <div className="flex items-center gap-2 flex-wrap rounded-lg border border-dashed border-violet-200 bg-violet-50/40 px-3 py-2">
-            <span className="text-xs font-medium text-slate-600">📱 {t("แพลตฟอร์มที่มี", "Platforms")} <span className="text-slate-400">({platforms.length})</span></span>
+            <span className="text-xs font-medium text-slate-600"><Icon value="i:device-mobile" className="mr-1" />{t("แพลตฟอร์มที่มี", "Platforms")} <span className="text-slate-400">({platforms.length})</span></span>
             <div className="flex items-center gap-1.5 ml-auto">
               <input value={newPlat} onChange={(e) => setNewPlat(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addPlatform(); }}
                 placeholder={t("เพิ่มแพลตฟอร์มใหม่ เช่น Instagram", "New platform, e.g. Instagram")} className="h-8 w-56 max-w-full border border-slate-200 rounded-md px-2 text-xs bg-white" />
               <button type="button" onClick={() => void addPlatform()} disabled={adding || !newPlat.trim()} className="h-8 px-3 rounded-md bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 disabled:opacity-50">{adding ? "..." : `＋ ${t("เพิ่ม", "Add")}`}</button>
-              <a href="/tasks/settings?tab=platform" target="_blank" rel="noreferrer" className="h-8 px-2.5 inline-flex items-center rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50" title={t("ตั้งไอคอน สี ลำดับ หรือปิดใช้แพลตฟอร์ม", "Icon, color, order, enable/disable")}>⚙️ {t("จัดการแพลตฟอร์ม", "Manage")} ↗</a>
+              <a href="/tasks/settings?tab=platform" target="_blank" rel="noreferrer" className="h-8 px-2.5 inline-flex items-center rounded-md border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50" title={t("ตั้งไอคอน สี ลำดับ หรือปิดใช้แพลตฟอร์ม", "Icon, color, order, enable/disable")}><Icon value="i:settings" className="mr-1" />{t("จัดการแพลตฟอร์ม", "Manage")}<Icon value="i:external-link" className="ml-1" /></a>
             </div>
           </div>
           {brands.map((b) => (
@@ -121,7 +122,7 @@ export function BrandPlatformsModal({ brands, initial, initialFormats, onClose, 
               {/* รูปแบบโพสต์เริ่มต้นของแบรนด์นี้ — เฉพาะแพลตฟอร์มที่ลง + ที่มีตัวเลือก */}
               {platforms.some((p) => on(b.id, p.value) && (FORMATS[p.value] ?? []).length > 0) && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pt-1.5 border-t border-slate-100">
-                  <span className="text-[10px] text-slate-400">🎬 {t("ลงเป็น", "Post as")}</span>
+                  <span className="text-[10px] text-slate-400"><Icon value="i:movie" className="mr-1" />{t("ลงเป็น", "Post as")}</span>
                   {platforms.filter((p) => on(b.id, p.value) && (FORMATS[p.value] ?? []).length > 0).map((p) => (
                     <label key={p.value} className="inline-flex items-center gap-1 text-[11px] text-slate-500">
                       {p.label}

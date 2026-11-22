@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import type { PetConfig, PetCorner } from "./overview-customizer";
 
 // โหลด lottie-react เฉพาะตอนใช้จริง (กันบันเดิลบวมในหน้าที่ไม่มี Lottie)
@@ -121,10 +122,10 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
   // รายการเตือนตามที่เปิดไว้ + มีจำนวนจริง
   const alerts = useMemo(() => {
     const a: { kind: PetAlertKind; icon: string; text: string; n: number }[] = [];
-    if (cfg.overdue && data.overdue > 0) a.push({ kind: "overdue", icon: "⚠️", text: t(`เกินกำหนด ${data.overdue} งาน!`, `${data.overdue} overdue!`), n: data.overdue });
-    if (cfg.dueToday && data.dueToday > 0) a.push({ kind: "dueToday", icon: "⏰", text: t(`ครบกำหนดวันนี้ ${data.dueToday} งาน`, `${data.dueToday} due today`), n: data.dueToday });
-    if (cfg.review && data.review > 0) a.push({ kind: "review", icon: "🟡", text: t(`รอตรวจ ${data.review} งาน`, `${data.review} to review`), n: data.review });
-    if (cfg.newTasks && newCount > 0) a.push({ kind: "new", icon: "✨", text: t(`งานใหม่ ${newCount} งาน`, `${newCount} new`), n: newCount });
+    if (cfg.overdue && data.overdue > 0) a.push({ kind: "overdue", icon: "i:alert-triangle", text: t(`เกินกำหนด ${data.overdue} งาน!`, `${data.overdue} overdue!`), n: data.overdue });
+    if (cfg.dueToday && data.dueToday > 0) a.push({ kind: "dueToday", icon: "i:alarm", text: t(`ครบกำหนดวันนี้ ${data.dueToday} งาน`, `${data.dueToday} due today`), n: data.dueToday });
+    if (cfg.review && data.review > 0) a.push({ kind: "review", icon: "i:eye", text: t(`รอตรวจ ${data.review} งาน`, `${data.review} to review`), n: data.review });
+    if (cfg.newTasks && newCount > 0) a.push({ kind: "new", icon: "i:sparkles", text: t(`งานใหม่ ${newCount} งาน`, `${newCount} new`), n: newCount });
     return a;
   }, [cfg, data, newCount, t]);
 
@@ -198,7 +199,7 @@ export function DashboardPet({ petUrl, lottieUrl, lottieData, frames, cfg, data,
             {alerts.map((a) => (
               <button key={a.kind} onClick={() => { onAlert(a.kind); if (a.kind === "new") acknowledge(); }}
                 className={`flex items-center gap-1.5 text-xs w-full text-left transition-colors hover:text-violet-700 ${a === cur ? "font-semibold text-slate-800" : "text-slate-500"}`}>
-                <span>{a.icon}</span><span className="flex-1">{a.text}</span><span className="text-slate-300">›</span>
+                <span><Icon value={a.icon} /></span><span className="flex-1">{a.text}</span><span className="text-slate-300">›</span>
               </button>
             ))}
           </div>

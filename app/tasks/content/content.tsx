@@ -23,6 +23,7 @@ import { BrandFilterChip, useBrandParam } from "@/components/brand-hub/brand-fil
 import { StatusBadge } from "./content-ui";
 import { AiCaptionModal } from "./caption-card";
 import { ContentDrawer } from "./content-drawer";
+import { Icon } from "@/components/icon";
 export { ContentDrawer } from "./content-drawer";   // ย้ายไป content-drawer.tsx — re-export กันโค้ดเดิมที่อ้างจากไฟล์นี้
 export { postFormatLabel } from "./caption-card";   // ย้ายไป caption-card.tsx — re-export กันโค้ดเดิมที่อ้างจากไฟล์นี้
 
@@ -123,7 +124,7 @@ export function ContentPageView() {
   };
 
   return (
-    <StandaloneShell title={t("คอนเทนต์ Social", "Social Content")} icon="📱" accent="violet">
+    <StandaloneShell title={t("คอนเทนต์ Social", "Social Content")} icon="i:device-mobile" accent="violet">
       <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -132,15 +133,15 @@ export function ContentPageView() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งาน", "Tasks")}</a>
-            <a href="/tasks/content-calendar" className="h-10 px-4 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🗓️ {t("ปฏิทิน", "Calendar")}</a>
+            <a href="/tasks/content-calendar" className="h-10 px-4 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50"><Icon value="i:calendar" className="mr-1" />{t("ปฏิทิน", "Calendar")}</a>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
           </div>
         </div>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
-          <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("รายการ", "List")}</button>
-          <button onClick={() => setView("table")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "table" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📊 {t("ตาราง", "Table")}</button>
-          <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ {t("ปฏิทิน", "Calendar")}</button>
-          <button onClick={() => setView("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🧩 {t("แม่แบบ", "Templates")}</button>
+          <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:clipboard-list" className="mr-1" />{t("รายการ", "List")}</button>
+          <button onClick={() => setView("table")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "table" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:table" className="mr-1" />{t("ตาราง", "Table")}</button>
+          <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:calendar" className="mr-1" />{t("ปฏิทิน", "Calendar")}</button>
+          <button onClick={() => setView("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon value="i:puzzle" className="mr-1" />{t("แม่แบบ", "Templates")}</button>
         </div>
         {brandOnly && <div className="mt-3"><BrandFilterChip brandId={brandOnly} brands={brands} onClear={clearBrandOnly} count={items.length} /></div>}
       </div>
@@ -157,7 +158,7 @@ export function ContentPageView() {
                 <button onClick={createTpl} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแม่แบบ", "New Template")}</button>
               </div>
               {templates.length === 0 ? (
-                <EmptyState icon="🧩" title={t("ยังไม่มีแม่แบบคอนเทนต์", "No content templates yet")} hint={t('สร้างใหม่ หรือกด "บันทึกเป็นเทมเพลต" จากคอนเทนต์ที่มีอยู่', 'Create one, or click "Save as Template" from existing content')} />
+                <EmptyState icon={<Icon value="i:puzzle" />} title={t("ยังไม่มีแม่แบบคอนเทนต์", "No content templates yet")} hint={t('สร้างใหม่ หรือกด "บันทึกเป็นเทมเพลต" จากคอนเทนต์ที่มีอยู่', 'Create one, or click "Save as Template" from existing content')} />
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {templates.map((c) => (
@@ -180,7 +181,7 @@ export function ContentPageView() {
           )
           : view === "calendar" ? <MonthCalendar items={items} onOpen={(id) => setDetailId(id)} />
           : items.length === 0 ? (
-            <EmptyState icon="📱" title={t("ยังไม่มีคอนเทนต์", "No content yet")} action={{ label: <>＋ {t("สร้างคอนเทนต์", "Create Content")}</>, onClick: openCreate }} />
+            <EmptyState icon={<Icon value="i:device-mobile" />} title={t("ยังไม่มีคอนเทนต์", "No content yet")} action={{ label: <>＋ {t("สร้างคอนเทนต์", "Create Content")}</>, onClick: openCreate }} />
           ) : view === "table" ? (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
               {selected.size > 0 && (
@@ -188,8 +189,8 @@ export function ContentPageView() {
                   <span className="text-sm text-violet-800 font-medium">{t("เลือก", "Selected")} {selected.size}</span>
                   <div className="flex items-center gap-2">
                     <button onClick={() => setSelected(new Set())} className="text-xs text-slate-500 hover:underline">{t("ล้าง", "Clear")}</button>
-                    {canAiCaption && <button onClick={() => setBulkAi(true)} className="h-8 px-3 text-xs font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700">✨ {t("AI เขียนแคปชั่น", "AI write captions")}</button>}
-                    <button onClick={() => setBulkConfirm(true)} className="h-8 px-3 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700">🗑 {t("ลบที่เลือก", "Delete selected")}</button>
+                    {canAiCaption && <button onClick={() => setBulkAi(true)} className="h-8 px-3 text-xs font-medium text-white bg-fuchsia-600 rounded-lg hover:bg-fuchsia-700"><Icon value="i:sparkles" className="mr-1" />{t("AI เขียนแคปชั่น", "AI write captions")}</button>}
+                    <button onClick={() => setBulkConfirm(true)} className="h-8 px-3 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"><Icon value="i:trash" className="mr-1" />{t("ลบที่เลือก", "Delete selected")}</button>
                   </div>
                 </div>
               )}
@@ -220,8 +221,8 @@ export function ContentPageView() {
                         <td className="px-3 py-2 text-slate-500 max-w-[170px] truncate" onClick={(e) => c.task_id && e.stopPropagation()}>
                           {c.task_label
                             ? (c.task_id
-                              ? <a href={`/tasks?task=${c.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานนี้ (แท็บใหม่)", "Open task (new tab)")} className="inline-flex items-center gap-1 hover:text-violet-700 hover:underline">📋 {c.task_label} ↗</a>
-                              : <span className="inline-flex items-center gap-1" title={c.task_no ?? undefined}>📋 {c.task_label}</span>)
+                              ? <a href={`/tasks?task=${c.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานนี้ (แท็บใหม่)", "Open task (new tab)")} className="inline-flex items-center gap-1 hover:text-violet-700 hover:underline"><Icon value="i:clipboard-list" />{c.task_label} ↗</a>
+                              : <span className="inline-flex items-center gap-1" title={c.task_no ?? undefined}><Icon value="i:clipboard-list" />{c.task_label}</span>)
                             : "—"}
                         </td>
                         <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{c.brand_label ? <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span> : "—"}</td>
@@ -248,8 +249,8 @@ export function ContentPageView() {
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-2 flex-wrap">
                     {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
                     {c.post_type && <span>· {postTypeLabel(c.post_type)}</span>}
-                    {(c.assignees?.length ? c.assignees.map((a) => a.name).filter(Boolean).join(", ") : c.assignee_label) && <span>· 🙋 {c.assignees?.length ? c.assignees.map((a) => a.name).filter(Boolean).join(", ") : c.assignee_label}</span>}
-                    {c.scheduled_at && <span>· 🗓 {c.scheduled_at.slice(0, 16).replace("T", " ")}</span>}
+                    {(c.assignees?.length ? c.assignees.map((a) => a.name).filter(Boolean).join(", ") : c.assignee_label) && <span>· <Icon value="i:user" className="mr-1" />{c.assignees?.length ? c.assignees.map((a) => a.name).filter(Boolean).join(", ") : c.assignee_label}</span>}
+                    {c.scheduled_at && <span>· <Icon value="i:calendar" className="mr-1" />{c.scheduled_at.slice(0, 16).replace("T", " ")}</span>}
                   </div>
                 </div>
               ))}

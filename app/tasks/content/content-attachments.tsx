@@ -7,6 +7,7 @@ import { type ContentAttachment, type DriveFileRef } from "../data";
 import { DriveImageAdd } from "./drive-image-add";
 import { useT } from "@/components/i18n";
 import { type ToastVariant } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 // ราคาเป็นข้อความได้เมื่อมีหลายสินค้า (บรรทัดละ "ชื่อ: ราคา" — ดู multiProductVars)
 
@@ -51,16 +52,16 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
     <div className="space-y-3">
       {/* รูปภาพ */}
       <div>
-        <p className="text-xs text-slate-500 mb-1">🖼 {t("รูปภาพ", "Images")}</p>
+        <p className="text-xs text-slate-500 mb-1"><Icon value="i:photo" className="mr-1" />{t("รูปภาพ", "Images")}</p>
         <ImageAttach images={images.filter((a) => a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} hideList={hideImageList} />
         {driveReady && <p className="text-[10px] text-emerald-700 mt-0.5">{t("รูปย่อไว้โชว์และใช้โพสต์ · ต้นฉบับเต็มขึ้น Google Drive ให้อัตโนมัติ", "Previews for display/posting · full originals go to Google Drive automatically")}</p>}
         {onAddDriveImages && <DriveImageAdd existingKeys={images.map((a) => a.url ?? "").filter((u) => u.startsWith("drive:"))} onAdd={onAddDriveImages} pushToast={pushToast} />}
       </div>
       {/* วิดีโอ */}
       <div>
-        <p className="text-xs text-slate-500 mb-1">🎬 {t("วิดีโอ", "Video")}</p>
+        <p className="text-xs text-slate-500 mb-1"><Icon value="i:movie" className="mr-1" />{t("วิดีโอ", "Video")}</p>
         <input ref={vidRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickVideo(f); e.target.value = ""; }} />
-        <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vidBusy ? t("⏳ กำลังอัป…", "⏳ Uploading…") : driveReady ? t("⬆ อัปวิดีโอ (ขึ้น Google Drive)", "⬆ Upload video (to Google Drive)") : t("⬆ อัปวิดีโอสั้น (≤25MB)", "⬆ Upload short video (≤25MB)")}</button>
+        <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"><Icon value={vidBusy ? "i:hourglass" : "i:upload"} className="mr-1" />{vidBusy ? t("กำลังอัป…", "Uploading…") : driveReady ? t("อัปวิดีโอ (ขึ้น Google Drive)", "Upload video (to Google Drive)") : t("อัปวิดีโอสั้น (≤25MB)", "Upload short video (≤25MB)")}</button>
         <span className="text-[11px] text-slate-400 ml-2">{driveReady ? t("ไม่จำกัดขนาด · ปิดป๊อปได้ระหว่างอัป", "No size limit · you can close the popup") : t("คลิปใหญ่ → ใช้ Google Drive ด้านล่าง", "Big clips → use Google Drive below")}</span>
         {/* คลิปใหญ่: วางลิงก์ Google Drive — ระบบไม่ก็อปไฟล์ลงระบบ ดึงจาก Drive ตอนใช้งาน */}
         <div className="flex gap-1.5 mt-2">
@@ -68,7 +69,7 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
             className="flex-1 min-w-0 h-8 border border-slate-200 rounded-md px-2 text-xs" />
           <button onClick={async () => { const l = driveLink.trim(); if (!l) return; setDriveBusy(true); await onAddDriveVideo(l); setDriveBusy(false); setDriveLink(""); }}
             disabled={driveBusy || !driveLink.trim()} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 shrink-0">
-            {driveBusy ? t("⏳ ตรวจไฟล์…", "⏳ Checking…") : t("＋ เพิ่มจาก Drive", "＋ Add from Drive")}
+            {driveBusy ? <><Icon value="i:hourglass" className="mr-1" />{t("ตรวจไฟล์…", "Checking…")}</> : t("＋ เพิ่มจาก Drive", "＋ Add from Drive")}
           </button>
         </div>
         <p className="text-[10px] text-slate-400 mt-0.5">{t("ไฟล์อยู่ที่ Drive ที่เดียว (ไม่กินพื้นที่ระบบ) · ต้องแชร์ไฟล์ให้บัญชีระบบก่อน", "Stays on Drive only — share the file with the system account first")}</p>
@@ -90,10 +91,10 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
       </div>
       {/* ลิงก์ (พรีวิวเต็ม) */}
       <div>
-        <p className="text-xs text-slate-500 mb-1">🔗 {t("ลิงก์ (มีพรีวิว)", "Links (with preview)")}</p>
+        <p className="text-xs text-slate-500 mb-1"><Icon value="i:link" className="mr-1" />{t("ลิงก์ (มีพรีวิว)", "Links (with preview)")}</p>
         <div className="flex gap-1.5">
           <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addLink(); }} placeholder="https://..." className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
-          <button onClick={addLink} disabled={linkBusy} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 disabled:opacity-50">{linkBusy ? t("⏳", "⏳") : t("＋ พรีวิว", "＋ Preview")}</button>
+          <button onClick={addLink} disabled={linkBusy} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 disabled:opacity-50">{linkBusy ? <Icon value="i:hourglass" /> : t("＋ พรีวิว", "＋ Preview")}</button>
         </div>
         {linkAtts.length > 0 && <div className="space-y-2 mt-2">{linkAtts.map((l) => <LinkPreviewCard key={l.id} att={l} onDelete={() => void onDelete(l.id)} />)}</div>}
       </div>
@@ -109,7 +110,7 @@ export function LinkPreviewCard({ att, onDelete }: { att: ContentAttachment; onD
       {att.file_name
         // eslint-disable-next-line @next/next/no-img-element
         ? <img src={att.file_name} alt="" className="w-20 h-20 object-cover bg-slate-100 shrink-0" />
-        : <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-2xl shrink-0">🔗</div>}
+        : <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-2xl shrink-0"><Icon value="i:link" /></div>}
       <a href={att.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 py-1.5 pr-6 flex-1">
         <p className="text-sm font-medium text-slate-700 line-clamp-2">{att.label || host}</p>
         <p className="text-[11px] text-slate-400 truncate mt-0.5">{host}</p>

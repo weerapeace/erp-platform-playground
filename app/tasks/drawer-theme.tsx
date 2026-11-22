@@ -13,6 +13,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 export type DrawerDensity = "compact" | "normal" | "spacious";
 export type DrawerGradient = { from: string; to: string } | null;
@@ -167,13 +168,13 @@ export function DrawerThemeButton({ theme, update, sections, parts = DEFAULT_PAR
   };
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} title={label ?? t("แต่งหน้า drawer (ของฉัน)", "Customize drawer (yours)")} className="h-8 px-2 text-xs text-slate-400 hover:text-violet-600 rounded-md hover:bg-slate-50">🎨</button>
+      <button onClick={() => setOpen((o) => !o)} title={label ?? t("แต่งหน้า drawer (ของฉัน)", "Customize drawer (yours)")} className="h-8 px-2 text-xs text-slate-400 hover:text-violet-600 rounded-md hover:bg-slate-50"><Icon value="i:palette" /></button>
       {open && (
         <>
           <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-[61] mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl p-3 space-y-3 text-left">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-slate-700">🎨 {label ?? t("แต่งหน้า drawer", "Customize drawer")}</p>
+              <p className="text-sm font-semibold text-slate-700"><Icon value="i:palette" className="mr-1" />{label ?? t("แต่งหน้า drawer", "Customize drawer")}</p>
               <button onClick={() => update({ ...DEFAULT_DRAWER_THEME })} className="text-[11px] text-slate-400 hover:text-violet-600">{t("รีเซ็ต", "Reset")}</button>
             </div>
             {/* 🫧 กระจกใส — เฉพาะป๊อปที่ขอ (parts มี "glass") */}

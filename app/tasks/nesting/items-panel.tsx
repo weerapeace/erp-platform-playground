@@ -21,6 +21,7 @@ import {
 } from "./nest-utils";
 import { NumInput } from "./num-input";
 import { cardSha, rowsWithoutCard } from "./artwork-card";
+import { Icon } from "@/components/icon";
 
 export type AssetPreview = { url: string | null; sizes: AssetSize[] };
 
@@ -141,12 +142,12 @@ export function ItemsPanel({
     const st = cloudState(it);
     if (!st) return null;
     const m = {
-      saving: ["text-sky-700", t("☁️ กำลังบันทึกเข้าคลัง…", "☁️ Saving to library…")],
-      fetching: ["text-sky-700", t("☁️ กำลังโหลดจากคลัง…", "☁️ Downloading…")],
-      saved: ["text-emerald-700", t("☁️ เก็บไฟล์พิมพ์แล้ว", "☁️ Print file saved")],
-      error: ["text-amber-700", t("☁️ บันทึกเข้าคลังไม่สำเร็จ", "☁️ Not saved to library")],
+      saving: ["text-sky-700", t("กำลังบันทึกเข้าคลัง…", "Saving to library…"), "i:upload"],
+      fetching: ["text-sky-700", t("กำลังโหลดจากคลัง…", "Downloading…"), "i:download"],
+      saved: ["text-emerald-700", t("เก็บไฟล์พิมพ์แล้ว", "Print file saved"), "i:upload"],
+      error: ["text-amber-700", t("บันทึกเข้าคลังไม่สำเร็จ", "Not saved to library"), "i:upload"],
     }[st];
-    return <span className={`shrink-0 text-[11px] ${m[0]}`}>{m[1]}</span>;
+    return <span className={`shrink-0 text-[11px] ${m[0]}`}><Icon value={m[2]} className="mr-1" />{m[1]}</span>;
   };
   /** การ์ดในคลัง Artwork ของแถว: มีแล้ว = ปุ่ม "จัดการ" (หน้ารายละเอียดคลัง) · ยังไม่มี = ปุ่ม "เก็บเข้าคลัง" */
   const artLine = (it: NestingItem, c: Ctx) => {
@@ -155,29 +156,29 @@ export function ItemsPanel({
     if (it.asset_id) {
       return (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">🗂 {t("อยู่ในคลัง Artwork", "In the Artwork library")}</span>
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700"><Icon value="i:folders" className="mr-1" />{t("อยู่ในคลัง Artwork", "In the Artwork library")}</span>
           {onManageCard && (
             <button type="button" onClick={() => onManageCard(it.asset_id!)}
               title={t("เปิดรายละเอียดไฟล์ในคลัง — แก้ชื่อ/ชนิด/แท็ก/อัลบั้ม/ขนาด/Parent SKU", "Open the file details in the library — edit name/type/tags/albums/sizes/Parent SKU")}
               className="rounded border border-violet-300 bg-white px-2 py-0.5 text-violet-700 hover:bg-violet-50">
-              ⚙️ {t("จัดการ", "Manage")}
+              <Icon value="i:settings" className="mr-1" />{t("จัดการ", "Manage")}
             </button>
           )}
         </div>
       );
     }
     if (!sha || !canCard) return null;
-    if (st === "saving") return <div className="text-[11px] text-sky-700">🗂 {t("กำลังเก็บเข้าคลัง Artwork…", "Saving to the Artwork library…")}</div>;
+    if (st === "saving") return <div className="text-[11px] text-sky-700"><Icon value="i:folders" className="mr-1" />{t("กำลังเก็บเข้าคลัง Artwork…", "Saving to the Artwork library…")}</div>;
     const local = !!c.info && !c.info.error && !c.miss;
     return (
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className={`rounded px-1.5 py-0.5 ${st === "error" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}>
-          🗂 {st === "error" ? t("เก็บเข้าคลังไม่สำเร็จ", "Couldn't save to the library") : t("ยังไม่อยู่ในคลัง Artwork", "Not in the Artwork library yet")}
+          <Icon value="i:folders" className="mr-1" />{st === "error" ? t("เก็บเข้าคลังไม่สำเร็จ", "Couldn't save to the library") : t("ยังไม่อยู่ในคลัง Artwork", "Not in the Artwork library yet")}
         </span>
         {local && onKeepCard && (
           <button type="button" onClick={() => onKeepCard(it.key)} disabled={busy}
             className="rounded border border-violet-300 bg-white px-2 py-0.5 text-violet-700 hover:bg-violet-50 disabled:opacity-50">
-            ☁️ {st === "error" ? t("ลองอีกครั้ง", "Try again") : t("เก็บเข้าคลัง", "Save to library")}
+            <Icon value="i:upload" className="mr-1" />{st === "error" ? t("ลองอีกครั้ง", "Try again") : t("เก็บเข้าคลัง", "Save to library")}
           </button>
         )}
       </div>
@@ -232,11 +233,11 @@ export function ItemsPanel({
     <div className="flex items-center gap-2 text-xs">
       {it.file && !c.miss ? (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-slate-600" title={it.file.name}>📄 {it.file.name}</span>
+          <span className="truncate text-slate-600" title={it.file.name}><Icon value="i:file-text" className="mr-1" />{it.file.name}</span>
           {cloudChip(it)}
         </span>
       ) : c.miss === undefined && it.file && cloudState(it) === "fetching" ? (
-        <span className="text-sky-700">☁️ {t("กำลังโหลดไฟล์จากคลัง…", "Downloading the file from the library…")}</span>
+        <span className="text-sky-700"><Icon value="i:download" className="mr-1" />{t("กำลังโหลดไฟล์จากคลัง…", "Downloading the file from the library…")}</span>
       ) : (
         <span className={`min-w-0 ${missTone(it, c)}`}>{missText(it, c)}</span>
       )}
@@ -244,7 +245,7 @@ export function ItemsPanel({
         <button type="button" onClick={() => onDrivePick(it.key)} disabled={busy}
           title={t("เลือก PNG จากโฟลเดอร์ Drive ของลายนี้ — ระบบคัดลอกเข้าคลังให้", "Pick a PNG from this artwork's Drive folder — it's copied into the library")}
           className="shrink-0 rounded border border-violet-300 bg-violet-50 px-2 py-0.5 text-violet-700 hover:bg-violet-100 disabled:opacity-50">
-          📁 {t("ใช้ไฟล์จาก Drive", "Use a file from Drive")}
+          <Icon value="i:folder" className="mr-1" />{t("ใช้ไฟล์จาก Drive", "Use a file from Drive")}
         </button>
       )}
       <button type="button" onClick={() => browse(it.key)} disabled={busy}
@@ -317,7 +318,7 @@ export function ItemsPanel({
           {it.fill_pin && (
             <button type="button" onClick={() => patch(it.key, { fill_pin: false })}
               title={t("พิมพ์เอง (คงไว้) — กดเพื่อให้ระบบแบ่งให้แทน", "Typed by you (kept) — click to let the system share it out")}
-              aria-label={t("เลิกปักหมุด % นี้", "Unpin this %")} className="rounded px-0.5 text-[13px] leading-none hover:bg-violet-50">📌</button>
+              aria-label={t("เลิกปักหมุด % นี้", "Unpin this %")} className="rounded px-0.5 text-[13px] leading-none hover:bg-violet-50"><Icon value="i:pin" /></button>
           )}
         </>
       )}
@@ -327,7 +328,7 @@ export function ItemsPanel({
     <label className="flex items-center gap-1 text-xs text-slate-600"
       title={t("ล็อก = ห้ามชิ้นอื่นแทรกในช่องว่างของลายนี้ / จำกัดมุมหมุนเฉพาะลายนี้", "Lock = keep other pieces out of this artwork's gaps / limit its rotation")}>
       <input type="checkbox" checked={!!it.lock} onChange={(e) => patch(it.key, { lock: e.target.checked ? { box: true, rotate: "quad" } : null })} />
-      🔒 {t("ล็อกลายนี้", "Lock this artwork")}
+      <Icon value="i:lock" className="mr-1" />{t("ล็อกลายนี้", "Lock this artwork")}
     </label>
   );
   const lockDetail = (it: NestingItem, compact: boolean) => it.lock && (
@@ -367,13 +368,13 @@ export function ItemsPanel({
       title={canSplit ? t("ภาพเดียวมีหลายส่วน (เช่น ช้าง + ตัวหนังสือ) → แยกเป็นหลายชิ้น", "One image with several parts (e.g. elephant + text) → split into pieces")
         : t("ต้องอัปเดตตัวช่วยเป็น v1.3.0 ก่อน (คลิกขวาไอคอนกรรไกร → ตรวจหาเวอร์ชันใหม่)", "Update the helper to v1.3.0 first (right-click the scissors icon → Check for updates)")}
       className="rounded border border-slate-300 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-      ✂️ {t("แยกชิ้น", "Split pieces")}
+      <Icon value="i:scissors" className="mr-1" />{t("แยกชิ้น", "Split pieces")}
     </button>
   );
   const pieceInfo = (it: NestingItem) => it.piece && (
     <div className="flex flex-wrap items-center gap-2 text-[11px]">
       <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">
-        ✂️ {t(`ชิ้น ${it.piece.index + 1}/${it.piece.count} ของ ${it.piece.parent.title}`, `Piece ${it.piece.index + 1}/${it.piece.count} of ${it.piece.parent.title}`)}
+        <Icon value="i:scissors" className="mr-1" />{t(`ชิ้น ${it.piece.index + 1}/${it.piece.count} ของ ${it.piece.parent.title}`, `Piece ${it.piece.index + 1}/${it.piece.count} of ${it.piece.parent.title}`)}
       </span>
       <button type="button" onClick={() => onMergeBack(it.key)} disabled={busy} className="text-slate-500 underline disabled:opacity-50">
         {t("รวมกลับเป็นภาพเดียว", "Merge back into one image")}
@@ -479,13 +480,13 @@ export function ItemsPanel({
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={onPickLibrary} disabled={busy}
           className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-100 disabled:opacity-50">
-          🖼 {t("เลือกลายจากคลัง Artwork", "Pick artwork from library")}
+          <Icon value="i:photo" className="mr-1" />{t("เลือกลายจากคลัง Artwork", "Pick artwork from library")}
         </button>
         {keepable > 0 && onKeepCard && (
           <button type="button" onClick={() => onKeepCard(null)} disabled={busy}
             title={t("สร้างการ์ดในคลัง Artwork ให้ทุกแถวที่ยังไม่มี (ไฟล์เดิมเคยเข้าคลังแล้ว = ใช้การ์ดเดิม)", "Create Artwork library cards for every row without one (files already in the library reuse their card)")}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            ☁️ {t(`เก็บเข้าคลังทั้งหมด (${keepable})`, `Save all to library (${keepable})`)}
+            <Icon value="i:upload" className="mr-1" />{t(`เก็บเข้าคลังทั้งหมด (${keepable})`, `Save all to library (${keepable})`)}
           </button>
         )}
         {variant === "table" && (
@@ -496,7 +497,7 @@ export function ItemsPanel({
       {artworkBar}
       <div {...drop.zone("new")} onClick={() => browse(null)}
         className={`mt-2 cursor-pointer rounded-lg border-2 border-dashed px-3 py-3 text-center text-sm ${drop.over === "new" ? "border-violet-400 bg-violet-50" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
-        ⬆ {t("ลากไฟล์ PNG มาวางเพื่อเพิ่มลาย หรือกดเลือก", "Drop PNG files here to add, or click to browse")}
+        <Icon value="i:upload" className="mr-1" />{t("ลากไฟล์ PNG มาวางเพื่อเพิ่มลาย หรือกดเลือก", "Drop PNG files here to add, or click to browse")}
       </div>
 
       {variant === "table" ? (
@@ -515,7 +516,7 @@ export function ItemsPanel({
           <button type="button" onClick={evenSplit} className="rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50">
             {t("แบ่งเท่ากัน", "Split evenly")}
           </button>
-          <span className="text-[11px] text-slate-400">{t("พิมพ์ % ลายไหน = 📌 คงไว้ · ลายอื่นแบ่งที่เหลือให้เอง", "Type a % on any artwork = 📌 kept · the others share the rest automatically")}</span>
+          <span className="text-[11px] text-slate-400">{t("พิมพ์ % ลายไหน = ปักหมุดคงไว้ · ลายอื่นแบ่งที่เหลือให้เอง", "Type a % on any artwork = pinned (kept) · the others share the rest automatically")}</span>
         </div>
       )}
     </div>

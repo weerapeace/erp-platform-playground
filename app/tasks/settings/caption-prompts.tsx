@@ -12,6 +12,7 @@ import { useCreativeOptions } from "../use-options";
 import { useT } from "@/components/i18n";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 type Row = { id: string; brand_id: string | null; platform: string | null; prompt: string; updated_at: string };
 const ALL = "__all__";   // ค่าใน dropdown ที่หมายถึง "ทุก…" (= null ใน DB)
@@ -29,7 +30,7 @@ function AiUsageCard() {
   return (
     <div className="rounded-lg border border-fuchsia-200 bg-fuchsia-50/50 px-3 py-2">
       <div className="flex items-center gap-2 flex-wrap text-xs">
-        <span className="font-medium text-fuchsia-800">💸 {t("ค่าใช้จ่าย AI", "AI usage")}</span>
+        <span className="font-medium text-fuchsia-800"><Icon value="i:transfer-out" className="mr-1" />{t("ค่าใช้จ่าย AI", "AI usage")}</span>
         <span className="text-slate-600">{t("เดือนนี้", "This month")}: <b className="text-slate-800">~{thisMonth?.est_thb ?? 0} {t("บาท", "THB")}</b> ({thisMonth?.captions ?? 0} {t("แคปชั่น", "captions")} · {thisMonth?.calls ?? 0} {t("ครั้ง", "calls")} · {thisMonth?.images ?? 0} {t("รูป", "images")})</span>
         <span className="text-slate-400">| 3 {t("เดือนรวม", "months")}: ~{d.total.est_thb} {t("บาท", "THB")}</span>
         <button onClick={() => setOpen((o) => !o)} className="ml-auto text-fuchsia-700 hover:underline">{open ? t("ซ่อน", "Hide") : t("ดูรายละเอียด", "Details")}</button>
@@ -133,13 +134,13 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   // งาน AI ที่ไม่ใช่แคปชั่นโซเชียล แต่ใช้ทะเบียน prompt ชุดเดียวกัน (ตั้งรายแบรนด์ได้เหมือนกัน)
   const jobOptions = useMemo(() => [
     ...platforms,
-    { value: "product_detail", label: t("📦 รายละเอียดสินค้า — คำสั่งรวมทุกช่อง", "📦 Product detail — all fields") },
+    { value: "product_detail", label: t("รายละเอียดสินค้า — คำสั่งรวมทุกช่อง", "Product detail — all fields") },
     // คำสั่งรายช่อง (สำคัญกว่าคำสั่งรวม) — ตั้งจากป๊อป ⚙ ในหน้าสินค้าก็ได้ แต่ให้แก้จากหน้ารวมนี้ได้ด้วย
     // ตั้งเฉพาะฝั่งไทย — ฝั่งอังกฤษ AI แปลจากฝั่งไทยให้ตรงกันเอง ไม่ต้องเขียนคำสั่งซ้ำ
-    { value: "product_detail:name_th", label: t("📦 ↳ ชื่อสินค้า (คุม Name En ด้วย)", "📦 ↳ Product name (covers Name En)") },
-    { value: "product_detail:introduction", label: t("📦 ↳ Introduction (คุม Introduction En ด้วย)", "📦 ↳ Introduction (covers Introduction En)") },
-    { value: "product_detail:description", label: t("📦 ↳ Description (คุม English Description ด้วย)", "📦 ↳ Description (covers English Description)") },
-    { value: "translate", label: t("🌐 สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "🌐 Translation style (translate button)") },
+    { value: "product_detail:name_th", label: t("↳ ชื่อสินค้า (คุม Name En ด้วย)", "↳ Product name (covers Name En)") },
+    { value: "product_detail:introduction", label: t("↳ Introduction (คุม Introduction En ด้วย)", "↳ Introduction (covers Introduction En)") },
+    { value: "product_detail:description", label: t("↳ Description (คุม English Description ด้วย)", "↳ Description (covers English Description)") },
+    { value: "translate", label: t("สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "Translation style (translate button)") },
     { value: "mass_plan", label: t("วางแผนแบบ Mass (ปุ่ม AI ร่างในปฏิทินคอนเทนต์)", "Mass planning (AI draft in content calendar)") },
   ], [platforms, t]);
 
@@ -171,7 +172,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="font-semibold text-slate-800">✨ {t("คำสั่ง AI เขียนแคปชั่น (prompt)", "AI caption prompt")}</h2>
+        <h2 className="font-semibold text-slate-800"><Icon value="i:sparkles" className="mr-1" />{t("คำสั่ง AI เขียนแคปชั่น (prompt)", "AI caption prompt")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งได้ 4 ระดับ — ระดับที่เจาะจงกว่าจะถูกใช้ก่อน: แบรนด์+แพลตฟอร์ม → แบรนด์ → แพลตฟอร์ม → ค่ากลาง", "4 levels — the most specific wins: brand+platform → brand → platform → global")}</p>
       </div>
       <div className="p-5 space-y-3">
@@ -207,8 +208,8 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
               placeholder={effective?.row.prompt ?? t("พิมพ์คำสั่งให้ AI เช่น โทนเสียง ความยาว ห้ามพูดถึงอะไร", "Describe tone, length, what to avoid…")}
               className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-violet-300" />
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">💾 {t("บันทึกระดับนี้", "Save this level")}</button>
-              {exact && (bId || pKey) && <button onClick={remove} disabled={busy} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">🗑 {t("ลบระดับนี้", "Delete this level")}</button>}
+              <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50"><Icon value="i:device-floppy" className="mr-1" />{t("บันทึกระดับนี้", "Save this level")}</button>
+              {exact && (bId || pKey) && <button onClick={remove} disabled={busy} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50"><Icon value="i:trash" className="mr-1" />{t("ลบระดับนี้", "Delete this level")}</button>}
               <span className="text-[11px] text-slate-400">{t("กำลังแก้ระดับ", "Editing level")}: <b className="text-slate-600">{brandName(bId)} · {platName(pKey)}</b></span>
             </div>
 

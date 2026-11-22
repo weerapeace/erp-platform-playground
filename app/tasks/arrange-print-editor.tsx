@@ -13,6 +13,7 @@ import type { AssetRow, AssetSize } from "@/app/api/assets/shared";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import type { ArrangePrintSpec, ArrangeBaseItem, ArrangePrintType, PrintTypeRow, ArrangeQtyUnit } from "./data";
 import { listPrintTypes, createPrintType, updatePrintType, deletePrintType } from "./data";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -132,15 +133,15 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
       {/* ประเภทแผ่นพิมพ์ (DTF/UV) — โชว์เมื่อส่ง onPrintTypeChange · เลือก/แก้/เพิ่มได้ */}
       {onPrintTypeChange && (
         <div className="mb-4">
-          <div className="text-xs font-semibold text-slate-500 mb-1.5">🖨️ {t("ประเภทแผ่นพิมพ์", "Print sheet type")}</div>
+          <div className="text-xs font-semibold text-slate-500 mb-1.5"><Icon value="i:printer" className="mr-1" />{t("ประเภทแผ่นพิมพ์", "Print sheet type")}</div>
           <PrintTypeField value={printType ?? null} onChange={onPrintTypeChange} pushToast={pushToast} />
         </div>
       )}
       {/* บล็อกรูปฐาน (DFT UV Printed) — โชว์เมื่อส่ง onBasesChange · วางก่อนบล็อกเลือกรูป Artwork */}
       {onBasesChange && (
         <div className="mb-4">
-          <div className="text-xs font-semibold text-slate-500 mb-1.5">🧱 {t("รูปฐาน (จาก DFT UV Printed)", "Base images (from DFT UV Printed)")}</div>
-          <button type="button" onClick={() => setBasePickerOpen(true)} className="w-full border border-dashed border-teal-300 rounded-xl py-2.5 text-sm font-medium text-teal-700 bg-teal-50/50 hover:bg-teal-50 mb-2">🧱 ＋ {t("เลือกฐานรูปจากอัลบั้ม DFT UV (Printed)", "Pick base images from DFT UV (Printed)")}</button>
+          <div className="text-xs font-semibold text-slate-500 mb-1.5"><Icon value="i:wall" className="mr-1" />{t("รูปฐาน (จาก DFT UV Printed)", "Base images (from DFT UV Printed)")}</div>
+          <button type="button" onClick={() => setBasePickerOpen(true)} className="w-full border border-dashed border-teal-300 rounded-xl py-2.5 text-sm font-medium text-teal-700 bg-teal-50/50 hover:bg-teal-50 mb-2"><Icon value="i:wall" className="mr-1" />＋ {t("เลือกฐานรูปจากอัลบั้ม DFT UV (Printed)", "Pick base images from DFT UV (Printed)")}</button>
           {(bases ?? []).length === 0 ? (
             <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ยังไม่ได้เลือกรูปฐาน (ถ้ามี) — กดปุ่มด้านบน", "No base images yet (optional) — use the button above")}</div>
           ) : (
@@ -154,7 +155,7 @@ export function ArrangePrintEditor({ items, onChange, pushToast, contextLabel, c
           )}
         </div>
       )}
-      <button type="button" onClick={() => setPickerOpen(true)} className="w-full border border-dashed border-violet-300 rounded-xl py-2.5 text-sm font-medium text-violet-700 bg-violet-50/50 hover:bg-violet-50 mb-3">🖼️ ＋ {t("เลือกรูปจาก Artwork (เลือกได้หลายรูป)", "Pick images from Artwork (multiple)")}</button>
+      <button type="button" onClick={() => setPickerOpen(true)} className="w-full border border-dashed border-violet-300 rounded-xl py-2.5 text-sm font-medium text-violet-700 bg-violet-50/50 hover:bg-violet-50 mb-3"><Icon value="i:photo" className="mr-1" />＋ {t("เลือกรูปจาก Artwork (เลือกได้หลายรูป)", "Pick images from Artwork (multiple)")}</button>
       {items.length === 0 ? (
         <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่ได้เลือกรูป — กดปุ่มด้านบนเพื่อเลือกจากคลัง Artwork", "No images yet — pick from the Artwork library")}</div>
       ) : (
@@ -218,8 +219,8 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onSetQtyUnit, onAddSiz
           <HoverImage url={item.url} size={80} previewSize={340} rounded="rounded-lg" alt={item.title} />
         </button>
         <span className="w-full text-[11px] font-medium text-slate-700 text-center leading-tight line-clamp-2" title={item.title}>{item.title}</span>
-        {item.master_path && <button type="button" onClick={copyPath} title={item.master_path} className="w-full text-[10px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-1 py-0.5 truncate">📋 {t("คัดลอก path", "Copy path")}</button>}
-        {item.master_url && <a href={item.master_url} target="_blank" rel="noopener noreferrer" title={t("เปิดโฟลเดอร์บน Google Drive", "Open on Google Drive")} className="w-full text-[10px] text-center text-violet-700 hover:underline border border-slate-200 rounded px-1 py-0.5">📁 Drive</a>}
+        {item.master_path && <button type="button" onClick={copyPath} title={item.master_path} className="w-full text-[10px] text-slate-500 hover:text-violet-700 border border-slate-200 rounded px-1 py-0.5 truncate"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอก path", "Copy path")}</button>}
+        {item.master_url && <a href={item.master_url} target="_blank" rel="noopener noreferrer" title={t("เปิดโฟลเดอร์บน Google Drive", "Open on Google Drive")} className="w-full text-[10px] text-center text-violet-700 hover:underline border border-slate-200 rounded px-1 py-0.5"><Icon value="i:folder" className="mr-1" />Drive</a>}
       </div>
       {/* กล่องที่ 2 — ขนาด/จำนวน */}
       <div className="flex-1 min-w-0 border border-slate-200 rounded-xl p-2.5">
@@ -244,7 +245,7 @@ function ArrangeImageCard({ item, onToggleSize, onSetQty, onSetQtyUnit, onAddSiz
                     </button>
                   ))}
                 </div>
-                {unit === "sheet" && <span className="text-[11px] text-violet-600">🧩 {t("วางเต็มแผ่น", "fill the sheet")}</span>}
+                {unit === "sheet" && <span className="text-[11px] text-violet-600"><Icon value="i:puzzle" className="mr-1" />{t("วางเต็มแผ่น", "fill the sheet")}</span>}
               </div>
             ); })}
             {/* ขนาดที่ยังไม่เลือก — Wizard (collapseSizes=false) โชว์หมด · หน้างานพับซ่อน กดปุ่มกาง */}
@@ -304,13 +305,13 @@ function ArrangeBaseCard({ base, onChange, onRemove, onOpenDetail }: {
         <div className="text-[11px] font-semibold text-slate-400 mb-1.5">{t("รายละเอียด (เพิ่ม/ลบ จากรูปฐาน)", "Details (add/remove from base)")}</div>
         <div className="grid sm:grid-cols-2 gap-2">
           <label className="block">
-            <span className="text-[11px] font-medium text-emerald-700">➕ {t("เพิ่มอะไรจากรูปฐาน", "Add to base")}</span>
+            <span className="text-[11px] font-medium text-emerald-700"><Icon value="i:plus" className="mr-1" />{t("เพิ่มอะไรจากรูปฐาน", "Add to base")}</span>
             <textarea value={base.add} onChange={(e) => onChange({ add: e.target.value })} rows={2}
               placeholder={t("เช่น เพิ่มโลโก้มุมขวา, เพิ่มข้อความ...", "e.g. add logo top-right, add text...")}
               className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-emerald-300" />
           </label>
           <label className="block">
-            <span className="text-[11px] font-medium text-rose-700">➖ {t("ลบอะไรจากรูปฐาน", "Remove from base")}</span>
+            <span className="text-[11px] font-medium text-rose-700"><Icon value="i:minus" className="mr-1" />{t("ลบอะไรจากรูปฐาน", "Remove from base")}</span>
             <textarea value={base.remove} onChange={(e) => onChange({ remove: e.target.value })} rows={2}
               placeholder={t("เช่น ลบลายน้ำ, ลบข้อความเดิม...", "e.g. remove watermark, remove old text...")}
               className="mt-0.5 w-full text-sm border border-slate-200 rounded-md px-2 py-1 resize-y focus:outline-none focus:ring-1 focus:ring-rose-300" />
@@ -340,7 +341,7 @@ function PrintTypeField({ value, onChange, pushToast }: {
     <div>
       <div className="flex flex-wrap items-center gap-1.5">
         {loading ? <span className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</span>
-          : types.length === 0 ? <span className="text-xs text-slate-400">{t("ยังไม่มีประเภท — กด ⚙️ เพิ่ม", "No types yet — use ⚙️ to add")}</span>
+          : types.length === 0 ? <span className="text-xs text-slate-400">{t("ยังไม่มีประเภท — กดปุ่มจัดการเพื่อเพิ่ม", "No types yet — use Manage to add")}</span>
           : types.map((ty) => {
             const on = value?.id ? value.id === ty.id : value?.code === ty.code;
             const d = ptDim(ty.default_w, ty.default_h, ty.unit);
@@ -352,7 +353,7 @@ function PrintTypeField({ value, onChange, pushToast }: {
             );
           })}
         {value && <button type="button" onClick={() => onChange(null)} className="text-[11px] text-slate-400 hover:text-red-500 px-1">✕ {t("ล้าง", "Clear")}</button>}
-        <button type="button" onClick={() => setManaging((s) => !s)} className="text-[11px] text-slate-500 hover:text-violet-700 px-1">⚙️ {t("จัดการ", "Manage")}</button>
+        <button type="button" onClick={() => setManaging((s) => !s)} className="text-[11px] text-slate-500 hover:text-violet-700 px-1"><Icon value="i:settings" className="mr-1" />{t("จัดการ", "Manage")}</button>
       </div>
       {managing && <PrintTypeManager types={types} onChanged={load} pushToast={pushToast} />}
     </div>
@@ -412,7 +413,7 @@ function PrintTypeRowEdit({ ty, onChanged, pushToast }: {
       <input value={f.h} onChange={(e) => setF((s) => ({ ...s, h: e.target.value }))} inputMode="decimal" className={`w-14 ${inp}`} />
       <select value={f.unit} onChange={(e) => setF((s) => ({ ...s, unit: e.target.value }))} className={`${inp} px-1`}><option value="cm">cm</option><option value="mm">mm</option><option value="in">in</option></select>
       <button type="button" disabled={busy} onClick={save} className="h-8 px-2 text-xs text-violet-700 hover:underline disabled:opacity-50">{t("บันทึก", "Save")}</button>
-      <button type="button" disabled={busy} onClick={del} className="h-8 px-2 text-xs text-slate-400 hover:text-red-500 disabled:opacity-50" title={t("ลบ", "Delete")}>🗑</button>
+      <button type="button" disabled={busy} onClick={del} className="h-8 px-2 text-xs text-slate-400 hover:text-red-500 disabled:opacity-50" title={t("ลบ", "Delete")}><Icon value="i:trash" /></button>
     </div>
   );
 }

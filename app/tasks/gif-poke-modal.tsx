@@ -15,6 +15,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { GifPokeSettings } from "./gif-poke-settings";
 import { GifPokeAdmin } from "./gif-poke-admin";
+import { Icon } from "@/components/icon";
 
 type GifItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; default_message?: string | null; mine?: boolean };
 
@@ -149,7 +150,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
   return (
     <>
     <ERPModal open={open} onClose={onClose} size="lg" storageKey="gif-poke"
-      title={t("🎁 ส่ง GIF หาเพื่อน", "🎁 Send a GIF")}
+      title={t("ส่ง GIF หาเพื่อน", "Send a GIF")}
       description={t("เลือกเพื่อน เลือก GIF ใส่ข้อความ แล้วส่งให้เขาเห็นวิ่งบนจอ", "Pick people, a GIF, a message — it'll roam their screen")}
       footer={
         <>
@@ -157,15 +158,15 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           <button onClick={send} disabled={sending || !recipients.length || !selId}
             className="h-9 px-5 text-sm font-bold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-            {sending ? t("กำลังส่ง...", "Sending...") : t("ส่งเลย 🚀", "Send 🚀")}
+            {sending ? t("กำลังส่ง...", "Sending...") : <>{t("ส่งเลย", "Send")}<Icon value="i:rocket" className="ml-1" /></>}
           </button>
         </>
       }>
       <div className="space-y-4">
         {/* แถบเครื่องมือ: ตั้งค่าการรับ (ทุกคน) + จัดการคลัง (แอดมิน) */}
         <div className="flex items-center justify-end gap-2">
-          <button onClick={() => setSettingsOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">{t("⚙ ตั้งค่าการรับ", "⚙ Settings")}</button>
-          {isAdmin && <button onClick={() => setAdminOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">{t("🗂 จัดการคลัง", "🗂 Manage")}</button>}
+          <button onClick={() => setSettingsOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"><Icon value="i:settings" className="mr-1" />{t("ตั้งค่าการรับ", "Settings")}</button>
+          {isAdmin && <button onClick={() => setAdminOpen(true)} className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"><Icon value="i:folders" className="mr-1" />{t("จัดการคลัง", "Manage")}</button>}
         </div>
 
         {/* ผู้รับ */}
@@ -183,7 +184,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
               <button onClick={() => fileRef.current?.click()} disabled={uploading}
                 className="h-7 px-2.5 text-xs font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-lg disabled:opacity-50">
-                {uploading ? t("กำลังอัปโหลด...", "Uploading...") : t("⬆ อัปโหลด GIF เอง", "⬆ Upload")}
+                {uploading ? t("กำลังอัปโหลด...", "Uploading...") : <><Icon value="i:upload" className="mr-1" />{t("อัปโหลด GIF เอง", "Upload")}</>}
               </button>
             </div>
           </div>
@@ -233,7 +234,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
                       </div>
                     ) : (
                       <button onClick={() => setDelAsk(g.id)} title={t("ลบ GIF ที่ฉันอัปโหลด", "Delete my GIF")}
-                        className="absolute bottom-1 left-1 w-5 h-5 rounded-full bg-white/90 text-[10px] text-slate-500 shadow hover:text-rose-600">🗑</button>
+                        className="absolute bottom-1 left-1 w-5 h-5 rounded-full bg-white/90 text-[10px] text-slate-500 shadow hover:text-rose-600"><Icon value="i:trash" /></button>
                     ))}
                   </div>
                 );
@@ -246,7 +247,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">{t("ข้อความ (เลือก GIF แล้วเติมให้อัตโนมัติ · แก้ได้)", "Message (auto-filled by GIF · editable)")}</label>
           <textarea value={message} onChange={(e) => { setMessage(e.target.value); setMsgTouched(true); }} rows={2} maxLength={500}
-            placeholder={t("เช่น เก่งมากวันนี้! 💪", "e.g. Great job today! 💪")}
+            placeholder={t("เช่น เก่งมากวันนี้!", "e.g. Great job today!")}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-300" />
         </div>
 
@@ -257,7 +258,7 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
             {gifItemSrc(selected) && <img src={gifItemSrc(selected)!} alt="" className="w-14 h-14 rounded-lg object-cover border border-slate-200" />}
             <div className="min-w-0 text-sm">
               <p className="text-slate-500 text-xs">{t("จะส่ง GIF นี้", "Sending this GIF")}{recipients.length ? ` → ${recipients.length} ${t("คน", "people")}` : ""}</p>
-              {message.trim() && <p className="text-slate-700 truncate">💬 {message.trim()}</p>}
+              {message.trim() && <p className="text-slate-700 truncate"><Icon value="i:message-circle" className="mr-1" />{message.trim()}</p>}
             </div>
           </div>
         )}

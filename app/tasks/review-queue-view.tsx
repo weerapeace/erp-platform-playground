@@ -21,6 +21,7 @@ import { ConnectionError } from "@/components/connection-error";
 import { usePushToast } from "@/components/toast";
 import { subStatusBadge, subStatusLabel } from "./subtask-status";
 import { EmptyState, LoadingState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
 
 type Img = { r2_key: string; file_name: string | null };
 type Dest = { id: string; code: string };
@@ -181,14 +182,14 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
       {loadFailed && items === null ? <ConnectionError onRetry={() => void retry()} retrying={retrying} />
         : items === null ? <LoadingState />
         : rows.length === 0 ? (
-          <EmptyState icon="✅" title={t("ไม่มีงานรอตรวจ", "Nothing awaiting review")} />
+          <EmptyState icon={<Icon value="i:circle-check" />} title={t("ไม่มีงานรอตรวจ", "Nothing awaiting review")} />
         ) : (() => {
           const stMeta = (s: string) => ({ label: subStatusLabel(s), cls: subStatusBadge(s) });   // ป้ายสถานะงานย่อย — ของกลาง
           const pending = rows.filter((r) => r.status !== "approved");
           const approved = rows.filter((r) => r.status === "approved");
-          const groupTable = (title: string, list: ReviewQueueItem[]) => list.length === 0 ? null : (
+          const groupTable = (title: string, list: ReviewQueueItem[], icon?: string) => list.length === 0 ? null : (
             <div key={title} className="space-y-1.5">
-              <p className="text-sm font-semibold text-slate-600">{title} <span className="text-slate-400 font-normal">({list.length})</span></p>
+              <p className="text-sm font-semibold text-slate-600">{icon && <Icon value={icon} className="mr-1" />}{title} <span className="text-slate-400 font-normal">({list.length})</span></p>
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-500 text-xs">
@@ -222,10 +223,10 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                               <img src={r2ImageUrl(ks[0], 80) ?? ""} alt="" className="h-9 w-9 rounded object-cover border border-slate-200" />
                               {ks.length > 1 && <span className="text-[11px] text-slate-400">+{ks.length - 1}</span>}
                             </button>
-                          ) : r.approve_target === "sku_description" ? <span className="text-xs text-slate-400">📝 {t("รายละเอียด", "details")}</span> : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>; })()}
+                          ) : r.approve_target === "sku_description" ? <span className="text-xs text-slate-400"><Icon value="i:notes" className="mr-1" />{t("รายละเอียด", "details")}</span> : <span className="text-xs text-slate-300">{t("ไม่มีรูป", "none")}</span>; })()}
                         </td>
                         <td className="px-3 py-2 align-top text-right">
-                          <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600">🔎 {t("ดูงาน", "View")}</button>
+                          <button onClick={() => openItem(r)} className="h-8 px-3 text-xs font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600"><Icon value="i:search" className="mr-1" />{t("ดูงาน", "View")}</button>
                         </td>
                       </tr>
                     ); })}
@@ -234,7 +235,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
               </div>
             </div>
           );
-          return <div className="space-y-4">{groupTable(`🟡 ${t("รอตรวจ", "Pending review")}`, pending)}{groupTable(`✅ ${t("อนุมัติแล้ว", "Approved")}`, approved)}</div>;
+          return <div className="space-y-4">{groupTable(t("รอตรวจ", "Pending review"), pending, "i:hourglass")}{groupTable(t("อนุมัติแล้ว", "Approved"), approved, "i:circle-check")}</div>;
         })()}
 
       {active && (
@@ -242,7 +243,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
           title={`${t("ตรวจงาน", "Review")}: ${active.title}`}
           footer={<>
             <button onClick={closeItem} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-            <button onClick={revise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50 disabled:opacity-50">↩︎ {active.status === "approved" ? t("ย้อน/ตีกลับแก้", "Revert / Return") : t("ตีกลับแก้", "Return")}</button>
+            <button onClick={revise} disabled={busy} className="h-9 px-4 text-sm font-medium text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-50 disabled:opacity-50"><Icon value="i:arrow-back-up" className="mr-1" />{active.status === "approved" ? t("ย้อน/ตีกลับแก้", "Revert / Return") : t("ตีกลับแก้", "Return")}</button>
             {active.status === "approved"
               ? <span className="h-9 px-4 inline-flex items-center text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">✓ {t("อนุมัติแล้ว", "Approved")}</span>
               : <button onClick={onApprove} disabled={busy} className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${confirmApprove ? "bg-emerald-700 hover:bg-emerald-800 ring-2 ring-emerald-300" : "bg-emerald-600 hover:bg-emerald-700"}`}>✓ {confirmApprove ? t("ยืนยันอนุมัติ", "Confirm approve") : t("อนุมัติ", "Approve")}</button>}
@@ -253,18 +254,18 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
             {/* รายละเอียดงาน (งานย่อย + งานหลัก) — โชว์ถ้ามี */}
             {(active.description?.trim() || active.task_desc?.trim()) && (
               <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-1.5 text-sm">
-                {active.description?.trim() && <div><p className="text-[11px] font-semibold text-slate-400 mb-0.5">📝 {t("รายละเอียดงานย่อย", "Subtask details")}</p><p className="text-slate-600 whitespace-pre-wrap">{active.description}</p></div>}
-                {active.task_desc?.trim() && <div className={active.description?.trim() ? "border-t border-slate-200 pt-1.5" : ""}><p className="text-[11px] font-semibold text-slate-400 mb-0.5">📋 {t("รายละเอียดงานหลัก", "Task details")}</p><p className="text-slate-500 whitespace-pre-wrap">{active.task_desc}</p></div>}
+                {active.description?.trim() && <div><p className="text-[11px] font-semibold text-slate-400 mb-0.5"><Icon value="i:notes" className="mr-1" />{t("รายละเอียดงานย่อย", "Subtask details")}</p><p className="text-slate-600 whitespace-pre-wrap">{active.description}</p></div>}
+                {active.task_desc?.trim() && <div className={active.description?.trim() ? "border-t border-slate-200 pt-1.5" : ""}><p className="text-[11px] font-semibold text-slate-400 mb-0.5"><Icon value="i:clipboard-list" className="mr-1" />{t("รายละเอียดงานหลัก", "Task details")}</p><p className="text-slate-500 whitespace-pre-wrap">{active.task_desc}</p></div>}
               </div>
             )}
 
             {/* รูปที่ "ส่งมารอบนี้" (จาก image_sync_targets) — จัดกลุ่มตาม Parent/SKU + รหัส (ดูอย่างเดียว) */}
             {submittedGroups.length > 0 && (
               <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-3 space-y-2">
-                <p className="text-xs font-semibold text-violet-700">🖼 {t("รูปที่ส่งมารอบนี้ (รอตรวจ)", "Submitted this round")}</p>
+                <p className="text-xs font-semibold text-violet-700"><Icon value="i:photo" className="mr-1" />{t("รูปที่ส่งมารอบนี้ (รอตรวจ)", "Submitted this round")}</p>
                 {submittedGroups.map((g, gi) => (
                   <div key={gi}>
-                    <p className="text-[10px] font-mono text-slate-600 bg-white border border-slate-200 inline-block px-1.5 py-0.5 rounded mb-1">📦 {g.code} <span className="text-slate-400">({g.keys.length})</span></p>
+                    <p className="text-[10px] font-mono text-slate-600 bg-white border border-slate-200 inline-block px-1.5 py-0.5 rounded mb-1"><Icon value="i:package" className="mr-1" />{g.code} <span className="text-slate-400">({g.keys.length})</span></p>
                     <div className="flex flex-wrap gap-2">
                       {g.keys.map((k, i) => { const rep = replacedSlotNo(g.tk, k); return (
                         <div key={i} className="relative">
@@ -275,7 +276,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                           {/* แทนช่องเดิมลำดับไหน (ถ้ามี) */}
                           {rep !== null && (
                             <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-500 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 shadow" title={t("รูปนี้แทนรูปเดิมในสินค้า", "Replaces an existing product image")}>
-                              {rep > 0 ? t(`🔁 แทน #${rep}`, `🔁 → #${rep}`) : t("🔁 แทนรูปเดิม", "🔁 replaces")}
+                              <Icon value="i:repeat" className="mr-1" />{rep > 0 ? t(`แทน #${rep}`, `→ #${rep}`) : t("แทนรูปเดิม", "replaces")}
                             </span>
                           )}
                         </div>
@@ -289,7 +290,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
             {/* รายละเอียด Platform ที่ส่ง (งานเขียนคำอธิบาย) — ดูอย่างเดียว */}
             {active.approve_target === "sku_description" && (
               <div className="rounded-lg border border-slate-200 p-3 space-y-2">
-                <p className="text-xs font-semibold text-slate-500">📝 {t("รายละเอียด Platform ที่ส่ง", "Submitted platform details")}</p>
+                <p className="text-xs font-semibold text-slate-500"><Icon value="i:notes" className="mr-1" />{t("รายละเอียด Platform ที่ส่ง", "Submitted platform details")}</p>
                 {platParents === null ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
                   : platParents.length === 0 ? <p className="text-xs text-slate-300 italic">{t("ไม่มีข้อมูล", "none")}</p>
                   : platParents.map((p) => (
@@ -328,7 +329,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
 
             {/* ปลายทางรูป — Parent SKU + SKU (เลือกได้) */}
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2">
-              <p className="text-xs font-semibold text-slate-500">📦 {t("อนุมัติแล้วรูปจะเข้าอัลบั้มของ", "On approval, images go to")}</p>
+              <p className="text-xs font-semibold text-slate-500"><Icon value="i:package" className="mr-1" />{t("อนุมัติแล้วรูปจะเข้าอัลบั้มของ", "On approval, images go to")}</p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs text-slate-400 w-14">Parent</span>
                 {destParents.length ? destParents.map((p) => (
@@ -342,7 +343,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
                 ))}
                 <button onClick={() => setPickOpen(true)} className="h-7 px-2 text-xs font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">＋ {t("เลือก SKU", "Add SKU")}</button>
               </div>
-              {!destParents.length && !destSkus.length && <p className="text-[11px] text-amber-600">⚠ {t("ยังไม่มีปลายทาง — เลือกอย่างน้อย 1 ที่ ไม่งั้นรูปจะไม่เข้าอัลบั้มสินค้า", "No destination — pick at least one or images won't reach product albums")}</p>}
+              {!destParents.length && !destSkus.length && <p className="text-[11px] text-amber-600"><Icon value="i:alert-triangle" className="mr-1" />{t("ยังไม่มีปลายทาง — เลือกอย่างน้อย 1 ที่ ไม่งั้นรูปจะไม่เข้าอัลบั้มสินค้า", "No destination — pick at least one or images won't reach product albums")}</p>}
             </div>
 
             {/* รูปที่ลงไว้ในสินค้าตอนนี้ (แกลเลอรีจริงของแต่ละ Parent/SKU) */}
@@ -351,7 +352,7 @@ export function ReviewQueueView({ onChanged }: { onChanged?: () => void }) {
               if (!dests.length) return null;
               return (
                 <div className="rounded-lg border border-slate-200 p-3 space-y-2">
-                  <p className="text-xs font-semibold text-slate-500">🖼 {t("รูปที่ลงไว้ในสินค้าตอนนี้", "Current images in the products")}</p>
+                  <p className="text-xs font-semibold text-slate-500"><Icon value="i:photo" className="mr-1" />{t("รูปที่ลงไว้ในสินค้าตอนนี้", "Current images in the products")}</p>
                   {dests.map((d) => { const g = destGalleries[d.tk] ?? []; return (
                     <div key={d.tk}>
                       <p className="text-[10px] font-mono text-slate-500 bg-slate-100 inline-block px-1.5 py-0.5 rounded mb-1">{d.code} <span className="text-slate-400">({g.length})</span></p>

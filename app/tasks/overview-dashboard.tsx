@@ -361,7 +361,7 @@ export function OverviewDashboard({
           return (
             <button key={m.id} onClick={() => setActiveMetric(on ? null : m.id)}
               className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 transition-all hover:shadow-sm ${c.box} ${on ? `ring-2 ${c.ring}` : ""}`}>
-              <span className="text-base">{m.icon}</span>
+              <span className="text-base inline-flex"><Icon value={m.icon} /></span>
               <span className="text-sm font-medium">{m.label}</span>
               <span className="text-lg font-bold tabular-nums">{metricCounts[m.id] ?? 0}</span>
             </button>
@@ -615,7 +615,7 @@ function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18,
   const icon = (extra: string) => card.iconUrl
     // eslint-disable-next-line @next/next/no-img-element
     ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className={`object-contain ${extra}`} style={{ width: iconSize, height: iconSize }} />
-    : <span className={`leading-none ${extra}`} style={{ fontSize: iconSize }}>{card.icon}</span>;
+    : <span className={`leading-none ${extra}`} style={{ fontSize: iconSize }}><Icon value={card.icon} /></span>;
   // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
   if (card.bgUrl) {
     return (

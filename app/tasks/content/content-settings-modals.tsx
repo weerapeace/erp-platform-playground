@@ -8,6 +8,7 @@ import { listHashtags, createHashtag, updateHashtag, deleteHashtag, getCaptionTe
 import { useT } from "@/components/i18n";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { type ToastVariant } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 // ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
 // โมดอลจัดการ "คลังแฮชแท็ก" — ดู/เพิ่ม/แก้ (กดที่ข้อความ)/ลบ/ค้นหา · แฮชแท็กในคลังจะขึ้น typeahead ในช่อง #hashtag
@@ -155,7 +156,7 @@ export function PlatformSettingsModal({ platforms, templates, settings, onClose,
     catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
   };
   return (
-    <ERPModal open onClose={onClose} size="xl" title={t("⚙️ ตั้งค่าต่อแพลตฟอร์ม", "⚙️ Platform Settings")}
+    <ERPModal open onClose={onClose} size="xl" title={t("ตั้งค่าต่อแพลตฟอร์ม", "Platform Settings")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
         <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
@@ -180,7 +181,7 @@ export function PlatformSettingsModal({ platforms, templates, settings, onClose,
               <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_caption !== false} onChange={(e) => setP(p.value, { use_caption: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แคปชั่น", "Use caption")}</label>
               <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_hashtags !== false} onChange={(e) => setP(p.value, { use_hashtags: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แฮชแท็ก", "Use hashtags")}</label>
             </div>
-            <label className="text-xs text-slate-500 block mt-2">💡 {t("คำแนะนำ/ข้อควรระวัง — โชว์เป็นปุ่ม ⓘ บนการ์ดแพลตฟอร์ม (เอาเมาส์ชี้)", "Tips — shown as ⓘ on the platform card (hover)")}
+            <label className="text-xs text-slate-500 block mt-2"><Icon value="i:bulb" className="mr-1" />{t("คำแนะนำ/ข้อควรระวัง — โชว์เป็นปุ่ม ⓘ บนการ์ดแพลตฟอร์ม (เอาเมาส์ชี้)", "Tips — shown as ⓘ on the platform card (hover)")}
               <textarea value={s.note ?? ""} onChange={(e) => setP(p.value, { note: e.target.value })} rows={2} placeholder={t("เช่น ใส่รูป 1:1 อย่างน้อย 5 รูป + วิดีโอ 15 วิ", "e.g. 5+ square images + 15s video")} className="mt-0.5 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
             </label>
           </div>
@@ -285,7 +286,7 @@ export function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClos
   const setHashPlat = (p: string, txt: string) => setVal((v) => ({ ...v, hashtags_by_platform: { ...(v.hashtags_by_platform ?? {}), [p]: txt } }));
   const save = async () => { setSaving(true); try { await saveCaptionConfig(val); pushToast("success", t("บันทึกแล้ว", "Saved")); onSaved(val); } catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); } };
   return (
-    <ERPModal open onClose={onClose} size="lg" title={t("✍️ พรอมต์ + แฮชแท็กเริ่มต้น", "✍️ Prompt + default hashtags")}
+    <ERPModal open onClose={onClose} size="lg" title={t("พรอมต์ + แฮชแท็กเริ่มต้น", "Prompt + default hashtags")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
         <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
@@ -293,8 +294,8 @@ export function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClos
       <div className="space-y-4">
         {/* พรอมต์ */}
         <div className="space-y-2">
-          <p className="text-sm font-semibold text-slate-700">📋 {t("พรอมต์ตั้งต้น (เอาไปวางใน AI เขียนแคปชั่น)", "Prompt (paste into AI to write captions)")}</p>
-          <p className="text-[11px] text-slate-400">{t("ใช้ตัวแปรได้: {product} {price} {color} {shop} — ปุ่ม 📋 คัดลอกพรอมต์ จะเติมข้อมูลสินค้าให้อัตโนมัติ", "Variables: {product} {price} {color} {shop} — the 📋 button fills product info automatically")}</p>
+          <p className="text-sm font-semibold text-slate-700"><Icon value="i:clipboard-list" className="mr-1" />{t("พรอมต์ตั้งต้น (เอาไปวางใน AI เขียนแคปชั่น)", "Prompt (paste into AI to write captions)")}</p>
+          <p className="text-[11px] text-slate-400">{t("ใช้ตัวแปรได้: {product} {price} {color} {shop} — ปุ่มคัดลอกพรอมต์ จะเติมข้อมูลสินค้าให้อัตโนมัติ", "Variables: {product} {price} {color} {shop} — the copy-prompt button fills product info automatically")}</p>
           {brandId && (
             <div>
               <label className="text-xs text-slate-400">{t("พรอมต์ของแบรนด์", "Brand prompt")} — {brandLabel || brandId}</label>

@@ -17,6 +17,7 @@ import type { UserPickerValue } from "@/components/pickers";
 import { listBrands, createCampaign, type Campaign } from "../data";
 import { listOptions, createOption, type Option } from "../use-options";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 type FormState = { name: string; brand_id: string; category_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
 const EMPTY: FormState = { name: "", brand_id: "", category_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
@@ -103,7 +104,7 @@ export function CampaignCreateModal({ open, onClose, onCreated, pushToast, initi
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้างแคมเปญ", "Create campaign")}</button>
       </>}>
-      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
+      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"><Icon value="i:alert-triangle" className="mr-1" />{formErr}</div>}
       <ERPFormSection title={t("ข้อมูลแคมเปญ", "Campaign details")} columns={2}>
         <ERPFormField label={t("ชื่อแคมเปญ", "Campaign name")} required span={2}><ERPInput value={form.name} autoFocus onChange={(e) => update({ name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } }} placeholder={t("เช่น Shopee 7.7 / เปิดตัว Heart Bag", "e.g. Shopee 7.7 / Heart Bag launch")} /></ERPFormField>
         <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => update({ brand_id: v })} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></ERPFormField>

@@ -22,6 +22,7 @@ import { TREND_CHECKLIST, TREND_HEAT, TREND_PLATFORMS, heatMeta, trendProgress, 
 import { getTrend, updateTrend, deleteTrend, listBrands, type TrendItem } from "../../data";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
@@ -99,14 +100,14 @@ export default function TrendBoardPage() {
     catch (e) { setErr((e as Error).message); }
   };
 
-  if (err && !trend) return <StandaloneShell title={t("เทรนด์", "Trend")} icon="🔥" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
+  if (err && !trend) return <StandaloneShell title={t("เทรนด์", "Trend")} icon="i:flame" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
   const prog = trendProgress(trend?.checklist);
   const h = heatMeta(trend?.heat);
   const barCls = prog.percent >= 80 ? "bg-emerald-500" : prog.percent >= 40 ? "bg-amber-400" : "bg-rose-400";
 
   return (
-    <StandaloneShell title={trend?.title ?? t("เทรนด์", "Trend")} icon="🔥" accent="violet">
+    <StandaloneShell title={trend?.title ?? t("เทรนด์", "Trend")} icon="i:flame" accent="violet">
       {/* หัวเรื่อง */}
       <div className="border-b border-slate-200 bg-white px-6 py-2">
         <div className="flex flex-wrap items-center gap-2">
@@ -121,13 +122,13 @@ export default function TrendBoardPage() {
           </select>
           {canSend && (
             <button onClick={() => setBoardOpen(true)} title={t("วางเทรนด์นี้เป็นการ์ดบนกระดานแคมเปญ", "Place this trend as a card on a campaign board")}
-              className="h-9 rounded-lg border border-indigo-300 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50">🎨 {t("ส่งขึ้นกระดานแคมเปญ", "Send to campaign board")}</button>
+              className="h-9 rounded-lg border border-indigo-300 px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50"><Icon value="i:palette" className="mr-1" />{t("ส่งขึ้นกระดานแคมเปญ", "Send to campaign board")}</button>
           )}
           <button onClick={addFrame} title={t("วางกรอบหน้า 16:9 + ช่องแนะนำอีกชุด", "Insert another 16:9 page frame")}
-            className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">🖼 {t("วางกรอบหน้า", "Page frame")}</button>
+            className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:photo" className="mr-1" />{t("วางกรอบหน้า", "Page frame")}</button>
           <button onClick={() => setSideOpen((v) => !v)}
             className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">{sideOpen ? "▶" : "◀"} {t("เช็คลิสต์", "Checklist")}</button>
-          <button onClick={() => void archive()} className="h-9 rounded-lg px-3 text-sm text-slate-400 hover:bg-rose-50 hover:text-rose-600">🗑 {t("เก็บเข้ากรุ", "Archive")}</button>
+          <button onClick={() => void archive()} className="h-9 rounded-lg px-3 text-sm text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:archive" className="mr-1" />{t("เก็บเข้ากรุ", "Archive")}</button>
         </div>
         {/* แถบความครบ */}
         <div className="mt-1.5 flex items-center gap-2">
@@ -137,7 +138,7 @@ export default function TrendBoardPage() {
           <span className="text-xs tabular-nums text-slate-500">{prog.done}/{prog.total} {t("ข้อ", "items")} · {prog.percent}%</span>
           {prog.missingCore.length > 0 && (
             <span className="truncate text-xs text-amber-600">
-              ⚠ {t("ยังขาด", "Missing")}: {prog.missingCore.slice(0, 4).map((c) => `${c.icon} ${t(c.th, c.en)}`).join(" · ")}{prog.missingCore.length > 4 ? " …" : ""}
+              <Icon value="i:alert-triangle" className="mr-1" />{t("ยังขาด", "Missing")}: {prog.missingCore.slice(0, 4).map((c, i) => <span key={c.key}>{i > 0 ? " · " : ""}<Icon value={c.icon} className="mr-1" />{t(c.th, c.en)}</span>)}{prog.missingCore.length > 4 ? " …" : ""}
             </span>
           )}
           {saving && <span className="text-xs text-slate-400">{t("กำลังบันทึก...", "Saving...")}</span>}
@@ -157,7 +158,7 @@ export default function TrendBoardPage() {
           <aside className="w-full shrink-0 space-y-3 overflow-y-auto pr-1 lg:w-[330px]" style={{ maxHeight: "calc(100vh - 180px)" }}>
             <div className="rounded-xl border border-slate-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-slate-800">✅ {t("สิ่งที่ต้องมีในเทรนด์", "What this trend needs")}</h3>
+                <h3 className="text-sm font-semibold text-slate-800"><Icon value="i:circle-check" className="mr-1" />{t("สิ่งที่ต้องมีในเทรนด์", "What this trend needs")}</h3>
                 <span className="text-[11px] text-slate-400">{t("ติ๊กเมื่อวางบนกระดานแล้ว", "Tick when it's on the board")}</span>
               </div>
               <div className="space-y-1">
@@ -176,7 +177,7 @@ export default function TrendBoardPage() {
                           }} />
                         <span className="min-w-0">
                           <span className="block text-[13px] font-medium text-slate-800">
-                            {c.icon} {t(c.th, c.en)}
+                            <Icon value={c.icon} className="mr-1" />{t(c.th, c.en)}
                             {c.core && !done && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">{t("ควรมี", "key")}</span>}
                           </span>
                           <span className="block text-[11px] leading-snug text-slate-400">{t(c.thHint, c.enHint)}</span>
@@ -197,7 +198,7 @@ export default function TrendBoardPage() {
 
             {/* ข้อมูลเทรนด์ (แก้ได้ทันที) */}
             <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-              <h3 className="text-sm font-semibold text-slate-800">📋 {t("ข้อมูลเทรนด์", "Trend info")}</h3>
+              <h3 className="text-sm font-semibold text-slate-800"><Icon value="i:clipboard-list" className="mr-1" />{t("ข้อมูลเทรนด์", "Trend info")}</h3>
               <label className="block">
                 <span className="text-[11px] text-slate-500">{t("อธิบายสั้น ๆ", "Summary")}</span>
                 <textarea defaultValue={trend?.summary ?? ""} rows={2} onBlur={(e) => void patch({ summary: e.target.value })}
@@ -208,7 +209,7 @@ export default function TrendBoardPage() {
                 <div className="mt-0.5 flex gap-1">
                   <input defaultValue={trend?.source_url ?? ""} placeholder="https://..." onBlur={(e) => void patch({ source_url: e.target.value })}
                     className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-xs focus:outline-none focus:ring-2 focus:ring-violet-200" />
-                  {trend?.source_url && <a href={trend.source_url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2 text-xs text-blue-600 hover:bg-blue-50">↗</a>}
+                  {trend?.source_url && <a href={trend.source_url} target="_blank" rel="noreferrer" className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-2 text-xs text-blue-600 hover:bg-blue-50"><Icon value="i:external-link" /></a>}
                 </div>
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -235,7 +236,7 @@ export default function TrendBoardPage() {
                           void patch({ platforms: on ? cur.filter((x) => x !== p.value) : [...cur, p.value] });
                         }}
                         className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                        {p.icon} {p.label}
+                        <Icon value={p.icon} className="mr-1" />{p.label}
                       </button>
                     );
                   })}

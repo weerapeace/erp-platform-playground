@@ -15,6 +15,7 @@ import { tr } from "@/lib/lang";
 import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
 import type { HoverField } from "./task-hover-card";
+import { Icon } from "@/components/icon";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -218,7 +219,7 @@ function PetPromptHelper() {
   return (
     <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/40 p-3">
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
-        <span>{open ? "▾" : "▸"}</span>💡 {t("ตัวช่วย: prompt สร้างรูป PET (คัดลอกได้)", "Helper: prompts to create a PET image (copyable)")}
+        <span>{open ? "▾" : "▸"}</span><Icon value="i:bulb" className="mr-1" />{t("ตัวช่วย: prompt สร้างรูป PET (คัดลอกได้)", "Helper: prompts to create a PET image (copyable)")}
       </button>
       {open && (
         <div className="mt-2 space-y-2">
@@ -336,19 +337,19 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title={t("🎨 แต่งหน้าภาพรวม (ของฉัน)", "🎨 Customize my overview")}
+    <ERPModal open={open} onClose={onClose} size="lg" title={t("แต่งหน้าภาพรวม (ของฉัน)", "Customize my overview")}
       footer={<>
         <button onClick={() => onChange(DEFAULT_THEME)} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("รีเซ็ตค่าเริ่มต้น", "Reset")}</button>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">{t("เสร็จ", "Done")}</button>
       </>}>
-      {err && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
+      {err && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between"><span><Icon value="i:alert-triangle" className="mr-1" />{err}</span><button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
       <p className="text-[11px] text-slate-400 mb-3">{t("ทุกการเปลี่ยนบันทึกอัตโนมัติ (เห็นผลทันที) · เป็นการแต่งของคุณคนเดียว ไม่กระทบคนอื่น", "Saves automatically (live) · personal to you")}</p>
 
       {/* ===== แท็บ ===== */}
       <div className="flex items-center gap-1 mb-4 border-b border-slate-200 overflow-x-auto">
-        {([["theme", t("🎨 ธีม & สี", "🎨 Theme & colors")], ["hero", t("👋 แถบทักทาย & PET", "👋 Banner & PET")], ["cards", t("🗂 การ์ด & มุมมอง", "🗂 Cards & views")]] as const).map(([k, label]) => (
+        {([["theme", "i:palette", t("ธีม & สี", "Theme & colors")], ["hero", "i:hand-stop", t("แถบทักทาย & PET", "Banner & PET")], ["cards", "i:folders", t("การ์ด & มุมมอง", "Cards & views")]] as const).map(([k, ic, label]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-violet-600 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{label}</button>
+            className={`shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === k ? "border-violet-600 text-violet-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}><Icon value={ic} className="mr-1" />{label}</button>
         ))}
       </div>
 
@@ -358,10 +359,10 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           <div className="text-sm font-semibold text-slate-700">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
           {undoStack.length > 0 && (
             <button onClick={undoTheme} title={t("ย้อนธีมกลับก่อนกดพรีเซ็ต", "Undo theme change")}
-              className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg">↩ {t("ย้อนกลับ", "Undo")}{undoStack.length > 1 ? ` (${undoStack.length})` : ""}</button>
+              className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"><Icon value="i:arrow-back-up" className="mr-1" />{t("ย้อนกลับ", "Undo")}{undoStack.length > 1 ? ` (${undoStack.length})` : ""}</button>
           )}
         </div>
-        <p className="text-[11px] text-amber-600 mb-2">⚠ {t("กดพรีเซ็ตจะเปลี่ยนทั้งหน้า (ทับที่แต่งไว้) — เผลอกดใช้ปุ่ม ↩ ย้อนกลับได้", "Presets replace your whole setup — use ↩ Undo if you tapped by accident")}</p>
+        <p className="text-[11px] text-amber-600 mb-2"><Icon value="i:alert-triangle" className="mr-1" />{t("กดพรีเซ็ตจะเปลี่ยนทั้งหน้า (ทับที่แต่งไว้) — เผลอกดใช้ปุ่มย้อนกลับได้", "Presets replace your whole setup — use Undo if you tapped by accident")}</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESETS.map((p) => (
             <button key={p.key} onClick={() => applyFullTheme(p.theme)} title={p.name()}
@@ -376,11 +377,11 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           <div className="flex items-center gap-2 flex-wrap">
             <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("ตั้งชื่อธีมนี้แล้วบันทึก", "Name this theme to save")}
               className="h-8 px-2 text-sm border border-slate-200 rounded flex-1 min-w-[160px]" />
-            <button onClick={saveCurrent} disabled={!newName.trim()} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-40">💾 {t("บันทึกธีมของฉัน", "Save my theme")}</button>
+            <button onClick={saveCurrent} disabled={!newName.trim()} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-40"><Icon value="i:device-floppy" className="mr-1" />{t("บันทึกธีมของฉัน", "Save my theme")}</button>
           </div>
           {isAdmin && (
             <div className="flex items-center gap-2 mt-2">
-              <button onClick={setTeamDefault} className="h-8 px-3 text-xs font-medium text-slate-700 border border-slate-200 rounded hover:bg-slate-50">🏢 {t("ตั้งธีมนี้เป็นค่าเริ่มต้นของทีม", "Set as team default")}</button>
+              <button onClick={setTeamDefault} className="h-8 px-3 text-xs font-medium text-slate-700 border border-slate-200 rounded hover:bg-slate-50"><Icon value="i:building" className="mr-1" />{t("ตั้งธีมนี้เป็นค่าเริ่มต้นของทีม", "Set as team default")}</button>
               {teamMsg && <span className="text-[11px] text-emerald-600">{teamMsg}</span>}
               <span className="text-[11px] text-slate-400">{t("(คนที่ยังไม่เคยแต่งหน้าจะได้ธีมนี้)", "(new users get this theme)")}</span>
             </div>
@@ -437,7 +438,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             canUpload ? (
               <div className="flex items-center gap-2">
                 <label className={`h-8 px-3 leading-8 text-xs font-medium rounded cursor-pointer ${busy === "hero" ? "bg-slate-200 text-slate-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
-                  {busy === "hero" ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload")}
+                  {busy === "hero" ? t("กำลังอัป…", "Uploading…") : <><Icon value="i:upload" className="mr-1" />{t("อัปโหลดรูป", "Upload")}</>}
                   <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "hero"}
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setHero({ imageUrl: k }), "hero"); e.target.value = ""; }} /></label>
                 {theme.hero.imageUrl && <button onClick={() => setHero({ imageUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "Remove")}</button>}
@@ -461,7 +462,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         {/* ข้อความ + สีตัวอักษร Hero */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
           <label className="text-xs text-slate-500">{t("ข้อความทักทาย (เว้นว่าง = ใช้ค่าเริ่มต้น)", "Greeting text (blank = default)")}
-            <input value={theme.hero.title ?? ""} onChange={(e) => setHero({ title: e.target.value || null })} placeholder={t("เช่น สวัสดีทีมครีเอทีฟ 👋", "e.g. Hi creative team 👋")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
+            <input value={theme.hero.title ?? ""} onChange={(e) => setHero({ title: e.target.value || null })} placeholder={t("เช่น สวัสดีทีมครีเอทีฟ", "e.g. Hi creative team")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
           <label className="text-xs text-slate-500">{t("ข้อความรอง (เว้นว่าง = สรุปงานอัตโนมัติ)", "Subtitle (blank = auto summary)")}
             <input value={theme.hero.subtitle ?? ""} onChange={(e) => setHero({ subtitle: e.target.value || null })} placeholder={t("เช่น ลุยงานวันนี้กันเลย!", "e.g. Let's get to work!")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
           <label className="flex items-center gap-2 text-xs text-slate-600">{t("สีตัวอักษร", "Text color")}
@@ -485,7 +486,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             <span className="text-xs text-slate-500">{t("ไอคอนลอย (Pet)", "Floating pet")}</span>
             {canUpload ? (
               <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "pet" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("รองรับ GIF — ลอยมุมล่างขวาของแถบ Hero", "Supports GIF — floats at the hero's bottom-right")}>
-                {busy === "pet" ? "…" : (theme.hero.petUrl ? t("เปลี่ยน", "Change") : t("⬆ อัปโหลด (GIF ได้)", "⬆ Upload (GIF ok)"))}
+                {busy === "pet" ? "…" : (theme.hero.petUrl ? t("เปลี่ยน", "Change") : <><Icon value="i:upload" className="mr-1" />{t("อัปโหลด (GIF ได้)", "Upload (GIF ok)")}</>)}
                 <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "pet"} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setHero({ petUrl: k }), "pet"); e.target.value = ""; }} /></label>
             ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลด", "Need upload permission")}</span>}
             {theme.hero.petUrl && <button onClick={() => setHero({ petUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button>}
@@ -494,7 +495,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500">{t("Lottie (ขยับลื่น)", "Lottie (smooth)")}</span>
             <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "lottie" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("เลือกไฟล์ .json (ดาวน์โหลดฟรีจาก LottieFiles)", "Pick a .json (free from LottieFiles)")}>
-              {busy === "lottie" ? "…" : ((theme.hero.petLottieData || theme.hero.petLottieUrl) ? t("เปลี่ยนไฟล์", "Change") : t("⬆ เลือกไฟล์ .json", "⬆ Choose .json"))}
+              {busy === "lottie" ? "…" : ((theme.hero.petLottieData || theme.hero.petLottieUrl) ? t("เปลี่ยนไฟล์", "Change") : <><Icon value="i:upload" className="mr-1" />{t("เลือกไฟล์ .json", "Choose .json")}</>)}
               <input type="file" accept=".json,application/json" className="hidden" disabled={busy === "lottie"} onChange={(e) => { const f = e.target.files?.[0]; if (f) void loadLottieFile(f); e.target.value = ""; }} />
             </label>
             {theme.hero.petLottieData ? <span className="text-[11px] text-emerald-600">✓ {t("โหลดแล้ว", "Loaded")}</span> : null}
@@ -508,7 +509,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               <span className="text-xs text-slate-500">{t("หลายรูป (สลับให้ขยับ)", "Multi-frame (animate)")}</span>
               {canUpload ? (
                 <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "frames" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("เลือกได้หลายรูปพร้อมกัน — ระบบจะสลับรูปเรียงซ้าย→ขวา", "Pick several at once — frames play left→right")}>
-                  {busy === "frames" ? "…" : t("⬆ เพิ่มรูป (เลือกหลายรูปได้)", "⬆ Add frames (multi-select)")}
+                  {busy === "frames" ? "…" : <><Icon value="i:upload" className="mr-1" />{t("เพิ่มรูป (เลือกหลายรูปได้)", "Add frames (multi-select)")}</>}
                   <input type="file" multiple accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === "frames"} onChange={(e) => { const fs = e.target.files; if (fs && fs.length) void addFrames(fs); e.target.value = ""; }} />
                 </label>
               ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลด", "Need upload permission")}</span>}
@@ -557,7 +558,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             canUpload ? (
               <div className="flex items-center gap-2">
                 <label className={`h-8 px-3 leading-8 text-xs font-medium rounded cursor-pointer ${busy === "page" ? "bg-slate-200 text-slate-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
-                  {busy === "page" ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload")}
+                  {busy === "page" ? t("กำลังอัป…", "Uploading…") : <><Icon value="i:upload" className="mr-1" />{t("อัปโหลดรูป", "Upload")}</>}
                   <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "page"}
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setPage({ imageUrl: k }), "page"); e.target.value = ""; }} /></label>
                 {theme.page.imageUrl && <button onClick={() => setPage({ imageUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "Remove")}</button>}
@@ -598,8 +599,8 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("มุมมองงานหลัก", "Main task view")}</div>
         {/* เลือกแบบ Kanban / ตาราง */}
         <div className="flex items-center gap-2 mb-3">
-          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["wip", t("🚧 WIP งานค้าง", "🚧 WIP")], ["table", t("▦ ตาราง", "▦ Table")], ["calendar", t("🗓 ปฏิทิน", "🗓 Calendar")]] as const).map(([m, label]) => (
-            <button key={m} onClick={() => setKanban({ view: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.view === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+          {([["kanban", "i:clipboard-list", t("การ์ด Kanban", "Kanban cards")], ["wip", "i:hammer", t("WIP งานค้าง", "WIP")], ["table", "i:table", t("ตาราง", "Table")], ["calendar", "i:calendar", t("ปฏิทิน", "Calendar")]] as const).map(([m, ic, label]) => (
+            <button key={m} onClick={() => setKanban({ view: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.view === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><Icon value={ic} className="mr-1" />{label}</button>
           ))}
         </div>
         {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && (
@@ -672,7 +673,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                 {([["tl", "↖"], ["tr", "↗"], ["bl", "↙"], ["br", "↘"]] as const).map(([cn, arrow]) => (
                   <button key={cn} onClick={() => setPet({ corner: cn, posX: undefined, posY: undefined })} className={`h-7 w-8 text-sm rounded border ${(theme.pet?.corner ?? "br") === cn && theme.pet?.posX == null ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{arrow}</button>
                 ))}
-                {theme.pet?.posX != null && <span className="text-[10px] text-violet-500">📍 {t("ตำแหน่งเอง", "custom")}</span>}
+                {theme.pet?.posX != null && <span className="text-[10px] text-violet-500"><Icon value="i:pin" className="mr-1" />{t("ตำแหน่งเอง", "custom")}</span>}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500">{t("ขนาด", "Size")}</span>
@@ -755,7 +756,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             </label>
             <span className="text-[11px] text-slate-400">{t("(เว้น = สีตามชุดสีการ์ด)", "(blank = follow card color)")}</span>
           </div>
-          <span className="text-[11px] text-slate-400 w-full">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64 · ใส่ GIF ได้ (ภาพขยับ)", "💡 Full image ~400×400 · icon ~64×64 · GIF supported (animated)")}</span>
+          <span className="text-[11px] text-slate-400 w-full"><Icon value="i:bulb" className="mr-1" />{t("รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64 · ใส่ GIF ได้ (ภาพขยับ)", "Full image ~400×400 · icon ~64×64 · GIF supported (animated)")}</span>
         </div>
         <div className="space-y-2">
           {CARD_KEYS.map((k) => {
@@ -769,20 +770,20 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                     : c.iconUrl
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={`/api/r2-image?key=${encodeURIComponent(c.iconUrl)}`} alt="" className="w-7 h-7 object-contain" />
-                    : <span className="text-lg">{c.icon}</span>}
+                    : <span className="text-lg inline-flex"><Icon value={c.icon} /></span>}
                 </div>
                 <input value={c.label ?? ""} onChange={(e) => setCard(k, { label: e.target.value || null })} placeholder={CARD_LABEL[k]()} className="text-sm font-medium w-28 shrink-0 h-7 px-1.5 border border-slate-200 rounded bg-white" title={t("ชื่อการ์ด (เว้นว่าง = ค่าเริ่มต้น)", "Card label (blank = default)")} />
                 <input value={c.icon} onChange={(e) => setCard(k, { icon: e.target.value })} placeholder="emoji" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded bg-white" title={t("ไอคอน emoji", "emoji icon")} />
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `c:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                    {busy === `c:${k}` ? "…" : t("⬆ ไอคอน", "⬆ Icon")}
+                    {busy === `c:${k}` ? "…" : <><Icon value="i:upload" className="mr-1" />{t("ไอคอน", "Icon")}</>}
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === `c:${k}`}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { iconUrl: key }), `c:${k}`); e.target.value = ""; }} /></label>
                 )}
                 {c.iconUrl && <button onClick={() => setCard(k, { iconUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">×</button>}
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `cb:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                    {busy === `cb:${k}` ? "…" : (c.bgUrl ? t("เปลี่ยนรูปเต็ม", "Full") : t("⬆ รูปเต็ม", "⬆ Full"))}
+                    {busy === `cb:${k}` ? "…" : (c.bgUrl ? t("เปลี่ยนรูปเต็ม", "Full") : <><Icon value="i:upload" className="mr-1" />{t("รูปเต็ม", "Full")}</>)}
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === `cb:${k}`}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { bgUrl: key }), `cb:${k}`); e.target.value = ""; }} /></label>
                 )}

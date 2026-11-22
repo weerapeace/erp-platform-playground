@@ -101,7 +101,7 @@ function storyPosted(e: CalEntry): boolean {
 }
 function NoFileBadge() {
   return (
-    <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ด 🖼 รูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
+    <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ดรูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
       className="shrink-0 text-[9px] leading-none text-amber-600">ไม่มีไฟล์</span>
   );
 }
@@ -152,7 +152,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
       <div style={st} className="rounded-lg border border-slate-200 bg-white shadow-lg p-2 text-[11px]" onMouseEnter={onOpen} onMouseLeave={onClose}>
         <div className="flex items-center gap-1.5 min-w-0">
           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${e.statusDot}`} />
-          <span className="truncate font-medium text-slate-700">📖 {e.title}</span>
+          <span className="truncate font-medium text-slate-700"><Icon value="i:book-2" className="mr-1" />{e.title}</span>
           <span className="ml-auto shrink-0 text-[10px] text-slate-400">{e.statusLabel}</span>
         </div>
         {shown.length > 0 && (
@@ -165,7 +165,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
         )}
         <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
           <PlatIcons list={plats} size={10} />
-          <span className={e.fileCount ? "text-slate-400" : "text-amber-600"}>{e.fileCount ? `📎 ${e.fileCount} ไฟล์` : "ยังไม่มีไฟล์"}</span>
+          <span className={e.fileCount ? "text-slate-400" : "text-amber-600"}>{e.fileCount ? <><Icon value="i:paperclip" className="mr-1" />{e.fileCount} ไฟล์</> : "ยังไม่มีไฟล์"}</span>
           <span className="ml-auto text-slate-400">คลิกเพื่อเปิด</span>
         </div>
       </div>,
@@ -194,7 +194,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
           ))}
         </div>
       ) : (
-        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700">🖼 ยังไม่มีรูปที่จะลง</div>
+        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700"><Icon value="i:photo" className="mr-1" />ยังไม่มีรูปที่จะลง</div>
       )}
       {/* ต่อแพลตฟอร์ม */}
       {plats.length > 0 && (
@@ -209,10 +209,10 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
                   {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
                 </span>
               )}
-              {(p.state === "ready" || p.state === "missing") && <span className={`text-[10px] ${p.manual ? "text-slate-500" : "text-violet-600"}`} title={p.manual ? "แพลตฟอร์มนี้ระบบยังโพสต์ให้ไม่ได้ — คัดลอกแคปชั่นแล้วลงในแอปเอง แล้วติ๊กว่าลงแล้ว" : "ระบบโพสต์ให้ได้ (กดโพสต์เลย หรือตั้งคิว)"}>{p.manual ? "✋ ต้องกดเอง" : "🤖 ระบบลงให้"}</span>}
-              {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? "ลงเป็น Story — ไม่ต้องมีแคปชั่น" : "ตั้งไว้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป"}>{p.isStory ? "Story" : "ไม่ใช้แคปชั่น"}</span>}
+              {(p.state === "ready" || p.state === "missing") && <span className={`text-[10px] ${p.manual ? "text-slate-500" : "text-violet-600"}`} title={p.manual ? "แพลตฟอร์มนี้ระบบยังโพสต์ให้ไม่ได้ — คัดลอกแคปชั่นแล้วลงในแอปเอง แล้วติ๊กว่าลงแล้ว" : "ระบบโพสต์ให้ได้ (กดโพสต์เลย หรือตั้งคิว)"}>{p.manual ? <><Icon value="i:hand-stop" className="mr-1" />ต้องกดเอง</> : <><Icon value="i:robot" className="mr-1" />ระบบลงให้</>}</span>}
+              {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? "ลงเป็น Story — ไม่ต้องมีแคปชั่น" : "ตั้งไว้ที่ปุ่มตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป"}>{p.isStory ? "Story" : "ไม่ใช้แคปชั่น"}</span>}
               <span className="ml-auto flex items-center gap-1 shrink-0">
-                {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="text-[10px] text-slate-400">🖼 {e.platformImages[p.code].length}</span> : null}
+                {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="text-[10px] text-slate-400"><Icon value="i:photo" className="mr-1" />{e.platformImages[p.code].length}</span> : null}
                 {/* 📋 คัดลอกแคปชั่นที่จะโพสต์ (ข้อความเดียวกับปุ่ม 📋 ใน drawer) */}
                 {actions && !p.captionOff && p.state !== "skip" && (() => {
                   const tx = actions.texts; const text = tx && tx !== "error" ? (tx[p.code] ?? "") : "";
@@ -220,7 +220,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
                   return (
                     <button type="button" onClick={() => actions.onCopy(p.code)} disabled={loading || tx === "error" || !text}
                       title={loading ? "กำลังเตรียมแคปชั่น…" : tx === "error" ? "โหลดแคปชั่นไม่สำเร็จ — เปิดการ์ดเพื่อคัดลอก" : text ? `คัดลอกแคปชั่น ${platformLabel(p.code)}` : "ยังไม่มีแคปชั่น — คลิกการ์ดเพื่อเขียน"}
-                      className="h-5 w-6 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 disabled:opacity-40">{loading ? "…" : "📋"}</button>
+                      className="h-5 w-6 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 disabled:opacity-40">{loading ? "…" : <Icon value="i:clipboard-list" />}</button>
                   );
                 })()}
                 {/* ☐ โพสต์แล้ว (บันทึกทันที · กดซ้ำ = ยกเลิก) — ข้าม/ตั้งเวลาแล้ว ไม่มีปุ่ม (เหมือนใน drawer) */}
@@ -241,7 +241,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
         </div>
       )}
       <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-        <span>{missingAny.length ? `⚠ ยังขาด ${missingAny.length}/${plats.length} แพลตฟอร์ม` : plats.length ? "✓ ครบทุกแพลตฟอร์ม" : "ยังไม่เลือกแพลตฟอร์ม"}</span>
+        <span>{missingAny.length ? <><Icon value="i:alert-triangle" className="mr-1" />ยังขาด {missingAny.length}/{plats.length} แพลตฟอร์ม</> : plats.length ? "✓ ครบทุกแพลตฟอร์ม" : "ยังไม่เลือกแพลตฟอร์ม"}</span>
         {onFull
           ? <button type="button" onClick={onFull} className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-700">เปิดแก้เต็ม ↗</button>
           : <span>คลิกการ์ดเพื่อเปิดแก้</span>}
@@ -360,7 +360,7 @@ export function ContentCalendarView() {
           dateKey: c.scheduled_at ? c.scheduled_at.slice(0, 10) : null, time: c.scheduled_at ? c.scheduled_at.slice(11, 16) : null,
           brand_id: c.brand_id ?? null, brand_label: c.brand_label ?? null,
           status: c.status, statusLabel: contentStatusLabel(c.status), statusCls: m.cls, statusDot: m.dot,
-          thumb: c.task_cover_url ?? null, sub: c.task_label ? `📋 ${c.task_label}` : null,
+          thumb: c.task_cover_url ?? null, sub: c.task_label ? c.task_label : null,
           meta: [c.parent_sku_code || c.sku_code || null, c.brand_label].filter(Boolean).join(" · ") || null,
           platforms: c.platforms ?? [], overdue: false, hideInBacklog: c.status === "cancelled",
           captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
@@ -380,7 +380,7 @@ export function ContentCalendarView() {
         brand_id: tk.brand_id, brand_label: tk.brand_label,
         status: tk.status, statusLabel: m.label, statusCls: m.cls, statusDot: m.dot,
         thumb: key ? r2ImageUrl(key, 96) : null, sub: tk.task_no ? `#${tk.task_no}${tk.sku_code ? ` · ${tk.parent_sku_code || tk.sku_code}` : ""}` : null,
-        meta: [who ? `👤 ${who}` : null, tk.brand_label].filter(Boolean).join(" · ") || null,
+        meta: [who ? who : null, tk.brand_label].filter(Boolean).join(" · ") || null,
         platforms: tk.platforms ?? [], overdue: isOverdue(tk), hideInBacklog: isTerminal(tk.status),
         captionPlatforms: [], platformImages: {}, imageKeys: [], imageCount: 0, postStatus: {}, isStory: false, fileCount: 0, formats: {},
       };
@@ -562,7 +562,7 @@ export function ContentCalendarView() {
 
   // ป้ายคำตามโหมด
   const L = mode === "content" ? {
-    title: t("ปฏิทินคอนเทนต์", "Content Calendar"), icon: "🗓️",
+    title: t("ปฏิทินคอนเทนต์", "Content Calendar"), icon: "i:calendar",
     desc: t("คอนเทนต์ทุกแบรนด์รวมที่เดียว · เรียงตามวันตั้งโพสต์ · ลากวางเปลี่ยนวันได้", "All content in one place · by scheduled date · drag to reschedule"),
     backlog: t("ยังไม่ลงวันที่", "Unscheduled"), backlogHint: t("ลากการ์ดไปวางในวันที่ต้องการโพสต์ · ลากจากปฏิทินมาที่นี่เพื่อเอาวันออก · กด ✕ = ไม่โพสต์แล้ว (เคลียร์งานเก่า)", "Drag a card onto a day · drop here to clear its date · ✕ = cancel"),
     create: t("สร้างคอนเทนต์", "Create content"), createDay: t("สร้างคอนเทนต์ใหม่ลงวันนี้", "Create new content on this day"),
@@ -571,7 +571,7 @@ export function ContentCalendarView() {
     legend: t("คลิกช่องวัน = เพิ่ม/หยิบจากค้าง · ลากการ์ดข้ามวัน = เปลี่ยนวัน · จุดสี = แบรนด์", "Click a day = add/pick · drag a card = reschedule · color dot = brand"),
     countTip: t("นับเฉพาะคอนเทนต์ที่ตั้งวันโพสต์ในเดือนนี้ (ไม่รวมกล่องยังไม่ลงวันที่)", "Only content scheduled in this month"),
   } : {
-    title: t("ปฏิทินงาน", "Task Calendar"), icon: "📋",
+    title: t("ปฏิทินงาน", "Task Calendar"), icon: "i:clipboard-list",
     desc: t("งาน Creative ทุกแบรนด์ · เรียงตามกำหนดส่ง · ลากวางเปลี่ยนกำหนดส่งได้ · สีแดง = เลยกำหนด", "All creative tasks · by due date · drag to change due date · red = overdue"),
     backlog: t("ยังไม่กำหนดส่ง", "No due date"), backlogHint: t("ลากการ์ดไปวางในวันกำหนดส่ง · ลากจากปฏิทินมาที่นี่เพื่อเอากำหนดส่งออก · กด ✕ = ยกเลิกงาน", "Drag a card onto a due day · drop here to clear · ✕ = cancel task"),
     create: t("สร้างงาน", "Create task"), createDay: t("สร้างงานใหม่ (กำหนดส่งวันนี้)", "Create new task due this day"),
@@ -624,7 +624,7 @@ export function ContentCalendarView() {
           {story ? (
             <>
               <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: brandColor(e.brand_id) }} />
-              <span className="truncate flex-1 min-w-0">📖 {e.title}</span>
+              <span className="truncate flex-1 min-w-0"><Icon value="i:book-2" className="mr-1" />{e.title}</span>
               {storyNoFile(e) && <NoFileBadge />}
               {storyPosted(e) && <span className="shrink-0 text-emerald-600">✓</span>}
             </>
@@ -659,11 +659,11 @@ export function ContentCalendarView() {
   const modeBtn = (m: CalMode) => `h-8 px-3 rounded-md text-sm font-medium transition inline-flex items-center gap-1.5 ${mode === m ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`;
   const modeSwitch = (
     <div className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t("เลือกปฏิทิน", "Choose calendar")}>
-      <button onClick={() => setMode("content")} className={modeBtn("content")}>🗓️ {t("คอนเทนต์", "Content")}</button>
-      <button onClick={() => setMode("task")} className={modeBtn("task")}>📋 {t("งาน", "Tasks")}</button>
+      <button onClick={() => setMode("content")} className={modeBtn("content")}><Icon value="i:calendar" className="mr-1" />{t("คอนเทนต์", "Content")}</button>
+      <button onClick={() => setMode("task")} className={modeBtn("task")}><Icon value="i:clipboard-list" className="mr-1" />{t("งาน", "Tasks")}</button>
       <button onClick={() => setMode("plan")} className={modeBtn("plan")} title={refreshAlerts ? t(`มี ${refreshAlerts} ที่ต้องเตรียม (ถึงรอบเปลี่ยน)`, `${refreshAlerts} to prepare`) : undefined}>
-        🧭 {t("วางแผน", "Plan")}
-        {refreshAlerts > 0 && <span className="min-w-[1.25rem] rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white">🔔{refreshAlerts}</span>}
+        <Icon value="i:compass" className="mr-1" />{t("วางแผน", "Plan")}
+        {refreshAlerts > 0 && <span className="min-w-[1.25rem] rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold leading-5 text-white"><Icon value="i:bell" />{refreshAlerts}</span>}
       </button>
     </div>
   );
@@ -671,13 +671,13 @@ export function ContentCalendarView() {
   // แท็บวางแผน = หน้าวางแผนคอนเทนต์ทั้งหน้า (ข้อมูลชุดเดียวกัน · สิทธิ์ชุดเดิม tasks.* / แนว+ตั้งค่า = marketing.label.manage)
   if (mode === "plan") {
     return (
-      <StandaloneShell title={t("วางแผนคอนเทนต์", "Content Plan")} icon="🧭" accent="violet">
+      <StandaloneShell title={t("วางแผนคอนเทนต์", "Content Plan")} icon="i:compass" accent="violet">
         <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-bold text-slate-900">🧭 {t("วางแผนคอนเทนต์", "Content Plan")}</h1>
+            <h1 className="text-2xl font-bold text-slate-900"><Icon value="i:compass" className="mr-1" />{t("วางแผนคอนเทนต์", "Content Plan")}</h1>
             {modeSwitch}
           </div>
-          <p className="text-slate-500 mt-1">{t("จะลงอะไร แนวไหน ลงที่ไหน · 🔔 เตือนว่าที่ไหนถึงรอบต้องเปลี่ยน · ข้อมูลชุดเดียวกับแท็บคอนเทนต์", "What, which pillar, where · reminders for recurring refreshes")}</p>
+          <p className="text-slate-500 mt-1">{t("จะลงอะไร แนวไหน ลงที่ไหน · เตือนว่าที่ไหนถึงรอบต้องเปลี่ยน · ข้อมูลชุดเดียวกับแท็บคอนเทนต์", "What, which pillar, where · reminders for recurring refreshes")}</p>
         </div>
         <ContentPlanView embedded canCreate={can("tasks.create" as never)} canEdit={can("tasks.edit" as never)} canPillars={can("marketing.label.manage" as never)} />
       </StandaloneShell>
@@ -690,7 +690,7 @@ export function ContentCalendarView() {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-slate-900">{L.icon} {L.title}</h1>
+              <h1 className="text-2xl font-bold text-slate-900"><Icon value={L.icon} className="mr-1" />{L.title}</h1>
               {/* สลับโหมด คอนเทนต์ ⇄ งาน (ปฏิทินเดียวกัน) */}
               {modeSwitch}
             </div>
@@ -698,12 +698,12 @@ export function ContentCalendarView() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {mode === "content"
-              ? <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("รายการคอนเทนต์", "Content list")}</a>
-              : <a href="/tasks?view=kanban" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 {t("บอร์ดงาน", "Task board")}</a>}
+              ? <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:clipboard-list" className="mr-1" />{t("รายการคอนเทนต์", "Content list")}</a>
+              : <a href="/tasks?view=kanban" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:folders" className="mr-1" />{t("บอร์ดงาน", "Task board")}</a>}
             {mode === "content" && (
               <button onClick={() => setQueueOpen(true)} title={t("คิวโพสต์อัตโนมัติ — ระบบโพสต์ให้ตามเวลา (Facebook/Instagram)", "Auto-post queue — posts on time (Facebook/Instagram)")}
                 className="h-10 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
-                📤 {t("คิวโพสต์", "Post queue")}
+                <Icon value="i:package-export" />{t("คิวโพสต์", "Post queue")}
                 {queueFailed > 0 ? <span className="text-[11px] font-semibold text-white bg-rose-500 rounded-full px-1.5">{queueFailed}</span>
                   : queueActive > 0 ? <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 rounded-full px-1.5">{queueActive}</span> : null}
               </button>
@@ -734,7 +734,7 @@ export function ContentCalendarView() {
             );
           })}
           {brandFilter !== "all" && !(activeStyle?.accent_color || activeStyle?.bg_image_key) && (
-            <button onClick={() => setStyleBrandId(brandFilter)} className="inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm text-slate-400 border border-dashed border-slate-300 hover:border-violet-300 hover:text-violet-700">🎨 {t("แต่งหน้าแบรนด์", "Style")}</button>
+            <button onClick={() => setStyleBrandId(brandFilter)} className="inline-flex items-center gap-1 h-9 px-3 rounded-full text-sm text-slate-400 border border-dashed border-slate-300 hover:border-violet-300 hover:text-violet-700"><Icon value="i:palette" className="mr-1" />{t("แต่งหน้าแบรนด์", "Style")}</button>
           )}
         </div>
 
@@ -749,7 +749,7 @@ export function ContentCalendarView() {
                 const active = platformFilter === p.value;
                 return (
                   <button key={p.value} onClick={() => setPlatformFilter(active ? "all" : p.value)} className={segCls(active)} title={`${p.label} · ${counts.plat[p.value] ?? 0} ${t("รายการ", "items")}`}>
-                    {img ? <img src={img} alt="" className="h-4 w-4 rounded-sm object-contain" /> : p.icon ? <span className="leading-none text-sm">{p.icon}</span> : null}
+                    {img ? <img src={img} alt="" className="h-4 w-4 rounded-sm object-contain" /> : p.icon ? <span className="leading-none text-sm inline-flex"><Icon value={p.icon} /></span> : null}
                     <span className="hidden md:inline">{p.label}</span>
                     {(counts.plat[p.value] ?? 0) > 0 && <span className={`text-[10px] tabular-nums ${active ? "text-white/80" : "text-slate-400"}`}>{counts.plat[p.value]}</span>}
                   </button>
@@ -776,7 +776,7 @@ export function ContentCalendarView() {
             {mode === "content" && (
               <button onClick={() => setNotReady((v) => !v)} title={t("โพสต์ที่ยังขาดแคปชั่นหรือรูปในแพลตฟอร์มใดแพลตฟอร์มหนึ่ง (ชี้การ์ดดูว่าขาดอะไร)", "Posts missing caption or images on some platform")}
                 className={`h-7 px-2.5 rounded-md text-xs font-medium border inline-flex items-center gap-1 ${notReady ? "bg-amber-500 border-amber-500 text-white shadow-sm" : counts.notReady > 0 ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100" : "bg-white border-slate-200 text-slate-400"}`}>
-                ⚠ {t("ยังไม่พร้อม", "Not ready")}
+                <Icon value="i:alert-triangle" />{t("ยังไม่พร้อม", "Not ready")}
                 {counts.notReady > 0 && <span className={`text-[10px] tabular-nums ${notReady ? "text-white/80" : "text-amber-600"}`}>{counts.notReady}</span>}
               </button>
             )}
@@ -806,7 +806,7 @@ export function ContentCalendarView() {
               <div className="h-16 flex items-center justify-between px-4 relative" style={bg ? { backgroundImage: `url(${bg})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
                 <div className="absolute inset-0" style={{ background: bg ? `linear-gradient(to top, ${accent}cc, ${accent}33)` : "transparent" }} />
                 <span className="relative text-white font-semibold text-lg drop-shadow">{brands.find((b) => b.id === brandFilter)?.name}</span>
-                <button onClick={() => setStyleBrandId(brandFilter)} className="relative text-white/90 hover:text-white text-xs border border-white/40 rounded-full px-2.5 py-1">🎨 {t("แต่งหน้า", "Edit style")}</button>
+                <button onClick={() => setStyleBrandId(brandFilter)} className="relative text-white/90 hover:text-white text-xs border border-white/40 rounded-full px-2.5 py-1"><Icon value="i:palette" className="mr-1" />{t("แต่งหน้า", "Edit style")}</button>
               </div>
             </div>
           );
@@ -821,12 +821,12 @@ export function ContentCalendarView() {
             {mode === "content" && (
               <button onClick={toggleStory} title={t("โหมด Story: แถบเล็กใต้ทุกวันบอกว่าทำ Story ของวันนั้นแล้วหรือยัง (กด ＋ สร้าง Story ลงวันนั้นได้เลย)", "Story mode: a strip under each day shows whether a Story exists")}
                 className={`h-9 px-3 rounded-lg border text-sm font-medium inline-flex items-center gap-1.5 ${storyMode ? "bg-pink-600 border-pink-600 text-white shadow-sm" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                📖 Story{storyMode && <span className={`text-[11px] tabular-nums ${storyDaysInMonth >= days ? "text-white/90" : "text-white/80"}`}>{storyDaysInMonth}/{days} {t("วัน", "days")}</span>}
+                <Icon value="i:book-2" />Story{storyMode && <span className={`text-[11px] tabular-nums ${storyDaysInMonth >= days ? "text-white/90" : "text-white/80"}`}>{storyDaysInMonth}/{days} {t("วัน", "days")}</span>}
               </button>
             )}
             {offset !== 0 && <button onClick={() => setOffset(0)} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">{t("วันนี้", "Today")}</button>}
           </div>
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs">{L.icon} {t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-100 text-xs"><Icon value={L.icon} />{t("เดือนนี้", "This month")} {scheduledThisMonth}</span>
         </div>
 
         <div className="flex gap-4 items-start flex-col lg:flex-row">
@@ -882,7 +882,7 @@ export function ContentCalendarView() {
                       return (
                         <div className={`mt-1 flex items-center gap-1 rounded-md px-1 py-0.5 text-[10px] ${st.length ? "bg-pink-50 text-pink-700" : past ? "bg-rose-50 text-rose-400" : "bg-slate-50 text-slate-400"}`}
                           title={st.length ? st.map((e) => `${e.brand_label ?? ""} ${e.title}${storyPosted(e) ? " ✓" : ""}${storyNoFile(e) ? ` (${t("ยังไม่มีไฟล์", "no file yet")})` : ""}`).join(" · ") : (past ? t("วันนี้ไม่ได้ทำ Story", "No story this day") : t("ยังไม่มี Story ของวันนี้", "No story yet"))}>
-                          <span>📖</span>
+                          <span><Icon value="i:book-2" /></span>
                           {st.length ? (
                             <span className="flex items-center gap-0.5 flex-1 min-w-0">
                               {st.slice(0, 5).map((e) => (
@@ -910,7 +910,7 @@ export function ContentCalendarView() {
                 );
               })}
             </div>
-            <p className="text-[11px] text-slate-400 mt-2">💡 {L.legend}</p>
+            <p className="text-[11px] text-slate-400 mt-2"><Icon value="i:bulb" className="mr-1" />{L.legend}</p>
           </div>
 
           <div className="w-full lg:w-[260px] shrink-0 space-y-3">
@@ -920,12 +920,12 @@ export function ContentCalendarView() {
             onDrop={onDropBacklog}
             className={`rounded-xl border p-3 ${overKey === "backlog" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300" : "border-slate-200 bg-slate-50"}`}>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-sm font-semibold text-slate-700">📥 {L.backlog}</span>
+              <span className="text-sm font-semibold text-slate-700"><Icon value="i:inbox" className="mr-1" />{L.backlog}</span>
               <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
             </div>
             <p className="text-[11px] text-slate-400 mb-2">{L.backlogHint}</p>
             {unscheduled.length === 0 ? (
-              <div className="text-center text-xs text-slate-300 py-6">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</div>
+              <div className="text-center text-xs text-slate-300 py-6">{t("ไม่มีงานค้าง", "All scheduled")}<Icon value="i:confetti" className="ml-1" /></div>
             ) : (
               <div className="space-y-1.5 max-h-[560px] overflow-y-auto pr-0.5">
                 {unscheduled.map((e) => (
@@ -984,13 +984,13 @@ export function ContentCalendarView() {
       )}
 
       {/* ป๊อปเลือกว่าจะทำอะไรกับวันที่กด */}
-      <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={`${L.icon} ${dayPickLabel}`}>
+      <ERPModal open={!!dayPick} onClose={() => setDayPick(null)} size="sm" title={dayPickLabel}>
         {dayPick && (
           <div className="space-y-3">
             {(byDay[dayPick] ?? []).length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-semibold text-slate-600">📌 {t("มีอยู่แล้วในวันนี้", "Already on this day")}</span>
+                  <span className="text-xs font-semibold text-slate-600"><Icon value="i:pin" className="mr-1" />{t("มีอยู่แล้วในวันนี้", "Already on this day")}</span>
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{(byDay[dayPick] ?? []).length}</span>
                 </div>
                 <div className="space-y-1.5 max-h-[30vh] overflow-y-auto pr-0.5">
@@ -1011,11 +1011,11 @@ export function ContentCalendarView() {
               className="w-full h-11 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 flex items-center justify-center gap-2">＋ {L.createDay}</button>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-slate-600">📥 {L.pick}</span>
+                <span className="text-xs font-semibold text-slate-600"><Icon value="i:inbox" className="mr-1" />{L.pick}</span>
                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
               </div>
               {unscheduled.length === 0 ? (
-                <p className="text-xs text-slate-300 text-center py-4">{t("ไม่มีงานค้าง 🎉", "All scheduled 🎉")}</p>
+                <p className="text-xs text-slate-300 text-center py-4">{t("ไม่มีงานค้าง", "All scheduled")}<Icon value="i:confetti" className="ml-1" /></p>
               ) : (
                 <div className="space-y-1.5 max-h-[50vh] overflow-y-auto pr-0.5">
                   {unscheduled.map((e) => (

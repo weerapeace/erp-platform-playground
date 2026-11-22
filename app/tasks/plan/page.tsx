@@ -14,7 +14,7 @@ function PlanPageInner() {
   const v = sp.get("view") as PlanView | null;
   const embedded = sp.get("embed") === "1";
   return (
-    <StandaloneShell title="แผนงาน" icon="📋" accent="violet">
+    <StandaloneShell title="แผนงาน" icon="i:clipboard-list" accent="violet">
       {!embedded && <div className="border-b border-slate-200 bg-white px-4 py-5 sm:px-8">
         <h1 className="text-2xl font-bold text-slate-900">แผนงาน</h1>
         <p className="mt-1 text-slate-500">งานที่ต้องทำของทีม จัดตามความด่วน · ปักดาว 3 งานหลักของวันนี้ · มอบงานแล้วคนนั้นได้แจ้งเตือน</p>

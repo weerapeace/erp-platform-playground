@@ -18,6 +18,7 @@ import { platformLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import type { FormField } from "@/app/api/admin/field-registry-v2/route";
 import { type ToastVariant } from "@/components/toast";
+import { Icon } from "@/components/icon";
 import {
   listContent, getContent, listContentAttachments, updateContent, getPlatformSettings, savePlatformSettings, listSubtasks, updateSubtask,
   getPublishConfig, savePublishConfig,
@@ -124,7 +125,7 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
 
   return (
     <>
-    <ERPModal open onClose={onClose} size="xl" title={`🚀 ${t("เผยแพร่ — ตัวช่วยลงโพสต์", "Publish — posting helper")}`}
+    <ERPModal open onClose={onClose} size="xl" title={t("เผยแพร่ — ตัวช่วยลงโพสต์", "Publish — posting helper")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
         <button onClick={confirm} disabled={saving || loading} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : `✓ ${t("ยืนยันเผยแพร่", "Confirm publish")}`}</button>
@@ -133,14 +134,14 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
         <div className="space-y-4">
           {parents.length > 0 && (
             <div className="flex justify-end">
-              <button onClick={() => setFieldPickerOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("เลือกฟิลด์ที่โชว์", "Choose fields")}</button>
+              <button onClick={() => setFieldPickerOpen(true)} className="text-xs text-violet-700 hover:underline"><Icon value="i:settings" className="mr-1" />{t("เลือกฟิลด์ที่โชว์", "Choose fields")}</button>
             </div>
           )}
 
           {/* รูป/ลิงก์ที่ส่งงาน (ทุกงานย่อย) — เอาไปลงโพสต์ */}
           {(taskImages.length > 0 || taskLinks.length > 0) && (
             <div className="rounded-lg border border-slate-200 bg-white p-3">
-              <p className="text-xs font-semibold text-slate-500 mb-2">🖼️ {t("รูป/ลิงก์ที่ส่งงาน", "Submitted images / links")} <span className="font-normal text-slate-400">({taskImages.length} {t("รูป", "img")})</span></p>
+              <p className="text-xs font-semibold text-slate-500 mb-2"><Icon value="i:photo" className="mr-1" />{t("รูป/ลิงก์ที่ส่งงาน", "Submitted images / links")} <span className="font-normal text-slate-400">({taskImages.length} {t("รูป", "img")})</span></p>
               {taskImages.length > 0 && (
                 <div className="flex gap-2 flex-wrap">
                   {taskImages.map((im) => { const bd = subBadge(im.status); return (
@@ -154,7 +155,7 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
               )}
               {taskLinks.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  {taskLinks.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
+                  {taskLinks.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate"><Icon value="i:link" className="mr-1" />{l.label || l.url}</a>)}
                 </div>
               )}
             </div>
@@ -204,11 +205,11 @@ export function PublishModal({ taskId, parents, parentFallback, taskPlatforms = 
                     return (
                       <div key={pf} className={`rounded-lg border p-2.5 ${doneUrl ? "border-emerald-200 bg-emerald-50/40" : "border-slate-200"}`}>
                         <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">{doneUrl && "✅"}<PlatformChip code={pf} /></span>
+                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">{doneUrl && <Icon value="i:circle-check" />}<PlatformChip code={pf} /></span>
                           <div className="flex items-center gap-2 flex-wrap">
-                            {text && <button onClick={() => copy(text, platformLabel(pf))} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอกแคปชั่น", "Copy caption")}</button>}
+                            {text && <button onClick={() => copy(text, platformLabel(pf))} className="text-xs text-violet-700 hover:underline"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอกแคปชั่น", "Copy caption")}</button>}
                             {goUrl && <a href={goUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-white bg-violet-600 rounded-md px-2 py-1 hover:bg-violet-700">↗ {t("เปิด", "Open")} {platformLabel(pf)}</a>}
-                            {prodUrl && <a href={prodUrl} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline">🔗 {t("ลิงก์สินค้า", "Product link")}</a>}
+                            {prodUrl && <a href={prodUrl} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline"><Icon value="i:link" className="mr-1" />{t("ลิงก์สินค้า", "Product link")}</a>}
                           </div>
                         </div>
                         {text && <pre className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 rounded p-2 whitespace-pre-wrap font-sans max-h-24 overflow-y-auto mb-1.5">{text}</pre>}
@@ -252,7 +253,7 @@ function FieldPickerModal({ selected, onClose, onSaved, pushToast }: { selected:
   const toggle = (col: string) => setPicked((p) => p.includes(col) ? p.filter((x) => x !== col) : [...p, col]);
   const save = async () => { setSaving(true); try { await savePublishConfig({ parent_fields: picked }); pushToast("success", t("บันทึกแล้ว", "Saved")); onSaved(picked); } catch (e) { pushToast("error", (e as Error).message); setSaving(false); } };
   return (
-    <ERPModal open onClose={onClose} size="lg" title={t("⚙️ เลือกฟิลด์ Parent SKU ที่จะโชว์", "⚙️ Choose Parent SKU fields to show")}
+    <ERPModal open onClose={onClose} size="lg" title={t("เลือกฟิลด์ Parent SKU ที่จะโชว์", "Choose Parent SKU fields to show")}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
         <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
@@ -321,21 +322,21 @@ function ParentDetailPanel({ parentId, code, selectedCols, skuImagesBy = {}, onO
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
       <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-        <span className="text-sm font-semibold text-slate-700">📦 {code || parentId}</span>
+        <span className="text-sm font-semibold text-slate-700"><Icon value="i:package" className="mr-1" />{code || parentId}</span>
         <div className="flex items-center gap-3">
-          <button onClick={copyAll} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("คัดลอกทั้งหมด", "Copy all")}</button>
+          <button onClick={copyAll} className="text-xs font-medium text-violet-700 hover:underline"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอกทั้งหมด", "Copy all")}</button>
           <button onClick={onOpenFull} className="text-xs text-violet-700 hover:underline">↗ {t("เปิดสินค้าเต็ม", "Open full")}</button>
         </div>
       </div>
       {cover && <a href={r2ImageUrl(cover) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลดรูปปก", "Download cover")}>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={r2ImageUrl(cover, 200) ?? ""} alt="" className="h-20 w-20 object-cover rounded-lg border border-slate-200 mb-2" /></a>}
       {loading ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
-        : fields.length === 0 ? <p className="text-xs text-slate-400">{t("— ไม่มีรายละเอียด (กด ⚙️ เลือกฟิลด์)", "— no details (use ⚙️ Choose fields)")}</p> : (
+        : fields.length === 0 ? <p className="text-xs text-slate-400">{t("— ไม่มีรายละเอียด (กดปุ่มเลือกฟิลด์)", "— no details (use Choose fields)")}</p> : (
         <div className="space-y-1.5">
           {fields.map((f, i) => (
             <div key={i} className="flex items-start gap-2">
               <span className="text-[11px] text-slate-400 w-28 shrink-0 pt-0.5">{f.label}</span>
               <span className="text-xs text-slate-700 flex-1 whitespace-pre-wrap break-words min-w-0">{f.value}</span>
-              <button onClick={() => onCopy(f.value, f.label)} title={t("คัดลอก", "Copy")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
+              <button onClick={() => onCopy(f.value, f.label)} title={t("คัดลอก", "Copy")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0"><Icon value="i:clipboard-list" /></button>
             </div>
           ))}
         </div>
@@ -358,7 +359,7 @@ function ParentDetailPanel({ parentId, code, selectedCols, skuImagesBy = {}, onO
                       <div className="flex items-center gap-1.5"><span className="text-xs font-mono text-slate-700 truncate">{s.code}</span>{s.color && <span className="text-[11px] text-slate-500 truncate">· {s.color}</span>}</div>
                       {s.price != null && <div className="text-[11px] text-emerald-700">{Number(s.price).toLocaleString("th-TH")} ฿</div>}
                     </div>
-                    <button onClick={() => onCopy(s.code, s.code)} title={t("คัดลอกรหัส", "Copy code")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0">📋</button>
+                    <button onClick={() => onCopy(s.code, s.code)} title={t("คัดลอกรหัส", "Copy code")} className="text-slate-400 hover:text-violet-600 text-xs shrink-0"><Icon value="i:clipboard-list" /></button>
                     <button onClick={() => onOpenSku(s.id)} title={t("เปิด SKU", "Open SKU")} className="text-violet-600 hover:text-violet-800 text-xs shrink-0">↗</button>
                   </div>
                   {/* รูปที่ส่งงานของ SKU นี้ */}

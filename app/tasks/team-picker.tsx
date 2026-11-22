@@ -18,7 +18,7 @@ export function TeamFill({ onPick, className }: { onPick: (members: { id: string
     <select value="" title={t("เลือกทีม → ดึงสมาชิกมาใส่ (แก้เพิ่ม/ลบได้ต่อ)", "Pick a team → fill its members (you can still edit)")}
       onChange={(e) => { const tm = teams.find((x) => x.id === e.target.value); if (tm) onPick(tm.members.filter((m) => m.id)); e.currentTarget.value = ""; }}
       className={className ?? "h-8 px-2 text-xs border border-violet-200 rounded-lg text-violet-700 bg-white hover:bg-violet-50 cursor-pointer"}>
-      <option value="">👥 {t("เลือกทีม…", "Pick a team…")}</option>
+      <option value="">{t("เลือกทีม…", "Pick a team…")}</option>
       {teams.map((tm) => <option key={tm.id} value={tm.id}>{tm.name} ({tm.members.length})</option>)}
     </select>
   );
@@ -34,7 +34,7 @@ export function TeamMemberSelect({ onPick, className }: { onPick: (member: { id:
     <select value="" title={t("เลือกจากทีม", "Pick from a team")}
       onChange={(e) => { const id = e.target.value; if (id) { for (const tm of teams) { const m = tm.members.find((x) => x.id === id); if (m) { onPick(m); break; } } } e.currentTarget.value = ""; }}
       className={className ?? "h-9 px-2 text-xs border border-violet-200 rounded-lg text-violet-700 bg-white hover:bg-violet-50 cursor-pointer shrink-0"}>
-      <option value="">👥 {t("จากทีม…", "From team…")}</option>
+      <option value="">{t("จากทีม…", "From team…")}</option>
       {teams.map((tm) => (
         <optgroup key={tm.id} label={tm.name}>
           {tm.members.filter((m) => m.id).map((m) => <option key={tm.id + m.id} value={m.id}>{m.name || m.id}</option>)}

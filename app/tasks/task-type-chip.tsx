@@ -5,6 +5,7 @@
 // ป้ายชื่อ resolve จาก use-options (รวมประเภทที่ปิดใช้งานด้วย → งานเก่าไม่โชว์ code ดิบ)
 // มิเรอร์ PlatformChip (task_type ไม่มีรูปไอคอน icon_key — มีแค่ emoji)
 // ============================================================
+import { Icon } from "@/components/icon";
 import { taskTypeLabel, taskTypeMeta } from "./use-options";
 
 const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
@@ -21,7 +22,7 @@ export function TaskTypeChip({ code, className = "" }: { code: string; className
 
   return (
     <span className={`${base} ${fallback} ${className}`} style={style} title={label}>
-      {emoji && <span className="leading-none">{emoji}</span>}
+      {emoji && <span className="leading-none inline-flex"><Icon value={emoji} /></span>}
       <span className="truncate">{label}</span>
     </span>
   );

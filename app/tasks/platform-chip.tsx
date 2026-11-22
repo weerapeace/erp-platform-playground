@@ -5,6 +5,7 @@
 //  • ไม่มีอะไร → ชิป slate มาตรฐาน
 // ใช้ที่ task-detail-drawer ก่อน; ที่อื่น (การ์ด/คิว/คานบัน) ค่อยเปลี่ยนมาใช้ตัวนี้ได้
 // ============================================================
+import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { platformLabel, platformMeta } from "./use-options";
 
@@ -24,7 +25,7 @@ export function PlatformChip({ code, iconOnly }: { code: string; iconOnly?: bool
   if (iconOnly && (img || emoji)) {
     return (
       <span title={label} className={`inline-flex items-center justify-center h-6 w-6 rounded-full border ${color ? "" : "bg-slate-100 border-slate-200"}`} style={style}>
-        {img ? <img src={img} alt={label} className="h-4 w-4 rounded-sm object-contain" /> : <span className="text-sm leading-none">{emoji}</span>}
+        {img ? <img src={img} alt={label} className="h-4 w-4 rounded-sm object-contain" /> : <span className="text-sm leading-none inline-flex"><Icon value={emoji} /></span>}
       </span>
     );
   }
@@ -35,7 +36,7 @@ export function PlatformChip({ code, iconOnly }: { code: string; iconOnly?: bool
     <span className={`${base} ${fallback}`} style={style}>
       {img
         ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" />
-        : emoji ? <span className="leading-none">{emoji}</span> : null}
+        : emoji ? <span className="leading-none inline-flex"><Icon value={emoji} /></span> : null}
       {label}
     </span>
   );

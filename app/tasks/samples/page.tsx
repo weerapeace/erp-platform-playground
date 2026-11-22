@@ -7,7 +7,7 @@ import { SampleImagesPage } from "@/components/sample-images";
 
 export default function SamplesPage() {
   return (
-    <StandaloneShell title="SAMPLE Images" icon="📸" accent="violet">
+    <StandaloneShell title="SAMPLE Images" icon="i:camera" accent="violet">
       <SampleImagesPage />
     </StandaloneShell>
   );

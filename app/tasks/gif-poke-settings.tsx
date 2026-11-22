@@ -47,7 +47,7 @@ export function GifPokeSettings({ open, onClose }: { open: boolean; onClose: () 
   );
 
   return (
-    <ERPModal open={open} onClose={onClose} size="md" title={t("⚙ ตั้งค่าการรับ GIF", "⚙ GIF settings")}
+    <ERPModal open={open} onClose={onClose} size="md" title={t("ตั้งค่าการรับ GIF", "GIF settings")}
       description={t("ปรับว่าจะรับ GIF จากเพื่อนแบบไหน", "Control how you receive GIFs")}
       footer={<button onClick={onClose} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("เสร็จ", "Done")}</button>}>
       <div className="space-y-4">

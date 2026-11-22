@@ -178,7 +178,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
       </>}>
-      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
+      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"><Icon value="i:alert-triangle" className="mr-1" />{formErr}</div>}
       {preset?.album && (
         <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-sm text-violet-800">
           <Icon name="library" className="mt-0.5" />
@@ -197,7 +197,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           <div className="flex flex-wrap gap-2">{POST_TYPES.map((p) => { const onSel = form.post_types.includes(p.value); return (
             <button key={p.value} type="button" onClick={() => togglePostType(p.value)} aria-pressed={onSel}
               className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-sm font-medium transition-colors ${onSel ? "bg-violet-600 text-white border-violet-600 shadow-sm" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300 hover:bg-violet-50"}`}>
-              <span className="text-base leading-none">{p.icon}</span>{postTypeLabel(p.value)}{onSel && <span className="text-[10px] opacity-80">✓</span>}
+              <span className="text-base leading-none"><Icon value={p.icon} /></span>{postTypeLabel(p.value)}{onSel && <span className="text-[10px] opacity-80">✓</span>}
             </button>
           ); })}</div>
         </ERPFormField>
@@ -207,7 +207,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           <ERPDateTime24 value={form.scheduled_at} onChange={(v) => upd({ scheduled_at: v })} />
           {schedRec && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
+              <span className="text-[11px] text-violet-400"><Icon value="i:bulb" className="mr-1" />{t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
               {schedRec.items.map((it) => (
                 <button key={it.time} type="button" onClick={() => applyRecTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
               ))}
@@ -221,7 +221,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           <div className="col-span-2 -mt-2">
             <div className="text-[11px] text-slate-400 mb-1">{t("SKU ลูกของ", "Child SKUs of")} <span className="font-mono">{form.parent.code}</span> · {t("กดเลือกได้หลายสี", "tap to pick colors")}{!form.product && skuIds.length > 0 && <span className="ml-1 text-violet-600 font-medium">{t(`เลือก ${skuIds.length} สี`, `${skuIds.length} selected`)}</span>}</div>
             <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-0.5">
-              <button type="button" onClick={() => pickChild(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!form.product && !skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>🎨 {t("ทุกสี", "All colors")} ({children.length})</button>
+              <button type="button" onClick={() => pickChild(null)} className={`h-7 px-2.5 rounded-full border text-[11px] font-medium ${!form.product && !skuIds.length ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}><Icon value="i:palette" className="mr-1" />{t("ทุกสี", "All colors")} ({children.length})</button>
               {children.map((c) => { const on = form.product?.id === c.id || skuIds.includes(c.id); const col = c.color_th ?? c.color_en; const parentCode = form.parent?.code ?? ""; return (
                 <button key={c.id} type="button" title={c.code} onClick={() => pickChild(c)}
                   className={`h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>
@@ -244,7 +244,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
                 ? t(`ติ๊กตามที่ตั้งไว้ของแบรนด์นี้ (${bpMap[form.brand_id].length} แพลตฟอร์ม) — แก้ได้`, `Auto-selected from this brand (${bpMap[form.brand_id].length}) — editable`)
                 : t("แบรนด์นี้ยังไม่ได้ตั้งว่าลงที่ไหน", "No default platforms for this brand yet")}
             </span>
-            <button type="button" onClick={() => setBpOpen(true)} className="text-[11px] font-medium text-violet-700 hover:underline shrink-0">⚙️ {t("ตั้งค่าต่อแบรนด์", "Set per brand")}</button>
+            <button type="button" onClick={() => setBpOpen(true)} className="text-[11px] font-medium text-violet-700 hover:underline shrink-0"><Icon value="i:settings" className="mr-1" />{t("ตั้งค่าต่อแบรนด์", "Set per brand")}</button>
           </div>
           <div className="flex flex-wrap gap-1.5">{platforms.map((p) => { const onSel = form.platforms.includes(p.value); const skip = brandSkips(p.value); return (
             <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} title={skip ? t("แบรนด์นี้ตั้งไว้ว่าไม่ลงที่นี่", "This brand skips this platform") : undefined}

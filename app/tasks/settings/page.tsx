@@ -35,6 +35,7 @@ import { useToast } from "@/components/toast";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import dynamic from "next/dynamic";
+import { Icon } from "@/components/icon";
 
 // ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
 const FileHistoryView = dynamic(() => import("../file-history-view").then((m) => m.FileHistoryView), { ssr: false, loading: () => <LoadingState /> });
@@ -66,37 +67,37 @@ export default function TaskSettingsPage() {
   // เมนูตั้งค่าจัดหมวด (ของกลาง SettingsNavLayout) — เจ้าของขอ 2026-10-26: เดิม 14 ปุ่มเรียงแถวเดียวดูยาก
   const navGroups: SettingsNavGroup<Tab>[] = [
     { label: t("ผู้ใช้และสิทธิ์", "Users and access"), items: [
-      { key: "perm", icon: "🔑", label: t("สิทธิ์", "Permissions"), desc: t("ใครทำอะไรได้ ต่อตำแหน่ง/รายคน", "Who can do what, by role or person"), hidden: !canPermTab },
-      { key: "team", icon: "👥", label: t("ทีม", "Teams"), desc: t("คนในแต่ละทีม", "People in each team") },
+      { key: "perm", icon: <Icon value="i:key" />, label: t("สิทธิ์", "Permissions"), desc: t("ใครทำอะไรได้ ต่อตำแหน่ง/รายคน", "Who can do what, by role or person"), hidden: !canPermTab },
+      { key: "team", icon: <Icon value="i:users" />, label: t("ทีม", "Teams"), desc: t("คนในแต่ละทีม", "People in each team") },
     ] },
     { label: t("ตัวเลือกในฟอร์มงาน", "Task form options"), items: [
-      { key: "task_type", icon: "🏷️", label: t("ประเภทงาน", "Task types"), desc: t("ตัวเลือกประเภทตอนสร้างงาน", "Type choices when creating a task") },
-      { key: "platform", icon: "📱", label: t("แพลตฟอร์ม", "Platforms"), desc: t("ช่องทางที่ลงงาน", "Channels a task is for") },
-      { key: "campaign_category", icon: "📁", label: t("หมวดแคมเปญ", "Campaign categories"), desc: t("จัดกลุ่มแคมเปญ", "Group campaigns") },
-      { key: "subtype", icon: "🧩", label: t("ชนิดงานย่อย", "Subtask types"), desc: t("งานย่อยที่เพิ่มในงานได้", "Subtasks you can add to a task") },
+      { key: "task_type", icon: <Icon value="i:tag" />, label: t("ประเภทงาน", "Task types"), desc: t("ตัวเลือกประเภทตอนสร้างงาน", "Type choices when creating a task") },
+      { key: "platform", icon: <Icon value="i:device-mobile" />, label: t("แพลตฟอร์ม", "Platforms"), desc: t("ช่องทางที่ลงงาน", "Channels a task is for") },
+      { key: "campaign_category", icon: <Icon value="i:folder" />, label: t("หมวดแคมเปญ", "Campaign categories"), desc: t("จัดกลุ่มแคมเปญ", "Group campaigns") },
+      { key: "subtype", icon: <Icon value="i:puzzle" />, label: t("ชนิดงานย่อย", "Subtask types"), desc: t("งานย่อยที่เพิ่มในงานได้", "Subtasks you can add to a task") },
     ] },
     { label: t("ขั้นตอนงาน", "Workflow"), items: [
-      { key: "status", icon: "🚦", label: t("สถานะ + เส้นทาง", "Statuses + transitions"), desc: t("ชื่อ สี % ทางไปต่อ และเงื่อนไขก่อนเข้าแต่ละสถานะ", "Names, colors, %, next steps and entry rules per status") },
-      { key: "submit", icon: "📤", label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
-      { key: "readiness", icon: "✅", label: t("ความพร้อมสินค้า", "Product readiness"), desc: t("เช็กอะไรบ้างใต้ความคืบหน้าในลิ้นชักงาน", "What the task drawer checks under progress") },
-      { key: "board_sections", icon: "🧱", label: t("เทมเพลตโซนกระดาน", "Board section templates"), desc: t("ชุดโซน bento ของกระดานบรีฟ/แคมเปญ", "Bento zone sets for brief/campaign boards") },
+      { key: "status", icon: <Icon value="i:route" />, label: t("สถานะ + เส้นทาง", "Statuses + transitions"), desc: t("ชื่อ สี % ทางไปต่อ และเงื่อนไขก่อนเข้าแต่ละสถานะ", "Names, colors, %, next steps and entry rules per status") },
+      { key: "submit", icon: <Icon value="i:package-export" />, label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
+      { key: "readiness", icon: <Icon value="i:circle-check" />, label: t("ความพร้อมสินค้า", "Product readiness"), desc: t("เช็กอะไรบ้างใต้ความคืบหน้าในลิ้นชักงาน", "What the task drawer checks under progress") },
+      { key: "board_sections", icon: <Icon value="i:wall" />, label: t("เทมเพลตโซนกระดาน", "Board section templates"), desc: t("ชุดโซน bento ของกระดานบรีฟ/แคมเปญ", "Bento zone sets for brief/campaign boards") },
     ] },
     { label: t("การแสดงผล", "Display"), items: [
-      { key: "mysub", icon: "🧩", label: t("งานย่อยของฉัน", "My subtasks"), desc: t("จัดกลุ่ม/เรียงรายการงานย่อยของทุกคน", "Grouping and sorting of everyone's subtask list") },
+      { key: "mysub", icon: <Icon value="i:puzzle" />, label: t("งานย่อยของฉัน", "My subtasks"), desc: t("จัดกลุ่ม/เรียงรายการงานย่อยของทุกคน", "Grouping and sorting of everyone's subtask list") },
     ] },
     { label: t("เชื่อมต่อและอัตโนมัติ", "Connections and automation"), items: [
-      { key: "line", icon: "🔔", label: "LINE", desc: t("แจ้งเตือนงานเข้ากลุ่ม LINE", "Task alerts to a LINE group") },
-      { key: "drive", icon: "🗂️", label: t("โฟลเดอร์ปก", "Cover folder"), desc: t("ที่เก็บรูปปกใน Google Drive", "Where cover images live in Google Drive") },
-      { key: "brand_drive", icon: "🏷️", label: t("โฟลเดอร์ต่อแบรนด์", "Brand folders"), desc: t("Drive แยกตามแบรนด์", "Drive folders per brand") },
-      { key: "ai_prompt", icon: "✨", label: t("Prompt แคปชั่น AI", "AI caption prompt"), desc: t("คำสั่งให้ AI เขียนแคปชั่น", "Instructions for AI-written captions") },
+      { key: "line", icon: <Icon value="i:bell" />, label: "LINE", desc: t("แจ้งเตือนงานเข้ากลุ่ม LINE", "Task alerts to a LINE group") },
+      { key: "drive", icon: <Icon value="i:folders" />, label: t("โฟลเดอร์ปก", "Cover folder"), desc: t("ที่เก็บรูปปกใน Google Drive", "Where cover images live in Google Drive") },
+      { key: "brand_drive", icon: <Icon value="i:tag" />, label: t("โฟลเดอร์ต่อแบรนด์", "Brand folders"), desc: t("Drive แยกตามแบรนด์", "Drive folders per brand") },
+      { key: "ai_prompt", icon: <Icon value="i:sparkles" />, label: t("Prompt แคปชั่น AI", "AI caption prompt"), desc: t("คำสั่งให้ AI เขียนแคปชั่น", "Instructions for AI-written captions") },
     ] },
     { label: t("ประวัติ", "History"), items: [
-      { key: "file_history", icon: "📂", label: t("ประวัติไฟล์", "File history"), desc: t("ตัวแยกไฟล์ลงรูป / ย้ายโฟลเดอร์อะไรไปแล้วบ้าง", "What the file sorter uploaded or moved") },
+      { key: "file_history", icon: <Icon value="i:folder-open" />, label: t("ประวัติไฟล์", "File history"), desc: t("ตัวแยกไฟล์ลงรูป / ย้ายโฟลเดอร์อะไรไปแล้วบ้าง", "What the file sorter uploaded or moved") },
     ] },
   ];
 
   return (
-    <StandaloneShell title={t("ตั้งค่างาน Creative", "Creative Task Settings")} icon="⚙️" accent="violet">
+    <StandaloneShell title={t("ตั้งค่างาน Creative", "Creative Task Settings")} icon="i:settings" accent="violet">
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -109,7 +110,7 @@ export default function TaskSettingsPage() {
 
       <div className="px-4 sm:px-8 py-6">
         {!canSettings ? (
-          <EmptyState icon="🔒" title={t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")} />
+          <EmptyState icon={<Icon value="i:lock" />} title={t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")} />
         ) : (
         <SettingsNavLayout groups={navGroups} active={tab} onSelect={selectTab}>
         {tab === "perm" ? <MenuPermissionMatrix appKey="tasks" />
@@ -122,14 +123,14 @@ export default function TaskSettingsPage() {
           : tab === "board_sections" ? <BoardSectionTemplatesManager showToast={showToast} />
           : tab === "subtype" ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
-              <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2></div>
+              <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800"><Icon value="i:puzzle" className="mr-1" />{t("ชนิดงานย่อย", "Subtask types")}</h2></div>
               <div className="p-5"><SubtaskTypeManager showToast={showToast} /></div>
             </div>
           )
           : tab === "line" ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100">
-                <h2 className="font-semibold text-slate-800">🔔 {t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</h2>
+                <h2 className="font-semibold text-slate-800"><Icon value="i:bell" className="mr-1" />{t("แจ้งเตือนงานเข้า LINE", "LINE task notifications")}</h2>
                 <p className="text-xs text-slate-400 mt-0.5">{t("เตือนเมื่อมีงานใหม่ + งานย่อยส่งมารอตรวจ (ส่งเข้ากลุ่ม LINE) · เป็นการตั้งค่าของทั้งทีม", "Alerts on new tasks + review submissions (to a LINE group) · team-wide setting")}</p>
               </div>
               <div className="p-5"><LineSettings /></div>
@@ -167,7 +168,7 @@ function MySubViewManager({ showToast }: { showToast: (m: string) => void }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 max-w-xl mx-auto space-y-4">
       <div>
-        <h2 className="font-semibold text-slate-800">🧩 {t("งานย่อยของฉัน", "My subtasks")}</h2>
+        <h2 className="font-semibold text-slate-800"><Icon value="i:puzzle" className="mr-1" />{t("งานย่อยของฉัน", "My subtasks")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t('ตั้งครั้งเดียว ใช้กับทุกคน — จัดกลุ่ม + เรียงในรายการ "งานย่อยของฉัน" (คิวงาน + ภาพรวม)', 'Set once for everyone — grouping + sorting of the "My subtasks" list (queue + overview)')}</p>
       </div>
       <div>
@@ -255,7 +256,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
         <p className="text-xs text-slate-400 mt-0.5">{kind === "platform"
           ? t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสีหรือไอคอน (emoji/รูป) ต่อแพลตฟอร์ม — ชิปในหน้างานจะใช้สี/ไอคอนนี้ · ใส่รูปไอคอนจะแทนที่สี", "Add / rename / delete / reorder + set a color or icon (emoji/image) per platform — task chips use this · an icon image replaces the color")
           : t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสี/ไอคอน (emoji) ต่อประเภทงาน — ชิปในการ์ด/คิวจะใช้สีนี้ · เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลตใช้ตามทันที", "Add / rename / delete / reorder + set color/icon (emoji) per task type — cards/queue chips use this · changes apply immediately to task and template forms")}</p>
-        <p className="text-[11px] text-slate-400 mt-1">💡 {t("แก้ชื่อ/สี/ไอคอน emoji แล้วกดปุ่ม 💾 บันทึก ที่ท้ายแถว (รูปไอคอน + จัดลำดับ บันทึกทันที)", "Edit name/color/emoji then press 💾 Save at the end of the row (icon image + reorder save immediately)")}</p>
+        <p className="text-[11px] text-slate-400 mt-1"><Icon value="i:bulb" className="mr-1" />{t("แก้ชื่อ/สี/ไอคอน emoji แล้วกดปุ่มบันทึก ที่ท้ายแถว (รูปไอคอน + จัดลำดับ บันทึกทันที)", "Edit name/color/emoji then press Save at the end of the row (icon image + reorder save immediately)")}</p>
       </div>
       <div className="p-5">
         <div className="flex gap-2 mb-4">
@@ -281,10 +282,10 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                   {/* พรีวิวชิปจริง — รูปไอคอน > สี+emoji > slate */}
                   <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
                     title={t("ตัวอย่างชิป", "Chip preview")}>
-                    {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : icon ? <span className="leading-none">{icon}</span> : null}
+                    {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : icon ? <span className="leading-none inline-flex"><Icon value={icon} /></span> : null}
                     <span className={`truncate ${active ? "" : "line-through opacity-60"}`}>{label || o.label}</span>
                   </span>
-                  {!active && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600" title={t("ไม่โผล่ให้เลือกในฟอร์ม/ป๊อปแพลตฟอร์ม — กดปุ่ม 🚫 ด้านขวาเพื่อเปิดใช้", "Hidden from pickers — click 🚫 to enable")}>{t("ปิดอยู่", "Off")}</span>}
+                  {!active && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600" title={t("ไม่โผล่ให้เลือกในฟอร์ม/ป๊อปแพลตฟอร์ม — กดปุ่มเปิด/ปิดด้านขวาเพื่อเปิดใช้", "Hidden from pickers — click the on/off button on the right to enable")}>{t("ปิดอยู่", "Off")}</span>}
                   <input value={label} onChange={(e) => setField(o, { label: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && dirty) saveRow(o); }} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
@@ -294,17 +295,17 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                     {/* รูปไอคอน (อัปโหลด) — เฉพาะแพลตฟอร์ม (task_type ไม่มีคอลัมน์ icon_key) */}
                     {kind === "platform" && (<>
                       <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
-                        {uploadingId === o.id ? "..." : iconImg ? "🖼" : t("รูป", "Img")}
+                        {uploadingId === o.id ? "..." : iconImg ? <Icon value="i:photo" /> : t("รูป", "Img")}
                         <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadIcon(o, f); e.target.value = ""; }} />
                       </label>
                       {iconImg && <button onClick={() => patchMeta(o, { icon_key: null })} title={t("ลบรูปไอคอน", "Remove icon image")} className="text-slate-300 hover:text-red-500 text-xs">⊘</button>}
                     </>)}
                   </div>
-                  {dirty && <button onClick={() => saveRow(o)} title={t("บันทึกแถวนี้", "Save this row")} className="h-7 px-2 text-[11px] font-medium text-white bg-violet-600 rounded hover:bg-violet-700 shrink-0">💾 {t("บันทึก", "Save")}</button>}
+                  {dirty && <button onClick={() => saveRow(o)} title={t("บันทึกแถวนี้", "Save this row")} className="h-7 px-2 text-[11px] font-medium text-white bg-violet-600 rounded hover:bg-violet-700 shrink-0"><Icon value="i:device-floppy" className="mr-1" />{t("บันทึก", "Save")}</button>}
                   <span className="text-[10px] text-slate-300 font-mono">{o.key}</span>
                   {/* เปิด/ปิดใช้งาน — ปิด = ซ่อนจากฟอร์มสร้าง/ป๊อปแบรนด์/แถวติ๊กใน drawer แต่ไม่ลบ (งานเก่ายังโชว์ชื่อได้) */}
                   <button onClick={() => patchMeta(o, { is_active: !active })} title={active ? t("เปิดใช้อยู่ — กดเพื่อปิด (ซ่อนจากตัวเลือก ไม่ลบ)", "Enabled — click to disable") : t("ปิดอยู่ — กดเพื่อเปิดใช้", "Disabled — click to enable")}
-                    className={`h-7 w-7 inline-flex items-center justify-center rounded border text-xs ${active ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"}`}>{active ? "✓" : "🚫"}</button>
+                    className={`h-7 w-7 inline-flex items-center justify-center rounded border text-xs ${active ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-100"}`}>{active ? "✓" : <Icon value="i:ban" />}</button>
                   <button onClick={() => remove(o)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
                 </div>
                 );
@@ -337,7 +338,7 @@ function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }
   const move = (from: number, to: number) => setFields((f) => { if (!f || from === to || from < 0 || to < 0) return f; const n = [...f]; const [m] = n.splice(from, 1); n.splice(to, 0, m); return n; });
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl mx-auto">
-      <h2 className="text-lg font-semibold text-slate-800">📤 {t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
+      <h2 className="text-lg font-semibold text-slate-800"><Icon value="i:package-export" className="mr-1" />{t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
       <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน (ดึงทุกฟิลด์จากทะเบียนฟิลด์กลาง) — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ · ลากจัดลำดับ = ลำดับที่โชว์ในป๊อปอัปตรวจงาน", "Pick Parent SKU fields that must be filled — drag to set the order shown in the review popup")}</p>
       {fields === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <>
@@ -416,7 +417,7 @@ function TeamManager({ showToast }: { showToast: (m: string) => void }) {
           : <div className="space-y-3">{teams.map((tm) => (
             <div key={tm.id} className="border border-slate-200 rounded-lg p-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-violet-500">👥</span>
+                <span className="text-violet-500"><Icon value="i:users" /></span>
                 <input defaultValue={tm.name} onBlur={(e) => rename(tm, e.target.value)} className="flex-1 text-sm font-medium bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                 <span className="text-[11px] text-slate-400">{tm.members.length} {t("คน", "members")}</span>
                 <button onClick={() => remove(tm)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>

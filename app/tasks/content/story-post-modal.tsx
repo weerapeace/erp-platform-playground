@@ -12,6 +12,7 @@ import { ERPModal } from "@/components/modal";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { publishToPlatform } from "../data";
 import type { PostImage } from "./post-confirm-modal";
+import { Icon } from "@/components/icon";
 
 type Plat = "facebook" | "instagram";
 const LABEL: Record<Plat, string> = { facebook: "Facebook", instagram: "Instagram" };
@@ -58,7 +59,7 @@ export function StoryPostModal({ open, contentId, media, canPost, storyStatus, o
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="md" title="📲 ลง Story" closeOnBackdrop={!busy}
+    <ERPModal open={open} onClose={onClose} size="md" title="ลง Story" closeOnBackdrop={!busy}
       footer={<>
         <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ยกเลิก</button>
         <button type="button" onClick={() => void submit()} disabled={busy} className="h-9 rounded-lg bg-pink-600 px-4 text-sm font-medium text-white hover:bg-pink-700 disabled:opacity-50">
@@ -80,7 +81,7 @@ export function StoryPostModal({ open, contentId, media, canPost, storyStatus, o
                     {src && x.type !== "video"
                       // eslint-disable-next-line @next/next/no-img-element
                       ? <img src={src} alt="" className="h-full w-full object-cover" />
-                      : <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-500">{x.type === "video" ? "🎬 คลิป" : "Drive"}</span>}
+                      : <span className="absolute inset-0 flex items-center justify-center text-xs text-slate-500">{x.type === "video" ? <><Icon value="i:movie" className="mr-1" />คลิป</> : "Drive"}</span>}
                     {pick === x.key && <span className="absolute right-1 top-1 h-5 w-5 rounded-full bg-pink-600 text-center text-xs leading-5 text-white">✓</span>}
                   </button>
                 );

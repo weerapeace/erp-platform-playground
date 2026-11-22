@@ -16,6 +16,7 @@ import { TREND_HEAT, TREND_PLATFORMS, heatMeta, TREND_CHECKLIST } from "@/lib/cr
 import { listTrends, createTrend, listBrands, type TrendItem } from "../data";
 import { BrandSelect } from "@/components/brand-select";
 import { EmptyState, LoadingState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
 
 type FormState = {
   title: string; summary: string; heat: string; brand_id: string;
@@ -68,11 +69,11 @@ export default function TrendsPage() {
   }, [form, router, t]);
 
   return (
-    <StandaloneShell title={t("เทรนด์", "Trends")} icon="🔥" accent="violet">
+    <StandaloneShell title={t("เทรนด์", "Trends")} icon="i:flame" accent="violet">
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">🔥 {t("เทรนด์", "Trends")}</h1>
+            <h1 className="text-2xl font-bold text-slate-900"><Icon value="i:flame" className="mr-1" />{t("เทรนด์", "Trends")}</h1>
             <p className="mt-1 text-slate-500">
               {t("บอร์ดเทรนด์ 1 หน้า/1 เทรนด์ — โทนสี · ภาพอ้างอิง · เลย์เอาต์แบนเนอร์ ครบในหน้าเดียว แล้วส่งขึ้นกระดานแคมเปญได้เลย",
                  "One page per trend — palette, references, banner layout in one board, ready to drop onto a campaign board")}
@@ -87,14 +88,14 @@ export default function TrendsPage() {
 
         {/* ตัวกรอง */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`🔍 ${t("ค้นหาเทรนด์...", "Search trends...")}`}
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาเทรนด์...", "Search trends...")}
             className="h-9 w-64 rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
           <button onClick={() => setHeatFilter("")}
             className={`h-9 rounded-full border px-3 text-xs font-medium ${!heatFilter ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{t("ทั้งหมด", "All")}</button>
           {TREND_HEAT.map((h) => (
             <button key={h.value} onClick={() => setHeatFilter(heatFilter === h.value ? "" : h.value)}
               className={`h-9 rounded-full border px-3 text-xs font-medium ${heatFilter === h.value ? h.cls : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-              {h.icon} {t(h.th, h.en)}
+              <Icon value={h.icon} className="mr-1" />{t(h.th, h.en)}
             </button>
           ))}
           <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-500">
@@ -108,7 +109,7 @@ export default function TrendsPage() {
         {trendsSWR.loading && trends.length === 0 ? (
           <LoadingState />
         ) : shown.length === 0 ? (
-          <EmptyState icon="🔥" title={trends.length === 0 ? t("ยังไม่มีเทรนด์", "No trends yet") : t("ไม่พบเทรนด์ที่ตรงกับตัวกรอง", "No trends match the filter")}
+          <EmptyState icon={<Icon value="i:flame" />} title={trends.length === 0 ? t("ยังไม่มีเทรนด์", "No trends yet") : t("ไม่พบเทรนด์ที่ตรงกับตัวกรอง", "No trends match the filter")}
             hint={t('สร้างเทรนด์เพื่อเก็บโทนสี ภาพอ้างอิง และเลย์เอาต์ไว้ที่เดียว เช่น "โทนพาสเทลหน้าร้อน" หรือ "คลิปรีวิวมือถือ"',
                  'Create a trend to keep palette, references and layout in one place')}
             action={{ label: <>＋ {t("สร้างเทรนด์", "New trend")}</>, onClick: () => { setForm(EMPTY); setErr(null); setModalOpen(true); } }} />
@@ -121,7 +122,7 @@ export default function TrendsPage() {
 
       {/* สร้างเทรนด์ใหม่ */}
       <ERPModal open={modalOpen} onClose={() => !saving && setModalOpen(false)} size="lg"
-        title={`🔥 ${t("สร้างเทรนด์ใหม่", "New trend")}`}
+        title={t("สร้างเทรนด์ใหม่", "New trend")}
         description={t("กรอกแค่ชื่อก็สร้างได้ — ที่เหลือไปใส่บนกระดานทีหลัง", "Only the name is required — fill the rest on the board later")}
         footer={
           <div className="flex w-full items-center justify-end gap-2">
@@ -179,13 +180,13 @@ export default function TrendsPage() {
               {TREND_PLATFORMS.map((p) => (
                 <button key={p.value} type="button" onClick={() => togglePlatform(p.value)}
                   className={`rounded-full border px-2.5 py-1 text-xs ${form.platforms.includes(p.value) ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                  {p.icon} {p.label}
+                  <Icon value={p.icon} className="mr-1" />{p.label}
                 </button>
               ))}
             </div>
           </div>
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-            💡 {t(`สร้างเสร็จจะเข้ากระดานเลย — บนกระดานมีเช็คลิสต์ ${TREND_CHECKLIST.length} ข้อคอยเตือนว่าต้องมีอะไรบ้าง (โทนสี · ภาพอ้างอิง · เลย์เอาต์ ฯลฯ)`,
+            <Icon value="i:bulb" className="mr-1" />{t(`สร้างเสร็จจะเข้ากระดานเลย — บนกระดานมีเช็คลิสต์ ${TREND_CHECKLIST.length} ข้อคอยเตือนว่าต้องมีอะไรบ้าง (โทนสี · ภาพอ้างอิง · เลย์เอาต์ ฯลฯ)`,
                   `You'll go straight to the board — a ${TREND_CHECKLIST.length}-item checklist reminds you what a trend needs`)}
           </p>
         </div>
@@ -209,9 +210,9 @@ function TrendCard({ trend, onOpen }: { trend: TrendItem; onOpen: () => void }) 
       </div>
       <div className="p-3">
         <div className="mb-1 flex items-center gap-1.5">
-          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${h.cls}`}>{h.icon} {t(h.th, h.en)}</span>
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${h.cls}`}><Icon value={h.icon} className="mr-1" />{t(h.th, h.en)}</span>
           {!trend.is_active && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-400">{t("ในกรุ", "Archived")}</span>}
-          {trend.brand_name && <span className="ml-auto truncate text-[11px] text-slate-400">🏷 {trend.brand_name}</span>}
+          {trend.brand_name && <span className="ml-auto truncate text-[11px] text-slate-400"><Icon value="i:tag" className="mr-1" />{trend.brand_name}</span>}
         </div>
         <p className="line-clamp-2 text-sm font-semibold leading-snug text-slate-800">{trend.title}</p>
         {trend.summary && <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">{trend.summary}</p>}
@@ -222,7 +223,7 @@ function TrendCard({ trend, onOpen }: { trend: TrendItem; onOpen: () => void }) 
           <span className="shrink-0 text-[10px] tabular-nums text-slate-400">{trend.done}/{trend.total}</span>
         </div>
         {trend.missing_core.length > 0 && (
-          <p className="mt-1 text-[10px] text-amber-600">⚠ {t(`ยังขาดข้อสำคัญ ${trend.missing_core.length} ข้อ`, `${trend.missing_core.length} key item(s) missing`)}</p>
+          <p className="mt-1 text-[10px] text-amber-600"><Icon value="i:alert-triangle" className="mr-1" />{t(`ยังขาดข้อสำคัญ ${trend.missing_core.length} ข้อ`, `${trend.missing_core.length} key item(s) missing`)}</p>
         )}
         {trend.platforms.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">

@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 
 type Info = {
   id: string; name: string; status: string; kind_label: string; kind_icon: string; due_date: string | null;
@@ -33,7 +34,7 @@ export function WorkJobLinkBox({ taskId }: { taskId: string }) {
     <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium text-violet-700">🛠 {t("งานชุดรุ่น", "Model batch job")} · {info.kind_icon} {info.kind_label}{info.status === "done" ? ` · ✓ ${t("ปิดงานแล้ว", "Closed")}` : ""}</p>
+          <p className="text-[11px] font-medium text-violet-700"><Icon value="i:tool" className="mr-1" />{t("งานชุดรุ่น", "Model batch job")} · <Icon value={info.kind_icon} className="mr-1" />{info.kind_label}{info.status === "done" ? ` · ✓ ${t("ปิดงานแล้ว", "Closed")}` : ""}</p>
           <p className="truncate text-sm font-semibold text-slate-800" title={info.name}>{info.name}</p>
         </div>
         <a href={`/marketing/skus?job=${info.id}`} className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700">

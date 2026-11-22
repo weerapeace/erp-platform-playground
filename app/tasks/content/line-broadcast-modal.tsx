@@ -32,7 +32,7 @@ export function LineBroadcastModal({ open, title, captions, media, link, onClose
   const images = media.filter((m) => m.type !== "video" && !m.key.startsWith("drive:")).slice(0, 4);
 
   return (
-    <ERPModal open={open} onClose={onClose} size="md" title="💬 ร่าง LINE Broadcast" hasUnsavedChanges={text !== base}
+    <ERPModal open={open} onClose={onClose} size="md" title="ร่าง LINE Broadcast" hasUnsavedChanges={text !== base}
       footer={<>
         <a href="https://manager.line.biz/" target="_blank" rel="noreferrer" className="mr-auto inline-flex h-9 items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">เปิด LINE OA Manager ↗</a>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>

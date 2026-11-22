@@ -7,6 +7,7 @@ import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { saveBrandCalStyle, type BrandCalStyle, type BrandOption } from "../data";
+import { Icon } from "@/components/icon";
 
 const PRESETS = ["#7c3aed", "#2563eb", "#0ea5e9", "#059669", "#d946ef", "#e11d48", "#ea580c", "#f59e0b", "#64748b", "#111827"];
 
@@ -60,7 +61,7 @@ export function BrandStyleModal({ brand, current, onClose, onSaved, pushToast }:
   const bgUrl = bgKey ? r2ImageUrl(bgKey, 640) : null;
 
   return (
-    <ERPModal open onClose={onClose} title={`🎨 ${t("แต่งหน้าแท็บ", "Style tab")} · ${brand.name}`} size="md"
+    <ERPModal open onClose={onClose} title={`${t("แต่งหน้าแท็บ", "Style tab")} · ${brand.name}`} size="md"
       footer={<>
         <button onClick={clearAll} disabled={saving} className="h-9 px-3 text-sm font-medium text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 mr-auto">{t("ล้างค่า", "Reset")}</button>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
@@ -89,7 +90,7 @@ export function BrandStyleModal({ brand, current, onClose, onSaved, pushToast }:
         <label className="text-sm font-medium text-slate-700">{t("รูปพื้นหลังแบนเนอร์ (ไม่ใส่ก็ได้)", "Banner background image (optional)")}</label>
         <div className="flex items-center gap-2 mt-1.5">
           <label className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 cursor-pointer">
-            {uploading ? t("กำลังอัป...", "Uploading...") : t("⬆ เลือกรูป", "⬆ Upload")}
+            {uploading ? t("กำลังอัป...", "Uploading...") : <><Icon value="i:upload" className="mr-1" />{t("เลือกรูป", "Upload")}</>}
             <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickImage(f); e.target.value = ""; }} />
           </label>
           {bgKey && <button onClick={() => setBgKey(null)} className="h-9 px-3 text-sm text-red-500 border border-red-200 rounded-lg hover:bg-red-50">{t("เอารูปออก", "Remove")}</button>}

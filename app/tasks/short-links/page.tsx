@@ -7,7 +7,7 @@ import { ShortLinksManager } from "@/components/short-links";
 
 export default function ShortLinksPage() {
   return (
-    <StandaloneShell title="ลิงก์สั้น" icon="🔗" accent="violet">
+    <StandaloneShell title="ลิงก์สั้น" icon="i:link" accent="violet">
       <ShortLinksManager />
     </StandaloneShell>
   );

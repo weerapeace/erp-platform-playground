@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 
 export type Poke = { id: string; from_user_id: string; from_name: string | null; from_avatar: string | null; gif_url: string | null; gif_key: string | null; message: string | null; created_at: string };
 
@@ -156,7 +157,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
               <div className="bg-white rounded-2xl shadow-xl border border-slate-100 p-2.5">
                 <div className="flex items-center gap-2 mb-1">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {av ? <img src={av} alt="" className="w-5 h-5 rounded-full object-cover" /> : <span className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center text-[11px]">🎁</span>}
+                  {av ? <img src={av} alt="" className="w-5 h-5 rounded-full object-cover" /> : <span className="w-5 h-5 rounded-full bg-violet-100 flex items-center justify-center text-[11px]"><Icon value="i:gift" /></span>}
                   <span className="text-[11px] font-semibold text-slate-700 truncate">{p.from_name || t("เพื่อนร่วมงาน", "A colleague")}</span>
                 </div>
                 {p.message && <p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{p.message}</p>}
@@ -164,7 +165,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
                   {onReply && p.from_user_id && (
                     <button onClick={() => onReply(p)} className="flex-1 h-7 rounded-lg border border-violet-200 text-violet-700 text-xs font-bold hover:bg-violet-50">{t("↩ ตอบกลับ", "↩ Reply")}</button>
                   )}
-                  <button onClick={() => dismiss(p.id)} className="flex-1 h-7 rounded-lg bg-violet-600 text-white text-xs font-bold hover:bg-violet-700">{t("ปิด 💜", "Thanks 💜")}</button>
+                  <button onClick={() => dismiss(p.id)} className="flex-1 h-7 rounded-lg bg-violet-600 text-white text-xs font-bold hover:bg-violet-700"><Icon value="i:heart" className="mr-1" />{t("ปิด", "Thanks")}</button>
                 </div>
               </div>
             </div>
@@ -180,7 +181,7 @@ export function GifPokeLayer({ userId, onReply }: { userId: string | null; onRep
         );
       })}
       {queued > 0 && (
-        <div className="absolute bottom-3 left-3 bg-violet-600/90 text-white text-xs font-medium rounded-full px-2.5 py-1 shadow">🎁 +{queued} {t("รออยู่", "waiting")}</div>
+        <div className="absolute bottom-3 left-3 bg-violet-600/90 text-white text-xs font-medium rounded-full px-2.5 py-1 shadow"><Icon value="i:gift" className="mr-1" />+{queued} {t("รออยู่", "waiting")}</div>
       )}
     </div>
   );

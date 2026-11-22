@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { LINE_TEMPLATES } from "@/lib/creative-line-templates";
 
 // ชุดอีโมจิคร่าว ๆ ให้เลือกแทรกในแม่แบบข้อความ (เน้นที่ใช้บ่อยในงาน/แจ้งเตือน)
@@ -33,7 +34,7 @@ export function LineSettings() {
   return (
     <div className="space-y-3 text-sm">
       <div className={`px-3 py-2 rounded-lg border ${info?.has_token ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
-        {info?.has_token ? t("✅ เชื่อมบอท LINE แล้ว", "✅ LINE bot connected") : t("⚠️ ยังไม่ได้เชื่อมบอท LINE — ตั้งโทเคนบอทที่ระบบกลาง/จัดซื้อก่อน", "⚠️ No LINE bot token yet — set it up in the central/purchasing settings first")}
+        {info?.has_token ? <><Icon value="i:circle-check" className="mr-1" />{t("เชื่อมบอท LINE แล้ว", "LINE bot connected")}</> : <><Icon value="i:alert-triangle" className="mr-1" />{t("ยังไม่ได้เชื่อมบอท LINE — ตั้งโทเคนบอทที่ระบบกลาง/จัดซื้อก่อน", "No LINE bot token yet — set it up in the central/purchasing settings first")}</>}
       </div>
       <div className="text-xs text-slate-600">
         {info?.current
@@ -54,8 +55,8 @@ export function LineSettings() {
         <button disabled={busy || !gid.trim()} onClick={() => post({ group_id: gid.trim() }, t("บันทึกแล้ว ✓", "Saved ✓"))} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-40">{t("บันทึก", "Save")}</button>
       </div>
       <div className="flex items-center gap-2 flex-wrap pt-1">
-        <button disabled={busy} onClick={load} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded hover:bg-slate-50">🔄 {t("รีเฟรช", "Refresh")}</button>
-        <button disabled={busy} onClick={() => post({ test: true }, t("ส่งข้อความทดสอบแล้ว — เช็ก LINE ✓", "Test sent — check LINE ✓"))} className="h-8 px-3 text-xs font-medium text-slate-700 border border-slate-200 rounded hover:bg-slate-50">✉️ {t("ส่งข้อความทดสอบ", "Send test")}</button>
+        <button disabled={busy} onClick={load} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded hover:bg-slate-50"><Icon value="i:refresh" className="mr-1" />{t("รีเฟรช", "Refresh")}</button>
+        <button disabled={busy} onClick={() => post({ test: true }, t("ส่งข้อความทดสอบแล้ว — เช็ก LINE ✓", "Test sent — check LINE ✓"))} className="h-8 px-3 text-xs font-medium text-slate-700 border border-slate-200 rounded hover:bg-slate-50"><Icon value="i:mail" className="mr-1" />{t("ส่งข้อความทดสอบ", "Send test")}</button>
         {info?.current && <button disabled={busy} onClick={() => post({ clear: true }, t("ล้างแล้ว (กลับไปใช้กลุ่มหลัก)", "Cleared (using main group)"))} className="h-8 px-3 text-xs font-medium text-rose-600 border border-rose-200 rounded hover:bg-rose-50">{t("ล้างกลุ่มงาน", "Clear group")}</button>}
         {msg && <span className="text-[11px] text-emerald-600">{msg}</span>}
       </div>

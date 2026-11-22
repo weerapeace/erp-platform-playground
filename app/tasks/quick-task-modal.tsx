@@ -47,7 +47,7 @@ export function QuickTaskModal({ open, onClose, onCreated, pushToast, me, locked
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="md" title={t("⚡ งานด่วน", "⚡ Quick task")} hasUnsavedChanges={!!title.trim()}
+    <ERPModal open={open} onClose={onClose} size="md" title={t("งานด่วน", "Quick task")} hasUnsavedChanges={!!title.trim()}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังสร้าง...", "Creating...") : t("สร้างงาน", "Create")}</button>

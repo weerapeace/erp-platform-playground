@@ -9,6 +9,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { useSWRLite, mutateSWR } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ConfirmDialog } from "@/components/modal";
@@ -106,7 +107,7 @@ export default function CampaignsPage() {
   const onDelete = async () => { if (!delTarget) return; try { await deleteCampaign(delTarget.id); pushToast("info", t("ลบแคมเปญแล้ว", "Campaign deleted")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
 
   return (
-    <StandaloneShell title={t("แคมเปญ Creative", "Creative Campaigns")} icon="📣" accent="violet">
+    <StandaloneShell title={t("แคมเปญ Creative", "Creative Campaigns")} icon="i:ad" accent="violet">
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -116,7 +117,7 @@ export default function CampaignsPage() {
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งานทั้งหมด", "All tasks")}</a>
             <button onClick={() => (manage ? exitManage() : setManage(true))} title={t("ติ๊กเลือกแคมเปญแล้วย้ายเข้าหมวด / เปลี่ยนหมวดรายใบ", "Select campaigns and move them into a category")}
-              className={`h-10 px-4 inline-flex items-center text-sm font-medium rounded-lg border ${manage ? "bg-violet-100 border-violet-300 text-violet-800" : "border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{manage ? `✕ ${t("เสร็จแล้ว", "Done")}` : `🗂 ${t("จัดหมวด", "Organize")}`}</button>
+              className={`h-10 px-4 inline-flex items-center text-sm font-medium rounded-lg border ${manage ? "bg-violet-100 border-violet-300 text-violet-800" : "border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{manage ? `✕ ${t("เสร็จแล้ว", "Done")}` : <><Icon value="i:folders" className="mr-1" />{t("จัดหมวด", "Organize")}</>}</button>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแคมเปญ", "Create campaign")}</button>
           </div>
         </div>
@@ -128,7 +129,7 @@ export default function CampaignsPage() {
         ) : campaignsSWR.error && campaigns.length === 0 ? (
           <ErrorState onRetry={() => void load()} />
         ) : campaigns.length === 0 ? (
-          <EmptyState icon="📣" title={t("ยังไม่มีแคมเปญ", "No campaigns yet")} hint={t('สร้างแคมเปญเพื่อจัดกลุ่มงาน creative เช่น "Shopee 7.7" หรือ "เปิดตัวสินค้าใหม่"', 'Create a campaign to group creative tasks, e.g. "Shopee 7.7" or "New product launch"')} action={{ label: <>＋ {t("สร้างแคมเปญ", "Create campaign")}</>, onClick: openCreate }} />
+          <EmptyState icon={<Icon value="i:ad" />} title={t("ยังไม่มีแคมเปญ", "No campaigns yet")} hint={t('สร้างแคมเปญเพื่อจัดกลุ่มงาน creative เช่น "Shopee 7.7" หรือ "เปิดตัวสินค้าใหม่"', 'Create a campaign to group creative tasks, e.g. "Shopee 7.7" or "New product launch"')} action={{ label: <>＋ {t("สร้างแคมเปญ", "Create campaign")}</>, onClick: openCreate }} />
         ) : (
           <div className="space-y-6">
             {/* ตัวกรองหมวด */}
@@ -136,11 +137,11 @@ export default function CampaignsPage() {
               <button type="button" onClick={() => setCatFilter("")} className={`h-8 rounded-full border px-3 text-xs font-medium ${catFilter === "" ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t("ทุกหมวด", "All")} <span className="opacity-60">{campaigns.length}</span></button>
               {categories.map((cat) => { const n = campaigns.filter((c) => c.category_id === cat.id).length; return (
                 <button key={cat.id} type="button" onClick={() => setCatFilter(catFilter === cat.id ? "" : cat.id)} className={`h-8 rounded-full border px-3 text-xs font-medium ${catFilter === cat.id ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                  {cat.icon ? `${cat.icon} ` : ""}{cat.label} <span className="opacity-60">{n}</span></button>); })}
+                  {cat.icon ? <Icon value={cat.icon} className="mr-1" /> : null}{cat.label} <span className="opacity-60">{n}</span></button>); })}
               {campaigns.some((c) => !c.category_id) && (
                 <button type="button" onClick={() => setCatFilter(catFilter === NO_CAT ? "" : NO_CAT)} className={`h-8 rounded-full border border-dashed px-3 text-xs font-medium ${catFilter === NO_CAT ? "border-violet-600 bg-violet-600 text-white" : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"}`}>{t("ยังไม่จัดหมวด", "Uncategorized")} <span className="opacity-60">{campaigns.filter((c) => !c.category_id).length}</span></button>
               )}
-              <a href="/tasks/settings" className="ml-auto text-xs text-violet-700 hover:underline">⚙️ {t("จัดการหมวด", "Manage categories")}</a>
+              <a href="/tasks/settings" className="ml-auto text-xs text-violet-700 hover:underline"><Icon value="i:settings" className="mr-1" />{t("จัดการหมวด", "Manage categories")}</a>
             </div>
 
             {groups.length === 0 && <div className="rounded-xl border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">{t("ไม่มีแคมเปญในหมวดนี้", "No campaigns in this category")}</div>}
@@ -148,7 +149,7 @@ export default function CampaignsPage() {
             <section key={g.key}>
               <div className="mb-2 flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full" style={{ background: g.color || "#cbd5e1" }} />
-                <h2 className="text-sm font-semibold text-slate-800">{g.icon ? `${g.icon} ` : ""}{g.label}</h2>
+                <h2 className="text-sm font-semibold text-slate-800">{g.icon ? <Icon value={g.icon} className="mr-1" /> : null}{g.label}</h2>
                 <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">{g.items.length}</span>
               </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -161,8 +162,8 @@ export default function CampaignsPage() {
                     <div className="flex items-center gap-1.5">
                       {manage && <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggleSel(c.id)} onClick={(e) => e.stopPropagation()} className="h-4 w-4 accent-violet-600" />}
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${st.cls}`}>{st.label()}</span>
-                      {c.visibility === "private" && <span title={t("ส่วนตัว — เห็นเฉพาะเจ้าของ", "Private")} className="text-xs">🔒</span>}
-                      {c.visibility === "shared" && <span title={t("แชร์เฉพาะคนที่เลือก", "Shared")} className="text-xs">🔗</span>}
+                      {c.visibility === "private" && <span title={t("ส่วนตัว — เห็นเฉพาะเจ้าของ", "Private")} className="text-xs"><Icon value="i:lock" /></span>}
+                      {c.visibility === "shared" && <span title={t("แชร์เฉพาะคนที่เลือก", "Shared")} className="text-xs"><Icon value="i:link" /></span>}
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); setDelTarget(c); }} className="text-xs text-slate-300 hover:text-red-500">{t("ลบ", "Delete")}</button>
                   </div>
@@ -170,25 +171,25 @@ export default function CampaignsPage() {
                   {c.objective && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{c.objective}</p>}
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-3 flex-wrap">
                     {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
-                    {(c.start_date || c.end_date) && <span>· 🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
-                    {c.owner_label && <span>· 👤 {c.owner_label}</span>}
+                    {(c.start_date || c.end_date) && <span>· <Icon value="i:calendar" className="mr-1" />{c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
+                    {c.owner_label && <span>· <Icon value="i:user" className="mr-1" />{c.owner_label}</span>}
                   </div>
                   <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2">
                     {manage ? (
                       /* โหมดจัดหมวด: เปลี่ยนหมวดรายใบได้เลย */
                       <label className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-slate-500" onClick={(e) => e.stopPropagation()}>
-                        <span className="shrink-0">📁</span>
+                        <span className="shrink-0"><Icon value="i:folder" /></span>
                         <select value={c.category_id ?? ""} disabled={movingId === c.id} onChange={(e) => void moveOne(c, e.target.value)}
                           className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 disabled:opacity-50">
                           <option value="">{t("— ยังไม่จัดหมวด —", "— Uncategorized —")}</option>
-                          {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.icon ? `${cat.icon} ` : ""}{cat.label}</option>)}
+                          {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
                         </select>
                         {movingId === c.id && <span className="text-[10px] text-slate-400">…</span>}
                       </label>
                     ) : (
                       <>
-                        <button onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} className="text-xs font-medium text-violet-700 hover:underline">📋 {t("ดูรายละเอียด", "View details")}</button>
-                        <button onClick={(e) => { e.stopPropagation(); router.push(`/tasks/campaigns/${c.id}`); }} className="text-xs font-medium text-slate-500 hover:text-violet-700">🟪 {t("เข้ากระดาน", "Open board")}</button>
+                        <button onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} className="text-xs font-medium text-violet-700 hover:underline"><Icon value="i:clipboard-list" className="mr-1" />{t("ดูรายละเอียด", "View details")}</button>
+                        <button onClick={(e) => { e.stopPropagation(); router.push(`/tasks/campaigns/${c.id}`); }} className="text-xs font-medium text-slate-500 hover:text-violet-700"><Icon value="i:layout-kanban" className="mr-1" />{t("เข้ากระดาน", "Open board")}</button>
                       </>
                     )}
                   </div>
@@ -206,14 +207,14 @@ export default function CampaignsPage() {
       {manage && (
         <div className="fixed inset-x-0 bottom-0 z-[60] border-t border-violet-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
           <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-slate-800">🗂 {t("เลือกไว้", "Selected")} {selected.size} {t("แคมเปญ", "campaigns")}</span>
+            <span className="text-sm font-semibold text-slate-800"><Icon value="i:folders" className="mr-1" />{t("เลือกไว้", "Selected")} {selected.size} {t("แคมเปญ", "campaigns")}</span>
             <span className="text-xs text-slate-400">{t("กดการ์ดเพื่อเลือก · หรือเปลี่ยนหมวดรายใบจากช่องบนการ์ด", "Click cards to select, or change per card")}</span>
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <button onClick={() => setSelected(new Set(groups.flatMap((g) => g.items.map((c) => c.id))))} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">{t("เลือกทั้งหมดที่เห็น", "Select all visible")}</button>
               <button onClick={() => setSelected(new Set())} disabled={selected.size === 0} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">{t("ล้าง", "Clear")}</button>
               <select value={bulkCat} onChange={(e) => setBulkCat(e.target.value)} className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm">
                 <option value="">{t("— ยังไม่จัดหมวด —", "— Uncategorized —")}</option>
-                {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.icon ? `${cat.icon} ` : ""}{cat.label}</option>)}
+                {categories.map((cat) => <option key={cat.id} value={cat.id}>{cat.label}</option>)}
               </select>
               <button onClick={() => void createCatQuick().then((id) => { if (id) setBulkCat(id); })} className="h-9 rounded-md border border-violet-200 bg-violet-50 px-3 text-xs font-medium text-violet-700 hover:bg-violet-100">＋ {t("หมวดใหม่", "New category")}</button>
               <button onClick={() => void moveSelected()} disabled={selected.size === 0 || bulkBusy} className="h-9 rounded-md bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-40">{bulkBusy ? t("กำลังย้าย…", "Moving…") : `${t("ย้ายเข้าหมวด", "Move to category")} →`}</button>

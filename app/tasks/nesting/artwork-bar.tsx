@@ -10,6 +10,7 @@ import { useT } from "@/components/i18n";
 import { BrandSelect, type BrandSelectOption } from "@/components/brand-select";
 import { apiFetch } from "@/lib/api";
 import { targetReady, type ArtworkTarget } from "./artwork-card";
+import { Icon } from "@/components/icon";
 
 export function ArtworkBar({ value, onChange }: { value: ArtworkTarget; onChange: (v: ArtworkTarget) => void }) {
   const t = useT();
@@ -27,7 +28,7 @@ export function ArtworkBar({ value, onChange }: { value: ArtworkTarget; onChange
   const typeVal = value.types[0] ?? "";
   return (
     <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-xs ${ready ? "bg-violet-50 text-violet-800" : "bg-amber-50 text-amber-800"}`}>
-      <span className="font-medium">☁️ {t("เก็บเข้าคลัง Artwork เป็น", "Save to Artwork as")}</span>
+      <span className="font-medium"><Icon value="i:upload" className="mr-1" />{t("เก็บเข้าคลัง Artwork เป็น", "Save to Artwork as")}</span>
       <BrandSelect plain brands={brands} value={value.brandId} onChange={(id) => onChange({ ...value, brandId: id })}
         emptyLabel={t("— เลือกแบรนด์ —", "— Select brand —")} title={t("แบรนด์ของการ์ด artwork", "Brand of the artwork card")}
         className={`h-7 rounded border bg-white px-1.5 text-xs ${value.brandId ? "border-slate-300" : "border-amber-400"}`} />

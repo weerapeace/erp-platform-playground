@@ -19,6 +19,7 @@ import {
   type DriveFolderRef, type DriveRootInfo, type PrintType, type PublishResult,
 } from "./data";
 import type { Placed } from "./sheet-view";
+import { Icon } from "@/components/icon";
 
 type ExportSheet = { pdf: string; preview?: string; eps?: string };
 type Phase = "idle" | "export" | "drive" | "upload" | "card";
@@ -229,14 +230,14 @@ export function PublishModal({
         `The helper on this computer (v${helperVersion}) can't upload to Drive yet — right-click the scissors icon next to the clock → “Check for updates” (needs v${HELPER_DRIVE_VERSION} or later)`)
       : t("ติดต่อตัวช่วยในเครื่องนี้ไม่ได้", "Cannot reach the helper on this computer"))
     : !driveOn ? t("ยังไม่ได้ตั้งค่า Google Drive ของระบบ — แจ้งผู้ดูแล", "Google Drive isn't set up for the system yet — ask an admin")
-      : !code ? t("ยังไม่มีประเภทงานพิมพ์ — ตั้งที่คลังไฟล์ → ⚙️ จัดการประเภทงานพิมพ์", "No print types yet — set them up in the file library → ⚙️ Manage print types")
+      : !code ? t("ยังไม่มีประเภทงานพิมพ์ — ตั้งที่คลังไฟล์ → ปุ่มจัดการประเภทงานพิมพ์", "No print types yet — set them up in the file library → Manage print types button")
         : rootInfo && !target ? t("เลือกโฟลเดอร์ปลายทางก่อนส่ง", "Choose a destination folder before sending")
           : cantWrite ? t("ระบบยังเขียนลงโฟลเดอร์ปลายทางไม่ได้ — ดูวิธีแก้ด้านล่าง", "The system can't write to the destination folder yet — see below")
             : null;
 
   return (
     <ERPModal open={open} onClose={cancel} size="md" closeOnBackdrop={!busy} defaultExpanded={false}
-      title={`📤 ${t("ส่งเข้าคลังงานพิมพ์", "Send to the print library")}`}
+      title={t("ส่งเข้าคลังงานพิมพ์", "Send to the print library")}
       description={t("ไฟล์ขึ้น Google Drive + ได้การ์ดในคลังไฟล์ หมวดงานพิมพ์", "Files go to Google Drive and a card appears in the file library's print section")}
       footer={
         <div className="flex justify-end gap-2">
@@ -258,7 +259,7 @@ export function PublishModal({
               `This job was sent on ${new Date(publishedAt).toLocaleString("en-GB")} — sending again moves the old files with the same names to the Drive trash (restorable for 30 days) and updates the same card`)}
           </div>
         )}
-        {warn && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">⚠ {warn}</div>}
+        {warn && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800"><Icon value="i:alert-triangle" className="mr-1" />{warn}</div>}
 
         <div>
           <div className="mb-1 text-xs text-slate-500">{t("ประเภทงานพิมพ์", "Print type")}</div>
@@ -276,13 +277,13 @@ export function PublishModal({
           <div className="mb-1 text-xs text-slate-500">{t("โฟลเดอร์ปลายทาง", "Destination folder")}</div>
           {(rootMissing || pickMissing) && !pick && (
             <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              ⚠ {pickMissing ? t("หาโฟลเดอร์ที่เลือกไว้ไม่เจอ (ถูกย้าย/ลบ?) — เลือกโฟลเดอร์ใหม่", "The folder you chose earlier is gone (moved/deleted?) — choose a new one")
+              <Icon value="i:alert-triangle" className="mr-1" />{pickMissing ? t("หาโฟลเดอร์ที่เลือกไว้ไม่เจอ (ถูกย้าย/ลบ?) — เลือกโฟลเดอร์ใหม่", "The folder you chose earlier is gone (moved/deleted?) — choose a new one")
                 : t("หาโฟลเดอร์ส่งร้านพิมพ์ตั้งต้นไม่เจอ (ถูกย้าย/เปลี่ยนชื่อ?) — เลือกโฟลเดอร์ใหม่ก่อนส่ง", "The default print-shop folder is missing (moved/renamed?) — choose a new one before sending")}
             </div>
           )}
           <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1 break-all rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
-              📁 {target ? target.name : rootInfo ? t("— ยังไม่ได้เลือก —", "— not chosen —") : t("กำลังตรวจ…", "Checking…")}
+              <Icon value="i:folder" className="mr-1" />{target ? target.name : rootInfo ? t("— ยังไม่ได้เลือก —", "— not chosen —") : t("กำลังตรวจ…", "Checking…")}
               {pick && <span className="ml-1 text-[11px] text-violet-600">{t("(เลือกเอง · จำในเครื่องนี้)", "(your choice · remembered here)")}</span>}
             </div>
             {target?.url && <a href={target.url} target="_blank" rel="noreferrer" className="shrink-0 text-xs text-violet-700 underline">{t("เปิด", "Open")}</a>}
@@ -293,7 +294,7 @@ export function PublishModal({
           </div>
           {cantWrite && (
             <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <div>⚠ {t(`ระบบเห็นโฟลเดอร์ "${target!.name}" แต่ยังไม่มีสิทธิ์สร้างโฟลเดอร์ข้างใน — ใน Google Drive คลิกขวาโฟลเดอร์นี้ → แชร์ → เพิ่มบัญชีด้านล่างเป็น "ผู้จัดการเนื้อหา" (Content manager) แล้วกด "ตรวจอีกครั้ง"`,
+              <div><Icon value="i:alert-triangle" className="mr-1" />{t(`ระบบเห็นโฟลเดอร์ "${target!.name}" แต่ยังไม่มีสิทธิ์สร้างโฟลเดอร์ข้างใน — ใน Google Drive คลิกขวาโฟลเดอร์นี้ → แชร์ → เพิ่มบัญชีด้านล่างเป็น "ผู้จัดการเนื้อหา" (Content manager) แล้วกด "ตรวจอีกครั้ง"`,
                 `The system can see "${target!.name}" but can't create folders in it — in Google Drive right-click the folder → Share → add the account below as "Content manager", then press "Check again"`)}</div>
               {saEmail && (
                 <div className="mt-1.5 flex items-center gap-2">
@@ -343,7 +344,7 @@ export function PublishModal({
 
         <div>
           <div className="mb-1 text-xs text-slate-500">{t("จะสร้างที่", "Will be created at")}</div>
-          <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700">📁 {dest.join(" / ")}</div>
+          <div className="break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700"><Icon value="i:folder" className="mr-1" />{dest.join(" / ")}</div>
         </div>
 
         <div>
@@ -357,7 +358,7 @@ export function PublishModal({
 
         {busy && (
           <div className="rounded-lg bg-violet-50 px-3 py-2 text-violet-800">
-            <div>⏳ {phaseText[phase as Exclude<Phase, "idle">]}</div>
+            <div><Icon value="i:hourglass" className="mr-1" />{phaseText[phase as Exclude<Phase, "idle">]}</div>
             {phase === "upload" && push && (
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-1.5 rounded-full bg-violet-600 transition-all" style={{ width: `${pct}%` }} /></div>
             )}
@@ -366,7 +367,7 @@ export function PublishModal({
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">{error}</div>}
         {done && !busy && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
-            <div className="font-medium">✅ {done.share_url
+            <div className="font-medium"><Icon value="i:circle-check" className="mr-1" />{done.share_url
               ? (copied ? t("ส่งแล้ว · คัดลอกลิงก์ให้แล้ว (ทุกคนที่มีลิงก์ดูได้)", "Sent · link copied (anyone with the link can view)") : t("ส่งแล้ว · ลิงก์แชร์ (ทุกคนที่มีลิงก์ดูได้)", "Sent · share link (anyone with the link can view)"))
               : t("ส่งแล้ว", "Sent")}</div>
             {done.share_error && (

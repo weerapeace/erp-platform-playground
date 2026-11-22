@@ -12,6 +12,7 @@ import { isOverdue, type CreativeTask, type SubtaskAssignee } from "./data";
 import { AssigneeAvatar } from "./assignee-avatar";
 import { StatusBadge } from "./task-badges";
 import { EmptyState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
 
 type Row = { person: SubtaskAssignee; open: number; overdue: number; tasks: CreativeTask[] };
 
@@ -37,7 +38,7 @@ export function WorkloadBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; o
   const maxOpen = Math.max(1, ...rows.map((r) => r.open));
 
   if (rows.length === 0 && unassigned.length === 0) {
-    return <EmptyState title={t("ไม่มีงานค้างในระบบ 🎉", "No open tasks 🎉")} />;
+    return <EmptyState title={<>{t("ไม่มีงานค้างในระบบ", "No open tasks")}<Icon value="i:confetti" className="ml-1" /></>} />;
   }
 
   return (
@@ -51,7 +52,7 @@ export function WorkloadBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; o
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-slate-800">{r.person.label || t("ไม่ทราบชื่อ", "Unknown")}</span>
                 <span className="text-xs text-slate-500">{r.open} {t("งาน", "tasks")}</span>
-                {r.overdue > 0 && <span className="text-[11px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5">⚠ {t("เกินกำหนด", "overdue")} {r.overdue}</span>}
+                {r.overdue > 0 && <span className="text-[11px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5"><Icon value="i:alert-triangle" className="mr-1" />{t("เกินกำหนด", "overdue")} {r.overdue}</span>}
               </div>
               {/* แถบภาระงาน */}
               <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-1.5">
@@ -74,7 +75,7 @@ export function WorkloadBoard({ tasks, onCardClick }: { tasks: CreativeTask[]; o
 
       {unassigned.length > 0 && (
         <div className="bg-amber-50/50 rounded-xl border border-amber-200 p-3">
-          <p className="text-sm font-semibold text-amber-800 mb-2">🕳 {t("ยังไม่มีผู้รับผิดชอบ", "Unassigned")} ({unassigned.length})</p>
+          <p className="text-sm font-semibold text-amber-800 mb-2"><Icon value="i:user" className="mr-1" />{t("ยังไม่มีผู้รับผิดชอบ", "Unassigned")} ({unassigned.length})</p>
           <div className="flex flex-wrap gap-1.5">
             {unassigned.map((tk) => (
               <button key={tk.id} onClick={() => onCardClick(tk.id)} className="inline-flex items-center gap-1.5 text-xs rounded-lg border border-amber-200 bg-white px-2 py-1 hover:border-violet-300 max-w-[260px]">

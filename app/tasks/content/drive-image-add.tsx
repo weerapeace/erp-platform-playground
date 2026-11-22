@@ -7,6 +7,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { type ToastVariant } from "@/components/toast";
 import { resolveDriveLink, type DriveFileRef } from "../data";
+import { Icon } from "@/components/icon";
 
 export function DriveImageAdd({ existingKeys, onAdd, pushToast }: {
   existingKeys: string[];                              // คีย์ drive:<id> ที่แนบอยู่แล้ว (กันซ้ำ)
@@ -54,13 +55,13 @@ export function DriveImageAdd({ existingKeys, onAdd, pushToast }: {
           placeholder={t("วางลิงก์รูป หรือลิงก์โฟลเดอร์จาก Google Drive...", "Paste a Google Drive image or folder link...")}
           className="flex-1 min-w-0 h-8 border border-slate-200 rounded-md px-2 text-xs" />
         <button onClick={() => void check()} disabled={busy || !link.trim()} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50 shrink-0">
-          {busy && !pick ? t("⏳ ตรวจ…", "⏳ Checking…") : t("＋ รูปจาก Drive", "＋ From Drive")}
+          {busy && !pick ? <><Icon value="i:hourglass" className="mr-1" />{t("ตรวจ…", "Checking…")}</> : t("＋ รูปจาก Drive", "＋ From Drive")}
         </button>
       </div>
       <p className="text-[10px] text-slate-400 mt-0.5">{t("รูปอยู่ที่ Drive ที่เดียว (ไม่ก็อปลงระบบ) · โพสต์อัตโนมัติได้ · ต้องแชร์ไฟล์/โฟลเดอร์ให้บัญชีระบบก่อน", "Stays on Drive (no copy) · auto-post ready · share with the system account first")}</p>
 
       {pick && (
-        <ERPModal open onClose={() => setPick(null)} size="lg" title={`📁 ${pick.name || "Google Drive"}`}
+        <ERPModal open onClose={() => setPick(null)} size="lg" title={pick.name || "Google Drive"}
           footer={<>
             <button onClick={() => setPick(null)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => void confirmPick()} disabled={busy || sel.length === 0} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">

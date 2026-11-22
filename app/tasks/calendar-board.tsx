@@ -10,6 +10,7 @@ import { ScheduleBoard } from "@/components/schedule-board";
 import { useViewportLayout } from "@/components/device-view";
 import { statusMeta, isTerminal, transitionsFrom } from "./use-statuses";
 import { isOverdue, type CreativeTask } from "./data";
+import { Icon } from "@/components/icon";
 
 export function CalendarBoard({ tasks, onCardClick, onSetDue, onSetDueMany, onStatus }: {
   tasks: CreativeTask[];
@@ -67,12 +68,12 @@ export function CalendarBoard({ tasks, onCardClick, onSetDue, onSetDueMany, onSt
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-slate-600">
               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>
-              <span>👤 {who(t)}</span>
-              {t.product_name && <span className="truncate">📦 {t.product_name}</span>}
+              <span><Icon value="i:user" className="mr-1" />{who(t)}</span>
+              {t.product_name && <span className="truncate"><Icon value="i:package" className="mr-1" />{t.product_name}</span>}
             </div>
             {onSetDue && (
               <label className="flex items-center gap-1.5">
-                <span className="shrink-0 text-slate-500">📅 วันส่ง</span>
+                <span className="shrink-0 text-slate-500"><Icon value="i:calendar" className="mr-1" />วันส่ง</span>
                 <input type="date" value={t.due_date ? String(t.due_date).slice(0, 10) : ""} onChange={(e) => onSetDue(t, e.target.value || null)}
                   className="h-8 flex-1 rounded-lg border border-slate-200 px-2 text-xs" />
               </label>
@@ -85,7 +86,7 @@ export function CalendarBoard({ tasks, onCardClick, onSetDue, onSetDueMany, onSt
                 ))}
               </div>
             )}
-            <button type="button" onClick={() => { close(); onCardClick(t.id); }} className="h-8 w-full rounded-lg bg-violet-600 text-white hover:bg-violet-700">เปิดรายละเอียดเต็ม ↗</button>
+            <button type="button" onClick={() => { close(); onCardClick(t.id); }} className="h-8 w-full rounded-lg bg-violet-600 text-white hover:bg-violet-700">เปิดรายละเอียดเต็ม<Icon value="i:external-link" className="ml-1" /></button>
           </div>
         );
       }}

@@ -10,6 +10,7 @@ import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { askConfirm } from "@/components/modal/ask-dialog";
 
 type LibItem = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null; is_active: boolean; sort_order: number; default_message: string | null };
@@ -81,7 +82,7 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
 
   return (
     <ERPModal open={open} onClose={close} size="lg" storageKey="gif-poke-admin"
-      title={t("🗂 จัดการคลัง GIF", "🗂 Manage GIF library")}
+      title={t("จัดการคลัง GIF", "Manage GIF library")}
       description={t("เพิ่ม/ลบ/ซ่อน · แก้ชื่อ หมวด และลำดับ", "Add/remove/hide · edit name, category, order")}
       footer={<button onClick={close} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">{t("เสร็จ", "Done")}</button>}>
       <div className="space-y-3">
@@ -97,7 +98,7 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
           </div>
           <button onClick={addUrl} disabled={busy || !newUrl.trim()} className="h-8 px-3 text-xs font-bold text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{t("＋ เพิ่มลิงก์", "＋ Add link")}</button>
           <input ref={fileRef} type="file" accept="image/gif,image/webp,image/png,image/jpeg" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
-          <button onClick={() => fileRef.current?.click()} disabled={busy} className="h-8 px-3 text-xs font-medium text-violet-700 bg-violet-100 rounded-lg hover:bg-violet-200 disabled:opacity-50">{busy ? t("...", "...") : t("⬆ อัปโหลด", "⬆ Upload")}</button>
+          <button onClick={() => fileRef.current?.click()} disabled={busy} className="h-8 px-3 text-xs font-medium text-violet-700 bg-violet-100 rounded-lg hover:bg-violet-200 disabled:opacity-50">{busy ? t("...", "...") : <><Icon value="i:upload" className="mr-1" />{t("อัปโหลด", "Upload")}</>}</button>
         </div>
 
         {err && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{err}</p>}
@@ -121,10 +122,10 @@ export function GifPokeAdmin({ open, onClose, onChanged }: { open: boolean; onCl
                       title={t("ลำดับ", "Order")} className="w-14 h-8 px-2 text-sm border border-slate-200 rounded-lg" />
                     <button onClick={() => void patchItem(g.id, { is_active: !g.is_active })} title={g.is_active ? t("ซ่อน", "Hide") : t("แสดง", "Show")}
                       className={`h-8 px-2 text-xs rounded-lg shrink-0 ${g.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{g.is_active ? t("แสดง", "Shown") : t("ซ่อน", "Hidden")}</button>
-                    <button onClick={() => void del(g.id)} title={t("ลบ", "Delete")} className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 rounded-lg shrink-0">🗑</button>
+                    <button onClick={() => void del(g.id)} title={t("ลบ", "Delete")} className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 rounded-lg shrink-0"><Icon value="i:trash" /></button>
                   </div>
                   <input defaultValue={g.default_message ?? ""} onBlur={(e) => { const v = e.target.value.trim(); if (v !== (g.default_message ?? "")) void patchItem(g.id, { default_message: v }); }}
-                    placeholder={t("💬 ข้อความ default (เลือก GIF นี้แล้วเติมให้อัตโนมัติ)", "💬 Default message (auto-filled when this GIF is picked)")}
+                    placeholder={t("ข้อความ default (เลือก GIF นี้แล้วเติมให้อัตโนมัติ)", "Default message (auto-filled when this GIF is picked)")}
                     className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg" />
                 </div>
               );

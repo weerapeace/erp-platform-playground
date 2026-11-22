@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { Icon } from "@/components/icon";
 
 type BrandRow = { id: string; name: string; color: string | null; folder_id: string; folder_name: string; folder_url: string };
 
@@ -44,12 +45,12 @@ export function BrandDriveFolders() {
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
       <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="font-semibold text-slate-800">🗂️ {t("โฟลเดอร์ Drive ต่อแบรนด์", "Drive folder per brand")}</h2>
+        <h2 className="font-semibold text-slate-800"><Icon value="i:folders" className="mr-1" />{t("โฟลเดอร์ Drive ต่อแบรนด์", "Drive folder per brand")}</h2>
         <p className="text-xs text-slate-400 mt-0.5">{t("ตั้งโฟลเดอร์แม่ใน Google Drive ให้แต่ละแบรนด์ — เวลากด \"สร้างโฟลเดอร์ + อัปไฟล์ขึ้น Drive\" ในงาน ระบบจะสร้างโครงโฟลเดอร์ (ตาม Parent SKU) ไว้ใต้โฟลเดอร์แม่ของแบรนด์นั้น", "Set a parent Google Drive folder for each brand — the task's \"Create Drive folder\" button builds the folder structure under that brand's parent folder")}</p>
-        <p className="text-[11px] text-slate-400 mt-1">💡 {t("วิธีตั้ง: เปิดโฟลเดอร์แม่ใน Google Drive → คัดลอกลิงก์ → วางในช่องของแบรนด์ (ต้องแชร์โฟลเดอร์ให้ service account สิทธิ์ Editor ก่อน)", "How: open the parent folder in Google Drive → copy link → paste into the brand's box (share the folder with the service account as Editor first)")}</p>
+        <p className="text-[11px] text-slate-400 mt-1"><Icon value="i:bulb" className="mr-1" />{t("วิธีตั้ง: เปิดโฟลเดอร์แม่ใน Google Drive → คัดลอกลิงก์ → วางในช่องของแบรนด์ (ต้องแชร์โฟลเดอร์ให้ service account สิทธิ์ Editor ก่อน)", "How: open the parent folder in Google Drive → copy link → paste into the brand's box (share the folder with the service account as Editor first)")}</p>
       </div>
       <div className="p-5">
-        {!driveOn && <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("⚠ ยังไม่ได้ตั้งค่า Google Drive (service account) — ตั้งค่าไม่ได้จนกว่าจะเพิ่ม env", "⚠ Google Drive is not configured (service account) — add env first")}</div>}
+        {!driveOn && <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><Icon value="i:alert-triangle" className="mr-1" />{t("ยังไม่ได้ตั้งค่า Google Drive (service account) — ตั้งค่าไม่ได้จนกว่าจะเพิ่ม env", "Google Drive is not configured (service account) — add env first")}</div>}
         {rows === null ? <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
           : rows.length === 0 ? <div className="py-10 text-center text-slate-400">{t("ยังไม่มีแบรนด์", "No brands yet")}</div>
           : (
@@ -62,7 +63,7 @@ export function BrandDriveFolders() {
                       <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: hex }} />
                       <span className="font-medium text-slate-800 text-sm min-w-[120px]">{b.name}</span>
                       {b.folder_id ? (
-                        <a href={b.folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 truncate max-w-[220px]" title={b.folder_name}>📁 {b.folder_name || t("โฟลเดอร์", "Folder")}</a>
+                        <a href={b.folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2 py-0.5 rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 truncate max-w-[220px]" title={b.folder_name}><Icon value="i:folder" className="mr-1" />{b.folder_name || t("โฟลเดอร์", "Folder")}</a>
                       ) : (
                         <span className="text-xs text-slate-400">{t("ยังไม่ตั้ง", "Not set")}</span>
                       )}

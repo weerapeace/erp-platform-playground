@@ -19,6 +19,7 @@ import type { CreativeTask } from "./data";
 import { statusMeta, canTransitionTo, type Status } from "./use-statuses";
 import { useToast } from "@/components/toast";
 import { TaskCard, taskCardCfg } from "./task-card";
+import { Icon } from "@/components/icon";
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
@@ -398,26 +399,26 @@ export function CanvasBoard({
     <div ref={wrapRef} className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
       {/* Toolbar */}
       <div className={`${isMax ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
-        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title={t("เลือก/ลาก", "Select / Drag")}>🖱️</ToolBtn>
-        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title={t("เลื่อนกระดาน", "Pan canvas")}>✋</ToolBtn>
+        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title={t("เลือก/ลาก", "Select / Drag")}><Icon value="i:pointer" /></ToolBtn>
+        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title={t("เลื่อนกระดาน", "Pan canvas")}><Icon value="i:hand-stop" /></ToolBtn>
         <Sep />
         <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title={t("กล่อง", "Box")}>▭</ToolBtn>
         <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title={t("ข้อความ", "Text")}>𝐓</ToolBtn>
-        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title={t("โน้ตกาว", "Sticky note")}>🟨</ToolBtn>
+        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title={t("โน้ตกาว", "Sticky note")}><Icon value="i:notes" /></ToolBtn>
         <ToolBtn active={tool === "connect"} onClick={() => { setTool(tool === "connect" ? "select" : "connect"); setConnectFrom(null); }} title={t("เชื่อมลูกศร (คลิกต้นทาง → ปลายทาง)", "Connect arrow (click source → target)")}>↗</ToolBtn>
         <Sep />
         <ToolBtn onClick={undo} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} disabled={!past.length}>↶</ToolBtn>
         <ToolBtn onClick={redo} title={t("ทำซ้ำ (Ctrl+Y)", "Redo (Ctrl+Y)")} disabled={!future.length}>↷</ToolBtn>
         <Sep />
-        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title={t("ซูมออก", "Zoom out")}>➖</ToolBtn>
+        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title={t("ซูมออก", "Zoom out")}><Icon value="i:zoom-out" /></ToolBtn>
         <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
-        <ToolBtn onClick={() => zoomBtn(1.2)} title={t("ซูมเข้า", "Zoom in")}>➕</ToolBtn>
+        <ToolBtn onClick={() => zoomBtn(1.2)} title={t("ซูมเข้า", "Zoom in")}><Icon value="i:zoom-in" /></ToolBtn>
         <Sep />
-        <ToolBtn onClick={resetView} title={t("จัดมุมมองกลับ", "Reset view")}>🎯</ToolBtn>
+        <ToolBtn onClick={resetView} title={t("จัดมุมมองกลับ", "Reset view")}><Icon value="i:target" /></ToolBtn>
         <ToolBtn onClick={resetLayout} title={t("จัดเรียงการ์ดใหม่", "Reset card layout")}>↺</ToolBtn>
-        <ToolBtn onClick={toggleFs} title={isMax ? t("ย่อกลับ (Esc)", "Restore (Esc)") : t("ขยายเต็มหน้าต่าง", "Fullscreen")}>{isMax ? "🗗" : "⛶"}</ToolBtn>
+        <ToolBtn onClick={toggleFs} title={isMax ? t("ย่อกลับ (Esc)", "Restore (Esc)") : t("ขยายเต็มหน้าต่าง", "Fullscreen")}>{isMax ? <Icon value="i:minimize" /> : <Icon value="i:maximize" />}</ToolBtn>
         <Sep />
-        {canFreeMove && <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? t("ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)", "Free move: ON — drag to any status (bypass workflow)") : t("ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow", "Free move: OFF — follow workflow transitions")}>{freeMove ? "🔓" : "🔒"}</ToolBtn>}
+        {canFreeMove && <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? t("ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)", "Free move: ON — drag to any status (bypass workflow)") : t("ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow", "Free move: OFF — follow workflow transitions")}>{freeMove ? <Icon value="i:lock-open" /> : <Icon value="i:lock" />}</ToolBtn>}
         {onAddTask && <button onClick={onAddTask} title={t("เพิ่มงานใหม่", "Add task")} className="h-8 px-2.5 ml-0.5 flex items-center gap-1 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">＋ {t("งาน", "Task")}</button>}
       </div>
       {/* ปุ่มออกจากเต็มจอ (ลอยมุมขวาบน) */}
@@ -573,7 +574,7 @@ export function CanvasBoard({
           const nextAlign: Record<Align, Align> = { left: "center", center: "right", right: "left" };
           return (
             <div ref={barRef} className="absolute z-30 flex items-stretch bg-white rounded-xl border border-slate-200 shadow-lg h-11" style={{ left: barPos.left, top: barPos.top }} onPointerDown={e => e.stopPropagation()}>
-              <div className="flex items-center px-3 text-slate-700 font-semibold text-sm">{selKind === "text" ? "T" : selKind === "box" ? "▭" : selKind === "image" ? "🖼" : "🟨"}</div>
+              <div className="flex items-center px-3 text-slate-700 font-semibold text-sm">{selKind === "text" ? "T" : selKind === "box" ? "▭" : selKind === "image" ? <Icon value="i:photo" /> : <Icon value="i:notes" />}</div>
 
               {o && <>
                 <BarSep />
@@ -625,10 +626,10 @@ export function CanvasBoard({
                 <div className="absolute top-full right-0 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40 text-sm">
                   <MenuItem onClick={() => { duplicateSelected(); setPop(null); }}>⧉ {t("คัดลอก", "Duplicate")}</MenuItem>
                   {o && <>
-                    <MenuItem onClick={() => { bringFront(); setPop(null); }}>⬆ {t("ขึ้นหน้าสุด", "Bring to front")}</MenuItem>
-                    <MenuItem onClick={() => { sendBack(); setPop(null); }}>⬇ {t("ลงหลังสุด", "Send to back")}</MenuItem>
+                    <MenuItem onClick={() => { bringFront(); setPop(null); }}><Icon value="i:chevron-up" className="mr-1" />{t("ขึ้นหน้าสุด", "Bring to front")}</MenuItem>
+                    <MenuItem onClick={() => { sendBack(); setPop(null); }}><Icon value="i:chevron-down" className="mr-1" />{t("ลงหลังสุด", "Send to back")}</MenuItem>
                   </>}
-                  <MenuItem danger onClick={() => { deleteSelected(); setPop(null); }}>🗑 {t("ลบ", "Delete")}</MenuItem>
+                  <MenuItem danger onClick={() => { deleteSelected(); setPop(null); }}><Icon value="i:trash" className="mr-1" />{t("ลบ", "Delete")}</MenuItem>
                 </div>
               )}
             </div>

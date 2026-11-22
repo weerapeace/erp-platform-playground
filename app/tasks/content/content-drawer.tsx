@@ -233,7 +233,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); images.push({ key: a.r2_key, label: s.title, status: s.status }); } }
           else if (a.kind !== "image" && a.url) {
             const lb = (a.label ?? "").trim();
-            links.push({ label: lb && !["path", "video", "link"].includes(lb) && !isLocalPath(lb) ? `${s.title} · ${lb}` : lb === "video" ? `${s.title} · 🎬` : s.title, url: a.url });
+            links.push({ label: lb && !["path", "video", "link"].includes(lb) && !isLocalPath(lb) ? `${s.title} · ${lb}` : lb === "video" ? `${s.title} · ${t("วิดีโอ", "video")}` : s.title, url: a.url });
           }
         }
         for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, label: s.title, status: s.status }); } }
@@ -753,7 +753,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <div className="flex items-center gap-1.5 min-w-0">
                 <h3 onDoubleClick={() => setTitleEdit(d.title ?? "")} title={t("ดับเบิลคลิกเพื่อแก้ชื่อ", "Double-click to rename")}
                   className="text-base font-semibold text-slate-900 truncate cursor-text hover:bg-slate-50 rounded px-1 -mx-1">{d.title}</h3>
-                <button type="button" onClick={() => setTitleEdit(d.title ?? "")} title={t("แก้ชื่อคอนเทนต์", "Rename")} className="shrink-0 h-6 w-6 rounded text-slate-400 hover:text-violet-700 hover:bg-violet-50 text-xs">✏️</button>
+                <button type="button" onClick={() => setTitleEdit(d.title ?? "")} title={t("แก้ชื่อคอนเทนต์", "Rename")} className="shrink-0 h-6 w-6 rounded text-slate-400 hover:text-violet-700 hover:bg-violet-50 text-xs inline-flex items-center justify-center"><Icon value="i:pencil" /></button>
               </div>
             ) : (
               <input autoFocus value={titleEdit} onChange={(e) => setTitleEdit(e.target.value)}
@@ -773,11 +773,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <span className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${brandLabel ? "bg-violet-50 text-violet-800 border-violet-200" : "text-slate-400 border-slate-200"}`} title={t("แบรนด์ (แก้ที่การ์ดสินค้า)", "Brand (edit in product card)")}>
                 <span className="h-2 w-2 rounded-full" style={{ background: (brands.find((b) => b.id === brandId)?.color) || "#cbd5e1" }} />{brandLabel ?? t("ยังไม่ระบุแบรนด์", "No brand")}
               </span>
-              <span className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${schedLabel ? "text-slate-600 border-slate-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>🗓 {schedLabel ?? t("ยังไม่ตั้งเวลา", "Not scheduled")}</span>
+              <span className={`inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5 border ${schedLabel ? "text-slate-600 border-slate-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}><Icon value="i:calendar" />{schedLabel ?? t("ยังไม่ตั้งเวลา", "Not scheduled")}</span>
               {/* ผูกกับงานอยู่ → กดไปดูงานนั้นได้เลย (เปิดแท็บใหม่ ไม่หลุดจากคอนเทนต์ที่กำลังแก้) */}
               {d.task_id && (
                 <a href={`/tasks?task=${d.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานที่ผูกกับคอนเทนต์นี้ (แท็บใหม่)", "Open the linked task (new tab)")}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:underline whitespace-nowrap">👁 {t("ดูงาน", "View task")} ↗</a>
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:underline whitespace-nowrap"><Icon value="i:eye" />{t("ดูงาน", "View task")} ↗</a>
               )}
               {/* สร้างจากอัลบั้ม Contents (คลังไฟล์) → กดกลับไปดูไฟล์ทั้งชุดในอัลบั้ม */}
               {d.album_id && (
@@ -819,10 +819,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {!isHidden(dth, "product") && (
             <div style={{ order: cOrderOf("product") }} className="border border-slate-200 rounded-xl bg-white p-3">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-sm font-semibold text-slate-700">🛍 {cLabelOf("product")}</span>
+                <span className="text-sm font-semibold text-slate-700"><Icon value="i:shopping-bag" className="mr-1" />{cLabelOf("product")}</span>
                 <div className="flex items-center gap-3">
                   {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-[11px] text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงจากงาน", "⬇ Pull from task")}</button>}
-                  {hasProduct && <button onClick={() => setProdEdit((v) => !v)} className="text-xs font-medium text-violet-700 hover:underline">{prodEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("แก้ไข", "Edit")}`}</button>}
+                  {hasProduct && <button onClick={() => setProdEdit((v) => !v)} className="text-xs font-medium text-violet-700 hover:underline">{prodEdit ? `✓ ${t("เสร็จ", "Done")}` : <><Icon value="i:pencil" className="mr-1" />{t("แก้ไข", "Edit")}</>}</button>}
                 </div>
               </div>
               {/* โหมดดู */}
@@ -831,7 +831,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   {productCover
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={productCover} alt="" className="h-14 w-14 rounded-lg object-cover border border-slate-200 shrink-0" />
-                    : <div className="h-14 w-14 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 text-xl shrink-0">🛍</div>}
+                    : <div className="h-14 w-14 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 text-xl shrink-0"><Icon value="i:shopping-bag" /></div>}
                   <div className="min-w-0 flex-1">
                     <div className="font-mono text-[11px] text-slate-500 truncate">{sku?.code ?? parent?.code}{sku && parent ? <span className="text-slate-300"> · Parent {parent.code}</span> : null}</div>
                     <div className="text-sm text-slate-800 leading-snug line-clamp-2">{sku?.name ?? parent?.name}</div>
@@ -935,13 +935,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {/* ตั้งเวลาโพสต์ — เด่น ปักบนสุด · (สถานะ/ผู้รับผิดชอบ ย้ายไปจัดการที่งานย่อยแทน) */}
             <div className="bg-violet-50 border border-violet-200 rounded-xl p-3">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
-                <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline">⚙️ {t("เวลาแนะนำ", "Suggested times")}</button>
+                <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5"><Icon value="i:calendar" />{t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
+                <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline"><Icon value="i:settings" className="mr-1" />{t("เวลาแนะนำ", "Suggested times")}</button>
               </div>
               <div className="mt-1.5"><ERPDateTime24 value={scheduledAt} onChange={setScheduledAt} /></div>
               {schedRec && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
+                  <span className="text-[11px] text-violet-400"><Icon value="i:bulb" className="mr-1" />{t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
                   {schedRec.items.map((it) => (
                     <button key={it.time} type="button" onClick={() => applyRecommendedTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
                   ))}
@@ -954,9 +954,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               {can("tasks.edit") && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => setLineOpen(true)} title={t("ระบบร่างข้อความ+รูปให้ แล้วคัดลอกไปส่งเองใน LINE OA", "Draft text + images to send in LINE OA")}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100">💬 {t("ร่าง LINE Broadcast", "Draft LINE broadcast")}</button>
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-100"><Icon value="i:message-circle" />{t("ร่าง LINE Broadcast", "Draft LINE broadcast")}</button>
                   {(autoConnected("facebook") || autoConnected("instagram")) && <button type="button" onClick={() => setStoryOpen(true)}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-pink-200 bg-pink-50 px-3 text-xs font-medium text-pink-700 hover:bg-pink-100">📲 {t("ลง Story (Facebook + Instagram)", "Post Story (Facebook + Instagram)")}</button>}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-pink-200 bg-pink-50 px-3 text-xs font-medium text-pink-700 hover:bg-pink-100"><Icon value="i:device-mobile" />{t("ลง Story (Facebook + Instagram)", "Post Story (Facebook + Instagram)")}</button>}
                   {(["facebook", "instagram"] as const).filter((pp) => postStatus[`${pp}_story`] === "posted").map((pp) => (
                     <a key={pp} href={postedLinks[`${pp}_story`] || undefined} target="_blank" rel="noreferrer" className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-700">✓ {pp === "facebook" ? "FB" : "IG"} Story</a>
                   ))}
@@ -969,7 +969,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             <div style={{ order: cOrderOf("media") }} className="border border-slate-200 rounded-xl bg-white p-3">
               <div className="flex items-center justify-between gap-2 mb-2">
                 <button onClick={() => toggleColl("media")} className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 min-w-0">
-                  <span className="text-[10px] text-slate-300">{coll("media") ? "▸" : "▾"}</span>🖼 {cLabelOf("media")}
+                  <span className="text-[10px] text-slate-300">{coll("media") ? "▸" : "▾"}</span><Icon value="i:photo" className="mr-1" />{cLabelOf("media")}
                   <span className="text-[11px] font-normal text-slate-400">{postImages.length} {t("ไฟล์", "files")}</span>
                 </button>
                 <button onClick={() => { setMediaAdd((v) => !v); if (coll("media")) toggleColl("media"); }} className="text-xs font-medium text-violet-700 hover:underline shrink-0">{mediaAdd ? `✓ ${t("เสร็จ", "Done")}` : `＋ ${t("เพิ่ม / จัดการ", "Add / manage")}`}</button>
@@ -994,7 +994,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     Object.values(platformFormats).includes("story") && attachments.length === 0 ? (
                       // Story ที่ลงแผนไว้ก่อน (สร้างจากแถบ 📖 ในปฏิทินโดยยังไม่ใส่ไฟล์)
                       <button onClick={() => setMediaAdd(true)} className="w-full rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800 hover:bg-amber-100">
-                        📎 {t("Story นี้ยังไม่มีไฟล์ — กดที่นี่เพื่ออัปโหลดรูป/วิดีโอ หรือวางลิงก์ Google Drive", "This story has no file yet — click to upload an image/video or paste a Google Drive link")}
+                        <Icon value="i:paperclip" className="mr-1" />{t("Story นี้ยังไม่มีไฟล์ — กดที่นี่เพื่ออัปโหลดรูป/วิดีโอ หรือวางลิงก์ Google Drive", "This story has no file yet — click to upload an image/video or paste a Google Drive link")}
                       </button>
                     ) : (
                     <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป — กด ＋ เพิ่ม หรือผูกงานที่มีรูปส่งมาแล้ว", "No media yet — click ＋ or link a task that has images")}</p>
@@ -1012,14 +1012,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                           <div key={im.key} {...mediaDrag.rowProps(gi)} {...mediaDrag.handleProps(gi)} title={t("ลากเพื่อสลับตำแหน่ง", "Drag to reorder")}
                             className={`relative group aspect-square cursor-grab active:cursor-grabbing ${mediaDrag.rowCls(gi)}`}>
                             {im.type === "video"
-                              ? <div className="w-full h-full rounded-lg border border-slate-200 bg-slate-800 text-white flex items-center justify-center text-lg" title={im.label ?? ""}>🎬</div>
+                              ? <div className="w-full h-full rounded-lg border border-slate-200 bg-slate-800 text-white flex items-center justify-center text-lg" title={im.label ?? ""}><Icon value="i:movie" /></div>
                               // eslint-disable-next-line @next/next/no-img-element
                               : <img src={r2ImageUrl(im.key, 240) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(lbIdx)} title={`${im.label ?? ""}${bd ? ` · ${bd.label}` : ""}`} className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-zoom-in" />}
                             <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${isTask ? (bd?.cls ?? "bg-slate-400") : "bg-violet-500"}`}>{isTask ? t("งาน", "task") : t("อัปเอง", "own")}</span>
                             {usedBy > 0 && <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-emerald-600 text-white px-1 py-px rounded" title={t(`เลือกใช้ใน ${usedBy} แพลตฟอร์ม`, `Used by ${usedBy} platform(s)`)}>✓{usedBy}</span>}
                             {ownAtt?.drive_file_id && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-white/95 text-emerald-700 px-1 py-px rounded inline-flex items-center gap-0.5" title={t("มีต้นฉบับเต็มใน Google Drive", "Full original in Google Drive")}><Icon name="folder" size={8} />{t("ต้นฉบับ", "orig")}</span>}
                             <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
-                              {im.type !== "video" && <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>}
+                              {im.type !== "video" && <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700"><Icon value="i:link" /></button>}
                               {driveId
                                 ? <>
                                     <a href={driveFileViewUrl(driveId)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={t("เปิดต้นฉบับใน Google Drive", "Open the original in Google Drive")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-emerald-700 text-[10px] shadow hover:text-emerald-900"><Icon name="open" size={11} /></a>
@@ -1037,12 +1037,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   )}
                   {(pathItems.length > 0 || mediaAdd) && (
                     <div className="mt-2 space-y-1">
-                      <p className="text-[11px] text-slate-400">📂 {t("Path ไฟล์ — คัดลอกไปวางในช่องเลือกไฟล์ตอนอัปขึ้นแพลตฟอร์ม", "File paths — copy & paste into the upload file picker")}</p>
+                      <p className="text-[11px] text-slate-400"><Icon value="i:folder-open" className="mr-1" />{t("Path ไฟล์ — คัดลอกไปวางในช่องเลือกไฟล์ตอนอัปขึ้นแพลตฟอร์ม", "File paths — copy & paste into the upload file picker")}</p>
                       {pathItems.map((p) => (
                         <div key={p.path} className="group/pt flex items-center gap-1.5 text-[11px]">
                           {/^https?:\/\//i.test(p.path)
-                            ? <a href={p.path} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-violet-700 hover:underline" title={p.path}>🔗 {p.path}</a>
-                            : <span className="min-w-0 flex-1 truncate font-mono text-slate-700" title={p.path}>📂 {p.path}</span>}
+                            ? <a href={p.path} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-violet-700 hover:underline" title={p.path}><Icon value="i:link" className="mr-1" />{p.path}</a>
+                            : <span className="min-w-0 flex-1 truncate font-mono text-slate-700" title={p.path}><Icon value="i:folder-open" className="mr-1" />{p.path}</span>}
                           <span className="shrink-0 max-w-[40%] truncate text-[10px] text-slate-400" title={p.label ?? ""}>{p.label}</span>
                           <CopyButton value={p.path} title={t(`คัดลอก path: ${p.path}`, `Copy path: ${p.path}`)} className="!w-5 !h-5" />
                           {p.attId && <button onClick={() => setDelAtt({ id: p.attId as string, label: p.path })} title={t("เอา path นี้ออก", "Remove this path")} className="shrink-0 text-slate-300 hover:text-rose-600 opacity-0 group-hover/pt:opacity-100">✕</button>}
@@ -1072,8 +1072,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <p className="text-sm font-semibold text-slate-700">{t("แพลตฟอร์ม", "Platforms")} <span className="text-[11px] font-normal text-slate-400">{caps.length} {t("ช่อง", "channels")} · {t("โพสต์แล้ว", "posted")} {doneCount}/{totalCount}</span></p>
               <CaptionToolbar pinned={pinnedTools} onSavePinned={savePinnedTools} actions={[
                 ...(canAiCaption && caps.length > 0 ? [{
-                  key: "ai", primary: true,
-                  label: aiAllBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียนทั้งหมด", "✨ AI write all"),
+                  key: "ai", primary: true, icon: "i:sparkles",
+                  label: aiAllBusy ? t("กำลังเขียน...", "Writing...") : t("AI เขียนทั้งหมด", "AI write all"),
                   onClick: () => setAiModal({ platforms: caps.filter((c) => pset[c.platform]?.use_caption !== false && (postStatus[c.platform] ?? "todo") !== "skip").map((c) => c.platform) }),
                 }] : []),
                 ...(caps.length > 1 ? [{
@@ -1081,11 +1081,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   label: openPlats.size === caps.length ? t("⊟ พับทั้งหมด", "⊟ Collapse all") : t("⊞ กางทั้งหมด", "⊞ Expand all"),
                   onClick: () => setOpenPlats(openPlats.size === caps.length ? new Set() : new Set(caps.map((c) => c.platform))),
                 }] : []),
-                { key: "copy_prompt", label: `📋 ${t("คัดลอกพรอมต์", "Copy prompt")}`, onClick: copyPrompt },
-                { key: "prompt_cfg", label: `✍️ ${t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags")}`, onClick: () => setCfgOpen(true) },
-                { key: "platform_cfg", label: `⚙️ ${t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}`, onClick: () => setPsOpen(true) },
-                { key: "templates", label: `📝 ${t("แม่แบบ", "Templates")}`, onClick: () => setTplSettingsOpen(true) },
-                { key: "hashtags", label: `🏷 ${t("คลังแฮชแท็ก", "Hashtag library")}`, onClick: () => setHashOpen(true) },
+                { key: "copy_prompt", icon: "i:clipboard-list", label: t("คัดลอกพรอมต์", "Copy prompt"), onClick: copyPrompt },
+                { key: "prompt_cfg", icon: "i:pencil", label: t("พรอมต์/แฮชแท็ก", "Prompt/Hashtags"), onClick: () => setCfgOpen(true) },
+                { key: "platform_cfg", icon: "i:settings", label: t("ตั้งค่าแพลตฟอร์ม", "Platform settings"), onClick: () => setPsOpen(true) },
+                { key: "templates", icon: "i:notes", label: t("แม่แบบ", "Templates"), onClick: () => setTplSettingsOpen(true) },
+                { key: "hashtags", icon: "i:tag", label: t("คลังแฮชแท็ก", "Hashtag library"), onClick: () => setHashOpen(true) },
               ]} />
             </div>
             {/* ติ๊กว่าจะลงที่ไหนบ้าง — โชว์ทุกแพลตฟอร์มในระบบ (ของแบรนด์นี้ขึ้นก่อน) · ม่วง = ลง (มีการ์ดด้านล่าง) · ขาว = ไม่ลง · บันทึกทันทีที่กด */}
@@ -1105,7 +1105,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     const on = contentPlatforms.includes(p.value); const st = postStatus[p.value] ?? "todo"; const isBrand = !!brandAllow?.includes(p.value);
                     return (
                       <button key={p.value} type="button" disabled={platBusy} onClick={() => togglePlatform(p.value)}
-                        title={p.inactive ? t(`${p.label} ถูกปิดใช้ในตั้งค่าแพลตฟอร์ม — ยังเอาออกจากคอนเทนต์นี้ได้ · เปิดใช้ที่ ⚙️ ตั้งค่า → แพลตฟอร์ม`, `${p.label} is disabled in settings — you can still remove it here`) : on ? t("กดเพื่อเอาออก (ไม่ลงที่นี่)", "Click to remove") : t(`กดเพื่อลงที่ ${p.label}${isBrand ? " (แบรนด์นี้ลงประจำ)" : ""}`, `Click to add ${p.label}`)}
+                        title={p.inactive ? t(`${p.label} ถูกปิดใช้ในตั้งค่าแพลตฟอร์ม — ยังเอาออกจากคอนเทนต์นี้ได้ · เปิดใช้ที่ ตั้งค่า → แพลตฟอร์ม`, `${p.label} is disabled in settings — you can still remove it here`) : on ? t("กดเพื่อเอาออก (ไม่ลงที่นี่)", "Click to remove") : t(`กดเพื่อลงที่ ${p.label}${isBrand ? " (แบรนด์นี้ลงประจำ)" : ""}`, `Click to add ${p.label}`)}
                         className={`h-8 pl-1.5 pr-2.5 rounded-full border inline-flex items-center gap-1.5 text-xs font-medium transition-colors disabled:opacity-60 ${on ? "bg-violet-600 text-white border-violet-600 shadow-sm" : isBrand ? "bg-white text-slate-700 border-violet-200 hover:border-violet-400" : "bg-white text-slate-500 border-slate-200 hover:border-slate-400"}`}>
                         {(p.icon_key || p.icon) && <PlatformChip code={p.value} iconOnly />}
                         {p.label}{p.inactive && <span className="text-[9px] opacity-70">({t("ปิดใช้", "off")})</span>}
@@ -1118,7 +1118,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   {brandAllow && brandAllow.length > 0 && (
                     <button type="button" disabled={platBusy} onClick={() => void applyPlatforms([...new Set([...brandAllow, ...contentPlatforms.filter((p) => caps.find((c) => c.platform === p)?.caption?.trim())])])}
                       title={t("ติ๊กแพลตฟอร์มประจำของแบรนด์นี้ (ตัวที่มีแคปชั่นแล้วคงไว้)", "Select this brand's default platforms (keeps ones with captions)")}
-                      className="h-8 px-2.5 rounded-full text-[11px] text-violet-700 border border-dashed border-violet-300 hover:bg-violet-50 disabled:opacity-60">✨ {t("ติ๊กตามแบรนด์", "Brand defaults")}</button>
+                      className="h-8 px-2.5 rounded-full text-[11px] text-violet-700 border border-dashed border-violet-300 hover:bg-violet-50 disabled:opacity-60"><Icon value="i:sparkles" className="mr-1" />{t("ติ๊กตามแบรนด์", "Brand defaults")}</button>
                   )}
                 </div>
               );
@@ -1134,7 +1134,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             )}
             {caps.length === 0 ? (
-              <div className="text-sm text-slate-400 italic rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center">☝️ {t("ยังไม่ได้เลือกว่าจะลงที่ไหน — กดปุ่มแพลตฟอร์มด้านบนเพื่อเพิ่มการ์ดแคปชั่น", "Nothing selected yet — click a platform above to add its caption card")}</div>
+              <div className="text-sm text-slate-400 italic rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center"><Icon value="i:pointer" className="mr-1" />{t("ยังไม่ได้เลือกว่าจะลงที่ไหน — กดปุ่มแพลตฟอร์มด้านบนเพื่อเพิ่มการ์ดแคปชั่น", "Nothing selected yet — click a platform above to add its caption card")}</div>
             ) : (
               <div className="space-y-1.5">
                 {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={captionVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} onPullFrom={caps.length > 1 ? () => setPullTo(c.platform) : undefined} paths={pathItems} onAddPath={onAddPath} fallbackImages={contentImageKeys} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={autoConnected(c.platform)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
@@ -1170,7 +1170,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                 ))}
                 <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
-                {parent && <p className="text-[11px] text-slate-400">🔗 {t(`ลิงก์ Shopee / Lazada / TikTok จะบันทึกกลับไปที่ Parent ${parent.code} ด้วย — คอนเทนต์ครั้งหน้าของสินค้านี้มีลิงก์ให้ทันที`, `Shopee / Lazada / TikTok links are saved back to Parent ${parent.code} — future content gets them automatically`)}</p>}
+                {parent && <p className="text-[11px] text-slate-400"><Icon value="i:link" className="mr-1" />{t(`ลิงก์ Shopee / Lazada / TikTok จะบันทึกกลับไปที่ Parent ${parent.code} ด้วย — คอนเทนต์ครั้งหน้าของสินค้านี้มีลิงก์ให้ทันที`, `Shopee / Lazada / TikTok links are saved back to Parent ${parent.code} — future content gets them automatically`)}</p>}
               </div>
             </CSection>)}
             {/* published url — ปักไว้ล่างสุดเสมอ */}
@@ -1182,9 +1182,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
           <RowMenu up label={`⋯ ${t("เพิ่มเติม", "More")}`} items={[
-            ...(!d.is_template ? [{ label: `💾 ${t("บันทึกเป็นเทมเพลต", "Save as template")}`, onClick: saveAsTemplate }] : []),
-            ...(can("tasks.create") ? [{ label: `📝 ${t("ใส่แผนงาน", "Add to plan")}`, onClick: () => setPlanOpen(true) }] : []),
-            { label: `🗑 ${t("ลบคอนเทนต์นี้", "Delete this content")}`, onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
+            ...(!d.is_template ? [{ icon: "i:device-floppy", label: t("บันทึกเป็นเทมเพลต", "Save as template"), onClick: saveAsTemplate }] : []),
+            ...(can("tasks.create") ? [{ icon: "i:notes", label: t("ใส่แผนงาน", "Add to plan"), onClick: () => setPlanOpen(true) }] : []),
+            { icon: "i:trash", label: t("ลบคอนเทนต์นี้", "Delete this content"), onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
           ]} />
           {/* 🔗 โพสต์นี้อยู่ในแผนงานทีมกี่งาน (ผูกจากกระดานแผนงาน / ใส่แผนงาน) — ไม่มี = ไม่โชว์ */}
           <PlanLinkedBadge kind="content" id={contentId} />
@@ -1259,9 +1259,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <ERPModal open onClose={() => setApplyFrom(null)} size="sm" title={t("ใช้แคปชั่น/แฮชแท็กนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}>
           <div className="space-y-2">
             <p className="text-[11px] text-slate-400">{t("คัดลอกจาก", "Copy from")} <span className="font-medium text-slate-600">{platformLabel(applyFrom)}</span></p>
-            <button onClick={() => applyCapToAll(applyFrom, "empty")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm">✅ {t("แทนแค่ช่องที่ยังว่าง", "Only empty fields")}<span className="block text-[11px] text-slate-400">{t("ปลอดภัยสุด — ไม่ทับที่มีข้อความแล้ว", "Safest — won't touch filled fields")}</span></button>
-            <button onClick={() => applyCapToAll(applyFrom, "except_edited")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm">✍️ {t("แทนทุกอัน ยกเว้นอันที่แก้เอง", "All except manually edited")}<span className="block text-[11px] text-slate-400">{t("ทับค่าจากแม่แบบ/อัตโนมัติ แต่เก็บที่พิมพ์เอง", "Overwrite auto/template values, keep your edits")}</span></button>
-            <button onClick={() => applyCapToAll(applyFrom, "all")} className="w-full text-left px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 text-sm">⚠️ {t("แทนทุกอัน", "Replace all")}<span className="block text-[11px] text-red-400">{t("ทับทุกช่อง รวมที่กรอกไว้แล้ว", "Overwrites everything, including filled")}</span></button>
+            <button onClick={() => applyCapToAll(applyFrom, "empty")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm"><Icon value="i:circle-check" className="mr-1" />{t("แทนแค่ช่องที่ยังว่าง", "Only empty fields")}<span className="block text-[11px] text-slate-400">{t("ปลอดภัยสุด — ไม่ทับที่มีข้อความแล้ว", "Safest — won't touch filled fields")}</span></button>
+            <button onClick={() => applyCapToAll(applyFrom, "except_edited")} className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 hover:bg-violet-50 hover:border-violet-300 text-sm"><Icon value="i:pencil" className="mr-1" />{t("แทนทุกอัน ยกเว้นอันที่แก้เอง", "All except manually edited")}<span className="block text-[11px] text-slate-400">{t("ทับค่าจากแม่แบบ/อัตโนมัติ แต่เก็บที่พิมพ์เอง", "Overwrite auto/template values, keep your edits")}</span></button>
+            <button onClick={() => applyCapToAll(applyFrom, "all")} className="w-full text-left px-3 py-2 rounded-lg border border-red-200 text-red-700 hover:bg-red-50 text-sm"><Icon value="i:alert-triangle" className="mr-1" />{t("แทนทุกอัน", "Replace all")}<span className="block text-[11px] text-red-400">{t("ทับทุกช่อง รวมที่กรอกไว้แล้ว", "Overwrites everything, including filled")}</span></button>
             <div className="flex justify-end pt-1"><button onClick={() => setApplyFrom(null)} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button></div>
           </div>
         </ERPModal>

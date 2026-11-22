@@ -12,6 +12,7 @@ import { useT } from "@/components/i18n";
 import { ColorInput } from "@/components/color-picker";
 import { listSubtaskTypes, updateSubtaskType, createSubtaskType, subtaskTypeHint, type SubtaskType } from "./data";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { Icon } from "@/components/icon";
 
 export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { showToast?: (m: string) => void; onChanged?: () => void }) {
   const t = useT();
@@ -92,7 +93,7 @@ export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { sh
                   <div className="flex items-center gap-2 flex-wrap">
                     <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
                     <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[160px]" style={hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined} title={t("ตัวอย่างชิป", "Chip preview")}>
-                      <span className="leading-none">{r.icon || "🧩"}</span><span className="truncate">{r.label_th}</span>
+                      <span className="leading-none"><Icon value={r.icon || "i:puzzle"} /></span><span className="truncate">{r.label_th}</span>
                     </span>
                     <div title={t("สีประจำ", "Color")}><ColorInput value={r.color || "#64748b"} onChange={(v) => setField(r.key, { color: v })} allowText={false} /></div>
                     <input value={r.icon || ""} maxLength={2} placeholder="🧩" onChange={(e) => setField(r.key, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />

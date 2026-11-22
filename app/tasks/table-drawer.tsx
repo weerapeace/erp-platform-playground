@@ -7,6 +7,7 @@ import { useT } from "@/components/i18n";
 import { computeGrid, indexToCol } from "@/lib/canvas-formula";
 import { DrawerShell } from "@/components/modal";
 import { type ToastVariant } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 type Grid = string[][];
 
@@ -159,7 +160,7 @@ export function TableDrawer({ tableId, onClose, onSaved, onDeleted, pushToast }:
         </div>
 
         <div className="border-t border-slate-200 px-6 py-3 shrink-0 flex items-center gap-2">
-          <button onClick={() => setConfirmDel(true)} className="h-9 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">🗑 {t("ลบตาราง", "Delete")}</button>
+          <button onClick={() => setConfirmDel(true)} className="h-9 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50"><Icon value="i:trash" className="mr-1" />{t("ลบตาราง", "Delete")}</button>
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
           <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50">{saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
         </div>

@@ -12,6 +12,7 @@ import { helperApi, helperFileUrl, type SplitResult } from "@/lib/nesting-helper
 import type { NestingItem, SplitParams } from "./data";
 import { fmtLen, type FileInfo, type Unit } from "./nest-utils";
 import { NumInput } from "./num-input";
+import { Icon } from "@/components/icon";
 
 export function SplitModal({
   open, onClose, item, info, scale, initial, saved, canRemember, unit, onApply, onForget,
@@ -95,7 +96,7 @@ export function SplitModal({
 
   return (
     <ERPModal open={open} onClose={() => { if (!applying) onClose(); }} size="lg" closeOnBackdrop={!applying}
-      title={`✂️ ${t("แยกชิ้น", "Split pieces")} · ${item.title}`}
+      title={`${t("แยกชิ้น", "Split pieces")} · ${item.title}`}
       description={t("แยกส่วนต่าง ๆ ในภาพออกเป็นหลายชิ้น แต่ละชิ้นมีเส้นตัดของตัวเอง", "Split the parts of this image into separate pieces, each with its own cut line")}
       footer={
         <div className="flex items-center justify-end gap-2">
@@ -124,7 +125,7 @@ export function SplitModal({
                 <span className="absolute left-0 top-0 rounded-br px-1 text-[11px] font-semibold text-white" style={{ background: g.color }}>{g.index + 1}</span>
               </div>
             ))}
-            {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 text-xs text-slate-600">⏳ {t("กำลังหาชิ้น…", "Finding pieces…")}</div>}
+            {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 text-xs text-slate-600"><Icon value="i:hourglass" className="mr-1" />{t("กำลังหาชิ้น…", "Finding pieces…")}</div>}
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
             <span className="shrink-0">{t("รวมส่วนที่ห่างกันไม่เกิน", "Join parts closer than")}</span>

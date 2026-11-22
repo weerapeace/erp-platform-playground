@@ -31,6 +31,7 @@ import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, typ
 import type { ArrangePrintType } from "./data";
 import { BrandSelect } from "@/components/brand-select";
 import { templateShownInWizard } from "@/lib/task-template-visibility";
+import { Icon } from "@/components/icon";
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -343,9 +344,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         ); })}
       </div>
 
-      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
-      {lockedCampaignId && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600">📣 Campaign: <span className="font-medium text-slate-800">{lockedCampaignLabel || t("แคมเปญนี้","this campaign")}</span></div>}
-      {!lockedCampaignId && presetCampaign && form.campaign_id === presetCampaign.id && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600">📣 Campaign: <span className="font-medium text-slate-800">{presetCampaign.name}</span> <span className="text-xs text-slate-400">· {t("เลือกให้แล้ว เปลี่ยนได้ในขั้นข้อมูลงาน","Preselected — change it in Task info")}</span></div>}
+      {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"><Icon value="i:alert-triangle" className="mr-1" />{formErr}</div>}
+      {lockedCampaignId && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600"><Icon value="i:ad" className="mr-1" />Campaign: <span className="font-medium text-slate-800">{lockedCampaignLabel || t("แคมเปญนี้","this campaign")}</span></div>}
+      {!lockedCampaignId && presetCampaign && form.campaign_id === presetCampaign.id && step === 1 && <div className="mb-4 px-3 py-2 bg-violet-50/60 border border-violet-100 rounded-lg text-sm text-slate-600"><Icon value="i:ad" className="mr-1" />Campaign: <span className="font-medium text-slate-800">{presetCampaign.name}</span> <span className="text-xs text-slate-400">· {t("เลือกให้แล้ว เปลี่ยนได้ในขั้นข้อมูลงาน","Preselected — change it in Task info")}</span></div>}
 
       {/* STEP 1 — เลือกแบรนด์ + เทมเพลตของแบรนด์ */}
       {step === 1 && (
@@ -376,10 +377,10 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
               {brandTemplates.map((tpl) => { const on = tplId === tpl.id; return (
                 <button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className={`p-3 rounded-lg border text-left ${on ? "border-violet-400 ring-2 ring-violet-200 bg-violet-50/40" : "border-slate-200 hover:border-violet-300"}`}>
                   <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
-                    {tpl.icon ? <span className="text-lg leading-none shrink-0">{tpl.icon}</span> : null}
+                    {tpl.icon ? <span className="text-lg leading-none shrink-0 inline-flex"><Icon value={tpl.icon} /></span> : null}
                     <span className="min-w-0">{tpl.name}</span>
                   </p>
-                  <p className="text-xs text-slate-400 mt-0.5">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน","steps")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว","d")}` : ""}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน","steps")}{(tpl.content_items?.length ?? 0) > 0 ? <> · <Icon value="i:device-mobile" className="mr-1" />{tpl.content_items!.length}</> : ""}{tpl.due_offset_days != null ? <> · <Icon value="i:clock" className="mr-1" />+{tpl.due_offset_days}{t("ว","d")}</> : ""}</p>
                 </button>
               ); })}
               {brandTemplates.length === 0 && <p className="text-xs text-slate-400 sm:col-span-2 py-2">{t("แบรนด์นี้ยังไม่มีเทมเพลต — กดถัดไปกรอกข้อมูลงานได้เลย","No templates for this brand — click Next to fill task info")}</p>}
@@ -392,7 +393,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       {step === 2 && (<>
         {contentItems.length > 0 && (
           <div className="mb-4 flex items-center gap-2 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-2 text-sm text-fuchsia-700">
-            📱 {t("แม่แบบนี้จะสร้างคอนเทนต์", "This template will create")} {contentItems.length} {t("ชิ้นพ่วงกับงาน (ดู/แก้ได้ที่แท็บคอนเทนต์ในงาน)", "content item(s) linked to the task (view/edit in the task's Content tab)")}
+            <Icon value="i:device-mobile" />{t("แม่แบบนี้จะสร้างคอนเทนต์", "This template will create")} {contentItems.length} {t("ชิ้นพ่วงกับงาน (ดู/แก้ได้ที่แท็บคอนเทนต์ในงาน)", "content item(s) linked to the task (view/edit in the task's Content tab)")}
           </div>
         )}
         {/* สวิตช์โหมดกรอก: BASIC (เฉพาะช่องจำเป็น) / ADVANCE (ครบ) + ⚙️ ตั้งว่า BASIC โชว์ช่องไหน (ตั้งร่วมทั้งระบบ) */}
@@ -406,7 +407,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             ))}
           </div>
           <button type="button" onClick={() => setModeCfgOpen((s) => !s)} title={t("ตั้งว่าโหมด BASIC โชว์ช่องไหน", "Choose which fields BASIC shows")}
-            className="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-violet-700 border border-slate-200 rounded-md">⚙️</button>
+            className="h-7 w-7 inline-flex items-center justify-center text-slate-400 hover:text-violet-700 border border-slate-200 rounded-md"><Icon value="i:settings" /></button>
         </div>
         {modeCfgOpen && (
           <div className="mb-3 border border-violet-200 bg-violet-50/40 rounded-lg p-2.5">
@@ -484,7 +485,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       {step === 3 && isArrangePrint && (
         <div>
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-base">🖨️</span>
+            <span className="text-base"><Icon value="i:printer" /></span>
             <p className="text-sm font-semibold text-slate-700">{t("งานเรียงพิมพ์ — เลือกรูปแล้วกำหนดขนาด/จำนวน", "Arrange print — pick images, set sizes/qty")}</p>
           </div>
           <p className="text-xs text-slate-400 mb-3">{t("แต่ละรูปเลือกได้หลายขนาด · ขนาดดึงจากคลัง Artwork · เพิ่มขนาดใหม่ได้", "Each image: multiple sizes · from Artwork library · add new sizes")}</p>
@@ -507,7 +508,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
               <label className="text-[11px] text-slate-400">{t("ชื่อเต็ม (ชื่องาน + ชื่อเสริม)", "Full name")}</label>
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-9 px-3 flex items-center text-sm font-mono bg-white border border-slate-200 rounded-lg truncate">{combinedTitle}</div>
-                <button type="button" onClick={copyCombined} title={t("คัดลอกชื่อเต็ม", "Copy full name")} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">📋 {t("คัดลอก", "Copy")}</button>
+                <button type="button" onClick={copyCombined} title={t("คัดลอกชื่อเต็ม", "Copy full name")} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0"><Icon value="i:clipboard-list" className="mr-1" />{t("คัดลอก", "Copy")}</button>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
@@ -562,7 +563,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           ) : (
             <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
               {subs.some((r) => r.autoSkip) && (
-                <p className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5">🔁 {t("โหมดใหม่: งานย่อยที่ไม่ได้ติ๊ก = ไม่ต้องมี — แก้รูป/คำอธิบายที่สินค้าจากหน้างานได้เลย (ติ๊กถ้าอยากสร้าง · ตั้งค่าได้ที่ ตั้งค่า → ส่งงาน)", "New mode: unticked subtasks aren't needed — edit images/description on the product from the task page (tick to create anyway · configurable in Settings → Submit)")}</p>
+                <p className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5"><Icon value="i:repeat" className="mr-1" />{t("โหมดใหม่: งานย่อยที่ไม่ได้ติ๊ก = ไม่ต้องมี — แก้รูป/คำอธิบายที่สินค้าจากหน้างานได้เลย (ติ๊กถ้าอยากสร้าง · ตั้งค่าได้ที่ ตั้งค่า → ส่งงาน)", "New mode: unticked subtasks aren't needed — edit images/description on the product from the task page (tick to create anyway · configurable in Settings → Submit)")}</p>
               )}
               {subs.map((row, i) => <SubRowEditor key={i} row={row} onChange={(p) => patchSub(i, p)} onRemove={() => removeSub(i)} />)}
             </div>
@@ -571,7 +572,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           {/* คอนเทนต์ social (สร้างพร้อมงาน) + ผู้รับผิดชอบต่อคอนเทนต์ */}
           <div className="mt-5 border-t border-slate-100 pt-4">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-slate-600">📱 {t("คอนเทนต์ social (สร้างพร้อมงาน)", "Social content (created with the task)")}</p>
+              <p className="text-sm text-slate-600"><Icon value="i:device-mobile" className="mr-1" />{t("คอนเทนต์ social (สร้างพร้อมงาน)", "Social content (created with the task)")}</p>
               <button onClick={addContentItem} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">＋ {t("เพิ่มคอนเทนต์", "Add content")}</button>
             </div>
             {contentItems.length === 0 ? (
@@ -581,7 +582,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
                 {contentItems.map((c, i) => (
                   <div key={i} className="border border-slate-200 rounded-lg p-2.5 space-y-1.5 bg-violet-50/10">
                     <div className="flex items-center gap-2">
-                      <span className="text-base">📱</span>
+                      <span className="text-base"><Icon value="i:device-mobile" /></span>
                       <input value={c.title} onChange={(e) => patchContentItem(i, { title: e.target.value })} placeholder={t("ชื่อคอนเทนต์ เช่น โพสต์เปิดตัว 7.7", "Content title")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
                       <button onClick={() => removeContentItem(i)} className="text-slate-300 hover:text-red-500 text-sm px-1" title={t("ลบ", "Remove")}>✕</button>
                     </div>
@@ -654,7 +655,7 @@ function SubRowEditor({ row, onChange, onRemove }: { row: SubRow; onChange: (p: 
         <input value={row.title} onChange={(e) => onChange({ title: e.target.value })} placeholder={t("ชื่องานย่อย","Subtask title")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
         <button onClick={onRemove} className="text-slate-300 hover:text-red-500 text-sm px-1" title={t("ลบแถว","Remove row")}>✕</button>
       </div>
-      {row.autoSkip && !row.include && <p className="pl-6 text-[11px] text-violet-600">🔁 {t("โหมดใหม่: ไม่ต้องสร้าง — แก้ที่สินค้าจากหน้างานได้เลย", "New mode: not needed — edit the product from the task page")}</p>}
+      {row.autoSkip && !row.include && <p className="pl-6 text-[11px] text-violet-600"><Icon value="i:repeat" className="mr-1" />{t("โหมดใหม่: ไม่ต้องสร้าง — แก้ที่สินค้าจากหน้างานได้เลย", "New mode: not needed — edit the product from the task page")}</p>}
       {row.include && (
         <div className="pl-6 space-y-1.5">
           <div className="flex flex-wrap items-center gap-1.5">

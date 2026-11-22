@@ -5,6 +5,7 @@
  */
 import { useState } from "react";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { Icon } from "@/components/icon";
 import { platformLabel } from "../use-options";
 import type { PostImage } from "./post-confirm-modal";
 
@@ -72,7 +73,7 @@ function ImageGrid({ images, max = 4, tall, ratio }: { images: PostImage[]; max?
 /** รูปเดียวแบบเลื่อนได้ (IG carousel) — ปุ่ม ‹ › + จุดบอกตำแหน่ง */
 function Carousel({ images, aspect = "aspect-square", dark, ratio }: { images: PostImage[]; aspect?: string; dark?: boolean; ratio?: number | null }) {
   const [i, setI] = useState(0);
-  if (!images.length) return <div className={`${aspect} bg-slate-100 flex items-center justify-center text-slate-300 text-3xl`}>🖼</div>;
+  if (!images.length) return <div className={`${aspect} bg-slate-100 flex items-center justify-center text-slate-300 text-3xl`}><Icon value="i:photo" /></div>;
   const im = images[Math.min(i, images.length - 1)];
   return (
     <div className={`relative ${ratio ? "" : aspect} overflow-hidden ${dark ? "bg-black" : "bg-slate-100"}`} style={ratio ? { aspectRatio: String(ratio) } : undefined}>

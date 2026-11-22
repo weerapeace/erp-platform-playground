@@ -16,6 +16,7 @@ import { TeamFill } from "../team-picker";
 import { subtaskTypeHint, listContentTemplates, POST_TYPES, postTypeLabel, type SubtaskType, type SubtaskStepConfig, type ContentItem } from "../data";
 import { ERPModal } from "@/components/modal";
 import { SubtaskTypeManager } from "../subtask-type-manager";
+import { Icon } from "@/components/icon";
 
 const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 
@@ -96,7 +97,7 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm font-medium text-slate-700">{t("เลือกงานย่อยที่ต้องทำ", "Choose subtasks")}</p>
-          <button type="button" onClick={() => { mgrChanged.current = false; setMgrOpen(true); }} className="text-[11px] text-violet-600 hover:underline shrink-0">⚙️ {t("จัดการชนิดงานย่อย", "Manage types")}</button>
+          <button type="button" onClick={() => { mgrChanged.current = false; setMgrOpen(true); }} className="text-[11px] text-violet-600 hover:underline shrink-0"><Icon value="i:settings" className="mr-1" />{t("จัดการชนิดงานย่อย", "Manage types")}</button>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {types.map((ty) => {
@@ -107,7 +108,7 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
               <button type="button" key={ty.key} onClick={() => toggleType(ty)} title={multi ? t("กดเพื่อเพิ่มอีก 1 อัน (ลบได้ที่การ์ดตั้งค่าด้านล่าง)", "Click to add another (remove in settings below)") : subtaskTypeHint(ty)}
                 className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-colors ${on ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:border-slate-300"}`}>
                 <span className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs font-semibold shrink-0 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-400"}`}>{multi ? (cnt > 0 ? cnt : "＋") : (on ? "✓" : <span className="text-transparent">✓</span>)}</span>
-                <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded text-base leading-none shrink-0" style={isHex(ty.color) ? { backgroundColor: `${ty.color}1a` } : undefined}>{ty.icon ?? "🧩"}</span>
+                <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded text-base leading-none shrink-0" style={isHex(ty.color) ? { backgroundColor: `${ty.color}1a` } : undefined}><Icon value={ty.icon ?? "i:puzzle"} /></span>
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-slate-800">{ty.label_th}{multi && <span className="ml-1 text-[10px] font-normal text-violet-500">· {t("เพิ่มได้หลายอัน", "add multiple")}</span>}</span>
                   <span className="block text-[11px] text-slate-400 leading-snug">{TYPE_HINT[ty.key]?.() ?? subtaskTypeHint(ty)}</span>
@@ -142,7 +143,7 @@ export function SubtaskTypePicker({ steps, types, onChange, onTypesChanged }: { 
           <ol className="text-xs text-slate-600 space-y-0.5 list-decimal list-inside">
             {steps.map((s, i) => (
               <li key={i}>
-                {(types.find((x) => x.key === s.type)?.icon ?? "🧩")} {s.title || t("(ไม่มีชื่อ)", "(no name)")}
+                <Icon value={types.find((x) => x.key === s.type)?.icon ?? "i:puzzle"} className="mr-1" />{s.title || t("(ไม่มีชื่อ)", "(no name)")}
                 {s.config.requires_approval && <span className="text-amber-600"> · {t("ต้องอนุมัติ", "needs approval")}</span>}
                 {s.config.required && <span className="text-red-500"> · {t("บังคับ", "required")}</span>}
               </li>

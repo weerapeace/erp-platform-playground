@@ -44,6 +44,7 @@ import {
   saveTarget, targetReady, type ArtworkTarget,
 } from "./artwork-card";
 import { helperFileUrl } from "@/lib/nesting-helper";
+import { Icon } from "@/components/icon";
 
 // การ์ดในคลังไฟล์ (ของกลาง) — โหลดเมื่อกดดูเท่านั้น (คลังไฟล์ตัวใหญ่ ไม่ให้หน้าจัดเรียงช้า)
 const AssetDetailPopup = dynamic(() => import("@/components/asset-library").then((m) => m.AssetDetailPopup), { ssr: false });
@@ -898,11 +899,11 @@ export function NestingEditor({ id }: { id: string }) {
   const header = jobSettings?.header && settings.header_text ? summary?.sheets[idx]?.header ?? null : null;
   const done = !!run && !run.running && run.job?.status === "done" && !!sheets;
 
-  if (loading) return <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="✂️" accent="violet"><LoadingState /></StandaloneShell>;
-  if (loadError) return <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="✂️" accent="violet"><ErrorState hint={loadError} onRetry={() => void load()} /></StandaloneShell>;
+  if (loading) return <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="i:scissors" accent="violet"><LoadingState /></StandaloneShell>;
+  if (loadError) return <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="i:scissors" accent="violet"><ErrorState hint={loadError} onRetry={() => void load()} /></StandaloneShell>;
 
   return (
-    <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="✂️" accent="violet">
+    <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="i:scissors" accent="violet">
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-6 py-3">
         <Link href="/tasks/nesting" className="text-sm text-slate-500 hover:text-slate-800">← {t("งานจัดเรียงทั้งหมด", "All nesting jobs")}</Link>
         <input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} maxLength={120}
@@ -963,7 +964,7 @@ export function NestingEditor({ id }: { id: string }) {
               <button type="button" onClick={() => setItemsBig(true)} disabled={!!busy}
                 title={t("เปิดหน้าต่างใหญ่ จัดการรูปเป็นตาราง (ค้นหา · ลากสลับลำดับ · แก้ทุกช่อง)", "Open a large window to manage images as a table (search · drag to reorder · edit everything)")}
                 className="mb-2 w-full rounded-lg border border-violet-300 bg-violet-50 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-60">
-                🖼 {t("จัดการรูป", "Manage images")}
+                <Icon value="i:photo" className="mr-1" />{t("จัดการรูป", "Manage images")}
               </button>
               <button type="button" onClick={() => void startNest()} disabled={!!run?.running || !!busy}
                 className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
@@ -980,7 +981,7 @@ export function NestingEditor({ id }: { id: string }) {
 
         <main className="min-w-0 flex-1 space-y-3">
           <HelperSetupCard status={helper} onRecheck={() => void recheck()} />
-          {busy && <div className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white">⏳ {busy}</div>}
+          {busy && <div className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-white"><Icon value="i:hourglass" className="mr-1" />{busy}</div>}
           {run?.error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{run.error}</div>}
           {stale && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
             {t("ค่าตั้งหรือไฟล์เปลี่ยนไปหลังจัดเรียง — ผลบนจอยังเป็นของเดิม กด “จัดเรียงใหม่” เพื่ออัปเดต", "Settings or files changed after nesting — the result on screen is still the old one. Press “Nest again” to update")}
@@ -1077,7 +1078,7 @@ export function NestingEditor({ id }: { id: string }) {
                   <button type="button" disabled={!done || !!busy || stale} onClick={() => setPublishOpen(true)}
                     title={stale ? t("ค่าตั้งเปลี่ยนหลังจัดเรียง — จัดเรียงใหม่ก่อนส่ง", "Settings changed after nesting — nest again before sending") : undefined}
                     className="rounded-lg border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50">
-                    📤 {pub.published_at ? t("ส่งเข้าคลังใหม่", "Send to library again") : t("ส่งเข้าคลังงานพิมพ์", "Send to print library")}
+                    <Icon value="i:package-export" className="mr-1" />{pub.published_at ? t("ส่งเข้าคลังใหม่", "Send to library again") : t("ส่งเข้าคลังงานพิมพ์", "Send to print library")}
                   </button>
                 )}
                 <button type="button" disabled={!done || !!busy} onClick={() => exportFiles("eps")} className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50">EPS</button>
@@ -1111,7 +1112,7 @@ export function NestingEditor({ id }: { id: string }) {
       )}
       {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
       <ERPModal open={!!sizeSave} onClose={() => { if (!sizeSave?.saving) setSizeSave(null); }} size="sm"
-        title={`📐 ${t("บันทึกเป็นไซส์ในคลัง", "Save as a library size")}`}
+        title={t("บันทึกเป็นไซส์ในคลัง", "Save as a library size")}
         description={t("ไซส์นี้จะไปอยู่ในลายนี้ที่คลังไฟล์กลาง — งานต่อไปเลือกจาก “ไซส์จากคลัง…” ได้เลย", "This size is added to the artwork in the central library — pick it from “Library size…” next time")}
         footer={<div className="flex justify-end gap-2">
           <button type="button" onClick={() => setSizeSave(null)} disabled={sizeSave?.saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">{t("ยกเลิก", "Cancel")}</button>
@@ -1138,7 +1139,7 @@ export function NestingEditor({ id }: { id: string }) {
         )}
       </ERPModal>
       <ERPModal open={itemsBig} onClose={() => setItemsBig(false)} size="xl" defaultExpanded
-        title={`🖼 ${t("จัดการรูป", "Manage images")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
+        title={`${t("จัดการรูป", "Manage images")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
         description={t("แก้ได้ทุกช่องเหมือนการ์ด · ลาก ⠿ เพื่อสลับลำดับ · ลากไฟล์ PNG มาวางที่แถวเพื่อใส่ไฟล์", "Edit everything as on the cards · drag ⠿ to reorder · drop a PNG on a row to attach it")}
         footer={
           <div className="flex justify-end gap-2">

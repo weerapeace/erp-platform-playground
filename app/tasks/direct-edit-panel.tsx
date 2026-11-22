@@ -21,6 +21,7 @@ import { setEditContext, clearEditContext } from "@/lib/edit-context";
 import type { TaskParentRef, TaskSkuRef } from "./data";
 import { DEFAULT_SKIP_SUBTASKS, DIRECT_TARGETS, isDirectTask, useProductModeCfg, type ProductModeCfg } from "./product-edit-mode";
 import { type PushToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
 
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 const TaskImagesViewer = dynamic(() => import("./task-images-viewer").then((m) => m.TaskImagesViewer), { ssr: false });
@@ -93,15 +94,15 @@ export function ChangeList({ changes, canUndo, onUndo, compact = false }: { chan
             ) : (
               <div className="mt-1.5 flex items-center gap-2">
                 {c.field_key === "cover" ? <>
-                  <HoverImage url={c.image_url} size={44} previewSize={320} rounded="rounded-md" fallback="🖼" />
+                  <HoverImage url={c.image_url} size={44} previewSize={320} rounded="rounded-md" fallback={<Icon value="i:photo" />} />
                   <span className="text-slate-300 text-xs">→</span>
                   <HoverImage url={r2ImageUrl(keyOf(c.new_value))} size={44} previewSize={320} rounded="rounded-md" fallback="—" />
-                </> : <HoverImage url={c.image_url} size={44} previewSize={320} rounded="rounded-md" fallback="🖼" />}
+                </> : <HoverImage url={c.image_url} size={44} previewSize={320} rounded="rounded-md" fallback={<Icon value="i:photo" />} />}
               </div>
             )}
             {canUndo && c.in_effect && !isAdd(c) && onUndo && (
               <div className="mt-1.5 flex justify-end">
-                <button type="button" onClick={() => onUndo(c)} className="h-7 px-2.5 rounded-md border border-orange-200 bg-white text-[11px] font-medium text-orange-700 hover:bg-orange-50">↩︎ {t("ย้อนกลับ", "Undo")}</button>
+                <button type="button" onClick={() => onUndo(c)} className="h-7 px-2.5 rounded-md border border-orange-200 bg-white text-[11px] font-medium text-orange-700 hover:bg-orange-50"><Icon value="i:arrow-back-up" className="mr-1" />{t("ย้อนกลับ", "Undo")}</button>
               </div>
             )}
             {isAdd(c) && c.in_effect && canUndo && <p className="mt-1 text-[10px] text-slate-400 text-right">{t("ไม่ใช้รูปนี้ → ลบในตัวแก้สินค้า", "Don't want it? Delete it in the product editor")}</p>}
@@ -161,7 +162,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
     }
     await open(kind, id);
   };
-  const editLabel = claimable ? `🙋 ${t("รับงาน + แก้ที่สินค้า", "Claim + edit product")}` : `✏️ ${t("แก้ที่สินค้า", "Edit product")}`;
+  const editLabel = claimable ? <><Icon value="i:user-plus" className="mr-1" />{t("รับงาน + แก้ที่สินค้า", "Claim + edit product")}</> : <><Icon value="i:pencil" className="mr-1" />{t("แก้ที่สินค้า", "Edit product")}</>;
   const close = () => { clearEditContext(); setEditing(null); void reloadChanges(); };
   useEffect(() => () => clearEditContext(), []);
 
@@ -202,7 +203,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
   ) : null;
   return (
     <div className={compact ? "space-y-2" : "rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2.5"}>
-      {!compact && <p className="text-[11px] text-violet-700">🔁 {t("โหมดใหม่ — แก้ที่สินค้าได้เลย ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ ไม่ต้องอัปโหลดซ้ำ", "New mode — edit the product directly. Old versions are kept and changes summarised for the reviewer. No re-upload needed.")}</p>}
+      {!compact && <p className="text-[11px] text-violet-700"><Icon value="i:repeat" className="mr-1" />{t("โหมดใหม่ — แก้ที่สินค้าได้เลย ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ ไม่ต้องอัปโหลดซ้ำ", "New mode — edit the product directly. Old versions are kept and changes summarised for the reviewer. No re-upload needed.")}</p>}
 
       {noProducts ? (
         picker ?? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">{t("งานนี้ยังไม่ได้ผูก Parent SKU — เพิ่มที่ช่อง \"Parent SKU\" ของงานก่อน", "No Parent SKU linked yet — add one in the task's \"Parent SKU\" field first")}</p>
@@ -214,21 +215,21 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
                 : claimable ? t("งานนี้ยังไม่มีผู้รับผิดชอบ — กดเพื่อรับงาน (ใส่ชื่อคุณ) แล้วเปิดตัวแก้ทันที", "Nobody is assigned yet — click to claim the task (adds your name) and open the editor")
                 : t("ต้องเป็นผู้รับผิดชอบ/ผู้ตรวจ และงานยังไม่ปิด", "Assignee/reviewer only, while the task is open")}
               className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-lg border border-violet-200 bg-white text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50">
-              <HoverImage url={r2ImageUrl(p.image_key)} size={24} rounded="rounded" fallback="📦" />
+              <HoverImage url={r2ImageUrl(p.image_key)} size={24} rounded="rounded" fallback={<Icon value="i:package" />} />
               {claiming ? t("กำลังรับงาน…", "Claiming…") : editLabel} <span className="font-mono text-slate-500">{p.code || p.name}</span>
             </button>
           ))}
           {showSkus && skus.filter((s) => s.id && s.id !== "_").map((s) => (
             <button key={s.id} type="button" disabled={(!canEdit && !claimable) || claiming} onClick={() => void openProduct("sku", s.id)}
               className="inline-flex items-center gap-1.5 h-8 pl-1 pr-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-              <HoverImage url={r2ImageUrl(s.image_key)} size={24} rounded="rounded" fallback="🎨" />
-              {claimable ? "🙋" : "✏️"} SKU <span className="font-mono text-slate-500">{s.code || s.name}</span>
+              <HoverImage url={r2ImageUrl(s.image_key)} size={24} rounded="rounded" fallback={<Icon value="i:palette" />} />
+              <Icon value={claimable ? "i:user-plus" : "i:pencil"} className="mr-1" />SKU <span className="font-mono text-slate-500">{s.code || s.name}</span>
             </button>
           ))}
           {/* 🖼 ดูรูปทั้งหมดของงาน (ป๊อปดูรูปกลาง) — ในป๊อปมีปุ่มแก้ที่สินค้าให้ด้วย (เจ้าของขอ 2026-11-11) */}
           <button type="button" onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (Parent · SKU · Description)", "View all images in this task (Parent · SKU · Description)")}
             className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
-            🖼 {t("ดูรูปทั้งหมด", "View all images")}
+            <Icon value="i:photo" className="mr-1" />{t("ดูรูปทั้งหมด", "View all images")}
           </button>
           {picker && !pickOpen && (
             <button type="button" onClick={() => setPickOpen(true)} className="inline-flex items-center h-8 px-2.5 rounded-lg border border-dashed border-violet-300 text-xs text-violet-600 hover:bg-white">＋ {compact ? "Parent" : t("เพิ่ม Parent SKU", "Add Parent SKU")}</button>
@@ -242,13 +243,13 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
         // แบบย่อ: บรรทัดเดียว "สิ่งที่แก้ในงานนี้ N รายการ ›" (กดเปิดป๊อป — ย้อนกลับได้ในป๊อป)
         <div className="border-t border-slate-100 pt-1.5 text-[11.5px]">
           {error ? (
-            <button type="button" onClick={() => void reloadChanges()} className="text-red-600 hover:underline">⚠ {t("โหลดสิ่งที่แก้ไม่สำเร็จ — ลองใหม่", "Couldn't load changes — retry")}</button>
+            <button type="button" onClick={() => void reloadChanges()} className="text-red-600 hover:underline"><Icon value="i:alert-triangle" className="mr-1" />{t("โหลดสิ่งที่แก้ไม่สำเร็จ — ลองใหม่", "Couldn't load changes — retry")}</button>
           ) : changes === null ? <span className="text-slate-300">…</span>
             : changes.length === 0 ? <span className="text-slate-400">{t("ยังไม่มีสิ่งที่แก้ในงานนี้", "No changes in this task yet")}</span>
             : (
               <button type="button" onClick={() => setAllOpen(true)} className="w-full flex items-center justify-between text-slate-600 hover:text-violet-700">
                 <span>{t(`สิ่งที่แก้ในงานนี้ ${changes.length} รายการ`, `${changes.length} change(s) in this task`)} ›</span>
-                {canUndo && <span className="text-slate-400">↩ {t("ย้อนกลับได้", "undoable")}</span>}
+                {canUndo && <span className="text-slate-400"><Icon value="i:arrow-back-up" className="mr-1" />{t("ย้อนกลับได้", "undoable")}</span>}
               </button>
             )}
         </div>
@@ -257,7 +258,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
         <p className="text-[11px] font-medium text-slate-500 mb-1">{t("สิ่งที่แก้ในงานนี้ (ระบบจดให้เอง)", "Changes made in this task (recorded automatically)")}</p>
         {error ? (
           <div className="flex items-center justify-between gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2.5 py-1.5">
-            <span>⚠ {error}</span>
+            <span><Icon value="i:alert-triangle" className="mr-1" />{error}</span>
             <button type="button" onClick={() => void reloadChanges()} className="shrink-0 h-7 px-2 rounded border border-red-200 bg-white">{t("ลองใหม่", "Retry")}</button>
           </div>
         ) : changes === null ? (
@@ -324,7 +325,7 @@ export function DirectSubmitModal({ changes, onClose, onConfirm }: { changes: Ta
     <ERPModal open onClose={onClose} title={t("ส่งงาน — ตรวจสิ่งที่แก้", "Submit — review changes")} size="md" defaultExpanded={false}
       footer={<>
         <button type="button" onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" onClick={() => void submit()} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "..." : `✅ ${t("ยืนยันส่งงาน", "Confirm submit")}`}</button>
+        <button type="button" onClick={() => void submit()} disabled={busy} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "..." : <><Icon value="i:circle-check" className="mr-1" />{t("ยืนยันส่งงาน", "Confirm submit")}</>}</button>
       </>}>
       <div className="space-y-3">
         <p className="text-sm text-slate-600">{active.length > 0
@@ -337,7 +338,7 @@ export function DirectSubmitModal({ changes, onClose, onConfirm }: { changes: Ta
             {t("ไม่มีอะไรต้องแก้ (ส่งงานโดยไม่เปลี่ยนสินค้า)", "Nothing needed changing (submit without product changes)")}
           </label>
         )}
-        {err && <p className="text-xs text-red-600">⚠ {err}</p>}
+        {err && <p className="text-xs text-red-600"><Icon value="i:alert-triangle" className="mr-1" />{err}</p>}
       </div>
     </ERPModal>
   );

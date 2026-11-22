@@ -131,7 +131,7 @@ export function NestingListView() {
   };
 
   return (
-    <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="✂️" accent="violet">
+    <StandaloneShell title={t("จัดเรียงงานพิมพ์", "Print nesting")} icon="i:scissors" accent="violet">
       <div className="border-b border-slate-200 bg-white px-8 py-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
