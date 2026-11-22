@@ -54,6 +54,7 @@ import { reshapeNode } from "@/lib/flowchart";
 import { googleFontsPreviewHref, useFontLink } from "@/components/font-select";
 import { ShapePalette, SHAPE_DRAG_MIME } from "./shape-palette";
 import { StylePicker } from "./style-picker";
+import { FLOW_THEMES, isFlowTheme, type FlowThemeKey } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_META, flowStyleFont, isFlowStyle, type FlowStyleKey } from "@/lib/flowchart-styles";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
@@ -196,6 +197,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // ── ชั้นล็อก ──
   const [boardStyle, setBoardStyle] = useState<FlowStyleKey>("normal");   // สไตล์ทั้งกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [styleOpen, setStyleOpen] = useState(false);
+  const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
   const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
   const hideKey = `erp-flowchart-hide-own:${entityType}`;
@@ -218,7 +220,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   useEffect(() => { setEdgeShapeDefault(loadDefaultShape()); }, []);
 
   // ── ข้อมูลล่าสุด (ref ไว้ใช้ใน callback/timer ไม่ให้ค้างค่าเก่า) ──
-  const scene = useMemo(() => toFlowScene(nodes, edges, pins, boardStyle === "normal" ? undefined : boardStyle), [nodes, edges, pins, boardStyle]);
+  const scene = useMemo(() => toFlowScene(nodes, edges, pins, boardStyle === "normal" ? undefined : boardStyle, boardTheme === "std" ? undefined : boardTheme), [nodes, edges, pins, boardStyle, boardTheme]);
   const sig = useMemo(() => flowSceneSig(scene), [scene]);
   const sceneRef = useRef(scene); sceneRef.current = scene;
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
@@ -239,6 +241,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     setEdges(toRFEdges(s));
     setPins(s.pins ?? {});
     setBoardStyle(isFlowStyle(s.style) ? s.style : "normal");
+    setBoardTheme(isFlowTheme(s.theme) ? s.theme : "std");
   }, []);
 
   // ── โหลด ──
@@ -655,6 +658,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     meName,
     recentShapes,
     boardStyle,
+    boardTheme,
     setStyle: (ids, style) => {
       const set = new Set(ids);
       setNodes((ns) => ns.map((n) => { if (!set.has(n.id) || n.type === "zone") return n; const d = { ...n.data }; if (style) d.style = style; else delete d.style; return { ...n, data: d }; }));
@@ -693,7 +697,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme]);
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
   const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
@@ -857,7 +861,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
               </button>
               {styleOpen && (
                 <span className="absolute left-0 top-9 z-30 block">
-                  <StylePicker t={t} value={boardStyle} title={t("สไตล์ทั้งกระดาน (กล่องที่ตั้งสไตล์เองไว้ไม่เปลี่ยนตาม)", "Board style (boxes with their own style keep it)")}
+                  <StylePicker t={t} value={boardStyle} theme={{ value: boardTheme, onPick: (k) => setBoardTheme(k) }} title={t("สไตล์ทั้งกระดาน (กล่องที่ตั้งสไตล์เองไว้ไม่เปลี่ยนตาม)", "Board style (boxes with their own style keep it)")}
                     onPick={(k) => { setBoardStyle(k ?? "normal"); setStyleOpen(false); }} />
                 </span>
               )}
@@ -989,7 +993,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         )}
 
         {/* กระดาน */}
-        <div ref={wrapRef} className="relative min-h-0 flex-1"
+        <div ref={wrapRef} className="relative min-h-0 flex-1" style={FLOW_THEMES[boardTheme].dark ? { background: "#0f172a" } : undefined}
           onPointerMove={(e) => { pointerRef.current = { x: e.clientX, y: e.clientY }; }}
           onPointerDownCapture={(e) => {
             const h = readOnly ? null : (e.target as HTMLElement).closest(".fc-h") as HTMLElement | null;

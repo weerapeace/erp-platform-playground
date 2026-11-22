@@ -21,6 +21,9 @@ import { ColorPanel } from "./rich-text";
 import { FLOW_STYLE_EDGE, effectiveStyle, flowStyleBoxCss, flowStyleLook, type FlowStyleKey, type FlowStyleLook } from "@/lib/flowchart-styles";
 /** สีตัวหนังสือตามสไตล์กล่อง (null = ตามชุดสีปกติ) */
 const ToneCtx = createContext<{ text: string; sub: string } | null>(null);
+import { themePalette } from "@/lib/flowchart-themes";
+/** สีทั้ง 7 ตามชุดสีของกระดาน */
+const usePal = () => themePalette(useBoard().boardTheme);
 import { AUTO_ACTIONS, AUTO_ACTS_MAX, AUTO_STATUSES, AUTO_STATUS_META, AUTO_TRIGGERS, autoAction, autoTrigger, type AutoPick, type AutoRef, type FlowAuto } from "@/lib/flow-automation";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
@@ -77,6 +80,8 @@ export type FlowBoardActions = {
   removeEdge: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
   editRule: (id: string) => void;
+  /** ชุดสีของกระดาน (lib/flowchart-themes) */
+  boardTheme: string;
   /** สไตล์ทั้งกระดาน (lib/flowchart-styles) */
   boardStyle: FlowStyleKey;
   /** ตั้งสไตล์กล่อง (หลายกล่องพร้อมกันได้) · null = ตามกระดาน */
@@ -101,8 +106,9 @@ const HANDLE_POS: [string, Position][] = [["t", Position.Top], ["r", Position.Ri
 
 /** ข้อความในกล่อง: บรรทัดแรกตัวหนา · ที่เหลือตัวเล็ก */
 function LabelText({ label, color, align = "center" }: { label: string; color: FlowColor; align?: "center" | "left" | "right" }) {
+  const PAL = usePal();
   const { title, sub } = splitFlowLabel(label);
-  const pal = useContext(ToneCtx) ?? FLOW_PALETTE[color];
+  const pal = useContext(ToneCtx) ?? PAL[color];
   return (
     <div className="pointer-events-none w-full whitespace-pre-wrap break-words leading-snug" style={{ textAlign: align }}>
       <div className="text-[13px] font-semibold" style={{ color: pal.text }}>{title || "\u00a0"}</div>
@@ -159,6 +165,8 @@ function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: 
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
+  const PAL = usePal();
+  const { updateData } = useBoard();
   const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes, setStyle } = useBoard();
   const [shapeOpen, setShapeOpen] = useState(false);
   const [pop, setPop] = useState<null | "style" | "fill" | "stroke">(null);
@@ -167,7 +175,7 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const iconScale = iconScaleOf(ids);
   const [fmt, setFmt] = useState(false);
-  const pal = FLOW_PALETTE[cur ?? "slate"];
+  const pal = PAL[cur ?? "slate"];
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
   return (
     <div className="relative">
@@ -180,17 +188,32 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
       )}
       {!single && <span className="px-1.5 text-[11px] font-medium text-violet-700">{t(`เลือก ${ids.length} กล่อง`, `${ids.length} selected`)}</span>}
       {FLOW_COLORS.map((c) => (
-        <button key={c} type="button" title={t(FLOW_PALETTE[c].th, FLOW_PALETTE[c].en)} onClick={() => setColor(ids, c)}
+        <button key={c} type="button" title={t(PAL[c].th, PAL[c].en)} onClick={() => setColor(ids, c)}
           className={`mx-0.5 h-4 w-4 rounded-full border-2 ${cur === c ? "ring-2 ring-violet-300 ring-offset-1" : ""}`}
-          style={{ background: FLOW_PALETTE[c].fill, borderColor: FLOW_PALETTE[c].stroke }} />
+          style={{ background: PAL[c].fill, borderColor: PAL[c].stroke }} />
       ))}
       <span className="mx-1 h-5 w-px bg-slate-200" />
-      {single?.kind !== "zone" && (
+      {single?.kind === "zone" && (
         <>
-          <button type="button" className={`${btn} ${pop === "style" ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => togglePop("style")}
+          {(["dash", "solid", "none"] as const).map((l) => (
+            <button key={l} type="button" onClick={() => updateData(ids[0], { line: l })} aria-pressed={(single.data.line ?? "dash") === l}
+              title={t("แบบเส้นกรอบโซน", "Zone border style")}
+              className={`${btn} ${(single.data.line ?? "dash") === l ? "bg-violet-100 text-violet-700" : ""}`}>{l === "dash" ? t("ประ", "Dashed") : l === "solid" ? t("ทึบ", "Solid") : t("ไม่มีเส้น", "None")}</button>
+          ))}
+          <label className="inline-flex items-center gap-1 px-1 text-[11px] text-slate-500" title={t("ความเข้มของพื้นโซน", "Zone fill strength")}>
+            <Icon value="i:circle-half" />
+            <input type="range" min={10} max={100} step={5} value={single.data.opacity ?? 55} onChange={(e) => updateData(ids[0], { opacity: Number(e.target.value) })}
+              className="nodrag nopan h-1 w-16 cursor-pointer accent-violet-600" aria-label={t("ความเข้มพื้น", "Fill strength")} />
+          </label>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
+        </>
+      )}
+      {(
+        <>
+          {single?.kind !== "zone" && <button type="button" className={`${btn} ${pop === "style" ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => togglePop("style")}
             title={t("สไตล์กล่อง (ปกติ · minimal · comic · luxury · punk-hazard · y2k)" + (single ? "" : " — ทุกกล่องที่เลือก"), "Box style" + (single ? "" : " — all selected"))}>
             <Icon value="i:palette" />{t("สไตล์", "Style")}
-          </button>
+          </button>}
           <button type="button" className={`${btn} relative ${pop === "fill" ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => togglePop("fill")} title={t("สีพื้นเอง", "Custom fill")}>
             <Icon value="i:paint" /><span className="absolute bottom-0.5 left-1.5 right-1.5 h-[3px] rounded border border-slate-300" style={{ background: single?.data.fill ?? pal.fill }} />
           </button>
@@ -282,8 +305,9 @@ const stopAll = { onDoubleClick: (e: React.SyntheticEvent) => e.stopPropagation(
  *  กดข้อความ = แก้ · ปุ่ม x = ลบข้อ (Ctrl+Z ย้อนได้) · ช่องล่างสุด = เพิ่มข้อ · กล่องยืดสูงตามจำนวนข้อเอง
  *  editingTitle = กำลังแก้ชื่อกล่อง (ดับเบิลคลิกกล่อง / ปุ่ม "แก้" บนแถบ) */
 function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }: { id: string; data: FlowNodeData; color: FlowColor; width?: number; height?: number; editingTitle: boolean; onTitleDone: () => void }) {
+  const PAL = usePal();
   const { readOnly, t, updateData, growNode, meName } = useBoard();
-  const pal = FLOW_PALETTE[color];
+  const pal = PAL[color];
   const items = data.items ?? [];
   const prog = todoProgress(items);
   const [editId, setEditId] = useState<string | null>(null);
@@ -398,8 +422,9 @@ function AutoChip({ p, refOf }: { p: AutoPick; refOf: (k?: string) => AutoRef | 
 /** กล่อง "อัตโนมัติ" (เจ้าของสั่ง 2026-11-20 แบบ A): หัว (ชื่อ + สถานะ) · เมื่อ · ถ้า · ให้ (หลายอย่าง) — กดแถวไหนแก้แถวนั้น
  *  ⚠️ จดกฎอย่างเดียว ระบบยังไม่ทำงานเอง · ทะเบียน เมื่อ/ให้ = lib/flow-automation */
 function AutoCard({ id, data, color, width, height, editingTitle, onTitleDone }: { id: string; data: FlowNodeData; color: FlowColor; width?: number; height?: number; editingTitle: boolean; onTitleDone: () => void }) {
+  const PAL = usePal();
   const { readOnly, t, updateData, growNode } = useBoard();
-  const pal = FLOW_PALETTE[color];
+  const pal = PAL[color];
   const a: FlowAuto = data.auto ?? { acts: [], status: "plan" };
   const [edit, setEdit] = useState<"when" | "cond" | number | "add" | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -487,7 +512,8 @@ function AutoCard({ id, data, color, width, height, editingTitle, onTitleDone }:
 
 /** รูปทรงพื้นหลังแบบ SVG (คำถาม = ข้าวหลามตัด · ที่เก็บ = ทรงกระบอก) */
 function ShapeBg({ kind, color, fill, stroke, shape, look }: { kind: FlowKind; color: FlowColor; fill?: string; stroke?: string; shape?: string; look?: FlowStyleLook }) {
-  const p0 = FLOW_PALETTE[color];
+  const PAL = usePal();
+  const p0 = PAL[color];
   const p = look ? { ...p0, fill: look.fill, stroke: look.stroke } : { ...p0, fill: fill ?? p0.fill, stroke: stroke ?? p0.stroke };
   const common = { fill: p.fill, stroke: p.stroke, strokeWidth: look ? Math.min(look.sw, 4) : 2, vectorEffect: "non-scaling-stroke" as const, ...(look?.dash ? { strokeDasharray: look.dash } : {}) };
   const svgStyle = look?.filter ? { filter: look.filter } : undefined;
@@ -516,14 +542,15 @@ function ShapeBg({ kind, color, fill, stroke, shape, look }: { kind: FlowKind; c
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
+  const PAL = usePal();
   const { readOnly, t, updateData, growNode, autoEditId, clearAutoEdit, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule, boardStyle } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
   // สไตล์กล่อง (ของกล่อง → ของกระดาน → ปกติ) · กรอบโซนไม่ใช้สไตล์
   const styleKey = kind === "zone" ? "normal" : effectiveStyle(data.style, boardStyle);
-  const look = styleKey === "normal" ? null : flowStyleLook(styleKey, FLOW_PALETTE[color], { fill: data.fill, stroke: data.stroke }, kind === "todo" || kind === "auto");
-  const pal = look ? { ...FLOW_PALETTE[color], fill: look.fill, stroke: look.stroke, text: look.text, sub: look.sub } : FLOW_PALETTE[color];
+  const look = styleKey === "normal" ? null : flowStyleLook(styleKey, PAL[color], { fill: data.fill, stroke: data.stroke }, kind === "todo" || kind === "auto");
+  const pal = look ? { ...PAL[color], fill: look.fill, stroke: look.stroke, text: look.text, sub: look.sub } : PAL[color];
   const [editing, setEditing] = useState(false);
   const meta = FLOW_KIND_META[kind];
   // กล่องไฟล์ = ป๊อปเลือกประเภท · กล่องหน้าใน ERP ที่ยังไม่ได้เลือกหน้า = ป๊อปเลือกหน้า (เลือกแล้ว = แก้ข้อความ)
@@ -544,8 +571,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           </NodeToolbar>
         )}
         <div className="fc-zone relative h-full w-full">
-          <div className="absolute inset-0 rounded-2xl" style={{ background: data.fill ?? pal.fill, opacity: 0.55 }} />
-          <div className="absolute inset-0 rounded-2xl" style={{ border: `2px dashed ${data.stroke ?? pal.stroke}`, opacity: selected ? 1 : 0.7 }} />
+          <div className="absolute inset-0 rounded-2xl" style={{ background: data.fill ?? pal.fill, opacity: (data.opacity ?? 55) / 100 }} />
+          <div className="absolute inset-0 rounded-2xl" style={{ border: data.line === "none" ? (selected ? `2px dashed ${data.stroke ?? pal.stroke}` : "none") : `2px ${data.line === "solid" ? "solid" : "dashed"} ${data.stroke ?? pal.stroke}`, opacity: selected ? 1 : data.line === "solid" ? 0.9 : 0.7 }} />
           <div className={`fc-zone-handle absolute left-2 top-1.5 inline-flex max-w-[90%] items-center gap-1.5 rounded-lg px-2 py-1 ${readOnly ? "" : "cursor-grab"}`}
             style={{ color: pal.text, background: "rgba(255,255,255,.75)" }}
             title={readOnly ? undefined : t("ลากตรงนี้ = ย้ายทั้งกรอบพร้อมกล่องข้างใน · ดับเบิลคลิก = แก้ชื่อ", "Drag here to move the zone with its boxes · double-click to rename")}

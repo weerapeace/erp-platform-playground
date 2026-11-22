@@ -10,6 +10,7 @@ import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { sanitizeRich } from "@/lib/flowchart-rich";
 import { AUTO_STATUS_META, autoPickLabel } from "@/lib/flow-automation";
 import { flowShapeOf, flowShapeSvg } from "@/lib/flowchart-shapes";
+import { themePalette } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_EDGE, effectiveStyle, flowStyleBoxCss, flowStyleLook, type FlowStyleKey } from "@/lib/flowchart-styles";
 import { FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
@@ -21,23 +22,25 @@ const extRow = (exts: string[] | undefined, size: number) => exts?.length
   ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:2px;line-height:0">${exts.map((e) => fileTypeSvg(e, size)).join("")}</div>`
   : "";
 
-function zoneHtml(n: FlowSceneNode, ox: number, oy: number): string {
-  const p = FLOW_PALETTE[nodeColor(n.type, n.data)];
+function zoneHtml(n: FlowSceneNode, ox: number, oy: number, theme?: string): string {
+  const p = themePalette(theme)[nodeColor(n.type, n.data)];
+  const line = n.data.line === "none" ? "none" : `2px ${n.data.line === "solid" ? "solid" : "dashed"} ${n.data.stroke ?? p.stroke}`;
   const x = n.position.x - ox, y = n.position.y - oy;
   const title = esc(splitFlowLabel(n.data.label).title || "โซน");
   return `<div style="position:absolute;left:${x}px;top:${y}px;width:${n.width}px;height:${n.height}px;box-sizing:border-box">`
-    + `<div style="position:absolute;inset:0;border-radius:16px;background:${n.data.fill ?? p.fill};opacity:.55"></div>`
-    + `<div style="position:absolute;inset:0;border-radius:16px;border:2px dashed ${n.data.stroke ?? p.stroke};opacity:.7"></div>`
+    + `<div style="position:absolute;inset:0;border-radius:16px;background:${n.data.fill ?? p.fill};opacity:${(n.data.opacity ?? 55) / 100}"></div>`
+    + `<div style="position:absolute;inset:0;border-radius:16px;border:${line};opacity:.7"></div>`
     + `<div style="position:absolute;left:8px;top:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.75);font-size:14px;font-weight:700;color:${p.text};white-space:nowrap">${title}</div>`
     + `</div>`;
 }
 
-function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowStyleKey): string {
+function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowStyleKey, theme?: string): string {
+  const PAL = themePalette(theme);
   const place = n.type === "storage" ? storagePlaceOf(n.data.place) : null;
   const color = place && !n.data.color ? "slate" : nodeColor(n.type, n.data);   // ที่เก็บแบบไอคอน: ชื่อสีเทาเข้มเหมือนกล่องอื่น
   const styleKey = effectiveStyle(n.data.style, boardStyle);
-  const look = styleKey === "normal" ? null : flowStyleLook(styleKey, FLOW_PALETTE[color], { fill: n.data.fill, stroke: n.data.stroke }, n.type === "todo" || n.type === "auto");
-  const p = look ? { ...FLOW_PALETTE[color], fill: look.fill, stroke: look.stroke, text: look.text, sub: look.sub } : FLOW_PALETTE[color];
+  const look = styleKey === "normal" ? null : flowStyleLook(styleKey, PAL[color], { fill: n.data.fill, stroke: n.data.stroke }, n.type === "todo" || n.type === "auto");
+  const p = look ? { ...PAL[color], fill: look.fill, stroke: look.stroke, text: look.text, sub: look.sub } : PAL[color];
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
   const frameless = n.type === "file" || n.type === "text" || !!place;
@@ -123,8 +126,8 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
     if (e.label) labels.push(`<div style="position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;color:#475569;white-space:nowrap">${esc(e.label)}</div>`);
   }
   const svg = `<svg width="${b.w}" height="${b.h}" style="position:absolute;left:0;top:0;overflow:visible"><defs><marker id="fc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>${paths.join("")}</svg>`;
-  const zones = s.nodes.filter((n) => n.type === "zone").map((n) => zoneHtml(n, b.x, b.y)).join("");
-  const nodes = s.nodes.filter((n) => n.type !== "zone").map((n) => nodeHtml(n, b.x, b.y, s.style)).join("");
+  const zones = s.nodes.filter((n) => n.type === "zone").map((n) => zoneHtml(n, b.x, b.y, s.theme)).join("");
+  const nodes = s.nodes.filter((n) => n.type !== "zone").map((n) => nodeHtml(n, b.x, b.y, s.style, s.theme)).join("");
   const html = `<div style="position:relative;width:${b.w}px;height:${b.h}px;background:#ffffff;font-family:${FONT}">${zones}${svg}${nodes}${labels.join("")}</div>`;
   return { html, width: Math.ceil(b.w), height: Math.ceil(b.h) };
 }

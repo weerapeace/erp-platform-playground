@@ -7,6 +7,8 @@ import { FLOW_PALETTE } from "@/lib/flowchart";
 import { FLOW_STYLE_KEYS, FLOW_STYLE_META, flowStyleBoxCss, flowStyleLook, type FlowStyleKey } from "@/lib/flowchart-styles";
 import { googleFontsPreviewHref, useFontLink } from "@/components/font-select";
 import { Icon } from "@/components/icon";
+import { FLOW_COLORS } from "@/lib/flowchart";
+import { FLOW_THEMES, FLOW_THEME_KEYS, themePalette, type FlowThemeKey } from "@/lib/flowchart-themes";
 
 const STYLE_FONTS = FLOW_STYLE_KEYS.map((k) => FLOW_STYLE_META[k].font).filter((f): f is string => !!f);
 
@@ -14,13 +16,15 @@ const STYLE_FONTS = FLOW_STYLE_KEYS.map((k) => FLOW_STYLE_META[k].font).filter((
 export const cssToStyle = (css: Record<string, string>): React.CSSProperties =>
   Object.fromEntries(Object.entries(css).map(([k, v]) => [k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()), v])) as React.CSSProperties;
 
-export function StylePicker({ t, value, onPick, inherit, title }: {
+export function StylePicker({ t, value, onPick, inherit, title, theme }: {
   t: (th: string, en: string) => string;
   /** สไตล์ตอนนี้ (null = ตามกระดาน) */
   value: FlowStyleKey | null;
   onPick: (k: FlowStyleKey | null) => void;
   /** โชว์ปุ่ม "ตามกระดาน" (สไตล์รายกล่อง) */
   inherit?: boolean;
+  /** ชุดสีของกระดาน (แผงของแถบเครื่องมือ) */
+  theme?: { value: FlowThemeKey; onPick: (k: FlowThemeKey) => void };
   title: string;
 }) {
   useFontLink(googleFontsPreviewHref(STYLE_FONTS));
@@ -43,6 +47,23 @@ export function StylePicker({ t, value, onPick, inherit, title }: {
           );
         })}
       </div>
+      {theme && (
+        <>
+          <div className="mt-2 border-t border-slate-100 px-1 pb-1 pt-2 text-[11px] text-slate-500">{t("ชุดสีของกระดาน (จุดสี 7 จุด)", "Board colour set (the 7 dots)")}</div>
+          <div className="grid grid-cols-3 gap-1">
+            {FLOW_THEME_KEYS.map((k) => {
+              const pal = themePalette(k);
+              return (
+                <button key={k} type="button" onClick={() => theme.onPick(k)} title={t(FLOW_THEMES[k].th, FLOW_THEMES[k].en)}
+                  className={`flex flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[10.5px] text-slate-600 hover:bg-slate-50 ${theme.value === k ? "bg-violet-50 ring-1 ring-violet-300" : ""}`}>
+                  <span className="flex gap-0.5">{FLOW_COLORS.map((c) => <span key={c} className="h-2.5 w-2.5 rounded-full border-[1.5px]" style={{ background: pal[c].fill, borderColor: pal[c].stroke }} />)}</span>
+                  <span className="truncate">{t(FLOW_THEMES[k].th, FLOW_THEMES[k].en)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
       {inherit && (
         <button type="button" onClick={() => onPick(null)}
           className={`mt-1 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed px-2 py-1 text-[11px] ${value === null ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>

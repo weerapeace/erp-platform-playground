@@ -59,7 +59,8 @@ export type FlowTodo = { id: string; text: string; done?: boolean; by?: string; 
 /** items = ข้อของกล่อง "รายการงาน" */
 /** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
 /** style = สไตล์ของกล่อง (lib/flowchart-styles · ไม่มี = ตามกระดาน) */
-export type FlowNodeData = { style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** line/opacity = กรอบโซน: แบบเส้น (ประ · ทึบ · ไม่มี) + ความเข้มพื้น 10-100 */
+export type FlowNodeData = { line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -81,7 +82,8 @@ export const edgeShapeOf = (e: { shape?: unknown } | null | undefined): FlowEdge
  */
 export type FlowPins = Record<string, { x: number; y: number }>;
 /** style = สไตล์ทั้งกระดาน (ไม่มี = ปกติ · เก็บเฉพาะตอนตั้ง) */
-export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins; style?: FlowStyleKey };
+/** theme = ชุดสีของกระดาน (lib/flowchart-themes · ไม่มี = มาตรฐาน) */
+export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins; style?: FlowStyleKey; theme?: string };
 
 /** กล่อง/เส้นของ "ชั้นล็อก" (ระบบสร้าง ไม่ได้เก็บในกระดาน) ขึ้นต้นด้วยคำนี้ — เส้นที่วาดเองต่อเข้ากล่องพวกนี้ได้ */
 export const SYS_PREFIX = "sys:";
@@ -169,6 +171,10 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     if (o.type === "auto") data.auto = cleanAuto(d.auto);
     if (o.type === "shape") data.shape = isShapeKey(d.shape) ? d.shape : DEFAULT_SHAPE;
     if (isFontName(d.font)) data.font = d.font;
+    if (o.type === "zone") {
+      if (d.line === "dash" || d.line === "solid" || d.line === "none") data.line = d.line;
+      if (typeof d.opacity === "number" && Number.isFinite(d.opacity)) data.opacity = Math.min(100, Math.max(10, Math.round(d.opacity)));
+    }
     if (isFlowStyle(d.style)) data.style = d.style;   // "normal" เก็บได้ (กล่องที่ตั้งปกติเองบนกระดานสไตล์อื่น)
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
@@ -189,8 +195,11 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     eids.add(id);
   }
   const out = withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
-  return isFlowStyle(r.style) && r.style !== "normal" ? { ...out, style: r.style } : out;
+  const withStyle = isFlowStyle(r.style) && r.style !== "normal" ? { ...out, style: r.style } : out;
+  return isThemeName(r.theme) && r.theme !== "std" ? { ...withStyle, theme: r.theme } : withStyle;
 }
+/** ชื่อชุดสี (ตรวจค่าจริงที่ lib/flowchart-themes · ไม่รู้จัก = มาตรฐาน) */
+const isThemeName = (v: unknown): v is string => typeof v === "string" && /^[a-z]{2,12}$/.test(v);
 
 // ── กล่อง "รายการงาน" (เจ้าของสั่ง 2026-11-20 แบบ A + แถบคืบหน้า · ใครติ๊ก · งานค้างทั้งผัง) ──
 export const TODO_MAX = 100;
@@ -260,9 +269,9 @@ function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | 
 type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
 /** แบบลูกศรของเส้นบนกระดานเก็บใน data.shape (React Flow) */
 type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown; data?: unknown };
-export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins, style?: FlowStyleKey): FlowScene {
+export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins, style?: FlowStyleKey, theme?: string): FlowScene {
   return parseFlowScene({
-    kind: "flowchart", pins, style,
+    kind: "flowchart", pins, style, theme,
     nodes: nodes.map((n) => ({
       id: n.id, type: n.type, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       width: Math.round(n.width ?? n.measured?.width ?? 0) || undefined,
@@ -446,8 +455,9 @@ export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowSc
     if (v) pins[k] = v;
   }
   const style = mine.style !== base.style ? mine.style : theirs.style;   // สไตล์กระดาน: เราเปลี่ยน = ของเรา · ไม่ได้แตะ = ของอีกฝั่ง
+  const theme = mine.theme !== base.theme ? mine.theme : theirs.theme;
   const merged = withPins({ kind: "flowchart", v: 1, nodes, edges }, pins);
-  return style ? { ...merged, style } : merged;
+  return { ...merged, ...(style ? { style } : {}), ...(theme ? { theme } : {}) };
 }
 
 /** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */
