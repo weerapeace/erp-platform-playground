@@ -196,8 +196,9 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
         🔎 {label}{count > 0 ? ` (${count})` : ""}
       </button>
       {open && createPortal(
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={() => setOpen(false)}>
-          <div className="bg-white rounded-xl shadow-2xl w-[440px] max-w-[94vw] max-h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        // 📱 มือถือ (จอ < 640px) = แผ่นเลื่อนขึ้นจากล่าง เต็มความกว้าง (เจ้าของเลือก 2026-11-22) · จอใหญ่ = ป๊อปกลางจอเหมือนเดิม
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4 max-sm:items-end max-sm:p-0" onClick={() => setOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-[440px] max-w-[94vw] max-h-[82vh] flex flex-col max-sm:w-full max-sm:max-w-full max-sm:max-h-[85dvh] max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:pb-[env(safe-area-inset-bottom)]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
               <h3 className="font-semibold text-slate-800">{manage ? "⚙ ตั้งค่าเริ่มต้น (ทุกคน)" : "กรองตามแท็ก"}</h3>
               <div className="flex items-center gap-2">

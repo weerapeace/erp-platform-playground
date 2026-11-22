@@ -24,6 +24,9 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
 import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL, useCtrlWheel } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง ย่อ/ขยาย)
 import { useUserPref } from "@/lib/use-user-pref";
+import { useViewportLayout } from "@/components/device-view";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { BottomSheet } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 
@@ -214,6 +217,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const setViewPersist = (v: "card" | "table") => { setView(v); try { localStorage.setItem("sku-browser-view", v); } catch { /* ignore */ } };
   // ขนาดการ์ด (ของกลาง) — จำรายคน · โหมดเลือก (ป๊อปอัป) จำแยก เพราะกล่องแคบกว่าหน้าเต็ม
   const gallery = useGalleryColumns(pick ? "sku-browser-pick" : "sku-browser", 6);
+  const isPhone = useViewportLayout() === "phone";   // 📱 มือถือ: แท็บเลื่อน · ＋ ลอย · เมนู ⋯ · ตารางแบบแถวกะทัดรัด
+  const [moreOpen, setMoreOpen] = useState(false);
   // 🔍 ขนาดรูปในโหมดตาราง (เจ้าของขอ 2026-11-22 "ctrl + scroll ขยายตาราง" · เลือกแบบ "ขยายแค่รูป") — จำกับบัญชี
   const [tblZoom, setTblZoomRaw] = useUserPref<number>("sku_table_img_zoom", 1, (v) => (typeof v === "number" && v >= TBL_ZOOMS[0] && v <= TBL_ZOOMS[TBL_ZOOMS.length - 1] ? v : null));
   const stepTblZoom = (d: 1 | -1) => setTblZoomRaw(nextTblZoom(tblZoom, d));
@@ -469,7 +474,46 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   return (
     <div>
       {/* สลับ SKU / Parent SKU + ปุ่มเพิ่ม — ซ่อนในโหมดเลือก (pick) เพราะขอซื้อได้เฉพาะ SKU */}
-      {!pick && (
+      {/* 📱 มือถือ (เจ้าของเลือก 2026-11-22 แบบ A): แท็บเลื่อนซ้ายขวา · ปุ่ม ＋ ลอยมุมขวาล่าง · ปุ่มรองรวมในเมนู ⋯ (แผ่นเลื่อนขึ้นจากล่าง) */}
+      {!pick && isPhone && (() => {
+        const plain = !taobao && !bundle && !swatch;
+        const tabs: { key: string; label: string; on: boolean; go: () => void }[] = [
+          { key: "skus", label: "🏷️ SKU", on: plain && entity === "skus", go: () => { setTaobao(false); setBundle(false); setSwatch(false); setEntity("skus"); patchNav({ en: "skus", page: 0 }); } },
+          { key: "parent-skus", label: "📦 Parent SKU", on: plain && entity === "parent-skus", go: () => { setTaobao(false); setBundle(false); setSwatch(false); setEntity("parent-skus"); patchNav({ en: "parent-skus", page: 0 }); } },
+          { key: "taobao", label: `🛒 ${t("จาก Taobao", "From Taobao")}`, on: taobao, go: () => { setTaobao(true); setBundle(false); setSwatch(false); setSelected(new Set()); } },
+          { key: "bundle", label: "📦 Bundle", on: bundle, go: () => { setBundle(true); setTaobao(false); setSwatch(false); setSelected(new Set()); } },
+          { key: "swatch", label: "🎨 Swatch", on: swatch, go: () => { setSwatch(true); setBundle(false); setTaobao(false); setSelected(new Set()); } },
+        ];
+        const act = (fn: () => void) => () => { setMoreOpen(false); fn(); };
+        const item = "w-full flex items-center gap-3 px-4 py-3 text-[14px] text-slate-700 text-left border-b border-slate-100 active:bg-slate-50";
+        return (
+          <>
+            <ScrollTabs activeKey={tabs.find((x) => x.on)?.key ?? null} className="mb-2 pb-0.5">
+              {tabs.map((x) => (
+                <button key={x.key} data-tab-key={x.key} type="button" onClick={x.go}
+                  className={`shrink-0 h-8 px-3 rounded-full border text-[13px] whitespace-nowrap ${x.on ? "border-indigo-300 bg-indigo-50 text-indigo-700 font-medium" : "border-slate-200 bg-white text-slate-600"}`}>{x.label}</button>
+              ))}
+            </ScrollTabs>
+            {plain && (
+              <button type="button" onClick={() => setAddOpen(true)}
+                className="fixed bottom-[76px] right-4 z-40 inline-flex h-12 items-center gap-1.5 rounded-full bg-indigo-600 px-4 text-sm font-medium text-white shadow-lg active:scale-95">
+                ＋ {t("เพิ่ม", "Add")} {entity === "parent-skus" ? "Parent SKU" : "SKU"}
+              </button>
+            )}
+            <BottomSheet open={moreOpen} onClose={() => setMoreOpen(false)} title={t("เมนูเพิ่มเติม", "More")} backKey="sku-more">
+              <div className="-mx-4">
+                {plain && entity === "skus" && <button type="button" className={item} onClick={act(() => setMergeOpen(true))}>🔗 {t("จัดการ SKU ซ้ำ", "Merge duplicates")}</button>}
+                {plain && entity === "skus" && <div className="px-4 py-2 border-b border-slate-100"><MaterialRequestButton /></div>}
+                {plain && entity === "parent-skus" && <button type="button" className={item} onClick={act(() => openSpecExport(selected.size ? [...selected] : []))}>📤 {t("ส่งออกรายละเอียด", "Export details")}</button>}
+                {plain && <button type="button" className={item} onClick={act(() => setMissingOpen(true))}>🔎 {t("ตรวจรูปหาย", "Find broken images")}</button>}
+                {plain && <button type="button" className={item} onClick={act(() => setCustomizeOpen(true))}>⚙️ {t("ปรับการ์ด", "Customize cards")}</button>}
+                {plain && <button type="button" className={item} onClick={act(() => openSpecial("trash"))}>🗑 {t("ถังขยะ", "Trash")}</button>}
+              </div>
+            </BottomSheet>
+          </>
+        );
+      })()}
+      {!pick && !isPhone && (
       <div className="flex items-center gap-1 mb-3">
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
           <button onClick={() => { setTaobao(false); setBundle(false); setSwatch(false); setEntity("skus"); patchNav({ en: "skus", page: 0 }); }} className={`h-9 px-4 text-sm ${!taobao && !bundle && !swatch && entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
@@ -528,8 +572,9 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       {taobao ? <TaobaoBrowser focusId={taobaoOpen?.focusId ?? null} initialStatus={taobaoOpen?.status} /> : bundle ? <BundleBrowser /> : swatch ? <SwatchBrowser openId={swatchOpen?.id ?? null} focusSpotId={swatchOpen?.spotId ?? null} /> : (<>
 
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
-      <div className="flex items-center gap-2 mb-3">
-        <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
+      {/* 📱 มือถือ: ติดบนจอตอนเลื่อนลง · ปรับการ์ดย้ายเข้าเมนู ⋯ */}
+      <div className={`flex items-center gap-2 mb-3 ${isPhone && !pick ? "sticky top-0 z-20 -mx-1 px-1 py-1.5 bg-white/95 backdrop-blur" : ""}`}>
+        <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 min-w-0 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
           <span className="text-slate-400">🔍</span>
           <input value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder={t("ค้นหา SKU ทั้งหมด (รหัส / ชื่อ) — หาได้จากทุกกลุ่ม", "Search all SKUs (code / name) — across every group")}
@@ -537,8 +582,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
         <TagGroupFilter value={tagFilter} onChange={setTagFilter} label={t("กรองแท็ก", "Filter tags")} showNone={false} />
-        {!pick && <button onClick={() => setCustomizeOpen(true)}
+        {!pick && !isPhone && <button onClick={() => setCustomizeOpen(true)}
           className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ {t("ปรับการ์ด", "Card settings")}</button>}
+        {!pick && isPhone && <button type="button" onClick={() => setMoreOpen(true)} aria-label={t("เมนูเพิ่มเติม", "More")}
+          className="h-10 w-10 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-600 text-lg leading-none">⋯</button>}
       </div>
 
       {/* breadcrumb */}
@@ -608,7 +655,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
                 ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed} onOpenParent={(id) => setParentPeekId(id)}
-                    imgPx={Math.round(TBL_IMG_BASE * tblZoom)} wheelRef={tblWheelRef} attEntity={entity === "parent-skus" ? "parent_skus_v2" : "skus_v2"}
+                    imgPx={Math.round(TBL_IMG_BASE * tblZoom)} wheelRef={tblWheelRef} compact={isPhone} attEntity={entity === "parent-skus" ? "parent_skus_v2" : "skus_v2"}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
@@ -859,7 +906,8 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   );
 }
 
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent, imgPx = 36, wheelRef, attEntity }: {
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent, imgPx = 36, wheelRef, attEntity, compact = false }: {
+  compact?: boolean;    // 📱 มือถือ = แถวกะทัดรัด
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
   sortKey: string; onSort: (col: string) => void;
   showCost?: boolean;   // มีสิทธิ์ดูต้นทุน → เพิ่มคอลัมน์ "ราคาซื้อ (ล่าสุด)"
@@ -885,10 +933,42 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
       if (imgs.length > 1) setLb((cur) => (cur ? { images: imgs, index: 0 } : cur));
     }).catch(() => { /* โหลดรูปอื่นไม่ได้ = ดูรูปหลักรูปเดียว */ });
   };
+  const lightbox = (
+    <ImageLightbox images={lb?.images ?? []} index={lb ? lb.index : -1} onClose={() => { lbReq.current++; setLb(null); }}
+      onIndex={(i) => setLb((cur) => (cur ? { ...cur, index: i } : cur))} thumbnails={(lb?.images.length ?? 0) > 1} />
+  );
+  // 📱 มือถือ: แถวกะทัดรัด (ติ๊ก · รูป · รหัส+ชื่อ · ราคา) ไม่ต้องเลื่อนตารางซ้ายขวา — เจ้าของเลือก 2026-11-22
+  if (compact) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+        {lightbox}
+        {rows.map((c) => {
+          const sel = selected.has(c.id);
+          const w = cardWarnings(c);
+          const price = c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : (showCost && c.buy_price ? fmtBuy(c.buy_price) : "—");
+          return (
+            <div key={c.id} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
+              className={`flex items-center gap-2.5 px-2.5 py-2 cursor-pointer ${sel ? "bg-indigo-50" : "active:bg-slate-50"}`}>
+              <span onClick={(e) => { e.stopPropagation(); onToggle(c.id); }}
+                className={`shrink-0 inline-flex w-5 h-5 rounded border items-center justify-center text-[11px] ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
+              <HoverImage url={c.image} size={Math.max(40, imgPx)} alt={c.code} fallback="—" onOpen={() => openImages(c)} />
+              <div className="flex-1 min-w-0">
+                <div className="font-mono text-[11px] text-slate-500 truncate">{c.code}{!c.is_active && <span className="ml-1 text-slate-400">· ปิด</span>}</div>
+                <div className="text-[13px] text-slate-800 leading-snug line-clamp-2">{c.name || <span className="text-slate-300">—</span>}</div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-[13px] tabular-nums text-slate-700">{price}</div>
+                {w.length > 0 && <div className="text-[11px] text-amber-700">⚠ {w.length}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
   return (
     <div ref={wheelRef} className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
-      <ImageLightbox images={lb?.images ?? []} index={lb ? lb.index : -1} onClose={() => { lbReq.current++; setLb(null); }}
-        onIndex={(i) => setLb((cur) => (cur ? { ...cur, index: i } : cur))} thumbnails={(lb?.images.length ?? 0) > 1} />
+      {lightbox}
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-slate-500 text-[12px]">
           <tr className="text-left">
