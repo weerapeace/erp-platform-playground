@@ -205,8 +205,6 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [peek, setPeek] = useState<{ href: string; label: string; rect: DOMRect } | null>(null);
   const [bigPage, setBigPage] = useState<{ href: string; label: string } | null>(null);
   const [capturingId, setCapturingId] = useState<string | null>(null);
-  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const peekLater = (v: typeof peek, ms: number) => { if (peekTimer.current) clearTimeout(peekTimer.current); peekTimer.current = setTimeout(() => setPeek(v), ms); };
   const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
   const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
@@ -670,8 +668,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     boardStyle,
     boardTheme,
     capturingId,
-    peekPage: (href, label, rect) => { if (!rect) return; peekLater({ href, label, rect }, 450); },
-    peekLeave: () => peekLater(null, 250),
+    // กดปุ่มตา = เปิด/ปิด (เจ้าของสั่ง 2026-11-22 เอาการชี้ค้างออก เหลือแต่กดตา)
+    peekPage: (href, label, rect) => { if (!rect) return; setPeek((cur) => (cur && cur.href === href ? null : { href, label, rect })); },
     openPagePreview: (href, label) => { setPeek(null); setBigPage({ href, label }); },
     togglePagePeek: (id) => {
       const n = nodesRef.current.find((x) => x.id === id); if (!n || !n.data.href) return;
@@ -1121,7 +1119,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       </div>
 
       {peek && <PagePeek href={peek.href} label={peek.label} anchor={peek.rect} t={t} onBig={() => { setPeek(null); setBigPage({ href: peek.href, label: peek.label }); }}
-        onEnter={() => { if (peekTimer.current) clearTimeout(peekTimer.current); }} onLeave={() => peekLater(null, 250)} />}
+        onClose={() => setPeek(null)} />}
       {bigPage && <FlowPagePreview nodeId={null} page={bigPage} onClose={() => setBigPage(null)} />}
       <FolderCardModal open={folderOpen} onClose={() => setFolderOpen(false)}
         onPlace={(_skeletons, info) => { addNode("folder", { label: info.label, path: info.path }); setFolderOpen(false); }} />

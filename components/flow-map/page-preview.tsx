@@ -78,15 +78,17 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
 
   // โซนแยกตามหน้า (สลับไปดูหน้าอื่นแล้วกลับมา โซนเดิมยังอยู่)
   const [zonesBy, setZonesBy] = useState<Record<string, Zone[]>>({});
-  const zones = useMemo(() => (node ? zonesBy[node] ?? [] : []), [zonesBy, node]);
-  const setZones = useCallback((fn: (z: Zone[]) => Zone[]) => { if (node) setZonesBy((m) => ({ ...m, [node]: fn(m[node] ?? []) })); }, [node]);
+  // ที่เก็บโซน: กล่องในผังระบบ · เปิดจากการ์ดกระดานที่ไม่มีกล่องคู่ = ใช้ลิงก์หน้า (แก้ 2026-11-22 เดิมโซนไม่ถูกเก็บเลย)
+  const zoneKey = node ?? (page ? `page:${page.href}` : null);
+  const zones = useMemo(() => (zoneKey ? zonesBy[zoneKey] ?? [] : []), [zonesBy, zoneKey]);
+  const setZones = useCallback((fn: (z: Zone[]) => Zone[]) => { if (zoneKey) setZonesBy((m) => ({ ...m, [zoneKey]: fn(m[zoneKey] ?? []) })); }, [zoneKey]);
   const [sel, setSel] = useState<string | null>(null);
   const trashRef = useRef<{ node: string; z: Zone; i: number }[]>([]);
   const removeZone = useCallback((id: string) => {
-    if (!node) return;
-    setZones((zs) => { const i = zs.findIndex((z) => z.id === id); if (i >= 0) trashRef.current.push({ node, z: zs[i], i }); return zs.filter((z) => z.id !== id); });
+    if (!zoneKey) return;
+    setZones((zs) => { const i = zs.findIndex((z) => z.id === id); if (i >= 0) trashRef.current.push({ node: zoneKey, z: zs[i], i }); return zs.filter((z) => z.id !== id); });
     setSel(null);
-  }, [node, setZones]);
+  }, [zoneKey, setZones]);
   const undoRemove = useCallback(() => {
     const last = trashRef.current.pop();
     if (!last) return;
@@ -225,7 +227,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
 
   // Delete / Backspace = ลบโซนที่เลือก · Ctrl+Z = เรียกคืนโซนที่เพิ่งลบ (ไม่ทำงานตอนพิมพ์ในช่อง)
   useEffect(() => {
-    if (!nodeId) return;
+    if (!nodeId && !page) return;
     const onKey = (e: KeyboardEvent) => {
       const el = document.activeElement as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
@@ -234,7 +236,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nodeId, sel, removeZone, undoRemove]);
+  }, [nodeId, page, sel, removeZone, undoRemove]);
 
   // ── เส้นทางงาน ──
   const flows = useMemo(() => {

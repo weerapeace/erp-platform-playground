@@ -1,7 +1,7 @@
 "use client";
 
 // 👁 ดูตัวอย่างหน้าในการ์ด "หน้าใน ERP" (ใช้ภายใน components/flowchart-board · เจ้าของเลือก 2026-11-22 แบบ A + ข้อ 1-3)
-//   - PagePeek = ภาพหน้าจริงสด (iframe ?embed=1 ย่อ · ดูอย่างเดียว กดข้างในไม่ได้) ลอยข้างการ์ด — ชี้การ์ด (จอคอม) หรือกดปุ่มตา (มือถือ)
+//   - PagePeek = ภาพหน้าจริงสด (iframe ?embed=1 ย่อ · ดูอย่างเดียว กดข้างในไม่ได้) ลอยข้างการ์ด — กดปุ่มตาบนการ์ด (กดซ้ำ / กดที่อื่น / Esc = ปิด)
 //   - captureCardImage = ถ่ายภาพหน้าจอเก็บไว้ในการ์ด (การ์ดแบบมีภาพ ไม่ต้องโหลดหน้าจริงทุกใบ · กด "ถ่ายใหม่" เมื่อหน้าเปลี่ยน)
 //   กดภาพ/ปุ่มขยาย = ป๊อปดูหน้าจริงตัวใหญ่ (ของกลาง components/flow-map/page-preview — ล็อกปุ่มบันทึก/ลบ)
 
@@ -15,10 +15,18 @@ const FRAME_W = 1280, FRAME_H = 800;
 const embedUrl = (href: string) => `${href}${href.includes("?") ? "&" : "?"}embed=1`;
 
 /** ภาพหน้าจริงสดลอยข้างการ์ด · anchor = กรอบการ์ดบนจอ */
-export function PagePeek({ href, label, anchor, t, onBig, onEnter, onLeave }: {
+export function PagePeek({ href, label, anchor, t, onBig, onClose }: {
   href: string; label: string; anchor: DOMRect; t: (th: string, en: string) => string;
-  onBig: () => void; onEnter: () => void; onLeave: () => void;
+  onBig: () => void; onClose: () => void;
 }) {
+  const box = useRef<HTMLDivElement>(null);
+  // กดที่อื่น (ยกเว้นปุ่มตา — ปุ่มตาสลับเอง) / Esc = ปิด
+  useEffect(() => {
+    const down = (e: PointerEvent) => { const tg = e.target as Element | null; if (box.current?.contains(tg as Node) || tg?.closest?.("[data-page-peek-btn]")) return; onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("pointerdown", down, true); document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key); };
+  }, [onClose]);
   const W = 300, scale = W / FRAME_W, H = Math.round(FRAME_H * scale);
   const [loaded, setLoaded] = useState(false);
   const vw = typeof window !== "undefined" ? window.innerWidth : 1200, vh = typeof window !== "undefined" ? window.innerHeight : 800;
@@ -28,8 +36,7 @@ export function PagePeek({ href, label, anchor, t, onBig, onEnter, onLeave }: {
   if (left < 8) { left = Math.max(8, Math.min(vw - W - 8, anchor.left)); top = anchor.bottom + 8; }
   top = Math.max(8, Math.min(vh - H - 52, top));
   return createPortal(
-    <div className="fixed z-[1150] overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl" style={{ left, top, width: W + 12 }}
-      onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div ref={box} className="fixed z-[1150] overflow-hidden rounded-xl border border-slate-300 bg-white shadow-2xl" style={{ left, top, width: W + 12 }}>
       <div className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500">
         <Icon value="i:eye" /><span className="min-w-0 flex-1 truncate">{t(`หน้าจริง · ${label}`, `Live page · ${label}`)}</span>
         <button type="button" onClick={onBig} className="rounded px-1.5 text-violet-700 hover:bg-violet-50">{t("ขยาย ↗", "Expand ↗")}</button>
@@ -62,7 +69,7 @@ export async function captureCardImage(href: string): Promise<string> {
   } finally { frame.remove(); }
 }
 
-/** ตัวจับเวลาชี้ค้าง (จอคอม): ชี้ 450ms = เปิด · ออก 250ms = ปิด (ย้ายเมาส์เข้าภาพได้ทัน) */
+/** (เลิกใช้ชี้ค้าง 2026-11-22 · เก็บไว้เผื่อใช้ที่อื่น) ตัวจับเวลาชี้ค้าง: ชี้ 450ms = เปิด · ออก 250ms = ปิด */
 export function useHoverPeek(open: () => void, close: () => void) {
   const tm = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (tm.current) clearTimeout(tm.current); }, []);
