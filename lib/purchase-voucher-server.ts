@@ -9,6 +9,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeVoucher, cbmFromCm, isForeignCurrency, isCNY, lineDiscount, type ShipMethod } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { loadPartnerMatcher } from "@/lib/po-line-price";
+import { otherOwners } from "@/lib/delivery-bill-share";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -432,9 +433,14 @@ export async function restoreVoucherSnapshot(admin: Admin, id: string, snap: { h
   for (const r of (cur ?? []) as Row[]) if (!keep.has(String(r.id))) await admin.from("purchase_voucher_lines_v2").update({ is_active: false, updated_at: now }).eq("id", String(r.id));
   if (Array.isArray(snap.bills)) {
     const keepB = new Set(snap.bills.map((b) => String(b.id)));
-    for (const b of snap.bills) await admin.from("purchase_delivery_bills").update({ lines: b.lines ?? [], status: b.status ?? "parsed", summary: b.summary ?? null, applied_at: b.applied_at ?? null, is_active: true, updated_at: now }).eq("id", String(b.id)).eq("voucher_id", id);
-    const { data: curB } = await admin.from("purchase_delivery_bills").select("id").eq("voucher_id", id).not("is_active", "is", false);
-    for (const r of (curB ?? []) as Row[]) if (!keepB.has(String(r.id))) await admin.from("purchase_delivery_bills").update({ is_active: false, updated_at: now }).eq("id", String(r.id));
+    // ★ 2026-11-22 ใบส่งของที่ใช้ร่วมกับใบอื่น (มีแถวของใบอื่น) — ไม่คืน/ไม่ปิด กันทับแถวที่ใบอื่นเลือก/ใช้ไปแล้ว
+    const { data: curB } = await admin.from("purchase_delivery_bills").select("id, kind, lines").eq("voucher_id", id).not("is_active", "is", false);
+    const sharedNow = new Set(((curB ?? []) as Row[]).filter((r) => r.kind !== "seller" && otherOwners((Array.isArray(r.lines) ? r.lines : []) as Parameters<typeof otherOwners>[0], id).length > 0).map((r) => String(r.id)));
+    for (const b of snap.bills) {
+      if (sharedNow.has(String(b.id))) continue;
+      await admin.from("purchase_delivery_bills").update({ lines: b.lines ?? [], status: b.status ?? "parsed", summary: b.summary ?? null, applied_at: b.applied_at ?? null, is_active: true, updated_at: now }).eq("id", String(b.id)).eq("voucher_id", id);
+    }
+    for (const r of (curB ?? []) as Row[]) if (!keepB.has(String(r.id)) && !sharedNow.has(String(r.id))) await admin.from("purchase_delivery_bills").update({ is_active: false, updated_at: now }).eq("id", String(r.id));
   }
   await recomputeVoucher(admin, id);
 }

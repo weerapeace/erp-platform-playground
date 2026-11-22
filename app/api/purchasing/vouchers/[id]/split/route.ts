@@ -14,6 +14,8 @@ import { writeAudit } from "@/lib/audit";
 import { recomputeVoucher, assignVoucherNumber, findOpenMerge } from "@/lib/purchase-voucher-server";
 import { syncSellerBillExtras } from "@/lib/seller-bill";
 import { voucherPaidReason } from "@/lib/voucher-merge-plan";
+import { restoreRowTargets } from "@/lib/delivery-bill-share";
+import type { DeliveryBillLine } from "@/lib/delivery-bill";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,7 +24,7 @@ export const maxDuration = 60;
 type Params = { params: Promise<{ id: string }> };
 type Row = Record<string, unknown>;
 type SplitSource = { id: string; header: Row; lines: { id: string; sort_order: number | null }[]; bills: string[]; grs: string[] };
-type SplitData = { version: number; target_before: Row; sources: SplitSource[] };
+type SplitData = { version: number; target_before: Row; sources: SplitSource[]; row_refs?: { bill_id: string; changed: { idx: number; from: string }[] }[] };
 
 async function loadState(id: string) {
   const admin = supabaseAdmin();
@@ -108,6 +110,17 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
       metadata: { note: `แยกกลับจาก ${target.pv_no ?? "ใบหลัก"}`, from: id, merge_audit_id: merge.id, pv_no_before_merge: h.pv_no ?? null, pv_no_now: a.pv_no ?? null, moved_back: { lines: nLines, bills: billIds.length, grs: (mg ?? []).length } } });
   }
 
+  // 2.5) ใบส่งของใช้ร่วม: แถวที่ตอนรวมถูกเปลี่ยนให้ชี้ใบหลัก → ชี้ใบเดิมกลับ (★ 2026-11-22)
+  let rowsBack = 0;
+  for (const ref of split.row_refs ?? []) {
+    const { data: rb } = await admin.from("purchase_delivery_bills").select("id, voucher_id, lines").eq("id", ref.bill_id).maybeSingle();
+    if (!rb) continue;
+    const r = restoreRowTargets((Array.isArray((rb as Row).lines) ? (rb as Row).lines : []) as DeliveryBillLine[], String((rb as Row).voucher_id), id, ref.changed);
+    if (!r.restored) continue;
+    await admin.from("purchase_delivery_bills").update({ lines: r.lines, updated_at: now }).eq("id", ref.bill_id);
+    rowsBack += r.restored;
+  }
+
   // 3) ใบหลัก: คืนค่าที่การรวมเปลี่ยน (ยอดสรุปบิล/หมายเหตุ/บิลโอนจีน/วันที่) · โหมดแก้ไขคงไว้ (กด บันทึก หรือ ยกเลิกการแก้ ต่อเอง)
   const tb = split.target_before ?? {};
   const md = merge.metadata;
@@ -120,6 +133,6 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try { await syncSellerBillExtras(admin, id); } catch { /* ไม่มีสรุปบิล */ }
 
   await writeAudit(admin, { action: "split", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
-    metadata: { note: "แยกใบกลับ (ย้อนการรวม)", merge_audit_id: merge.id, restored, split_at: now, merged_at: md.merged_at ?? merge.created_at } });
+    metadata: { note: "แยกใบกลับ (ย้อนการรวม)", merge_audit_id: merge.id, restored, shared_rows_back: rowsBack, split_at: now, merged_at: md.merged_at ?? merge.created_at } });
   return NextResponse.json({ ok: true, restored, still_editing: target.status === "confirmed", error: null });
 }

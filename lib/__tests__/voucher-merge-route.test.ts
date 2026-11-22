@@ -145,6 +145,16 @@ describe("หลังรวม: กันยกเลิกการแก้ +
     expect(res.status).toBe(409);
     expect((await res.json()).error).toContain("บันทึกการแก้ไข");
   });
+  it("★ 11-22 ใบส่งของใช้ร่วม: กล่องที่ชี้ใบที่ถูกรวม → ชี้ใบหลัก · แยกใบกลับ = คืน", async () => {
+    const OLDV = "00000000-0000-4000-8000-000000000001", NEWV = "00000000-0000-4000-8000-000000000002", OTHER = "00000000-0000-4000-8000-000000000099";
+    tables.purchase_delivery_bills.push({ id: "B-shared", voucher_id: OTHER, kind: "carrier", is_active: true, lines: [{ description: "BOX", voucher_line_ids: [] }, { description: "PAPER", for_voucher_id: NEWV, voucher_line_ids: ["L-new"] }] });
+    await mergePost(req({ ids: [NEWV, OLDV] }));
+    const sh = () => tables.purchase_delivery_bills.find((b) => b.id === "B-shared")!.lines as Row[];
+    expect(sh()[1].for_voucher_id).toBe(OLDV);
+    expect(sh()[0].for_voucher_id).toBeUndefined();
+    await splitPost(req({}), params(OLDV));
+    expect(sh()[1].for_voucher_id).toBe(NEWV);
+  });
   it("การรวมเก่า (ไม่มี split_data) → แยกอัตโนมัติไม่ได้ บอกตรง ๆ", async () => {
     tables.audit_logs.push({ id: "a-old", action: "merge", entity_type: "purchase_vouchers_v2", entity_id: "00000000-0000-4000-8000-000000000001", created_at: "2026-11-15T00:00:00Z", metadata: { merged_pv_nos: ["PV2026-10-16-001"] } });
     V("00000000-0000-4000-8000-000000000001").editing_at = "2026-11-21T00:00:00Z";

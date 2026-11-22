@@ -68,6 +68,11 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
       },
       select: (_cols?: string, opts?: { head?: boolean }) => ((head = !!opts?.head), q),
       eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), q),
+      // jsonb @> แบบง่าย: คอลัมน์เป็น array ของ object → มี object ที่มีทุกคีย์ตรงกับแต่ละตัวที่ขอ
+      contains: (c: string, v: unknown) => (filters.push((r) => {
+        const arr = Array.isArray(r[c]) ? (r[c] as Row[]) : [];
+        return (Array.isArray(v) ? (v as Row[]) : []).every((want) => arr.some((x) => Object.entries(want).every(([k, val]) => x?.[k] === val)));
+      }), q),
       neq: (c: string, v: unknown) => (filters.push((r) => r[c] !== v), q),
       in: (c: string, v: unknown[]) => (filters.push((r) => v.includes(r[c])), q),
       gte: (c: string, v: string) => (filters.push((r) => String(r[c]) >= v), q),

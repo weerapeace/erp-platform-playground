@@ -19,7 +19,7 @@ import { formatDate } from "@/lib/date";
 import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
-import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
+import { DeliveryBillPanel, type DeliveryBillApi, type DeliveryBillStatus } from "@/components/delivery-bill-panel";
 import { SellerBillPanel, type SellerBillPanelApi, type BillLineMoney, type BillLinkMap } from "@/components/seller-bill-panel";
 import { SaveBar } from "@/components/save-bar";
 import { SendToChinaPayButton } from "@/components/china-pay-send-button";
@@ -121,6 +121,13 @@ export default function PurchaseVoucherFormPage() {
   // ★ 2026-11-15 แผงบิลร้านให้หน้าใบคุม (เจ้าของ: "ขอปุ่มบันทึกร่างด้วย" — แถบเดียวบันทึกทั้งหน้า) + งานแก้ PO ทำตอนยืนยันใบ
   const panelRef = useRef<SellerBillPanelApi | null>(null);
   const [panelStatus, setPanelStatus] = useState<{ pending: boolean; undecided: number; bills: number }>({ pending: false, undecided: 0, bills: 0 });
+  // ★ 2026-11-22 ใบส่งของจากขนส่ง: ที่แก้ค้าง (ลบแถว/แก้ตัวเลข/จับคู่/เลือกของใบไหน) ต้องไม่หายเงียบ · ก่อนยืนยันเตือนค่าส่ง ฿0
+  const deliveryRef = useRef<DeliveryBillApi | null>(null);
+  const [dbStatus, setDbStatus] = useState<DeliveryBillStatus>({ pending: false, mineRows: 0, unappliedRows: 0, unmappedRows: 0 });
+  const dbStatusRef = useRef(dbStatus);   // ค่าล่าสุด (หลังบันทึกแล้วตรวจต่อทันที)
+  const onDbStatus = useCallback((s: DeliveryBillStatus) => { dbStatusRef.current = s; setDbStatus(s); }, []);
+  const [dbAsk, setDbAsk] = useState<{ kind: "unsaved" | "ship0"; next: "confirm" | "revise" } | null>(null);
+  const [dbBusy, setDbBusy] = useState(false);
   const onPanelStatus = useCallback((s: { pending: boolean; undecided: number; bills: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided && p.bills === s.bills ? p : s)), []);
   // ★ 2026-11-15 รอบ 4 (เจ้าของ: "ตารางล่างไม่ค่อยจำเป็น เอาไปรวมกับอันบน · อยากได้ view รวมทุกอันเป็นตาราง และดูแบบแยกบิล")
   //   แยกตามบิล = แผงบิลร้าน (แถวบาง + ฿/ชิ้น · ยอด ฿) + กล่อง "ไม่มีบิล" · รวมเป็นตาราง = ตารางเดียวทุกรายการ + คอลัมน์ "บิล" · จำในเครื่อง
@@ -163,6 +170,7 @@ export default function PurchaseVoucherFormPage() {
     setReviseBusy(true);
     try {
       if (action === "save") await panelRef.current?.flush();   // บิลร้านที่แก้ค้าง
+      if (action === "save" && deliveryRef.current?.pending() && !(await deliveryRef.current.flush())) return;   // ใบส่งของที่แก้ค้าง
       if (action === "save" && dirty && !(await save())) return;
       const res = await apiFetch(`/api/purchasing/vouchers/${id}/revise`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason, renumber }) });
       const j = await res.json().catch(() => ({}));
@@ -238,6 +246,7 @@ export default function PurchaseVoucherFormPage() {
   /** ★ 2026-11-15 บันทึกร่างทั้งหน้า — บิลร้านที่ค้าง (บันทึกอัตโนมัติยังไม่ทันส่ง) + หัวใบ/รายการ · ไม่ได้แก้อะไรก็กดได้ */
   const saveAll = async () => {
     await panelRef.current?.flush();
+    if (deliveryRef.current?.pending() && !(await deliveryRef.current.flush())) return;   // ★ 2026-11-22 ใบส่งของที่แก้ค้าง
     if (dirty) { if (!(await save())) return; }
     setSavedAt(new Date());
     toast.success("บันทึกร่างแล้ว");
@@ -271,6 +280,7 @@ export default function PurchaseVoucherFormPage() {
     setConfirming(true);
     try {
       await panelRef.current?.flush();   // บิลร้านที่แก้ค้าง (บันทึกอัตโนมัติยังไม่ทันส่ง)
+      if (deliveryRef.current?.pending() && !(await deliveryRef.current.flush())) return;   // ใบส่งของที่แก้ค้าง (กันหายเงียบ)
       if (dirty && !(await save())) return;
       const res = await apiFetch(`/api/purchasing/vouchers/${id}/confirm`, { method: "POST" });
       const j = await res.json().catch(() => ({}));
@@ -425,7 +435,33 @@ export default function PurchaseVoucherFormPage() {
   const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
   /** ★ 2026-11-21 ข้อเสนอ 1 — ใบนี้ยังไม่มีค่าส่ง + ร้านเดียวกันมีใบอื่นที่ยังไม่มีค่าส่ง (≤ 14 วัน) → ถามก่อน "ส่งมาพร้อมใบอื่นไหม?" · ถามไม่ได้ = ยืนยันตามปกติ */
-  const askConfirm = async () => {
+  /** ★ 2026-11-22 ก่อนยืนยัน / บันทึกการแก้ไข: ใบส่งของยังไม่บันทึก → ถาม · มีกล่องของใบนี้แต่ยังไม่ได้ใช้น้ำหนัก/คิว หรือค่าส่ง ฿0 → เตือน */
+  const preCheck = (next: "confirm" | "revise", skip: ("unsaved" | "ship0")[] = []) => {
+    if (!skip.includes("unsaved") && deliveryRef.current?.pending()) { setDbAsk({ kind: "unsaved", next }); return; }
+    const ds = dbStatusRef.current;
+    if (!skip.includes("ship0") && ds.mineRows > 0 && (ds.unappliedRows > 0 || !(Number(t?.ship_total_thb ?? 0) > 0))) { setDbAsk({ kind: "ship0", next }); return; }
+    setDbAsk(null);
+    if (next === "revise") startReviseSave(); else void askConfirmShip();
+  };
+  const askConfirm = async () => preCheck("confirm");
+  const dbSaveThen = async () => {
+    if (!dbAsk) return;
+    setDbBusy(true);
+    try { if (!(await deliveryRef.current?.flush())) return; await new Promise((r) => setTimeout(r, 80)); preCheck(dbAsk.next, ["unsaved"]); }   // รอแผงโหลดใหม่ → สถานะล่าสุด
+    finally { setDbBusy(false); }
+  };
+  const dbApplyNow = async () => {
+    setDbBusy(true);
+    try {
+      const r = await deliveryRef.current?.applyAll();
+      setDbAsk(null);
+      if (!r) return;
+      if (r.unmapped > 0) toast.warning(`ยังมี ${r.unmapped} กล่องของใบนี้ที่ยังไม่ได้จับคู่สินค้า — จับคู่ หรือเลือกช่อง "ของใบ" ว่าเป็นของใบอื่น / พักไว้ / ไม่ใช่ของเรา แล้วกดยืนยันอีกครั้ง`);
+      else if (r.failed > 0) toast.error("ใช้น้ำหนัก/คิวไม่สำเร็จบางใบ — ดูที่แผงใบส่งของ");
+      else toast.success(`ใส่น้ำหนัก/คิวแล้ว ${r.applied} รายการ — ตรวจค่าส่งแล้วกดยืนยันอีกครั้ง`);
+    } finally { setDbBusy(false); }
+  };
+  const askConfirmShip = async () => {
     if (!(Number(t?.ship_total_thb ?? 0) > 0)) {
       try {
         const j = await apiFetch(`/api/purchasing/vouchers/merge?for=${id}`).then((r) => r.json());
@@ -478,7 +514,7 @@ export default function PurchaseVoucherFormPage() {
               </div>
               {(() => {
                 /* ★ 2026-11-16 ปุ่ม "＋ ใบใหม่ ▾" (เจ้าของเลือกแบบ B) — ไปหน้ารายการแล้วเปิดป๊อป "ออกใบสำคัญรับ" ตามวิธีที่เลือก · มีที่ยังไม่บันทึก = ถามก่อน */
-                const goNew = (mode: "gr" | "bill" | "china" | "manual") => { const to = `/purchasing/vouchers?new=${mode}`; if ((dirty || panelStatus.pending) && !readonly) setLeaveTo(to); else router.push(to); };
+                const goNew = (mode: "gr" | "bill" | "china" | "manual") => { const to = `/purchasing/vouchers?new=${mode}`; if ((dirty || panelStatus.pending || dbStatus.pending || dbStatus.pending || dbStatus.pending) && !readonly) setLeaveTo(to); else router.push(to); };
                 const newItems: RowMenuItem[] = [
                   { label: "จากใบรับ (GR)", onClick: () => goNew("gr") },
                   { label: "จากบิลร้าน (ให้ AI อ่าน)", onClick: () => goNew("bill") },
@@ -537,7 +573,7 @@ export default function PurchaseVoucherFormPage() {
                 {canRevise && (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setReviseCancelOpen(true)} disabled={reviseBusy} className="h-9 px-3 text-xs rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิกการแก้</button>
-                    <button onClick={startReviseSave} disabled={reviseBusy || saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
+                    <button onClick={() => preCheck("revise")} disabled={reviseBusy || saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">{reviseBusy ? "กำลังบันทึก…" : "✓ บันทึกการแก้ไข"}</button>
                   </div>
                 )}
               </div>
@@ -826,7 +862,7 @@ export default function PurchaseVoucherFormPage() {
                     {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
                     <DeliveryBillPanel voucherId={id} readonly={readonly}
                       lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id }))}
-                      onApplied={load} />
+                      onApplied={load} controlRef={deliveryRef} onStatus={onDbStatus} />
                   </div>
                 </CollapseCard>
 
@@ -842,7 +878,7 @@ export default function PurchaseVoucherFormPage() {
                 {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} dirty={dirty} saving={saving || reviseBusy}
-                    onSave={() => void save()} onConfirm={editing ? startReviseSave : () => void askConfirm()} onSetGoodsThb={readonly ? undefined : setGoodsThb}
+                    onSave={() => void save()} onConfirm={editing ? () => preCheck("revise") : () => void askConfirm()} onSetGoodsThb={readonly ? undefined : setGoodsThb}
                     revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
@@ -909,7 +945,7 @@ export default function PurchaseVoucherFormPage() {
                 saveLabel={editing ? "💾 เก็บที่แก้ไว้ก่อน" : "💾 บันทึกร่าง"} onSave={saveAll}
                 note={editing ? `กำลังแก้ → เวอร์ชัน ${hd.revision + 1} · กด "บันทึกการแก้ไข" เมื่อเสร็จ` : "บิลร้าน + หัวใบ + รายการ"}
                 extra={editing
-                  ? (canRevise ? <button type="button" onClick={startReviseSave} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
+                  ? (canRevise ? <button type="button" onClick={() => preCheck("revise")} disabled={reviseBusy || saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ บันทึกการแก้ไข</button> : null)
                   : (hd.status === "draft" && canEdit ? <button type="button" onClick={() => void askConfirm()} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50">✓ ยืนยัน + ออกเลข</button> : null)} />
             )}
           </>
@@ -954,6 +990,27 @@ export default function PurchaseVoucherFormPage() {
             ))}
           </div>
           <p className="text-[11px] text-slate-400 mt-2">กด รวมก่อน = ไปหน้ารายการแล้วเปิดขั้นรวมโดยติ๊กใบเหล่านี้ไว้ให้ (ตรวจได้ก่อนกดรวม)</p>
+        </ERPModal>
+      )}
+      {/* ★ 2026-11-22 ใบส่งของ: ยังไม่บันทึก / ค่าส่ง ฿0 — ถามก่อนยืนยันหรือบันทึกการแก้ไข */}
+      {dbAsk && (
+        <ERPModal open onClose={() => !dbBusy && setDbAsk(null)} size="sm" storageKey="pv-delivery-precheck"
+          title={dbAsk.kind === "unsaved" ? "ใบส่งของจากขนส่งยังไม่บันทึก" : dbStatus.unappliedRows > 0 ? "ยังไม่ได้ใช้น้ำหนัก/คิวจากใบส่งของ" : "ค่าส่งยังเป็น ฿0"}
+          footer={dbAsk.kind === "unsaved" ? <>
+            <button onClick={() => setDbAsk(null)} disabled={dbBusy} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">กลับไปแก้</button>
+            <button onClick={() => { deliveryRef.current?.discard(); preCheck(dbAsk.next, ["unsaved"]); }} disabled={dbBusy} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ทิ้งที่แก้</button>
+            <button onClick={() => void dbSaveThen()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{dbBusy ? "กำลังบันทึก…" : "บันทึกแล้วไปต่อ"}</button>
+          </> : <>
+            <button onClick={() => setDbAsk(null)} disabled={dbBusy} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">ยกเลิก</button>
+            <button onClick={() => preCheck(dbAsk.next, ["unsaved", "ship0"])} disabled={dbBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยืนยันโดยไม่มีค่าส่ง</button>
+            <button onClick={() => void dbApplyNow()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">{dbBusy ? "กำลังใส่…" : "ใช้เลย"}</button>
+          </>}>
+          {dbAsk.kind === "unsaved"
+            ? <p className="text-sm text-slate-600">มีที่แก้ในใบส่งของ (ลบแถว · แก้ตัวเลข · จับคู่สินค้า · เลือกว่ากล่องเป็นของใบไหน) ที่ยังไม่ได้กดบันทึก — ถ้าไปต่อโดยไม่บันทึก ที่แก้จะหาย</p>
+            : <div className="text-sm text-slate-600 space-y-1">
+                <p>ใบนี้มีกล่องในใบส่งของ {dbStatus.mineRows} กล่อง{dbStatus.unappliedRows > 0 ? <> · ยังไม่ได้กด <b>ใช้น้ำหนัก/คิว</b> {dbStatus.unappliedRows} กล่อง</> : null}{dbStatus.unmappedRows > 0 ? <> · ยังไม่ได้จับคู่สินค้า {dbStatus.unmappedRows} กล่อง</> : null}</p>
+                <p>ค่าส่งตอนนี้ <b className="text-orange-700">฿{fmtMoney(t?.ship_total_thb ?? 0)}</b> — กด <b>ใช้เลย</b> = ใส่น้ำหนัก/คิวจากกล่องที่จับคู่แล้วให้ (แล้วกดยืนยันอีกครั้ง)</p>
+              </div>}
         </ERPModal>
       )}
       {/* ★ 2026-11-21 ข้อเสนอ 2 — แยกใบกลับ */}

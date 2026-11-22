@@ -31,6 +31,10 @@ export type DeliveryBillLine = {
   method?: "cube" | "weight" | null;   // คิดค่าส่งกล่องนี้จากคิวหรือน้ำหนัก (auto จากกฎ Description · แก้ได้)
   voucher_line_ids: string[];    // สินค้าในใบสำคัญที่จับคู่กับบรรทัดนี้ (เลือกได้หลายตัว)
   no?: number | null;            // เลขบรรทัดบนกระดาษ (lib/bill-line-order) — ใบเก่าไม่มี
+  /** ★ 2026-11-22 แถวนี้เป็นของใบสำคัญไหน (ว่าง = ใบเจ้าของบิล) · พักไว้ / ไม่ใช่ของเรา · ใช้แล้วเมื่อไร — lib/delivery-bill-share */
+  for_voucher_id?: string | null;
+  hold?: "parked" | "not_ours" | null;
+  applied_at?: string | null;
 };
 
 /** กฎ "คำใน Description → วิธีคิด" จากตั้งค่ากลาง (/m/freight-description-rules) · เรียงตาม sort_order กฎแรกที่เข้าชนะ */

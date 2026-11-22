@@ -18,6 +18,8 @@ import { writeAudit } from "@/lib/audit";
 import { recomputeVoucher, assignVoucherNumber, snapshotVoucher } from "@/lib/purchase-voucher-server";
 import { syncSellerBillExtras } from "@/lib/seller-bill";
 import { saveRevision, getRevision, VOUCHER_ENTITY } from "@/lib/document-revisions";
+import { retargetRows } from "@/lib/delivery-bill-share";
+import type { DeliveryBillLine } from "@/lib/delivery-bill";
 import { checkVoucherMerge, shipTogetherCandidates, SHIP_TOGETHER_DAYS, MERGE_HEADER_KEYS, type VoucherForMerge, type ShipTogetherRow } from "@/lib/voucher-merge-plan";
 
 export const dynamic = "force-dynamic";
@@ -119,6 +121,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (bErr) return NextResponse.json({ error: "ย้ายบิลไม่สำเร็จ: " + bErr.message }, { status: 500 });
   const { data: mg, error: gErr } = await admin.from("goods_receipts_v2").update({ voucher_id: targetId }).in("voucher_id", sourceIds).select("id");
   if (gErr) return NextResponse.json({ error: "ย้ายใบรับไม่สำเร็จ: " + gErr.message }, { status: 500 });
+  // ★ 2026-11-22 ใบส่งของใช้ร่วม: แถวที่ชี้ใบที่ถูกรวม → ชี้ใบหลัก (จดไว้ให้ แยกใบกลับ)
+  const rowRefs: { bill_id: string; changed: { idx: number; from: string }[] }[] = [];
+  const seenBills = new Set<string>();
+  for (const sid of sourceIds) {
+    const { data: rb } = await admin.from("purchase_delivery_bills").select("id, voucher_id, lines").contains("lines", [{ for_voucher_id: sid }]).not("is_active", "is", false);
+    for (const b of (rb ?? []) as Row[]) {
+      const bid = String(b.id); if (seenBills.has(bid)) continue; seenBills.add(bid);
+      const r = retargetRows((Array.isArray(b.lines) ? b.lines : []) as DeliveryBillLine[], String(b.voucher_id), sourceIds, targetId);
+      if (!r.changed.length) continue;
+      await admin.from("purchase_delivery_bills").update({ lines: r.lines, updated_at: now }).eq("id", bid);
+      rowRefs.push({ bill_id: bid, changed: r.changed });
+    }
+  }
 
   // 3) หัวใบหลัก: รวมค่าส่งในจีน/ค่าธรรมเนียม/ยอดจ่าย · หมายเหตุต่อกัน · วันที่ใหม่ · เข้าโหมดแก้ไข (ถ้ามีใบยืนยันแล้ว)
   const sumOf = (k: string) => { const xs = rows.map((r) => numOrNull(r[k])).filter((x): x is number => x != null && x > 0); return xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) * 100) / 100 : null; };
@@ -163,7 +178,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       pv_no_before: target.pv_no ?? null, pv_no_after: (after as Row | null)?.pv_no ?? null,
       date_before: target.voucher_date ?? null, date_after: (after as Row | null)?.voucher_date ?? null,
       moved: { lines: movedLines, bills: (mb ?? []).length, grs: (mg ?? []).length }, started_editing: startEditing, merged_at: now,   // นาฬิกาเดียวกับ editing_at (กันยกเลิกการแก้หลังรวม)
-      split_data: { version: 1, target_before: pick(target), sources: splitSources },
+      split_data: { version: 1, target_before: pick(target), sources: splitSources, row_refs: rowRefs },
     },
   });
   if (startEditing) await writeAudit(admin, { action: "edit_start", entityType: VOUCHER_ENTITY, entityId: targetId, actorId: user?.id ?? null, actorName,
