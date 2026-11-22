@@ -180,8 +180,8 @@ export const WORKFLOWS: WorkflowDef[] = [
   {
     key: "creative-task",
     label: "งานครีเอทีฟ / งานย่อย + อนุมัติผลงาน",
-    flow: "ตั้งค่าได้ในระบบ (ตาราง erp_creative_statuses + เส้นทาง) · อนุมัติ / ตีกลับ / แก้ ต้องมีสิทธิ์ tasks.approve",
-    ruleFiles: ["lib/creative-statuses-server.ts", "lib/creative-status-colors.ts", "lib/approval-token.ts"],
+    flow: "ตั้งค่าได้ในระบบ (ตาราง erp_creative_statuses + เส้นทาง · หน้า /tasks/settings?tab=status) · อนุมัติ / ตีกลับ / แก้ ต้องมีสิทธิ์ tasks.approve · เงื่อนไขก่อนเข้าสถานะ (ความพร้อมสินค้า/คอนเทนต์ · เตือนหรือห้าม · ui_config task_status_gates) เช็กฝั่งเว็บที่ applyTaskTransition",
+    ruleFiles: ["lib/creative-statuses-server.ts", "lib/creative-status-colors.ts", "lib/approval-token.ts", "lib/task-status-gates.ts", "app/tasks/task-actions.ts", "app/tasks/status-gate-check.tsx"],
     gates: [],
     tables: ["erp_creative_statuses", "erp_creative_status_transitions"],
     signals: [],

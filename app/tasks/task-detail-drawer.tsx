@@ -41,7 +41,7 @@ import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import { TaskPlatformListing, usePlatformListedStatus } from "./task-platform-listing";
 import { TaskReadinessBar } from "./task-readiness-bar";
-import { READINESS_WARN_TO, type ReadinessItem } from "@/lib/task-readiness";
+
 import { TaskBriefBoard } from "./task-reference-board";
 import { copyText } from "@/components/copy-button";
 import { Popover } from "@/components/popover";
@@ -179,7 +179,6 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [quickOpen, setQuickOpen] = useState(false);   // แผงตรวจสินค้าเร็ว (ดูอย่างเดียว + อนุมัติ/ตีกลับ)
   const [descTab, setDescTab] = useState<"text" | "notes">("text"); // กล่องรายละเอียด: แท็บ ข้อความ / โน้ตอ้างอิง
   const [filesOpen, setFilesOpen] = useState<boolean | null>(null);
-  const [readyItems, setReadyItems] = useState<ReadinessItem[] | null>(null); // รายการ "ยังขาดอะไร" (ใช้เตือนก่อนส่งตรวจ/ปิดงาน)
   const pfStatus = usePlatformListedStatus(detail?.parent_skus ?? NO_PARENTS); // สถานะลงร้าน — ใช้ร่วมแถบ Platform + ความพร้อม // กล่องไฟล์/Drive (null = ตามว่ามีไฟล์ไหม)
   const [refEdit, setRefEdit] = useState(false);  // เปิดตัวแก้โน้ตอ้างอิง (ใต้รายละเอียดงาน — แท็บอ้างอิงเลิกใช้ 2026-11-21 · กระดาน = กระดานบรีฟ)
   const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
@@ -259,17 +258,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
-  // เตือน (ไม่บล็อก) ก่อนส่งตรวจ/อนุมัติ/เผยแพร่/ปิดงาน ถ้าความพร้อมสินค้ายังขาด — เจ้าของเลือก 2026-11-21
-  const confirmReadiness = async (toKey: string): Promise<boolean> => {
-    if (!READINESS_WARN_TO.has(toKey) || !readyItems) return true;
-    const miss = readyItems.filter((i) => !i.pending && !i.ok);
-    if (!miss.length) return true;
-    return askConfirm({
-      title: t(`สินค้ายังขาด ${miss.length} เรื่อง — ทำต่อเลยไหม?`, `${miss.length} product item(s) still missing — continue?`),
-      message: <ul className="list-disc pl-5 text-sm space-y-0.5">{miss.map((i) => <li key={i.key}>{t(i.label, i.label_en)}{i.issues[0] ? <span className="text-slate-400"> — {i.issues[0]}</span> : null}</li>)}</ul>,
-      confirmText: t("ทำต่อเลย", "Continue anyway"), cancelText: t("กลับไปแก้", "Go back"),
-    });
-  };
+  // เตือน/ห้าม ก่อนเข้าสถานะ (ความพร้อมสินค้า · คอนเทนต์) ย้ายไปของกลาง applyTaskTransition → status-gate-check (2026-11-22)
+  //   ตั้งต่อสถานะได้ที่ /tasks/settings?tab=status — ลิ้นชัก/บอร์ด/กระดาน ใช้กฎเดียวกัน
   // admin: บังคับตั้งสถานะใดก็ได้ (force ข้ามกฎ workflow) — บันทึก audit ฝั่ง server
   // ผ่านของกลาง applyTaskTransition → ถ้ายังมีงานย่อยค้างตอนปิดงาน จะถามก่อน (ไม่ปล่อยงานย่อยค้างในคิวตรวจ)
   const handleForceStatus = async (toKey: string) => { setBusy(true); try { if (await applyTaskTransition(d, toKey, { pushToast, force: true })) await refresh(); } finally { setBusy(false); } };
@@ -370,7 +360,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               {parentList.length > 0 && (
                 <div className="mt-2.5">
                   <TaskReadinessBar taskId={d.id} taskType={d.task_type} platforms={d.platforms ?? []} parentKey={parentList.map((x) => x.id).join(",")}
-                    status={pfStatus} onOpenParent={setOpenParentId} onResult={setReadyItems} accent={dth.accent} />
+                    status={pfStatus} onOpenParent={setOpenParentId} accent={dth.accent} />
                 </div>
               )}
               {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
@@ -859,7 +849,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
               : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
               : isPrimary ? "flex-1 text-white" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
-            return <button key={a.to_key} disabled={busy} onClick={async () => { if (!(await confirmReadiness(a.to_key))) return; if (a.to_key === "published") setPublishToKey(a.to_key); else handleMove(a.to_key); }} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
+            return <button key={a.to_key} disabled={busy} onClick={async () => { if (a.to_key === "published") setPublishToKey(a.to_key); else handleMove(a.to_key); }} style={isPrimary ? { background: btnBg(dth) } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
           })}
         </div>
       </DrawerShell>

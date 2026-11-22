@@ -48,6 +48,11 @@ export async function applyTaskTransition(task: CreativeTask, toKey: string, opt
     else {
       const t = transitionBetween(task.status, toKey);
       if (!t) { pushToast("error", `เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`); return false; }
+      // เงื่อนไขก่อนเข้าสถานะ (ตั้งต่อสถานะ · เจ้าของเลือก 2026-11-22) — เฉพาะการย้ายไปข้างหน้า · โหลดตัวเช็กเมื่อใช้ (ไม่ถ่วงทุกหน้า)
+      if (!t.kind || t.kind === "normal" || t.kind === "approve") {
+        const { checkStatusGate } = await import("./status-gate-check");
+        if (!(await checkStatusGate(task, toKey, pushToast))) return false;
+      }
       if (t.kind === "approve") done = await withOpenSubtaskCheck((c) => approveTask(task.id, "approve", undefined, toKey, c));
       else if (t.kind === "reject" || t.kind === "revise") {
         // กด "ยกเลิก" = ไม่ทำอะไรเลย (เดิมใช้ window.prompt แล้วค่าว่าง → ระบบยังตีกลับงานโดยไม่มีเหตุผล)

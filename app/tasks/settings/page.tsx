@@ -12,8 +12,6 @@ import { useAuth } from "@/components/auth";
 import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";
 import { apiFetch } from "@/lib/api";
 import { listOptions, createOption, updateOption, deleteOption, type Option } from "../use-options";
-import { listStatuses, createStatus, updateStatus, deleteStatus, setTransition, deleteTransition, type Status, type Transition } from "../use-statuses";
-import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors";
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
@@ -29,7 +27,7 @@ import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { CaptionPromptsManager } from "./caption-prompts";
 import { ProductModeManager } from "../product-mode-settings";
 import { ReadinessRulesManager } from "../readiness-settings";
-import { tr } from "@/lib/lang";
+import { StatusWorkflowManager } from "../status-workflow-settings";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
@@ -77,8 +75,7 @@ export default function TaskSettingsPage() {
       { key: "subtype", icon: "🧩", label: t("ชนิดงานย่อย", "Subtask types"), desc: t("งานย่อยที่เพิ่มในงานได้", "Subtasks you can add to a task") },
     ] },
     { label: t("ขั้นตอนงาน", "Workflow"), items: [
-      { key: "status", icon: "🚦", label: t("สถานะ", "Statuses"), desc: t("ชื่อและสีของสถานะงาน", "Status names and colors") },
-      { key: "transition", icon: "🔀", label: t("เส้นทาง", "Transitions"), desc: t("สถานะไหนไปต่อสถานะไหนได้", "Which status can move to which") },
+      { key: "status", icon: "🚦", label: t("สถานะ + เส้นทาง", "Statuses + transitions"), desc: t("ชื่อ สี % ทางไปต่อ และเงื่อนไขก่อนเข้าแต่ละสถานะ", "Names, colors, %, next steps and entry rules per status") },
       { key: "submit", icon: "📤", label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
       { key: "readiness", icon: "✅", label: t("ความพร้อมสินค้า", "Product readiness"), desc: t("เช็กอะไรบ้างใต้ความคืบหน้าในลิ้นชักงาน", "What the task drawer checks under progress") },
     ] },
@@ -114,8 +111,7 @@ export default function TaskSettingsPage() {
         ) : (
         <SettingsNavLayout groups={navGroups} active={tab} onSelect={selectTab}>
         {tab === "perm" ? <MenuPermissionMatrix appKey="tasks" />
-          : tab === "status" ? <StatusManager showToast={showToast} />
-          : tab === "transition" ? <TransitionManager showToast={showToast} />
+          : tab === "status" || tab === "transition" ? <StatusWorkflowManager />
           : tab === "team" ? <TeamManager showToast={showToast} />
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
           : tab === "ai_prompt" ? <CaptionPromptsManager showToast={showToast} />
@@ -317,128 +313,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
   );
 }
 
-// ============================================================
-// แท็บจัดการสถานะ
-// ============================================================
-function StatusManager({ showToast }: { showToast: (m: string) => void }) {
-  const t = useT();
-  const [statuses, setStatuses] = useState<Status[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newLabel, setNewLabel] = useState("");
-  const [newColor, setNewColor] = useState("slate");
-
-  const load = useCallback(async () => { setLoading(true); try { setStatuses((await listStatuses()).statuses); } catch (e) { showToast((e as Error).message); } finally { setLoading(false); } }, [showToast]);
-  useEffect(() => { load(); }, [load]);
-
-  const patch = async (id: string, p: Record<string, unknown>) => { try { await updateStatus(id, p); await load(); } catch (e) { showToast((e as Error).message); } };
-  const add = async () => { if (!newLabel.trim()) return; try { await createStatus({ label: newLabel.trim(), color: newColor }); setNewLabel(""); await load(); showToast(t("เพิ่มสถานะแล้ว", "Status added")); } catch (e) { showToast((e as Error).message); } };
-  const remove = async (s: Status) => { if (!(await askConfirm({ title: `${t("ลบสถานะ", "Delete status")} "${s.label}" ?`, variant: "danger" }))) return; try { await deleteStatus(s.id!); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
-  // ลากจัดลำดับ (ของกลาง) — เขียน sort_order = ตำแหน่งใหม่ เฉพาะแถวที่เปลี่ยน
-  const reorder = async (from: number, to: number) => {
-    const next = moveItem(statuses, from, to);
-    setStatuses(next);   // optimistic
-    const jobs = next.map((s, idx) => ({ s, idx })).filter(({ s, idx }) => s.sort_order !== idx);
-    try { await Promise.all(jobs.map(({ s, idx }) => updateStatus(s.id!, { sort_order: idx }))); setStatuses(next.map((s, idx) => ({ ...s, sort_order: idx }))); }
-    catch (e) { showToast((e as Error).message); await load(); }
-  };
-  const { rowProps, handleProps, rowCls } = useDragReorder(reorder);
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="font-semibold text-slate-800">{t("สถานะงาน", "Task Statuses")}</h2>
-        <p className="text-xs text-slate-400 mt-0.5">{t("เพิ่ม/แก้ชื่อ/สี/ลำดับ/ธง — Kanban·Canvas·คิว อ่านจากที่นี่ · \"ปิดงาน\"=ดูอย่างเดียว · \"ต้องอนุมัติ\"=รอตรวจ · \"เริ่มต้น\"=สถานะตอนสร้างงาน", "Add / rename / color / reorder / flags — Kanban·Canvas·Queue reads from here · \"Close task\"=read-only · \"Needs approval\"=pending review · \"Default\"=status on task creation")}</p>
-      </div>
-      <div className="p-5">
-        <div className="flex gap-2 mb-4">
-          <select value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm">{STATUS_COLOR_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-          <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder={t("เพิ่มสถานะใหม่...", "Add new status...")} className="flex-1 h-9 border border-slate-200 rounded-lg px-3 text-sm" />
-          <button onClick={add} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("เพิ่ม", "Add")}</button>
-        </div>
-        {loading ? <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : (
-          <div className="space-y-1.5">
-            {statuses.map((s, i) => (
-              <div key={s.id} {...rowProps(i)} className={`flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 flex-wrap transition-colors ${rowCls(i)}`}>
-                <DragHandle {...handleProps(i)} title={t("ลากเพื่อจัดลำดับ", "Drag to reorder")} />
-                <span className={`h-3 w-3 rounded-full ${statusColor(s.color).dot}`} />
-                <select defaultValue={s.color} onChange={(e) => patch(s.id!, { color: e.target.value })} className="h-7 border border-slate-200 rounded-md px-1 text-xs w-24">{STATUS_COLOR_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-                <input defaultValue={s.label} onBlur={(e) => { if (e.target.value.trim() && e.target.value !== s.label) patch(s.id!, { label: e.target.value.trim() }); }} placeholder={t("ชื่อไทย", "Thai")} className="flex-1 min-w-[110px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
-                <input defaultValue={s.label_en ?? ""} onBlur={(e) => { if (e.target.value !== (s.label_en ?? "")) patch(s.id!, { label_en: e.target.value.trim() || null }); }} placeholder="EN" title={t("ชื่ออังกฤษ (ว่าง=ใช้ไทย)", "English (blank = use Thai)")} className="w-28 text-sm text-slate-500 bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
-                <label className="flex items-center gap-1 text-[11px] text-slate-500" title={t("ความคืบหน้า %", "Progress %")}>% <input type="number" defaultValue={s.progress_percent} onBlur={(e) => patch(s.id!, { progress_percent: Number(e.target.value) })} className="w-12 h-7 border border-slate-200 rounded px-1 text-xs" /></label>
-                <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={s.is_terminal} onChange={(e) => patch(s.id!, { is_terminal: e.target.checked })} />{t("ปิดงาน", "Close task")}</label>
-                <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={s.is_approval_gate} onChange={(e) => patch(s.id!, { is_approval_gate: e.target.checked })} />{t("ต้องอนุมัติ", "Needs approval")}</label>
-                <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="radio" name="defstatus" checked={s.is_default} onChange={() => patch(s.id!, { is_default: true })} />{t("เริ่มต้น", "Default")}</label>
-                <span className="text-[10px] text-slate-300 font-mono">{s.key}</span>
-                <button onClick={() => remove(s)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
-// แท็บจัดการเส้นทาง (transition)
-// ============================================================
-const KINDS = [{ value: "normal", label: () => tr("ปกติ", "Normal") }, { value: "approve", label: () => tr("อนุมัติ", "Approve") }, { value: "reject", label: () => tr("ไม่ผ่าน", "Reject") }, { value: "revise", label: () => tr("ให้แก้", "Revise") }, { value: "block", label: () => tr("ติดปัญหา", "Blocked") }];
-function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
-  const t = useT();
-  const [statuses, setStatuses] = useState<Status[]>([]);
-  const [transitions, setTransitions] = useState<Transition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [from, setFrom] = useState("");
-  const [toKey, setToKey] = useState("");
-  const [label, setLabel] = useState("");
-  const [kind, setKind] = useState("normal");
-
-  const load = useCallback(async () => { setLoading(true); try { const r = await listStatuses(); setStatuses(r.statuses); setTransitions(r.transitions); if (!from && r.statuses[0]) setFrom(r.statuses[0].key); } catch (e) { showToast((e as Error).message); } finally { setLoading(false); } }, [showToast, from]);
-  useEffect(() => { load(); }, [load]);
-
-  const labelOf = (k: string) => statuses.find((s) => s.key === k)?.label ?? k;
-  const fromTransitions = transitions.filter((t) => t.from_key === from);
-
-  const add = async () => { if (!from || !toKey) { showToast(t("เลือกต้นทาง-ปลายทาง", "Please select source and destination")); return; } try { await setTransition({ from_key: from, to_key: toKey, label: label.trim() || `→ ${labelOf(toKey)}`, kind }); setToKey(""); setLabel(""); setKind("normal"); await load(); showToast(t("บันทึกเส้นทางแล้ว", "Transition saved")); } catch (e) { showToast((e as Error).message); } };
-  const remove = async (t: Transition) => { try { await deleteTransition(t.id!); await load(); } catch (e) { showToast((e as Error).message); } };
-
-  if (loading) return <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>;
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
-      <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="font-semibold text-slate-800">{t("เส้นทางสถานะ (จากสถานะไหน → ไปไหนได้)", "Status Transitions (from which status → to which)")}</h2>
-        <p className="text-xs text-slate-400 mt-0.5">{t("ชนิด \"อนุมัติ/ไม่ผ่าน/ให้แก้\" = ใช้สิทธิ์อนุมัติ (หัวหน้า) · ปุ่มเหล่านี้จะโผล่ในคิว/Kanban/หน้ารายละเอียด", "Types \"approve/reject/revise\" require approval permission (supervisor) · Buttons appear in Queue / Kanban / detail pages")}</p>
-      </div>
-      <div className="p-5 space-y-4">
-        <div>
-          <label className="text-xs text-slate-400">{t("จากสถานะ", "From status")}</label>
-          <select value={from} onChange={(e) => setFrom(e.target.value)} className="ml-2 h-8 border border-slate-200 rounded-md px-2 text-sm">{statuses.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-        </div>
-        <div className="space-y-1.5">
-          {fromTransitions.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่มีเส้นทางจากสถานะนี้", "No transitions from this status yet")}</p> : fromTransitions.map((tr) => (
-            <div key={tr.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm">
-              <span className="text-slate-400">→</span>
-              <span className="font-medium text-slate-700">{labelOf(tr.to_key)}</span>
-              <span className="text-xs bg-slate-50 border border-slate-200 rounded px-1.5 text-slate-500">{tr.label}</span>
-              <span className="text-[11px] text-violet-600">{KINDS.find((k) => k.value === tr.kind)?.label()}</span>
-              <button onClick={() => { setToKey(tr.to_key); setKind(tr.kind ?? "normal"); setLabel(tr.label ?? ""); }}
-                title={t("แก้ป้ายปุ่ม / ชนิด ของเส้นทางนี้", "Edit this transition's label / type")}
-                className="ml-auto text-slate-300 hover:text-violet-600">✎</button>
-              <button onClick={() => remove(tr)} title={t("ลบเส้นทางนี้", "Remove this transition")} className="text-slate-300 hover:text-red-500">✕</button>
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-slate-100 pt-3 flex gap-2 flex-wrap items-center">
-          <span className="text-xs text-slate-400">{fromTransitions.some((x) => x.to_key === toKey) ? t("แก้เส้นทาง →", "Edit transition →") : t("เพิ่มเส้นทาง →", "Add transition →")}</span>
-          <select value={toKey} onChange={(e) => setToKey(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm"><option value="">{t("ปลายทาง...", "Destination...")}</option>{statuses.filter((s) => s.key !== from).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}</select>
-          <select value={kind} onChange={(e) => setKind(e.target.value)} className="h-8 border border-slate-200 rounded-md px-2 text-sm">{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label()}</option>)}</select>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("ป้ายปุ่ม (เช่น 📤 ส่งตรวจ)", "Button label (e.g. 📤 Submit for review)")} className="flex-1 min-w-[140px] h-8 border border-slate-200 rounded-md px-2 text-sm" />
-          <button onClick={add} className="h-8 px-3 bg-violet-600 text-white text-sm rounded-md hover:bg-violet-700">{fromTransitions.some((x) => x.to_key === toKey) ? t("บันทึกการแก้ไข", "Save changes") : t("เพิ่ม", "Add")}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// แท็บสถานะ + เส้นทาง = หน้าจัดการสถานะแบบละเอียด (app/tasks/status-workflow-settings.tsx · 2026-11-22)
 
 // ── ตั้งค่า "ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน" (ค่ากลาง) ──
 function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }) {
