@@ -22,8 +22,17 @@ export const CATALOG_STALE_MS = 2 * 3600_000;
 /** รอบค้างเก่ากว่านี้ = ทิ้ง เริ่มใหม่จาก last_done_at */
 export const RUN_MAX_AGE_MS = 6 * 3600_000;
 
+/**
+ * รุ่นของสถานะ — สถานะรุ่นเก่ากว่านี้ = ทิ้ง เริ่มใหม่จากเวลาดึงแบบเต็มที่ "ครบจริง" (fallback)
+ * 🐛 2026-11-22 (BSAC008 มีบน Shopee แต่ระบบไม่รู้): รุ่น 1 ใช้ "แถวที่อัปเดตล่าสุด" เป็นเวลาดึงเต็ม — แต่ตัวอื่น (แก้บนร้าน/เทียบระบบ)
+ *   ก็อัปเดตแถวด้วย → Shopee LM คิดว่าดึงเต็มเมื่อ 11-20 ทั้งที่ครบจริงครั้งเดียว 11-14 → ของที่ลงช่วง 14-20 ไม่เคยถูกดึง
+ *   รุ่น 2 = เวลาเริ่มของรอบดึงเต็มที่ครบจริง (ประวัติ audit complete) · ขึ้นรุ่น = ทุกร้านเริ่มใหม่ 1 ครั้ง
+ */
+export const CATALOG_REFRESH_VERSION = 2;
+
 export type CatalogRefreshRun = { since: string; started_at: string; cursor: string };
 export type CatalogRefreshState = {
+  v: number;
   last_done_at: string | null;
   run: CatalogRefreshRun | null;
   last_at: string | null;
@@ -37,7 +46,11 @@ const ms = (iso: string | null | undefined): number | null => { const t = Date.p
 export function normalizeRefreshState(v: unknown): CatalogRefreshState {
   const o = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
   const run = o.run && typeof o.run === "object" ? o.run as Record<string, unknown> : null;
+  const ver = typeof o.v === "number" ? o.v : 0;
+  // รุ่นเก่า = ถือว่าไม่เคยมีรอบ (เริ่มใหม่จาก fallback)
+  if (ver < CATALOG_REFRESH_VERSION) return { v: CATALOG_REFRESH_VERSION, last_done_at: null, run: null, last_at: null, ok: true, error: null };
   return {
+    v: ver,
     last_done_at: ms(o.last_done_at as string) != null ? String(o.last_done_at) : null,
     run: run && ms(run.since as string) != null && ms(run.started_at as string) != null
       ? { since: String(run.since), started_at: String(run.started_at), cursor: String(run.cursor ?? "") } : null,
@@ -50,7 +63,7 @@ export function normalizeRefreshState(v: unknown): CatalogRefreshState {
 
 /**
  * รอบนี้ดึงตั้งแต่เมื่อไร · ต่อจาก cursor ไหน
- * fallbackSinceMs = ไม่เคยมีรอบ (ใช้เวลาที่ดึงแบบเต็มครั้งล่าสุด) · null = ไม่รู้เลย → ไม่ดึง (ให้กดดึงแบบเต็มก่อน 1 ครั้ง)
+ * fallbackSinceMs = ไม่เคยมีรอบ (ใช้เวลาเริ่มของรอบดึงแบบเต็มที่ครบจริงครั้งล่าสุด) · null = ไม่รู้เลย → ไม่ดึง (ให้กดดึงแบบเต็มก่อน 1 ครั้ง)
  */
 export function planRefreshWindow(state: CatalogRefreshState, nowMs: number, fallbackSinceMs: number | null):
   { sinceMs: number; startedAtMs: number; cursor: string; resumed: boolean } | null {
@@ -69,8 +82,9 @@ export function finishRefreshState(prev: CatalogRefreshState, r: {
   sinceMs: number; startedAtMs: number; cursor: string; done: boolean; error: string | null; saved: number;
 }, nowMs: number): CatalogRefreshState {
   const at = new Date(nowMs).toISOString();
-  if (r.done && !r.error) return { last_done_at: new Date(r.startedAtMs).toISOString(), run: null, last_at: at, ok: true, error: null, saved: r.saved };
+  if (r.done && !r.error) return { v: CATALOG_REFRESH_VERSION, last_done_at: new Date(r.startedAtMs).toISOString(), run: null, last_at: at, ok: true, error: null, saved: r.saved };
   return {
+    v: CATALOG_REFRESH_VERSION,
     last_done_at: prev.last_done_at,
     run: { since: new Date(r.sinceMs).toISOString(), started_at: new Date(r.startedAtMs).toISOString(), cursor: r.cursor },
     last_at: at, ok: !r.error, error: r.error, saved: r.saved,

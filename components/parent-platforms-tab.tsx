@@ -219,11 +219,13 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
     setCheckingShop(p.code);
     try {
       const j = await apiFetch("/api/product-platforms/shop-check", { method: "POST", body: JSON.stringify({ parent_sku_id: parentId, platform_code: p.code }) }).then((r) => r.json()) as
-        { error: string | null; on_shop: { external_id: string | null } | null; fresh_at: string | null; refreshed: { ok: boolean; error: string | null } | null };
+        { error: string | null; on_shop: { external_id: string | null } | null; fresh_at: string | null; refreshed: { ok: boolean; done: boolean; error: string | null } | null };
       if (j.error) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${j.error}`); return; }
       if (j.fresh_at) setFreshness((f) => ({ ...f, [p.code]: j.fresh_at }));
       if (j.on_shop) { toast.success(`เจอสินค้านี้บน ${p.name_th} แล้ว${j.on_shop.external_id ? ` (#${j.on_shop.external_id})` : ""} — จับคู่ให้แล้ว ไม่ต้องลงซ้ำ`); void load(); return; }
       if (j.refreshed && !j.refreshed.ok) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${j.refreshed.error ?? "ไม่ทราบสาเหตุ"} — ยังไม่แน่ใจว่ามีบนร้านหรือยัง`); return; }
+      // ยังดึงตามรายการร้านไม่ครบ (ของเก่าค้าง) = ยังบอกไม่ได้ว่าไม่มี — ไม่เปิดตัวช่วยลงสินค้า (กันลงซ้ำ · บั๊ก BSAC008 2026-11-22)
+      if (j.refreshed && !j.refreshed.done && isCatalogStale(j.fresh_at, Date.now())) { toast.warning(`ระบบกำลังดึงรายการสินค้าจาก ${p.name_th} ให้ครบ (ยังไม่ครบ) — ยังบอกไม่ได้ว่ามีสินค้านี้แล้วหรือยัง กดเช็กอีกครั้งในอีกสักครู่`); void load(); return; }
       toast.success(`ยังไม่มีบน ${p.name_th} (เช็กกับร้านเมื่อสักครู่)`);
       if (thenAdd) setAddOn(p.code);
     } catch (e) { toast.error(`เช็กกับ ${p.name_th} ไม่สำเร็จ: ${(e as Error).message}`); }

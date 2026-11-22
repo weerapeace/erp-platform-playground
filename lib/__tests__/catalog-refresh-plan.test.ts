@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  OVERLAP_MS, catalogAgeText, catalogRefreshKey, finishRefreshState, isCatalogStale, normalizeRefreshState, planRefreshWindow,
+  CATALOG_REFRESH_VERSION, OVERLAP_MS, catalogAgeText, catalogRefreshKey, finishRefreshState, isCatalogStale, normalizeRefreshState, planRefreshWindow,
 } from "@/lib/catalog-refresh-plan";
 
 const NOW = Date.parse("2026-11-21T10:00:00Z");
 const H = 3600_000;
+const V = CATALOG_REFRESH_VERSION;
 
 describe("catalog-refresh-plan", () => {
   it("คีย์ + อ่านค่าเสีย = สถานะว่าง", () => {
     expect(catalogRefreshKey("lazada", "b1")).toBe("catalog_refresh:lazada:b1");
-    expect(normalizeRefreshState(null)).toEqual({ last_done_at: null, run: null, last_at: null, ok: true, error: null });
-    expect(normalizeRefreshState({ last_done_at: "x", run: { since: "bad" } }).run).toBeNull();
+    expect(normalizeRefreshState(null)).toEqual({ v: CATALOG_REFRESH_VERSION, last_done_at: null, run: null, last_at: null, ok: true, error: null });
+    expect(normalizeRefreshState({ v: V, last_done_at: "x", run: { since: "bad" } }).run).toBeNull();
   });
 
   it("ไม่เคยมีรอบ + ไม่รู้เวลาดึงเต็ม = ไม่ดึง · รู้เวลาดึงเต็ม = เริ่มจากตรงนั้นถอยเผื่อ", () => {
@@ -21,20 +22,20 @@ describe("catalog-refresh-plan", () => {
   });
 
   it("มีรอบครบล่าสุด → เริ่มจาก last_done_at (ไม่ใช้เวลาดึงเต็ม)", () => {
-    const s = normalizeRefreshState({ last_done_at: new Date(NOW - H).toISOString() });
+    const s = normalizeRefreshState({ v: V, last_done_at: new Date(NOW - H).toISOString() });
     expect(planRefreshWindow(s, NOW, NOW - 99 * H)?.sinceMs).toBe(NOW - H - OVERLAP_MS);
   });
 
   it("รอบค้าง (หมดเวลากลางทาง) → ทำต่อช่วงเวลาเดิม + cursor เดิม · ค้างนานเกิน 6 ชม. = เริ่มใหม่", () => {
     const run = { since: new Date(NOW - 5 * H).toISOString(), started_at: new Date(NOW - H).toISOString(), cursor: "1:50" };
-    const s = normalizeRefreshState({ last_done_at: new Date(NOW - 5 * H).toISOString(), run });
+    const s = normalizeRefreshState({ v: V, last_done_at: new Date(NOW - 5 * H).toISOString(), run });
     expect(planRefreshWindow(s, NOW, null)).toEqual({ sinceMs: NOW - 5 * H, startedAtMs: NOW - H, cursor: "1:50", resumed: true });
-    const old = normalizeRefreshState({ last_done_at: new Date(NOW - 9 * H).toISOString(), run: { ...run, started_at: new Date(NOW - 7 * H).toISOString() } });
+    const old = normalizeRefreshState({ v: V, last_done_at: new Date(NOW - 9 * H).toISOString(), run: { ...run, started_at: new Date(NOW - 7 * H).toISOString() } });
     expect(planRefreshWindow(old, NOW, null)?.resumed).toBe(false);
   });
 
   it("จบครบ = last_done_at เป็นเวลาเริ่มรอบ · ค้าง/พลาด = เก็บรอบไว้ทำต่อ ไม่ขยับ last_done_at", () => {
-    const prev = normalizeRefreshState({ last_done_at: new Date(NOW - 2 * H).toISOString() });
+    const prev = normalizeRefreshState({ v: V, last_done_at: new Date(NOW - 2 * H).toISOString() });
     const done = finishRefreshState(prev, { sinceMs: NOW - 2 * H, startedAtMs: NOW - 60_000, cursor: "", done: true, error: null, saved: 3 }, NOW);
     expect(done.last_done_at).toBe(new Date(NOW - 60_000).toISOString());
     expect(done.run).toBeNull();
@@ -42,6 +43,16 @@ describe("catalog-refresh-plan", () => {
     expect(part.last_done_at).toBe(prev.last_done_at);
     expect(part.run?.cursor).toBe("2:100");
     expect(part.ok).toBe(false);
+  });
+
+  it("สถานะรุ่นเก่า (ใช้เวลาดึงเต็มผิด · บั๊ก BSAC008) = ทิ้ง เริ่มใหม่จากเวลาดึงเต็มที่ครบจริง", () => {
+    const old = normalizeRefreshState({ last_done_at: new Date(NOW - H).toISOString(), ok: true });   // ไม่มี v = รุ่น 1
+    expect(old.last_done_at).toBeNull();
+    const fullOk = NOW - 8 * 24 * H;   // ดึงเต็มครบจริง 11-14
+    expect(planRefreshWindow(old, NOW, fullOk)?.sinceMs).toBe(fullOk - OVERLAP_MS);
+    const done = finishRefreshState(old, { sinceMs: fullOk, startedAtMs: NOW, cursor: "", done: true, error: null, saved: 9 }, NOW);
+    expect(done.v).toBe(V);
+    expect(normalizeRefreshState(done).last_done_at).toBe(new Date(NOW).toISOString());
   });
 
   it("เก่าไหม + ข้อความอายุ", () => {

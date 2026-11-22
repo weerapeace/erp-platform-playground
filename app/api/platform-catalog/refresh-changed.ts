@@ -51,11 +51,23 @@ async function readState(admin: SupabaseClient, key: string) {
 async function writeState(admin: SupabaseClient, key: string, value: unknown) {
   await admin.from("ui_config").upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
 }
-/** เวลาที่ดึงแบบเต็มครั้งล่าสุด (โดยประมาณ = แถวที่อัปเดตล่าสุดของร้าน+แบรนด์นี้) — ใช้ตอนยังไม่เคยมีรอบ "เฉพาะตัวที่เปลี่ยน" */
-async function lastFullPullMs(admin: SupabaseClient, platformId: string, brandId: string): Promise<number | null> {
-  const { data } = await admin.from("platform_catalog_listings").select("updated_at").eq("platform_id", platformId).eq("brand_id", brandId)
-    .eq("source", "api").order("updated_at", { ascending: false }).limit(1).maybeSingle();
-  const t = Date.parse(String((data as { updated_at?: string } | null)?.updated_at ?? ""));
+/**
+ * เวลาเริ่มของรอบ "ดึงสินค้าจากร้าน" แบบเต็มที่ครบจริงครั้งล่าสุด — ใช้ตอนยังไม่เคยมีรอบ "เฉพาะตัวที่เปลี่ยน"
+ *   = ประวัติ audit (entity platform_catalog · source <ร้าน>_api · complete=true) → run_started_at
+ *   ไม่มีประวัติครบ = แถวแรกสุดที่ดึงจาก API (เวลาเริ่มดึงครั้งแรก — ถอยไกลสุด ปลอดภัยสุด)
+ * 🐛 2026-11-22: เดิมใช้ "แถวที่อัปเดตล่าสุด" — แต่ตัวอื่นก็อัปเดตแถว (แก้บนร้าน/เทียบระบบ) → Shopee LM คิดว่าดึงเต็ม 11-20 (จริง 11-14) → BSAC008 หลุด
+ */
+async function fullPullBaselineMs(admin: SupabaseClient, platform: string, platformId: string, brandId: string): Promise<number | null> {
+  const { data: a } = await admin.from("audit_logs").select("created_at, metadata->>run_started_at")
+    .eq("entity_type", "platform_catalog").eq("action", "import")
+    .eq("metadata->>source", `${platform}_api`).eq("metadata->>brand_id", brandId).eq("metadata->>complete", "true")
+    .order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const row = a as { created_at?: string; run_started_at?: string | null } | null;
+  const fromAudit = Date.parse(String(row?.run_started_at || row?.created_at || ""));
+  if (Number.isFinite(fromAudit)) return fromAudit;
+  const { data } = await admin.from("platform_catalog_listings").select("created_at").eq("platform_id", platformId).eq("brand_id", brandId)
+    .eq("source", "api").order("created_at", { ascending: true }).limit(1).maybeSingle();
+  const t = Date.parse(String((data as { created_at?: string } | null)?.created_at ?? ""));
   return Number.isFinite(t) ? t : null;
 }
 
@@ -152,7 +164,7 @@ export async function refreshShopChanged(admin: SupabaseClient, args: { platform
     const key = catalogRefreshKey(platform, brandId);
     const prev = await readState(admin, key);
     const now = Date.now();
-    const win = planRefreshWindow(prev, now, prev.last_done_at ? null : await lastFullPullMs(admin, platformId, brandId));
+    const win = planRefreshWindow(prev, now, prev.last_done_at ? null : await fullPullBaselineMs(admin, platform, platformId, brandId));
     if (!win) return { ...base, error: "ยังไม่เคยดึงสินค้าจากร้านนี้ — กด \"ดึงสินค้าจากร้าน\" แบบเต็ม 1 ครั้งก่อน", fresh_at: null };
     const ctx = { platformId, brandId, sinceMs: win.sinceMs, startedAtMs: win.startedAtMs, cursor: win.cursor, budgetMs: args.budgetMs };
     const r = platform === "lazada" ? await pullLazada(admin, ctx) : await pullShopee(admin, ctx);
@@ -203,14 +215,20 @@ export async function checkParentOnShop(admin: SupabaseClient, platformCode: str
 
 /**
  * ด่านก่อนลงจริง (create-product ของแต่ละร้าน): เช็กกับร้านก่อน → เจอสินค้านี้บนร้าน = ไม่สร้างซ้ำ
- * เช็กไม่สำเร็จ + ข้อมูลร้านเก่ากว่า 2 ชม. = ไม่ให้ลง (ไม่แน่ใจ) · เช็กไม่สำเร็จแต่ข้อมูลสด (ตัวดึงทุกชั่วโมงเพิ่งทำ) = ลงต่อได้
+ * ข้อมูลร้านเก่ากว่า 2 ชม. และ (เช็กไม่สำเร็จ หรือ ยังดึงตามไม่ครบ) = ไม่ให้ลง (ยังบอกไม่ได้ว่ามีแล้วหรือยัง)
+ *   ข้อมูลสด (ตัวดึงทุกชั่วโมงเพิ่งครบ) = ลงต่อได้แม้รอบนี้เช็กไม่สำเร็จ
+ * 🐛 2026-11-22: เดิมกันเฉพาะ "เช็กไม่สำเร็จ" — ระหว่างดึงตามของเก่ายังไม่ครบ (BSAC008) ด่านปล่อยผ่านได้ → เพิ่มเงื่อนไข "ยังไม่ครบ"
  * คืน null = ผ่าน · อื่น ๆ = หยุดพร้อมข้อความ
  */
 export async function guardNotOnShop(admin: SupabaseClient, platformCode: string, platformLabel: string, parentId: string, budgetMs = 15_000): Promise<{ status: number; error: string } | null> {
   const c = await checkParentOnShop(admin, platformCode, parentId, budgetMs);
   if (c.onShop) return { status: 409, error: `มีบน ${platformLabel} แล้ว${c.onShop.external_id ? ` (#${c.onShop.external_id})` : ""} — ระบบเพิ่งเจอตอนเช็กกับร้าน จับคู่ให้แล้ว ไม่สร้างซ้ำ` };
-  if (c.result && !c.result.ok && isCatalogStale(c.freshAt, Date.now())) {
+  const stale = isCatalogStale(c.freshAt, Date.now());
+  if (c.result && !c.result.ok && stale) {
     return { status: 503, error: `เช็กกับ ${platformLabel} ก่อนลงไม่สำเร็จ (${c.result.error ?? "ไม่ทราบสาเหตุ"}) — กันลงซ้ำไว้ก่อน ลองใหม่อีกครั้ง` };
+  }
+  if (c.result && !c.result.done && stale) {
+    return { status: 503, error: `ระบบกำลังดึงรายการสินค้าจาก ${platformLabel} ให้ครบ (ยังไม่ครบ) — ยังบอกไม่ได้ว่ามีสินค้านี้บนร้านแล้วหรือยัง กันลงซ้ำไว้ก่อน ลองใหม่ในอีกสักครู่` };
   }
   return null;
 }
@@ -229,7 +247,7 @@ export async function catalogFreshness(admin: SupabaseClient, brandId: string): 
   }
   for (const [code, pid] of ids) {
     if (out[code] || !pid) continue;
-    const t = await lastFullPullMs(admin, pid, brandId);
+    const t = await fullPullBaselineMs(admin, code, pid, brandId);
     out[code] = t ? new Date(t).toISOString() : null;
   }
   const lastOk = (tt as { value?: { last_ok_at?: string | null } } | null)?.value?.last_ok_at ?? null;
