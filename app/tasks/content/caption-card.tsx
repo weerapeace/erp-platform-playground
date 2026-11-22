@@ -184,11 +184,38 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
   // ข้อความที่จะโพสต์ (แม่แบบ + ตัวแปร · ตัดแคปชั่น/แฮชแท็กที่ปิดไว้) — ของกลาง caption-assemble ตัวเดียวกับปฏิทิน
   const preview = assembleCaption(cap, setting, templates, sharedVars);
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
-  const [previewOpen, setPreviewOpen] = useState(false);   // 👁 ป๊อปดูตัวอย่างโพสต์ (จากหัวการ์ด ไม่ต้องกาง)
+  const [previewOpen, setPreviewOpen] = useState(false);
+  // ตัวอย่างโพสต์ข้าง ๆ (เจ้าของสั่ง 2026-11-22): การ์ดกว้างพอ = 2 คอลัมน์ (ตัวอย่างลอยตาม) · แคบ/มือถือ = ใต้ช่องพิมพ์ พับไว้ กดดู
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [wide, setWide] = useState(false);
+  const [sideOpen, setSideOpen] = useState(false);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!open || !el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setWide(e.contentRect.width >= 620));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [open]);   // 👁 ป๊อปดูตัวอย่างโพสต์ (จากหัวการ์ด ไม่ต้องกาง)
   const previewImgKeys = selectedImages.length ? selectedImages : fallbackImages;   // รูปในตัวอย่าง: ที่เลือกไว้ ไม่งั้น = รูปแนบของโพสต์
   const canPreview = !!preview.trim() || previewImgKeys.length > 0;
   const lim = captionLimitCheck(cap.platform, preview);   // ลิมิตตัวอักษร/แฮชแท็กของแพลตฟอร์ม (lib/caption-template PLATFORM_LIMITS)
   const overLimit = lim.over > 0 || lim.hashtagsOver > 0;
+  // ตัวอย่างโพสต์ในการ์ด (ข้าง ๆ / ใต้ช่องพิมพ์) + นับตัวอักษร/แฮชแท็กเทียบลิมิตแพลตฟอร์ม
+  const sidePreview = (
+    <div className="space-y-1">
+      <div className="rounded-xl bg-slate-100 p-2">
+        <PostMockup platform={cap.platform} pageName={pageName} avatarUrl={avatarUrl} format={format} text={preview} t={t}
+          images={previewImgKeys.map((k) => postImages.find((im) => im.key === k)).filter((im): im is PostImage => !!im)} />
+      </div>
+      {useCaption && (
+        <p className={`text-[11px] ${overLimit ? "text-rose-600 font-medium" : "text-slate-400"}`} title={PLATFORM_LIMITS[cap.platform]?.note ?? ""}>
+          {lim.chars.toLocaleString("th-TH")}{lim.max != null ? ` / ${lim.max.toLocaleString("th-TH")}` : ""} {t("ตัวอักษร", "chars")}
+          {lim.maxHashtags != null ? ` · #${lim.hashtagCount}/${lim.maxHashtags}` : ""}
+          {overLimit ? ` · ${t("เกินลิมิต", "over limit")}` : ""}
+        </p>
+      )}
+    </div>
+  );
   // สถานะโพสต์ต่อแพลตฟอร์ม: ป้ายบนหัวการ์ด + ปุ่ม ✅ โพสต์แล้ว (กดสลับ) · "ข้าม" อยู่ในเมนู ⋯ (นาน ๆ ใช้ที)
 
   // ตัวอย่างที่ประกอบจากแม่แบบ — โชว์เฉพาะตอนแม่แบบ "เติมข้อความเพิ่ม" จริง ๆ
@@ -306,7 +333,8 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
       </ERPModal>
 
       {open && (
-        <div className="px-2.5 pb-2.5 space-y-2">
+        <div ref={bodyRef} className={canPreview && wide ? "px-2.5 pb-2.5 grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] gap-3 items-start" : "px-2.5 pb-2.5"}>
+        <div className="space-y-2 min-w-0">
           {/* สถานะเชื่อมบัญชี (Facebook/Instagram): เชื่อมแล้วโพสต์จริงได้ · ยังไม่เชื่อม = โพสต์มือ + ลิงก์ไปตั้งค่า */}
           {connInfo && !connInfo.connected && (   /* เชื่อมแล้วไม่ต้องโชว์ (เจ้าของสั่ง 2026-11-20) — เปลี่ยนเพจได้ที่ตั้งค่าแพลตฟอร์ม */
             <div className="flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border bg-amber-50 border-amber-200 text-amber-800">
@@ -411,6 +439,19 @@ export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImag
               </div>
             )}
           </div>
+        </div>
+        {/* ตัวอย่างที่จะโพสต์ — โชว์เมื่อมีแคปชั่นหรือมีรูป · ภาพจำลองตัวเดียวกับป๊อป 👁 */}
+        {canPreview && (wide ? (
+          <div className="sticky top-2 self-start space-y-1">
+            <div className="text-[11px] text-slate-400">{t("ตัวอย่างที่จะโพสต์", "Post preview")}</div>
+            {sidePreview}
+          </div>
+        ) : (
+          <div className="mt-2">
+            <button type="button" onClick={() => setSideOpen((v) => !v)} className="text-[11px] font-medium text-violet-700 hover:underline">{sideOpen ? `▾ ${t("ซ่อนตัวอย่างโพสต์", "Hide preview")}` : `▸ ${t("ดูตัวอย่างโพสต์", "Show preview")}`}</button>
+            {sideOpen && <div className="mt-1.5">{sidePreview}</div>}
+          </div>
+        ))}
         </div>
       )}
     </div>
