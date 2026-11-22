@@ -16,7 +16,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { tr } from "@/lib/lang";
 import {
-  descLines, duplicateLines, groupSkusByBase, isDuplicateLine, listingChecks, plainColor, priceSummary, skuFlags,
+  descLines, duplicateLines, groupSkusByBase, isDuplicateLine, listingChecks, plainColor, priceSummary, realCustomSize, skuFlags,
   type ListingCheck, type ListingSku, type QuickCheckParent,
 } from "@/lib/product-listing-checks";
 
@@ -125,6 +125,8 @@ function ParentSection({ p, multi, lang, onOpenParent, onViewImages }: {
         <p className="text-xs text-slate-500 mt-1.5">
           {tr("ขนาด", "Size")}: {p.size
             ? `${tr("กว้าง", "W")} ${p.size.length ?? "—"} × ${tr("สูง", "H")} ${p.size.height ?? "—"} × ${tr("หนา", "D")} ${p.size.thickness ?? "—"} ${tr("ซม.", "cm")}`
+            : realCustomSize(p.custom_size) ? realCustomSize(p.custom_size)
+            : p.size_not_needed ? <span className="text-slate-400">{tr("ไม่ต้องใส่ไซส์ (ติ๊กไว้ที่ Parent SKU)", "Not needed (set on Parent SKU)")}</span>
             : <span className="text-amber-700">{tr("ยังไม่ใส่", "not set")}</span>}
         </p>
       </div>

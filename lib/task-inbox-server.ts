@@ -83,7 +83,7 @@ export async function loadTaskInbox(admin: Db, me: string, canApprove: boolean):
   const parentIds = [...new Set(all.map(parentOf).filter((x): x is string => !!x))];
   const reviewParentIds = [...new Set(grouped.review.map(parentOf).filter((x): x is string => !!x))];
   const { data: pData } = parentIds.length
-    ? await admin.from("parent_skus_v2").select("id, code, cover_image_r2_key, introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm").in("id", parentIds)
+    ? await admin.from("parent_skus_v2").select("id, code, cover_image_r2_key, introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm, size_not_needed, custom_size").in("id", parentIds)
     : { data: [] as Row[] };
   const parentById = new Map(((pData ?? []) as Row[]).map((r) => [String(r.id), r]));
   const checksByParent = new Map<string, number>();
@@ -106,6 +106,7 @@ export async function loadTaskInbox(admin: Db, me: string, canApprove: boolean):
       const lp: ListingParent = {
         code: String(p.code ?? ""), introduction: s(p.introduction), description: s(p.description), english_description: s(p.english_description),
         size: l || h || th ? { length: l, height: h, thickness: th } : null,
+        size_not_needed: p.size_not_needed === true, custom_size: s(p.custom_size),
         parent_images: cnt.get(`p:${pid}`) ?? 0, description_images: cnt.get(`d:${pid}`) ?? 0,
         skus: skus.filter((x) => String(x.parent_sku_id) === pid).map((x) => ({
           code: String(x.code ?? ""), color_th: s(x.color_th) ?? (plainColor(s(x.color_platform_th)) || null), color_en: s(x.color_platform_en),

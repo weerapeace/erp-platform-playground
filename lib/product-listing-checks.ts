@@ -27,6 +27,10 @@ export type ListingParent = {
   description: string | null;          // Description ไทย
   english_description: string | null;  // Description อังกฤษ
   size: { length: number | null; height: number | null; thickness: number | null } | null;
+  /** ติ๊ก "ไม่ต้องใส่ไซส์" ไว้ (parent_skus_v2.size_not_needed) → ไม่เตือนขนาด */
+  size_not_needed?: boolean;
+  /** ขนาดแบบพิมพ์เอง (custom_size) — มีข้อความจริง = นับว่าใส่ขนาดแล้ว ("None" ที่ค้างจากระบบเก่าไม่นับ) */
+  custom_size?: string | null;
   parent_images: number;
   description_images: number;
   skus: ListingSku[];
@@ -77,6 +81,19 @@ export function skuFlags(s: ListingSku) {
   };
 }
 
+/** ขนาดที่พิมพ์เองที่มีความหมาย (ตัดค่าขยะจากระบบเก่า เช่น "None") */
+export function realCustomSize(v: string | null | undefined): string | null {
+  const t = (v ?? "").trim();
+  return t && !/^(none|null|undefined|n\/a|-+|0)$/i.test(t) ? t : null;
+}
+/** ข้อขนาดผ่านไหม: ใส่ กว้าง/สูง/หนา อย่างน้อย 1 ช่อง · หรือมีขนาดพิมพ์เอง · หรือติ๊ก "ไม่ต้องใส่ไซส์" */
+export function sizeFilled(p: Pick<ListingParent, "size" | "size_not_needed" | "custom_size">): boolean {
+  if (p.size_not_needed) return true;
+  const sz = p.size;
+  if (sz && (Number(sz.length) > 0 || Number(sz.height) > 0 || Number(sz.thickness) > 0)) return true;
+  return !!realCustomSize(p.custom_size);
+}
+
 /** รวมจุดที่ควรเช็กของสินค้า 1 รุ่น */
 export function listingChecks(p: ListingParent): ListingCheck[] {
   const out: ListingCheck[] = [];
@@ -91,8 +108,7 @@ export function listingChecks(p: ListingParent): ListingCheck[] {
   if (th.length && en.length && en.length * 2 < th.length) add("desc_en_short", "desc", tr(`Description อังกฤษสั้นกว่าไทยมาก (${en.length} บรรทัด จาก ${th.length})`, `English description is much shorter (${en.length} of ${th.length} lines)`));
   const enCm = cmNumbers(p.english_description), miss = [...new Set(cmNumbers(p.description).filter((v) => !enCm.includes(v)))];
   if (miss.length && enCm.length) add("desc_cm_mismatch", "desc", tr(`ตัวเลขไทยกับอังกฤษไม่ตรง: ${miss.join(", ")} ซม. ไม่มีในฉบับอังกฤษ`, `Numbers differ: ${miss.join(", ")} cm missing in English`));
-  const sz = p.size;
-  if (!sz || !(Number(sz.length) > 0 || Number(sz.height) > 0 || Number(sz.thickness) > 0)) add("size_missing", "desc", tr("ยังไม่ได้ใส่ขนาด (กว้าง × สูง × หนา)", "Size (W × H × D) is missing"));
+  if (!sizeFilled(p)) add("size_missing", "desc", tr("ยังไม่ได้ใส่ขนาด (กว้าง × สูง × หนา)", "Size (W × H × D) is missing"));
 
   const n = (pick: (f: ReturnType<typeof skuFlags>, s: ListingSku) => boolean) => p.skus.filter((s) => pick(skuFlags(s), s)).length;
   const enEmpty = n((_, s) => !plainColor(s.color_en)), enThai = n((_, s) => !!plainColor(s.color_en) && hasThai(plainColor(s.color_en)));

@@ -10,6 +10,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { useToast } from "@/components/toast";
+import { sizeFilled } from "@/lib/product-listing-checks";
 import { cleanReadinessRules, readinessKeysFor, readinessSummary, taskReadiness, READINESS_RULES_KEY, type ReadinessItem, type ReadinessParent, type ReadinessRules } from "@/lib/task-readiness";
 import { getTaskQuickCheck } from "./data";
 import { platformLabel } from "./use-options";
@@ -83,6 +85,24 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
       .then((r) => { if (r.ok) onSaved?.(); }).catch(() => undefined);
   }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showAll, setShowAll] = useState(false);
+  const toast = useToast();
+  const [sizeBusy, setSizeBusy] = useState(false);
+  // ปุ่ม "ไม่ต้องใส่ไซส์" (เจ้าของเลือก 2026-11-22) — ติ๊ก parent_skus_v2.size_not_needed ผ่าน API กลาง (ลงประวัติ) · ย้อนกลับได้จากแจ้งผล
+  const noSizeIds = (parents ?? []).filter((p) => !sizeFilled(p)).map((p) => p.id);
+  const setSizeNotNeeded = async (ids: string[], on: boolean): Promise<boolean> => {
+    const res = await Promise.all(ids.map((id) => apiFetch(`/api/master-v2/parent-skus/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ size_not_needed: on }) }).then((r) => r.ok).catch(() => false)));
+    const okIds = new Set(ids.filter((_, i) => res[i]));
+    if (okIds.size) setParents((ps) => (ps ?? []).map((p) => (okIds.has(p.id) ? { ...p, size_not_needed: on } : p)));
+    return okIds.size === ids.length;
+  };
+  const markNoSize = async () => {
+    const ids = noSizeIds; if (!ids.length || sizeBusy) return;
+    setSizeBusy(true);
+    const ok = await setSizeNotNeeded(ids, true);
+    setSizeBusy(false);
+    if (!ok) { toast.error(t("บันทึกไม่สำเร็จ — อาจไม่มีสิทธิ์แก้สินค้า", "Save failed — you may not have permission to edit products")); return; }
+    toast.undo(t(`ตั้งว่าไม่ต้องใส่ไซส์แล้ว (${ids.length} รุ่น)`, `Marked size not needed (${ids.length})`), async () => { await setSizeNotNeeded(ids, false); });
+  };
 
   if (err) return <p className="text-[11px] text-slate-400">{t("ตรวจความพร้อมไม่สำเร็จ — ลองเปิดใหม่", "Couldn't check readiness — reopen to retry")}</p>;
   if (!items) return <div className="h-5 w-40 rounded bg-slate-100 animate-pulse" />;
@@ -109,13 +129,24 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
           if (it.pending) return <span key={it.key} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-400">… {label}</span>;
           if (it.ok) return showAll ? <span key={it.key} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">✓ {label}</span> : null;
           const canJump = it.parentIds.length > 0;
-          return (
+          const chip = (
             <button key={it.key} type="button" title={it.issues.join("\n")} disabled={!canJump}
               onClick={() => { if (canJump) onOpenParent(it.parentIds[0]); }}
               className={`inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700 ${canJump ? "hover:bg-rose-100 cursor-pointer" : "cursor-help"}`}>
               ✕ {label}{it.issues.length > 1 && <span className="text-rose-400">({it.issues.length})</span>}
             </button>
           );
+          if (it.key === "size" && noSizeIds.length > 0) return (
+            <span key={it.key} className="inline-flex items-center gap-1">
+              {chip}
+              <button type="button" disabled={sizeBusy} onClick={() => void markNoSize()}
+                title={t("สินค้านี้ไม่มีขนาดให้วัด — ไม่ต้องเตือนเรื่องขนาดอีก (น้ำหนักยังต้องใส่) · ย้อนกลับได้", "This product has no size to measure — stop warning about size (weight still required) · undoable")}
+                className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                {sizeBusy ? "…" : t("ไม่ต้องใส่ไซส์", "No size needed")}
+              </button>
+            </span>
+          );
+          return chip;
         })}
       </div>
     </div>

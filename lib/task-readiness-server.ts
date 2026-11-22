@@ -19,7 +19,7 @@ export type ReadinessParentsLoad = { ok: true; parents: ReadinessParent[] } | { 
 
 export async function loadReadinessParents(admin: Db, taskId: string): Promise<ReadinessParentsLoad> {
   const r = await loadTaskImages(admin, taskId, {
-    parentCols: ", introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm, warranty, weight_g, category_id",
+    parentCols: ", introduction, description, english_description, size_length_cm, size_height_cm, size_thickness_cm, size_not_needed, custom_size, warranty, weight_g, category_id",
     skuCols: ", color_platform_th, color_platform_en, list_price, fake_price",
   });
   if (!r.ok) return { ok: false, status: r.status, error: r.error };
@@ -32,6 +32,7 @@ export async function loadReadinessParents(admin: Db, taskId: string): Promise<R
       id: p.id, code: p.code, name: p.name,
       introduction: str(row.introduction), description: str(row.description), english_description: str(row.english_description),
       size: l || h || t ? { length: l, height: h, thickness: t } : null,
+      size_not_needed: row.size_not_needed === true, custom_size: str(row.custom_size),
       warranty: str(row.warranty), weight_g: num(row.weight_g), category_id: row.category_id != null ? String(row.category_id) : null,
       parent_images: p.images.length, description_images: p.description.length, thumbs: p.images.slice(0, 6).map((x) => x.key),
       skus: p.skus.map((s) => {

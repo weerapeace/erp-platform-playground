@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  cmNumbers, descLines, duplicateLines, groupSkusByBase, isDuplicateLine, listingChecks, plainColor, priceSummary, skuFlags,
+  cmNumbers, descLines, duplicateLines, groupSkusByBase, isDuplicateLine, listingChecks, plainColor, priceSummary, realCustomSize, skuFlags,
   type ListingParent, type ListingSku,
 } from "@/lib/product-listing-checks";
 
@@ -85,5 +85,16 @@ describe("skuFlags / priceSummary / groupSkusByBase", () => {
   it("groupSkusByBase รวมแบบย่อย D/G/N", () => {
     const g = groupSkusByBase(["WK46-01", "WK46-01D", "WK46-01G", "WK46-02", "WK46-02N"].map((c) => sku(c, "ดำ", "B", 1, 2)));
     expect(g.map((x) => [x.base, x.items.length])).toEqual([["WK46-01", 3], ["WK46-02", 2]]);
+  });
+});
+
+describe("ข้อขนาด — ไม่ต้องใส่ไซส์ / ขนาดพิมพ์เอง (2026-11-22)", () => {
+  it("ไม่มีขนาด = เตือน", () => { expect(keys(parent({ size: null }))).toContain("size_missing"); });
+  it("ติ๊กไม่ต้องใส่ไซส์ = ไม่เตือน", () => { expect(keys(parent({ size: null, size_not_needed: true }))).not.toContain("size_missing"); });
+  it("ขนาดพิมพ์เองจริง = นับว่าใส่แล้ว", () => { expect(keys(parent({ size: null, custom_size: "ยาว 120 ซม." }))).not.toContain("size_missing"); });
+  it("ค่าขยะ None / - ไม่นับ", () => {
+    expect(keys(parent({ size: null, custom_size: "None" }))).toContain("size_missing");
+    expect(keys(parent({ size: null, custom_size: " - " }))).toContain("size_missing");
+    expect(realCustomSize("none")).toBeNull();
   });
 });
