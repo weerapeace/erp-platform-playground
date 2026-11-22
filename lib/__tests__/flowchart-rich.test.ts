@@ -48,3 +48,16 @@ describe("แปลงข้อความ", () => {
     expect(isHexColor("red")).toBe(false);
   });
 });
+
+describe("แถบจัดข้อความ: ไฮไลต์ + ลิงก์ (2026-11-22)", () => {
+  it("ไฮไลต์ = background-color เก็บได้ · ค่าแปลกทิ้ง", () => {
+    expect(sanitizeRich('<span style="background-color: #fef08a">x</span>')).toBe('<span style="background-color:#fef08a">x</span>');
+    expect(sanitizeRich('<span style="background-color: url(x)">x</span>')).toBe("x");
+  });
+  it("ลิงก์: เว็บ/หน้าในระบบเท่านั้น · เปิดแท็บใหม่ · javascript: ทิ้งแต่เก็บข้อความ", () => {
+    expect(sanitizeRich('<a href="https://a.com/x?y=1&z=2" onclick="evil()">ไป</a>')).toBe('<a href="https://a.com/x?y=1&amp;z=2" target="_blank" rel="noopener noreferrer">ไป</a>');
+    expect(sanitizeRich('<a href="/tasks">งาน</a>')).toContain('href="/tasks"');
+    expect(sanitizeRich('<a href="javascript:alert(1)">x</a>')).toBe("x");
+    expect(sanitizeRich('<a href="https://a.com" style="color:red">y</a>')).not.toContain("color");
+  });
+});

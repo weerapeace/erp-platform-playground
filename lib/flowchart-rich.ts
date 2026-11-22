@@ -6,7 +6,9 @@
 // ฟังก์ชันล้วน ไม่ใช้ DOM — เทสต์ lib/__tests__/flowchart-rich.test.ts
 // ============================================================
 
-const ALLOWED = new Set(["b", "strong", "i", "em", "u", "s", "strike", "span", "div", "p", "br", "ul", "ol", "li"]);
+const ALLOWED = new Set(["b", "strong", "i", "em", "u", "s", "strike", "span", "div", "p", "br", "ul", "ol", "li", "a"]);
+/** ลิงก์ที่ยอมให้เก็บ: เว็บ (http/https) หรือหน้าในระบบ (ขึ้นต้น /) — กัน javascript: */
+const HREF_OK = (v: string) => /^(https?:\/\/[^\s"<>]+|\/[^\s"<>]*)$/i.test(v) && v.length <= 500;
 const VOID = new Set(["br"]);
 /** แท็กที่ต้องทิ้งทั้งเนื้อหาข้างใน (ไม่ใช่แค่ตัวแท็ก) */
 const DROP_WITH_CONTENT = new Set(["script", "style", "iframe", "object", "embed", "noscript", "template", "textarea", "select", "svg", "math", "head", "title"]);
@@ -15,6 +17,7 @@ export const RICH_MAX = 20000;
 const COLOR_RE = /^(#[0-9a-f]{3}|#[0-9a-f]{6}|#[0-9a-f]{8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/i;
 const STYLE_OK: Record<string, (v: string) => string | null> = {
   "color": (v) => (COLOR_RE.test(v) ? v : null),
+  "background-color": (v) => (COLOR_RE.test(v) ? v : null),   // ไฮไลต์ (แถบจัดข้อความ 2026-11-22)
   "font-size": (v) => { const m = /^(\d{1,2}(\.\d+)?)px$/.exec(v); return m && Number(m[1]) >= 6 && Number(m[1]) <= 72 ? `${m[1]}px` : null; },
   "font-weight": (v) => (/^(bold|normal|[1-9]00)$/.test(v) ? v : null),
   "font-style": (v) => (/^(italic|normal)$/.test(v) ? v : null),
@@ -64,13 +67,18 @@ export function sanitizeRich(html: unknown): string {
       continue;
     }
     if (DROP_WITH_CONTENT.has(name)) { if (!close && !/\/>$/.test(tok)) { drop = name; dropDepth = 1; } continue; }
-    if (!ALLOWED.has(name)) continue;   // แท็กอื่น (a, img, font ...) = ทิ้งแท็ก เก็บข้อความข้างใน
+    if (!ALLOWED.has(name)) continue;   // แท็กอื่น (img, font ...) = ทิ้งแท็ก เก็บข้อความข้างใน
     if (close) {
       let at = -1;
       for (let i = stack.length - 1; i >= 0; i--) if (stack[i] === name || stack[i] === `#${name}`) { at = i; break; }
       if (at < 0) continue;
       while (stack.length > at) { const x = stack.pop()!; if (x[0] !== "#") out.push(`</${x}>`); }
       continue;
+    }
+    if (name === "a") {   // ลิงก์: เก็บเฉพาะ href ที่ปลอดภัย · เปิดแท็บใหม่เสมอ
+      const href = decodeAttr(attrOf(tok.slice(2), "href") ?? "").trim();
+      if (!HREF_OK(href)) { stack.push("#a"); continue; }
+      out.push(`<a href="${href.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}" target="_blank" rel="noopener noreferrer">`); stack.push("a"); continue;
     }
     const style = attrOf(tok.slice(name.length + 1), "style");
     const st = style ? cleanStyle(decodeAttr(style)) : "";
