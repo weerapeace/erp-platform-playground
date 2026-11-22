@@ -7,6 +7,7 @@ import { AccessDenied, useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { LinePayslipPeriodsCard } from "@/components/payroll/line-payslip-periods-card";
 
 type EmployeeSummary = {
   id: string;
@@ -347,6 +348,8 @@ export default function PayrollLineMembersPage() {
           <StatCard label="ยังไม่ผูก" value={stats.notLinked} tone="amber" />
           <StatCard label="รวมพนักงาน" value={stats.total} tone="slate" />
         </div>
+
+        <LinePayslipPeriodsCard canEdit={canEdit} />
 
         {(error || success) && (
           <div

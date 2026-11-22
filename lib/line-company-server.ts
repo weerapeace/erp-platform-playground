@@ -19,6 +19,7 @@ import {
   type CompanyMenuKind, type CompanyMenuLayout, type PublishedMenuKey,
 } from "@/lib/line-company";
 import { identityCallName, resolveLineIdentity, type LineIdentity } from "@/lib/line-identity";
+import { APPROVE_LIFF_ID } from "@/lib/approval-token";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -177,7 +178,7 @@ export async function handleCompanyEvents(admin: Admin, cfg: LineConfig, bot: Li
       if (!act) continue;   // กดแท็บเมนูแอดมิน (cmptab=) / ค่าแปลก = ไม่ตอบ
       // กดจากเมนูเก่าที่ค้าง (เพิ่งถูกถอนผูก/ถอนสิทธิ์แอดมิน) → สลับเมนูให้ถูกชุดเลย
       if (!actionAllowed(id.who, act)) await linkCompanyMenu(bot.token, menus, uid, menuKindFor(id.who));
-      const text = companyReplyText(id.who, act, name);
+      const text = companyReplyText(id.who, act, name, APPROVE_LIFF_ID);
       if (text) await lineReplyMessages(bot.token, e.replyToken, [lineText(text)]);
       continue;
     }

@@ -18,6 +18,7 @@ import {
 import { companyLayoutOf, companyMenusOf, type CompanyMenuState } from "@/lib/line-company-server";
 import { listLinkedLineUsers } from "@/lib/line-identity";
 import type { LineBotView, LineConfig } from "@/lib/line-send";
+import { APPROVE_LIFF_ID } from "@/lib/approval-token";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type SharpFn = typeof import("sharp");
@@ -133,7 +134,7 @@ export async function publishCompanyMenus(admin: Admin, cfg: LineConfig, bot: Li
   for (const key of PUBLISHED_MENU_KEYS) {
     const png = await renderCompanyMenuPng(key, layout).catch((e) => { console.error("[line-company] render", e); return null; });
     if (!png) { await rollback(); return { ok: false, error: "วาดรูปเมนูไม่สำเร็จ (โหลดฟอนต์ไม่ได้?) ลองใหม่อีกครั้ง" }; }
-    const r = await call(bot.token, `${API}/richmenu`, { method: "POST", headers: JSON_HEAD, body: JSON.stringify(richMenuBody(key, layout)) });
+    const r = await call(bot.token, `${API}/richmenu`, { method: "POST", headers: JSON_HEAD, body: JSON.stringify(richMenuBody(key, layout, { liffId: APPROVE_LIFF_ID })) });
     const id = r.ok ? String(r.json?.richMenuId ?? "") : "";
     if (!id) { await rollback(); console.warn("[line-company] create menu", key, r.status, r.text); return { ok: false, error: lineErr("สร้างเมนู", r.status) }; }
     created[key] = id;

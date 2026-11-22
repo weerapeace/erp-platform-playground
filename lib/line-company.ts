@@ -175,7 +175,12 @@ export const POSTBACK_PREFIX = "cmp=";
 export const TAB_POSTBACK_PREFIX = "cmptab=";
 
 /** ตัวเมนูที่ส่งให้ LINE สร้าง (POST /v2/bot/richmenu) */
-export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout): Record<string, unknown> {
+/** ปุ่มที่เปิดหน้าเล็กในไลน์ได้ทันที (รอบ 3) — มีรหัส LIFF = ปุ่มเปิดลิงก์ ไม่ต้องรอบอทตอบ */
+export const LIFF_PAGE_ACTIONS: readonly CompanyAction[] = ["payslip", "warning", "piecework"];
+const isLiffPageAction = (a: CompanyAction): a is "payslip" | "warning" | "piecework" => (LIFF_PAGE_ACTIONS as CompanyAction[]).includes(a);
+export const liffPageLink = (liffId: string, act: "payslip" | "warning" | "piecework") => `https://liff.line.me/${liffId}?me=${act}`;
+
+export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout, opts: { liffId?: string } = {}): Record<string, unknown> {
   const buttons = visibleButtons(layout[buttonsKindOf(key)]);
   const tab = adminTabOf(key);
   const { width, height } = richMenuSize(buttons.length);
@@ -192,7 +197,9 @@ export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout): 
       ...tabAreas,
       ...buttons.map((b, i) => ({
         bounds: richMenuCell(i, buttons.length, !!tab),
-        action: { type: "postback", label: b.label.slice(0, LABEL_MAX), data: `${POSTBACK_PREFIX}${b.act}`, displayText: b.label },
+        action: opts.liffId && isLiffPageAction(b.act)
+          ? { type: "uri", label: b.label.slice(0, LABEL_MAX), uri: liffPageLink(opts.liffId, b.act) }
+          : { type: "postback", label: b.label.slice(0, LABEL_MAX), data: `${POSTBACK_PREFIX}${b.act}`, displayText: b.label },
       })),
     ],
   };
@@ -230,7 +237,7 @@ const SOON = "ส่วนนี้กำลังเปิดใช้ในร
  * ข้อความตอบกลับเมื่อกดปุ่ม — คืน null = ไม่ต้องตอบ (ปล่อยให้พนักงานตอบเองในห้องแชทรวม)
  * ห้ามมีตัวเงินในข้อความเด็ดขาด (สลิป/ค่าแรงต้องเปิดหน้าเล็กที่เช็กตัวตน)
  */
-export function companyReplyText(who: CompanyWho, act: CompanyAction, name?: string | null): string | null {
+export function companyReplyText(who: CompanyWho, act: CompanyAction, name?: string | null, liffId?: string): string | null {
   if (!actionAllowed(who, act)) {
     return who === "blocked"
       ? "บัญชีไลน์นี้ถูกระงับการดูข้อมูล กรุณาติดต่อบริษัท"
@@ -244,6 +251,12 @@ export function companyReplyText(who: CompanyWho, act: CompanyAction, name?: str
       return "ผูกไลน์กับร้านของคุณ: ขอลิงก์ผูกไลน์จากพนักงานขายที่ดูแลร้าน เมื่อผูกแล้วจะดูออเดอร์และสินค้าของร้านได้ที่นี่\nหรือพิมพ์ถามในแชตนี้ได้เลย พนักงานจะตอบกลับ";
     case "talk":
       return "พิมพ์ข้อความหรือส่งรูปในแชตนี้ได้เลย พนักงานจะตอบกลับในแชตนี้";
+    case "payslip":
+    case "warning":
+    case "piecework":
+      // ตัวเงินไม่พิมพ์ในแชต — ส่งลิงก์หน้าเล็ก (เช็กตัวตนใหม่ทุกครั้ง)
+      return liffId ? `${hi}กดลิงก์นี้เพื่อเปิดดู${act === "payslip" ? "สลิปเงินเดือน" : act === "warning" ? "ใบเตือน" : "งานเหมา"}ของคุณ
+${liffPageLink(liffId, act)}` : `${hi}${SOON}`;
     case "help":
       return `${hi}เรื่องเงินเดือน วันลา หรือเรื่องอื่น ติดต่อฝ่ายบุคคลหรือหัวหน้าโดยตรงได้เลย (ระบบถามตอบในไลน์จะเปิดในรอบถัดไป)`;
     default:
