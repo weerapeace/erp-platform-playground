@@ -3,7 +3,7 @@ import { alertDue, countPullStates, pullAlerts, shopPullHealth, type ShopPullInp
 import { lazMoney, lazOrderToPlatformOrder, lazTime } from "@/lib/lazada-orders";
 import { lineOrderToPlatformOrder } from "@/lib/line-shopping-orders";
 import {
-  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, lazadaToInternal, lineShoppingStatus, needsAction,
+  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, offKey, toggleOffCircle, lazadaToInternal, lineShoppingStatus, needsAction,
   platformStatusLabel, shopManagedName, webshopStatus, webshopToInternal,
 } from "@/lib/platform-order-status";
 
@@ -123,5 +123,28 @@ describe("ออเดอร์เว็บไซต์ + แหล่งที�
     if (!r.ok) expect(r.reason).toContain("หน้าเว็บไซต์");
     expect(platformStatusLabel("ready_to_ship")).toBe("พร้อมส่ง");
     expect(platformStatusLabel("LINE_TO_SHIP")).toBe("ที่ต้องจัดส่ง");
+  });
+});
+
+describe("วงกลมแพลตฟอร์มในการ์ดแบรนด์ (toggleOffCircle)", () => {
+  const B = "b1", all = ["sp", "lz", "tt"];
+  it("คลิกธรรมดา = ปิด/เปิดวงเดียว", () => {
+    const a = toggleOffCircle([], B, all, "lz", false);
+    expect(a).toEqual([offKey(B, "lz")]);
+    expect(toggleOffCircle(a, B, all, "lz", false)).toEqual([]);
+  });
+  it("Shift+คลิก = โชว์วงนั้นวงเดียว · Shift+คลิกซ้ำ = โชว์ทั้งหมด", () => {
+    const solo = toggleOffCircle([], B, all, "sp", true);
+    expect(solo.sort()).toEqual([offKey(B, "lz"), offKey(B, "tt")].sort());
+    expect(toggleOffCircle(solo, B, all, "sp", true)).toEqual([]);
+  });
+  it("Shift+คลิกวงอื่นตอนโชว์วงเดียว = ย้ายไปโชว์วงนั้นแทน · ไม่แตะการ์ดอื่น", () => {
+    const other = offKey("b2", "sp");
+    const solo = toggleOffCircle([other], B, all, "sp", true);
+    const moved = toggleOffCircle(solo, B, all, "tt", true);
+    expect(moved.sort()).toEqual([other, offKey(B, "sp"), offKey(B, "lz")].sort());
+  });
+  it("การ์ดทุกแบรนด์ใช้ * · ออเดอร์ไม่ผูกแพลตฟอร์มใช้ phone", () => {
+    expect(offKey(null, null)).toBe("*:phone");
   });
 });

@@ -12,13 +12,13 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
-import { ERPInput, ERPSelect } from "@/components/form";
+import { ERPInput } from "@/components/form";
 import { ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Pager } from "@/components/pager";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { StatFilterCards, type StatFilterCard } from "@/components/stat-filter-cards";
-import { PlatformBadge, PlatformIcon } from "@/components/platform-icon";
+import { PlatformBadge } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { ErrorState } from "@/components/state-views";
@@ -36,10 +36,18 @@ import { InvoiceModal } from "./invoice-modal";
 import { ShipModal } from "./ship-modal";
 import { ManualOrderModal } from "./manual-order-modal";
 import { ShippingProfileModal } from "./shipping-profile-modal";
+import { BrandCards } from "./brand-cards";
+import { usePullAll } from "./use-pull-all";
+import { MenuBar, type MenuItem } from "@/components/menu-bar";
+import type { PlatformBrandCard } from "@/lib/platform-order-status";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
-type Summary = { by_status: Record<string, number>; todo: number; late: number; today: number; invoice_requested: number; booked?: number; view_total: { todo: number; history: number } };
+type Summary = { by_status: Record<string, number>; todo: number; late: number; today: number; invoice_requested: number; booked?: number; view_total: { todo: number; history: number }; brand_cards?: PlatformBrandCard[] };
+// วงกลมแพลตฟอร์มที่ปิดไว้ — จำต่อเครื่อง/ผู้ใช้ (เจ้าของเลือก 2026-11-22 ข้อ 2) · เปิดในโหมดส่วนตัว/ล้างข้อมูลเว็บ = เริ่มใหม่ (เปิดทุกวง)
+const OFF_KEY = "platform-orders.off.v1";
+const readOff = (): string[] => { try { const v = JSON.parse(localStorage.getItem(OFF_KEY) ?? "[]"); return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 40) : []; } catch { return []; } };
+const saveOff = (v: string[]) => { try { localStorage.setItem(OFF_KEY, JSON.stringify(v)); } catch { /* เก็บไม่ได้ก็ยังใช้ได้ (แค่ไม่จำ) */ } };
 type CardKey = "all" | "todo" | "late" | "today" | "invoice" | "booked" | "shipped" | "cancelled";
 const PAGE_SIZE = 50;
 
@@ -100,9 +108,13 @@ function PlatformOrdersInner() {
   const [demo, setDemo] = useState(sp.get("demo") === "1");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [platformId, setPlatformId] = useState("");
   // ลิงก์จากหน้าแบรนด์ (/brand-hub): ?brand=<id> → เปิดมาเห็นออเดอร์ของแบรนด์นั้นเลย
   const [brandId, setBrandId] = useState(() => sp.get("brand") ?? "");
+  // วงกลมแพลตฟอร์มที่ปิดไว้ (การ์ดแบรนด์) — ส่งเป็น ?off= · โหลดค่าที่จำไว้หลังเปิดหน้า
+  const [off, setOffState] = useState<string[]>([]);
+  useEffect(() => { setOffState(readOff()); }, []);
+  const setOff = useCallback((v: string[]) => { setOffState(v); saveOff(v); }, []);
+  const importPlatform = useRef<string>("");   // อัปไฟล์ออเดอร์: แพลตฟอร์มที่เลือกจากเมนู ⋯
   const [view, setView] = useState<"todo" | "history">("todo");
   const [card, setCard] = useState<CardKey>("todo");
   const [qInput, setQInput] = useState("");
@@ -145,8 +157,8 @@ function PlatformOrdersInner() {
     try {
       const params = new URLSearchParams({ view, page: String(page), page_size: String(PAGE_SIZE), ...cardParams(card) });
       if (demo) params.set("demo", "1");
-      if (platformId) params.set("platform_id", platformId);
       if (brandId) params.set("brand_id", brandId);
+      if (off.length) params.set("off", off.join(","));
       if (q) params.set("q", q);
       const j = await apiFetch(`/api/platform-orders?${params}`).then((r) => r.json());
       if (seq !== reqSeq.current) return;
@@ -154,10 +166,11 @@ function PlatformOrdersInner() {
       setRows((j.orders ?? []) as PlatformOrderRow[]); setTotal(Number(j.total) || 0); setSummary(j.summary ?? null);
     } catch { if (seq === reqSeq.current) setError("โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่"); }
     finally { if (seq === reqSeq.current) setLoading(false); }
-  }, [view, page, card, demo, platformId, brandId, q]);
+  }, [view, page, card, demo, brandId, off, q]);
   useEffect(() => { void load(); }, [load]);
   // เปลี่ยนตัวกรอง = กลับหน้าแรก + ล้างที่ติ๊กไว้
-  useEffect(() => { setPage(1); setSel(new Set()); }, [view, card, demo, platformId, brandId]);
+  useEffect(() => { setPage(1); setSel(new Set()); }, [view, card, demo, brandId, off]);
+  const pull = usePullAll({ canManage: canManage && !demo, onDone: () => void load() });
 
   const toggleDemo = () => {
     setDemo((d) => {
@@ -254,7 +267,8 @@ function PlatformOrdersInner() {
   };
 
   const importFile = async (file: File) => {
-    if (!platformId) { toast.warning("เลือกร้าน/แพลตฟอร์มก่อนอัปไฟล์"); return; }
+    const platformId = importPlatform.current;
+    if (!platformId) { toast.warning("เลือกร้านจากเมนู ⋯ › อัปไฟล์ออเดอร์ ก่อน"); return; }
     setImporting(true);
     try {
       const XLSX = await import("xlsx");
@@ -312,6 +326,23 @@ function PlatformOrdersInner() {
     } finally { setShpSyncing(false); }
   };
 
+  // เมนู ⋯ (ปุ่มรอง · เจ้าของเลือก 2026-11-22 ข้อ 4)
+  const uploadPlatforms = platforms.filter((p) => p.code !== "website");
+  const moreItems: MenuItem[] = [
+    ...(canManage && !demo ? [
+      { type: "section" as const, key: "s-pull", label: "ดึงย้อนหลัง 30 วัน" },
+      { key: "tts", label: ttsSyncing ? "กำลังดึง TikTok…" : "ดึงออเดอร์ TikTok 30 วัน", icon: "refresh", disabled: ttsSyncing, onSelect: () => void syncTiktokOrders() },
+      { key: "shp", label: shpSyncing ? "กำลังดึง Shopee…" : "ดึงออเดอร์ Shopee 30 วัน", icon: "refresh", disabled: shpSyncing, onSelect: () => void syncShopeeOrders() },
+      { type: "submenu" as const, key: "upload", label: importing ? "กำลังนำเข้า…" : "อัปไฟล์ออเดอร์ (Excel/CSV)", icon: "upload", disabled: importing,
+        items: uploadPlatforms.length
+          ? uploadPlatforms.map((p) => ({ key: `up-${p.id}`, label: p.name_th, onSelect: () => { importPlatform.current = p.id; fileRef.current?.click(); } }))
+          : [{ key: "up-none", label: "ยังไม่มีร้าน", disabled: true }] },
+      { type: "divider" as const, key: "d1" },
+    ] : []),
+    { key: "ship", label: "ตั้งค่าการส่ง", icon: "settings", onSelect: () => setShowProfile(true) },
+    { type: "toggle", key: "demo", label: "โหมดทดลอง", icon: "flask", on: demo, onSelect: toggleDemo },
+  ];
+
   const viewTab = (k: "todo" | "history", label: string, n: number | undefined) => (
     <button type="button" onClick={() => { setView(k); setCard(k === "todo" ? "todo" : "all"); }}
       className={`h-9 rounded-lg border px-3 text-sm ${view === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
@@ -327,55 +358,34 @@ function PlatformOrdersInner() {
           <p className="mt-0.5 text-sm text-slate-500">ออเดอร์จากทุกร้านในที่เดียว · เลือกหลายใบแล้วพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า · ออกใบกำกับภาษีได้จากออเดอร์</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* 2026-11-20 เจ้าของเลือก widget แบบ A: ปุ่มไปหน้าสถานะการดึงออเดอร์ทุกร้าน */}
+          {/* 2026-11-22 เจ้าของเลือก widget: ปุ่มหลัก 3 ปุ่ม (ดึงทุกร้าน · สถานะดึง+ไฟสถานะ · สร้างออเดอร์) + ปุ่มรองรวมในเมนู ⋯ */}
+          {pull.pullButton}
           {!demo && (
-            <Link href="/master/platform-orders/pull-status" title="ดูว่าแต่ละร้านดึงออเดอร์อัตโนมัติปกติไหม · ดึงตอนนี้ได้"
+            <Link href="/master/platform-orders/pull-status" title="ดูว่าแต่ละร้านดึงออเดอร์อัตโนมัติปกติไหม · ไฟสี = ร้านที่แย่สุดตอนนี้"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
-              <Icon value="i:route" />สถานะดึงออเดอร์
+              {pull.statusDot}สถานะดึงออเดอร์
             </Link>
           )}
-          {canManage && !demo && (
-            <button type="button" onClick={() => void syncTiktokOrders()} disabled={ttsSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก TikTok Shop (อ่านอย่างเดียว · สถานะตามร้าน)"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <PlatformIcon code="tiktok" size={16} />{ttsSyncing ? "กำลังดึง…" : "ดึงออเดอร์ TikTok"}
-            </button>
+          {canManage && !demo && <button type="button" onClick={() => setShowManual(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:plus" />สร้างออเดอร์</button>}
+          {demo && (
+            <button type="button" onClick={toggleDemo} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm text-amber-800"><Icon value="i:flask" />ออกจากโหมดทดลอง</button>
           )}
-          {canManage && !demo && (
-            <button type="button" onClick={() => void syncShopeeOrders()} disabled={shpSyncing} title="ดึงออเดอร์ 30 วันล่าสุดจาก Shopee (อ่านอย่างเดียว · สถานะตามร้าน · ปกติระบบดึงเองทุก 15 นาที)"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <PlatformIcon code="shopee" size={16} />{shpSyncing ? "กำลังดึง…" : "ดึงออเดอร์ Shopee"}
-            </button>
-          )}
-          {canManage && !demo && <button type="button" onClick={() => setShowManual(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800"><Icon value="i:plus" />สร้างออเดอร์</button>}
-          <button type="button" onClick={() => setShowProfile(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:settings" />ตั้งค่าการส่ง</button>
-          <button type="button" onClick={toggleDemo} aria-pressed={demo}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${demo ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-            <Icon value="i:flask" />{demo ? "ออกจากโหมดทดลอง" : "โหมดทดลอง"}
-          </button>
+          <MenuBar menus={[{ key: "more", label: "เมนูเพิ่มเติม", icon: "dots-vertical", iconOnly: true, align: "end", width: 260, items: moreItems }]} />
+          <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); }} />
         </div>
       </div>
 
       {demo && <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">โหมดทดลอง — ออเดอร์ตัวอย่างหน้าตาแบบ Shopee กดได้ทุกปุ่ม แต่ไม่บันทึกอะไรและไม่ส่งอะไรขึ้นร้าน</p>}
+      {pull.progress}
+      {(importing || ttsSyncing || shpSyncing) && <div className="mb-3 text-xs text-slate-500"><Icon value="i:refresh" className="mr-1" />{importing ? "กำลังนำเข้าไฟล์ออเดอร์…" : ttsSyncing ? "กำลังดึงออเดอร์ TikTok 30 วัน…" : "กำลังดึงออเดอร์ Shopee 30 วัน…"}</div>}
+
+      {!demo && <BrandCards cards={summary?.brand_cards ?? []} platforms={pf} brandId={brandId} onBrand={setBrandId} off={off} onOff={setOff} />}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {!demo && viewTab("todo", "ต้องจัดการ", summary?.view_total.todo)}
+        {/* E2 (เจ้าของเลือก 2026-11-22): แท็บนี้โชว์เฉพาะร้านที่ยังไม่ได้ดึงจาก API (ตอนนี้ IG International · Shopee) — ร้านที่เชื่อม API แล้วซ่อนยอดจากเมล */}
         {!demo && viewTab("history", "ยอดขายจากเมล", summary?.view_total.history)}
-        {!demo && (
-          <>
-            <ERPSelect value={platformId} onChange={(e) => setPlatformId(e.target.value)} className="h-9 w-auto" options={[{ value: "", label: "ทุกร้าน" }, ...platforms.map((p) => ({ value: p.id, label: p.name_th }))]} />
-            <ERPSelect value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 w-auto" options={[{ value: "", label: "ทุกแบรนด์" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} />
-          </>
-        )}
         <div className="min-w-[180px] flex-1"><ERPInput value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="ค้นเลขออเดอร์ ชื่อลูกค้า หรือชื่อสินค้า/รหัส SKU" leftIcon={<Icon value="i:search" />} /></div>
-        {!demo && view === "todo" && canManage && (
-          <>
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); }} />
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={importing} title="อัปไฟล์ออเดอร์จาก Seller Center (Excel/CSV) — เลือกร้านก่อน"
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
-              <Icon value="i:upload" />{importing ? "กำลังนำเข้า…" : "อัปไฟล์ออเดอร์"}
-            </button>
-          </>
-        )}
       </div>
 
       <StatFilterCards cards={cards} value={card} onChange={(k) => setCard(k as CardKey)} className="mb-3" showZero />

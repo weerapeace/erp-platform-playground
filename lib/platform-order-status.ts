@@ -39,6 +39,27 @@ export type PlatformOrderItemRow = {
   /** ลิ้นชักออเดอร์: รูป (SKU → Parent) · สี · ชื่อกล่อง · น้ำหนักต่อชิ้น (กรัม) */
   image_key?: string | null; color?: string | null; box_name?: string | null; weight_g?: number | null;
 };
+/** การ์ดแบรนด์ในศูนย์ออเดอร์ (2026-11-22) — งานต้องจัดส่งต่อแบรนด์ + วงกลมแพลตฟอร์ม · code "phone" = ออเดอร์ที่ไม่ผูกแพลตฟอร์ม · email = ยอดจากเมลที่ยังโชว์ */
+export type PlatformBrandCard = { brand_id: string | null; name: string; todo: number; platforms: { platform_id: string | null; code: string; todo: number; email: number }[] };
+
+/** คีย์วงกลมที่ปิด (ส่งไป API ?off=) — แบรนด์ "*" = ทุกแบรนด์ · แพลตฟอร์ม "phone" = ไม่ผูกแพลตฟอร์ม */
+export const offKey = (brandId: string | null, platformId: string | null) => `${brandId ?? "*"}:${platformId ?? "phone"}`;
+/**
+ * กดวงกลมแพลตฟอร์มในการ์ดแบรนด์ (pure · มีเทสต์)
+ *   คลิกธรรมดา = ปิด/เปิดวงนั้น
+ *   Shift+คลิก = โชว์วงนั้นวงเดียว (ปิดวงอื่นในการ์ดเดียวกัน) · Shift+คลิกวงเดิมซ้ำตอนโชว์วงเดียวอยู่ = กลับมาโชว์ทุกวงเหมือนเดิม
+ */
+export function toggleOffCircle(off: readonly string[], brandId: string | null, all: readonly (string | null)[], target: string | null, solo: boolean): string[] {
+  const keys = all.map((pid) => offKey(brandId, pid));
+  const k = offKey(brandId, target);
+  const set = new Set(off);
+  if (!solo) { if (set.has(k)) set.delete(k); else set.add(k); return [...set]; }
+  const others = keys.filter((x) => x !== k);
+  const isSolo = !set.has(k) && others.length > 0 && others.every((x) => set.has(x));
+  for (const x of keys) set.delete(x);
+  if (!isSolo) for (const x of others) set.add(x);
+  return [...set];
+}
 
 export const PLATFORM_ORDER_STATUSES = ["new", "confirmed", "packed", "shipped", "cancelled"] as const;
 export type PlatformOrderStatus = (typeof PLATFORM_ORDER_STATUSES)[number];

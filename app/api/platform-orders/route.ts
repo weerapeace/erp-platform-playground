@@ -25,7 +25,7 @@ import { guardApi } from "@/lib/api-auth";
 import { auditChangeMeta, writeAudit } from "@/lib/audit";
 import {
   PLATFORM_ORDER_STATUSES, bangkokDayRange, checkTransition, isPlatformOrderStatus, needsAction, shipDue,
-  type PlatformOrderRow,
+  type PlatformOrderRow, type PlatformBrandCard,
 } from "@/lib/platform-order-status";
 import { demoOrder, demoOrders, isDemoId } from "@/lib/platform-order-demo";
 import { cleanShipTo, isManualChannel, isOpenManualChannel, isMarketplace, isShippingActive, manualOrderNo, manualShipBy, type OrderShipping } from "@/lib/order-shipping";
@@ -49,7 +49,24 @@ async function defaultWarehouse(admin: Admin): Promise<string | null> {
   return (any1 as { id?: string } | null)?.id ?? null;
 }
 
-type ListParams = { platformId: string; brandId: string; view: string; status: string; q: string; due: string; invoice: string; active?: boolean; booked?: boolean; qIds?: string[] };
+type ListParams = {
+  platformId: string; brandId: string; view: string; status: string; q: string; due: string; invoice: string; active?: boolean; booked?: boolean; qIds?: string[];
+  /** วงกลมแพลตฟอร์มที่ปิดไว้ (การ์ดแบรนด์ 2026-11-22) — คู่ แบรนด์|* : แพลตฟอร์ม|phone */
+  off?: OffPair[];
+  /** ยอดขายจากเมล: ซ่อนคู่ แบรนด์×แพลตฟอร์ม ที่ดึงจาก API แล้ว (เจ้าของเลือก E2 — LM ไม่ใช้เมลแล้ว · IG Shopee ยังใช้) */
+  apiPairs?: { brand_id: string; platform_id: string }[];
+};
+type OffPair = { brand: string; platform: string };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** ?off=brandId|*:platformId|phone,... → คู่ที่ปิด (ตรวจรูปแบบ กันตัวกรองพัง · ≤ 40 คู่) */
+function parseOff(raw: string): OffPair[] {
+  return raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 40).map((s) => {
+    const [brand, platform] = s.split(":");
+    return { brand: brand ?? "", platform: platform ?? "" };
+  }).filter((p) => (p.brand === "*" || UUID_RE.test(p.brand)) && (p.platform === "phone" || UUID_RE.test(p.platform)));
+}
+/** ยังไม่จ่าย (ไม่นับงาน) — ตรงกับ isUnpaidPlatformStatus + ON_HOLD · Lazada เก็บตัวพิมพ์เล็ก */
+const NOT_ACTIVE_PS = "UNPAID,ON_HOLD,unpaid,LINE_UNPAID,LINE_EXPIRED,WEB_UNPAID,WEB_VERIFYING";
 
 /** คำค้น → ปลอดภัยสำหรับ or() ของ PostgREST (ตัด , ( ) ที่ทำให้ตัวกรองพัง) */
 const cleanQ = (q: string) => q.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
@@ -59,11 +76,19 @@ function applyFilters(q: any, p: ListParams) {
   if (p.platformId) q = q.eq("platform_id", p.platformId);
   if (p.brandId) q = q.eq("brand_id", p.brandId);
   // view: ไม่ใช้ .neq("source","email") เพราะ PostgREST ตัดแถวที่ source เป็น null ทิ้ง
-  if (p.view === "history") q = q.eq("source", "email");
-  else if (p.view !== "all") q = q.or("source.is.null,source.neq.email");
+  if (p.view === "history") {
+    q = q.eq("source", "email");
+    // E2: ร้านที่ดึงจาก API แล้ว ไม่ต้องเห็นยอดจากเมล (ยังนับในรายงานยอดขายเหมือนเดิม)
+    for (const a of p.apiPairs ?? []) q = q.or(`brand_id.is.null,brand_id.neq.${a.brand_id},platform_id.neq.${a.platform_id}`);
+  } else if (p.view !== "all") q = q.or("source.is.null,source.neq.email");
+  // วงกลมแพลตฟอร์มที่ปิด · ไม่ใช้ .neq ตรง ๆ เพราะตัดแถวที่ค่าเป็น null ทิ้ง
+  for (const o of p.off ?? []) {
+    const pf = o.platform === "phone" ? "platform_id.not.is.null" : `platform_id.is.null,platform_id.neq.${o.platform}`;
+    q = o.brand === "*" ? q.or(pf) : q.or(`brand_id.is.null,brand_id.neq.${o.brand},${pf}`);
+  }
   if (p.status && isPlatformOrderStatus(p.status)) q = q.eq("status", p.status);
   // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction · TikTok ON_HOLD = ผู้ซื้อยังยกเลิกได้ ยังไม่นับ)
-  if (p.active) q = q.in("status", OPEN_STATUSES).or("platform_status.is.null,platform_status.not.in.(UNPAID,ON_HOLD)");
+  if (p.active) q = q.in("status", OPEN_STATUSES).or(`platform_status.is.null,platform_status.not.in.(${NOT_ACTIVE_PS})`);
   const s = cleanQ(p.q);
   if (s) q = q.or(`order_no.ilike.*${s}*,external_order_id.ilike.*${s}*,customer_name.ilike.*${s}*${p.qIds?.length ? `,id.in.(${p.qIds.join(",")})` : ""}`);
   // จองขนส่งแล้ว รอรับ = ยังไม่ส่ง + มีการจองที่ไม่ถูกยกเลิก
@@ -178,6 +203,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     platformId: (sp.get("platform_id") ?? "").trim(), brandId: (sp.get("brand_id") ?? "").trim(),
     view: (sp.get("view") ?? "todo").trim(), status: (sp.get("status") ?? "").trim(), q: (sp.get("q") ?? "").trim(),
     due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1", booked: sp.get("booked") === "1",
+    off: parseOff(sp.get("off") ?? ""),
   };
   const page = Math.max(1, Number(sp.get("page")) || 1);
   const size = Math.min(PAGE_MAX, Math.max(10, Number(sp.get("page_size")) || 50));
@@ -185,16 +211,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   if (cleanQ(p.q)) p.qIds = await orderIdsByProduct(admin, cleanQ(p.q));   // ค้นชื่อสินค้า/รหัส SKU ด้วย
+  p.apiPairs = await apiConnectedPairs(admin);
   const count = (extra: Partial<ListParams>): Promise<number> =>
     applyFilters(admin.from("platform_orders").select("id", { count: "exact", head: true }), { ...p, ...extra })
       .then((r: { count: number | null }) => r.count ?? 0);
   // การ์ด = ทั้งร้าน/ทั้งมุมมอง ไม่ขึ้นกับตัวกรองย่อย (สถานะ/คำค้น/กำหนดส่ง/ใบกำกับ)
   const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false };
 
-  const listQ = applyFilters(admin.from("platform_orders").select(LIST_COLS, { count: "exact" }), p)
-    .order("ship_by_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false })
-    .range((page - 1) * size, page * size - 1);
-  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist, booked] = await Promise.all([
+  // เรียง: ออเดอร์ล่าสุดก่อน (เจ้าของขอ 2026-11-22) · การ์ด "เลยกำหนดส่ง/ต้องส่งวันนี้" หรือ ?sort=due = ใกล้กำหนดส่งก่อน
+  const byDue = sp.get("sort") === "due" || p.due === "late" || p.due === "today";
+  let listQ = applyFilters(admin.from("platform_orders").select(LIST_COLS, { count: "exact" }), p);
+  listQ = byDue
+    ? listQ.order("ship_by_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false })
+    : listQ.order("ordered_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
+  listQ = listQ.range((page - 1) * size, page * size - 1);
+  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist, booked, brandCards] = await Promise.all([
     listQ,
     Promise.all(PLATFORM_ORDER_STATUSES.map((st) => count({ ...scope, status: st }))),
     count({ ...scope, view: "todo", active: true }),
@@ -204,6 +235,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     count({ ...scope, view: "todo" }),
     count({ ...scope, view: "history" }),
     count({ ...scope, view: "todo", booked: true }),
+    loadBrandCards(admin, { ...p, ...scope, brandId: "", platformId: "", off: [], view: "todo", active: true }).catch(() => []),
   ]);
   if (list.error) return NextResponse.json({ error: "โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const by: Record<string, number> = {};
@@ -213,9 +245,56 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     orders: listRows.map((r) => ({ ...r, ...productSummary(media.get(r.id) ?? []) })),
     total: list.count ?? 0, page, page_size: size,
-    summary: { by_status: by, todo, late, today, invoice_requested: invReq, booked, view_total: { todo: viewTodo, history: viewHist } },
+    summary: { by_status: by, todo, late, today, invoice_requested: invReq, booked, view_total: { todo: viewTodo, history: viewHist }, brand_cards: brandCards },
     error: null,
   });
+}
+
+/** คู่ แบรนด์×แพลตฟอร์ม ที่ดึงออเดอร์จาก API อยู่ (Shopee/Lazada เชื่อมแล้ว) — ใช้ซ่อนยอดจากเมลของร้านนั้น */
+async function apiConnectedPairs(admin: Admin): Promise<{ brand_id: string; platform_id: string }[]> {
+  const { data: pf } = await admin.from("erp_platforms").select("id, code").in("code", ["shopee", "lazada"]);
+  const ids = ((pf ?? []) as { id: string }[]).map((x) => x.id);
+  if (!ids.length) return [];
+  const { data } = await admin.from("platform_credentials").select("brand_id, platform_id, meta").in("platform_id", ids);
+  return ((data ?? []) as { brand_id: string; platform_id: string; meta: { stage?: string } | null }[])
+    .filter((r) => r.meta?.stage === "connected" && UUID_RE.test(r.brand_id)).map((r) => ({ brand_id: r.brand_id, platform_id: r.platform_id }));
+}
+
+type BrandCard = PlatformBrandCard;
+/**
+ * การ์ดแบรนด์ (เจ้าของเลือก 2026-11-22): ต่อแบรนด์ = งานต้องจัดส่ง + วงกลมแพลตฟอร์ม (ร้านที่เปิดบัญชีไว้ + ร้านที่มีงานค้าง)
+ * นับจากออเดอร์ "ต้องจัดส่ง" (ไม่ขึ้นกับตัวกรองแบรนด์/วงกลมที่ปิด) · email = ยอดจากเมลที่ยังโชว์ (ร้านที่ยังไม่มี API)
+ */
+async function loadBrandCards(admin: Admin, p: ListParams): Promise<BrandCard[]> {
+  const [{ data: pf }, { data: brands }, { data: accts }, active, emailRows] = await Promise.all([
+    admin.from("erp_platforms").select("id, code, is_active"),
+    admin.from("brands").select("id, name"),
+    admin.from("platform_accounts").select("brand_id, platform_id, is_active"),
+    applyFilters(admin.from("platform_orders").select("brand_id, platform_id"), p).limit(5000),
+    applyFilters(admin.from("platform_orders").select("brand_id, platform_id"), { ...p, view: "history", active: false }).limit(5000),
+  ]);
+  const code = new Map(((pf ?? []) as { id: string; code: string; is_active: boolean }[]).map((x) => [x.id, x]));
+  const brandName = new Map(((brands ?? []) as { id: string; name: string }[]).map((b) => [b.id, b.name]));
+  const SELLING = new Set(["shopee", "lazada", "tiktok", "line_shopping", "website"]);
+  const map = new Map<string, Map<string, { todo: number; email: number }>>();   // brand → platform → นับ
+  const touch = (b: string | null, pl: string | null) => {
+    const bk = b ?? "", pk = pl ?? "phone";
+    const m = map.get(bk) ?? map.set(bk, new Map()).get(bk)!;
+    return m.get(pk) ?? m.set(pk, { todo: 0, email: 0 }).get(pk)!;
+  };
+  for (const a of (accts ?? []) as { brand_id: string; platform_id: string; is_active: boolean }[]) {
+    const c = code.get(a.platform_id);
+    if (a.is_active && c && SELLING.has(c.code)) touch(a.brand_id, a.platform_id);
+  }
+  for (const r of ((active as { data: unknown }).data ?? []) as { brand_id: string | null; platform_id: string | null }[]) touch(r.brand_id, r.platform_id).todo++;
+  for (const r of ((emailRows as { data: unknown }).data ?? []) as { brand_id: string | null; platform_id: string | null }[]) touch(r.brand_id, r.platform_id).email++;
+  const ORDER = ["shopee", "lazada", "tiktok", "line_shopping", "website"];
+  const rank = (c: string) => { const i = ORDER.indexOf(c); return i < 0 ? 99 : i; };
+  return [...map.entries()].map(([b, m]) => {
+    const platforms = [...m.entries()].map(([pid, n]) => ({ platform_id: pid === "phone" ? null : pid, code: pid === "phone" ? "phone" : code.get(pid)?.code ?? "other", todo: n.todo, email: n.email }))
+      .sort((x, y) => rank(x.code) - rank(y.code) || x.code.localeCompare(y.code));
+    return { brand_id: b || null, name: b ? brandName.get(b) ?? "ไม่ทราบแบรนด์" : "ไม่ระบุแบรนด์", todo: platforms.reduce((a, x) => a + x.todo, 0), platforms };
+  }).sort((a, b) => b.todo - a.todo || a.name.localeCompare(b.name));
 }
 
 type PatchBody = { id?: string; ids?: string[]; status?: string; tracking_no?: string; carrier?: string; ship_to?: unknown; cod_amount?: unknown };
