@@ -15,13 +15,13 @@
  */
 import { isChecklistPartKind } from "./checklist-box";
 import { emitTaskContentChanged } from "@/lib/task-content-events";
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT, useLang } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { ERPModal } from "@/components/modal";
-import { ERPDateTime24 } from "@/components/form";
+import { ContentCreateModal, type ContentCreatePreset, type ContentCreatedResult } from "@/app/tasks/content/content-create-modal";
 import { usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -29,8 +29,7 @@ import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import type { CreatedTask } from "@/app/tasks/create-task-modal";
 import { applyTaskTransition } from "@/app/tasks/task-actions";
-import { useCreativeOptions } from "@/app/tasks/use-options";
-import { deleteTask, createContent, addContentAttachment, getContent, listBrands, listSubtasks, POST_TYPES, type CreativeTask, type BrandOption } from "@/app/tasks/data";
+import { deleteTask, addContentAttachment, getContent, listBrands, listSubtasks, type CreativeTask, type BrandOption } from "@/app/tasks/data";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
@@ -229,7 +228,6 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const [assetOptOpen, setAssetOptOpen] = useState(false);  // กล่องเลือกข้อมูลที่จะดึง (หลังเลือกรูป)
   const [assetView, setAssetView] = useState<Record<string, unknown> | null>(null); // การ์ดรูปที่กดดู
   const [brands, setBrands] = useState<BrandOption[]>([]);
-  const { platforms: platformOpts } = useCreativeOptions();
   const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
   pushToastRef.current = pushToast as (v: "success" | "error" | "info", m: string) => void;
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
@@ -327,34 +325,31 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       : t("ใบงานที่เลือกอยู่บนกระดานแล้ว", "Selected sheets are already on the board"));
   };
   const onTaskCreated = (tk: CreatedTask) => { void placeCard(taskCardSkeleton(tk), tk.id); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
-  const createContentCard = async () => {
-    if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
+  // ป๊อปสร้างคอนเทนต์กลาง: ค่าตั้งต้นจากกระดาน (ล็อกแคมเปญ · ผูกงาน · รูป/แคปชั่นที่เลือก · แบบการ์ด)
+  const contentPreset = useMemo<ContentCreatePreset | null>(() => (contentOpen ? {
+    ...(cForm.title ? { title: cForm.title } : {}), post_types: [cForm.post_type],
+    board: { campaign: campaign ? { id: campaign.id, name: campaign.name } : null, task: task ? { id: task.id, brand_id: task.brandId } : null,
+      images: cSeed?.images ?? [], caption: (cSeed?.caption ?? "").trim() || undefined, cardModes: true },
+  } : null), [contentOpen, cForm.title, cForm.post_type, campaign, task, cSeed]);
+  const onContentCreated = async (r: ContentCreatedResult) => {
     try {
-      const cap = (cSeed?.caption ?? "").trim();
-      const { id: cid, content_no } = await createContent({
-        title: cForm.title.trim(), campaign_id: campaignId, post_type: cForm.post_type, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null, status: "draft",
-        // กระดานบรีฟของงาน → คอนเทนต์ผูกงาน (ขึ้นในรายการคอนเทนต์ของงาน · เจ้าของเลือก 2026-11-22)
-        ...(task ? { task_id: task.id, brand_id: task.brandId } : {}),
-        ...(cap ? { brief: cap, captions: cForm.platforms.map((p) => ({ platform: p, caption: cap })) } : {}),
-      });
       // รูปที่เลือกบนกระดาน → แนบด้วยไฟล์เดิมบน R2 (ไม่อัปซ้ำ · ไม่เปลือง R2)
       let failed = 0;
-      for (const k of cSeed?.images ?? []) { try { await addContentAttachment(cid, { kind: "image", r2_key: k, file_name: k.split("/").pop() ?? null }); } catch { failed++; } }
+      for (const k of cSeed?.images ?? []) { try { await addContentAttachment(r.id, { kind: "image", r2_key: k, file_name: k.split("/").pop() ?? null }); } catch { failed++; } }
       if (failed) pushToast("error", t(`แนบรูปไม่สำเร็จ ${failed} รูป — แนบเพิ่มในคอนเทนต์ได้`, `${failed} image(s) failed to attach — add them in the content`));
-      if (cSeed?.sourceIds.length) cSeed.onCreated?.(cid);
+      if (cSeed?.sourceIds.length) cSeed.onCreated?.(r.id);
       if (task) emitTaskContentChanged(task.id);
       setCSeed(null);
-      const base = { id: cid, content_no, title: cForm.title.trim(), status: "draft" };
-      if (cForm.cardMode === "per_platform" && cForm.platforms.length) {
+      const base = { id: r.id, content_no: r.content_no, title: r.title, status: "draft" };
+      if (r.cardMode === "per_platform" && r.platforms.length) {
         // วาง 1 การ์ด/แพลตฟอร์ม (เรียงแนวนอน) — ผูก content เดียวกัน
         const all: Record<string, unknown>[] = [];
-        cForm.platforms.forEach((p, i) => { const dx = i * 270; for (const el of perPlatformCardSkeleton(base, p)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
-        void placeCard(all, cid);
+        r.platforms.forEach((p, i) => { const dx = i * 270; for (const el of perPlatformCardSkeleton(base, p)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+        void placeCard(all, r.id);
       } else {
-        void placeCard(contentCardSkeleton({ ...base, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null }), cid);
+        void placeCard(contentCardSkeleton({ ...base, platforms: r.platforms, scheduled_at: r.scheduled_at }), r.id);
       }
       setContentOpen(false); setCForm({ title: "", post_type: "image", platforms: [], scheduled_at: "", cardMode: "combined" });
-      pushToast("success", t(`สร้างคอนเทนต์ ${content_no} + วางการ์ดแล้ว`, `Created content ${content_no} and placed card`));
     } catch (e) { pushToast("error", (e as Error).message); }
   };
   // วางการ์ดโฟลเดอร์ (เก็บ path) บนกระดาน — ป๊อป + โครงการ์ด = ของกลาง components/canvas-sketch/folder-card
@@ -795,47 +790,10 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       <CreateTaskModal open={taskOpen} onClose={() => setTaskOpen(false)} pushToast={pushToast}
         lockedCampaignId={campaign?.id} lockedCampaignLabel={campaign?.name} onCreated={onTaskCreated} />
 
-      {/* สร้างคอนเทนต์ (ย่อ) → วางการ์ดคอนเทนต์ */}
-      <ERPModal open={contentOpen} onClose={() => setContentOpen(false)} title={t("สร้างคอนเทนต์ลงกระดาน", "Add Content card to board")} size="md"
-        footer={<>
-          <button onClick={() => setContentOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={createContentCard} disabled={!cForm.title.trim()} className="h-9 px-4 text-sm text-white bg-amber-600 rounded-lg disabled:opacity-50">{t("สร้าง + วางการ์ด", "Create + place card")}</button>
-        </>}>
-        <div className="space-y-3">
-          <div><label className="text-xs text-slate-400">{t("ชื่อคอนเทนต์", "Content title")}</label><input value={cForm.title} onChange={(e) => setCForm((f) => ({ ...f, title: e.target.value }))} placeholder={t("เช่น โพสต์เปิดตัวสินค้าใหม่", "e.g. New product launch post")} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-slate-400">{t("ประเภทโพสต์", "Post type")}</label><select value={cForm.post_type} onChange={(e) => setCForm((f) => ({ ...f, post_type: e.target.value }))} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm">{POST_TYPES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}</select></div>
-            <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Scheduled time")}</label><ERPDateTime24 value={cForm.scheduled_at} onChange={(v) => setCForm((f) => ({ ...f, scheduled_at: v }))} /></div>
-          </div>
-          <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platforms")}</label>
-            <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = cForm.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setCForm((f) => ({ ...f, platforms: on ? f.platforms.filter((x) => x !== p.value) : [...f.platforms, p.value] }))} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
-          </div>
-          <div><label className="text-xs text-slate-400">{t("แบบการ์ด", "Card style")}</label>
-            <div className="flex gap-1.5 mt-1">
-              {([["combined", `📱 ${t("การ์ดรวม", "Combined")}`], ["per_platform", `🔀 ${t("แยกรายแพลตฟอร์ม", "Per platform")}`]] as const).map(([v, lbl]) => (
-                <button key={v} type="button" onClick={() => setCForm((f) => ({ ...f, cardMode: v }))} className={`px-2.5 py-1 rounded-full text-xs border ${cForm.cardMode === v ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{lbl}</button>
-              ))}
-            </div>
-            {cForm.cardMode === "per_platform" && <p className="text-[11px] text-slate-400 mt-1">{t("วาง 1 การ์ด/แพลตฟอร์ม · ทุกใบผูก content เดียวกัน (แก้ที่ Drawer)", "One card per platform · all linked to the same content (edit in Drawer)")}</p>}
-          </div>
-          {cSeed && (cSeed.images.length > 0 || cSeed.caption !== null) && (
-            <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2 space-y-1.5">
-              <p className="text-[11px] text-violet-700">{t("จากของที่เลือกบนกระดาน", "From the items selected on the board")}{cSeed.images.length > 0 && ` · ${t(`แนบรูป ${cSeed.images.length} รูป (ใช้ไฟล์เดิม)`, `${cSeed.images.length} image(s) attached (same files)`)}`}</p>
-              {cSeed.images.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {cSeed.images.slice(0, 8).map((k) => <img key={k} src={r2ImageUrl(k, 120) ?? ""} alt="" className="h-12 w-12 rounded object-cover bg-white border border-violet-100" />)}
-                </div>
-              )}
-              <textarea value={cSeed.caption ?? ""} onChange={(e) => setCSeed((s) => (s ? { ...s, caption: e.target.value } : s))} rows={3}
-                placeholder={t("ร่างแคปชัน (ใส่ทุกแพลตฟอร์มที่เลือก แก้ต่อได้ในคอนเทนต์)", "Caption draft (used for every selected platform, editable later)")}
-                className="w-full text-sm border border-slate-200 rounded-lg p-2 bg-white" />
-            </div>
-          )}
-          {task && <p className="text-[11px] text-violet-700">{t("คอนเทนต์นี้จะขึ้นในรายการคอนเทนต์ของงานด้วย (สถานะ: ร่าง)", "This content also appears in the task's content list (status: draft)")}</p>}
-          <p className="text-xs text-slate-400">{t(`สร้างแบบย่อ — รายละเอียด/caption แก้ต่อได้ที่ "เปิดเต็ม" ในการ์ด`, `Quick create — edit details/caption later via "Open full" on the card`)}</p>
-        </div>
-      </ERPModal>
+      {/* สร้างคอนเทนต์ → วางการ์ดคอนเทนต์ · ป๊อปสร้างคอนเทนต์กลางตัวเต็ม (แบรนด์ · SKU/Parent · เลือกวันจากปฏิทิน) + ส่วนของกระดาน (เจ้าของสั่ง 2026-11-22) */}
+      <ContentCreateModal open={contentOpen} onClose={() => { setContentOpen(false); setCSeed(null); }} onCreated={onContentCreated}
+        brands={brands} campaigns={campaign ? [{ id: campaign.id, name: campaign.name }] : []} defaultBrandId={task?.brandId ?? campaign?.brandId ?? null}
+        preset={contentPreset} pushToast={pushToast} />
 
       {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => { setContentView(null); void syncContentCards(); }} onChanged={() => void syncContentCards()} onDeleted={(cid) => { sketchRef.current?.removeCards((c) => c.kind === "content" && String(c.data.id ?? "") === cid); pushToast("info", t("เอาการ์ดคอนเทนต์ออกจากกระดานแล้ว", "Removed content card from board")); }} pushToast={pushToast} />}
       {tableView && <TableDrawer tableId={String(tableView.id ?? "")} onClose={() => setTableView(null)}

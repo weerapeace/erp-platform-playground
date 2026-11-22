@@ -6,13 +6,13 @@
  *   ข้อมูลอัลบั้มแก้ในหน้าเลย (ชุดช่องกลาง AlbumInfoFields · บันทึกเอง: ตัวเลือกบันทึกทันที · ข้อความบันทึกตอนออกจากช่อง)
  *   แคปชั่นแยกแพลตฟอร์ม = การ์ดเดียวกับหน้าลงโพสต์ (CaptionCard โหมด draft) → content_albums.caption_drafts (บันทึกเองหลังพิมพ์ 0.8 วิ) · AI เขียนรายแพลตฟอร์ม/ทุกแพลตฟอร์ม
  *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม
- *   ส่งเข้าปฏิทิน: เลือกวันก่อน (ปฏิทินกลาง DocCalendar · เห็นโพสต์เดิมของแบรนด์แต่ละวัน) → ป๊อปสร้างโพสต์กลาง ContentCreateModal ที่ใส่วัน + ข้อมูลจากอัลบั้มให้แล้ว
+ *   ส่งเข้าปฏิทิน: เลือกวันก่อน (ContentDatePickModal · เห็นโพสต์เดิมของแบรนด์แต่ละวัน) → ป๊อปสร้างโพสต์กลาง ContentCreateModal ที่ใส่วัน + ข้อมูลจากอัลบั้มให้แล้ว
  *     (แบรนด์ · ชื่อ · แพลตฟอร์ม · ประเภท · ไฟล์ที่เลือก · แคปชั่นร่าง · สินค้าที่แท็ก — ไม่ได้แท็ก = เดาจากรหัสในชื่ออัลบั้ม)
  *   ช่วยคัดรูป (เบลอ/คล้าย · ./cull) · ดาวน์โหลดทั้งอัลบั้มเป็น zip (lib/zip)
  * หน้าตาแบบ B (เจ้าของเลือก 2026-11-20): รูปซ้าย · ข้อมูล/แคปชั่น/Reference/ลงแล้ว แถบขวา (จอเล็กย้ายไปใต้รูป) · ลบ/ปิดอัลบั้มอยู่ในเมนู "เพิ่มเติม"
  *   ติ๊กมุมรูป = เลือกใช้ → แถบคำสั่ง BulkActionBar (inline) · แตะรูป = ImageLightbox · ขนาดรูป gallery-columns · วิธีใช้ = InfoHint
  *   เอาไฟล์ออก / ล้างที่เลือก / ตั้งปก → ปุ่ม "ย้อนกลับ" ในแจ้งเตือน (toast.undo · ไฟล์ใส่กลับผ่าน POST files restore)
- * ใช้ของกลาง: ERPModal · ConfirmDialog · BulkActionBar · ImageLightbox · useGalleryColumns · InfoHint · Popover · UploadProgress · runBackgroundTask · ContentCreateModal · DocCalendar · useDragReorder · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
+ * ใช้ของกลาง: ERPModal · ConfirmDialog · BulkActionBar · ImageLightbox · useGalleryColumns · InfoHint · Popover · UploadProgress · runBackgroundTask · ContentCreateModal · ContentDatePickModal · useDragReorder · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
  * สิทธิ์: แก้/อัป assets.upload · ลบไฟล์ assets.delete · ลบอัลบั้ม assets.manage · สร้างโพสต์ tasks.create
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,10 +32,10 @@ import { analyzeAlbumPhotos } from "./cull";
 import { RefBoard } from "./ref-board";
 import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
-import { listCampaigns, listContent, getCaptionTemplates, getPlatformSettings, type BrandOption, type CaptionTemplate, type ContentCaption, type PlatformSettings, type ShopChannel } from "@/app/tasks/data";
+import { listCampaigns, getCaptionTemplates, getPlatformSettings, type BrandOption, type CaptionTemplate, type ContentCaption, type PlatformSettings, type ShopChannel } from "@/app/tasks/data";
 import { CaptionCard, PullCaptionModal } from "@/app/tasks/content/caption-card";
 import { captionForPlatform, type AlbumCaptionDrafts } from "@/lib/content-album-captions";
-import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
+import { ContentDatePickModal } from "@/app/tasks/content/content-date-pick";
 import { findParentSkuByCode } from "@/components/pickers";
 import { codeLike } from "@/lib/website-image-match";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
@@ -85,8 +85,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   /** ส่งเข้าปฏิทิน: ขั้นเลือกวันก่อน (เตรียมค่าตั้งต้นไว้ระหว่างเลือก) */
   const [datePick, setDatePick] = useState<ContentCreatePreset | null>(null);
   const [postDate, setPostDate] = useState<string | null>(null);
-  const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
-  const [calDocs, setCalDocs] = useState<CalDoc[]>([]);
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -384,18 +382,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
     flushDrafts();
     const base = albumPostPreset({ ...album, caption_drafts: draftsRef.current, planned_platforms: infoRef.current?.planned_platforms ?? album.planned_platforms });
     setDatePick(base);
-    const due = album.due_date;
-    const d0 = due ? new Date(`${due}T00:00:00`) : new Date();
-    setCalCursor(new Date(d0.getFullYear(), d0.getMonth(), 1));
-    // โพสต์เดิมของแบรนด์นี้ (ดูว่าวันไหนว่าง) · โพสต์จากอัลบั้มนี้ = สีม่วง
-    listContent(album.brand_id ? { brand_id: album.brand_id } : {})
-      .then((rows) => setCalDocs(rows.filter((r) => r.scheduled_at && r.status !== "cancelled").map((r) => {
-        const d = new Date(r.scheduled_at as string);
-        const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        const time = d.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", hour12: false });
-        return { id: r.id, no: `${time} ${r.content_no ?? ""}`.trim(), sub: r.title, date: ymd, color: r.album_id === album.id ? "#7c3aed" : (r.brand_color ?? "#94a3b8"), title: `${time} · ${r.title}` };
-      })))
-      .catch(() => setCalDocs([]));
     // ยังไม่ได้แท็กสินค้า → เดาจากรหัสในชื่ออัลบั้ม (เช่น "ROAR06") ถ้าตรงรหัส Parent SKU เป๊ะ
     if (!base.parent) {
       const code = album.name.split(/\s+/).map((w) => codeLike(w)).find(Boolean);
@@ -827,18 +813,15 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       )}
       {/* ส่งเข้าปฏิทิน ขั้นที่ 1: เลือกวัน */}
       {datePick && album && (
-        <ERPModal open onClose={() => setDatePick(null)} title={t("เลือกวันลงโพสต์", "Pick a post date")} size="xl" storageKey="content-album-date" zIndex={60}
+        <ContentDatePickModal open brandId={album.brand_id} albumId={album.id} selectedDay={album.due_date} onClose={() => setDatePick(null)}
           description={t("กดวันที่จะลง → เปิดรายละเอียดโพสต์ที่ใส่ข้อมูลจากอัลบั้มให้แล้ว · ในช่องวันคือโพสต์ที่มีอยู่แล้ว (สีม่วง = จากอัลบั้มนี้)", "Pick a day → the post form opens prefilled from this album · each day shows existing posts (purple = from this album)")}
+          onPick={(day) => { const p = datePick; setDatePick(null); setPostDate(day); setPostPreset(p); }}
           footer={<div className="flex flex-wrap items-center gap-2 w-full">
             <span className="text-xs text-slate-500">{[datePick.parent ? `${t("สินค้า", "Product")} ${datePick.parent.code}` : null, album.brand_name, datePick.album ? t(`${datePick.album.asset_ids.length} ไฟล์`, `${datePick.album.asset_ids.length} files`) : null].filter(Boolean).join(" · ")}</span>
             <span className="flex-1" />
             <button onClick={() => setDatePick(null)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => { const p = datePick; setDatePick(null); setPostDate(null); setPostPreset(p); }} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยังไม่กำหนดวัน", "No date yet")}</button>
-          </div>}>
-          <DocCalendar docs={calDocs} cursor={calCursor} onCursor={setCalCursor} unit={t("โพสต์", "posts")} selectedDay={album.due_date} disablePast
-            onPickDay={(day) => { const p = datePick; setDatePick(null); setPostDate(day); setPostPreset(p); }}
-            hint={album.due_date ? t(`กรอบเข้ม = วันที่ตั้งไว้ว่าต้องลงภายใน · เวลาโพสต์ใส่ให้ตามเวลาแนะนำของวันนั้น (แก้ได้ในฟอร์ม)`, "Dark outline = the album's post-by date · time follows the recommended time (editable)") : t("เวลาโพสต์ใส่ให้ตามเวลาแนะนำของวันนั้น (แก้ได้ในฟอร์ม)", "Time follows the day's recommended time (editable)")} />
-        </ERPModal>
+          </div>} />
       )}
       {postPreset && album && (
         <ContentCreateModal open preset={postPreset} brands={brands} campaigns={campaigns} defaultBrandId={album.brand_id} defaultDate={postDate}

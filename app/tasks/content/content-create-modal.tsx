@@ -4,6 +4,8 @@
 // ContentCreateModal (ของกลาง) — ป๊อปอัปสร้างคอนเทนต์ใหม่
 // ใช้ทั้งหน้า /tasks/content และ /tasks/content-calendar (คลิกวันในปฏิทิน)
 // รองรับ prefill: แบรนด์ (จากแท็บ) + วันตั้งโพสต์ (จากช่องวันที่คลิก)
+// ปุ่ม "เลือกจากปฏิทิน" ข้างช่องวัน (ContentDatePickModal) · สร้างเสร็จ = แจ้งเตือนมีปุ่ม "เปิดในปฏิทิน" (2026-11-22)
+// สร้างจากกระดาน (preset.board): ล็อกแคมเปญ/ผูกงาน · รูป+แคปชั่นร่างจากกระดาน · เลือกแบบการ์ด (ผู้เรียกแนบรูป+วางการ์ดใน onCreated)
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +19,8 @@ import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type Bra
 import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, toggleChildSelection, type ExtraProduct } from "./content-products-editor";
 import { BrandSelect } from "@/components/brand-select";
 import { Icon } from "@/components/icon";
+import { useToast } from "@/components/toast";
+import { ContentDatePickModal } from "./content-date-pick";
 import {
   createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
@@ -35,12 +39,21 @@ export type ContentCreatePreset = {
   album?: { id: string; name: string; asset_ids: string[]; caption?: string | null; captions?: AlbumCaptionDrafts };
   /** สินค้าหลัก (Parent SKU) ตั้งต้น — เช่น สินค้าที่แท็กไว้ในอัลบั้ม */
   parent?: ParentSkuPickerValue;
+  /** สร้างจากกระดาน (แคมเปญ / บรีฟของงาน) */
+  board?: {
+    campaign?: { id: string; name: string } | null;      // กระดานแคมเปญ → ล็อกแคมเปญ
+    task?: { id: string; brand_id: string | null } | null; // กระดานบรีฟของงาน → ผูกงาน + แบรนด์ของงาน
+    images?: string[];                                    // รูปที่เลือกบนกระดาน (ผู้เรียกแนบหลังสร้าง) — แค่โชว์จำนวน
+    caption?: string;                                     // แคปชั่นร่างจากกระดาน → บรีฟ + แคปชั่นทุกแพลตฟอร์ม
+    cardModes?: boolean;                                  // โชว์ตัวเลือก การ์ดรวม / แยกรายแพลตฟอร์ม
+  };
 };
+export type ContentCreatedResult = { id: string; content_no: string; title: string; platforms: string[]; scheduled_at: string | null; cardMode: "combined" | "per_platform" };
 export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, preset = null, pushToast }: {
   preset?: ContentCreatePreset | null;   // เติมค่าตั้งต้น (เช่น ปฏิทินโหมด Story: ชื่อ + IG/FB + รูปแบบ story)
   open: boolean;
   onClose: () => void;
-  onCreated: (r: { id: string; content_no: string }) => void;
+  onCreated: (r: ContentCreatedResult) => void;
   brands: BrandOption[];
   campaigns: CampaignOpt[];
   defaultBrandId?: string | null;   // เติมแบรนด์ให้ (เช่น แท็บแบรนด์ที่เลือกในปฏิทิน)
@@ -48,8 +61,12 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
   pushToast: (type: "success" | "error" | "info", m: string) => void;
 }) {
   const t = useT();
+  const toast = useToast();
   const { platforms } = useCreativeOptions();
   const [form, setForm] = useState<Form>(emptyForm());
+  const [calOpen, setCalOpen] = useState(false);
+  const [cardMode, setCardMode] = useState<"combined" | "per_platform">("combined");
+  const board = preset?.board ?? null;
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -70,7 +87,10 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       const rec = (recRef.current[String(day)] ?? [])[0]?.time;
       sched = `${sched}T${rec || "10:00"}`;
     }
-    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched, ...(preset?.title ? { title: preset.title } : {}), ...(preset?.platforms ? { platforms: preset.platforms } : {}), ...(preset?.post_types ? { post_types: preset.post_types } : {}), ...(preset?.parent ? { parent: preset.parent } : {}) });
+    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched, ...(preset?.title ? { title: preset.title } : {}), ...(preset?.platforms ? { platforms: preset.platforms } : {}), ...(preset?.post_types ? { post_types: preset.post_types } : {}), ...(preset?.parent ? { parent: preset.parent } : {}),
+      ...(preset?.board?.campaign ? { campaign_id: preset.board.campaign.id } : {}), ...(preset?.board?.task?.brand_id && !defaultBrandId ? { brand_id: preset.board.task.brand_id } : {}),
+      ...(preset?.board?.caption?.trim() ? { note: preset.board.caption.trim() } : {}) });
+    setCardMode("combined");
     setDirty(false); setFormErr(null); setChildren([]); setSkuIds([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate, preset]);
 
@@ -139,6 +159,13 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     const labels = [t("อา.", "Sun"), t("จ.", "Mon"), t("อ.", "Tue"), t("พ.", "Wed"), t("พฤ.", "Thu"), t("ศ.", "Fri"), t("ส.", "Sat")];
     return { items, label: labels[day] };
   }, [form.scheduled_at, recTimes, t]);
+  // เลือกวันจากปฏิทินคอนเทนต์ → เติมเวลาแนะนำของวันนั้น (ไม่มี = เวลาเดิม/10:00)
+  const pickCalDay = (day: string) => {
+    const dow = new Date(`${day}T00:00:00`).getDay();
+    const rec = (recRef.current[String(dow)] ?? [])[0]?.time;
+    upd({ scheduled_at: `${day}T${rec || form.scheduled_at.slice(11, 16) || "10:00"}` });
+    setCalOpen(false);
+  };
   const applyRecTime = (tm: string) => { const d = form.scheduled_at.slice(0, 10) || new Date().toISOString().slice(0, 10); upd({ scheduled_at: `${d}T${tm}` }); };
   const save = async () => {
     if (!form.title.trim()) { setFormErr(t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
@@ -153,6 +180,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         // รูปแบบโพสต์: ของแบรนด์ + ที่ preset บังคับ (เช่น story) — เฉพาะแพลตฟอร์มที่เลือกไว้จริง
         platform_formats: Object.fromEntries(Object.entries({ ...(bpFmt[form.brand_id] ?? {}), ...(preset?.platform_formats ?? {}) }).filter(([p]) => form.platforms.includes(p))),
+        ...(board?.task ? { task_id: board.task.id } : {}),
+        ...(board?.caption?.trim() && !preset?.album ? { brief: board.caption.trim(), captions: form.platforms.map((p) => ({ platform: p, caption: board.caption!.trim() })) } : {}),
         ...(preset?.album ? {
           album_id: preset.album.id, album_asset_ids: preset.album.asset_ids,
           // แคปชั่นจากอัลบั้ม: ของแต่ละแพลตฟอร์ม → ไม่มีใช้แคปชั่นกลาง (lib/content-album-captions)
@@ -166,8 +195,9 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       });
       setDirty(false);
       if (r.warning) pushToast("error", r.warning);
-      pushToast("success", t(`สร้างคอนเทนต์ ${r.content_no} แล้ว`, `Content ${r.content_no} created`));
-      onCreated(r);
+      toast.action(t(`สร้างคอนเทนต์ ${r.content_no} แล้ว`, `Content ${r.content_no} created`), t("เปิดในปฏิทิน", "Open in calendar"),
+        () => { window.open(`/tasks/content-calendar?content=${r.id}`, "_blank"); });
+      onCreated({ id: r.id, content_no: r.content_no, title: form.title.trim(), platforms: form.platforms, scheduled_at: form.scheduled_at || null, cardMode });
     } catch (e) { setFormErr((e as Error).message); }
     finally { setSaving(false); }
   };
@@ -176,7 +206,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
     <ERPModal open={open} onClose={onClose} title={t("สร้างคอนเทนต์ใหม่", "Create New Content")} size="lg" hasUnsavedChanges={dirty}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
+        <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : board ? t("สร้าง + วางการ์ด", "Create + place card") : t("สร้าง", "Create")}</button>
       </>}>
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700"><Icon value="i:alert-triangle" className="mr-1" />{formErr}</div>}
       {preset?.album && (
@@ -184,6 +214,12 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           <Icon name="library" className="mt-0.5" />
           <span>{t(`จากอัลบั้ม “${preset.album.name}” · แนบ ${preset.album.asset_ids.length} ไฟล์ให้ (ใช้ไฟล์เดิมใน Drive ไม่ก๊อปซ้ำ)${Object.keys(preset.album.captions ?? {}).length ? " · ใส่แคปชั่นตามแพลตฟอร์มให้" : preset.album.caption?.trim() ? " · ใส่แคปชั่นร่างให้ทุกแพลตฟอร์ม" : ""}`,
             `From album “${preset.album.name}” · ${preset.album.asset_ids.length} file(s) attached (same Drive files, no copies)${Object.keys(preset.album.captions ?? {}).length ? " · per-platform captions added" : preset.album.caption?.trim() ? " · draft caption added to every platform" : ""}`)}</span>
+        </div>
+      )}
+      {board && ((board.images?.length ?? 0) > 0 || !!board.caption?.trim()) && (
+        <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+          <Icon name="image" className="mt-0.5" />
+          <span>{[board.images?.length ? t(`แนบรูปจากกระดาน ${board.images.length} รูป`, `${board.images.length} board image(s) attached`) : null, board.caption?.trim() ? t("แคปชั่นร่างจากกระดาน (บรีฟ + ทุกแพลตฟอร์ม)", "Draft caption from the board") : null].filter(Boolean).join(" · ")}</span>
         </div>
       )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
@@ -202,9 +238,17 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           ); })}</div>
         </ERPFormField>
         <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => pickBrand(v, true)} emptyLabel={t("— ไม่ระบุ —", "— None —")} /></ERPFormField>
-        <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
+        <ERPFormField label="Campaign" hint={board?.campaign ? t("ล็อกตามกระดานแคมเปญนี้", "Locked to this campaign board") : undefined}>
+          {board?.campaign
+            ? <ERPInput value={board.campaign.name} disabled readOnly />
+            : <ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} />}
+        </ERPFormField>
         <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")} span={2}>
-          <ERPDateTime24 value={form.scheduled_at} onChange={(v) => upd({ scheduled_at: v })} />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1"><ERPDateTime24 value={form.scheduled_at} onChange={(v) => upd({ scheduled_at: v })} /></div>
+            <button type="button" onClick={() => setCalOpen(true)} className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-violet-200 text-sm text-violet-700 hover:bg-violet-50 shrink-0"><Icon name="calendar" />{t("เลือกจากปฏิทิน", "Pick from calendar")}</button>
+          </div>
+          {!form.scheduled_at && <p className="mt-1 text-[11px] text-slate-400">{t("ไม่ใส่วัน = อยู่ในกล่อง “ยังไม่ตั้งวัน” ของปฏิทินคอนเทนต์", "No date = goes to “Unscheduled” in the content calendar")}</p>}
           {schedRec && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-violet-400"><Icon value="i:bulb" className="mr-1" />{t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
@@ -252,7 +296,17 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
           ); })}</div>
         </ERPFormField>
         <ERPFormField label={t("โน้ต/บรีฟ", "Note/Brief")} span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
+        {board?.cardModes && (
+          <ERPFormField label={t("แบบการ์ดบนกระดาน", "Card style on the board")} span={2} hint={cardMode === "per_platform" ? t("วาง 1 การ์ด/แพลตฟอร์ม · ทุกใบผูกคอนเทนต์เดียวกัน", "One card per platform · all linked to the same content") : undefined}>
+            <div className="flex gap-1.5">
+              {([["combined", t("การ์ดรวม", "Combined")], ["per_platform", t("แยกรายแพลตฟอร์ม", "Per platform")]] as const).map(([v, lbl]) => (
+                <button key={v} type="button" onClick={() => setCardMode(v)} className={`px-2.5 py-1 rounded-full text-xs border ${cardMode === v ? "bg-amber-600 text-white border-amber-600" : "bg-white text-slate-600 border-slate-200"}`}>{lbl}</button>
+              ))}
+            </div>
+          </ERPFormField>
+        )}
       </ERPFormSection>
+      <ContentDatePickModal open={calOpen} brandId={form.brand_id || null} selectedDay={form.scheduled_at || null} onPick={pickCalDay} onClose={() => setCalOpen(false)} />
       {bpOpen && <BrandPlatformsModal brands={brands} initial={bpMap} onClose={() => setBpOpen(false)} onSaved={(m, f) => { setBpMap(m); setBpFmt(f); setBpOpen(false); if (form.brand_id && m[form.brand_id]) upd({ platforms: [...m[form.brand_id]] }); }} initialFormats={bpFmt} pushToast={pushToast} />}
     </ERPModal>
   );
