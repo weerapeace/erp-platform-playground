@@ -98,3 +98,4 @@
 - ทุกการเปิดดูลงประวัติ `line_customer_view`
 - โค้ด: `lib/line-customer-view.ts` (กติกา) · `lib/line-customer-view-server.ts` · `app/api/line-company/customer-view` · `app/a/customer-view.tsx` · ชิ้นส่วนร่วม `app/a/liff-parts.tsx`
 - ปุ่มเป็นลิงก์หลังกด "สร้างเมนูในไลน์" ใหม่ (เมนูเก่า = บอทตอบลิงก์ให้)
+- **รอบ 5 วันนัดส่งใบสั่งขาย:** ดู `docs/so-order-due-date.md` — ใส่วันแล้วตารางส่งงานในไลน์ลูกค้าจะขึ้นเอง

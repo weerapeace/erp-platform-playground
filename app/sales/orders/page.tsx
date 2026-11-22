@@ -43,6 +43,7 @@ import { SoOrderReadView } from "./order-read-view";
 import { SoBillMatchModal } from "./bill-match-modal";
 import { SoBillModal, ShipResultPanel, type ShipResult } from "./bill-modal";
 import { SoMergeModal } from "./merge-modal";
+import { SoDueEditor, useSaveSoDue, type SoDueItem } from "./due-editor";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink, useOpenParam } from "@/lib/open-param";
 import { pickQuoteDocs } from "@/lib/quote-pull";
@@ -70,7 +71,9 @@ type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string 
   /** ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง (อ่านอย่างเดียว — มาจาก GET ใบ · lib/mo-so-rule) */
   progress?: SoLineProgress | null;
   /** ขั้นงานของรายการ 0-4 (อ่านอย่างเดียว — หน้าสถานะ · lib/so-order-stage) */
-  stage?: SoLineStage | null };
+  stage?: SoLineStage | null;
+  /** วันนัดส่งเฉพาะรายการ — ต้องส่งกลับตอนบันทึก ไม่งั้นการบันทึก (เขียนรายการใหม่ทั้งชุด) จะล้างวันทิ้ง */
+  due_date?: string | null };
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered: boolean };
 
 const ST: Record<string, { label: string; color: string }> = {
@@ -80,6 +83,8 @@ const ST: Record<string, { label: string; color: string }> = {
 };
 const money = (n: number) => "฿" + (Math.round(n) || 0).toLocaleString("th-TH");
 const dayText = (s: string | null) => (s ? new Date(s + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "—");
+/** ใบที่ยังต้องใส่วันนัดส่ง (ยืนยันแล้ว · ยังไม่ส่ง · ไม่ถูกรวม) — ปุ่มกรอง "ยังไม่ใส่วันนัดส่ง" */
+const needsDue = (r: { due_date: string | null; status: string; merged_into_id?: string | null }) => !r.due_date && r.status === "confirmed" && !r.merged_into_id;
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 type Form = {
@@ -138,6 +143,9 @@ export default function SoOrdersPage() {
   const [askCancel, setAskCancel] = useState<Row | Form | null>(null);
   // จัดระเบียบ (2026-11-21): เลือกหลายใบ → รวม · แบนเนอร์ใบที่ควรรวม · เปิดใบขายจากใบ · ผลส่งของ
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // ป๊อปตั้งวันนัดส่ง (ทั้งใบ / เฉพาะรายการ / หลายใบ) — ./due-editor
+  const [dueFor, setDueFor] = useState<{ title: string; subtitle?: string; value: string | null; baseDate: string | null; moHint: string | null; items: (due: string | null) => SoDueItem[]; label: (due: string | null) => string; reopen?: string } | null>(null);
+  const [noDue, setNoDue] = useState(false);
   const [mergeIds, setMergeIds] = useState<string[] | null>(null);
   const [mergeHints, setMergeHints] = useState<MergeHint[]>([]);
   const [billFor, setBillFor] = useState<string[] | null>(null);
@@ -174,8 +182,9 @@ export default function SoOrdersPage() {
       // ใบที่ถูกรวมเข้าใบอื่นแล้ว ซ่อนไว้ (ดูได้ในแท็บ "ยกเลิก")
       .filter((r) => (status ? r.status === status : !r.merged_into_id))
       .filter((r) => !groupFilter || (r.groups ?? []).some((g) => g.id === groupFilter))
+      .filter((r) => !noDue || needsDue(r))
       .filter((r) => !q || `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`.toLowerCase().includes(q));
-  }, [rows, status, search, groupFilter]);
+  }, [rows, status, search, groupFilter, noDue]);
   // ชุดที่มีใบสั่งขายอยู่ (ไว้ทำปุ่มกรอง)
   const groupChips = useMemo(() => {
     const m = new Map<string, { id: string; name: string; n: number }>();
@@ -273,6 +282,7 @@ export default function SoOrdersPage() {
           quote_id: (l.quote_id as string) ?? null, quote_no: (l.quote_no as string) ?? null,
           progress: (l.progress as SoLineProgress | null) ?? null,
           stage: (l.stage as SoLineStage | null) ?? null,
+          due_date: l.due_date ? String(l.due_date).slice(0, 10) : null,
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
@@ -348,6 +358,41 @@ export default function SoOrdersPage() {
 
   // ---- ผูกใบสั่งผลิตต่อรายการ ----
   /** ทำรายการกับใบนี้แล้ว "อยู่หน้าเดิม" (โหลดใบใหม่ ไม่ปิดป๊อปเหมือน act) */
+  // ตั้งวันนัดส่งแล้ว (หรือกดย้อนกลับ) → โหลดตาราง + ใบที่เปิดอ่านอยู่ใหม่
+  const readOpenId = useRef<string | null>(null);
+  readOpenId.current = form?.id && !editing ? form.id : null;
+  const saveDue = useSaveSoDue(async () => { await load(); if (readOpenId.current) await openRow({ id: readOpenId.current }); });
+  const moCountText = (ids: Set<string>) => (ids.size ? `มีใบสั่งผลิต ${ids.size} ใบ` : null);
+  /** ป๊อปวันนัดส่งของใบที่เปิดอยู่: lineIds ว่าง = ทั้งใบ · มี = เฉพาะรายการ */
+  const openDueForForm = (lineIds: string[]) => {
+    if (!form?.id) return;
+    const orderId = form.id;
+    const mosOf = (ids: string[]) => new Set(ids.flatMap((id) => { const m = meta[id]; return m?.progress?.mos.length ? m.progress.mos.map((x) => x.id) : m?.mo_id ? [m.mo_id] : []; }));
+    if (!lineIds.length) {
+      setDueFor({ title: `วันนัดส่ง ${form.order_no ?? ""}`.trim(), subtitle: "ทั้งใบ · รายการที่ตั้งวันแยกไว้จะใช้วันของตัวเอง", value: form.due_date || null, baseDate: form.order_date,
+        moHint: moCountText(mosOf(Object.keys(meta))), items: (d) => [{ order_id: orderId, due_date: d }], label: (d) => d ? `ตั้งวันนัดส่ง ${dayText(d)} แล้ว` : "ลบวันนัดส่งแล้ว" });
+      return;
+    }
+    const dues = [...new Set(lineIds.map((id) => meta[id]?.due_date ?? null))];
+    setDueFor({ title: `วันนัดส่ง ${lineIds.length} รายการ`, subtitle: `เฉพาะรายการที่เลือก · ลบวัน = กลับไปใช้วันของหัวใบ${form.due_date ? ` (${dayText(form.due_date)})` : ""}`,
+      value: dues.length === 1 ? dues[0] : null, baseDate: form.order_date, moHint: moCountText(mosOf(lineIds)),
+      items: (d) => [{ order_id: orderId, lines: Object.fromEntries(lineIds.map((id) => [id, d])) }],
+      label: (d) => d ? `ตั้งวันนัดส่ง ${lineIds.length} รายการ เป็น ${dayText(d)} แล้ว` : `ลบวันนัดส่ง ${lineIds.length} รายการแล้ว` });
+  };
+  /** ป๊อปวันนัดส่งจากตาราง (1 ใบ หรือหลายใบที่ติ๊กไว้) */
+  const openDueForRows = (rs: Row[]) => {
+    const list = rs.filter((r) => r.status !== "cancelled" && !r.merged_into_id);
+    if (!list.length) return;
+    const one = list.length === 1 ? list[0] : null;
+    const vals = [...new Set(list.map((r) => r.due_date?.slice(0, 10) ?? null))];
+    setDueFor({ title: one ? `วันนัดส่ง ${one.order_no ?? ""}`.trim() : `วันนัดส่ง ${list.length} ใบ`,
+      subtitle: one ? (one.customer_name ?? undefined) : `ตั้งวันเดียวกันให้ทุกใบที่เลือก${rs.length > list.length ? ` (ข้ามใบยกเลิก/ถูกรวม ${rs.length - list.length} ใบ)` : ""}`,
+      value: vals.length === 1 ? vals[0] : null, baseDate: one ? one.order_date : null,
+      moHint: list.some((r) => r.mo_opened_at) ? "ใบสั่งผลิตที่ผูกกับใบเหล่านี้" : null,
+      items: (d) => list.map((r) => ({ order_id: r.id, due_date: d })),
+      label: (d) => d ? `ตั้งวันนัดส่ง ${list.length} ใบ เป็น ${dayText(d)} แล้ว` : `ลบวันนัดส่ง ${list.length} ใบแล้ว` });
+  };
+
   const lineAct = async (body: Record<string, unknown>, okMsg: string) => {
     if (!form?.id) return false;
     setLinkBusy(true);
@@ -415,7 +460,7 @@ export default function SoOrdersPage() {
         return {
           sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
           discount_type: l.discount_type, discount_value: l.discount_value, note: l.note ?? null,
-          mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null,
+          mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null, due_date: m?.due_date ?? null,
           quote_id: m?.quote_id ?? null, quote_no: m?.quote_no ?? null,
           source: m?.mo_id ? "mo" : m?.quote_id ? "quote" : "manual",
           mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? `new:${g.name}` : null,
@@ -473,7 +518,14 @@ export default function SoOrdersPage() {
     { key: "order", header: "วันที่สั่ง", width: "7rem", align: "center", sortValue: (r) => r.order_date, sortLabel: "วันที่สั่ง",
       cell: (r) => <span className="text-[12px] text-slate-500">{dayText(r.order_date)}</span> },
     { key: "due", header: "กำหนดส่ง", width: "7rem", align: "center", sortValue: (r) => r.due_date ?? "9999", sortLabel: "กำหนดส่ง",
-      cell: (r) => r.due_date ? <span className="text-[12px] font-medium text-indigo-700">{dayText(r.due_date)}</span> : <span className="text-[10px] text-amber-600">ยังไม่ระบุ</span> },
+      cell: (r) => {
+        const can = canEdit && r.status !== "cancelled" && !r.merged_into_id;
+        const label = r.due_date ? <span className="text-[12px] font-medium text-indigo-700">{dayText(r.due_date)}</span> : <span className="text-[10px] text-amber-600">ยังไม่ระบุ</span>;
+        return can
+          ? <button type="button" onClick={(e) => { e.stopPropagation(); openDueForRows([r]); }} title="ตั้งวันนัดส่ง · ลูกค้าเห็นในไลน์"
+              className={`rounded-md px-1.5 py-0.5 ${r.due_date ? "hover:bg-indigo-50" : "border border-dashed border-amber-300 bg-amber-50 hover:bg-amber-100"}`}>{label}</button>
+          : label;
+      } },
     { key: "lines", header: "รายการ", width: "5rem", align: "right", sortValue: (r) => r.line_count, sortLabel: "จำนวนรายการ",
       cell: (r) => <span className="tabular-nums text-slate-600">{r.line_count}</span> },
     { key: "total", header: "ยอดรวม", width: "8rem", align: "right", sortValue: (r) => r.grand_total, sortLabel: "ยอดรวม",
@@ -543,6 +595,11 @@ export default function SoOrdersPage() {
             className={`h-8 px-3 text-sm rounded-lg border ${status === k ? "text-white border-transparent" : "bg-white text-slate-600 border-slate-200"}`}
             style={status === k ? { backgroundColor: v.color } : undefined}>{v.label} ({counts.get(k)})</button>
         ))}
+        {rows.some(needsDue) && (
+          <button onClick={() => setNoDue(!noDue)} title="ใบที่ยืนยันแล้วแต่ยังไม่ใส่วันนัดส่ง (ลูกค้าจะไม่เห็นในตารางส่งงานในไลน์)"
+            className={`h-8 px-3 inline-flex items-center gap-1 text-sm rounded-lg border ${noDue ? "bg-amber-500 text-white border-amber-500" : "bg-white text-amber-700 border-amber-200"}`}>
+            <Icon name="calendar" /> ยังไม่ใส่วันนัดส่ง ({rows.filter(needsDue).length})</button>
+        )}
         {groupChips.length > 0 && <span className="ml-2 text-[11px] text-slate-400">ชุด:</span>}
         {groupChips.map((g) => (
           <button key={g.id} onClick={() => setGroupFilter(groupFilter === g.id ? "" : g.id)}
@@ -566,6 +623,8 @@ export default function SoOrdersPage() {
             className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40">รวมเป็นใบเดียว</button>}
           {canShip && <button disabled={!sameCustSel || selectedRows.some((r) => r.status === "cancelled")} onClick={() => setBillFor([...selected])} title={sameCustSel ? "" : "ใบขาย 1 ใบต้องเป็นลูกค้าเดียวกัน"}
             className="h-8 rounded-lg border border-emerald-300 px-3 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"><Icon name="receipt" /> เปิดใบขายรวม</button>}
+          {canEdit && <button disabled={selectedRows.every((r) => r.status === "cancelled" || !!r.merged_into_id)} onClick={() => openDueForRows(selectedRows)}
+            className="h-8 rounded-lg border border-indigo-200 px-3 text-xs text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"><Icon name="calendar" /> ตั้งวันนัดส่ง</button>}
           <button onClick={() => setSelected(new Set())} className="ml-auto h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-600 hover:bg-slate-50">ล้างที่เลือก</button>
         </div>
       )}
@@ -643,6 +702,7 @@ export default function SoOrdersPage() {
             canOpenMo={canEdit && form.status !== "cancelled"}
             onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")}
             orphanMos={orphanMos}
+            onSetDue={canEdit && form.status !== "cancelled" ? openDueForForm : undefined}
             onLinkMo={canEdit && form.status !== "cancelled" ? (l) => setLinkFor({ tempId: l.tempId, sku: l.sku ?? null, name: l.product_name, mode: "read" }) : undefined}
             onOpenLineMo={canEdit && form.status !== "cancelled" ? (l) => void lineAct({ action: "open_mo", line_id: l.tempId }, `เปิดใบสั่งผลิตให้ ${l.sku ?? l.product_name} แล้ว`) : undefined}
             onUnlinkMo={canEdit && form.status === "confirmed" ? (mo) => setUnlinkMo(mo) : undefined}
@@ -753,6 +813,9 @@ export default function SoOrdersPage() {
       </ERPModal>
 
       {/* ── จัดระเบียบ: รวมใบ / เปิดใบขาย / ผลส่งของ / แยกคืน ── */}
+      <SoDueEditor open={!!dueFor} title={dueFor?.title ?? ""} subtitle={dueFor?.subtitle} value={dueFor?.value ?? null} baseDate={dueFor?.baseDate}
+        moHint={dueFor?.moHint ?? null} onClose={() => setDueFor(null)}
+        onSave={async (d, sync) => { const f = dueFor; if (!f) return false; const ok = await saveDue(f.items(d), sync, f.label(d)); if (ok) setSelected(new Set()); return ok; }} />
       <SoMergeModal ids={mergeIds} onClose={() => setMergeIds(null)}
         onDone={(r) => { setMergeIds(null); setSelected(new Set()); void load(); void openRow({ id: r.id }); }} />
       <SoBillModal open={!!billFor} orderIds={billFor ?? []} onClose={() => setBillFor(null)}

@@ -7,6 +7,7 @@
  *     ขั้นต่อรายการคิดที่ GET /api/so-orders/[id] ด้วย lib/so-order-stage (กติกาเดียวกับมุมมอง "ตามชุด")
  *   • ตารางมีรูป (รูปปก SKU ไม่มีใช้ของรุ่น · HoverImage ของกลาง) + คอลัมน์สถานะ: ขั้นงาน · ใบผลิต · เปิดผลิต x/y · ส่ง x/y
  *   • จัดกลุ่มตามรุ่นได้ (สวิตช์ — lib/so-order-view) · เตือนรายการยังไม่ผูก / เปิดผลิตขาด-เกิน / ใบผลิตไม่ตรงรายการ
+ *   • วันนัดส่ง (แบบ B 2026-11-22): กดวันที่หัวใบ = ตั้งทั้งใบ · ติ๊กรายการ → "ตั้งวันนัดส่ง" = เฉพาะรายการ (ป๊อป ./due-editor ในหน้าแม่)
  *   • รายการที่ยังไม่มีใบผลิต: ปุ่ม "ผูกใบที่มี" (ตัวเลือกใบงานกลาง โหมดใบเดียว) · "เปิดใบใหม่" (open_mo เฉพาะรายการ)
  * ยอดเงิน: SalesTotalsPreview (ของกลางตัวเดียวกับใบขาย) · ยอดต่อรายการ: lib/mo-so-rule
  */
@@ -26,6 +27,8 @@ type ReadMeta = {
   progress?: SoLineProgress | null;
   /** ขั้นงานของรายการ 0-4 (จาก API) */
   stage?: SoLineStage | null;
+  /** วันนัดส่งเฉพาะรายการ (ว่าง = ใช้ของหัวใบ) */
+  due_date?: string | null;
 };
 
 const num = (n: number) => (Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
@@ -52,7 +55,7 @@ const ORDER_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: "ยกเลิก", cls: "bg-rose-50 text-rose-700" },
 };
 
-export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo, onUnlinkMo, onBill, onFillPrices, mergedLines = 0, onUnmerge }: {
+export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo, onUnlinkMo, onBill, onFillPrices, mergedLines = 0, onUnmerge, onSetDue }: {
   header: {
     companyName: string; customerName: string; orderDate: string; dueDate: string;
     poNo: string; salePerson: string; note: string; status: string;
@@ -76,6 +79,8 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   /** จำนวนรายการที่รวมมาจากใบอื่น + ปุ่ม "แยกคืน" */
   mergedLines?: number;
   onUnmerge?: () => void;
+  /** ตั้งวันนัดส่ง: ทั้งใบ (lineIds ว่าง) หรือเฉพาะรายการ · ไม่ส่ง = ไม่มีสิทธิ์ → อ่านอย่างเดียว */
+  onSetDue?: (lineIds: string[]) => void;
 }) {
   const items = useMemo(() => lines.filter((l) => l.product_name.trim() || l.sku), [lines]);
   const main = useMemo(() => majorityGroup(items.map((l) => meta[l.tempId]?.group ?? null)), [items, meta]);
@@ -102,14 +107,19 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   const shown = filter === null ? items : items.filter((l) => stageOf(l) === filter);
   const groups = useMemo(() => groupByModel(shown, lineAmount), [shown]);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const canDue = !!onSetDue && !cancelled;
+  const togglePick = (id: string) => setPicked((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const st = ORDER_STATUS[header.status] ?? { label: header.status, cls: "bg-slate-100 text-slate-600" };
 
   const row = (l: EditorLine, indent = false) => {
     const m = meta[l.tempId];
     const otherGroup = m?.group && main && m.group.id !== main.group.id;
     return (
-      <tr key={l.tempId} className={!hasMo(l) && !cancelled ? "bg-rose-50/40" : ""}>
-        <td className={`py-1.5 pr-1 text-center font-mono text-[11px] text-slate-400 ${indent ? "pl-6" : "pl-3"}`}>{indexOf.get(l.tempId)}</td>
+      <tr key={l.tempId} className={picked.has(l.tempId) ? "bg-blue-50/60" : !hasMo(l) && !cancelled ? "bg-rose-50/40" : ""}>
+        <td className={`py-1.5 pr-1 text-center font-mono text-[11px] text-slate-400 ${indent ? "pl-6" : "pl-3"}`}>
+          {canDue ? <label className="flex cursor-pointer items-center justify-center gap-1"><input type="checkbox" checked={picked.has(l.tempId)} onChange={() => togglePick(l.tempId)} aria-label="เลือกรายการ" />{indexOf.get(l.tempId)}</label> : indexOf.get(l.tempId)}
+        </td>
         <td className="px-1 py-1.5"><HoverImage url={lineImage(l)} size={36} previewSize={280} alt={l.product_name} rounded="rounded-md" /></td>
         <td className="min-w-0 px-2 py-1.5">
           <div className="truncate text-sm text-slate-800" title={l.product_name}>{l.product_name}</div>
@@ -135,6 +145,11 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           {!!l.discount_value && <div className="text-[10px] text-rose-600">ลด {l.discount_type === "percent" ? `${l.discount_value}%` : baht(l.discount_value)}</div>}
         </td>
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm font-medium tabular-nums text-slate-800">{baht(lineAmount(l))}</td>
+        <td className="whitespace-nowrap px-2 py-1.5 text-center text-xs">
+          {m?.due_date
+            ? <button type="button" disabled={!canDue} onClick={() => onSetDue?.([l.tempId])} className="font-medium text-indigo-700 enabled:hover:underline" title="วันนัดส่งเฉพาะรายการนี้">{dayText(m.due_date)}</button>
+            : <span className="text-slate-400" title="ใช้วันนัดส่งของหัวใบ">{header.dueDate ? `ตามหัวใบ` : "—"}</span>}
+        </td>
         <td className="px-3 py-1.5">
           <StatusCell stage={stageOf(l)} moNo={m?.mo_no ?? null} p={m?.progress ?? null} qty={Number(l.qty) || 0} cancelled={cancelled} />
           {onUnlinkMo && hasMo(l) && !cancelled && (
@@ -157,7 +172,7 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
       </tr>
     );
   };
-  const cols = <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-24" /><col className="w-24" /><col className="w-24" /><col className="w-28" /><col className="w-44" /></colgroup>;
+  const cols = <colgroup><col className="w-10" /><col className="w-12" /><col /><col className="w-24" /><col className="w-24" /><col className="w-24" /><col className="w-28" /><col className="w-24" /><col className="w-44" /></colgroup>;
   const zeroPrice = items.filter((l) => !(Number(l.unit_price) > 0)).length;
   const shippedQty = items.reduce((s, l) => s + Math.min(meta[l.tempId]?.progress?.shipped ?? 0, Number(l.qty) || 0), 0);
   const orderedQty = items.filter(hasMo).reduce((s, l) => s + (Number(l.qty) || 0), 0);
@@ -180,7 +195,11 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           <div className="col-span-2"><div className="text-[11px] text-slate-400">ลูกค้า</div><div className="font-medium text-slate-800">{header.customerName || "—"}</div></div>
           <div><div className="text-[11px] text-slate-400">วันที่สั่ง</div><div className="text-slate-700">{dayText(header.orderDate) || "—"}</div></div>
           <div><div className="text-[11px] text-slate-400">กำหนดส่ง</div>
-            {header.dueDate ? <div className="font-medium text-indigo-700">{dayText(header.dueDate)}</div> : <div className="text-amber-600">ยังไม่ระบุ</div>}</div>
+            {canDue ? (
+              <button type="button" onClick={() => onSetDue!([])} title="ตั้งวันนัดส่งทั้งใบ · ลูกค้าเห็นในไลน์"
+                className={header.dueDate ? "inline-flex items-center gap-1 font-medium text-indigo-700 hover:underline" : "inline-flex items-center gap-1 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-700 hover:bg-amber-100"}>
+                {header.dueDate ? <>{dayText(header.dueDate)} <Icon name="edit" /></> : <><Icon name="calendar" /> ใส่วันนัดส่ง</>}</button>
+            ) : header.dueDate ? <div className="font-medium text-indigo-700">{dayText(header.dueDate)}</div> : <div className="text-amber-600">ยังไม่ระบุ</div>}</div>
           <div><div className="text-[11px] text-slate-400">เลข PO ลูกค้า</div><div className="text-slate-700">{header.poNo || "—"}</div></div>
           <div><div className="text-[11px] text-slate-400">ยอดรวมทั้งสิ้น</div><div className="font-semibold tabular-nums text-slate-800">{formatMoney(totals.grand_total)}</div></div>
           <div className="col-span-2"><div className="text-[11px] text-slate-400">บริษัท</div><div className="text-slate-700">{header.companyName || "—"}</div></div>
@@ -269,6 +288,13 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
             <span className={`rounded-full px-2 py-0.5 text-[11px] ${STAGE_TONE[filter].chip}`}>กรอง: {SO_LINE_STAGES[filter].label}
               <button type="button" onClick={() => setFilter(null)} className="ml-1 opacity-70 hover:opacity-100" aria-label="ล้างตัวกรอง">×</button></span>
           )}
+          {canDue && picked.size > 0 && (
+            <span className="flex items-center gap-1.5">
+              <button type="button" onClick={() => onSetDue!([...picked])} className="inline-flex h-7 items-center gap-1 rounded-md bg-blue-600 px-2.5 text-[11px] font-medium text-white hover:bg-blue-700"><Icon name="calendar" /> ตั้งวันนัดส่ง ({picked.size})</button>
+              <button type="button" onClick={() => setPicked(new Set())} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-500 hover:bg-slate-50">ล้างที่เลือก</button>
+            </span>
+          )}
+          {canDue && picked.size === 0 && <span className="text-[11px] text-slate-400">ติ๊กรายการเพื่อตั้งวันนัดส่งแยก</span>}
           <span className="ml-auto flex items-center gap-1.5">
             <label className="flex cursor-pointer items-center gap-1 text-[11px] text-slate-600">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} /> จัดกลุ่มตามรุ่น
@@ -287,14 +313,14 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           <div className="px-4 py-8 text-center text-sm text-slate-400">ไม่มีรายการในขั้นนี้ — <button type="button" onClick={() => setFilter(null)} className="text-blue-600 hover:underline">ดูทั้งหมด</button></div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[840px] table-fixed">
+            <table className="w-full min-w-[940px] table-fixed">
               {cols}
               <thead className="bg-white text-[11px] text-slate-500">
                 <tr className="border-b border-slate-100">
                   <th className="py-1.5 pl-3 pr-1 text-center font-medium">#</th><th className="px-1 py-1.5 text-left font-medium">รูป</th>
                   <th className="px-2 py-1.5 text-left font-medium">สินค้า</th><th className="px-2 py-1.5 text-right font-medium">จำนวน</th>
                   <th className="px-2 py-1.5 text-right font-medium">ส่งแล้ว</th>
-                  <th className="px-2 py-1.5 text-right font-medium">ราคา/หน่วย</th><th className="px-2 py-1.5 text-right font-medium">รวมก่อนภาษี</th>
+                  <th className="px-2 py-1.5 text-right font-medium">ราคา/หน่วย</th><th className="px-2 py-1.5 text-right font-medium">รวมก่อนภาษี</th><th className="px-2 py-1.5 text-center font-medium">นัดส่ง</th>
                   <th className="px-3 py-1.5 text-left font-medium">สถานะ</th>
                 </tr>
               </thead>
@@ -314,6 +340,7 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
                       <td className="px-2 py-2 text-right text-xs tabular-nums text-slate-500">{num(g.items.reduce((s, l) => s + Math.min(meta[l.tempId]?.progress?.shipped ?? 0, Number(l.qty) || 0), 0))}</td>
                       <td />
                       <td className="px-2 py-2 text-right text-sm font-medium tabular-nums text-slate-800">{baht(g.total)}</td>
+                      <td />
                       <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-[10px] ${STAGE_TONE[minStage].chip}`}>ช้าสุด: {SO_LINE_STAGES[minStage].short}</span></td>
                     </tr>
                     {opened && g.items.map((l) => row(l, true))}
