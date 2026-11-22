@@ -5,7 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditDiff } from "@/lib/audit";
+import { cleanLabelStyle } from "@/lib/task-type-label-style";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -42,14 +43,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if ("is_active" in body) patch.is_active = body.is_active;
   if ("color" in body) patch.color = body.color || null;          // สีประเภท (hex) — ว่าง = ล้าง
   if ("icon" in body) patch.icon = body.icon || null;             // ไอคอน emoji — ว่าง = ล้าง
+  if (target.table === "erp_task_types" && "label_style" in body) patch.label_style = cleanLabelStyle(body.label_style); // ตัวหนา/ขนาดป้าย (เฉพาะประเภทงาน)
   if (isPlatform && "icon_key" in body) patch.icon_key = body.icon_key || null; // รูปไอคอนอัปโหลด (R2 key) เฉพาะ platform
   if (Object.keys(patch).length === 1) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
 
-  const sel = isPlatform ? "id, code, name_th, color, icon, icon_key, sort_order, is_active" : "id, code, name_th, color, icon, sort_order, is_active";
+  const sel = isPlatform ? "id, code, name_th, color, icon, icon_key, sort_order, is_active" : target.table === "erp_task_types" ? "id, code, name_th, color, icon, label_style, sort_order, is_active" : "id, code, name_th, color, icon, sort_order, is_active";
+  const { data: before } = await admin.from(target.table).select(sel).eq("id", id).maybeSingle();   // ค่าเดิม → จดว่าเปลี่ยนจากอะไรเป็นอะไร
   const { data, error } = await admin.from(target.table).update(patch).eq("id", id).select(sel).maybeSingle();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   if (!data) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
-  await writeAudit(admin, { action: "update", entityType: "creative_option", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
+  await writeAudit(admin, { action: "update", entityType: "creative_option", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: auditDiff(before as Record<string, unknown> | null, Object.fromEntries(Object.entries(patch).filter(([k]) => k !== "updated_at"))) } });
   return NextResponse.json({ data: mapRow(data as unknown as Record<string, unknown>, target.kind), error: null });
 }
 

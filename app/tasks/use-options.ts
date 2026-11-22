@@ -3,16 +3,17 @@
 // รองรับ 2 ภาษา: label (ไทย) / label_en (อังกฤษ) — สลับตาม lang ปัจจุบัน
 // label registry (singleton) ให้ cell ที่อยู่นอก component อ่านชื่อจาก key ได้
 // ============================================================
+import { cleanLabelStyle, type TaskTypeLabelStyle } from "@/lib/task-type-label-style";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { cachedJson, invalidateCache } from "@/lib/client-cache";
 import { TASK_TYPES, PLATFORMS } from "@/lib/creative-tasks";
 import { getLang, subscribeLang } from "@/lib/lang";
 
-export type Option = { id: string; kind: string; key: string; label: string; label_en?: string | null; color?: string | null; icon?: string | null; icon_key?: string | null; sort_order: number; is_active?: boolean };
+export type Option = { id: string; kind: string; key: string; label: string; label_en?: string | null; color?: string | null; icon?: string | null; icon_key?: string | null; label_style?: TaskTypeLabelStyle | null; sort_order: number; is_active?: boolean };
 export type OptItem = { value: string; label: string };
 // ตัวเลือกแพลตฟอร์มแบบมี meta (สี/ไอคอน) — ใช้เรนเดอร์ชิปแบบมีสีหรือรูปไอคอน
-export type PlatformMeta = { color?: string | null; icon?: string | null; icon_key?: string | null };
+export type PlatformMeta = { color?: string | null; icon?: string | null; icon_key?: string | null; label_style?: TaskTypeLabelStyle | null };
 export type PlatformOpt = OptItem & PlatformMeta;
 
 // label maps แยกภาษา (อัปเดตเมื่อโหลด DB เสร็จ) — เริ่มจากค่า fallback ในโค้ด (ไทย; en ใช้ไทยไปก่อน)
@@ -51,7 +52,7 @@ export function useCreativeOptions() {
       if (tt.length) {
         taskTypeMap = Object.fromEntries(tt.map((o) => [o.key, o.label]));
         taskTypeMapEn = Object.fromEntries(tt.map((o) => [o.key, o.label_en || o.label]));
-        taskTypeMetaMap = Object.fromEntries(tt.map((o) => [o.key, { color: o.color ?? null, icon: o.icon ?? null, icon_key: null }]));
+        taskTypeMetaMap = Object.fromEntries(tt.map((o) => [o.key, { color: o.color ?? null, icon: o.icon ?? null, icon_key: null, label_style: cleanLabelStyle(o.label_style) }]));
       }
       if (pf.length) {
         platformMap = Object.fromEntries(pf.map((o) => [o.key, o.label]));

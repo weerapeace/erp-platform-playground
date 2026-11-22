@@ -25,7 +25,7 @@ import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, t
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-status";
-import { OverviewCustomizer, CARD_COLORS, hiddenCardsOf, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, hiddenCardsOf, hiddenShortcutsOf, SHORTCUT_LABELS, type ShortcutKey, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
@@ -313,14 +313,23 @@ export function OverviewDashboard({
           {theme.show.shortcuts && (
             <div className={`flex items-center gap-2 flex-wrap mt-4 ${theme.hero.align === "center" ? "justify-center" : ""}`}>
               <span className="text-xs font-semibold text-white/70 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
-              <ShortcutPill icon="i:ad" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
-              <ShortcutPill icon="i:device-mobile" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
-              <ShortcutPill icon="i:repeat" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
-              <ShortcutPill icon="i:hourglass" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
-              <ShortcutPill icon="i:books" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
-              <ShortcutPill icon="i:flame" label={t("เทรนด์", "Trends")} href="/tasks/trends" />
-              <ShortcutPill icon="i:camera" label="SAMPLE Images" href="/tasks/samples" />
-              {(canSettings ?? isAdmin) && <ShortcutPill icon="i:settings" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
+              {(() => {
+                // ซ่อนทีละปุ่มได้ที่ "แต่งหน้า → การ์ด & มุมมอง" · คอนเทนต์ชี้ปฏิทินคอนเทนต์ (หน้า /tasks/content เดิมยังอยู่)
+                const hidden = hiddenShortcutsOf(theme.show);
+                const defs: { k: ShortcutKey; icon: string; href?: string; onClick?: () => void; show?: boolean }[] = [
+                  { k: "campaigns", icon: "i:ad", href: "/tasks/campaigns" },
+                  { k: "content", icon: "i:calendar", href: "/tasks/content-calendar" },
+                  { k: "templates", icon: "i:repeat", href: "/tasks/settings?tab=templates" },
+                  { k: "review", icon: "i:hourglass", href: "/tasks/review" },
+                  { k: "knowledge", icon: "i:books", onClick: onOpenKnowledge },
+                  { k: "trends", icon: "i:flame", href: "/tasks/trends" },
+                  { k: "samples", icon: "i:camera", href: "/tasks/samples" },
+                  { k: "settings", icon: "i:settings", href: "/tasks/settings", show: canSettings ?? isAdmin },
+                ];
+                return defs.filter((d) => d.show !== false && !hidden.includes(d.k)).map((d) => (
+                  <ShortcutPill key={d.k} icon={d.icon} label={t(SHORTCUT_LABELS[d.k][0], SHORTCUT_LABELS[d.k][1])} href={d.href} onClick={d.onClick} />
+                ));
+              })()}
             </div>
           )}
         </div>

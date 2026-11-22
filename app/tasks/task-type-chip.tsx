@@ -7,6 +7,7 @@
 // ============================================================
 import { Icon } from "@/components/icon";
 import { taskTypeLabel, taskTypeMeta } from "./use-options";
+import { labelTextStyle } from "@/lib/task-type-label-style";
 
 const isHex = (c?: string | null): c is string => !!c && /^#[0-9a-fA-F]{6}$/.test(c);
 
@@ -23,7 +24,7 @@ export function TaskTypeChip({ code, className = "" }: { code: string; className
   return (
     <span className={`${base} ${fallback} ${className}`} style={style} title={label}>
       {emoji && <span className="leading-none inline-flex"><Icon value={emoji} /></span>}
-      <span className="truncate">{label}</span>
+      <span className="truncate" style={labelTextStyle(meta?.label_style)}>{label}</span>
     </span>
   );
 }

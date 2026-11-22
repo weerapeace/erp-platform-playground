@@ -24,7 +24,16 @@ export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; 
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 // hiddenCards = การ์ดสรุป 4 ใบที่คนนี้ซ่อน (ไม่ตั้ง = ซ่อนครบ 4 ใบ — ใช้ hiddenCardsOf) · filtersOpen = แผงตัวกรองกางอยู่ไหม (ไม่ตั้ง = พับ) — เจ้าของขอ 2026-10-26
-export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean; hiddenCards?: CardKey[]; filtersOpen?: boolean };
+export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean; hiddenCards?: CardKey[]; filtersOpen?: boolean; hiddenShortcuts?: ShortcutKey[] };
+// ปุ่มลัดในแถบทักทาย — ซ่อนทีละปุ่มได้ (เจ้าของขอ 2026-11-22: คิวรอตรวจ/คลังความรู้ไม่ได้ใช้ · เทมเพลตย้ายเข้าตั้งค่า) · ไม่เคยตั้ง = ซ่อนชุดเริ่มต้น
+export type ShortcutKey = "campaigns" | "content" | "templates" | "review" | "knowledge" | "trends" | "samples" | "settings";
+export const SHORTCUT_KEYS: ShortcutKey[] = ["campaigns", "content", "templates", "review", "knowledge", "trends", "samples", "settings"];
+export const DEFAULT_HIDDEN_SHORTCUTS: ShortcutKey[] = ["templates", "review", "knowledge"];
+export const hiddenShortcutsOf = (show: SectionsTheme): ShortcutKey[] => show.hiddenShortcuts ?? DEFAULT_HIDDEN_SHORTCUTS;
+export const SHORTCUT_LABELS: Record<ShortcutKey, [string, string]> = {
+  campaigns: ["แคมเปญ", "Campaigns"], content: ["ปฏิทินคอนเทนต์", "Content calendar"], templates: ["เทมเพลต", "Templates"], review: ["คิวรอตรวจ", "Review queue"],
+  knowledge: ["คลังความรู้", "Knowledge"], trends: ["เทรนด์", "Trends"], samples: ["SAMPLE Images", "SAMPLE Images"], settings: ["ตั้งค่า", "Settings"],
+};
 /** การ์ดสรุปที่ซ่อนของคนนี้ — ยังไม่เคยปรับ = ซ่อนทั้ง 4 ใบ (ค่าเริ่มต้นของทุกคน ตามเจ้าของสั่ง 2026-10-26) */
 export const hiddenCardsOf = (show: SectionsTheme): CardKey[] => show.hiddenCards ?? CARD_KEYS;
 // มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
@@ -579,6 +588,20 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             </label>
           ))}
         </div>
+        {/* ปุ่มลัดในแถบทักทาย — ติ๊กออก = ซ่อน (กดเปิดคืนได้เสมอ · หน้าเดิมไม่หาย) */}
+        {theme.show.shortcuts && (<>
+          <div className="text-xs text-slate-500 mt-3 mb-1.5">{t("ปุ่มลัดที่โชว์", "Shortcuts shown")}</div>
+          <div className="flex flex-wrap gap-3">
+            {SHORTCUT_KEYS.map((k) => {
+              const cur = hiddenShortcutsOf(theme.show);
+              return (
+                <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={!cur.includes(k)} onChange={(e) => setShow({ hiddenShortcuts: e.target.checked ? cur.filter((x) => x !== k) : [...cur, k] })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t(SHORTCUT_LABELS[k][0], SHORTCUT_LABELS[k][1])}
+                </label>
+              );
+            })}
+          </div>
+        </>)}
         {/* การ์ดสรุป 4 ใบ — ติ๊กออก = ซ่อน (กดรูปตาบนการ์ดในหน้าก็ได้) */}
         <div className="text-xs text-slate-500 mt-3 mb-1.5">{t("การ์ดสรุปที่โชว์", "Summary cards shown")}</div>
         <div className="flex flex-wrap gap-3">

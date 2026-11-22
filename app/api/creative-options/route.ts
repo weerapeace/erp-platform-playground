@@ -21,7 +21,7 @@ export const revalidate = 0;
 const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms", campaign_category: "erp_campaign_categories" };
 const KINDS = new Set(Object.keys(KIND_TABLE));
 // color/icon = สี + ไอคอน emoji (มีทั้ง 2 ตาราง) · icon_key = รูปไอคอนอัปโหลด (เฉพาะ erp_platforms)
-const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, label_en: r.name_en ?? null, color: r.color ?? null, icon: r.icon ?? null, icon_key: r.icon_key ?? null, sort_order: r.sort_order, is_active: r.is_active });
+const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, label_en: r.name_en ?? null, color: r.color ?? null, icon: r.icon ?? null, icon_key: r.icon_key ?? null, label_style: r.label_style ?? null, sort_order: r.sort_order, is_active: r.is_active });
 
 function deriveKey(label: string): string {
   const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const k of kinds) {
     const table = KIND_TABLE[k]; if (!table) continue;
     // icon_key มีเฉพาะ erp_platforms — task_types ไม่มีคอลัมน์นี้ (select แยกตามตาราง)
-    const sel = table === "erp_platforms" ? "id, code, name_th, name_en, color, icon, icon_key, sort_order, is_active" : "id, code, name_th, name_en, color, icon, sort_order, is_active";
+    const sel = table === "erp_platforms" ? "id, code, name_th, name_en, color, icon, icon_key, sort_order, is_active" : table === "erp_task_types" ? "id, code, name_th, name_en, color, icon, label_style, sort_order, is_active" : "id, code, name_th, name_en, color, icon, sort_order, is_active";
     // คืนทุกแถว (รวมที่ปิดใช้งาน) → ตัวแปลป้ายชื่อรวมประเภทที่ปิดด้วย งานเก่าจะไม่โชว์ code ดิบ · ฟอร์ม dropdown กรอง is_active เองฝั่ง client
     const { data, error } = await admin.from(table).select(sel).order("sort_order", { ascending: true });
     if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });

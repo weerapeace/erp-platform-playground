@@ -31,17 +31,23 @@ import { BoardSectionTemplatesManager } from "../board-section-templates-setting
 import { StatusWorkflowManager } from "../status-workflow-settings";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { askConfirm } from "@/components/modal/ask-dialog";
-import { useToast } from "@/components/toast";
+import { useToast, usePushToast } from "@/components/toast";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import dynamic from "next/dynamic";
-import { Icon } from "@/components/icon";
+import { Icon, useIconSettings } from "@/components/icon";
+import { IconPickerModal } from "@/components/icon/icon-picker-modal";
+import { cleanLabelStyle, labelTextStyle, LABEL_WEIGHT_OPTIONS, LABEL_SIZE_OPTIONS, type LabelWeight, type LabelSize } from "@/lib/task-type-label-style";
 
 // ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
+// เทมเพลต + Prompt ต่อแบรนด์ ย้ายจาก /tasks/templates (เจ้าของขอ 2026-11-22) · คลังความรู้เข้าจากที่นี่ (ปุ่มลัดซ่อนไว้)
+const TemplatesTab = dynamic(() => import("../templates/templates-tabs").then((m) => m.TemplatesTab), { ssr: false, loading: () => <LoadingState /> });
+const BrandPromptsTab = dynamic(() => import("../templates/brand-prompts").then((m) => m.BrandPromptsTab), { ssr: false, loading: () => <LoadingState /> });
+const KnowledgeDrawer = dynamic(() => import("../knowledge-drawer").then((m) => m.KnowledgeDrawer), { ssr: false });
 const FileHistoryView = dynamic(() => import("../file-history-view").then((m) => m.FileHistoryView), { ssr: false, loading: () => <LoadingState /> });
 
-type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "readiness" | "board_sections" | "line" | "drive" | "brand_drive" | "ai_prompt" | "file_history";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "readiness", "board_sections", "line", "drive", "brand_drive", "ai_prompt", "file_history"];
+type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "readiness" | "board_sections" | "line" | "drive" | "brand_drive" | "ai_prompt" | "file_history" | "templates" | "brand_prompts" | "knowledge";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "readiness", "board_sections", "line", "drive", "brand_drive", "ai_prompt", "file_history", "templates", "brand_prompts", "knowledge"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -58,6 +64,8 @@ export default function TaskSettingsPage() {
   // ไม่มีสิทธิ์แท็บสิทธิ์ → เริ่มที่แท็บประเภทงานแทน
   const tab: Tab = tabRaw === "perm" && !canPermTab ? "task_type" : tabRaw;
   const toast = useToast();
+  const pushToast = usePushToast();
+  const [knowOpen, setKnowOpen] = useState(false);
   const showToast = useCallback((m: string) => toast.info(m), [toast]);   // แจ้งผ่าน toast กลาง (components/toast)
   // เลือกเมนู → จำใน URL (?tab=) รีเฟรช/ส่งลิงก์แล้วเปิดหัวข้อเดิม
   const selectTab = useCallback((k: Tab) => {
@@ -81,6 +89,11 @@ export default function TaskSettingsPage() {
       { key: "submit", icon: <Icon value="i:package-export" />, label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
       { key: "readiness", icon: <Icon value="i:circle-check" />, label: t("ความพร้อมสินค้า", "Product readiness"), desc: t("เช็กอะไรบ้างใต้ความคืบหน้าในลิ้นชักงาน", "What the task drawer checks under progress") },
       { key: "board_sections", icon: <Icon value="i:wall" />, label: t("เทมเพลตโซนกระดาน", "Board section templates"), desc: t("ชุดโซน bento ของกระดานบรีฟ/แคมเปญ", "Bento zone sets for brief/campaign boards") },
+    ] },
+    { label: t("แม่แบบงาน", "Task templates"), items: [
+      { key: "templates", icon: <Icon value="i:clipboard-list" />, label: t("เทมเพลต", "Templates"), desc: t("แม่แบบงานพร้อมขั้นตอน (งานประจำย้ายไปปฏิทิน)", "Task templates with steps (recurring moved to the calendar)") },
+      { key: "brand_prompts", icon: <Icon value="i:notes" />, label: t("Prompt ต่อแบรนด์", "Brand prompts"), desc: t("คำสั่ง AI แยกตามแบรนด์", "AI instructions per brand") },
+      { key: "knowledge", icon: <Icon value="i:books" />, label: t("คลังความรู้", "Knowledge"), desc: t("คู่มือ/ความรู้ของทีม", "Team guides and know-how") },
     ] },
     { label: t("การแสดงผล", "Display"), items: [
       { key: "mysub", icon: <Icon value="i:puzzle" />, label: t("งานย่อยของฉัน", "My subtasks"), desc: t("จัดกลุ่ม/เรียงรายการงานย่อยของทุกคน", "Grouping and sorting of everyone's subtask list") },
@@ -125,6 +138,16 @@ export default function TaskSettingsPage() {
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800"><Icon value="i:puzzle" className="mr-1" />{t("ชนิดงานย่อย", "Subtask types")}</h2></div>
               <div className="p-5"><SubtaskTypeManager showToast={showToast} /></div>
+            </div>
+          )
+          : tab === "templates" ? <TemplatesTab pushToast={pushToast} />
+          : tab === "brand_prompts" ? <BrandPromptsTab pushToast={pushToast} />
+          : tab === "knowledge" ? (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 max-w-xl mx-auto text-center">
+              <div className="text-3xl text-slate-400 mb-2"><Icon value="i:books" /></div>
+              <p className="text-sm text-slate-600 mb-3">{t("คลังความรู้ของทีม — ซ่อนจากแถบทักทายไว้ เปิดคืนได้ที่ แต่งหน้า → การ์ด & มุมมอง → ปุ่มลัดที่โชว์", "Team knowledge base — hidden from the banner; turn the shortcut back on in Customize → Cards & views")}</p>
+              <button type="button" onClick={() => setKnowOpen(true)} className="h-9 px-4 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"><Icon value="i:books" className="mr-1" />{t("เปิดคลังความรู้", "Open knowledge base")}</button>
+              {knowOpen && <KnowledgeDrawer onClose={() => setKnowOpen(false)} canEdit={canSettings} pushToast={pushToast} />}
             </div>
           )
           : tab === "line" ? (
@@ -208,13 +231,16 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
   };
   // ร่างแก้ไขต่อแถว (ชื่อ/สี/ไอคอน) — ไม่ autosave, กดปุ่ม 💾 ค่อยบันทึก (กันสีกระพริบ/ยิง API รัวตอนเลื่อนเลือกสี)
   const [draft, setDraft] = useState<Record<string, Partial<Option>>>({});
+  const [pickFor, setPickFor] = useState<string | null>(null);   // แถวที่กำลังเลือกไอคอนกลาง
+  const iconSettings = useIconSettings();
   const setField = (o: Option, patch: Partial<Option>) => setDraft((d) => ({ ...d, [o.id]: { ...d[o.id], ...patch } }));
   const clearDraft = (id: string) => setDraft((d) => { const n = { ...d }; delete n[id]; return n; });
   const isDirty = (o: Option) => {
     const d = draft[o.id]; if (!d) return false;
     return (("label" in d) && (d.label ?? "").trim() !== (o.label ?? ""))
       || (("color" in d) && (d.color ?? "") !== (o.color ?? ""))
-      || (("icon" in d) && (d.icon ?? "").trim() !== (o.icon ?? ""));
+      || (("icon" in d) && (d.icon ?? "").trim() !== (o.icon ?? ""))
+      || (("label_style" in d) && JSON.stringify(d.label_style ?? null) !== JSON.stringify(o.label_style ?? null));
   };
   const saveRow = async (o: Option) => {
     const d = draft[o.id]; if (!d) return;
@@ -222,6 +248,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
     if ("label" in d) { const l = (d.label ?? "").trim(); if (!l) { showToast(t("ชื่อห้ามว่าง", "Name is required")); return; } patch.label = l; }
     if ("color" in d) patch.color = d.color || null;
     if ("icon" in d) patch.icon = (d.icon ?? "").trim() || null;
+    if ("label_style" in d) patch.label_style = cleanLabelStyle(d.label_style);
     if (Object.keys(patch).length === 0) { clearDraft(o.id); return; }
     try { await updateOption(o.id, patch); setOpts((p) => p.map((x) => x.id === o.id ? { ...x, ...patch } : x)); clearDraft(o.id); showToast(t("บันทึกแล้ว", "Saved")); }
     catch (e) { showToast((e as Error).message); }
@@ -270,6 +297,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
               {opts.map((o, i) => {
                 const d = draft[o.id] ?? {};
                 const label = (d.label ?? o.label) as string;
+                const lStyle = cleanLabelStyle("label_style" in d ? d.label_style : o.label_style);
                 const color = ("color" in d ? d.color : o.color) as string | null | undefined;
                 const icon = ("icon" in d ? d.icon : o.icon) as string | null | undefined;
                 const dirty = isDirty(o);
@@ -283,7 +311,7 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                   <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
                     title={t("ตัวอย่างชิป", "Chip preview")}>
                     {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : icon ? <span className="leading-none inline-flex"><Icon value={icon} /></span> : null}
-                    <span className={`truncate ${active ? "" : "line-through opacity-60"}`}>{label || o.label}</span>
+                    <span className={`truncate ${active ? "" : "line-through opacity-60"}`} style={kind === "task_type" ? labelTextStyle(lStyle) : undefined}>{label || o.label}</span>
                   </span>
                   {!active && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600" title={t("ไม่โผล่ให้เลือกในฟอร์ม/ป๊อปแพลตฟอร์ม — กดปุ่มเปิด/ปิดด้านขวาเพื่อเปิดใช้", "Hidden from pickers — click the on/off button on the right to enable")}>{t("ปิดอยู่", "Off")}</span>}
                   <input value={label} onChange={(e) => setField(o, { label: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && dirty) saveRow(o); }} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
@@ -291,7 +319,21 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                     {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
                     <div title={t("สีประเภท", "Color")}><ColorInput value={color || "#64748b"} onChange={(v) => setField(o, { color: v })} allowText={false} /></div>
                     {/* ไอคอน emoji */}
-                    <input value={icon || ""} maxLength={2} placeholder="😀" onChange={(e) => setField(o, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                    {!(icon && /^(i|c|img):/.test(icon)) && <input value={icon || ""} maxLength={2} placeholder="😀" onChange={(e) => setField(o, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />}
+                    {/* เลือกจากไอคอนกลาง · มีไอคอนกลางอยู่ = กดเพื่อเปลี่ยน · ✕ ล้างกลับเป็นไม่มีไอคอน */}
+                    <button type="button" onClick={() => setPickFor(o.id)} title={t("เลือกไอคอนกลาง", "Pick a shared icon")} className="h-7 w-7 inline-flex items-center justify-center border border-slate-200 rounded text-slate-500 hover:bg-slate-50"><Icon value={icon && /^(i|c):/.test(icon) ? icon : "i:category"} /></button>
+                    {icon && /^(i|c):/.test(icon) && <button type="button" onClick={() => setField(o, { icon: "" })} title={t("ล้างไอคอน", "Clear icon")} className="text-[11px] text-slate-400 hover:text-red-500">✕</button>}
+                    {/* ตัวหนา + ขนาดป้าย — เฉพาะประเภทงาน (ใช้บนการ์ด/รายการทุกที่) */}
+                    {kind === "task_type" && (<>
+                      <select value={lStyle?.weight ?? ""} onChange={(e) => setField(o, { label_style: { ...(lStyle ?? {}), weight: e.target.value ? (Number(e.target.value) as LabelWeight) : undefined } })} title={t("น้ำหนักตัวอักษร", "Font weight")} className="h-7 rounded border border-slate-200 text-[11px] px-1 bg-white">
+                        <option value="">{t("ตัวอักษร: เดิม", "Weight: default")}</option>
+                        {LABEL_WEIGHT_OPTIONS.map((w) => <option key={w.value} value={w.value}>{t(w.th, w.en)}</option>)}
+                      </select>
+                      <select value={lStyle?.size ?? ""} onChange={(e) => setField(o, { label_style: { ...(lStyle ?? {}), size: (e.target.value || undefined) as LabelSize | undefined } })} title={t("ขนาดตัวอักษร", "Font size")} className="h-7 rounded border border-slate-200 text-[11px] px-1 bg-white">
+                        <option value="">{t("ขนาด: เดิม", "Size: default")}</option>
+                        {LABEL_SIZE_OPTIONS.map((z) => <option key={z.value} value={z.value}>{t(z.th, z.en)}</option>)}
+                      </select>
+                    </>)}
                     {/* รูปไอคอน (อัปโหลด) — เฉพาะแพลตฟอร์ม (task_type ไม่มีคอลัมน์ icon_key) */}
                     {kind === "platform" && (<>
                       <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
@@ -313,6 +355,17 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
             </div>
           )}
       </div>
+      {/* เลือกไอคอนจากชุดไอคอนกลาง (แทนพิมพ์อีโมจิ) — ค่าเข้าร่างของแถว กดบันทึกค่อยเซฟ */}
+      {pickFor && (() => {
+        const o = opts.find((x) => x.id === pickFor);
+        const d = o ? draft[o.id] ?? {} : {};
+        const cur = o ? (("icon" in d ? d.icon : o.icon) ?? null) : null;
+        return (
+          <IconPickerModal open onClose={() => setPickFor(null)} title={t("เลือกไอคอน", "Pick icon")} settings={iconSettings}
+            value={cur && /^(i|c):/.test(cur) ? cur : null}
+            onPick={(v) => { if (o) setField(o, { icon: v ?? "" }); setPickFor(null); }} />
+        );
+      })()}
     </div>
   );
 }
