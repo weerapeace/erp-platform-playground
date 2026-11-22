@@ -18,6 +18,7 @@
 import "@xyflow/react/dist/style.css";
 import "./flowchart.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position, SelectionMode,
   addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow,
@@ -54,6 +55,9 @@ import { reshapeNode } from "@/lib/flowchart";
 import { googleFontsPreviewHref, useFontLink } from "@/components/font-select";
 import { ShapePalette, SHAPE_DRAG_MIME } from "./shape-palette";
 import { StylePicker } from "./style-picker";
+import { PagePeek, captureCardImage } from "./page-peek";
+// ป๊อปดูหน้าจริงตัวใหญ่ (ของกลางของแผนผังการทำงาน) — โหลดเมื่อเปิดใช้
+const FlowPagePreview = dynamic(() => import("@/components/flow-map/page-preview").then((m) => m.FlowPagePreview), { ssr: false });
 import { FLOW_THEMES, isFlowTheme, type FlowThemeKey } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_META, flowStyleFont, isFlowStyle, type FlowStyleKey } from "@/lib/flowchart-styles";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
@@ -197,6 +201,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // ── ชั้นล็อก ──
   const [boardStyle, setBoardStyle] = useState<FlowStyleKey>("normal");   // สไตล์ทั้งกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [styleOpen, setStyleOpen] = useState(false);
+  // 👁 การ์ดหน้าใน ERP: ภาพลอย (ชี้ค้าง/ปุ่มตา) · ป๊อปตัวใหญ่ · ถ่ายภาพเก็บในการ์ด (เจ้าของเลือก 2026-11-22 แบบ A + ข้อ 1-3)
+  const [peek, setPeek] = useState<{ href: string; label: string; rect: DOMRect } | null>(null);
+  const [bigPage, setBigPage] = useState<{ href: string; label: string } | null>(null);
+  const [capturingId, setCapturingId] = useState<string | null>(null);
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const peekLater = (v: typeof peek, ms: number) => { if (peekTimer.current) clearTimeout(peekTimer.current); peekTimer.current = setTimeout(() => setPeek(v), ms); };
   const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
   const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
@@ -659,6 +669,24 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     recentShapes,
     boardStyle,
     boardTheme,
+    capturingId,
+    peekPage: (href, label, rect) => { if (!rect) return; peekLater({ href, label, rect }, 450); },
+    peekLeave: () => peekLater(null, 250),
+    openPagePreview: (href, label) => { setPeek(null); setBigPage({ href, label }); },
+    togglePagePeek: (id) => {
+      const n = nodesRef.current.find((x) => x.id === id); if (!n || !n.data.href) return;
+      const on = !n.data.peek?.on;
+      setNodes((ns) => ns.map((x) => (x.id !== id ? x : { ...x, ...(on ? { width: Math.max(boxOf(x).width, 300), height: Math.max(boxOf(x).height, 270) } : {}), data: { ...x.data, peek: { ...(x.data.peek ?? {}), on } } })));
+      if (on && !n.data.peek?.img) setTimeout(() => actionsRef.current?.capturePage(id), 50);   // ยังไม่มีภาพ → ถ่ายให้เลย
+    },
+    capturePage: (id) => {
+      const n = nodesRef.current.find((x) => x.id === id); if (!n?.data.href || capturingId) return;
+      setCapturingId(id);
+      captureCardImage(n.data.href)
+        .then((img) => { setNodes((ns) => ns.map((x) => (x.id !== id ? x : { ...x, data: { ...x.data, peek: { ...(x.data.peek ?? {}), on: true, img, at: new Date().toISOString() } } }))); pushToast("success", t("ถ่ายภาพหน้าแล้ว", "Page picture saved")); })
+        .catch((e) => pushToast("error", (e as Error).message || t("ถ่ายภาพหน้าไม่สำเร็จ", "Could not take the picture")))
+        .finally(() => setCapturingId(null));
+    },
     setStyle: (ids, style) => {
       const set = new Set(ids);
       setNodes((ns) => ns.map((n) => { if (!set.has(n.id) || n.type === "zone") return n; const d = { ...n.data }; if (style) d.style = style; else delete d.style; return { ...n, data: d }; }));
@@ -697,7 +725,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme, capturingId]);
+  const actionsRef = useRef<FlowBoardActions | null>(null); actionsRef.current = actions;
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
   const lockedById = useMemo(() => new Map((locked?.boxes ?? []).map((b) => [b.id, b])), [locked?.boxes]);
@@ -1091,6 +1120,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         </div>
       </div>
 
+      {peek && <PagePeek href={peek.href} label={peek.label} anchor={peek.rect} t={t} onBig={() => { setPeek(null); setBigPage({ href: peek.href, label: peek.label }); }}
+        onEnter={() => { if (peekTimer.current) clearTimeout(peekTimer.current); }} onLeave={() => peekLater(null, 250)} />}
+      {bigPage && <FlowPagePreview nodeId={null} page={bigPage} onClose={() => setBigPage(null)} />}
       <FolderCardModal open={folderOpen} onClose={() => setFolderOpen(false)}
         onPlace={(_skeletons, info) => { addNode("folder", { label: info.label, path: info.path }); setFolderOpen(false); }} />
 

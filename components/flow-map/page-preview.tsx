@@ -49,12 +49,14 @@ function pickBlock(el: Element | null, doc: Document): Element | null {
   return el;
 }
 
-export function FlowPagePreview({ nodeId, onClose, numOf }: { nodeId: string | null; onClose: () => void; numOf?: (edgeId: string) => number | null }) {
+/** page = เปิดจากลิงก์หน้าเลย (การ์ด "หน้าใน ERP" บนกระดาน · 2026-11-22) — หน้าที่อยู่ในผังระบบจะเห็นเส้นทางงานด้วย */
+export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: string | null; onClose: () => void; numOf?: (edgeId: string) => number | null; page?: { href: string; label: string } | null }) {
   const t = useT();
   const pushToast = usePushToast();
-  const [node, setNode] = useState<string | null>(nodeId);
-  useEffect(() => { setNode(nodeId); }, [nodeId]);
-  const n = node ? FLOW_NODES[node] : null;
+  const fromPage = useMemo(() => (page ? Object.keys(FLOW_NODES).find((k) => FLOW_NODES[k].href === page.href) ?? null : null), [page]);
+  const [node, setNode] = useState<string | null>(nodeId ?? fromPage);
+  useEffect(() => { setNode(nodeId ?? fromPage); }, [nodeId, fromPage]);
+  const n = node ? FLOW_NODES[node] : page ? { label: page.label, href: page.href } as (typeof FLOW_NODES)[string] : null;
   const href = n?.href ?? null;
   const info = href ? FLOW_PAGE_INFO[pageKey(href)] : undefined;
 
@@ -278,7 +280,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf }: { nodeId: string | n
     setCopying(false);
   };
 
-  if (!nodeId || !n) return null;
+  if ((!nodeId && !page) || !n) return null;
   const tabBtn = (k: Tab, label: string) => (
     <button key={k} type="button" onClick={() => setTab(k)} className={`h-9 px-2.5 text-[12.5px] border-b-2 whitespace-nowrap ${tab === k ? "border-violet-600 text-violet-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{label}</button>
   );

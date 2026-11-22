@@ -61,7 +61,9 @@ export type FlowTodo = { id: string; text: string; rich?: string; done?: boolean
 /** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
 /** style = สไตล์ของกล่อง (lib/flowchart-styles · ไม่มี = ตามกระดาน) */
 /** line/opacity = กรอบโซน: แบบเส้น (ประ · ทึบ · ไม่มี) + ความเข้มพื้น 10-100 */
-export type FlowNodeData = { line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** peek = การ์ด "หน้าใน ERP" แบบมีภาพ: on = โชว์ภาพในการ์ด · img = r2 key ภาพหน้าจอที่ถ่ายไว้ · at = เวลาถ่าย */
+export type FlowPagePeek = { on?: boolean; img?: string; at?: string };
+export type FlowNodeData = { peek?: FlowPagePeek; line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
@@ -258,8 +260,16 @@ export function reshapeNode(kind: FlowKind, data: FlowNodeData, target: string):
 }
 
 /** ช่องของกล่อง "หน้าใน ERP" ที่ผ่านการตรวจ (ลิงก์ต้องเป็นหน้าในระบบเท่านั้น — กันลิงก์แปลก/javascript:) */
-function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | "app" | "appName" | "icon"> {
-  const out: Pick<FlowNodeData, "href" | "app" | "appName" | "icon"> = {};
+function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | "app" | "appName" | "icon" | "peek"> {
+  const out: Pick<FlowNodeData, "href" | "app" | "appName" | "icon" | "peek"> = {};
+  const pk = (d.peek ?? null) as Record<string, unknown> | null;
+  if (pk && typeof pk === "object") {
+    const peek: FlowPagePeek = {};
+    if (pk.on === true) peek.on = true;
+    if (typeof pk.img === "string" && /^[\w\-./]{3,200}$/.test(pk.img)) peek.img = pk.img;
+    if (typeof pk.at === "string" && !Number.isNaN(Date.parse(pk.at))) peek.at = pk.at;
+    if (Object.keys(peek).length) out.peek = peek;
+  }
   if (isErpPageHref(d.href)) out.href = d.href;
   if (isAppKey(d.app)) out.app = d.app;
   if (typeof d.appName === "string" && d.appName.trim()) out.appName = d.appName.trim().slice(0, 80);

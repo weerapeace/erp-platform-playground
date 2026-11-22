@@ -20,6 +20,7 @@ import { StylePicker, cssToStyle } from "./style-picker";
 import { ColorPanel } from "./rich-text";
 import { TextFormatBar, applyTextShortcut, domTextAdapter, isInTextBar, useLinkRequest } from "@/components/text-format-bar";
 import { richToPlain as richPlain } from "@/lib/flowchart-rich";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 /** มีการจัดรูปแบบจริงไหม (ไม่มี = เก็บแค่ข้อความล้วน) */
@@ -131,6 +132,16 @@ export type FlowBoardActions = {
   removeEdge: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
   editRule: (id: string) => void;
+  /** การ์ดหน้าใน ERP: ภาพหน้าจริงลอยข้างการ์ด (rect = กรอบการ์ดบนจอ · null = ปิด) · leave = เมาส์ออก (ปิดแบบหน่วง) */
+  peekPage: (href: string, label: string, rect: DOMRect | null) => void;
+  peekLeave: () => void;
+  /** ป๊อปดูหน้าจริงตัวใหญ่ */
+  openPagePreview: (href: string, label: string) => void;
+  /** การ์ดแบบมีภาพ: เปิด/ปิด · ถ่ายภาพหน้าจอใหม่ */
+  togglePagePeek: (id: string) => void;
+  capturePage: (id: string) => void;
+  /** กล่องที่กำลังถ่ายภาพหน้าจออยู่ */
+  capturingId: string | null;
   /** ชุดสีของกระดาน (lib/flowchart-themes) */
   boardTheme: string;
   /** สไตล์ทั้งกระดาน (lib/flowchart-styles) */
@@ -218,7 +229,7 @@ function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: 
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
   const PAL = usePal();
   const { updateData } = useBoard();
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes, setStyle } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes, setStyle, togglePagePeek } = useBoard();
   const [shapeOpen, setShapeOpen] = useState(false);
   const [pop, setPop] = useState<null | "style" | "fill" | "stroke">(null);
   const togglePop = (p: "style" | "fill" | "stroke") => { setPop((v) => (v === p ? null : p)); setFmt(false); setShapeOpen(false); };
@@ -287,6 +298,12 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
           <button type="button" className={btn} onClick={() => editFileTypes(ids[0])} title={t("ใส่ไอคอนประเภทไฟล์ที่เก็บที่นี่", "Show which file types live here")}><Icon value="i:files" />{t("ไฟล์", "Files")}</button>
           <button type="button" className={btn} onClick={() => editRule(ids[0])} title={t("ผูกกับกฎที่เก็บจริงของระบบ — แผนไม่ตรงกฎจะขึ้นป้ายเตือน", "Link to the real storage rule — warns when the plan doesn't match")}><Icon value="i:shield-check" />{t("กฎ", "Rule")}</button>
         </>
+      )}
+      {single?.kind === "page" && single.data.href && (
+        <button type="button" className={`${btn} ${single.data.peek?.on ? "bg-violet-100 text-violet-700" : ""}`} onClick={() => togglePagePeek(ids[0])}
+          title={t("สลับเป็นการ์ดมีภาพหน้าจอ / ย่อกลับ", "Show the page picture in the card / collapse")}>
+          <Icon value="i:photo" />{single.data.peek?.on ? t("ย่อภาพ", "Hide picture") : t("ภาพ", "Picture")}
+        </button>
       )}
       {single?.kind === "page" && (
         <button type="button" className={btn} onClick={() => editPage(ids[0])} title={t("เลือกหน้าอื่นจากเมนู", "Pick another page from the menu")}><Icon value="i:arrows-exchange" />{t("เปลี่ยนหน้า", "Change page")}</button>
@@ -580,7 +597,7 @@ function ShapeBg({ kind, color, fill, stroke, shape, look }: { kind: FlowKind; c
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
   const PAL = usePal();
-  const { readOnly, t, updateData, growNode, autoEditId, clearAutoEdit, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule, boardStyle } = useBoard();
+  const { readOnly, t, updateData, growNode, autoEditId, clearAutoEdit, openFolder, selectedIds, editFileTypes, editPage, openPage, pageInfo, ruleCheck, editRule, boardStyle, peekPage, peekLeave, openPagePreview, capturePage, capturingId } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
@@ -674,6 +691,13 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
           <span className="shrink-0">{info?.appIcon ? <Icon value={info.appIcon} /> : <Icon value="i:apps" />}</span>
           <span className="min-w-0 flex-1 truncate">{appName ? t(`แอป ${appName}`, `App: ${appName}`) : t("หน้าใน ERP", "ERP page")}</span>
           {data.href && (
+            <button type="button" title={t("ดูตัวอย่างหน้า (ชี้การ์ดค้างก็ได้)", "Preview the page (or hover the card)")}
+              className="nodrag nopan pointer-events-auto inline-flex h-5 shrink-0 items-center rounded-full border bg-white px-1.5 text-[10.5px] hover:shadow-sm"
+              style={{ borderColor: pal.stroke, color: pal.text }}
+              onClick={(e) => { e.stopPropagation(); const card = (e.currentTarget as HTMLElement).closest(".react-flow__node"); peekPage(data.href!, data.label, card ? card.getBoundingClientRect() : null); }}
+              onDoubleClick={(e) => e.stopPropagation()}><Icon value="i:eye" /></button>
+          )}
+          {data.href && (
             <a href={data.href} target="_blank" rel="noopener noreferrer"
               className="nodrag nopan pointer-events-auto inline-flex h-5 shrink-0 items-center gap-0.5 rounded-full border bg-white px-1.5 text-[10.5px] font-medium hover:shadow-sm"
               style={{ borderColor: pal.stroke, color: pal.text }}
@@ -690,6 +714,22 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         {!data.href
           ? <div className="text-[10.5px] text-amber-700"><Icon value="i:alert-triangle" /> {t("ยังไม่ได้เลือกหน้า — กด \"เปลี่ยนหน้า\"", "No page chosen — click \"Change page\"")}</div>
           : info?.missing && <div className="text-[10.5px] text-amber-700" title={data.href}><Icon value="i:alert-triangle" /> {t("หน้านี้ไม่อยู่ในเมนูแล้ว", "This page is no longer in the menu")}</div>}
+        {data.href && data.peek?.on && (
+          <div className="pointer-events-auto mt-0.5 flex min-h-0 flex-1 flex-col gap-0.5">
+            <button type="button" onClick={(e) => { e.stopPropagation(); openPagePreview(data.href!, data.label); }} onDoubleClick={(e) => e.stopPropagation()}
+              title={t("กดเพื่อดูหน้าจริงตัวใหญ่", "Click for the large live view")}
+              className="nodrag nopan relative min-h-[90px] flex-1 overflow-hidden rounded-md border bg-white" style={{ borderColor: `${pal.stroke}55` }}>
+              {data.peek.img
+                ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2ImageUrl(data.peek.img, 640) ?? ""} alt={data.label} className="absolute inset-0 h-full w-full object-cover object-top" draggable={false} />
+                : <span className="absolute inset-0 flex items-center justify-center text-[10.5px] text-slate-400">{capturingId === id ? t("กำลังถ่ายภาพหน้า...", "Taking a picture...") : t("ยังไม่มีภาพ", "No picture yet")}</span>}
+            </button>
+            <div className="flex items-center text-[10px]" style={{ color: pal.sub }}>
+              <span className="min-w-0 flex-1 truncate">{data.peek.at ? t(`ภาพเมื่อ ${new Date(data.peek.at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`, `Taken ${new Date(data.peek.at).toLocaleString()}`) : ""}</span>
+              {!readOnly && <button type="button" disabled={capturingId === id} onClick={(e) => { e.stopPropagation(); capturePage(id); }} onDoubleClick={(e) => e.stopPropagation()}
+                className="nodrag nopan underline disabled:opacity-50">{capturingId === id ? t("กำลังถ่าย...", "Taking...") : t("ถ่ายใหม่", "Retake")}</button>}
+            </div>
+          </div>
+        )}
       </div>
     );
   } else if (kind === "auto") {
@@ -722,6 +762,8 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
         </NodeToolbar>
       )}
       <div
+        onMouseEnter={kind === "page" && data.href && !data.peek?.on ? (e) => { if (window.matchMedia?.("(pointer: fine)").matches) { const card = (e.currentTarget as HTMLElement).closest(".react-flow__node"); peekPage(data.href!, data.label, card ? card.getBoundingClientRect() : null); } } : undefined}
+        onMouseLeave={kind === "page" && data.href ? () => peekLeave() : undefined}
         onFocusCapture={(e) => { if ((e.target as HTMLElement).isContentEditable) setTyping(true); }}
         onBlurCapture={(e) => { if (!isInTextBar(e.relatedTarget) && !(e.relatedTarget instanceof HTMLElement && e.relatedTarget.isContentEditable)) setTyping(false); }}
         className={`fc-node relative flex h-full w-full justify-center ${kind === "note" || kind === "todo" || kind === "auto" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
