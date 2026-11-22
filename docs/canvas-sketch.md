@@ -86,3 +86,12 @@ ref.current?.insert([
 - ตัวเสริม: `@excalidraw/excalidraw` v0.18 — โหลดเฉพาะหน้าที่ใช้ (dynamic import) ไม่ถ่วงหน้าอื่น
 - สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · `storage_plan_flow` (กระดาน flowchart แผนผังการเก็บไฟล์) / `storage_plan` (รุ่นแรก Excalidraw)→ดู assets.view / แก้ assets.manage · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
 - ลบเอกสารแม่ ไม่ได้ลบกระดานอัตโนมัติ (entity_id เป็น text ไม่มี FK) — ยอมรับได้: กระดานเก่าไม่โผล่ที่ไหน
+
+## เทมเพลตโซนกระดาน (bento) — 2026-11-22
+
+- ตั้งค่า: `/tasks/settings` แท็บ "เทมเพลตโซนกระดาน" → เทมเพลตหลายชุด เลือกได้ว่าใช้กับกระดานบรีฟของงาน / กระดานแคมเปญ · ลากกล่องย้าย ลากมุมขวาล่างปรับขนาด (ห้ามทับกัน) · ชนิดโซน ทั่วไป / งาน / คอนเทนต์
+- เก็บที่ `ui_config` key `board_section_templates` · ตรรกะ pure = `lib/board-section-templates.ts` (เทสต์ `lib/__tests__/board-section-templates.test.ts`)
+- ใช้บนกระดาน: ส่ง `board: "brief" | "campaign"` ให้ `useCardKit` + ส่ง `onSelectionChange={kit.onSelection}` ให้ `CanvasSketch`
+  - ป๊อป Section → "วางเทมเพลตโซน" = วางกรอบ (frame) ทั้งชุด · `customData.sectionKind` / `sectionBatch` (ปุ่มย้อนกลับในแจ้งผลเอาชุดนั้นออก)
+  - เลือกกรอบโซนงาน/คอนเทนต์ → แถบลอย ＋ งาน / ＋ คอนเทนต์ → การ์ดใหม่วางในกรอบนั้น (ผูก frameId ให้ ลากกรอบแล้วการ์ดตาม) · คอนเทนต์ผูกงาน/แคมเปญเหมือนปุ่ม Content Card
+  - กรอบเก่าที่ไม่มี sectionKind → เดาจากชื่อที่ตรงกับเทมเพลต
