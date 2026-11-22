@@ -56,7 +56,34 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
 /** rich = ข้อความจัดรูปแบบ (HTML ชุดเล็ก ผ่าน sanitizeRich เสมอ · label = ข้อความล้วนคู่กัน) · align = จัดชิดทั้งกล่อง · fill/stroke = สีพื้น/เส้นขอบกำหนดเอง #rrggbb (ทับสีชุด) — lib/flowchart-rich */
 /** ข้อในกล่อง "รายการงาน" · by/at = ใครติ๊กเสร็จ เมื่อไหร่ (ISO) — เอาติ๊กออก = ลบ by/at */
 /** rich = ข้อความจัดรูปแบบของข้อ (ตัวหนา/สี/ลิงก์ · ผ่าน sanitizeRich) — text = ข้อความล้วนคู่กันเสมอ */
-export type FlowTodo = { id: string; text: string; rich?: string; done?: boolean; by?: string; at?: string };
+/** tag = ป้ายความด่วนของข้อ (key ในรายการป้ายของกระดาน FlowScene.todoTags · ไม่มี = ไม่ติดป้าย) */
+export type FlowTodo = { id: string; text: string; rich?: string; tag?: string; done?: boolean; by?: string; at?: string };
+/** ป้ายของข้อในรายการงาน (ตั้งชื่อ/สีเองได้ระดับกระดาน · ลำดับในรายการ = ลำดับความด่วน ใช้ตอนเรียง) */
+export type FlowTodoTag = { key: string; label: string; color: FlowColor };
+export const DEFAULT_TODO_TAGS: FlowTodoTag[] = [
+  { key: "urgent", label: "ด่วน", color: "rose" },
+  { key: "normal", label: "ไม่ด่วน", color: "blue" },
+  { key: "later", label: "ว่างค่อยทำ", color: "slate" },
+];
+const TAG_KEY_RE = /^[a-z0-9_-]{1,24}$/;
+/** รายการป้ายจากข้อมูลดิบ → ค่าที่ปลอดภัย (≤ 12 ป้าย · ชื่อ ≤ 20 ตัว · key ซ้ำทิ้ง) · ว่าง/ผิดรูป = null (ใช้ค่าตั้งต้น) */
+export function cleanTodoTags(raw: unknown): FlowTodoTag[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: FlowTodoTag[] = []; const seen = new Set<string>();
+  for (const v of raw) {
+    const o = (v ?? {}) as Record<string, unknown>;
+    const key = typeof o.key === "string" ? o.key : ""; const label = typeof o.label === "string" ? o.label.trim().slice(0, 20) : "";
+    if (!TAG_KEY_RE.test(key) || !label || seen.has(key)) continue;
+    out.push({ key, label, color: isColor(o.color) ? o.color : "slate" }); seen.add(key);
+    if (out.length >= 12) break;
+  }
+  return out.length ? out : null;
+}
+/** เรียงข้อ: ป้ายตามลำดับความด่วน → ไม่ติดป้าย → ข้อที่เสร็จแล้วล่างสุด (ลำดับเดิมคงไว้ในกลุ่มเดียวกัน) */
+export function sortTodosByTag(items: FlowTodo[], tags: FlowTodoTag[]): FlowTodo[] {
+  const rank = (i: FlowTodo) => (i.done ? 1000 : 0) + (i.tag ? (tags.findIndex((t) => t.key === i.tag) + 1 || tags.length + 1) : tags.length + 1);
+  return items.map((it, idx) => ({ it, idx })).sort((a, b) => rank(a.it) - rank(b.it) || a.idx - b.idx).map((x) => x.it);
+}
 /** items = ข้อของกล่อง "รายการงาน" */
 /** shape = รูปทรงของกล่องชนิด "shape" (lib/flowchart-shapes) · font = ฟอนต์ทั้งกล่อง (ชื่อ Google Font) */
 /** style = สไตล์ของกล่อง (lib/flowchart-styles · ไม่มี = ตามกระดาน) */
@@ -86,7 +113,7 @@ export const edgeShapeOf = (e: { shape?: unknown } | null | undefined): FlowEdge
 export type FlowPins = Record<string, { x: number; y: number }>;
 /** style = สไตล์ทั้งกระดาน (ไม่มี = ปกติ · เก็บเฉพาะตอนตั้ง) */
 /** theme = ชุดสีของกระดาน (lib/flowchart-themes · ไม่มี = มาตรฐาน) */
-export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins; style?: FlowStyleKey; theme?: string };
+export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[]; pins?: FlowPins; style?: FlowStyleKey; theme?: string; todoTags?: FlowTodoTag[] };
 
 /** กล่อง/เส้นของ "ชั้นล็อก" (ระบบสร้าง ไม่ได้เก็บในกระดาน) ขึ้นต้นด้วยคำนี้ — เส้นที่วาดเองต่อเข้ากล่องพวกนี้ได้ */
 export const SYS_PREFIX = "sys:";
@@ -199,7 +226,9 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
   }
   const out = withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
   const withStyle = isFlowStyle(r.style) && r.style !== "normal" ? { ...out, style: r.style } : out;
-  return isThemeName(r.theme) && r.theme !== "std" ? { ...withStyle, theme: r.theme } : withStyle;
+  const withTheme = isThemeName(r.theme) && r.theme !== "std" ? { ...withStyle, theme: r.theme } : withStyle;
+  const tags = cleanTodoTags(r.todoTags);
+  return tags ? { ...withTheme, todoTags: tags } : withTheme;
 }
 /** ชื่อชุดสี (ตรวจค่าจริงที่ lib/flowchart-themes · ไม่รู้จัก = มาตรฐาน) */
 const isThemeName = (v: unknown): v is string => typeof v === "string" && /^[a-z]{2,12}$/.test(v);
@@ -216,6 +245,7 @@ export function cleanTodos(raw: unknown): FlowTodo[] {
     if (!id || ids.has(id)) continue;
     const it: FlowTodo = { id, text: str(o.text).slice(0, 300) };
     const rich = sanitizeRich(o.rich); if (rich && rich.length <= 2000) it.rich = rich;
+    if (typeof o.tag === "string" && TAG_KEY_RE.test(o.tag)) it.tag = o.tag;
     if (o.done === true) {
       it.done = true;
       if (typeof o.by === "string" && o.by.trim()) it.by = o.by.trim().slice(0, 80);
@@ -234,15 +264,24 @@ export function todoProgress(items: FlowTodo[] | undefined): { done: number; tot
 }
 /** ติ๊ก / เอาติ๊กออก 1 ข้อ — ติ๊ก = จำชื่อคน + เวลา · เอาออก = ลบทิ้ง */
 export function toggleTodo(items: FlowTodo[], id: string, done: boolean, by: string, at = new Date().toISOString()): FlowTodo[] {
-  return items.map((i) => (i.id !== id ? i : done ? { id: i.id, text: i.text, ...(i.rich ? { rich: i.rich } : {}), done: true, ...(by ? { by } : {}), at } : { id: i.id, text: i.text, ...(i.rich ? { rich: i.rich } : {}) }));
+  const keep = (i: FlowTodo) => ({ id: i.id, text: i.text, ...(i.rich ? { rich: i.rich } : {}), ...(i.tag ? { tag: i.tag } : {}) });
+  const cur = items.find((i) => i.id === id); if (!cur) return items;
+  const next: FlowTodo = done ? { ...keep(cur), done: true, ...(by ? { by } : {}), at } : keep(cur);
+  const rest = items.filter((i) => i.id !== id);
+  // เจ้าของสั่ง 2026-11-22: ติ๊กเสร็จ = ย้ายลงล่างสุด · เอาติ๊กออก = กลับไปอยู่ก่อนข้อที่เสร็จแล้ว
+  if (done) return [...rest, next];
+  const firstDone = rest.findIndex((i) => i.done);
+  return firstDone < 0 ? [...rest, next] : [...rest.slice(0, firstDone), next, ...rest.slice(firstDone)];
 }
-export type OpenTodo = { nodeId: string; box: string; item: FlowTodo };
-/** "งานค้างทั้งผัง": ทุกข้อที่ยังไม่ติ๊กในทุกกล่องรายการงาน (เรียงตามกล่องบน→ล่าง ซ้าย→ขวา) */
-export function openTodos(nodes: Pick<FlowSceneNode, "id" | "type" | "position" | "data">[]): OpenTodo[] {
-  return nodes.filter((n) => n.type === "todo")
+export type OpenTodo = { nodeId: string; box: string; item: FlowTodo; tag?: FlowTodoTag };
+/** "งานค้างทั้งผัง": ทุกข้อที่ยังไม่ติ๊ก · เรียงป้ายด่วนก่อน (ตามลำดับป้าย) แล้วตามกล่องบน→ล่าง ซ้าย→ขวา */
+export function openTodos(nodes: Pick<FlowSceneNode, "id" | "type" | "position" | "data">[], tags: FlowTodoTag[] = DEFAULT_TODO_TAGS): OpenTodo[] {
+  const list = nodes.filter((n) => n.type === "todo")
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
     .flatMap((n) => (n.data.items ?? []).filter((i) => !i.done && i.text.trim())
-      .map((item) => ({ nodeId: n.id, box: splitFlowLabel(n.data.label).title, item })));
+      .map((item) => ({ nodeId: n.id, box: splitFlowLabel(n.data.label).title, item, tag: tags.find((t) => t.key === item.tag) })));
+  const rank = (x: OpenTodo) => (x.tag ? tags.indexOf(x.tag) : tags.length);
+  return list.map((x, i) => ({ x, i })).sort((a, b) => rank(a.x) - rank(b.x) || a.i - b.i).map((v) => v.x);
 }
 
 /** ชื่อฟอนต์ที่เก็บได้ (Google Font: ตัวอักษร/ตัวเลข/เว้นวรรค) — กันค่าแปลกเข้า CSS */
@@ -281,9 +320,9 @@ function cleanPageData(d: Record<string, unknown>): Pick<FlowNodeData, "href" | 
 type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
 /** แบบลูกศรของเส้นบนกระดานเก็บใน data.shape (React Flow) */
 type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown; data?: unknown };
-export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins, style?: FlowStyleKey, theme?: string): FlowScene {
+export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPins, style?: FlowStyleKey, theme?: string, todoTags?: FlowTodoTag[] | null): FlowScene {
   return parseFlowScene({
-    kind: "flowchart", pins, style, theme,
+    kind: "flowchart", pins, style, theme, todoTags: todoTags ?? undefined,
     nodes: nodes.map((n) => ({
       id: n.id, type: n.type, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
       width: Math.round(n.width ?? n.measured?.width ?? 0) || undefined,
@@ -468,8 +507,9 @@ export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowSc
   }
   const style = mine.style !== base.style ? mine.style : theirs.style;   // สไตล์กระดาน: เราเปลี่ยน = ของเรา · ไม่ได้แตะ = ของอีกฝั่ง
   const theme = mine.theme !== base.theme ? mine.theme : theirs.theme;
+  const todoTags = JSON.stringify(mine.todoTags) !== JSON.stringify(base.todoTags) ? mine.todoTags : theirs.todoTags;
   const merged = withPins({ kind: "flowchart", v: 1, nodes, edges }, pins);
-  return { ...merged, ...(style ? { style } : {}), ...(theme ? { theme } : {}) };
+  return { ...merged, ...(style ? { style } : {}), ...(theme ? { theme } : {}), ...(todoTags ? { todoTags } : {}) };
 }
 
 /** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */

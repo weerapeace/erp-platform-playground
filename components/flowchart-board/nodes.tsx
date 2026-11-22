@@ -21,6 +21,51 @@ import { ColorPanel } from "./rich-text";
 import { TextFormatBar, applyTextShortcut, domTextAdapter, isInTextBar, useLinkRequest } from "@/components/text-format-bar";
 import { richToPlain as richPlain } from "@/lib/flowchart-rich";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
+import { DEFAULT_TODO_TAGS, sortTodosByTag, type FlowTodoTag } from "@/lib/flowchart";
+
+/** ป้ายความด่วน 1 อัน (สีตามชุดสีของกระดาน) */
+function TodoTagChip({ tag, onClick, empty, t }: { tag?: FlowTodoTag; onClick?: (e: React.MouseEvent) => void; empty?: boolean; t: (th: string, en: string) => string }) {
+  const PAL = usePal();
+  const p = tag ? PAL[tag.color] : null;
+  return (
+    <button type="button" onClick={onClick} onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} disabled={!onClick}
+      title={onClick ? t("ป้ายความด่วน — กดเพื่อเปลี่ยน", "Priority tag — click to change") : undefined}
+      className={`nodrag nopan shrink-0 whitespace-nowrap rounded-full border px-1.5 text-[10px] leading-[17px] ${!tag && empty ? "invisible border-dashed border-slate-300 text-slate-400 group-hover:visible" : ""} ${onClick ? "cursor-pointer" : "cursor-default"}`}
+      style={p ? { background: p.fill, borderColor: p.stroke, color: p.text } : undefined}>
+      {tag ? tag.label : t("+ ป้าย", "+ Tag")}
+    </button>
+  );
+}
+
+/** แผงจัดการป้าย (ตั้งชื่อ/สี/เพิ่ม/ลบ/เรียง = ลำดับความด่วน) — ระดับกระดาน ใช้กับทุกกล่องรายการงาน */
+function TodoTagEditor({ tags, onChange, onClose, t }: { tags: FlowTodoTag[]; onChange: (tags: FlowTodoTag[] | null) => void; onClose: () => void; t: (th: string, en: string) => string }) {
+  const PAL = usePal();
+  const set = (i: number, patch: Partial<FlowTodoTag>) => onChange(tags.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  return (
+    <div className="nodrag nopan nowheel w-[250px] space-y-1 rounded-lg border border-slate-200 bg-white p-2 text-[11px] shadow-lg" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center text-slate-500"><span className="flex-1">{t("ป้ายของกระดานนี้ (บน = ด่วนกว่า)", "Tags on this board (top = more urgent)")}</span>
+        <button type="button" onClick={onClose} className="rounded p-0.5 hover:bg-slate-100" aria-label={t("ปิด", "Close")}><Icon value="i:x" /></button></div>
+      {tags.map((g, i) => (
+        <div key={g.key} className="flex items-center gap-1">
+          <button type="button" disabled={i === 0} onClick={() => onChange(moveItem(tags, i, i - 1))} className="text-slate-400 disabled:opacity-30" aria-label={t("ขึ้น", "Up")}><Icon value="i:chevron-up" /></button>
+          <input value={g.label} maxLength={20} onChange={(e) => set(i, { label: e.target.value })} onBlur={(e) => { if (!e.target.value.trim()) set(i, { label: g.label || "ป้าย" }); }}
+            className="h-6 min-w-0 flex-1 rounded border border-slate-200 px-1 text-[11px] outline-none focus:border-violet-400" />
+          <span className="flex gap-0.5">{FLOW_COLORS.map((c) => (
+            <button key={c} type="button" onClick={() => set(i, { color: c })} aria-label={c}
+              className={`h-3.5 w-3.5 rounded-full border-2 ${g.color === c ? "ring-2 ring-violet-300" : ""}`} style={{ background: PAL[c].fill, borderColor: PAL[c].stroke }} />
+          ))}</span>
+          <button type="button" onClick={() => onChange(tags.filter((_, j) => j !== i))} className="text-slate-400 hover:text-rose-600" aria-label={t("ลบป้าย", "Delete tag")}><Icon value="i:trash" /></button>
+        </div>
+      ))}
+      <div className="flex gap-1 pt-1">
+        {tags.length < 12 && <button type="button" onClick={() => onChange([...tags, { key: `t${Date.now().toString(36)}`, label: t("ป้ายใหม่", "New tag"), color: "violet" }])}
+          className="flex-1 rounded border border-dashed border-slate-300 py-0.5 text-violet-700 hover:bg-violet-50">+ {t("เพิ่มป้าย", "Add tag")}</button>}
+        <button type="button" onClick={() => onChange(null)} className="rounded border border-slate-200 px-2 py-0.5 text-slate-500 hover:bg-slate-50" title={t("กลับเป็น ด่วน / ไม่ด่วน / ว่างค่อยทำ", "Back to the default tags")}>{t("ค่าเดิม", "Reset")}</button>
+      </div>
+    </div>
+  );
+}
 
 const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 /** มีการจัดรูปแบบจริงไหม (ไม่มี = เก็บแค่ข้อความล้วน) */
@@ -141,6 +186,9 @@ export type FlowBoardActions = {
   capturePage: (id: string) => void;
   /** กล่องที่กำลังถ่ายภาพหน้าจออยู่ */
   capturingId: string | null;
+  /** ป้ายความด่วนของกระดาน (ตั้งเองได้ · ค่าตั้งต้น ด่วน/ไม่ด่วน/ว่างค่อยทำ) · null = กลับค่าตั้งต้น */
+  todoTags: FlowTodoTag[];
+  setTodoTags: (tags: FlowTodoTag[] | null) => void;
   /** ชุดสีของกระดาน (lib/flowchart-themes) */
   boardTheme: string;
   /** สไตล์ทั้งกระดาน (lib/flowchart-styles) */
@@ -377,6 +425,12 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
   const pal = PAL[color];
   const items = data.items ?? [];
   const prog = todoProgress(items);
+  const { todoTags, setTodoTags } = useBoard();
+  const tags = todoTags.length ? todoTags : DEFAULT_TODO_TAGS;
+  const [tagMenu, setTagMenu] = useState<string | null>(null);   // ข้อที่เปิดเมนูป้ายอยู่
+  const [tagEdit, setTagEdit] = useState(false);
+  // ลากสลับลำดับ = ของกลาง sortable-list (มือถือ: แตะที่จับ = เมนู ขึ้น/ลง/บนสุด/ล่างสุด)
+  const reorder = useDragReorder((from, to) => updateData(id, { items: moveItem(data.items ?? [], from, to) }), { group: `todo-${id}` });
   const [editId, setEditId] = useState<string | null>(null);
   const [adding, setAdding] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -401,14 +455,21 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
           ? <RichLineEditor initialHtml={data.rich || escHtml(splitFlowLabel(data.label).title)} placeholder={t("สิ่งที่ต้องทำ", "To do")}
               onDone={(r) => { if (r) updateData(id, { label: r.text || t("สิ่งที่ต้องทำ", "To do"), rich: r.html }); onTitleDone(); }} />
           : <RichInline className="min-w-0 flex-1 truncate" html={data.rich} text={splitFlowLabel(data.label).title || t("สิ่งที่ต้องทำ", "To do")} />}
+        {!readOnly && items.length > 1 && (
+          <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); setItems(sortTodosByTag(items, tags)); }}
+            title={t("เรียงตามความด่วน (ด่วนขึ้นบน · เสร็จแล้วลงล่าง) — Ctrl+Z ย้อนได้", "Sort by priority (urgent first · done last) — Ctrl+Z to undo")}
+            className="nodrag nopan shrink-0 rounded p-0.5 font-normal hover:bg-white/70" style={{ color: pal.sub }}><Icon value="i:arrows-sort" /></button>
+        )}
         <span className="shrink-0 text-[11px] font-normal" style={{ color: pal.sub }}>{prog.done}/{prog.total}</span>
       </div>
       <div className="mx-2.5 mb-1 mt-1.5 h-1 overflow-hidden rounded-full bg-slate-200/80">
         <div className="h-full rounded-full transition-[width]" style={{ width: `${prog.total ? (prog.done / prog.total) * 100 : 0}%`, background: pal.stroke }} />
       </div>
-      {items.map((it) => (
-        <div key={it.id} className="group flex items-start gap-1.5 px-2.5 py-[3px] text-[12px]"
+      {items.map((it, idx) => (
+        <div key={it.id} {...reorder.rowProps(idx)} className={`group relative flex items-start gap-1 px-1.5 py-[3px] text-[12px] ${reorder.rowCls(idx)}`}
           title={it.done && (it.by || it.at) ? t(`ติ๊กโดย ${it.by ?? "-"} · ${fmtTodoAt(it.at)}`, `Checked by ${it.by ?? "-"} · ${fmtTodoAt(it.at)}`) : undefined}>
+          {!readOnly && items.length > 1 && <span className="nodrag nopan mt-[1px] shrink-0 text-slate-300 group-hover:text-slate-500" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+            <DragHandle {...reorder.handleProps(idx)} title={t("ลากเพื่อสลับลำดับ · แตะ = เมนูขึ้น/ลง", "Drag to reorder · tap for up/down")} className="nodrag nopan" /></span>}
           <input type="checkbox" checked={!!it.done} disabled={readOnly} {...stopAll}
             onChange={(e) => setItems(toggleTodo(items, it.id, e.target.checked, meName))}
             aria-label={it.text} className="nodrag nopan mt-[2px] h-3.5 w-3.5 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-default" />
@@ -420,6 +481,29 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
                 <RichInline className={it.done ? "text-slate-400 line-through" : "text-slate-800"} html={it.rich} text={it.text || "—"} />
                 {it.done && it.by && <div className="text-[10px] text-slate-400">{t(`ติ๊กโดย ${it.by}`, `by ${it.by}`)}{it.at ? ` · ${fmtTodoAt(it.at)}` : ""}</div>}
               </div>}
+          {editId !== it.id && (
+            <TodoTagChip t={t} tag={tags.find((g) => g.key === it.tag)} empty={!readOnly}
+              onClick={readOnly ? undefined : (e) => { e.stopPropagation(); setTagMenu((v) => (v === it.id ? null : it.id)); setTagEdit(false); }} />
+          )}
+          {tagMenu === it.id && !readOnly && (
+            <div className="nodrag nopan absolute right-1 top-full z-30 mt-0.5" onPointerDown={(e) => e.stopPropagation()}>
+              {tagEdit
+                ? <TodoTagEditor t={t} tags={tags} onChange={(g) => setTodoTags(g)} onClose={() => { setTagEdit(false); setTagMenu(null); }} />
+                : (
+                  <div className="flex flex-col items-stretch gap-1 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
+                    {tags.map((g) => (
+                      <span key={g.key} className={`rounded-full ${it.tag === g.key ? "ring-2 ring-violet-300" : ""}`}>
+                        <TodoTagChip t={t} tag={g} onClick={(e) => { e.stopPropagation(); setItems(items.map((i) => (i.id === it.id ? { ...i, tag: g.key } : i))); setTagMenu(null); }} />
+                      </span>
+                    ))}
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setItems(items.map((i) => (i.id === it.id ? { ...i, tag: undefined } : i))); setTagMenu(null); }}
+                      className="rounded-full border border-dashed border-slate-300 px-1.5 text-[10px] leading-[17px] text-slate-500 hover:bg-slate-50">{t("ไม่ติดป้าย", "No tag")}</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setTagEdit(true); }}
+                      className="inline-flex items-center justify-center gap-1 border-t border-slate-100 pt-1 text-[10.5px] text-slate-500 hover:text-violet-700"><Icon value="i:settings" />{t("จัดการป้าย", "Manage tags")}</button>
+                  </div>
+                )}
+            </div>
+          )}
           {!readOnly && editId !== it.id && (
             <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); setItems(items.filter((i) => i.id !== it.id)); }}
               title={t("ลบข้อนี้ (ย้อนกลับได้ Ctrl+Z)", "Delete this item (Ctrl+Z to undo)")}

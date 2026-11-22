@@ -56,3 +56,29 @@ describe("กล่องรายการงาน", () => {
     expect(list.map((x) => [x.nodeId, x.box, x.item.text])).toEqual([["top", "ซื้อ", "ต่อ LINE"], ["low", "ขาย", "ทำใบส่งของ"]]);
   });
 });
+
+import { DEFAULT_TODO_TAGS, cleanTodoTags, sortTodosByTag } from "@/lib/flowchart";
+describe("ป้ายความด่วน + ลำดับ (2026-11-22)", () => {
+  it("ติ๊กเสร็จ = ลงล่างสุด · เอาติ๊กออก = อยู่ก่อนข้อที่เสร็จ · ป้ายไม่หาย", () => {
+    const items = [{ id: "a", text: "A", tag: "urgent" }, { id: "b", text: "B" }, { id: "c", text: "C", done: true }];
+    const on = toggleTodo(items, "a", true, "x", "2026-11-22T00:00:00.000Z");
+    expect(on.map((i) => i.id)).toEqual(["b", "c", "a"]);
+    expect(on[2].tag).toBe("urgent");
+    expect(toggleTodo(on, "a", false, "x").map((i) => i.id)).toEqual(["b", "a", "c"]);
+  });
+  it("เรียงตามความด่วน: ด่วน → ไม่ด่วน → ว่าง → ไม่ติดป้าย → เสร็จแล้ว", () => {
+    const items = [{ id: "1", text: "x" }, { id: "2", text: "x", tag: "later" }, { id: "3", text: "x", tag: "urgent", done: true }, { id: "4", text: "x", tag: "urgent" }, { id: "5", text: "x", tag: "normal" }];
+    expect(sortTodosByTag(items, DEFAULT_TODO_TAGS).map((i) => i.id)).toEqual(["4", "5", "2", "1", "3"]);
+  });
+  it("ป้ายตั้งเอง: key/ชื่อผิดทิ้ง · สีผิด = เทา · ว่าง = ค่าตั้งต้น", () => {
+    expect(cleanTodoTags([{ key: "wait", label: " รอลูกค้า ", color: "amber" }, { key: "BAD KEY", label: "x" }, { key: "w2", label: "", color: "rose" }, { key: "w3", label: "y", color: "neon" }]))
+      .toEqual([{ key: "wait", label: "รอลูกค้า", color: "amber" }, { key: "w3", label: "y", color: "slate" }]);
+    expect(cleanTodoTags([])).toBeNull();
+    const s = parseFlowScene({ kind: "flowchart", nodes: [], edges: [], todoTags: [{ key: "wait", label: "รอ", color: "cyan" }] })!;
+    expect(s.todoTags).toEqual([{ key: "wait", label: "รอ", color: "cyan" }]);
+  });
+  it("งานค้างทั้งผัง: ด่วนขึ้นก่อน + แนบป้าย", () => {
+    const list = openTodos([{ id: "n", type: "todo" as const, position: { x: 0, y: 0 }, data: { label: "G", items: [{ id: "1", text: "ไม่มีป้าย" }, { id: "2", text: "ด่วน", tag: "urgent" }] } }]);
+    expect(list.map((x) => [x.item.text, x.tag?.label])).toEqual([["ด่วน", "ด่วน"], ["ไม่มีป้าย", undefined]]);
+  });
+});

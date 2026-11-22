@@ -12,7 +12,7 @@ import { AUTO_STATUS_META, autoPickLabel } from "@/lib/flow-automation";
 import { flowShapeOf, flowShapeSvg } from "@/lib/flowchart-shapes";
 import { themePalette } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_EDGE, effectiveStyle, flowStyleBoxCss, flowStyleLook, type FlowStyleKey } from "@/lib/flowchart-styles";
-import { FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
+import { DEFAULT_TODO_TAGS, type FlowTodoTag, FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const SIDE: Record<string, Position> = { t: Position.Top, r: Position.Right, b: Position.Bottom, l: Position.Left };
@@ -34,7 +34,7 @@ function zoneHtml(n: FlowSceneNode, ox: number, oy: number, theme?: string): str
     + `</div>`;
 }
 
-function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowStyleKey, theme?: string): string {
+function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowStyleKey, theme?: string, todoTags?: FlowTodoTag[]): string {
   const PAL = themePalette(theme);
   const place = n.type === "storage" ? storagePlaceOf(n.data.place) : null;
   const color = place && !n.data.color ? "slate" : nodeColor(n.type, n.data);   // ที่เก็บแบบไอคอน: ชื่อสีเทาเข้มเหมือนกล่องอื่น
@@ -80,10 +80,11 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowSty
       + `</div>`;
   } else if (n.type === "todo") {
     const pr = todoProgress(n.data.items);
+    const tagChip = (k?: string) => { const g = k ? (todoTags ?? DEFAULT_TODO_TAGS).find((x) => x.key === k) : null; if (!g) return ""; const c = PAL[g.color]; return `<span style="flex:none;border:1px solid ${c.stroke};background:${c.fill};color:${c.text};border-radius:999px;padding:0 6px;font-size:10px;line-height:16px">${esc(g.label)}</span>`; };
     const rows = (n.data.items ?? []).filter((i) => i.text.trim()).map((i) =>
       `<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.35;margin-top:3px">`
       + `<span style="flex:none;width:12px;height:12px;margin-top:2px;border:1.5px solid ${strokeC};border-radius:3px;background:${i.done ? strokeC : "#fff"}"></span>`
-      + `<span style="color:${i.done ? "#94a3b8" : p.text};${i.done ? "text-decoration:line-through;" : ""}word-break:break-word">${i.rich ? sanitizeRich(i.rich) : esc(i.text)}</span></div>`).join("");
+      + `<span style="color:${i.done ? "#94a3b8" : p.text};${i.done ? "text-decoration:line-through;" : ""}word-break:break-word;flex:1">${i.rich ? sanitizeRich(i.rich) : esc(i.text)}</span>${tagChip(i.tag)}</div>`).join("");
     text = `<div style="width:100%;text-align:left"><div style="display:flex;justify-content:space-between;gap:6px;font-size:13px;font-weight:700;color:${p.text}"><span>${esc(title) || "&nbsp;"}</span><span style="font-weight:400;font-size:11px;color:${p.sub}">${pr.done}/${pr.total}</span></div>${rows}</div>`;
   } else {
     text = labelHtml;
@@ -127,7 +128,7 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
   }
   const svg = `<svg width="${b.w}" height="${b.h}" style="position:absolute;left:0;top:0;overflow:visible"><defs><marker id="fc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>${paths.join("")}</svg>`;
   const zones = s.nodes.filter((n) => n.type === "zone").map((n) => zoneHtml(n, b.x, b.y, s.theme)).join("");
-  const nodes = s.nodes.filter((n) => n.type !== "zone").map((n) => nodeHtml(n, b.x, b.y, s.style, s.theme)).join("");
+  const nodes = s.nodes.filter((n) => n.type !== "zone").map((n) => nodeHtml(n, b.x, b.y, s.style, s.theme, s.todoTags)).join("");
   const html = `<div style="position:relative;width:${b.w}px;height:${b.h}px;background:#ffffff;font-family:${FONT}">${zones}${svg}${nodes}${labels.join("")}</div>`;
   return { html, width: Math.ceil(b.w), height: Math.ceil(b.h) };
 }

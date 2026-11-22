@@ -47,7 +47,7 @@ import {
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
   OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
-  openTodos,
+  openTodos, DEFAULT_TODO_TAGS, type FlowTodoTag,
 } from "@/lib/flowchart";
 import { AUTO_STATUS_META, listAutos } from "@/lib/flow-automation";
 import { pushRecentShape } from "@/lib/flowchart-shapes";
@@ -58,7 +58,7 @@ import { StylePicker } from "./style-picker";
 import { PagePeek, captureCardImage } from "./page-peek";
 // ป๊อปดูหน้าจริงตัวใหญ่ (ของกลางของแผนผังการทำงาน) — โหลดเมื่อเปิดใช้
 const FlowPagePreview = dynamic(() => import("@/components/flow-map/page-preview").then((m) => m.FlowPagePreview), { ssr: false });
-import { FLOW_THEMES, isFlowTheme, type FlowThemeKey } from "@/lib/flowchart-themes";
+import { FLOW_THEMES, isFlowTheme, themePalette, type FlowThemeKey } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_META, flowStyleFont, isFlowStyle, type FlowStyleKey } from "@/lib/flowchart-styles";
 import { plainToRich, wrapRich } from "@/lib/flowchart-rich";
 import { boxAt, livePins, lockedLinePath, searchBoxes, staleEdges, type LockedBox, type LockedLine } from "@/lib/flowchart-locked";
@@ -205,7 +205,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [peek, setPeek] = useState<{ href: string; label: string; rect: DOMRect } | null>(null);
   const [bigPage, setBigPage] = useState<{ href: string; label: string } | null>(null);
   const [capturingId, setCapturingId] = useState<string | null>(null);
-  const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
+  const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");
+  const [todoTags, setTodoTags] = useState<FlowTodoTag[] | null>(null);   // ป้ายความด่วนของกระดาน (null = ด่วน/ไม่ด่วน/ว่างค่อยทำ)   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
   const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
   const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
   const hideKey = `erp-flowchart-hide-own:${entityType}`;
@@ -228,7 +229,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   useEffect(() => { setEdgeShapeDefault(loadDefaultShape()); }, []);
 
   // ── ข้อมูลล่าสุด (ref ไว้ใช้ใน callback/timer ไม่ให้ค้างค่าเก่า) ──
-  const scene = useMemo(() => toFlowScene(nodes, edges, pins, boardStyle === "normal" ? undefined : boardStyle, boardTheme === "std" ? undefined : boardTheme), [nodes, edges, pins, boardStyle, boardTheme]);
+  const scene = useMemo(() => toFlowScene(nodes, edges, pins, boardStyle === "normal" ? undefined : boardStyle, boardTheme === "std" ? undefined : boardTheme, todoTags), [nodes, edges, pins, boardStyle, boardTheme, todoTags]);
   const sig = useMemo(() => flowSceneSig(scene), [scene]);
   const sceneRef = useRef(scene); sceneRef.current = scene;
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
@@ -250,6 +251,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     setPins(s.pins ?? {});
     setBoardStyle(isFlowStyle(s.style) ? s.style : "normal");
     setBoardTheme(isFlowTheme(s.theme) ? s.theme : "std");
+    setTodoTags(s.todoTags ?? null);
   }, []);
 
   // ── โหลด ──
@@ -668,6 +670,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     boardStyle,
     boardTheme,
     capturingId,
+    todoTags: todoTags ?? DEFAULT_TODO_TAGS,
+    setTodoTags: (g) => setTodoTags(g && g.length ? g : null),
     // กดปุ่มตา = เปิด/ปิด (เจ้าของสั่ง 2026-11-22 เอาการชี้ค้างออก เหลือแต่กดตา)
     peekPage: (href, label, rect) => { if (!rect) return; setPeek((cur) => (cur && cur.href === href ? null : { href, label, rect })); },
     openPagePreview: (href, label) => { setPeek(null); setBigPage({ href, label }); },
@@ -723,7 +727,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme, capturingId]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme, capturingId, todoTags]);
   const actionsRef = useRef<FlowBoardActions | null>(null); actionsRef.current = actions;
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
@@ -800,7 +804,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // ── งานค้างทั้งผัง: ทุกข้อที่ยังไม่ติ๊กในกล่องรายการงาน (เจ้าของสั่ง 2026-11-20 ข้อ 3) ──
   const [todoOpen, setTodoOpen] = useState(false);
   const hasTodoBox = !(locked && hideOwn) && nodes.some((n) => n.type === "todo");
-  const pending = useMemo(() => (hasTodoBox ? openTodos(nodes) : []), [hasTodoBox, nodes]);
+  const pending = useMemo(() => (hasTodoBox ? openTodos(nodes, todoTags ?? DEFAULT_TODO_TAGS) : []), [hasTodoBox, nodes, todoTags]);
   // ── อัตโนมัติ N: ทุกกฎบนกระดาน แยกตามสถานะ (เจ้าของสั่ง 2026-11-20 ข้อ 4) ──
   const [autoOpen, setAutoOpen] = useState(false);
   // ฟอนต์ที่กล่องใช้ → โหลดจาก Google Fonts ครั้งเดียวต่อชุด
@@ -959,7 +963,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
                   {pending.length ? pending.map((p) => (
                     <button key={`${p.nodeId}:${p.item.id}`} type="button" onClick={() => goTo(p.nodeId)}
                       className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-slate-50">
-                      <span className="w-full truncate text-[12px] text-slate-800">{p.item.text}</span>
+                      <span className="flex w-full items-center gap-1"><span className="min-w-0 flex-1 truncate text-[12px] text-slate-800">{p.item.text}</span>
+                        {p.tag && <span className="shrink-0 rounded-full border px-1.5 text-[10px] leading-4" style={{ background: themePalette(boardTheme)[p.tag.color].fill, borderColor: themePalette(boardTheme)[p.tag.color].stroke, color: themePalette(boardTheme)[p.tag.color].text }}>{p.tag.label}</span>}</span>
                       <span className="w-full truncate text-[10.5px] text-slate-400"><Icon value="i:list-check" /> {p.box || t("สิ่งที่ต้องทำ", "To do")}</span>
                     </button>
                   )) : <span className="block px-2 py-1.5 text-[12px] text-emerald-700">{t("ทุกข้อติ๊กเสร็จแล้ว", "Every item is checked")}</span>}
