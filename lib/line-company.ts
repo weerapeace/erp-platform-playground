@@ -175,10 +175,12 @@ export const POSTBACK_PREFIX = "cmp=";
 export const TAB_POSTBACK_PREFIX = "cmptab=";
 
 /** ตัวเมนูที่ส่งให้ LINE สร้าง (POST /v2/bot/richmenu) */
-/** ปุ่มที่เปิดหน้าเล็กในไลน์ได้ทันที (รอบ 3) — มีรหัส LIFF = ปุ่มเปิดลิงก์ ไม่ต้องรอบอทตอบ */
-export const LIFF_PAGE_ACTIONS: readonly CompanyAction[] = ["payslip", "warning", "piecework"];
-const isLiffPageAction = (a: CompanyAction): a is "payslip" | "warning" | "piecework" => (LIFF_PAGE_ACTIONS as CompanyAction[]).includes(a);
-export const liffPageLink = (liffId: string, act: "payslip" | "warning" | "piecework") => `https://liff.line.me/${liffId}?me=${act}`;
+/** ปุ่มที่เปิดหน้าเล็กในไลน์ได้ทันที (รอบ 3 พนักงาน · รอบ 4 ลูกค้า) — มีรหัส LIFF = ปุ่มเปิดลิงก์ ไม่ต้องรอบอทตอบ */
+export type LiffPageAction = "payslip" | "warning" | "piecework" | "orders" | "schedule";
+export const LIFF_PAGE_ACTIONS: readonly LiffPageAction[] = ["payslip", "warning", "piecework", "orders", "schedule"];
+const isLiffPageAction = (a: CompanyAction): a is LiffPageAction => (LIFF_PAGE_ACTIONS as readonly string[]).includes(a);
+const LIFF_PAGE_NAME: Record<LiffPageAction, string> = { payslip: "สลิปเงินเดือน", warning: "ใบเตือน", piecework: "งานเหมา", orders: "สถานะงาน", schedule: "ตารางส่งงาน" };
+export const liffPageLink = (liffId: string, act: LiffPageAction) => `https://liff.line.me/${liffId}?me=${act}`;
 
 export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout, opts: { liffId?: string } = {}): Record<string, unknown> {
   const buttons = visibleButtons(layout[buttonsKindOf(key)]);
@@ -254,8 +256,10 @@ export function companyReplyText(who: CompanyWho, act: CompanyAction, name?: str
     case "payslip":
     case "warning":
     case "piecework":
-      // ตัวเงินไม่พิมพ์ในแชต — ส่งลิงก์หน้าเล็ก (เช็กตัวตนใหม่ทุกครั้ง)
-      return liffId ? `${hi}กดลิงก์นี้เพื่อเปิดดู${act === "payslip" ? "สลิปเงินเดือน" : act === "warning" ? "ใบเตือน" : "งานเหมา"}ของคุณ
+    case "orders":
+    case "schedule":
+      // ข้อมูลส่วนตัว/ของร้านไม่พิมพ์ในแชต — ส่งลิงก์หน้าเล็ก (เช็กตัวตนใหม่ทุกครั้ง)
+      return liffId ? `${hi}กดลิงก์นี้เพื่อเปิดดู${LIFF_PAGE_NAME[act]}${who === "customer" ? "ของร้าน" : "ของคุณ"}
 ${liffPageLink(liffId, act)}` : `${hi}${SOON}`;
     case "help":
       return `${hi}เรื่องเงินเดือน วันลา หรือเรื่องอื่น ติดต่อฝ่ายบุคคลหรือหัวหน้าโดยตรงได้เลย (ระบบถามตอบในไลน์จะเปิดในรอบถัดไป)`;
