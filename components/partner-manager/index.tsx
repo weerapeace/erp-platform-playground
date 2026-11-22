@@ -2,7 +2,10 @@
 
 // ============================================================
 // PartnerManager (ของกลาง) — หน้า Partner: ลูกค้า + ผู้จำหน่าย (partners_v2)
-//   list: การ์ดสรุป + แท็บประเภท + ค้นหา + ตาราง (ดึงครั้งเดียว กรอง/แบ่งหน้าฝั่ง client — 193 ราย)
+//   list (ออกแบบใหม่ 2026-11-22 · เจ้าของเลือกแบบ A ตารางแน่น): การ์ดสรุป + แท็บประเภท + ตารางกลาง DataTable
+//     (ค้น/กรอง/มุมมองที่บันทึก/จัดคอลัมน์/ส่งออก/การ์ดบนมือถือ) · สรุปต่อรายจาก /api/partners/summary
+//     ป้าย "น่าจะเป็นผู้จำหน่าย" (lib/partner-insights) · แก้หลายรายผ่าน bulk-update + ย้อนกลับ · ถังขยะ = is_active false กู้คืนได้
+//     ยอดค้าง/ครบกำหนด/วงเงิน = เฉพาะสิทธิ์ cashflow.view
 //   แท็บ "⚠️ ข้อมูลไม่ครบ" (ย้ายมาจากหน้า /master/partner-data-check 2026-11-11 · ลิงก์ ?tab=incomplete)
 //     → กดแถวเปิดป๊อปบนหน้านี้ มีกล่องเติมเฉพาะช่องที่ขาด + ข้ามไปรายถัดไป · กติกา lib/partner-data-check
 //   drawer: ดู (view) + แก้ไข/เพิ่ม (form) · โซนร้านจีนเฉพาะผู้ขาย
@@ -13,6 +16,14 @@ import { useState, useEffect, useMemo, useCallback, Fragment, type ReactNode } f
 import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, type BulkAction, type DataTableView, type RowAction } from "@/components/data-table";
+import { AppLogo, LogoPicker } from "@/components/logo-picker";
+import { formatDate } from "@/lib/date";
+import { todayTH } from "@/lib/partner-insights";
+import type { PartnerSummaryRow } from "@/app/api/partners/summary/route";
 import { apiFetch } from "@/lib/api";
 import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { useToast } from "@/components/toast";
@@ -22,22 +33,22 @@ import { Pager } from "@/components/pager";
 import { ConfirmDialog } from "@/components/modal";
 import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
-import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
+import { formatCreditTerm, formatLeadTime, salesCreditTermOf } from "@/lib/credit-term";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { shopNameSimilarity } from "@/lib/partner-match";
-import { checkRow, isChinaPartner, isIncomplete, sortCheckRows, type PartnerCheckRow } from "@/lib/partner-data-check";
+import { checkRow, isChinaPartner, isIncomplete, partnerGaps, sortCheckRows, type PartnerCheckRow } from "@/lib/partner-data-check";
 import { PartnerIncompleteTab } from "./incomplete-tab";
 import { PartnerQuickFix } from "./quick-fix";
 
 // drawer รายละเอียด record ของกลาง (คลิกวัตถุดิบ → เปิด SKU ตัวจริง) — โหลดเฉพาะตอนใช้
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 // popup สแกนร้านซ้ำ — โหลดเฉพาะตอนกดใช้
+const RecordHistoryDrawer = nextDynamic(() => import("@/components/activity-feed/record-history-drawer").then((m) => m.RecordHistoryDrawer), { ssr: false });
 const DuplicateScanModal = nextDynamic(() => import("./duplicate-scan").then((m) => m.DuplicateScanModal), { ssr: false });
 
 type Partner = Record<string, unknown> & { id: string };
-type Tab = "all" | "customer" | "supplier" | "china" | "incomplete";
+type Tab = "all" | "customer" | "supplier" | "china" | "suspect" | "incomplete" | "trash";
 type Mode = "view" | "edit" | "create";
-const PAGE = 25;
 
 const s = (p: Partner | null, k: string): string => { const v = p?.[k]; return v == null ? "" : String(v); };
 const b = (p: Partner | null, k: string): boolean => p?.[k] === true;
@@ -51,68 +62,76 @@ function avColor(code: string) { let h = 0; for (const c of code) h = (h * 31 + 
 const CUR_SYM: Record<string, string> = { CNY: "¥", RMB: "¥", YUAN: "¥", USD: "$", THB: "฿" };
 function money(v: unknown, cur: string) { const n = Number(v); return n > 0 ? (CUR_SYM[(cur || "THB").toUpperCase()] ?? "") + n.toLocaleString("th-TH") + (CUR_SYM[(cur || "").toUpperCase()] ? "" : ` ${cur}`) : ""; }
 
-// ส่งออก CSV (ฝั่ง client จากแถวที่กรองอยู่) — ใส่ BOM ให้ Excel อ่านภาษาไทยไม่เพี้ยน
-function exportCsv(rows: Partner[]) {
-  const cols: [string, (p: Partner) => string][] = [
-    ["รหัส", (p) => s(p, "code")], ["ชื่อ", (p) => nameOf(p)], ["ชื่อ (EN)", (p) => s(p, "name_en")],
-    ["ประเภท", (p) => [b(p, "is_customer") ? "ลูกค้า" : "", b(p, "is_supplier") ? "ผู้ขาย" : ""].filter(Boolean).join("+")],
-    ["เบอร์โทร", (p) => s(p, "phone")], ["มือถือ", (p) => s(p, "mobile")], ["LINE", (p) => s(p, "line_id")], ["WeChat", (p) => s(p, "wechat_id")],
-    ["อีเมล", (p) => s(p, "email")], ["จังหวัด", (p) => s(p, "province")], ["เลขภาษี", (p) => s(p, "tax_id")],
-    ["วงเงินเครดิต", (p) => s(p, "credit_limit")], ["เทอมจ่าย", (p) => formatCreditTerm(s(p, "purchase_credit_term") || null)],
-    ["สกุลเงิน", (p) => s(p, "default_currency")], ["ธนาคาร", (p) => s(p, "bank_name_brief")], ["เลขบัญชี", (p) => s(p, "account_number")],
-    ["แท็ก", (p) => Array.isArray(p.tags) ? (p.tags as string[]).join(" ") : ""],
-  ];
-  const esc = (v: string) => `"${(v ?? "").replace(/"/g, '""')}"`;
-  const lines = [cols.map((c) => esc(c[0])).join(","), ...rows.map((p) => cols.map((c) => esc(c[1](p))).join(","))];
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `partners-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 function Badges({ p }: { p: Partner }) {
   return (
     <div className="flex gap-1 flex-wrap">
-      {b(p, "is_customer") && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">🛍️ ลูกค้า</span>}
-      {b(p, "is_supplier") && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">🏭 ผู้ขาย</span>}
-      {isChina(p) && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">🇨🇳 จีน</span>}
+      {b(p, "is_customer") && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">ลูกค้า</span>}
+      {b(p, "is_supplier") && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">ผู้จำหน่าย</span>}
     </div>
   );
 }
 
+/** ตัวย่อวงกลม หรือโลโก้ร้าน (partners_v2.logo_url) */
+function PartnerAvatar({ p, size = 36 }: { p: Partner; size?: number }) {
+  if (s(p, "logo_url")) return <AppLogo src={s(p, "logo_url")} name={nameOf(p)} size={size} className="rounded-[10px] flex-none" />;
+  return <div style={{ width: size, height: size, background: avColor(s(p, "code") || p.id) }}
+    className="rounded-[10px] flex-none flex items-center justify-center font-bold text-[12px] text-white">{initials(nameOf(p))}</div>;
+}
+
+/** แถวที่ส่งเข้าตารางกลาง = ข้อมูลคู่ค้า + สรุป + ช่องข้อความสำเร็จรูป (ใช้ค้นหา/กรอง/โหมดการ์ดบนมือถือ) */
+type Row = Partner & {
+  _name: string; _type: string; _country: string; _contact: string; _last: string; _lastDate: string;
+  _credit: string; _gaps: string; _gapCount: number; _open: number; _suspect: boolean;
+};
+
+const lineUrl = (id: string) => `https://line.me/R/ti/p/${id.startsWith("@") ? id : "~" + id}`;
+const THB = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
+
 export function PartnerManager() {
   const toast = useToast();
+  const router = useRouter();
   const { can } = useAuth();
   const canEdit = can("products.edit" as Parameters<typeof can>[0]);
   const canCreate = can("products.create" as Parameters<typeof can>[0]);
+  const showMoney = can("cashflow.view");
 
-  const [all, setAll] = useState<Partner[]>([]);
+  const [all, setAll] = useState<Partner[]>([]);   // รวมรายที่อยู่ในถังขยะ (is_active=false)
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   // ลิงก์ ?tab=incomplete (หน้า /master/partner-data-check เดิมพามาที่นี่) → เปิดแท็บข้อมูลไม่ครบเลย
   const [tab, setTab] = useState<Tab>(() =>
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "incomplete" ? "incomplete" : "all");
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(0);
   const [sel, setSel] = useState<Partner | null>(null);
   const [mode, setMode] = useState<Mode>("view");
   const [fix, setFix] = useState(false);   // ป๊อปเปิดจากแท็บข้อมูลไม่ครบ → โชว์กล่องเติมช่องที่ขาด
   const [dupOpen, setDupOpen] = useState(false);
+  const [sum, setSum] = useState<Record<string, PartnerSummaryRow>>({});
+  const [resetSel, setResetSel] = useState(0);
+  const [history, setHistory] = useState<Partner | null>(null);
+  const [toTrash, setToTrash] = useState<Partner[] | null>(null);
+  const [busy, setBusy] = useState(false);
   // แท็บ "ข้อมูลไม่ครบ" — นับเอกสารที่เคยออกต้องใช้ฝั่ง server (ใบขาย/ใบสั่งซื้อ)
   const [inc, setInc] = useState<PartnerCheckRow[]>([]);
   const [incLoading, setIncLoading] = useState(true);
   const [incError, setIncError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadErr(null);
     try {
-      const res = await apiFetch("/api/master-v2/partners?limit=2000&sort_by=display_name&sort_dir=asc");
+      const res = await apiFetch("/api/master-v2/partners?limit=2000&sort_by=display_name&sort_dir=asc&include_inactive=true");
       const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
       setAll((j.data ?? []) as Partner[]);
-    } catch { toast.error("โหลดรายชื่อ Partner ไม่สำเร็จ"); }
+    } catch (e) { setLoadErr(e instanceof Error ? e.message : "โหลดรายชื่อ Partner ไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [toast]);
+  }, []);
+  const loadSum = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/partners/summary");
+      const j = await res.json();
+      if (res.ok && !j.error) setSum((j.data ?? {}) as Record<string, PartnerSummaryRow>);
+    } catch { /* สรุปเป็นส่วนเสริม — โหลดไม่ได้ ตารางยังใช้ได้ */ }
+  }, []);
   const loadInc = useCallback(async () => {
     setIncLoading(true); setIncError(null);
     try {
@@ -123,34 +142,59 @@ export function PartnerManager() {
     } catch (e) { setIncError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
     finally { setIncLoading(false); }
   }, []);
-  useEffect(() => { void load(); void loadInc(); }, [load, loadInc]);
+  useEffect(() => { void load(); void loadSum(); void loadInc(); }, [load, loadSum, loadInc]);
+
+  const active = useMemo(() => all.filter((p) => p.is_active !== false), [all]);
+  const trash = useMemo(() => all.filter((p) => p.is_active === false), [all]);
 
   const counts = useMemo(() => ({
-    all: all.length,
-    customer: all.filter((p) => b(p, "is_customer")).length,
-    supplier: all.filter((p) => b(p, "is_supplier")).length,
-    both: all.filter((p) => b(p, "is_customer") && b(p, "is_supplier")).length,
-    china: all.filter(isChina).length,
+    all: active.length,
+    customer: active.filter((p) => b(p, "is_customer")).length,
+    supplier: active.filter((p) => b(p, "is_supplier")).length,
+    china: active.filter(isChina).length,
+    suspect: active.filter((p) => sum[p.id]?.suspectSupplier).length,
     // ตัวเลขบนการ์ด = รายที่เคยออกเอกสารแล้ว และขาดช่องที่เอกสารต้องพิมพ์ (กรอกพวกนี้ก่อนคุ้มสุด)
     incomplete: inc.filter((r) => r.doc_count > 0 && r.missing_required).length,
-  }), [all, inc]);
+    trash: trash.length,
+  }), [active, trash, inc, sum]);
 
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return all.filter((p) => {
-      if (tab === "customer" && !b(p, "is_customer")) return false;
-      if (tab === "supplier" && !b(p, "is_supplier")) return false;
-      if (tab === "china" && !isChina(p)) return false;
-      if (kw) {
-        const hay = [nameOf(p), s(p, "code"), s(p, "name_en"), s(p, "phone"), s(p, "mobile"), s(p, "tax_id"), s(p, "province")].join(" ").toLowerCase();
-        if (!hay.includes(kw)) return false;
-      }
+  // แปลงเป็นแถวของตารางกลาง (ช่อง _x = ข้อความสำเร็จรูปไว้ค้น/กรอง/โชว์การ์ดมือถือ)
+  const toRow = useCallback((p: Partner): Row => {
+    const sm = sum[p.id];
+    const gaps = partnerGaps(p).map((g) => g.label);
+    const sup = b(p, "is_supplier"), cus = b(p, "is_customer");
+    const terms = [
+      sup && s(p, "purchase_credit_term") ? `จ่ายร้าน ${formatCreditTerm(s(p, "purchase_credit_term"))}` : "",
+      cus && salesCreditTermOf(p as { sales_credit_term?: unknown }) ? `ลูกค้าจ่าย ${formatCreditTerm(salesCreditTermOf(p as { sales_credit_term?: unknown }))}` : "",
+    ].filter(Boolean);
+    if (!terms.length) gaps.push("เครดิต");
+    const lastDate = [sm?.buyLast, sm?.sellLast].filter(Boolean).sort().pop() ?? "";
+    return {
+      ...p,
+      _name: nameOf(p),
+      _type: [cus ? "ลูกค้า" : "", sup ? "ผู้จำหน่าย" : ""].filter(Boolean).join(" + "),
+      _country: isChina(p) ? "จีน" : "ไทย",
+      _contact: [s(p, "mobile") || s(p, "phone"), s(p, "line_id") && `LINE ${s(p, "line_id")}`, s(p, "wechat_id") && `WeChat ${s(p, "wechat_id")}`].filter(Boolean).join(" · "),
+      _last: sm ? [sm.buyCount ? `ซื้อ ${sm.buyCount} ใบ` : "", sm.sellCount ? `ขาย ${sm.sellCount} ใบ` : "", lastDate ? `ล่าสุด ${formatDate(lastDate)}` : ""].filter(Boolean).join(" · ") : "",
+      _lastDate: lastDate,
+      _credit: terms.join(" · "),
+      _gaps: gaps.length ? `ขาด ${gaps.join(", ")}` : "",
+      _gapCount: gaps.length,
+      _open: (sm?.payOpen ?? 0) + (sm?.recvOpen ?? 0),
+      _suspect: !!sm?.suspectSupplier,
+    };
+  }, [sum]);
+
+  const tabRows = useMemo<Row[]>(() => {
+    const src = tab === "trash" ? trash : active;
+    return src.filter((p) => {
+      if (tab === "customer") return b(p, "is_customer");
+      if (tab === "supplier") return b(p, "is_supplier");
+      if (tab === "china") return isChina(p);
+      if (tab === "suspect") return !!sum[p.id]?.suspectSupplier;
       return true;
-    });
-  }, [all, tab, q]);
-
-  useEffect(() => { setPage(0); }, [tab, q]);
-  const pageRows = filtered.slice(page * PAGE, page * PAGE + PAGE);
+    }).map(toRow);
+  }, [tab, active, trash, sum, toRow]);
 
   const openView = (p: Partner) => { setSel(p); setMode("view"); setFix(false); };
   // จากแท็บข้อมูลไม่ครบ: เปิดป๊อปบนหน้านี้ + กล่องเติมช่องที่ขาด
@@ -184,127 +228,282 @@ export function PartnerManager() {
     setSel(saved); setMode("view");
   };
 
+  /**
+   * แก้หลายรายพร้อมกัน ผ่านของกลาง master-v2 bulk-update (โหมด edits ราย id · เช็กสิทธิ์ + ลงประวัติรายแถว)
+   * แล้วขึ้นแจ้งผลมุมจอมีปุ่ม "ย้อนกลับ" = ส่งค่าเดิมกลับไปแบบเดียวกัน
+   */
+  const bulkPatch = useCallback(async (rows: Partner[], change: (p: Partner) => Record<string, unknown>, done: string) => {
+    const edits = rows.map((p) => ({ id: p.id, changes: change(p) }))
+      .filter((e) => Object.entries(e.changes).some(([k, v]) => (rows.find((r) => r.id === e.id)?.[k] ?? null) !== v));
+    if (!edits.length) { toast.info("ทุกรายเป็นแบบนี้อยู่แล้ว"); return; }
+    const before = edits.map((e) => { const p = rows.find((r) => r.id === e.id)!; return { id: e.id, changes: Object.fromEntries(Object.keys(e.changes).map((k) => [k, p[k] ?? null])) }; });
+    const send = async (list: typeof edits) => {
+      const res = await apiFetch("/api/master-v2/partners/bulk-update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits: list }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      const map = new Map(list.map((e) => [e.id, e.changes]));
+      setAll((cur) => cur.map((p) => (map.has(p.id) ? { ...p, ...map.get(p.id) } : p)));
+    };
+    setBusy(true);
+    try {
+      await send(edits);
+      setResetSel((k) => k + 1);
+      toast.undo(`${done} ${edits.length} ราย`, async () => {
+        try { await send(before); toast.success("ย้อนกลับแล้ว"); } catch (e) { toast.error(e instanceof Error ? e.message : "ย้อนกลับไม่สำเร็จ"); }
+      }, { ms: 10000 });
+      void loadSum(); void loadInc();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  }, [toast, loadSum, loadInc]);
+
+  const toSupplierOnly = (rows: Partner[]) => bulkPatch(rows, () => ({ is_supplier: true, is_customer: false }), "เปลี่ยนเป็นผู้จำหน่ายแล้ว");
+  const addSupplier = (rows: Partner[]) => bulkPatch(rows, () => ({ is_supplier: true }), "ติดป้ายผู้จำหน่ายเพิ่มแล้ว");
+  const copy = (text: string) => { void navigator.clipboard?.writeText(text).then(() => toast.success(`คัดลอก ${text} แล้ว`)).catch(() => toast.error("คัดลอกไม่ได้")); };
+
+  const columns = useMemo<ColumnDef<Row>[]>(() => [
+    {
+      id: "_name", accessorKey: "_name", header: "Partner", size: 250,
+      cell: ({ row: { original: p } }) => (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <PartnerAvatar p={p} />
+          <div className="min-w-0"><div className="font-semibold text-[13px] truncate max-w-[210px]" title={p._name}>{p._name}</div><div className="text-[11px] text-slate-400 font-mono">{s(p, "code") || "—"}</div></div>
+        </div>
+      ),
+    },
+    {
+      id: "_type", accessorKey: "_type", header: "ประเภท", size: 170, meta: { filterType: "select" },
+      cell: ({ row: { original: p } }) => (
+        <div className="space-y-1">
+          <Badges p={p} />
+          {p._suspect && (
+            <div className="text-[10.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-1 leading-snug" onClick={(e) => e.stopPropagation()}>
+              <span title={`มีสินค้า ${sum[p.id]?.items ?? 0} รายการ · ใบสั่งซื้อ ${sum[p.id]?.buyCount ?? 0} ใบ ผูกกับร้านนี้`}>น่าจะเป็นผู้จำหน่าย?</span>
+              {canEdit && <span className="flex gap-1.5 mt-0.5">
+                <button type="button" disabled={busy} className="underline hover:text-amber-950" onClick={() => void toSupplierOnly([p])}>เปลี่ยน</button>
+                <button type="button" disabled={busy} className="underline hover:text-amber-950" onClick={() => void addSupplier([p])}>เป็นทั้งสอง</button>
+              </span>}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    { id: "_country", accessorKey: "_country", header: "ประเทศ", size: 80, meta: { filterType: "select" },
+      cell: ({ getValue }) => <span className={`text-[11px] px-2 py-0.5 rounded-full ${getValue() === "จีน" ? "bg-rose-50 text-rose-600" : "bg-slate-100 text-slate-600"}`}>{String(getValue())}</span> },
+    {
+      id: "_contact", accessorKey: "_contact", header: "ติดต่อ", size: 190, enableSorting: false,
+      cell: ({ row: { original: p } }) => {
+        const tel = s(p, "mobile") || s(p, "phone");
+        if (!tel && !s(p, "line_id") && !s(p, "wechat_id")) return <span className="text-slate-300">—</span>;
+        return (
+          <div className="flex flex-col gap-0.5 text-[12px]" onClick={(e) => e.stopPropagation()}>
+            {tel && <a href={`tel:${tel.replace(/[^\d+]/g, "")}`} className="text-slate-700 hover:text-indigo-600 no-underline">📞 {tel}</a>}
+            {s(p, "line_id") && <a href={lineUrl(s(p, "line_id"))} target="_blank" rel="noreferrer" className="text-emerald-700 hover:underline no-underline">LINE {s(p, "line_id")}</a>}
+            {s(p, "wechat_id") && <button type="button" onClick={() => copy(s(p, "wechat_id"))} title="กดเพื่อคัดลอก ไปวางใน WeChat" className="text-left text-green-700 hover:underline">WeChat {s(p, "wechat_id")}</button>}
+          </div>
+        );
+      },
+    },
+    { id: "province", accessorKey: "province", header: "จังหวัด", size: 110, meta: { filterType: "select" },
+      cell: ({ getValue }) => getValue() ? <span className="text-[12px]">{String(getValue())}</span> : <span className="text-slate-300">—</span> },
+    { id: "default_currency", accessorKey: "default_currency", header: "สกุลเงิน", size: 80, meta: { filterType: "select" } },
+    {
+      id: "_lastDate", accessorKey: "_lastDate", header: "ซื้อขายล่าสุด", size: 150,
+      cell: ({ row: { original: p } }) => {
+        const sm = sum[p.id];
+        if (!sm || (!sm.buyCount && !sm.sellCount && !sm.items)) return <span className="text-slate-300">—</span>;
+        return (
+          <div className="text-[12px] leading-snug">
+            {p._lastDate && <div className="font-medium">{formatDate(p._lastDate)}</div>}
+            <div className="text-[11px] text-slate-400">{[sm.buyCount ? `ซื้อ ${sm.buyCount}` : "", sm.sellCount ? `ขาย ${sm.sellCount}` : "", sm.items ? `สินค้า ${sm.items}` : ""].filter(Boolean).join(" · ")}</div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "_open", accessorKey: "_open", header: "ยอดค้าง", size: 140, meta: { permission: "cashflow.view", filterType: "number" },
+      cell: ({ row: { original: p } }) => {
+        const sm = sum[p.id];
+        if (!sm || !p._open) return <span className="text-slate-300">—</span>;
+        return (
+          <div className="text-[12px] leading-snug tabular-nums">
+            {!!sm.payOpen && <div>ต้องจ่าย {THB(sm.payOpen)}</div>}
+            {!!sm.recvOpen && <div>ต้องรับ {THB(sm.recvOpen)}</div>}
+            {!!sm.overdueDocs && <span className="text-[10.5px] px-1.5 rounded bg-red-50 text-red-600">เลยกำหนด {sm.overdueDocs} ใบ</span>}
+          </div>
+        );
+      },
+    },
+    {
+      id: "nextDue", accessorFn: (p) => sum[p.id]?.nextDue ?? "", header: "ครบกำหนด", size: 110, meta: { permission: "cashflow.view" },
+      cell: ({ getValue }) => { const d = String(getValue() || ""); return d ? <span className={`text-[12px] tabular-nums ${d < todayTH() ? "text-red-600 font-medium" : ""}`}>{formatDate(d)}</span> : <span className="text-slate-300">—</span>; },
+    },
+    {
+      id: "_credit", accessorKey: "_credit", header: "เครดิต / วงเงิน", size: 170, enableSorting: false,
+      cell: ({ row: { original: p } }) => {
+        const lim = Number(p.credit_limit);
+        if (!p._credit && !(showMoney && lim > 0)) return <span className="text-slate-300">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {p._credit.split(" · ").filter(Boolean).map((t) => <span key={t} className="text-[10.5px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">{t}</span>)}
+            {showMoney && lim > 0 && <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">วงเงิน {money(lim, s(p, "default_currency") || "THB")}</span>}
+          </div>
+        );
+      },
+    },
+    {
+      id: "_gaps", accessorKey: "_gapCount", header: "ข้อมูลขาด", size: 150, meta: { filterType: "number" },
+      cell: ({ row: { original: p } }) => p._gapCount
+        ? <div className="flex flex-wrap gap-1">{p._gaps.replace(/^ขาด /, "").split(", ").map((g) => <span key={g} className="text-[10.5px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">ขาด{g}</span>)}</div>
+        : <span className="text-[11px] text-emerald-600">ครบ</span>,
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [sum, canEdit, busy, showMoney]);
+
+  const views = useMemo<DataTableView[]>(() => [
+    { id: "all", label: "ทั้งหมด" },
+    { id: "gaps", label: "ข้อมูลไม่ครบ", filter: (r) => Number((r as Row)._gapCount) > 0 },
+    { id: "noterm", label: "ยังไม่ตั้งเครดิต", filter: (r) => !(r as Row)._credit },
+    { id: "active90", label: "ซื้อขายใน 90 วัน", filter: (r) => { const d = String((r as Row)._lastDate || ""); return !!d && d >= new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10); } },
+    ...(showMoney ? [
+      { id: "open", label: "มียอดค้าง", filter: (r: Record<string, unknown>) => Number((r as Row)._open) > 0 },
+      { id: "overdue", label: "เลยกำหนด", filter: (r: Record<string, unknown>) => Number(sum[String(r.id)]?.overdueDocs) > 0 },
+    ] : []),
+  ], [showMoney, sum]);
+
+  const bulkActions = useMemo<BulkAction<Row>[]>(() => {
+    if (!canEdit) return [];
+    if (tab === "trash") return [{ label: "↩ กู้คืน", onClick: (rows) => void bulkPatch(rows, () => ({ is_active: true }), "กู้คืนแล้ว") }];
+    return [
+      { label: "เปลี่ยนเป็นผู้จำหน่าย", onClick: (rows) => void toSupplierOnly(rows) },
+      { label: "+ ป้ายผู้จำหน่าย", onClick: (rows) => void addSupplier(rows) },
+      { label: "+ ป้ายลูกค้า", onClick: (rows) => void bulkPatch(rows, () => ({ is_customer: true }), "ติดป้ายลูกค้าเพิ่มแล้ว") },
+      { label: "เปลี่ยนเป็นลูกค้า", onClick: (rows) => void bulkPatch(rows, () => ({ is_customer: true, is_supplier: false }), "เปลี่ยนเป็นลูกค้าแล้ว") },
+      { label: "ตั้งเครดิต →", onClick: (rows) => router.push(`/cashflow/credit-terms?side=${rows.every((r) => b(r, "is_supplier")) ? "supplier" : "customer"}`) },
+      { label: "ย้ายไปถังขยะ", variant: "danger", onClick: (rows) => setToTrash(rows) },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, tab, bulkPatch]);
+
+  const rowActions = useMemo<RowAction<Row>[]>(() => [
+    { id: "open", label: "เปิดดู", onClick: (p) => openView(p), defaultPlacement: "menu" },
+    { id: "history", label: "ประวัติการแก้ไข", onClick: (p) => setHistory(p), defaultPlacement: "menu" },
+    ...(canEdit ? [
+      tab === "trash"
+        ? { id: "restore", label: "↩ กู้คืน", onClick: (p: Row) => void bulkPatch([p], () => ({ is_active: true }), "กู้คืนแล้ว"), defaultPlacement: "menu" as const }
+        : { id: "trash", label: "ย้ายไปถังขยะ", variant: "danger" as const, onClick: (p: Row) => setToTrash([p]), defaultPlacement: "menu" as const },
+    ] : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [canEdit, tab, bulkPatch]);
+
   const TABS: { key: Tab; label: string; n: number }[] = [
     { key: "all", label: "ทั้งหมด", n: counts.all },
     { key: "customer", label: "ลูกค้า", n: counts.customer },
     { key: "supplier", label: "ผู้จำหน่าย", n: counts.supplier },
-    { key: "china", label: "🇨🇳 ร้านจีน", n: counts.china },
-    { key: "incomplete", label: "⚠️ ข้อมูลไม่ครบ", n: counts.incomplete },
+    { key: "china", label: "ร้านจีน", n: counts.china },
+    { key: "suspect", label: "ป้ายน่าสงสัย", n: counts.suspect },
+    { key: "incomplete", label: "ข้อมูลไม่ครบ", n: counts.incomplete },
+    { key: "trash", label: "ถังขยะ", n: counts.trash },
   ];
   const STATS: { key: Tab; label: string; n: number; color: string; rail: string; hint?: string }[] = [
-    { key: "all", label: "👥 ทั้งหมด", n: counts.all, color: "text-slate-800", rail: "bg-indigo-500" },
-    { key: "customer", label: "🛍️ ลูกค้า", n: counts.customer, color: "text-blue-600", rail: "bg-blue-500" },
-    { key: "supplier", label: "🏭 ผู้จำหน่าย", n: counts.supplier, color: "text-emerald-600", rail: "bg-emerald-500" },
-    { key: "china", label: "🔄 ร้านจีน", n: counts.china, color: "text-rose-600", rail: "bg-rose-500" },
-    { key: "incomplete", label: "⚠️ ข้อมูลไม่ครบ", n: counts.incomplete, color: counts.incomplete > 0 ? "text-amber-600" : "text-slate-300", rail: "bg-amber-500", hint: "เฉพาะรายที่ออกเอกสารแล้ว" },
+    { key: "all", label: "ทั้งหมด", n: counts.all, color: "text-slate-800", rail: "bg-indigo-500" },
+    { key: "customer", label: "ลูกค้า", n: counts.customer, color: "text-blue-600", rail: "bg-blue-500" },
+    { key: "supplier", label: "ผู้จำหน่าย", n: counts.supplier, color: "text-emerald-600", rail: "bg-emerald-500" },
+    { key: "china", label: "ร้านจีน", n: counts.china, color: "text-rose-600", rail: "bg-rose-500" },
+    { key: "suspect", label: "ป้ายน่าสงสัย", n: counts.suspect, color: counts.suspect > 0 ? "text-amber-600" : "text-slate-300", rail: "bg-amber-500", hint: "ติดลูกค้า แต่มีสินค้า/ใบสั่งซื้อ" },
+    { key: "incomplete", label: "ข้อมูลไม่ครบ", n: counts.incomplete, color: counts.incomplete > 0 ? "text-amber-600" : "text-slate-300", rail: "bg-amber-500", hint: "เฉพาะรายที่ออกเอกสารแล้ว" },
   ];
 
   return (
-    <div className="p-5 max-w-[1180px] mx-auto">
-      <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+    <div className="p-3 sm:p-5 max-w-[1400px] mx-auto">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
         <div>
           <h1 className="text-[22px] font-bold tracking-tight flex items-center gap-2.5">🤝 Partners <span className="text-[15px] font-semibold text-slate-400 tabular-nums">{counts.all}</span></h1>
           <p className="mt-1 text-[13px] text-slate-500">ลูกค้า &amp; ผู้จำหน่าย — ติดต่อ ที่อยู่ ภาษี เครดิต และธนาคาร รวมที่เดียว</p>
         </div>
-        {canCreate && <button onClick={openCreate} className="h-[38px] px-4 text-[13px] font-semibold bg-indigo-600 text-white rounded-[10px] hover:bg-indigo-700">＋ เพิ่ม Partner</button>}
+        <div className="flex gap-2 flex-wrap">
+          <Link href="/cashflow/credit-terms" className="h-[38px] px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[10px] hover:bg-slate-50 inline-flex items-center no-underline">💳 จัดการเครดิตเทอม</Link>
+          <button onClick={() => setDupOpen(true)} title="หาคู่ค้า/ร้านที่ชื่อคล้ายกันมาก (มักเกิดจากพิมพ์ชื่อไม่เหมือนเดิมตอนสร้างใหม่)"
+            className="h-[38px] px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[10px] hover:bg-slate-50">🔍 สแกนร้านซ้ำ</button>
+          {canCreate && <button onClick={openCreate} className="h-[38px] px-4 text-[13px] font-semibold bg-indigo-600 text-white rounded-[10px] hover:bg-indigo-700">＋ เพิ่ม Partner</button>}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3 mb-4">
         {STATS.map((st) => (
           <button key={st.key} onClick={() => setTab(st.key)} title={st.hint}
-            className={`relative overflow-hidden text-left bg-white border rounded-[14px] px-4 py-3.5 transition hover:-translate-y-px ${tab === st.key ? "border-indigo-300 ring-1 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+            className={`relative overflow-hidden text-left bg-white border rounded-[14px] px-3 sm:px-4 py-2.5 sm:py-3.5 transition hover:-translate-y-px ${tab === st.key ? "border-indigo-300 ring-1 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
             <span className={`absolute left-0 top-0 bottom-0 w-[3px] ${st.rail}`} />
-            <div className="text-[12px] text-slate-500">{st.label}</div>
-            <div className={`text-[26px] font-bold mt-1 tabular-nums ${st.color}`}>{st.key === "incomplete" && incLoading ? <Spinner /> : st.n}</div>
-            {st.hint && <div className="text-[10.5px] text-slate-400">{st.hint}</div>}
+            <div className="text-[11.5px] sm:text-[12px] text-slate-500 truncate">{st.label}</div>
+            <div className={`text-[20px] sm:text-[26px] font-bold mt-0.5 tabular-nums ${st.color}`}>{st.key === "incomplete" && incLoading ? <Spinner /> : st.n}</div>
+            {st.hint && <div className="text-[10.5px] text-slate-400 truncate hidden sm:block">{st.hint}</div>}
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-2.5 flex-wrap mb-3.5">
-        <div className="inline-flex bg-white border border-slate-200 rounded-[11px] p-[3px] gap-0.5">
+      <div className="overflow-x-auto mb-3 -mx-3 px-3 sm:mx-0 sm:px-0">
+        <div className="inline-flex bg-white border border-slate-200 rounded-[11px] p-[3px] gap-0.5 whitespace-nowrap">
           {TABS.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`text-[13px] font-semibold px-3.5 py-[7px] rounded-lg transition flex items-center gap-1.5 ${tab === t.key ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+              className={`text-[13px] font-semibold px-3 py-[7px] rounded-lg transition flex items-center gap-1.5 ${tab === t.key ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
               {t.label} <span className="text-[11px] text-slate-400 tabular-nums">{t.n}</span>
             </button>
           ))}
         </div>
-        {/* แท็บข้อมูลไม่ครบใช้ตารางกลาง (มีค้นหา/ส่งออกในตัว) → ซ่อนแถบค้นหาของรายชื่อหลัก */}
-        {tab !== "incomplete" && <>
-        <div className="relative flex-1 min-w-[200px]">
-          <svg className="absolute left-3 top-3 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ / รหัส / เบอร์โทร / เลขภาษี / จังหวัด…"
-            className="w-full h-10 border border-slate-200 rounded-[11px] pl-9 pr-3.5 text-[13.5px] focus:outline-2 focus:outline-indigo-500" />
-        </div>
-        <button onClick={() => setDupOpen(true)}
-          title="หาคู่ค้า/ร้านที่ชื่อคล้ายกันมาก (มักเกิดจากพิมพ์ชื่อไม่เหมือนเดิมตอนสร้างใหม่)"
-          className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">🔍 สแกนร้านซ้ำ</button>
-        <button onClick={() => exportCsv(filtered)} disabled={!filtered.length}
-          title="ส่งออกรายชื่อที่กรองอยู่เป็นไฟล์ CSV (เปิดใน Excel ได้)"
-          className="h-10 px-3.5 text-[12.5px] font-semibold border border-slate-200 bg-white text-slate-600 rounded-[11px] hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-1.5 whitespace-nowrap">⬇ Export</button>
-        </>}
       </div>
+      {tab === "suspect" && counts.suspect > 0 && (
+        <div className="mb-3 text-[12.5px] bg-amber-50 border border-amber-200 text-amber-800 rounded-[10px] px-3.5 py-2.5">
+          รายเหล่านี้ติดป้าย &quot;ลูกค้า&quot; อย่างเดียว แต่มีสินค้าหรือใบสั่งซื้อผูกกับร้าน — น่าจะเป็นผู้จำหน่าย · กด &quot;เปลี่ยน&quot; ทีละราย หรือติ๊กหลายรายแล้วเลือกคำสั่งด้านล่าง (ย้อนกลับได้)
+        </div>
+      )}
+      {tab === "trash" && (
+        <div className="mb-3 text-[12.5px] bg-slate-50 border border-slate-200 text-slate-600 rounded-[10px] px-3.5 py-2.5">
+          ถังขยะ = คู่ค้าที่ปิดใช้งานแล้ว ไม่โชว์ในตัวเลือกคู่ค้า แต่เอกสารเก่ายังอ้างถึงได้ · กด &quot;↩ กู้คืน&quot; เพื่อนำกลับมา
+        </div>
+      )}
 
       {tab === "incomplete" ? (
         <PartnerIncompleteTab rows={inc} loading={incLoading} error={incError} onRetry={() => void loadInc()} onOpen={openFix} />
-      ) : <>
-      <div className="bg-white border border-slate-200 rounded-[14px] shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse min-w-[760px]">
-            <thead><tr className="bg-slate-50 border-b border-slate-200">
-              {["Partner", "ประเภท", "ติดต่อ", "ที่ตั้ง", "เครดิต / เทอม"].map((h, i) => (
-                <th key={h} className={`text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400 px-4 py-3 whitespace-nowrap ${i === 3 ? "hidden md:table-cell" : ""}`}>{h}</th>
-              ))}
-            </tr></thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={5} className="text-center py-14 text-slate-400"><Spinner /> กำลังโหลด…</td></tr>
-              ) : pageRows.length === 0 ? (
-                <tr><td colSpan={5} className="text-center py-14 text-slate-400">ไม่พบ Partner ที่ตรงเงื่อนไข</td></tr>
-              ) : pageRows.map((p) => {
-                const cur = s(p, "default_currency") || "THB";
-                const credit = money(p.credit_limit, cur);
-                const term = formatCreditTerm(s(p, "purchase_credit_term") || null);
-                return (
-                  <tr key={p.id} onClick={() => openView(p)} className="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50/70">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-[38px] h-[38px] rounded-[11px] flex-none flex items-center justify-center font-bold text-[13px] text-white" style={{ background: avColor(s(p, "code") || p.id) }}>{initials(nameOf(p))}</div>
-                        <div className="min-w-0"><div className="font-semibold text-[13.5px] truncate max-w-[230px]">{nameOf(p)}</div><div className="text-[11.5px] text-slate-400 font-mono">{s(p, "code") || "—"}</div></div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5"><Badges p={p} /></td>
-                    <td className="px-4 py-2.5">
-                      <div className="text-[12.5px] text-slate-600">{s(p, "mobile") || s(p, "phone") || <span className="text-slate-300">—</span>}</div>
-                      {(s(p, "line_id") || s(p, "wechat_id")) && <div className="text-[11px] text-slate-400">{s(p, "line_id") ? `LINE ${s(p, "line_id")}` : `WeChat ${s(p, "wechat_id")}`}</div>}
-                    </td>
-                    <td className="px-4 py-2.5 hidden md:table-cell"><div className="text-[12.5px] text-slate-600">{s(p, "province") || <span className="text-slate-300">—</span>}</div></td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex flex-wrap gap-1 items-center">
-                        {credit && <span className="text-[10.5px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">💳 {credit}</span>}
-                        {term !== "—" ? <span className="text-[10.5px] font-medium px-2 py-0.5 rounded-full bg-sky-50 text-sky-700">{term}</span> : (!credit && <span className="text-slate-300 text-xs">—</span>)}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {!loading && filtered.length > PAGE && (
-        <div className="mt-3"><Pager page={page} pageSize={PAGE} total={filtered.length} onPage={setPage} unitLabel="ราย" /></div>
+      ) : (
+        <DataTable<Row>
+          tableId="master-partners"
+          data={tabRows}
+          columns={columns}
+          loading={loading}
+          error={loadErr ?? undefined}
+          onRetry={() => void load()}
+          views={views}
+          searchPlaceholder="ค้นหาชื่อ / รหัส / เบอร์โทร / เลขภาษี / จังหวัด / LINE / WeChat…"
+          searchableKeys={["_name", "code", "name_en", "phone", "mobile", "tax_id", "province", "line_id", "wechat_id"]}
+          onRowClick={(p) => openView(p)}
+          rowActions={rowActions}
+          bulkActions={bulkActions}
+          bulkBarPosition="bottom"
+          bulkUnit="ราย"
+          selectionResetKey={resetSel}
+          pageSize={50}
+          canCheck={(perm) => can(perm as Parameters<typeof can>[0])}
+          exportFilename="partners"
+          exportEntityType="partners_v2"
+          enableCards
+          cardConfig={{ primary: "_name", subtitle: "_type", lines: ["_contact", "_last", "_credit", "_gaps"] }}
+          emptyMessage={tab === "trash" ? "ถังขยะว่าง" : "ไม่พบ Partner ที่ตรงเงื่อนไข"}
+        />
       )}
-      </>}
 
-      {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={all.filter((p) => p.id !== sel.id)}
+      {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={active.filter((p) => p.id !== sel.id)}
         onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave}
         onRemoved={() => { setSel(null); void load(); void loadInc(); }}
         fix={fix} onNext={nextFix ? () => openFix(nextFix) : undefined} />}
 
       <DuplicateScanModal open={dupOpen} onClose={() => setDupOpen(false)}
         onOpenPartner={(id) => { const p = all.find((r) => r.id === id); if (p) { setDupOpen(false); openView(p); } }} />
+
+      <ConfirmDialog open={!!toTrash} onClose={() => { if (!busy) setToTrash(null); }} loading={busy} variant="danger"
+        title={`ย้าย ${toTrash?.length ?? 0} รายไปถังขยะ?`} confirmText="ย้ายไปถังขยะ" cancelText="ไม่ย้าย"
+        message="จะหายจากรายชื่อและตัวเลือกคู่ค้า — เอกสารเก่าที่อ้างถึงยังดูได้ตามเดิม · กู้คืนได้ที่แท็บ ถังขยะ (หรือกด ย้อนกลับ ที่แจ้งผลมุมจอ)"
+        onConfirm={() => { const rows = toTrash ?? []; void bulkPatch(rows, () => ({ is_active: false }), "ย้ายไปถังขยะแล้ว").then(() => setToTrash(null)); }} />
+
+      {history && <RecordHistoryDrawer target={{ entityType: "partners_v2", entityId: history.id, title: nameOf(history), subtitle: "ประวัติการแก้ไข" }} onClose={() => setHistory(null)} />}
     </div>
   );
 }
@@ -380,8 +579,8 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
       const payload: Record<string, unknown> = {};
       const FIELDS = ["code", "name_th", "name_en", "display_name", "is_customer", "is_supplier", "is_company",
         "phone", "mobile", "email", "line_id", "wechat_id", "website", "address_line", "sub_district", "district", "province", "postal_code", "country",
-        "tax_id", "tax_branch", "credit_limit", "purchase_credit_term", "purchase_lead_time", "default_currency",
-        "bank_name_brief", "account_number", "bank_account_name", "sale_name", "shop_country", "is_taobao", "ship_before_pay", "buy_bill", "notes", "tags"];
+        "tax_id", "tax_branch", "credit_limit", "purchase_credit_term", "sales_credit_term", "purchase_lead_time", "default_currency",
+        "bank_name_brief", "account_number", "bank_account_name", "sale_name", "shop_country", "is_taobao", "ship_before_pay", "buy_bill", "notes", "tags", "logo_url"];
       for (const k of FIELDS) if (form[k] !== partner[k]) payload[k] = form[k] ?? null;
       if (mode === "create") for (const k of FIELDS) if (form[k] != null && form[k] !== "") payload[k] = form[k];
 
@@ -418,7 +617,9 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
         <div className="px-[22px] pt-5 relative border-b border-slate-100">
           <button onClick={tryClose} className="absolute top-4 right-4 w-8 h-8 rounded-[9px] border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100">✕</button>
           <div className="flex gap-3.5 items-start">
-            <div className="w-[56px] h-[56px] rounded-[15px] flex-none flex items-center justify-center font-bold text-[19px] text-white" style={{ background: avColor(s(form, "code") || partner.id || "P") }}>{initials(nameOf(form))}</div>
+            {s(form, "logo_url")
+              ? <AppLogo src={s(form, "logo_url")} name={nameOf(form)} size={56} className="rounded-[15px] flex-none" />
+              : <div className="w-[56px] h-[56px] rounded-[15px] flex-none flex items-center justify-center font-bold text-[19px] text-white" style={{ background: avColor(s(form, "code") || partner.id || "P") }}>{initials(nameOf(form))}</div>}
             <div className="min-w-0 pr-8">
               <h2 className="text-[18px] font-bold tracking-tight truncate">{mode === "create" ? "เพิ่ม Partner ใหม่" : nameOf(form)}</h2>
               <div className="text-[12.5px] text-slate-500 mt-0.5">{s(form, "name_en") && <span>{s(form, "name_en")} · </span>}<span className="font-mono">{s(form, "code") || "—"}</span></div>
@@ -473,9 +674,12 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
 const Lab = ({ children }: { children: ReactNode }) => <div className="text-[11px] font-bold tracking-wide uppercase text-slate-400 mb-2.5 flex items-center gap-1.5">{children}</div>;
 
 function ViewInfo({ form, isSup, showChina, cur }: { form: Partner; isSup: boolean; showChina: boolean; cur: string }) {
+  const { can } = useAuth();
+  const showLimit = can("cashflow.view");   // วงเงิน = ข้อมูลการเงินอ่อนไหว
   const fin: [string, ReactNode, string][] = [
-    ["วงเงินเครดิต", money(form.credit_limit, cur) || "ไม่กำหนด", Number(form.credit_limit) > 0 ? "text-amber-600" : "text-slate-400"],
-    [isSup ? "เทอมการจ่าย" : "เทอมชำระ", formatCreditTerm(s(form, "purchase_credit_term") || null), "text-slate-800"],
+    ...(showLimit ? [["วงเงินเครดิต", money(form.credit_limit, cur) || "ไม่จำกัด", Number(form.credit_limit) > 0 ? "text-amber-600" : "text-slate-400"] as [string, ReactNode, string]] : []),
+    // ผู้จำหน่าย = เทอมที่เราจ่ายเขา (purchase_credit_term) · ลูกค้า = เทอมที่เขาจ่ายเรา (sales_credit_term / ค่าเก่า payment_terms_days)
+    [isSup ? "เทอมการจ่าย" : "เทอมชำระ", formatCreditTerm(isSup ? (s(form, "purchase_credit_term") || null) : salesCreditTermOf(form as { sales_credit_term?: unknown })), "text-slate-800"],
     ["สกุลเงิน", cur, "text-slate-800"],
     [isSup ? "ระยะเวลาส่งของ" : "รอบวางบิล", formatLeadTime(s(form, "purchase_lead_time") || null), "text-sky-600"],
   ];
@@ -572,6 +776,8 @@ function SimilarNameWarn({ form, others }: { form: Partner; others: Partner[] })
 
 function EditForm({ form, set, isSup, showChina, cur, others }: { form: Partner; set: (k: string, v: unknown) => void; isSup: boolean; showChina: boolean; cur: string; others: Partner[] }) {
   const tagsStr = Array.isArray(form.tags) ? (form.tags as string[]).join(", ") : s(form, "tags");
+  const { can } = useAuth();
+  const showLimit = can("cashflow.view");   // วงเงิน = ข้อมูลการเงินอ่อนไหว
   return (
     <div className="space-y-5">
       <section><Lab>🔖 ประเภท Partner</Lab>
@@ -585,6 +791,8 @@ function EditForm({ form, set, isSup, showChina, cur, others }: { form: Partner;
           <Fld label="ชื่อ (ไทย)" k="name_th" form={form} set={set} span />
           <Fld label="ชื่อ (อังกฤษ/จีน)" k="name_en" form={form} set={set} span />
           <Fld label="ชื่อที่แสดง" k="display_name" form={form} set={set} span ph="เว้นว่าง = ใช้ชื่อไทย" />
+          <div className="col-span-2 flex flex-col gap-1.5"><label className="text-[11.5px] font-semibold text-slate-600">โลโก้ / รูปหน้าร้าน <span className="font-normal text-slate-400">(ไม่ใส่ = ใช้ตัวย่อ)</span></label>
+            <LogoPicker value={s(form, "logo_url")} name={nameOf(form)} url={s(form, "website") || null} folder="partner-logos" onChange={(v) => set("logo_url", v || null)} /></div>
         </div>
         <SimilarNameWarn form={form} others={others} />
       </section>
@@ -607,10 +815,12 @@ function EditForm({ form, set, isSup, showChina, cur, others }: { form: Partner;
       </section>
       <section><Lab>💰 การเงิน &amp; เครดิต</Lab>
         <div className="grid grid-cols-2 gap-3 items-start">
-          <Fld label="วงเงินเครดิต" k="credit_limit" form={form} set={set} prefix={cur === "CNY" ? "¥" : "฿"} />
+          {showLimit ? <Fld label="วงเงินเครดิต" k="credit_limit" form={form} set={set} prefix={cur === "CNY" ? "¥" : "฿"} /> : <div />}
           <div />
-          <div className="flex flex-col gap-1.5 col-span-2"><label className="text-[11.5px] font-semibold text-slate-600">เทอมการจ่าย</label>
-            <PurchaseCreditTermInput value={s(form, "purchase_credit_term") || null} onChange={(v) => set("purchase_credit_term", v)} /></div>
+          {isSup && <div className="flex flex-col gap-1.5 col-span-2"><label className="text-[11.5px] font-semibold text-slate-600">เทอมการจ่าย (เราจ่ายร้านนี้)</label>
+            <PurchaseCreditTermInput value={s(form, "purchase_credit_term") || null} onChange={(v) => set("purchase_credit_term", v)} /></div>}
+          {b(form, "is_customer") && <div className="flex flex-col gap-1.5 col-span-2"><label className="text-[11.5px] font-semibold text-slate-600">เทอมชำระ (ลูกค้าจ่ายเรา)</label>
+            <PurchaseCreditTermInput value={s(form, "sales_credit_term") || null} onChange={(v) => set("sales_credit_term", v)} /></div>}
           <div className="flex flex-col gap-1.5 col-span-2"><label className="text-[11.5px] font-semibold text-slate-600">ระยะเวลาส่งของ</label>
             <PurchaseLeadTimeInput value={s(form, "purchase_lead_time") || null} onChange={(v) => set("purchase_lead_time", v)} /></div>
         </div>

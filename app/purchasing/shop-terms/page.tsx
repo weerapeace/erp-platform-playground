@@ -1,32 +1,10 @@
-"use client";
-
 // ============================================================
-// ตั้งเครดิต + ระยะเวลาส่งของ ทุกร้าน (หน้าเต็ม)
-// เนื้อในเป็นของกลาง: ShopTermsBoard (ฝังที่อื่นได้)
+// เครดิต + ระยะเวลาส่งของ ต่อร้าน → ย้ายไปรวมที่หน้า "จัดการเครดิตเทอม" แท็บร้านค้า (2026-11-22)
+//   เจ้าของเลือกรวม 2 หน้าเดิมเป็นหน้าเดียว · ลิงก์เก่า (แดชบอร์ดจัดซื้อ / รายงานข้อมูลค้าง) ยังใช้ได้ พามาที่หน้าใหม่
+//   ของกลาง ShopTermsBoard ยังอยู่ (ห้ามลบของกลางโดยไม่ถามเจ้าของ) แต่ตอนนี้ไม่มีหน้าไหนใช้
 // ============================================================
-import Link from "next/link";
-import { PlaygroundShell } from "@/components/playground-shell";
-import { ShopTermsBoard } from "@/components/shop-terms-board";
+import { redirect } from "next/navigation";
 
 export default function ShopTermsPage() {
-  return (
-    <PlaygroundShell>
-      <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-5">
-        <div className="max-w-5xl mx-auto w-full flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">💳 เครดิต &amp; วันส่งของ ต่อร้าน</h1>
-            <p className="text-sm text-slate-500 mt-1">ตั้งครั้งเดียว — ปฏิทินจัดซื้อคิดวันจ่ายและวันของเข้าให้เองทุกใบ</p>
-          </div>
-          <Link href="/purchasing/calendar"
-            className="h-[38px] px-4 text-[13px] font-semibold rounded-[10px] border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 inline-flex items-center no-underline">
-            📅 ไปปฏิทินจัดซื้อ
-          </Link>
-        </div>
-      </div>
-
-      <div className="px-4 sm:px-8 py-5 max-w-5xl mx-auto w-full">
-        <ShopTermsBoard />
-      </div>
-    </PlaygroundShell>
-  );
+  redirect("/cashflow/credit-terms?side=supplier");
 }
