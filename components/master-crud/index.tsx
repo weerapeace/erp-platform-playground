@@ -59,6 +59,7 @@ import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula"
 import { formatAmount, currencyLabel } from "@/lib/money";
 import { MoneyInput } from "@/components/money-input";
 import { computedTextValue, textComputeDescribe, textComputeConfigKind } from "@/lib/computed-text";
+import { EXTRA_LANGS } from "@/lib/record-translations";
 import { ScrollTabs } from "@/components/scroll-tabs";   // แถบแท็บยาวเกิน: กดแล้วเลื่อนให้อยู่กลาง + ปุ่ม ‹ ›
 import { useViewportLayout } from "@/components/device-view";   // 📱 จอมือถือ → ลิ้นชักจัดแบบมือถือ
 import { useSwipeNav } from "@/lib/use-swipe-nav";             // 📱 ปัดซ้าย-ขวาเปลี่ยนแท็บ (ของกลาง)
@@ -1100,8 +1101,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F11: drawer mode — "view" (อ่านอย่างเดียว) | "edit" (ฟอร์ม)
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
   const [dblEditKey,  setDblEditKey]  = useState<string | null>(null);   // ฟิลด์ที่เพิ่งดับเบิลคลิกเพื่อแก้ตรงนั้น
-  const [langMode,    setLangMode]    = useState<"th" | "en">("th");     // สลับดูช่องไทย/อังกฤษ (ของกลาง: ui_style.lang_en) — ค่าตั้งต้นทุกช่อง
-  const [langField,   setLangField]   = useState<Record<string, "th" | "en">>({});   // สลับรายช่อง (key = ช่องไทย) ทับค่าตั้งต้น — ปุ่ม TH/EN ที่หัวข้อช่อง
+  // สลับภาษา (ของกลาง: ui_style.lang_en / lang_<ภาษาเพิ่ม> เช่น lang_ja) — "th" / "en" / "ja" = ภาษาเดียว · "th|en" = ดูคู่กัน 2 คอลัมน์
+  //   เจ้าของขอ 2026-11-22: โหมดคู่ + ภาษาญี่ปุ่น · จำโหมดที่เลือกไว้ต่อคน (เครื่องนี้) ต่อโมดูล
+  const langStoreKey = `mc.lang.${config.moduleKey ?? config.apiPath}`;
+  const [langMode,    setLangModeRaw] = useState<string>(() => { try { return localStorage.getItem(langStoreKey) || "th"; } catch { return "th"; } });
+  const setLangMode = useCallback((m: string) => { setLangModeRaw(m); try { localStorage.setItem(langStoreKey, m); } catch { /* ไม่จำก็ใช้ได้ */ } }, [langStoreKey]);
+  const [langField,   setLangField]   = useState<Record<string, string>>({});   // สลับรายช่อง (key = ช่องไทย) ทับค่าตั้งต้น — ปุ่ม TH/EN ที่หัวข้อช่อง (โหมดภาษาเดียว)
   const [translating, setTranslating] = useState(false);
   const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
@@ -2280,10 +2285,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // 🌐 แปลช่องไทย → ช่องอังกฤษที่จับคู่ไว้ (ui_style.lang_en + lang_translate)
   //   เติมเฉพาะช่องอังกฤษที่ยังว่าง (ไม่ทับของที่เขียนเอง) · ช่องคำนวณไม่ต้องแปล (lang_translate=false)
   //   ข้อมูลเก่าที่ใส่ขีดไว้ ("-") ถือว่าว่าง → แปลทับให้เลย
-  const translateAll = useCallback(async (opts?: { onlyKey?: string; overwrite?: boolean }) => {
+  //   to = ภาษาปลายทาง ("en" ค่าตั้งต้น · "ja" = ช่องญี่ปุ่น ui_style.lang_ja — เก็บในคอลัมน์ translations)
+  const translateAll = useCallback(async (opts?: { onlyKey?: string; overwrite?: boolean; to?: string }) => {
+    const to = opts?.to || "en";
     const pairs = effectiveFields
       .map((f) => ({ f, us: (f.uiStyle ?? {}) as Record<string, unknown> }))
-      .filter(({ us }) => us.lang_en && us.lang_translate !== false)
+      .filter(({ us }) => us[`lang_${to}`] && us.lang_translate !== false)
       .filter(({ f }) => !opts?.onlyKey || f.key === opts.onlyKey);
     if (pairs.length === 0) { flash(tr("ไม่มีช่องที่ตั้งค่าให้แปล", "No fields are set up for translation")); return; }
 
@@ -2294,7 +2301,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     let lastErr = "";
     try {
       for (const { f, us } of pairs) {
-        const enKey = String(us.lang_en);
+        const enKey = String(us[`lang_${to}`]);
         const src = String(formRef.current[f.key] ?? "").trim();
         const cur = String(formRef.current[enKey] ?? "").trim();
         if (!src || PLACEHOLDER_TEXT.has(src)) { skipped++; continue; }
@@ -2302,7 +2309,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         if (cur && !PLACEHOLDER_TEXT.has(cur) && !opts?.overwrite) { skipped++; continue; }
         const res = await apiFetch("/api/ai/translate", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ place: "fields", text: src.slice(0, 4000), to: "en" }),
+          body: JSON.stringify({ place: "fields", text: src.slice(0, 4000), to }),
         });
         const j = await res.json().catch(() => ({})) as { data?: { translated?: string }; translated?: string; error?: string };
         const out = String(j?.data?.translated ?? j?.translated ?? "").trim();
@@ -3439,7 +3446,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         ) : (<>
         {/* สลับภาษา TH/EN + แปลอัตโนมัติ + ✨ ให้ AI คิดรายละเอียด — โผล่เฉพาะโมดูลที่ตั้งค่าไว้ */}
         {(() => {
-          const pairFields = effectiveFields.filter((f) => (f.uiStyle as Record<string, unknown> | undefined)?.lang_en);
+          const pairFields = effectiveFields.filter((f) => langPairsOf(f).length > 0);
+          // ภาษาที่มีให้เลือก = ไทย + ทุกภาษาที่มีช่องคู่ (en / ja ...) · โหมดคู่ = ไทยซ้าย + อีกภาษาขวา
+          const langOpts = ["th", ...LANG_ORDER.filter((l) => pairFields.some((f) => langPairsOf(f).includes(l)))];
+          const langButtons = [...langOpts, ...langOpts.filter((l) => l !== "th").map((l) => `th|${l}`)];
+          const transTo = langMode.includes("|") ? langMode.split("|")[1] : (langMode !== "th" ? langMode : "en");
           const aiBtn = !!config.aiProductDetail && !!editingId && canEdit;
           const modeBtn = drawerMode === "view" && !!editingId && (entryModes.length > 0 || canEditModes);
           // 📋 คัดลอกจากรุ่นอื่น (ทุกกลุ่ม) — ช่องเรียงตาม layout (แท็บ → หัวข้อ) ป้ายกลุ่ม = ชื่อหัวข้อ
@@ -3468,13 +3479,19 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               {pairFields.length > 0 && (
               <div className="inline-flex items-center gap-0.5 rounded-lg border border-indigo-300 bg-white p-0.5" role="group" aria-label={tr("ภาษา", "Language")}>
-                {(["th", "en"] as const).map((m) => (
-                  <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
-                    title={m === "th" ? tr("สลับทุกช่องเป็นภาษาไทย (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to Thai (or switch one field with the TH/EN button by its label)") : tr("สลับทุกช่องเป็นภาษาอังกฤษ (สลับทีละช่องได้ที่ปุ่ม TH/EN ข้างหัวข้อ)", "Switch every field to English (or switch one field with the TH/EN button by its label)")}
-                    className={`h-7 px-2.5 rounded-md text-[12.5px] font-semibold ${pairFields.every((f) => (langField[f.key] ?? langMode) === m) ? "bg-indigo-100 text-indigo-800" : "text-slate-500 hover:bg-indigo-50"}`}>
-                    {m === "th" ? tr("ไทย", "TH") : "EN"}
-                  </button>
-                ))}
+                {langButtons.map((m) => {
+                  const two = m.includes("|");
+                  const on = two ? langMode === m : !langMode.includes("|") && pairFields.every((f) => (langField[f.key] ?? langMode) === m);
+                  return (
+                    <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
+                      title={two ? tr(`ดูคู่กัน 2 คอลัมน์ — ไทยซ้าย ${langName(m.split("|")[1])}ขวา (จำไว้ให้ครั้งหน้า)`, `Side by side — Thai left, ${langName(m.split("|")[1])} right (remembered)`)
+                        : m === "th" ? tr("สลับทุกช่องเป็นภาษาไทย (สลับทีละช่องได้ที่ปุ่มข้างหัวข้อ)", "Switch every field to Thai (or switch one field with the button by its label)")
+                        : tr(`สลับทุกช่องเป็น${langName(m)} (สลับทีละช่องได้ที่ปุ่มข้างหัวข้อ)`, `Switch every field to ${langName(m)} (or switch one field with the button by its label)`)}
+                      className={`h-7 px-2.5 rounded-md text-[12.5px] font-semibold inline-flex items-center gap-1 ${on ? "bg-indigo-100 text-indigo-800" : "text-slate-500 hover:bg-indigo-50"} ${two && m === langButtons.find((b) => b.includes("|")) ? "ml-1 border-l border-indigo-200 pl-2 rounded-l-none" : ""}`}>
+                      {two ? `${langShort("th")} | ${langShort(m.split("|")[1])}` : langShort(m)}
+                    </button>
+                  );
+                })}
               </div>
               )}
               {isPhone && toolGroups > 0 && (
@@ -3521,20 +3538,20 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               )}
               {canTranslate && canEdit && showTools && (
                 <div className="inline-flex items-center gap-0.5 rounded-lg border border-sky-300 bg-white p-0.5" role="group" aria-label={tr("แปลภาษา", "Translate")}>
-                  <button type="button" onClick={() => void translateAll()} disabled={translating}
-                    title={tr("แปลช่องไทย → ช่องอังกฤษที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ)", "Translate Thai → empty English fields (filled ones are kept)")}
+                  <button type="button" onClick={() => void translateAll({ to: transTo })} disabled={translating}
+                    title={tr(`แปลช่องไทย → ช่อง${langName(transTo)}ที่ยังว่าง (ช่องที่กรอกไว้แล้วจะไม่ถูกทับ) · เปลี่ยนภาษาปลายทาง = กดปุ่มภาษาด้านซ้าย`, `Translate Thai → empty ${langName(transTo)} fields (filled ones are kept) · pick the target with the language buttons`)}
                     className="h-7 px-2.5 rounded-md text-[12.5px] font-medium text-sky-700 hover:bg-sky-50 disabled:opacity-50">
-                    {translating ? tr("กำลังแปล…", "Translating…") : <><Icon value="🌐" size={15} className="inline-block align-[-2px] mr-1" />{tr("แปลทั้งหมด", "Translate all")}</>}
+                    {translating ? tr("กำลังแปล…", "Translating…") : <><Icon value="🌐" size={15} className="inline-block align-[-2px] mr-1" />{tr("แปลทั้งหมด", "Translate all")}{transTo !== "en" ? ` → ${langShort(transTo)}` : ""}</>}
                   </button>
                   <span className="h-4 w-px bg-sky-200" aria-hidden="true" />
-                  <button type="button" onClick={() => void translateAll({ overwrite: true })} disabled={translating}
+                  <button type="button" onClick={() => void translateAll({ overwrite: true, to: transTo })} disabled={translating}
                     title={tr("แปลใหม่ทับของเดิมทุกช่อง", "Re-translate and overwrite every field")}
                     className="h-7 px-2.5 rounded-md text-[12px] text-slate-500 hover:bg-sky-50 disabled:opacity-50">
                     <Icon name="refresh" size={14} className="inline-block align-[-2px] mr-1" />{tr("แปลทับ", "Overwrite")}
                   </button>
                 </div>
               )}
-              {pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
+              {!langMode.includes("|") && pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
               {!isPhone && extraEl && <span className="ml-auto">{extraEl}</span>}
             </div>
           );
@@ -3551,8 +3568,10 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           //   โหมด TH = ซ่อนช่องอังกฤษ · โหมด EN = ช่องอังกฤษ "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง)
           //   → ตำแหน่งช่องทั้งสองโหมดตรงกันเป๊ะ ไม่ว่าจะตั้ง display_order ของช่องอังกฤษไว้ตรงไหน
           //   สลับได้ทั้งฟอร์ม (ปุ่มบน) หรือทีละช่อง (ปุ่ม TH/EN ข้างหัวข้อ — เจ้าของขอ 2026-10-17 "บางช่องไม่ต้องมี 2 ภาษา")
-          const langPair = (f: FieldDef) => String((f.uiStyle as Record<string, unknown> | undefined)?.lang_en ?? "");
-          const enKeys = new Set(baseVisible.map(langPair).filter(Boolean));
+          //   โหมดคู่ "th|xx" (เจ้าของขอ 2026-11-22) = ช่องไทย + ช่องภาษา xx วางคู่กัน ครึ่งแถวต่อช่อง (มือถือเรียงลงมาเอง)
+          const langPair = (f: FieldDef, lang = "en") => String((f.uiStyle as Record<string, unknown> | undefined)?.[`lang_${lang}`] ?? "");
+          const enKeys = new Set(baseVisible.flatMap((f) => LANG_ORDER.map((l) => langPair(f, l))).filter(Boolean));
+          const twoCol = langMode.includes("|") ? langMode.split("|")[1] : null;
           // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
           //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้/ขนาดช่อง (compartments) บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
           //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
@@ -3617,18 +3636,52 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             return <NamePartsButton field={{ id: f.fieldId, cfg: f.textComputeCfg }} enField={enRef} sample={form} fieldLabel={f.label} onSaved={() => refreshRegistry()} />;
           };
           const visibleFields = baseVisible.flatMap((f) => {
-                if (enKeys.has(f.key)) return [];             // ช่องอังกฤษ: ไม่โชว์ที่ตำแหน่งเดิมของมัน
-                const pair = langPair(f);
-                const en = pair ? baseVisible.find((x) => x.key === pair) : undefined;
-                const btn = insertBtn(f, en ? pair : "");
-                const gear = namePartsBtn(f, en);
-                if (!en) return [btn || gear ? { ...f, labelAddon: <>{btn}{gear}</> } : f];   // ไม่มีคู่อังกฤษ (หรือยังไม่โชว์) → คงช่องไทยไว้
+                if (enKeys.has(f.key)) return [];             // ช่องภาษาอื่น: ไม่โชว์ที่ตำแหน่งเดิมของมัน
+                const enPair = langPair(f, "en");
+                const en = enPair ? baseVisible.find((x) => x.key === enPair) : undefined;
+                const btn = insertBtn(f, en ? enPair : "");
+                // คู่ของแต่ละภาษาที่ช่องนี้มี (เฉพาะที่โชว์ในฟอร์ม)
+                const pairs = LANG_ORDER.map((l) => ({ l, key: langPair(f, l) })).map((p) => ({ ...p, field: p.key ? baseVisible.find((x) => x.key === p.key) : undefined }))
+                  .filter((p): p is { l: string; key: string; field: FieldDef } => !!p.field);
+                // ช่องคำนวณ (Name Platform [EN]/ญี่ปุ่น) = คำนวณสดจากฟอร์ม · ช่องปกติ = มีข้อความไหม
+                const filled = (p: { key: string; field: FieldDef }) => p.field.type === "computed" && p.field.textCompute
+                  ? !!(computedTextValue(p.field.textCompute, form, p.field.textComputeCfg) ?? "").trim()
+                  : String(form[p.key] ?? "").trim() !== "";
+                if (!pairs.length) { const gear = namePartsBtn(f, undefined); return [btn || gear ? { ...f, labelAddon: <>{btn}{gear}</> } : f]; }   // ไม่มีคู่ (หรือยังไม่โชว์) → คงช่องไทยไว้
+                // 🀄 โหมดคู่: ไทยครึ่งซ้าย + อีกภาษาครึ่งขวา (ช่องที่ไม่มีคู่ภาษานั้น = แถวเดิม)
+                if (twoCol) {
+                  const other = pairs.find((p) => p.l === twoCol);
+                  const gear = namePartsBtn(f, en);
+                  if (!other) return [{ ...f, labelAddon: <>{btn}{gear}</> }];
+                  const half = (x: FieldDef) => ({ ...(x.uiStyle ?? {}), gw: 6 });
+                  const empty = !filled(other);
+                  const canTr = empty && canEdit && other.field.type !== "computed" && (f.uiStyle as Record<string, unknown> | undefined)?.lang_translate !== false && String(form[f.key] ?? "").trim() !== "";
+                  const otherAddon = <>
+                    <LangTag lang={twoCol} />
+                    {canTr && (
+                      <button type="button" disabled={translating} onClick={(e) => { e.preventDefault(); e.stopPropagation(); void translateAll({ onlyKey: f.key, to: twoCol }); }}
+                        title={tr(`แปลช่องนี้จากภาษาไทยเป็น${langName(twoCol)}`, `Translate this field from Thai to ${langName(twoCol)}`)}
+                        className="ml-1.5 inline-flex items-center rounded border border-sky-200 bg-sky-50 px-1.5 py-[2px] align-middle text-[10px] font-medium text-sky-700 hover:bg-sky-100 disabled:opacity-50">
+                        {translating ? tr("กำลังแปล…", "Translating…") : tr("แปลช่องนี้", "Translate")}
+                      </button>
+                    )}
+                    {other.field.type === "computed" && empty && <span className="ml-1.5 align-middle text-[10px] font-normal text-slate-400">{tr("สร้างอัตโนมัติเมื่อมีช่องภาษานี้", "Built automatically once this language is filled")}</span>}
+                  </>;
+                  return [
+                    { ...f, uiStyle: half(f), labelAddon: <><LangTag lang="th" />{btn}{gear}</> },
+                    { ...other.field, label: f.label, groupKey: f.groupKey, order: f.order, uiStyle: half(other.field), labelAddon: otherAddon },
+                  ];
+                }
+                // ภาษาเดียว: ช่องภาษาที่เลือก "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง) · ช่องที่ไม่มีคู่ภาษานั้น = ไทย
                 const m = langField[f.key] ?? langMode;
-                const pill = <LangPill mode={m} enFilled={en.type === "computed" || String(form[pair] ?? "").trim() !== ""} onChange={(nm) => setLangField((p) => ({ ...p, [f.key]: nm }))} />;
+                const cur = m === "th" ? undefined : pairs.find((p) => p.l === m);
+                const gear = namePartsBtn(f, en);
+                const pill = <LangPill mode={cur ? m : "th"} langs={["th", ...pairs.map((p) => p.l)]} filled={Object.fromEntries(pairs.map((p) => [p.l, filled(p)]))}
+                  onChange={(nm) => setLangField((p) => ({ ...p, [f.key]: nm }))} />;
                 const addon = <>{pill}{btn}{gear}</>;
-                return m === "th"
+                return !cur
                   ? [{ ...f, labelAddon: addon }]
-                  : [{ ...en, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? en.formSpan, labelAddon: addon }];
+                  : [{ ...cur.field, groupKey: f.groupKey, order: f.order, formSpan: f.formSpan ?? cur.field.formSpan, labelAddon: addon }];
               });
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
@@ -4464,20 +4517,46 @@ function InfoTip({ tip }: { tip: string }) {
 }
 
 // ปุ่มสลับภาษารายช่อง TH | EN ข้างหัวข้อ (เฉพาะช่องที่ตั้งคู่อังกฤษ ui_style.lang_en) · จุดเขียว = มีภาษาอังกฤษแล้ว
-function LangPill({ mode, enFilled, onChange }: { mode: "th" | "en"; enFilled: boolean; onChange: (m: "th" | "en") => void }) {
+//   ภาษาเพิ่ม (ญี่ปุ่น ฯลฯ) ตามทะเบียน lib/record-translations — ช่องไทยตั้ง ui_style.lang_<ภาษา>
+function LangPill({ mode, langs, filled, onChange }: { mode: string; langs: string[]; filled: Record<string, boolean>; onChange: (m: string) => void }) {
   return (
     <span className="ml-1.5 inline-flex align-middle overflow-hidden rounded border border-slate-200 text-[10px] font-semibold leading-none" data-lang-pill>
-      {(["th", "en"] as const).map((m) => (
+      {langs.map((m, i) => (
         <button key={m} type="button"
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange(m); }}
-          title={m === "th" ? tr("ดูช่องนี้เป็นภาษาไทย", "Show this field in Thai") : enFilled ? tr("ดูช่องนี้เป็นภาษาอังกฤษ", "Show this field in English") : tr("ดูช่องนี้เป็นภาษาอังกฤษ (ยังว่าง)", "Show this field in English (empty)")}
-          className={`px-1.5 py-[3px] ${m === "en" ? "border-l border-slate-200" : ""} ${mode === m ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-400 hover:text-slate-600"}`}>
-          {m === "th" ? "TH" : "EN"}
-          {m === "en" && <span className={`ml-0.5 ${enFilled ? "text-emerald-500" : "text-slate-300"}`}>•</span>}
+          title={m === "th" ? tr("ดูช่องนี้เป็นภาษาไทย", "Show this field in Thai") : filled[m] ? tr(`ดูช่องนี้เป็น${langName(m)}`, `Show this field in ${langName(m)}`) : tr(`ดูช่องนี้เป็น${langName(m)} (ยังว่าง)`, `Show this field in ${langName(m)} (empty)`)}
+          className={`px-1.5 py-[3px] ${i > 0 ? "border-l border-slate-200" : ""} ${mode === m ? "bg-indigo-50 text-indigo-700" : "bg-white text-slate-400 hover:text-slate-600"}`}>
+          {m === "th" ? "TH" : m === "en" ? "EN" : langShort(m)}
+          {m !== "th" && <span className={`ml-0.5 ${filled[m] ? "text-emerald-500" : "text-slate-300"}`}>•</span>}
         </button>
       ))}
     </span>
   );
+}
+
+/** ภาษาคู่ที่ระบบรู้จัก (ลำดับปุ่ม) — อังกฤษ + ภาษาเพิ่มจาก lib/record-translations */
+const LANG_ORDER: string[] = ["en", ...EXTRA_LANGS.map((l) => l.code)];
+/** ช่องนี้มีคู่ภาษาไหนบ้าง (ui_style.lang_en / lang_ja …) */
+function langPairsOf(f: { uiStyle?: Record<string, unknown> }): string[] {
+  const us = (f.uiStyle ?? {}) as Record<string, unknown>;
+  return LANG_ORDER.filter((l) => !!us[`lang_${l}`]);
+}
+/** ชื่อภาษาในประโยค (ภาษาไทย/อังกฤษตามหน้าจอ) */
+function langName(code: string): string {
+  if (code === "th") return tr("ภาษาไทย", "Thai");
+  if (code === "en") return tr("ภาษาอังกฤษ", "English");
+  const x = EXTRA_LANGS.find((l) => l.code === code);
+  return x ? tr(`ภาษา${x.labelTh}`, x.aiTarget) : code;
+}
+/** ชื่อสั้นบนปุ่ม: ไทย / EN / 日本語 */
+function langShort(code: string): string {
+  if (code === "th") return tr("ไทย", "TH");
+  if (code === "en") return "EN";
+  return EXTRA_LANGS.find((l) => l.code === code)?.label ?? code.toUpperCase();
+}
+/** ป้ายภาษาเล็กข้างหัวข้อช่อง (โหมดดูคู่กัน) */
+function LangTag({ lang }: { lang: string }) {
+  return <span className="ml-1.5 inline-flex rounded bg-slate-100 px-1.5 py-[2px] align-middle text-[10px] font-semibold leading-none text-slate-500">{langShort(lang)}</span>;
 }
 
 // ไอคอนหมวด — รองรับ emoji หรือรูปอัปโหลด "r2:<key>"

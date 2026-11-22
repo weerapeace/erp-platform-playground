@@ -16,7 +16,7 @@ export type NameWrap = "paren" | "square" | "lenticular" | "quote";
 /** wrap = ครอบชิ้นนี้ (ไม่มี = ธรรมดา) · before = ตัวคั่น "ก่อนชิ้นนี้" (ไม่มี = ใช้ตัวคั่นหลัก · ชิ้นแรกไม่ใช้) */
 export type NamePart = { key: NamePartKey; text?: string; text_en?: string; wrap?: NameWrap; before?: string };
 export type NamePartsConfig = { parts: NamePart[]; sep: string; dedupe: boolean };
-export type NameLang = "th" | "en";
+export type NameLang = "th" | "en" | "ja";
 
 export const NAME_PART_DEFS: { key: NamePartKey; label: string; hint: string }[] = [
   { key: "brand", label: "แบรนด์", hint: "เช่น Louis Montini" },
@@ -94,9 +94,11 @@ export function namePartText(part: NamePart, row: Record<string, unknown>, lang:
     case "collection": return str(row.collection_label) || str(row.collection_name);
     case "category": return str(row.category_label) || str(row.category_name);
     case "code": return str(row.code);
-    case "text": return lang === "en" ? str(part.text_en) || str(part.text) : str(part.text);
+    case "text": return lang === "th" ? str(part.text) : str(part.text_en) || str(part.text);   // ญี่ปุ่นใช้ข้อความอังกฤษ (ไม่มีช่องญี่ปุ่นของชิ้นนี้)
     case "name":
       // ไทย: ชื่อลงขายที่พิมพ์ไว้ (ถ้ามี) > Name Th · อังกฤษ: Name En > ฝั่งไทย (เหมือนสูตรเดิม)
+      // ญี่ปุ่น: ชื่อญี่ปุ่น (คำแปลในคอลัมน์ translations → ช่องเสมือน i18n_ja_name_th) เท่านั้น ไม่มี = ว่าง
+      if (lang === "ja") return str(row.i18n_ja_name_th);
       return lang === "en"
         ? str(row.name_en) || str(row.name_platform) || str(row.name_th)
         : str(row.name_platform) || str(row.name_th);

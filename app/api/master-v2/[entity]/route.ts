@@ -20,6 +20,7 @@ import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissi
 import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
 import { buildEntryModeEvaluator, entryModeColumns, loadEntryModeContext } from "@/lib/entry-modes-server";
 import { isModeIncomplete } from "@/lib/entry-modes";
+import { flattenTranslations, foldTranslationPatch, hasI18nKeys } from "@/lib/record-translations";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
 export const dynamic = "force-dynamic";
@@ -492,6 +493,10 @@ export async function requiredColumnsFor(admin: ReturnType<typeof supabaseAdmin>
   return ((flds ?? []) as { column_name: string | null }[]).map((f) => f.column_name).filter(Boolean) as string[];
 }
 
+/** ต่อ postProcess เดิม + แตกคอลัมน์ translations (ไม่มีคอลัมน์นี้ = ไม่ทำอะไร) */
+const withTranslations = (pp?: (row: Record<string, unknown>) => Record<string, unknown>) =>
+  (row: Record<string, unknown>) => flattenTranslations(pp ? pp(row) : row);
+
 export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
   const cached = _entityCache.get(entity);
   if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
@@ -511,7 +516,8 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
         .select("column_name, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
       relationResolves = buildRelationResolves((flds ?? []) as FieldRow[]);
     }
-    const cfg: EntityConfig = { ...base, relationResolves };
+    // คำแปลภาษาอื่น (คอลัมน์ translations) → ช่องเสมือน i18n_<ภาษา>_<ช่อง> ให้ฟอร์ม/สูตรข้อความอ่านได้ (lib/record-translations)
+    const cfg: EntityConfig = { ...base, relationResolves, postProcess: withTranslations(base.postProcess) };
     _entityCache.set(entity, { cfg, at: Date.now() });
     return cfg;
   }
@@ -539,6 +545,7 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
     ...(softDelete ? { softDeleteColumn: "is_active", defaults: { is_active: true } } : {}),
     relationResolves,
     orderColumn,
+    postProcess: withTranslations(undefined),
   };
   _entityCache.set(entity, { cfg, at: Date.now() });
   return cfg;
@@ -823,7 +830,8 @@ async function _POST(
 
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
   const access = await getFieldAccess(request, admin, cfg.table);
-  const { clean: cleanPayload0 } = stripReadonly(payload, access.readonlyCols);
+  // คำแปลภาษาอื่น (ช่องเสมือน i18n_*) → รวมเข้าคอลัมน์ translations (lib/record-translations)
+  const { clean: cleanPayload0 } = stripReadonly(hasI18nKeys(payload) ? foldTranslationPatch(payload, null) : payload, access.readonlyCols);
   const cleanPayload = await keepSecretsOnWrite(admin, cfg.table, null, stripGenerated(cleanPayload0));   // คอลัมน์ที่ DB คำนวณเอง ห้ามส่งไป · ค่าความลับที่ถูกปิดไว้ (••••) ไม่บันทึก
 
   let { data, error } = await admin

@@ -18,6 +18,7 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
 import { aiAvailable, aiChat, getAiFor, type UseCtx } from "@/lib/paid-services-server";
 import { resolvePlace } from "@/lib/paid-services";
+import { EXTRA_LANGS } from "@/lib/record-translations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,7 +38,10 @@ async function googleTranslate(text: string, tl: string): Promise<string> {
 }
 
 /** ปลายทางการแปล: to บังคับได้ · ไม่ส่ง = มีอักษรไทย→อังกฤษ, อื่น→ไทย */
+//   ภาษาเพิ่มเติม (ญี่ปุ่น ฯลฯ) ตามทะเบียน lib/record-translations EXTRA_LANGS — เช่น ช่องญี่ปุ่นของ Parent SKU
 function pickTarget(sample: string, to?: string): { tlCode: string; target: string } {
+  const extra = EXTRA_LANGS.find((l) => l.code === to);
+  if (extra) return { tlCode: extra.code, target: extra.aiTarget };
   const forced = to === "en" ? "en" : to === "th" ? "th" : null;
   const tlCode = forced ?? (/[฀-๿]/.test(sample) ? "en" : "th");
   return { tlCode, target: tlCode === "en" ? "English" : "Thai" };

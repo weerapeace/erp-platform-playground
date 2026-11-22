@@ -20,6 +20,7 @@ import { captureFieldVersions, diffVersionedFields, editContextFromRequest, vers
 import { deleteRecordFilesFor } from "@/lib/record-files";
 import { hasSecretFields, keepSecretsOnWrite, maskSecretRows } from "@/lib/settings-secrets";
 import { syncComputedAfterSave } from "@/lib/parent-computed-sync-server";
+import { foldTranslationPatch, hasI18nKeys, TRANSLATIONS_COLUMN } from "@/lib/record-translations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,9 +82,15 @@ async function _PATCH(
   const actorName = typeof _actor === "string" ? _actor : (user.email ?? null);
 
   // drop undefined values
-  const patch: Record<string, unknown> = {};
+  let patch: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {
     if (v !== undefined) patch[k] = v;
+  }
+  // คำแปลภาษาอื่น (ช่องเสมือน i18n_<ภาษา>_<ช่อง>) → รวมเข้าคอลัมน์ translations เดิม ไม่ทับภาษา/ช่องอื่น (lib/record-translations)
+  if (hasI18nKeys(patch)) {
+    const { data: cur, error: trErr } = await supabaseAdmin().from(cfg.table).select(TRANSLATIONS_COLUMN).eq("id", id).maybeSingle();
+    if (trErr) return NextResponse.json({ error: "รายการนี้ยังไม่รองรับคำแปลภาษาอื่น" }, { status: 400 });
+    patch = foldTranslationPatch(patch, (cur as Record<string, unknown> | null)?.[TRANSLATIONS_COLUMN]);
   }
 
   if (Object.keys(patch).length === 0) {

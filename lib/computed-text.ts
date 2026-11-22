@@ -185,6 +185,62 @@ TEXT_COMPUTES.platform_description_en = {
   },
 };
 
+// ───────── ภาษาญี่ปุ่น (เจ้าของขอ 2026-11-22) ─────────
+//   ช่องต้นทาง = คำแปลในคอลัมน์ translations (ช่องเสมือน i18n_ja_* — lib/record-translations)
+//   ยังไม่มีชื่อ/คำอธิบายญี่ปุ่น = ว่าง (ไม่เอาไทยมาปน) · ข้อความประจำแปลจากฉบับอังกฤษ
+const jaNameEmpty = (r: Record<string, unknown>) => !trim(r.i18n_ja_name_th);
+TEXT_COMPUTES.name_platform_code_ja = {
+  label: "ชื่อแพลตฟอร์ม + รหัส (ญี่ปุ่น)",
+  describe: "ชื่อสินค้าภาษาญี่ปุ่น + รหัส (Code) ต่อท้าย — ชิ้นชุดเดียวกับ Name Platform · ยังไม่มีชื่อญี่ปุ่น = ว่าง",
+  configurable: "name_parts",
+  describeCfg: (cfg) => `ประกอบจาก (ญี่ปุ่น): ${describeNameParts(cfg?.name_parts)}`,
+  fn: (r, cfg) => (jaNameEmpty(r) ? "" : buildNameFromParts(r, cfg?.name_parts, "ja")),
+};
+
+// รายละเอียดแพลตฟอร์ม (ญี่ปุ่น): โครงเดียวกับฉบับอังกฤษ (ยังไม่รองรับบล็อก ⚙ — ตั้งบล็อกไว้ก็ใช้โครงนี้)
+TEXT_COMPUTES.platform_description_ja = {
+  label: "รายละเอียดแพลตฟอร์ม (ญี่ปุ่น)",
+  describe: "เวอร์ชันญี่ปุ่นของ Platform Description — Introduction + Description ภาษาญี่ปุ่น + ขนาด/น้ำหนัก + เงื่อนไขการสั่งซื้อฉบับญี่ปุ่น · ยังไม่มีคำอธิบายญี่ปุ่น = ว่าง",
+  fn: (r) => {
+    const intro  = trim(r.i18n_ja_introduction);
+    const detail = trim(r.i18n_ja_description);
+    if (!intro && !detail) return "";
+    const customSize = trim(r.custom_size);
+    const sw = g(r.size_length_cm), sh = g(r.size_height_cm), st = Number(r.size_thickness_cm) || 0;
+    const productSize = st ? `${sw} x ${sh} x ${g(st)} cm（幅 x 高さ x 厚さ）` : `${sw} x ${sh} cm（幅 x 高さ）`;
+    const warranty = trim(r.warranty)
+      .replace(/ตลอดอายุการใช้งาน/g, "永久").replace(/ปี/g, "年").replace(/เดือน/g, "ヶ月").replace(/วัน/g, "日").replace(/\s+/g, "").trim();
+    const weightVal  = Number(r.weight_g) || 0;
+    const weightShow = !!r.show_weight;
+    const weightText = (weightShow && weightVal > 0) ? ` | 重さ: ${g(weightVal)} g` : "";
+    const brand     = trim(r.brand_name) || trim(r.brand_label);
+    const brandText = brand ? `${brand} ` : "";
+    const width  = Number(r.size_length_cm) || 0;
+    const height = Number(r.size_height_cm) || 0;
+    const prefix = "\n- サイズ: ";
+    let sizeLine = "";
+    if (!(width === 0 && height === 0)) sizeLine = `${prefix}${productSize}${weightText}`;
+    else if (customSize)                sizeLine = `${prefix}${customSize}${weightText}`;
+    else if (weightShow && weightVal > 0) sizeLine = `\n- 重さ: ${g(weightVal)} g`;
+    const warrantyText = (warranty && trim(r.warranty) !== "ไม่มีรับประกัน") ? `\n**保証期間: ${warranty}**` : "";
+    return (
+      `${intro}\n\n` +
+      `商品詳細\n${detail}` +
+      `${sizeLine}\n` +
+      `\n注意事項:` +
+      `${warrantyText}\n` +
+      `製造工程に起因する不良の場合、7日以内であれば追加料金なしで交換いたします。\n\n` +
+      `.... ${brandText}Official でのご注文について\n` +
+      `1. 発送は月曜日〜土曜日です。毎日8:00締め（8:00以降のご注文は翌営業日の発送、日曜日を除く）。\n` +
+      `2. ご入金後、準備に1〜3日、配送に2〜5日ほどかかります（配送会社により異なります）。\n` +
+      `3. 住所・電話番号に誤りがあった場合、こちらでは修正できません。お手数ですがキャンセルの上、再度ご注文ください。\n` +
+      `4. サイズ違いの交換は可能です（デザインの変更は不可）。返送料50バーツはお客様のご負担となります。\n\n` +
+      `....• ショップをフォローして、プロモーションや新商品をいち早くチェック！\n` +
+      `....• ご不明な点はチャットでお問い合わせください（月〜土 8:00〜22:00、日 11:00〜22:00）。`
+    );
+  },
+};
+
 // China bills — ประเภทบิล: ค่าส่ง / VAT (ISG/IG) / บิลร้านจีน
 TEXT_COMPUTES.china_bill_type = {
   label: "ประเภทบิล",
