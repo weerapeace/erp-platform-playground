@@ -14,6 +14,7 @@
  * หน้าที่ใช้: กระดานแคมเปญ · กระดานแผนงานทีม (components/team-plan/board-view) · doc: docs/canvas-sketch.md
  */
 import { isChecklistPartKind } from "./checklist-box";
+import { emitTaskContentChanged } from "@/lib/task-content-events";
 import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { useT, useLang } from "@/components/i18n";
@@ -29,7 +30,7 @@ import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import type { CreatedTask } from "@/app/tasks/create-task-modal";
 import { applyTaskTransition } from "@/app/tasks/task-actions";
 import { useCreativeOptions } from "@/app/tasks/use-options";
-import { deleteTask, createContent, getContent, listBrands, listSubtasks, POST_TYPES, type CreativeTask, type BrandOption } from "@/app/tasks/data";
+import { deleteTask, createContent, addContentAttachment, getContent, listBrands, listSubtasks, POST_TYPES, type CreativeTask, type BrandOption } from "@/app/tasks/data";
 import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
@@ -91,6 +92,8 @@ export type CardKitOptions = {
   sectionPresets?: string[];
   /** ป้ายบอกบริบทในป๊อปเลือกรูปจากคลัง (เช่น ชื่อแคมเปญ) */
   contextLabel?: string;
+  /** กระดานของงาน (กระดานบรีฟ): คอนเทนต์ที่สร้างจากกระดานผูกงานนี้ + แบรนด์ของงาน */
+  task?: { id: string; brandId: string | null } | null;
 };
 
 export type CardKit = {
@@ -104,11 +107,16 @@ export type CardKit = {
   onBoardReady: () => void;
   /** ซิงค์ข้อความ/รูปบนการ์ดทุกชนิดของชุดนี้ใหม่ (ปุ่ม "อัปเดตการ์ด") */
   syncAll: () => Promise<void>;
+  /** เปิดป๊อปสร้างคอนเทนต์ พร้อมรูป/ข้อความจากของที่เลือกบนกระดาน */
+  openContentFrom: (seed: ContentSeed) => void;
   /** ป๊อปทั้งหมดของชุดการ์ด — วางไว้ที่ไหนก็ได้ในหน้า */
   ui: ReactNode;
 };
 
-export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], contextLabel }: CardKitOptions): CardKit {
+/** ของที่เลือกบนกระดาน → ตั้งต้นคอนเทนต์ใหม่ · onCreated = แจ้งกลับเพื่อแปะป้ายบนของที่ใช้แล้ว */
+export type ContentSeed = { title?: string; images: string[]; caption: string | null; sourceIds: string[]; onCreated?: (contentId: string) => void };
+
+export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], contextLabel, task = null }: CardKitOptions): CardKit {
   const t = useT();
   const campaignId = campaign?.id ?? null;
   const [skuOpen, setSkuOpen] = useState(false);
@@ -122,6 +130,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
   const [sectionName, setSectionName] = useState("");
   const [contentOpen, setContentOpen] = useState(false); // modal สร้างคอนเทนต์
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "", cardMode: "combined" as "combined" | "per_platform" });
+  const [cSeed, setCSeed] = useState<ContentSeed | null>(null); // ของที่เลือกบนกระดาน (รูป/ข้อความ) สำหรับคอนเทนต์ใหม่
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
   const [tableView, setTableView] = useState<Record<string, unknown> | null>(null); // การ์ดตารางที่กดดู (เปิดสเปรดชีต)
   const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์ (ของกลาง FolderCardModal)
@@ -251,7 +260,20 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
   const createContentCard = async () => {
     if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     try {
-      const { id: cid, content_no } = await createContent({ title: cForm.title.trim(), campaign_id: campaignId, post_type: cForm.post_type, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null, status: "draft" });
+      const cap = (cSeed?.caption ?? "").trim();
+      const { id: cid, content_no } = await createContent({
+        title: cForm.title.trim(), campaign_id: campaignId, post_type: cForm.post_type, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null, status: "draft",
+        // กระดานบรีฟของงาน → คอนเทนต์ผูกงาน (ขึ้นในรายการคอนเทนต์ของงาน · เจ้าของเลือก 2026-11-22)
+        ...(task ? { task_id: task.id, brand_id: task.brandId } : {}),
+        ...(cap ? { brief: cap, captions: cForm.platforms.map((p) => ({ platform: p, caption: cap })) } : {}),
+      });
+      // รูปที่เลือกบนกระดาน → แนบด้วยไฟล์เดิมบน R2 (ไม่อัปซ้ำ · ไม่เปลือง R2)
+      let failed = 0;
+      for (const k of cSeed?.images ?? []) { try { await addContentAttachment(cid, { kind: "image", r2_key: k, file_name: k.split("/").pop() ?? null }); } catch { failed++; } }
+      if (failed) pushToast("error", t(`แนบรูปไม่สำเร็จ ${failed} รูป — แนบเพิ่มในคอนเทนต์ได้`, `${failed} image(s) failed to attach — add them in the content`));
+      if (cSeed?.sourceIds.length) cSeed.onCreated?.(cid);
+      if (task) emitTaskContentChanged(task.id);
+      setCSeed(null);
       const base = { id: cid, content_no, title: cForm.title.trim(), status: "draft" };
       if (cForm.cardMode === "per_platform" && cForm.platforms.length) {
         // วาง 1 การ์ด/แพลตฟอร์ม (เรียงแนวนอน) — ผูก content เดียวกัน
@@ -455,7 +477,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
     parent: { icon: "🧬", label: "Parent SKU", hint: t("สินค้าหลัก", "Parent products"), onClick: () => { setParentSel([]); setParentOpen(true); } },
     marketing: { icon: "🎯", label: t("SKU การตลาด", "Marketing SKU"), hint: t("รุ่น + ป้าย + สีที่เหลือ (จากหน้า SKU การตลาด)", "Model + labels + colors left"), onClick: () => { setMktSel([]); setMktOpen(true); } },
     task: { icon: "✅", label: "Task Card", hint: t("สร้างงานใหม่ + วางการ์ด", "New task + card"), onClick: () => setTaskOpen(true) },
-    content: { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => setContentOpen(true) },
+    content: { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => { setCSeed(null); setContentOpen(true); } },
     trend: { icon: "🔥", label: t("เทรนด์", "Trend"), hint: t("บอร์ดเทรนด์ (โทนสี/ref/เลย์เอาต์)", "Trend boards"), onClick: () => setTrendOpen(true) },
     designSheet: { icon: "📐", label: t("ใบงานออกแบบ", "Design sheet"), hint: t("ดึงจาก Design Dashboard หรือสร้างใหม่", "From Design Dashboard, or create new"), onClick: () => { setDsSel([]); setDsPickOpen(true); } },
     section: { icon: "🗂", label: "Section", hint: t("กรอบแบ่งโซนบนกระดาน", "Frame to group the board"), onClick: () => setSectionOpen(true) },
@@ -687,6 +709,21 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
             </div>
             {cForm.cardMode === "per_platform" && <p className="text-[11px] text-slate-400 mt-1">{t("วาง 1 การ์ด/แพลตฟอร์ม · ทุกใบผูก content เดียวกัน (แก้ที่ Drawer)", "One card per platform · all linked to the same content (edit in Drawer)")}</p>}
           </div>
+          {cSeed && (cSeed.images.length > 0 || cSeed.caption !== null) && (
+            <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-2 space-y-1.5">
+              <p className="text-[11px] text-violet-700">{t("จากของที่เลือกบนกระดาน", "From the items selected on the board")}{cSeed.images.length > 0 && ` · ${t(`แนบรูป ${cSeed.images.length} รูป (ใช้ไฟล์เดิม)`, `${cSeed.images.length} image(s) attached (same files)`)}`}</p>
+              {cSeed.images.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {cSeed.images.slice(0, 8).map((k) => <img key={k} src={r2ImageUrl(k, 120) ?? ""} alt="" className="h-12 w-12 rounded object-cover bg-white border border-violet-100" />)}
+                </div>
+              )}
+              <textarea value={cSeed.caption ?? ""} onChange={(e) => setCSeed((s) => (s ? { ...s, caption: e.target.value } : s))} rows={3}
+                placeholder={t("ร่างแคปชัน (ใส่ทุกแพลตฟอร์มที่เลือก แก้ต่อได้ในคอนเทนต์)", "Caption draft (used for every selected platform, editable later)")}
+                className="w-full text-sm border border-slate-200 rounded-lg p-2 bg-white" />
+            </div>
+          )}
+          {task && <p className="text-[11px] text-violet-700">{t("คอนเทนต์นี้จะขึ้นในรายการคอนเทนต์ของงานด้วย (สถานะ: ร่าง)", "This content also appears in the task's content list (status: draft)")}</p>}
           <p className="text-xs text-slate-400">{t(`สร้างแบบย่อ — รายละเอียด/caption แก้ต่อได้ที่ "เปิดเต็ม" ในการ์ด`, `Quick create — edit details/caption later via "Open full" on the card`)}</p>
         </div>
       </ERPModal>
@@ -699,5 +736,12 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
     </>
   );
 
-  return { items, canDesign, onCardOpen, onBoardReady, syncAll, ui };
+  // เปิดป๊อปสร้างคอนเทนต์พร้อมของที่เลือกบนกระดาน (รูป r2 key + ร่างแคปชัน) — ใช้ที่กระดานบรีฟของงาน
+  const openContentFrom = useCallback((seed: ContentSeed) => {
+    setCSeed({ ...seed, caption: seed.caption ?? "" });
+    setCForm({ title: seed.title ?? "", post_type: seed.images.length > 1 ? "album" : "image", platforms: [], scheduled_at: "", cardMode: "combined" });
+    setContentOpen(true);
+  }, []);
+
+  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui };
 }

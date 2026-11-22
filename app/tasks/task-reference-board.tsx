@@ -6,15 +6,15 @@
 //   ข้อมูลเดิมในตาราง erp_canvas_sketches ไม่ได้ลบ (ณ วันเลิกใช้มี 1 แผ่นและว่าง) · สิทธิ์ห้องนี้ยังอยู่ที่ /api/canvas-sketch
 //   โน้ตอ้างอิง (reference_html) ย้ายไปแก้ใต้รายละเอียดงานในลิ้นชัก
 // ============================================================
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CanvasSketchControls } from "@/components/canvas-sketch";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { LoadingState } from "@/components/state-views";
 
-const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
+// ตัวกระดาน + ชุดการ์ด + สร้างคอนเทนต์จากที่เลือก — โหลดเมื่อกางกระดานเท่านั้น (ไม่ถ่วงลิ้นชักงาน)
+const TaskBriefCanvas = dynamic(() => import("./task-brief-board-canvas"), {
   ssr: false,
   loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
@@ -30,12 +30,17 @@ export const taskReferenceUrl = (taskId: string) => `/tasks/reference/${encodeUR
 //  • รูปบรีฟที่แนบไว้แบบเดิม (reference_images) → ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก (กระดานยังไม่เคยบันทึก) ครั้งเดียว
 //    ไม่ลบรูปชุดเดิมในฐานข้อมูล (เก็บไว้เป็นสำรอง) · ลบรูปบนกระดานแล้วไม่ถูกเติมกลับ (กระดานบันทึกแล้ว)
 //  • พับ/ขยายเองตามของบนกระดาน: ว่าง = พับ · มีของ = ขยาย (2026-11-22) · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
+//  • การ์ด Parent/SKU/คอนเทนต์ + สร้างคอนเทนต์จากที่เลือก (2026-11-22) → task-brief-board-canvas.tsx
 // ============================================================
 export const TASK_BRIEF_ENTITY = "creative_task_brief";
 export const taskBriefUrl = (taskId: string) => `${taskReferenceUrl(taskId)}?board=brief`;
 
-export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", showOpenFull = true, foldable = true }: {
+export function TaskBriefBoard({ taskId, brandId = null, taskTitle, seedImageUrls = [], height = "50vh", showOpenFull = true, foldable = true }: {
   taskId: string;
+  /** แบรนด์ของงาน — คอนเทนต์ที่สร้างจากกระดานใช้แบรนด์นี้ */
+  brandId?: string | null;
+  /** ชื่องาน (ตั้งชื่อคอนเทนต์ตั้งต้น) */
+  taskTitle?: string;
   /** รูปบรีฟเดิม (URL เต็ม) — เติมขึ้นกระดานครั้งแรกครั้งเดียว */
   seedImageUrls?: string[];
   height?: string;
@@ -43,6 +48,7 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
   foldable?: boolean;
 }) {
   const t = useT();
+  const seedRef = useRef(seedImageUrls); seedRef.current = seedImageUrls;
   // พับ/ขยายอัตโนมัติตามของบนกระดาน (เจ้าของสั่ง 2026-11-22): ว่าง = พับ · มีของ = ขยาย · กดสลับเองได้ (เฉพาะตอนเปิดงานนี้อยู่)
   const [folded, setFolded] = useState(foldable);
   const [count, setCount] = useState<number | null>(null);
@@ -61,23 +67,6 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
   }, [taskId, foldable]);
   const toggleFold = () => setFolded((f) => !f);
 
-  const controlsRef = useRef<CanvasSketchControls | null>(null);
-  const seedRef = useRef(seedImageUrls); seedRef.current = seedImageUrls;
-  const seededRef = useRef(false);
-  const onReady = useCallback(() => {
-    const c = controlsRef.current; const urls = seedRef.current.filter(Boolean);
-    if (!c || seededRef.current || !urls.length || !c.isNewBoard() || c.getElements().length > 0) return;
-    seededRef.current = true;
-    // วางเรียงแถวละ 4 รูป กรอบ 220×220 (คงสัดส่วนรูปจริง)
-    const BOX = 220, GAP = 24, PER = 4;
-    const cols = Math.min(PER, urls.length);
-    const ox = -((cols * BOX + (cols - 1) * GAP) / 2), oy = -BOX / 2;
-    void c.insert(urls.map((u, i) => ({
-      type: "image", _imageUrl: u, width: BOX, height: BOX,
-      x: ox + (i % PER) * (BOX + GAP), y: oy + Math.floor(i / PER) * (BOX + GAP),
-    })));
-  }, []);
-
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 flex-wrap">
@@ -95,7 +84,7 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
           )}
         </span>
       </div>
-      {!folded && <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab compactHelp controlsRef={controlsRef} onReady={onReady} imageMaxPx={TASK_BOARD_IMAGE_MAX} />}
+      {!folded && <TaskBriefCanvas taskId={taskId} brandId={brandId} taskTitle={taskTitle} height={height} seedImageUrls={seedImageUrls} />}
     </div>
   );
 }

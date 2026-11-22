@@ -62,6 +62,7 @@ ref.current?.insert([
 ## ชุดการ์ดจากระบบอื่น (ของกลาง `components/canvas-cards` — `useCardKit`)
 
 - `const kit = useCardKit({ sketchRef, campaign?, sectionPresets?, contextLabel? })` → `kit.items` (ปุ่มเมนู: sku · parent · marketing · task · content · trend · designSheet · section · table · folder · asset · cards) · `kit.onCardOpen` (คืน false = ไม่ใช่การ์ดของชุดนี้ → หน้าจัดการการ์ดของตัวเองต่อ) · `kit.onBoardReady` · `kit.syncAll` · `{kit.ui}` (ป๊อปทั้งหมด)
+- `task?: { id, brandId }` (2026-11-22) = กระดานของงาน (กระดานบรีฟ) → คอนเทนต์ที่สร้างจากกระดานผูกงาน + ขึ้นในรายการคอนเทนต์ของลิ้นชัก (event `lib/task-content-events`) · `kit.openContentFrom({ images: r2Keys, caption, sourceIds, onCreated })` = เปิดป๊อปสร้างคอนเทนต์พร้อมรูป/ข้อความจากของที่เลือก (รูปแนบด้วยไฟล์เดิม ไม่อัปซ้ำ) — ใช้ที่ `app/tasks/task-brief-board-canvas.tsx`
 - `campaign` = กระดานของแคมเปญ: งาน/คอนเทนต์ที่สร้างจากกระดานผูกแคมเปญนั้น · ใบงานใหม่ใช้แบรนด์แคมเปญ · ไม่ส่ง = ไม่ผูก
 - โครงการ์ด `skeletons.ts` · ตัวเลือกหลายตัว `multi-picks.tsx` · แผงข้าง + `ToolMenu` (ไอคอนเป็นข้อความหรือ `<Icon>` ก็ได้) `drawers.tsx`
 - ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]` — ย้ายมาจากหน้านี้ 2026-11-15) · กระดานแผนงานทีม (`components/team-plan/board-view.tsx`)

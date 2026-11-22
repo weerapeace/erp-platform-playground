@@ -40,7 +40,7 @@ export default function TaskReferencePage() {
         )}
       </div>
       {id && task && (
-        <TaskBriefBoard taskId={id} height="calc(100vh - 150px)" showOpenFull={false} foldable={false}
+        <TaskBriefBoard taskId={id} brandId={task.brand_id} taskTitle={task.title} height="calc(100vh - 150px)" showOpenFull={false} foldable={false}
             seedImageUrls={(task.reference_images ?? []).map((k) => r2ImageUrl(k)).filter((u): u is string => !!u)} />
       )}
     </div>

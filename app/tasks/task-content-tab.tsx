@@ -22,6 +22,7 @@ import {
 
 import { loadBriefBoardItems, type BriefImage, type BriefNote } from "./brief-board-items";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { TASK_CONTENT_CHANGED } from "@/lib/task-content-events";
 
 const ContentDrawer = dynamic(() => import("./content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
@@ -58,6 +59,12 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle, 
     finally { setLoading(false); }
   }, [taskId, pushToast]);
   useEffect(() => { loadedOnce.current = false; load(); }, [load]);
+  // คอนเทนต์ถูกสร้าง/เปลี่ยนจากที่อื่น (เช่น กระดานบรีฟ) → โหลดรายการใหม่
+  useEffect(() => {
+    const on = (e: Event) => { if ((e as CustomEvent<{ taskId?: string }>).detail?.taskId === taskId) void load(); };
+    window.addEventListener(TASK_CONTENT_CHANGED, on);
+    return () => window.removeEventListener(TASK_CONTENT_CHANGED, on);
+  }, [taskId, load]);
 
   // เปลี่ยนสถานะจากรายการ (โหมดย่อ) + ปุ่มย้อนกลับในแจ้งผล · ประวัติ (audit) บันทึกฝั่ง server
   const changeStatus = async (c: ContentItem, to: ContentStatus) => {

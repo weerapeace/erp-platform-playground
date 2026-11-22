@@ -470,7 +470,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {!isHidden(dth, "board") && (<div style={{ order: tOrderOf("board") }}>
               {/* กระดานบรีฟ — แทนช่องแนบรูปบรีฟเดิม (เจ้าของเลือก 2026-11-21) · รูปบรีฟเดิม (reference_images) ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก ไม่ลบของเดิม */}
-              <TaskBriefBoard key={d.id} taskId={d.id}
+              <TaskBriefBoard key={d.id} taskId={d.id} brandId={d.brand_id} taskTitle={d.title}
                 seedImageUrls={(d.reference_images ?? []).map((k) => r2ImageUrl(k)).filter((u): u is string => !!u)} />
               </div>)}
 
