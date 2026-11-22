@@ -472,12 +472,23 @@ export function SampleImagesPage() {
     if (fails.length) pushToast("error", fails[0]);
     await reload();
   };
+  // ย้าย/เปลี่ยนแบรนด์ของอัลบั้มชั้นบนสุด (เจ้าของขอ 2026-11-22 "ยังเปลี่ยน Brand ไม่ได้") — อัลบั้มย่อยข้างในย้ายตาม
+  //   แบรนด์ปลายทางมีอัลบั้มวันเดียวกันอยู่แล้ว = รวมเข้าด้วยกัน (แยกคืนไม่ได้ → ถามก่อน) · ไม่รวม = กดย้อนกลับได้
   const doSetBrand = async (brandId: string) => {
-    if (!album) return;
+    if (!album || brandId === album.brand_id) return;
+    const from = album.brand_id;
+    if (from && !(await askConfirm({ title: t(`เปลี่ยนแบรนด์เป็น ${brandOf(brandId)?.name ?? ""}?`, `Change brand to ${brandOf(brandId)?.name ?? ""}?`),
+      message: t("อัลบั้มนี้และอัลบั้มย่อยข้างในจะย้ายไปอยู่แบรนด์ใหม่ทั้งหมด · ถ้าแบรนด์นั้นมีอัลบั้มของวันเดียวกันอยู่แล้ว ระบบจะรวมเข้าด้วยกัน (แยกคืนไม่ได้)", "This album and its sub-albums move to the new brand. If that brand already has a same-day album they will be merged (cannot be split back)."),
+      confirmText: t("เปลี่ยนแบรนด์", "Change brand") }))) return;
     setBusy(true);
     try {
       const r = await setAlbumBrand(album.id, brandId);
-      pushToast("success", t(`ย้ายอัลบั้มเข้า ${brandOf(brandId)?.name ?? ""} แล้ว${r.merged ? " (รวมกับอัลบั้มวันเดียวกันที่มีอยู่)" : ""}`, "Album moved into the brand"));
+      const msg = t(`ย้ายอัลบั้มเข้า ${brandOf(brandId)?.name ?? ""} แล้ว${r.merged ? " (รวมกับอัลบั้มวันเดียวกันที่มีอยู่)" : ""}`, "Album moved into the brand");
+      if (from && !r.merged) toast.action(msg, t("ย้อนกลับ", "Undo"), () => void (async () => {
+        try { const back = await setAlbumBrand(r.id, from); setTab(from); await reload(back.id, from); pushToast("success", t("ย้อนกลับแล้ว", "Undone")); }
+        catch (e) { pushToast("error", (e as Error).message); }
+      })(), { ms: 10000 });
+      else pushToast("success", msg);
       setToBrand(false);
       setTab(brandId);
       await reload(r.id, brandId);
@@ -828,8 +839,8 @@ export function SampleImagesPage() {
                 {/* เส้นทาง: ← อัลบั้มทั้งหมด · อัลบั้มของวัน › อัลบั้มย่อย — วางรูป/อัลบั้มบนชื่อ = ย้ายขึ้นไปที่นั่น */}
                 <div className="flex flex-wrap items-center gap-1.5">
                   <SampleAlbumPath path={path} brandColor={albumBrand?.color} nameOf={nameOf} onBack={() => closeAlbum()} onOpen={(id) => void openAlbum(id)} crumbExtra={dropOnAlbum} overKey={overKey} />
-                  {!album.brand_id && !album.parent_id && canEdit && brands.length > 0 && (
-                    <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
+                  {!album.parent_id && canEdit && brands.length > 0 && (
+                    <button type="button" onClick={() => setToBrand((x) => !x)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 bg-white px-3 text-[12px] text-violet-700 hover:bg-violet-50"><Icon value="i:arrow-right" />{album.brand_id ? t("เปลี่ยนแบรนด์", "Change brand") : t("ย้ายอัลบั้มเข้าแบรนด์", "Move album into a brand")}</button>
                   )}
                   {isDayAlbum(album) && canEdit && (
                     <button type="button" onClick={() => void rename()} disabled={busy} title={t("ตั้งชื่อให้อัลบั้มของวันนี้ (วันที่ยังเก็บไว้)", "Give this day album a name (date is kept)")} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:pencil" />{album.display_name ? t("แก้ชื่อ", "Rename") : t("ตั้งชื่อ", "Name it")}</button>
@@ -896,10 +907,10 @@ export function SampleImagesPage() {
                   {searching && photos && <span className="text-[12px] text-slate-500">{t(`พบ ${list.length} จาก ${allInView.length} รูป`, `${list.length} of ${allInView.length}`)}</span>}
                 </SampleSearchSort>
 
-                {toBrand && !album.brand_id && (
+                {toBrand && !album.parent_id && (
                   <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-violet-100 bg-violet-50/50 p-2 text-[12px]">
-                    <span className="text-slate-600">{t("อัลบั้มนี้เป็นของแบรนด์ไหน?", "Which brand is this album?")}</span>
-                    {brands.map((b) => (
+                    <span className="text-slate-600">{album.brand_id ? t("ย้ายไปแบรนด์ไหน?", "Move to which brand?") : t("อัลบั้มนี้เป็นของแบรนด์ไหน?", "Which brand is this album?")}</span>
+                    {brands.filter((b) => b.id !== album.brand_id).map((b) => (
                       <button key={b.id} type="button" disabled={busy} onClick={() => void doSetBrand(b.id)}
                         className={`relative inline-flex h-8 items-center gap-1 rounded-full border bg-white px-3 text-[12px] hover:border-violet-300 disabled:opacity-60 ${album.suggested_brand_id === b.id ? "border-violet-400 text-violet-800" : "border-slate-200 text-slate-700"}`}>
                         {dot(b.color)}{b.name}{album.suggested_brand_id === b.id && <span className="ml-1 rounded-full bg-violet-600 px-1.5 text-[10px] text-white">{t("แนะนำ", "Suggested")}</span>}

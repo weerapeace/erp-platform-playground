@@ -467,7 +467,17 @@ export async function POST(request: NextRequest) {
         if (e) return NextResponse.json({ error: "ย้ายอัลบั้มไม่สำเร็จ" }, { status: 500 });
         await rebrandBranch(admin, all, a.id, brand.id);
       }
-      for (const part of chunks(ids)) await admin.from("assets").update({ brand_id: brand.id }).in("id", part).is("brand_id", null);
+      // รูปที่ยังไม่มีแบรนด์ หรือเป็นของแบรนด์เดิมของอัลบั้มนี้ → แบรนด์ใหม่ (เปลี่ยนแบรนด์ได้ · 2026-11-22)
+      // รวมรูปในอัลบั้มย่อยทุกชั้นด้วย (อัลบั้มย่อยย้ายแบรนด์ตามไปแล้ว)
+      const subIds = descendantIds(all.map((x) => ({ id: x.id, parent_id: x.parentId })), a.id);
+      if (subIds.length) {
+        const { data: subMaps } = await admin.from("asset_collection_map").select("asset_id").in("collection_id", subIds);
+        for (const m of (subMaps ?? []) as { asset_id: string }[]) if (!ids.includes(m.asset_id)) ids.push(m.asset_id);
+      }
+      for (const part of chunks(ids)) {
+        await admin.from("assets").update({ brand_id: brand.id }).in("id", part).is("brand_id", null);
+        if (a.brandId && a.brandId !== brand.id) await admin.from("assets").update({ brand_id: brand.id }).in("id", part).eq("brand_id", a.brandId);
+      }
       await audit("update", resultId, { set_brand: brand.id, from_album: a.id, old_name: a.name, new_name: name, merged: !!target, files: ids.length });
       return NextResponse.json({ data: { id: resultId, name, merged: !!target }, error: null });
     }
