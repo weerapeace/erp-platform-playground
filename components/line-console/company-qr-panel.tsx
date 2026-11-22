@@ -12,7 +12,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { QrCode } from "@/components/qr-code";
 import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
-import { POSTER_QR_KINDS, QR_LABEL } from "@/lib/line-company-qr";
+import { POSTER_QR_KINDS, QR_LABEL } from "@/lib/line-company-qr-labels";   // ไม่ import lib/line-company-qr (มี crypto ฝั่งเซิร์ฟเวอร์)
 
 export type CompanyQrData = Record<"staff" | "customer" | "admin", { link: string | null; rotated_at: string | null }> | null;
 

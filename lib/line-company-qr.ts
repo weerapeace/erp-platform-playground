@@ -17,16 +17,9 @@ import { APPROVE_LIFF_ID } from "@/lib/approval-token";
 const SECRET = process.env.APPROVAL_TOKEN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || "dev-approval-secret";
 const APP_BASE = (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
 
-export type CompanyQrKind = "staff" | "customer" | "admin" | "shop";
-export const POSTER_QR_KINDS: Exclude<CompanyQrKind, "shop">[] = ["staff", "customer", "admin"];
-export const QR_KINDS: CompanyQrKind[] = ["staff", "customer", "admin", "shop"];
-
-export const QR_LABEL: Record<CompanyQrKind, { title: string; where: string }> = {
-  staff: { title: "QR พนักงาน", where: "ติดโรงงาน / ห้องพัก" },
-  customer: { title: "QR ลูกค้า (รวมทุกร้าน)", where: "หน้าร้าน / แปะใบส่งของ" },
-  admin: { title: "QR แอดมิน", where: "ไม่ติดที่สาธารณะ · ต้องมีบัญชี ERP ที่มีสิทธิ์แอดมิน" },
-  shop: { title: "QR รายร้าน", where: "ให้ร้านนั้นเท่านั้น · สแกนแล้วผูกร้านทันที" },
-};
+// ชื่อ/ชนิด QR อยู่ไฟล์แยก (หน้าเว็บ import ได้โดยไม่ติด crypto) — ส่งต่อจากที่นี่ให้ฝั่งเซิร์ฟเวอร์ใช้เหมือนเดิม
+import { QR_KINDS, type CompanyQrKind } from "@/lib/line-company-qr-labels";
+export { POSTER_QR_KINDS, QR_KINDS, QR_LABEL, type CompanyQrKind } from "@/lib/line-company-qr-labels";
 
 /** เลขรุ่นของ QR แต่ละแบบ (line_config.company_qr) */
 export type CompanyQrState = Partial<Record<CompanyQrKind, string>> & { rotated_at?: Partial<Record<CompanyQrKind, string>> };
