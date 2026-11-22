@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import {
-  compareAll, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
+  compareAll, coreValue, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
   type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
 } from "@/lib/platform-listing-drift";
 import { buildLineCreate } from "@/lib/line-create-payload";
@@ -24,7 +24,7 @@ import { loadShopeeCreate } from "@/app/api/shopee/create-product/load";
 import { loadShopeeListingLive } from "@/app/api/shopee/shared";
 import { loadLazListingLive } from "@/app/api/lazada/shared";
 import { loadTtsListingLive, ttsViewWithReview } from "@/app/api/tiktok-shop/shared";
-import { planShopeeEdit, planShopeeImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
+import { planShopeeEdit, planShopeeImages, planShopeeOptionImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
 import {
   foreignDescImages, lazadaEditStateFromView, lazadaListingView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazMigrateImageXml, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia,
   type LazadaEditState, type LazadaListingView,
@@ -117,6 +117,18 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
   const imgPlan = () => planShopeeImages(v, base.sys.imageRefs);
   const descPlan = () => planShopeeEdit(v, { description: base.sys.description });
   const titlePlan = () => planShopeeEdit(v, { name: base.sys.title ?? "" });
+  // รูปตัวเลือก: ชื่อตัวเลือกชั้นแรกบนร้าน (เช่น "ดำ (01)") ↔ รูปของสีนั้นในระบบ (ตัวเตรียมข้อมูลกลาง) · route /api/shopee/listing-edit option_images (a20fd610)
+  const tier0 = v.optionTiers?.[0] ?? null;
+  const optWant = (): Record<string, string> => {
+    const want: Record<string, string> = {};
+    const key = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+    for (const o of tier0?.options ?? []) {
+      const sv = base.sys.variants.find((x) => x.image && x.values[0] && (key(x.values[0]) === key(o.name) || key(coreValue(x.values[0])) === key(coreValue(o.name))));
+      if (sv?.image) want[o.name] = sv.image;
+    }
+    return want;
+  };
+  const optPlan = () => planShopeeOptionImages(v, optWant());
   const priceRows = shopeePriceRowsFromView(v);
   const priceEdit = () => priceRows.map((r) => {
     const m = v.hasModel ? v.models.find((x) => x.modelId === r.modelId) : null;
@@ -131,7 +143,7 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       : k === "description" ? (!v.descriptionEditable ? "Shopee: สินค้านี้ใช้รายละเอียดแบบมีรูป — แก้ใน Seller Centre" : errs(descPlan().errors))
       : k === "options" ? OPT_CANNOT.shopee
       : k === "desc_images" ? null
-      : k === "variant_images" ? "Shopee: ระบบยังเปลี่ยนรูปตัวเลือกให้ไม่ได้ — แก้ใน Seller Centre"
+      : k === "variant_images" ? errs(optPlan().errors)
       : errs(pricePlan().errors),
     build: async (keys) => {
       const calls: DriftCall[] = [];
@@ -151,6 +163,10 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       if (keys.includes("desc_images") && base.sys.descImageRefs?.length) body.desc_images = { before_ids: descImgs.map((x) => x.id), refs: base.sys.descImageRefs };
       const edit = body.edit as { name: string | null; description: string | null } | undefined;
       if (edit || body.images || body.desc_images) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : "", body.desc_images ? "รูปในรายละเอียด" : ""].filter(Boolean).join(" + "), body });
+      // รูปตัวเลือก: ต้องส่งแยกคำสั่ง (route ไม่รับรวมกับชื่อ/รูป/รูปในรายละเอียด) · route เช็กตัวเลือก/ราคาหลังส่ง
+      if (keys.includes("variant_images") && tier0 && optPlan().changed) {
+        calls.push({ url: "/api/shopee/listing-edit", label: "รูปตัวเลือก", body: { listing_id: base.listingId, option_images: { before: Object.fromEntries(tier0.options.map((o) => [o.name, o.imageId])), refs: optWant() } } });
+      }
       return calls;
     },
   };

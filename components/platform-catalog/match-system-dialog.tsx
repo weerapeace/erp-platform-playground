@@ -26,7 +26,9 @@ type Check = { listing_id: string; platform_code: string; items: DriftItem[]; is
 /** ชื่อร้านสั้น (แจ้งผลของตัวเปิดหน้าให้เช็ก) */
 const SHOP_LABEL: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE" };
 type Call = { url: string; body: Record<string, unknown>; label: string };
-type Step = { label: string; state: "wait" | "run" | "ok" | "fail"; error?: string };
+type Step = { label: string; state: "wait" | "run" | "ok" | "fail"; error?: string; warnings?: string[] };
+/** คำเตือนจากร้านที่ต้องรีบดู (โชว์กรอบแดงใหญ่ + แจ้งผลมุมจอ) */
+const URGENT = /ถูกสร้างใหม่|BigSeller ด่วน|structure/i;
 
 const REVIEW_NOTE: Record<string, string> = {
   tiktok: "TikTok: ส่งชื่อ/รูป/รายละเอียด/ชื่อตัวเลือก แล้ว TikTok ต้องตรวจใหม่ (ปกติไม่เกิน 1 วัน) ระหว่างนั้นร้านยังขายของเดิม · ราคามีผลทันที · ส่งหลายเรื่องพร้อมกัน = ตรวจรอบเดียว",
@@ -112,7 +114,10 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
         const r = await apiFetch(calls[i].url, { method: "POST", body: JSON.stringify(calls[i].body) });
         const j = await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }));
         const err = !r.ok || j.ok === false || j.error ? (j.error || (r.status === 409 ? "มีคนแก้บนร้านระหว่างนี้ — ปิดแล้วเปิดใหม่เพื่อดูข้อมูลล่าสุด" : `HTTP ${r.status}`)) : null;
-        st[i] = { ...st[i], state: err ? "fail" : "ok", error: err ?? undefined }; setSteps([...st]);
+        const warns = Array.isArray(j.warnings) ? (j.warnings as unknown[]).map(String).filter(Boolean) : [];
+        st[i] = { ...st[i], state: err ? "fail" : "ok", error: err ?? undefined, warnings: warns }; setSteps([...st]);
+        const urgent = warns.filter((w) => URGENT.test(w));
+        if (urgent.length) toast.error(urgent.join(" · "));
         if (err) { failed = true; break; }
       }
       const doneKeys = failed ? [] : keys;
@@ -249,10 +254,18 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                   <Icon name={s.state === "ok" ? "done" : s.state === "fail" ? "warning" : s.state === "run" ? "refresh" : "info"} />
                   <span className={s.state === "fail" ? "text-rose-700" : s.state === "ok" ? "text-emerald-700" : "text-slate-600"}>
                     ส่ง{s.label} — {s.state === "ok" ? "สำเร็จ" : s.state === "fail" ? `ไม่สำเร็จ: ${s.error}` : s.state === "run" ? "กำลังส่ง…" : "รอ"}
+                    {s.warnings?.filter((w) => !URGENT.test(w)).map((w) => <span key={w} className="block text-[11px] text-slate-500">{w}</span>)}
                   </span>
                 </li>
               ))}
             </ul>
+          )}
+          {/* คำเตือนด่วนจากร้าน (เช่น ตัวเลือกบน Shopee ถูกสร้างใหม่ → เช็ก BigSeller) — ต้องเห็นชัด */}
+          {steps?.some((s) => s.warnings?.some((w) => URGENT.test(w))) && (
+            <div className="flex items-start gap-1.5 rounded-lg border-2 border-rose-300 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-800">
+              <Icon name="warning" />
+              <span>{steps.flatMap((s) => s.warnings ?? []).filter((w) => URGENT.test(w)).join(" · ")}</span>
+            </div>
           )}
         </div>
       ) : null}

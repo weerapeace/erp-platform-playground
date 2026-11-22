@@ -365,5 +365,5 @@
   - LINE: /api/line-shopping/desc-images เฉพาะสินค้าที่ปิดขาย (ต่อท้ายได้อย่างเดียว — มีรูปเดิมต้องติ๊ก "รายละเอียด" ด้วย) · Shopee: ส่งผ่าน /api/shopee/listing-edit desc_images (route ฝากรูป scene desc แทนทั้งชุด · ร้าน LM มีสิทธิ์ extended แล้ว · 8ac19307)
 - **เว้นบรรทัดตามจริง** ในหน้าเทียบ (`plainText(..., { keepBlank })` · บรรทัดว่างไม่นับว่าต่าง)
 - **ตารางตัวเลือก** รูป · สี · ราคา 2 ฝั่ง (`variantTable`) ใต้แถว "ชื่อตัวเลือก"
-- **รูปตัวเลือก** (เรื่องใหม่ `variant_images`) ส่งได้ TikTok (skus images ชั้นหลัก ต้องครบทุกค่า) · Lazada (รูปแรกของแต่ละ SKU · planLazadaSkuMedia) · LINE (imageUrl ต่อตัวเลือก) · Shopee ดูอย่างเดียว
+- **รูปตัวเลือก** (เรื่องใหม่ `variant_images`) ส่งได้ TikTok (skus images ชั้นหลัก ต้องครบทุกค่า) · Lazada (รูปแรกของแต่ละ SKU · planLazadaSkuMedia) · LINE (imageUrl ต่อตัวเลือก) · Shopee (option_images ของ /api/shopee/listing-edit · ส่งแยกคำสั่ง · ต้องครบทุกตัวเลือกชั้นแรก · ตัวเลือกถูกสร้างใหม่ = กรอบแดง "เช็ก BigSeller ด่วน" · a20fd610)
 - รูปทุกแบบเทียบที่อยู่ตรง ๆ ไม่ได้ → ส่งครั้งแรกแล้วจำชุดใน `raw.sys_sync` (images_* / desc_images_* / vimg_*)
