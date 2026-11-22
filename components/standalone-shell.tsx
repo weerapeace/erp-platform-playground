@@ -17,6 +17,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { LangToggle, useT } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
+import { Icon } from "@/components/icon";
 
 export function StandaloneShell({
   title, icon, accent = "violet", children,
@@ -57,7 +58,7 @@ export function StandaloneShell({
           <span className={`h-1.5 w-1.5 rounded-full ${dot} hidden sm:block`} />
           <div className="leading-tight min-w-0">
             <div className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
-              {icon && <span>{icon}</span>}{title}
+              {icon && <span><Icon value={icon} /></span>}{title}
             </div>
             <div className="text-[10px] text-slate-400">{BRAND.name} · {t("โหมดแอปแยก", "Standalone app")}</div>
           </div>

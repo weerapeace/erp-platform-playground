@@ -48,7 +48,7 @@ export function HoverImage({
   previewSize?: number;   // ขนาดรูปพรีวิว (px)
   alt?: string;
   rounded?: string;       // class มุมโค้งของรูปย่อ
-  fallback?: string;      // ไอคอน/ตัวอักษรเมื่อไม่มีรูป
+  fallback?: ReactNode;   // ไอคอน/ตัวอักษรเมื่อไม่มีรูป (ส่ง <Icon> ได้)
   className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);

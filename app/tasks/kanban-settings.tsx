@@ -6,6 +6,7 @@
 // มุมมอง WIP (wip): ไม่มีจัดกลุ่ม (คอลัมน์ตายตัว) แต่เลือกจำนวนคอลัมน์การ์ดในช่องใหญ่ 1–3 แทน
 // ============================================================
 
+import { Icon } from "@/components/icon";
 import { useState } from "react";
 import { useT } from "@/components/i18n";
 import type { KanbanTheme, WipCols, CardLook, CardScale } from "./overview-customizer";
@@ -25,10 +26,10 @@ export function CardStyleBar({ cfg, onChange, accent, wip }: { cfg: KanbanTheme;
   const look = cfg.cardLook ?? "std";
   const size = cfg.cardScale ?? "md";
   const looks: [CardLook, string, string, string][] = [
-    ["std", "🃏", t("มาตรฐาน", "Standard"), t("รูปบน ข้อมูลตามที่ติ๊กใน ⚙️", "Cover on top, fields from ⚙️")],
-    ["gallery", "🖼️", t("รูปเด่น", "Gallery"), t("รูปใหญ่ + ชื่อ + คน + วันส่ง — จำงานจากรูป", "Big image + title, people, due")],
-    ["list", "☰", t("แถวรายการ", "List"), t("1 บรรทัดต่องาน เห็นได้มากสุดในจอเดียว", "One line per task — see the most at once")],
-    ["text", "🔤", t("กะทัดรัด", "Compact"), t("ไม่มีรูป เหลือชื่อ + คน + วันส่ง", "No images — title, people, due")],
+    ["std", "i:layout-grid", t("มาตรฐาน", "Standard"), t("รูปบน ข้อมูลตามที่ติ๊กในตั้งค่า", "Cover on top, fields from Settings")],
+    ["gallery", "i:photo", t("รูปเด่น", "Gallery"), t("รูปใหญ่ + ชื่อ + คน + วันส่ง — จำงานจากรูป", "Big image + title, people, due")],
+    ["list", "i:list", t("แถวรายการ", "List"), t("1 บรรทัดต่องาน เห็นได้มากสุดในจอเดียว", "One line per task — see the most at once")],
+    ["text", "i:typography", t("กะทัดรัด", "Compact"), t("ไม่มีรูป เหลือชื่อ + คน + วันส่ง", "No images — title, people, due")],
   ];
   const sizes: [CardScale, string][] = [["sm", t("เล็ก", "S")], ["md", t("กลาง", "M")], ["lg", t("ใหญ่", "L")]];
   const pick = (p: { look?: CardLook; size?: CardScale }) => {
@@ -42,12 +43,12 @@ export function CardStyleBar({ cfg, onChange, accent, wip }: { cfg: KanbanTheme;
         {looks.map(([k, icon, label, hint]) => (
           <button key={k} type="button" onClick={() => pick({ look: k })} title={`${label} — ${hint}`} aria-pressed={look === k}
             style={look === k ? { background: accent || "#7c3aed" } : undefined} className={seg(look === k)}>
-            {icon}<span className="hidden xl:inline ml-1">{label}</span>
+            <Icon value={icon} /><span className="hidden xl:inline ml-1">{label}</span>
           </button>
         ))}
       </div>
       <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm" role="group" aria-label={t("ขนาดการ์ด", "Card size")}
-        title={wip ? t("ขนาดการ์ด — ปรับจำนวนคอลัมน์ให้เอง (ปรับละเอียดได้ใน ⚙️)", "Card size — also sets columns (fine-tune in ⚙️)") : t("ขนาดการ์ด", "Card size")}>
+        title={wip ? t("ขนาดการ์ด — ปรับจำนวนคอลัมน์ให้เอง (ปรับละเอียดได้ในตั้งค่า)", "Card size — also sets columns (fine-tune in Settings)") : t("ขนาดการ์ด", "Card size")}>
         {sizes.map(([k, label]) => (
           <button key={k} type="button" onClick={() => pick({ size: k })} aria-pressed={size === k}
             style={size === k ? { background: accent || "#7c3aed" } : undefined} className={seg(size === k)}>{label}</button>
@@ -80,7 +81,7 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
     <div className="space-y-3">
       {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (แทนชี้ที่รูป) — เลือกได้ว่าจะโชว์อะไร */}
       <div className="space-y-1.5 rounded-lg border border-violet-100 bg-violet-50/40 p-2" data-hover-card-settings>
-        <div className="text-xs font-semibold text-violet-700">🪟 {t("Hover การ์ด (ชี้เมาส์ที่การ์ด)", "Card hover")}</div>
+        <div className="text-xs font-semibold text-violet-700"><Icon value="i:pointer" className="mr-1" />{t("Hover การ์ด (ชี้เมาส์ที่การ์ด)", "Card hover")}</div>
         <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
           <input type="checkbox" checked={cfg.hoverCard !== false} onChange={(e) => set({ hoverCard: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
           {t("โชว์รูปใหญ่ + รายละเอียดงาน เมื่อชี้ที่การ์ด", "Show large image + task details on hover")}
@@ -180,13 +181,13 @@ export function KanbanSettings({ cfg, onChange, accent, wip }: { cfg: KanbanThem
   return (
     <div className="relative">
       <button onClick={() => setOpen((o) => !o)} title={t("ตั้งค่า Kanban / การ์ด", "Kanban / card settings")}
-        className="h-7 px-2.5 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 shadow-sm">⚙️ {t("ตั้งค่า", "Settings")}</button>
+        className="h-7 px-2.5 inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 shadow-sm"><Icon value="i:settings" />{t("ตั้งค่า", "Settings")}</button>
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-40 mt-1 w-80 max-h-[75vh] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-xl p-3">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm font-semibold text-slate-700">⚙️ {wip ? t("ตั้งค่า WIP", "WIP settings") : t("ตั้งค่า Kanban", "Kanban settings")}</p>
+              <p className="text-sm font-semibold text-slate-700"><Icon value="i:settings" className="mr-1" />{wip ? t("ตั้งค่า WIP", "WIP settings") : t("ตั้งค่า Kanban", "Kanban settings")}</p>
               <button onClick={() => setOpen(false)} className="text-slate-300 hover:text-slate-600 text-xs">✕</button>
             </div>
             <KanbanSettingsControls cfg={cfg} onChange={onChange} wip={wip} />

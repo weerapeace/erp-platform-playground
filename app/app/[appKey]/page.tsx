@@ -48,7 +48,7 @@ function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(it.icon_url)}&w=64`} alt="" className={`${cls} object-contain shrink-0`} />;
   }
-  return <span className={`text-xl flex-shrink-0`}>{it.icon ?? "•"}</span>;
+  return <span className={`text-xl flex-shrink-0`}>{it.icon ? <Icon value={it.icon} /> : "•"}</span>;
 }
 type AppGroup = { id?: string; kind?: string | null; label_en?: string | null; menu_more_label?: string | null; key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; default_href: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null };
 // ไอคอนแอป: รูปอัปโหลด (icon_url) > emoji
@@ -57,7 +57,7 @@ function AppIcon({ app, size = 22 }: { app: AppGroup | null; size?: number }) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(app.icon_url)}&w=64`} alt="" className="rounded object-contain shrink-0" style={{ width: size, height: size }} />;
   }
-  return <span className="shrink-0 leading-none" style={{ fontSize: size }}>{app?.icon ?? "🧩"}</span>;
+  return <span className="shrink-0 leading-none" style={{ fontSize: size }}><Icon value={app?.icon ?? "🧩"} /></span>;
 }
 
 export default function StandaloneApp() {
@@ -543,7 +543,7 @@ export default function StandaloneApp() {
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
             {/* หัว — ชื่อแอป + ปิด (แอปเดี่ยว: โชว์เฉพาะเมนูของแอปนี้ ไม่มีทางออกไปแอปอื่น) */}
             <div className="flex-shrink-0 bg-white px-3 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
-              <div className="font-semibold text-slate-800 truncate px-1">{app?.icon ?? "🧩"} {app ? appTitle : "เมนูทั้งหมด"}</div>
+              <div className="font-semibold text-slate-800 truncate px-1"><Icon value={app?.icon ?? "🧩"} /> {app ? appTitle : "เมนูทั้งหมด"}</div>
               <button onClick={closeDrawer} aria-label="ปิด" className="text-slate-400 text-xl leading-none px-2">✕</button>
             </div>
 
@@ -606,7 +606,7 @@ function AppLoading({ label, icon }: { label?: string | null; icon?: string | nu
       {/* แถบหัวธีมเดียวกับแอปจริง → พอโหลดเสร็จเปลี่ยนแค่เนื้อหา (ลื่น ไม่กระพริบ) */}
       <header className="flex-shrink-0 bg-gradient-to-r from-blue-700 to-indigo-600 px-4" style={{ paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-3 flex items-center gap-2.5">
-          <div className="h-9 w-9 rounded-lg bg-white/15 flex items-center justify-center text-lg">{icon ?? "🧩"}</div>
+          <div className="h-9 w-9 rounded-lg bg-white/15 flex items-center justify-center text-lg text-white"><Icon value={icon ?? "🧩"} /></div>
           {label
             ? <div className="font-semibold text-lg text-white truncate">{label}</div>
             : <div className="h-5 w-36 rounded-md bg-white/20 animate-pulse" />}
@@ -616,7 +616,7 @@ function AppLoading({ label, icon }: { label?: string | null; icon?: string | nu
       <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6">
         <div className="relative h-16 w-16">
           <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 animate-ping opacity-60" />
-          <div className="absolute inset-0 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-3xl">{icon ?? "🧩"}</div>
+          <div className="absolute inset-0 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-3xl"><Icon value={icon ?? "🧩"} /></div>
         </div>
         <div className="flex items-center gap-2 text-slate-400 text-sm">
           <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-200 border-t-indigo-500 animate-spin" />

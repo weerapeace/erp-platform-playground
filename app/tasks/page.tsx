@@ -78,12 +78,12 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
       const cover = row.original.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(row.original.cover_image_r2_key)}` : null;
       return (
         <div className="flex items-center gap-2 min-w-0">
-          <HoverImage url={cover} size={34} previewSize={320} rounded="rounded-md" fallback="🎨" />
+          <HoverImage url={cover} size={34} previewSize={320} rounded="rounded-md" fallback={<Icon value="i:palette" />} />
           <div className="min-w-0">
             <div className="text-sm font-medium text-slate-800 line-clamp-1">{row.original.title}</div>
             <div className="text-xs text-slate-400 line-clamp-1">
               {row.original.task_type && <span>{taskTypeLabel(row.original.task_type)}</span>}
-              {row.original.sku_code && <span> · 📦 {row.original.sku_code}</span>}
+              {row.original.sku_code && <span> · <Icon value="i:package" className="mr-1" />{row.original.sku_code}</span>}
             </div>
           </div>
         </div>
@@ -95,7 +95,7 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
   { accessorKey: "priority", header: t("ความสำคัญ", "Priority"), size: 100, cell: ({ getValue }) => <PriorityBadge priority={getValue() as CreativePriority} /> },
   { accessorKey: "status", header: t("สถานะ", "Status"), size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as CreativeStatus} /> },
   { accessorKey: "progress_percent", header: t("คืบหน้า", "Progress"), size: 90, cell: ({ getValue }) => { const v = (getValue() as number) ?? 0; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-12 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400">{v}%</span></div>; } },
-  { accessorKey: "due_date", header: t("กำหนดส่ง", "Due date"), size: 110, cell: ({ row }) => { const row0 = row.original; if (!row0.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(row0); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{row0.due_date}</span>; } },
+  { accessorKey: "due_date", header: t("กำหนดส่ง", "Due date"), size: 110, cell: ({ row }) => { const row0 = row.original; if (!row0.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(row0); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && <Icon value="i:alert-triangle" className="mr-0.5" />}{row0.due_date}</span>; } },
 ]; }
 
 /** true ตั้งแต่ครั้งแรกที่ open เป็น true แล้วค้างไว้ — ใช้หน่วงโหลดโค้ดป๊อปจนกว่าจะเปิดใช้จริง */
@@ -276,7 +276,7 @@ export default function TasksPage() {
   const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   return (
-    <StandaloneShell title={t("งาน Creative (Task Manager)", "Creative Tasks")} icon="🎨" accent="violet">
+    <StandaloneShell title={t("งาน Creative (Task Manager)", "Creative Tasks")} icon="i:palette" accent="violet">
       {/* Header */}
       {/* แถบหัว — ซ่อนทั้งแถบบนหน้าภาพรวม (ปุ่มทั้งหมดมีใน Hero + ทางลัด ของภาพรวมแล้ว) */}
       {view !== "overview" && (
@@ -287,13 +287,13 @@ export default function TasksPage() {
             <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Link href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</Link>
-            <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
-            <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 {t("เทมเพลต", "Templates")}</a>
-            <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📚 {t("ความรู้", "Knowledge")}</button>
-            {canSettings && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
-            <button onClick={() => setQuickOpen(true)} className="h-10 px-4 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100 transition-colors">⚡ {t("งานด่วน", "Quick task")}</button>
-            {canJob && <button onClick={() => void openJobCreate()} title={t("งานเป็นชุดหลายรุ่น + เช็กลิสต์ต่อรุ่น (Clearance / ลงเว็บ) — ติ๊กที่หน้า SKU การตลาด", "Batch job over many models with a per-model checklist")} className="h-10 px-4 text-violet-700 bg-violet-50 border border-violet-200 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors">🛠 {t("งานชุดรุ่น", "Model batch")}</button>}
+            <Link href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:ad" className="mr-1" />{t("แคมเปญ", "Campaigns")}</Link>
+            <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:device-mobile" className="mr-1" />{t("คอนเทนต์", "Content")}</a>
+            <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:repeat" className="mr-1" />{t("เทมเพลต", "Templates")}</a>
+            <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:books" className="mr-1" />{t("ความรู้", "Knowledge")}</button>
+            {canSettings && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}><Icon value="i:settings" /></a>}
+            <button onClick={() => setQuickOpen(true)} className="h-10 px-4 text-amber-700 bg-amber-50 border border-amber-200 text-sm font-medium rounded-lg hover:bg-amber-100 transition-colors"><Icon value="i:bolt" className="mr-1" />{t("งานด่วน", "Quick task")}</button>
+            {canJob && <button onClick={() => void openJobCreate()} title={t("งานเป็นชุดหลายรุ่น + เช็กลิสต์ต่อรุ่น (Clearance / ลงเว็บ) — ติ๊กที่หน้า SKU การตลาด", "Batch job over many models with a per-model checklist")} className="h-10 px-4 text-violet-700 bg-violet-50 border border-violet-200 text-sm font-medium rounded-lg hover:bg-violet-100 transition-colors"><Icon value="i:tool" className="mr-1" />{t("งานชุดรุ่น", "Model batch")}</button>}
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
@@ -370,7 +370,7 @@ export default function TasksPage() {
             {view === "kanban" && (
               <div>
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <p className="text-xs text-slate-400">💡 {t("ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด · ปรับการ์ด/จัดกลุ่มที่ ⚙️", "Drag cards across columns · click to view · adjust via ⚙️")}</p>
+                  <p className="text-xs text-slate-400"><Icon value="i:bulb" className="mr-1" />{t("ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด · ปรับการ์ด/จัดกลุ่มที่ปุ่มตั้งค่า", "Drag cards across columns · click to view · adjust via Settings")}</p>
                   <KanbanSettings cfg={ovTheme.kanban} onChange={(k) => saveTheme({ ...ovTheme, kanban: k })} accent={ovTheme.accent} />
                 </div>
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -384,7 +384,7 @@ export default function TasksPage() {
 
             {view === "canvas" && (
               <div>
-                <p className="text-xs text-slate-400 mb-2">💡 {t("ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด", "Drag cards freely · drop into a status zone to change status · draw boxes/notes/arrows/images · double-click a card to view details")}</p>
+                <p className="text-xs text-slate-400 mb-2"><Icon value="i:bulb" className="mr-1" />{t("ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด", "Drag cards freely · drop into a status zone to change status · draw boxes/notes/arrows/images · double-click a card to view details")}</p>
                 <CanvasBoard tasks={tasks} statuses={statuses} startMaximized onAddTask={openCreate} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to, force) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to, force); }} />
               </div>
             )}
@@ -455,13 +455,13 @@ function ViewSwitcher({ view, setView, t, onHero }: {
 }) {
   const [open, setOpen] = useState(false);
   const VIEWS: { k: TaskView; icon: ReactNode; label: string }[] = [
-    { k: "overview", icon: "🏠", label: t("ภาพรวม", "Overview") },
-    { k: "queue", icon: "🙋", label: t("คิวงานของฉัน", "My queue") },
-    { k: "calendar", icon: "📅", label: t("ปฏิทิน", "Calendar") },
-    { k: "workload", icon: "👥", label: t("ภาระงาน", "Workload") },
-    { k: "report", icon: "📊", label: t("รายงาน", "Report") },
-    { k: "kanban", icon: "🟦", label: "Kanban" },
-    { k: "canvas", icon: "🟪", label: "Canvas" },
+    { k: "overview", icon: <Icon value="i:home" size={15} />, label: t("ภาพรวม", "Overview") },
+    { k: "queue", icon: <Icon value="i:user" size={15} />, label: t("คิวงานของฉัน", "My queue") },
+    { k: "calendar", icon: <Icon value="i:calendar" size={15} />, label: t("ปฏิทิน", "Calendar") },
+    { k: "workload", icon: <Icon value="i:users" size={15} />, label: t("ภาระงาน", "Workload") },
+    { k: "report", icon: <Icon value="i:chart-bar" size={15} />, label: t("รายงาน", "Report") },
+    { k: "kanban", icon: <Icon value="i:layout-kanban" size={15} />, label: "Kanban" },
+    { k: "canvas", icon: <Icon value="i:layout-dashboard" size={15} />, label: "Canvas" },
     { k: "files", icon: <Icon name="folder" size={15} />, label: t("ประวัติไฟล์", "File history") },
   ];
   const cur = VIEWS.find((v) => v.k === view) ?? VIEWS[0];
@@ -506,7 +506,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
 
   if (ordered.length === 0 && subtasks.length === 0) {
     return (
-      <EmptyState icon="🎉" title={t("ไม่มีงานค้างในคิวของคุณ", "Your queue is clear")} hint={t("งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง", "Tasks and subtasks assigned to you will appear here, sorted by priority and due date")} action={{ label: <>＋ {t("สร้างงาน", "New task")}</>, onClick: onCreate }} />
+      <EmptyState icon={<Icon value="i:confetti" />} title={t("ไม่มีงานค้างในคิวของคุณ", "Your queue is clear")} hint={t("งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง", "Tasks and subtasks assigned to you will appear here, sorted by priority and due date")} action={{ label: <>＋ {t("สร้างงาน", "New task")}</>, onClick: onCreate }} />
     );
   }
 
@@ -515,7 +515,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
       {/* งานย่อยของฉัน */}
       {!SUBTASKS_RETIRED && subtasks.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({subtasks.length})</p>
+          <p className="text-sm font-semibold text-slate-700 mb-2"><Icon value="i:puzzle" className="mr-1" />{t("งานย่อยของฉัน", "My subtasks")} ({subtasks.length})</p>
           <div className="space-y-3">
             {arrangeMySubtasks(subtasks, mySubView).map((g) => (
               <div key={g.key}>
@@ -559,8 +559,8 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
                 <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
                   <span className="font-mono">{task.task_no}</span>
                   {task.brand_label && <span>· {task.brand_label}</span>}
-                  {task.sku_code && <span>· 📦 {task.sku_code}</span>}
-                  {task.due_date && <span className={od ? "text-red-600 font-semibold" : ""}>· {od ? `⚠ ${t("เกินกำหนด", "Overdue")} ` : `${t("ส่ง", "Due")} `}{task.due_date}</span>}
+                  {task.sku_code && <span>· <Icon value="i:package" className="mr-1" />{task.sku_code}</span>}
+                  {task.due_date && <span className={od ? "text-red-600 font-semibold" : ""}>· {od ? <><Icon value="i:alert-triangle" className="mr-1" />{t("เกินกำหนด", "Overdue")} </> : `${t("ส่ง", "Due")} `}{task.due_date}</span>}
                 </div>
               </div>
             </div>
@@ -568,7 +568,7 @@ function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
               {actions.map((a) => (
                 <button key={a.to_key} onClick={() => onMove(task, a.to_key)} className="h-9 px-4 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700">{a.label}</button>
               ))}
-              <button onClick={() => onOpen(task.id)} className="h-9 px-4 text-sm font-medium rounded-lg text-slate-600 border border-slate-200 hover:bg-slate-50">📂 {t("เปิดงาน", "Open task")}</button>
+              <button onClick={() => onOpen(task.id)} className="h-9 px-4 text-sm font-medium rounded-lg text-slate-600 border border-slate-200 hover:bg-slate-50"><Icon value="i:folder-open" className="mr-1" />{t("เปิดงาน", "Open task")}</button>
             </div>
           </div>
         );

@@ -6,6 +6,7 @@
 // ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว + DataTable กลาง · ธีมต่อคนจาก user_ui_prefs
 // ============================================================
 
+import { Icon } from "@/components/icon";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useCtrlWheel } from "@/components/gallery-columns";
 import Link from "next/link";
@@ -225,11 +226,11 @@ export function OverviewDashboard({
 
   const heroLine = mineCount > 0
     ? `${t("คุณมีงานในมือ", "You have")} ${mineCount} ${t("งาน", "tasks on your plate")}${counts.overdue ? ` · ${t("เกินกำหนด", "overdue")} ${counts.overdue}` : ""}`
-    : t("ไม่มีงานค้างในมือคุณตอนนี้ 🎉", "Nothing on your plate right now 🎉");
+    : t("ไม่มีงานค้างในมือคุณตอนนี้", "Nothing on your plate right now");
   // ทักทายตามเวลา (ใช้เมื่อไม่ได้ตั้งข้อความเอง)
   const hr = new Date().getHours();
   const greetWord = hr < 12 ? t("สวัสดีตอนเช้า", "Good morning") : hr < 17 ? t("สวัสดีตอนบ่าย", "Good afternoon") : t("สวัสดีตอนเย็น", "Good evening");
-  const defaultTitle = `${greetWord}${userName ? " " + userName : ""} 👋`;
+  const defaultTitle = `${greetWord}${userName ? " " + userName : ""}`;
 
   const cardMeta: { key: CardKey; value: number; label: string }[] = [
     { key: "all", value: counts.total, label: t("งานทั้งหมด", "All tasks") },
@@ -295,11 +296,11 @@ export function OverviewDashboard({
             <div className="min-w-0">{viewSwitcher}</div>
             <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <button onClick={() => setGifOpen(true)} title={t("ส่ง GIF จิ้มเพื่อน", "Send a GIF to a colleague")}
-                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎁 {t("ส่ง GIF", "Send GIF")}</button>
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm"><Icon value="i:gift" className="mr-1" />{t("ส่ง GIF", "Send GIF")}</button>
               <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
-                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm"><Icon value="i:palette" className="mr-1" />{t("แต่งหน้า", "Customize")}</button>
               {onQuickCreate && <button onClick={onQuickCreate} title={t("เพิ่มงานเร็ว ๆ", "Quick add a task")}
-                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">⚡ {t("งานด่วน", "Quick")}</button>}
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm"><Icon value="i:bolt" className="mr-1" />{t("งานด่วน", "Quick")}</button>}
               <button onClick={onCreate} style={{ color: theme.accent }} className="h-10 px-4 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
             </div>
           </div>
@@ -312,14 +313,14 @@ export function OverviewDashboard({
           {theme.show.shortcuts && (
             <div className={`flex items-center gap-2 flex-wrap mt-4 ${theme.hero.align === "center" ? "justify-center" : ""}`}>
               <span className="text-xs font-semibold text-white/70 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
-              <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
-              <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
-              <ShortcutPill icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
-              <ShortcutPill icon="🟡" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
-              <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
-              <ShortcutPill icon="🔥" label={t("เทรนด์", "Trends")} href="/tasks/trends" />
-              <ShortcutPill icon="📸" label="SAMPLE Images" href="/tasks/samples" />
-              {(canSettings ?? isAdmin) && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
+              <ShortcutPill icon="i:ad" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
+              <ShortcutPill icon="i:device-mobile" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
+              <ShortcutPill icon="i:repeat" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
+              <ShortcutPill icon="i:hourglass" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
+              <ShortcutPill icon="i:books" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
+              <ShortcutPill icon="i:flame" label={t("เทรนด์", "Trends")} href="/tasks/trends" />
+              <ShortcutPill icon="i:camera" label="SAMPLE Images" href="/tasks/samples" />
+              {(canSettings ?? isAdmin) && <ShortcutPill icon="i:settings" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
             </div>
           )}
         </div>
@@ -334,7 +335,7 @@ export function OverviewDashboard({
                 active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
                 onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
               <button type="button" onClick={() => setCardHidden(m.key, true)} title={t("ซ่อนการ์ดนี้ (กดคืนได้ที่แถวด้านล่าง)", "Hide this card (restore from the row below)")} aria-label={t("ซ่อนการ์ด", "Hide card")}
-                className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md bg-white/80 text-slate-400 hover:text-slate-700 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">👁</button>
+                className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md bg-white/80 text-slate-400 hover:text-slate-700 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"><Icon value="i:eye" /></button>
             </div>
           ))}
         </div>
@@ -375,7 +376,7 @@ export function OverviewDashboard({
       {!SUBTASKS_RETIRED && mySubs.length > 0 && (
         filter === "mine" ? (
           <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
-            <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
+            <p className="text-sm font-semibold text-slate-700 mb-2"><Icon value="i:puzzle" className="mr-1" />{t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
             <div className="space-y-3">
               {arrangeMySubtasks(mySubs, mySubView).map((g) => (
                 <div key={g.key}>
@@ -391,7 +392,7 @@ export function OverviewDashboard({
                         style={s.type_color ? { borderLeftColor: s.type_color, borderLeftWidth: 3 } : undefined}>
                         {s.cover_image_r2_key
                           ? <img src={`/api/r2-image?key=${encodeURIComponent(s.cover_image_r2_key)}&w=80`} alt="" className="h-9 w-9 rounded object-cover border border-slate-100 shrink-0" />
-                          : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0">🖼️</span>}
+                          : <span className="h-9 w-9 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300 text-xs shrink-0"><Icon value="i:photo" /></span>}
                         <span className={`h-2 w-2 rounded-full shrink-0 ${subStatusDot(s.status)}`} title={statusText} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -404,7 +405,7 @@ export function OverviewDashboard({
                         </div>
                         {s.due_date && (
                           <div className="text-right shrink-0 leading-tight">
-                            <div className="text-xs text-slate-500">🗓 {s.due_date}</div>
+                            <div className="text-xs text-slate-500"><Icon value="i:calendar" className="mr-1" />{s.due_date}</div>
                             <div className={`text-[11px] font-medium ${remain != null && remain < 0 ? "text-red-600" : remain != null && remain <= 2 ? "text-amber-600" : "text-slate-400"}`}>{remainText}</div>
                           </div>
                         )}
@@ -418,7 +419,7 @@ export function OverviewDashboard({
           </div>
         ) : (
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800">
-            🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('กดการ์ด "งานของฉัน" เพื่อดูงานย่อย', 'tap the "My tasks" card to see subtasks')}
+            <Icon value="i:puzzle" />{t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('กดการ์ด "งานของฉัน" เพื่อดูงานย่อย', 'tap the "My tasks" card to see subtasks')}
           </div>
         )
       )}
@@ -429,7 +430,7 @@ export function OverviewDashboard({
         {theme.show.filters && filtersOpen && (
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 lg:w-52 lg:shrink-0 space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
+              <div className="text-xs font-semibold text-slate-500"><Icon value="i:search" className="mr-1" />{t("ตัวกรอง", "Filters")}</div>
               <button type="button" onClick={() => setFiltersOpen(false)} title={t("พับแผงตัวกรอง (บอร์ดกว้างขึ้น)", "Collapse filters (wider board)")} className="h-6 px-1.5 text-[11px] text-slate-400 border border-slate-200 rounded-md hover:text-slate-700 hover:bg-slate-50">◂ {t("พับ", "Hide")}</button>
             </div>
             <div>
@@ -461,7 +462,7 @@ export function OverviewDashboard({
           {theme.show.filters && !filtersOpen && (
             <div className="flex items-center gap-1.5 flex-wrap">
               <button type="button" onClick={() => setFiltersOpen(true)} title={t("กางแผงตัวกรอง (ประเภทงาน / แบรนด์)", "Show filters (type / brand)")}
-                className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 inline-flex items-center gap-1">🔎 {t("ตัวกรอง", "Filters")} ▸</button>
+                className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 inline-flex items-center gap-1"><Icon value="i:search" />{t("ตัวกรอง", "Filters")} ▸</button>
               {typeFilter && (
                 <button type="button" onClick={() => setTypeFilter("")} title={t("ล้างตัวกรองประเภทงาน", "Clear type filter")} className="h-7 px-2.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full hover:bg-violet-100">
                   {typeOptions.find((o) => o.value === typeFilter)?.label ?? typeFilter} ✕
@@ -476,7 +477,7 @@ export function OverviewDashboard({
           )}
           {filter === "review" ? (
             <>
-              <p className="text-sm font-semibold text-slate-700">🟡 {t("รอตรวจ/อนุมัติ — งานย่อยที่ส่งมา", "Review queue — submitted subtasks")}</p>
+              <p className="text-sm font-semibold text-slate-700"><Icon value="i:hourglass" className="mr-1" />{t("รอตรวจ/อนุมัติ — งานย่อยที่ส่งมา", "Review queue — submitted subtasks")}</p>
               <ReviewQueueView onChanged={onChanged} />
             </>
           ) : mineGroups ? (
@@ -484,7 +485,7 @@ export function OverviewDashboard({
           ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
-              ? <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">{theme.kanban.view === "wip" ? `🚧 WIP · ${filterLabel}` : filterLabel} ({theme.kanban.view === "wip" ? kanbanTasks.filter((tk) => isWipStatus(tk.status)).length : kanbanTasks.length})
+              ? <p className="text-sm font-semibold text-slate-700 flex items-center gap-2">{theme.kanban.view === "wip" ? <><Icon value="i:hammer" /> WIP · {filterLabel}</> : filterLabel} ({theme.kanban.view === "wip" ? kanbanTasks.filter((tk) => isWipStatus(tk.status)).length : kanbanTasks.length})
                   {statusFilter && onClearStatusFilter && <button type="button" onClick={onClearStatusFilter} className="text-[11px] font-normal text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {t("ล้างตัวกรองสถานะ", "Clear status filter")}</button>}
                 </p>
               : statusFilter && onClearStatusFilter
@@ -497,10 +498,10 @@ export function OverviewDashboard({
                   className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
               )}
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-                {([["kanban", "📋", t("การ์ด", "Cards")], ["wip", "🚧", "WIP"], ["calendar", "🗓", t("ปฏิทิน", "Calendar")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
+                {([["kanban", "i:layout-kanban", t("การ์ด", "Cards")], ["wip", "i:hammer", "WIP"], ["calendar", "i:calendar", t("ปฏิทิน", "Calendar")], ["table", "i:table", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
                   const on = theme.kanban.view === v;
                   return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
-                    className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
+                    className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}><Icon value={icon} className="mr-1" />{label}</button>;
                 })}
               </div>
               {/* หน้าตา + ขนาดการ์ด (กดครั้งเดียว) — จำนวนคอลัมน์ปรับละเอียดได้ใน ⚙️ */}
@@ -548,13 +549,13 @@ export function OverviewDashboard({
         {theme.show.campaigns && (
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col lg:w-72 lg:shrink-0">
             <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
+              <p className="text-sm font-semibold text-slate-700"><Icon value="i:ad" className="mr-1" />{t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
               <Link href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</Link>
             </div>
             <div className="p-2">
               {activeCampaigns.length === 0 ? (
                 <div className="py-8 text-center">
-                  <div className="text-3xl mb-1">📣</div>
+                  <div className="text-3xl mb-1"><Icon value="i:ad" /></div>
                   <p className="text-slate-500 text-sm">{t("ยังไม่มีแคมเปญที่กำลังทำ", "No active campaigns")}</p>
                   <Link href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</Link>
                 </div>
@@ -576,7 +577,7 @@ export function OverviewDashboard({
                         <div className="flex items-center justify-between gap-2 px-3 pb-2.5">
                           <a href={`/tasks/campaigns/${c.id}`} className="flex min-w-0 items-center gap-2 text-[11px] text-slate-400 flex-wrap">
                             {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
-                            {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
+                            {(c.start_date || c.end_date) && <span><Icon value="i:calendar" className="mr-1" />{c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
                           </a>
                           {onCreateInCampaign && (
                             <button type="button" onClick={() => onCreateInCampaign(c)} title={t("สร้างงานใหม่ในแคมเปญนี้", "New task in this campaign")}
@@ -662,7 +663,7 @@ function BrandChip({ active, color, onClick, label, accent }: { active: boolean;
 // ทางลัดแบบปุ่ม pill เล็ก (แนวนอน ใต้ Hero)
 function ShortcutPill({ icon, label, href, onClick }: { icon: string; label: string; href?: string; onClick?: () => void }) {
   const cls = "inline-flex items-center gap-1.5 h-9 px-3 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 shadow-sm hover:border-violet-300 hover:bg-violet-50/40 transition-colors";
-  const inner = <><span className="text-base">{icon}</span><span>{label}</span></>;
+  const inner = <><span className="text-base inline-flex"><Icon value={icon} /></span><span>{label}</span></>;
   return href
     ? <a href={href} className={cls}>{inner}</a>
     : <button onClick={onClick} className={cls}>{inner}</button>;
@@ -680,7 +681,7 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
       {/* งานที่ฉันทำ = การ์ด (งานเดี่ยวขึ้นบน) */}
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm font-semibold text-slate-700">🙋 {t("งานที่ฉันทำ", "Tasks I do")}</span>
+          <span className="text-sm font-semibold text-slate-700"><Icon value="i:user" className="mr-1" />{t("งานที่ฉันทำ", "Tasks I do")}</span>
           <span className="text-xs text-slate-400">({doing.length})</span>
           <span className="text-[11px] text-slate-400">· {t("งานที่มีแค่ฉันอยู่บนสุด", "solo tasks first")}</span>
         </div>
@@ -702,7 +703,7 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
       {/* งานที่ฉันมอบหมายให้คนอื่น = ตาราง */}
       <div>
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm font-semibold text-slate-700">📤 {t("งานที่ฉันมอบหมายให้คนอื่น", "Tasks I delegated")}</span>
+          <span className="text-sm font-semibold text-slate-700"><Icon value="i:send" className="mr-1" />{t("งานที่ฉันมอบหมายให้คนอื่น", "Tasks I delegated")}</span>
           <span className="text-xs text-slate-400">({delegated.length})</span>
         </div>
         {delegated.length === 0 ? emptyBox : (
@@ -731,7 +732,7 @@ function MyTaskCard({ task, solo, onClick, accent }: { task: CreativeTask; solo?
   return (
     <button type="button" onClick={onClick} className="text-left">
       <TaskCard task={task} cfg={MY_CARD_CFG} extra={{ statusPill: true, accentLeft: solo ? accent || "#7c3aed" : undefined,
-        badge: solo ? <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}>⭐</span> : undefined }} />
+        badge: solo ? <span className="text-[10px]" title={t("มีแค่ฉัน", "Only me")}><Icon value="i:star" /></span> : undefined }} />
     </button>
   );
 }

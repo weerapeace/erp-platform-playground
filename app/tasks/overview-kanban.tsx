@@ -7,6 +7,7 @@
 // การ์ดเลือกโชว์ข้อมูลได้ (รูปปก/แบรนด์/ผู้รับผิดชอบ/กำหนดส่ง/ความสำคัญ/ความคืบหน้า)
 // ============================================================
 
+import { Icon } from "@/components/icon";
 import { useMemo, useState, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import {
@@ -343,7 +344,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
 
   // ชิปกรอง: ทั้งหมด → กำลังทำ → พร้อมทำ → รอคิว (ใกล้เสร็จสุดก่อน)
   const subChips: [string, string, number][] = [["", t("ทั้งหมด", "All"), lanes.active.length], ...[...WIP_ACTIVE_STATUSES].reverse().map((s): [string, string, number] => [s, statusMeta(s).label, lanes.active.filter((x) => x.status === s).length])];
-  const sortBtn = (v: "due" | "manual", label: string, title: string) => {
+  const sortBtn = (v: "due" | "manual", label: ReactNode, title: string) => {
     const on = (v === "manual") === manual;
     return <button type="button" title={title} onClick={() => onCfgChange?.({ ...cfg, wipSort: v })}
       className={`h-6 px-2 text-[11px] font-medium rounded-md ${on ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-700"}`}>{label}</button>;
@@ -371,8 +372,8 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
                 <option value="brand">{t("จัดกลุ่ม: แบรนด์", "Group: brand")}</option>
               </select>
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
-                {sortBtn("due", t("⏰ กำหนดส่ง", "⏰ Due date"), t("เรียงตามกำหนดส่ง เก่าสุดก่อน", "Sort by due date, oldest first"))}
-                {sortBtn("manual", t("✋ ลำดับของฉัน", "✋ My order"), t("ลากการ์ดไปวางทับใบอื่นเพื่อสลับตำแหน่ง — จำแยกแต่ละคน", "Drag a card onto another to reorder — saved per person"))}
+                {sortBtn("due", <><Icon value="i:alarm" className="mr-1" />{t("กำหนดส่ง", "Due date")}</>, t("เรียงตามกำหนดส่ง เก่าสุดก่อน", "Sort by due date, oldest first"))}
+                {sortBtn("manual", <><Icon value="i:hand-stop" className="mr-1" />{t("ลำดับของฉัน", "My order")}</>, t("ลากการ์ดไปวางทับใบอื่นเพื่อสลับตำแหน่ง — จำแยกแต่ละคน", "Drag a card onto another to reorder — saved per person"))}
               </div>
               {manual && (cfg.wipOrder?.length ?? 0) > 0 && (
                 <button type="button" onClick={() => onCfgChange({ ...cfg, wipOrder: [] })} title={t("ล้างลำดับที่จัดไว้ กลับไปเรียงตามกำหนดส่ง", "Clear my order")}
@@ -382,7 +383,7 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
           )}
         </div>
       }>
-      {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้ 🎉", "Nothing in progress here 🎉")) : groups ? (
+      {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้", "Nothing in progress here")) : groups ? (
         <div className="space-y-3">
           {groups.map((g) => (
             <div key={g.key}>
