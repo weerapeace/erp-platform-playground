@@ -18,7 +18,9 @@ export type Target = {
   /** เปิดหน้าเช็กหลังส่ง (push-open): รหัสสินค้าบนร้าน · Shop ID · slug เว็บ */
   external_product_id?: string | null; shop_ref?: string | null; web_slug?: string | null;
 };
-export type Full = { campaign: Campaign; items: Item[]; targets: Target[] };
+/** อัลบั้มปกโปรในคลังรูป (ชื่อตามชื่อชุด · null = ยังไม่มีปก จึงยังไม่สร้าง) — lib/promo-cover-album */
+export type PromoAlbum = { id: string; name: string; count: number; own: boolean };
+export type Full = { campaign: Campaign; items: Item[]; targets: Target[]; album?: PromoAlbum | null };
 export type PlatformSummary = { platform: PromoPlatform; targets: number; ready: number; closed: number; unmatched: number; blocked: string[] };
 export type PlannedTarget = { item_id: string; parent_sku_id: string; platform: PromoPlatform; target_key: string; label: string; before_cover_url: string | null; ready: boolean; reason: string | null };
 export type Preview = { summary: PlatformSummary[]; targets: PlannedTarget[]; total: number; missingImage: string[] };

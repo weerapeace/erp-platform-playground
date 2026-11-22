@@ -2,6 +2,8 @@
 /**
  * 🖼 ตัวแก้ชุดโปร 1 ชุด — 1 เลือกรุ่น · 2 ปกโปร (อัปเอง / คลังรูป / กรอบโปรอัตโนมัติ) · 3 เลือกร้าน · 4 ตั้งเวลา
  *   ร่าง/รอเริ่ม = แก้ได้ทุกอย่าง · กำลังใช้ = แก้ได้แค่ชื่อ/เวลาจบ (จะเปลี่ยนรูป ต้องย้อนปกเดิมก่อน)
+ *   ลากไฟล์มาวางได้ (ของกลาง useFileDrop): ทั้งกล่องปกโปร = จับคู่รุ่นจากชื่อไฟล์ · ช่องปกของแต่ละรุ่น = ลงรุ่นนั้นเลย · Ctrl+V วางรูปที่คัดลอกได้
+ *   ปกโปรทุกรูปถูกเก็บลงอัลบั้มในคลังรูป ชื่อตามชื่อชุด (lib/promo-cover-album) — แก้ชื่อ/เปิดในคลังรูปได้จากกล่องอัลบั้ม
  *   ปุ่ม "ตรวจก่อน/หลัง แล้วยืนยัน" → ป๊อปยืนยัน (confirm-modal) — การส่งขึ้นร้านจริงเกิดตอนถึงเวลา หรือกด "ทำเดี๋ยวนี้" ในผลรายร้าน
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,6 +11,8 @@ import { Icon } from "@/components/icon";
 import { ERPDateTime24 } from "@/components/form";
 import { useToast } from "@/components/toast";
 import { AssetPicker } from "@/components/asset-picker";
+import { useFileDrop, FileDropHint } from "@/components/file-drop";
+import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
 import { apiFetch } from "@/lib/api";
 import { META_NOTE, PLATFORM_LABEL, PLATFORM_NOTE, PROMO_PLATFORMS, REVIEW_PLATFORMS, type PromoPlatform } from "@/lib/promo-cover";
@@ -48,6 +52,8 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pvLoading, setPvLoading] = useState(false);
   const fileFor = useRef<string | null>(null);
+  const [up, setUp] = useState<UploadProgressState | null>(null);
+  const [albumEdit, setAlbumEdit] = useState<string | null>(null);
   const oneFile = useRef<HTMLInputElement>(null);
   const manyFiles = useRef<HTMLInputElement>(null);
   const frameFile = useRef<HTMLInputElement>(null);
@@ -83,15 +89,17 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
 
   // ── รูป ──
   const setImage = (item: Item, key: string | null, source: Item["source"]) => patch({ set_items: [{ id: item.id, promo_key: key, source }] }, `img:${item.id}`);
-  const onOneFile = async (file: File | undefined) => {
-    const item = full.items.find((i) => i.id === fileFor.current);
+  const onOneFile = async (file: File | undefined, itemId = fileFor.current) => {
+    const item = full.items.find((i) => i.id === itemId);
     if (!file || !item) return;
     setBusy(`img:${item.id}`);
-    try { const key = await uploadPromoImage(file); await setImage(item, key, "upload"); }
+    setUp({ name: `${item.code} · ${file.name}`, size: file.size, pct: null });
+    try { const key = await uploadPromoImage(file); setUp(null); await setImage(item, key, "upload"); }
     catch (e) { toast.error((e as Error).message); setBusy(null); }
+    finally { setUp(null); }
   };
   /** วางหลายไฟล์ — จับคู่รุ่นจากชื่อไฟล์ (ชื่อไฟล์มีรหัสรุ่น เช่น LM-2201.jpg) */
-  const onManyFiles = async (files: FileList | null) => {
+  const onManyFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return;
     const byLen = [...full.items].sort((a, b) => b.code.length - a.code.length);
     const pairs: { item: Item; file: File }[] = []; const miss: string[] = [];
@@ -103,7 +111,11 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
     if (!pairs.length) { toast.warning("ไม่มีไฟล์ไหนตรงรหัสรุ่นในชุดนี้ — ตั้งชื่อไฟล์ให้มีรหัสรุ่น เช่น LM-2201.jpg"); return; }
     setBusy("many");
     const sets: { id: string; promo_key: string; source: "upload" }[] = []; const errs: string[] = [];
-    for (const p of pairs) { try { sets.push({ id: p.item.id, promo_key: await uploadPromoImage(p.file), source: "upload" }); } catch (e) { errs.push((e as Error).message); } }
+    for (const [n, p] of pairs.entries()) {
+      setUp({ name: p.file.name, size: p.file.size, count: { current: n + 1, total: pairs.length }, pct: pairs.length > 1 ? Math.round((n / pairs.length) * 100) : null });
+      try { sets.push({ id: p.item.id, promo_key: await uploadPromoImage(p.file), source: "upload" }); } catch (e) { errs.push((e as Error).message); }
+    }
+    setUp(null);
     setBusy(null);
     if (sets.length) await patch({ set_items: sets }, "many");
     toast[errs.length || miss.length ? "warning" : "success"](`ใส่ปกโปรแล้ว ${sets.length} รุ่น${miss.length ? ` · ไม่ตรงรหัสรุ่น ${miss.length} ไฟล์ (${miss.slice(0, 3).join(", ")})` : ""}${errs.length ? ` · อัปไม่ผ่าน ${errs.length}` : ""}`);
@@ -151,6 +163,27 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
     finally { setBusy(null); }
   };
 
+  // ลากไฟล์วาง: "many" = ทั้งกล่องปกโปร (จับคู่จากชื่อไฟล์) · "item:<id>" = ช่องปกของรุ่นนั้น (หลายไฟล์ = ใช้ไฟล์แรก)
+  const drop = useFileDrop((files, key) => {
+    if (key === "many") void onManyFiles(files);
+    else if (key.startsWith("item:")) void onOneFile(files[0], key.slice(5));
+  }, {
+    accept: "image/",
+    disabled: !editable || !!busy,
+    onBusy: () => toast.warning(editable ? "รอให้อัปรูปก่อนหน้าเสร็จก่อน" : "ชุดนี้แก้รูปไม่ได้แล้ว"),
+    onReject: () => toast.warning("ลากได้เฉพาะรูป JPG / PNG / WEBP"),
+    folders: false,
+  });
+
+  // อัลบั้มปกโปร: แก้ชื่อ
+  const saveAlbumName = async () => {
+    const nm = (albumEdit ?? "").trim();
+    if (!nm) { toast.warning("ใส่ชื่ออัลบั้มก่อน"); return; }
+    const f = await patch({ album_name: nm }, "album");
+    if (f) { setAlbumEdit(null); toast.success("เปลี่ยนชื่ออัลบั้มแล้ว"); }
+  };
+  const album = full.album ?? null;
+
   // ── รุ่น ──
   const loadCatalog = useCallback(async (): Promise<SkuPickerCatalog> => {
     const j = await (await apiFetch("/api/parent-skus/spec-export?catalog=1")).json() as { data?: SkuPickerCatalog; error?: string };
@@ -164,7 +197,7 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
   const hasReview = draft.platforms.some((p) => REVIEW_PLATFORMS.has(p as PromoPlatform));
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" {...drop.guard}>
       {/* หัว: ชื่อชุด */}
       <div className={section}>
         <label className="text-[12px] text-slate-500">ชื่อชุดโปร</label>
@@ -192,8 +225,9 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
         )}
       </div>
 
-      {/* 2 ปกโปร */}
-      <div className={section}>
+      {/* 2 ปกโปร — ทั้งกล่องลากหลายไฟล์มาวางได้ (จับคู่จากชื่อไฟล์) */}
+      <div className={`${section} relative`} {...(editable && full.items.length ? drop.zone("many") : {})}>
+        <FileDropHint show={drop.over === "many"} label="วางเลย — ระบบจับคู่รุ่นจากชื่อไฟล์" />
         <p className="mb-2 text-sm font-medium text-slate-800">2 · ปกโปร {missing > 0 && full.items.length > 0 && <Pill tone="warn" className="ml-1">ยังไม่มีปก {missing} รุ่น</Pill>}</p>
         {editable && (
           <div className="mb-3 flex flex-wrap gap-1.5">
@@ -205,10 +239,11 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
         {editable && mode === "upload" && (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
             <button type="button" className={btnSm} disabled={!!busy || !full.items.length} onClick={() => manyFiles.current?.click()}><Icon name="upload" /> วางหลายไฟล์พร้อมกัน</button>
-            <span>ชื่อไฟล์ต้องมีรหัสรุ่น เช่น LM-2201.jpg ระบบจับคู่ให้ · หรือกดอัปทีละรุ่นด้านล่าง</span>
+            <span>ลากหลายไฟล์มาวางในกล่องนี้ หรือกดปุ่ม · ชื่อไฟล์ต้องมีรหัสรุ่น เช่น LM-2201.jpg ระบบจับคู่ให้ · หรือลากรูปลงช่องของรุ่นนั้นตรง ๆ</span>
           </div>
         )}
-        {editable && mode === "library" && <p className="mb-3 text-[12px] text-slate-500">กด &quot;คลังรูป&quot; ที่รุ่นนั้น แล้วเลือกรูปจากคลังรูปกลาง</p>}
+        {editable && mode === "library" && <p className="mb-3 text-[12px] text-slate-500">กด &quot;คลังรูป&quot; ที่รุ่นนั้น แล้วเลือกรูปจากคลังรูปกลาง{album ? ` — เปิดมาที่อัลบั้ม "${album.name}" ให้ก่อน (เปลี่ยนอัลบั้มได้)` : ""}</p>}
+        {up && <UploadProgress {...up} className="mb-3" />}
         {editable && mode === "frame" && (
           <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg bg-slate-50 p-2.5">
             <Thumb src={imgUrl(c.frame_key, 160)} label="ยังไม่มีกรอบ" size={64} />
@@ -227,7 +262,9 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
             {full.items.map((i) => {
               const b = busy === `img:${i.id}`;
               return (
-                <div key={i.id} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2">
+                <div key={i.id} {...(editable ? drop.zone(`item:${i.id}`) : {})} title={editable ? "ลากรูปมาวางที่ช่องนี้ = ปกโปรของรุ่นนี้" : undefined}
+                  className={`relative flex items-center gap-2 rounded-lg border p-2 ${drop.over === `item:${i.id}` ? "border-sky-400 bg-sky-50" : "border-slate-200"}`}>
+                  <FileDropHint show={drop.over === `item:${i.id}`} label={`ปกโปรของ ${i.code}`} />
                   <Thumb src={imgUrl(i.cover_key, 160)} label="ไม่มีปกในระบบ" />
                   <Icon name="open" size={14} className="shrink-0 text-slate-400" />
                   <Thumb src={imgUrl(i.promo_key, 160)} label={b ? "กำลังทำ…" : "ยังไม่มีปกโปร"} accent={!!i.promo_key} />
@@ -249,6 +286,36 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
           </div>
         )}
       </div>
+
+      {/* อัลบั้มปกโปรในคลังรูป */}
+      {(album || full.items.some((i) => i.promo_key)) && (
+        <div className={section}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {albumEdit === null ? (
+              <p className="min-w-0 text-sm text-slate-800">
+                <Icon name="image" size={14} className="mr-1 inline text-slate-500" />
+                <span className="font-medium">อัลบั้มปกโปร:</span> {album ? album.name : "ยังไม่ได้สร้าง (สร้างให้ตอนบันทึกปกครั้งถัดไป)"}
+                {album && <span className="text-[12px] text-slate-500"> · {album.count.toLocaleString()} รูป</span>}
+              </p>
+            ) : (
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+                <input autoFocus value={albumEdit} maxLength={120} onChange={(e) => setAlbumEdit(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void saveAlbumName(); if (e.key === "Escape") setAlbumEdit(null); }}
+                  className="h-8 min-w-[12rem] flex-1 rounded-md border border-slate-300 px-2 text-sm" aria-label="ชื่ออัลบั้ม" />
+                <button type="button" className={btnSm} disabled={busy === "album"} onClick={() => void saveAlbumName()}><Icon name="save" /> {busy === "album" ? "กำลังบันทึก…" : "บันทึก"}</button>
+                <button type="button" className={btnSm} onClick={() => setAlbumEdit(null)}>ยกเลิก</button>
+              </div>
+            )}
+            {albumEdit === null && (
+              <div className="flex flex-wrap gap-1.5">
+                {canEdit && !c.deleted_at && <button type="button" className={btnSm} disabled={!!busy} onClick={() => setAlbumEdit(album?.name ?? c.name)}><Icon name="edit" /> {album ? "แก้ชื่อ" : "สร้างอัลบั้ม"}</button>}
+                {album && <a href={`/master/assets?collection=${album.id}`} target="_blank" rel="noopener" className={btnSm}><Icon name="open" /> เปิดในคลังรูป</a>}
+              </div>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-slate-500">ปกโปรทุกรูปของชุดนี้ (อัปเอง · จากคลัง · แปะกรอบ) ถูกเก็บในอัลบั้มนี้ให้เอง · ตั้งชื่อตามชื่อชุดโปร (มีอัลบั้มชื่อนี้อยู่แล้ว = ใช้อันเดิม) · เอาปกออก/ลบชุด รูปยังอยู่ในอัลบั้ม</p>
+        </div>
+      )}
 
       {/* 3 เลือกร้าน */}
       <div className={section}>
@@ -326,8 +393,8 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
         taken={{ badge: "อยู่ในชุดแล้ว", short: "อยู่แล้ว", hide: "ซ่อนที่อยู่ในชุดแล้ว", row: "✓ อยู่ในชุดแล้ว" }}
         confirmText={(n) => (n ? `เพิ่ม ${n} รุ่น` : "เลือกรุ่นก่อน")} busyText="กำลังเพิ่ม…"
         onConfirm={async (ids) => !!(await patch({ add_parent_ids: ids }, "add"))}
-        tabPrefKey="promo_cover_pick_tab" colsPrefKey="promo-cover-pick" showFullPageLink={false} />
-      <AssetPicker open={!!libFor} onClose={() => setLibFor(null)} title={libFor ? `เลือกปกโปรของ ${libFor.code}` : "เลือกรูป"} typeFilter="image" defaultSearch={libFor?.code}
+        tabPrefKey="promo_cover_pick_tab" colsPrefKey="promo-cover-pick" showFullPageLink={false} workTab />
+      <AssetPicker open={!!libFor} onClose={() => setLibFor(null)} title={libFor ? `เลือกปกโปรของ ${libFor.code}` : "เลือกรูป"} typeFilter="image" defaultSearch={album ? undefined : libFor?.code} defaultCollectionId={album?.id}
         onSelect={(a) => { const it = libFor; setLibFor(null); if (it && a[0]?.r2_key) void setImage(it, a[0].r2_key, "library"); }} />
     </div>
   );

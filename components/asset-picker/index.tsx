@@ -85,11 +85,12 @@ export type AssetPickerProps = {
   /** ส่งมา = มีแท็บ "ใบงานออกแบบ" (รูปของใบงาน · ใบที่ส่งมาขึ้นก่อน · ค้นใบอื่นได้) — รูปไม่ได้อยู่ในคลัง id ขึ้นต้น "ds:" */
   designSheets?: PickerDesignSheet[];
   lockCollectionName?: string;     // ล็อกให้เลือกได้เฉพาะอัลบั้มชื่อนี้ (ซ่อนตัวกรอง+แท็บอัปโหลด) เช่น "งานพิมพ์ DFT UV (Printed)"
+  defaultCollectionId?: string;    // เปิดมาที่อัลบั้มนี้ก่อน (ยังเปลี่ยนอัลบั้ม/ล้างตัวกรองได้) เช่น อัลบั้มปกโปรของชุด
 };
 
 const KIND_LABEL: Partial<Record<AssetType, string>> = { image: "🖼 รูป", video: "🎬 วิดีโอ", document: "📄 เอกสาร", design: "🎨 ออกแบบ" };
 
-export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, kinds, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName, designSheets }: AssetPickerProps) {
+export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFilter, kinds, title, contextLabel, defaultSource, defaultSearch, requireDriveFolder, lockCollectionName, designSheets, defaultCollectionId }: AssetPickerProps) {
   const firstKind = typeFilter ?? kinds?.[0] ?? "";
   const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
@@ -122,7 +123,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); fromSample.current = new Set(); setTab(designSheets?.length ? "sheet" : "library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setSelected(new Map()); fromSample.current = new Set(); setTab(designSheets?.length ? "sheet" : "library"); setSearch(defaultSearch ?? ""); setQuery(defaultSearch ?? ""); setType(firstKind); setSource(defaultSource ?? ""); setCollectionId(defaultCollectionId ?? ""); setTagId(""); setParentGroup(""); } }, [open, firstKind, defaultSource, defaultSearch, defaultCollectionId]); // eslint-disable-line react-hooks/exhaustive-deps
   // พิมพ์ค้น → รอหยุดพิมพ์ 0.3 วิ ค่อยค้นจริง (ไม่ยิงทุกตัวอักษร)
   useEffect(() => {
     if (search === query) return;

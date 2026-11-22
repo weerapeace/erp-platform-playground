@@ -133,6 +133,9 @@ export function AssetLibrary() {
     // ลิงก์ตรงเปิดการ์ด ?source=artwork&asset=<id> (เช่น ปุ่ม "เปิดการ์ดในคลัง" ของตัวแยกไฟล์ ERP)
     const assetId = sp.get("asset");
     if (assetId) { if (sp.get("source") === "artwork") setSource("artwork"); setDetailId(assetId); }
+    // ลิงก์ตรงเปิดอัลบั้ม ?collection=<id> (เช่น ปุ่ม "เปิดในคลังรูป" ของอัลบั้มปกโปร) — ทุกที่มา (รูปในอัลบั้มมาจากหลายที่)
+    const colId = sp.get("collection");
+    if (colId) { setSource("all"); setCollectionId(colId); }
   }, []);
 
   useEffect(() => {

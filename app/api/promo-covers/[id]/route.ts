@@ -2,7 +2,8 @@
  * 🖼 ชุดโปร 1 ชุด — ดู / แก้ / ลบ (ลงถังขยะ) / กู้คืน
  *  GET    → { campaign, items: [{ ...item, code, name, cover_key }], targets }        (products.platforms.view)
  *  PATCH  { name?, note?, starts_at?, ends_at?, auto_revert?, early_hours?, platforms?, frame_key?,
- *           add_parent_ids?, remove_item_ids?, set_items?: [{ id, promo_key, source }], restore? }   (products.platforms.publish)
+ *           add_parent_ids?, remove_item_ids?, set_items?: [{ id, promo_key, source }], album_name?, restore? }   (products.platforms.publish)
+ *     album = อัลบั้มปกโปรในคลังรูป (ชื่อตามชื่อชุด · เก็บปกที่ใช้ให้เอง — lib/promo-cover-album) · album_name = แก้ชื่ออัลบั้ม (แก้ได้ทุกสถานะ)
  *     ร่าง/รอเริ่ม = แก้ได้ทุกอย่าง (รอเริ่ม + แก้รุ่น/รูป/ร้าน/เวลาเริ่ม → กลับเป็นร่าง ต้องกดยืนยันใหม่)
  *     กำลังใช้ = แก้ได้แค่ ชื่อ/โน้ต/เวลาจบ/ย้อนอัตโนมัติ (จะเปลี่ยนรูป ต้องย้อนปกเดิมก่อน)
  *  DELETE → ลงถังขยะ (ยังมีปกโปรค้างบนร้าน = 409 ต้องย้อนก่อน)
@@ -14,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { isPromoPlatform, validateCampaign } from "@/lib/promo-cover";
 import { hasOnShop, loadCampaignFull } from "@/lib/promo-cover-server";
+import { findPromoAlbum, renamePromoAlbum, syncPromoAlbum } from "@/lib/promo-cover-album";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +30,8 @@ export async function GET(request: NextRequest, ctx: Ctx): Promise<NextResponse>
   if (!UUID.test(id)) return NextResponse.json({ error: "ไม่พบชุดโปร" }, { status: 404 });
   const full = await loadCampaignFull(supabaseAdmin(), id);
   if (!full) return NextResponse.json({ error: "ไม่พบชุดโปร (อาจถูกลบไปแล้ว)" }, { status: 404, headers: NO_STORE });
-  return NextResponse.json(full, { headers: NO_STORE });
+  const album = await findPromoAlbum(supabaseAdmin(), full.campaign).catch(() => null);
+  return NextResponse.json({ ...full, album }, { headers: NO_STORE });
 }
 
 export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
@@ -47,9 +50,20 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
     if (!c.deleted_at) return NextResponse.json({ ok: true, ...full }, { headers: NO_STORE });
     await admin.from("promo_cover_campaigns").update({ deleted_at: null, updated_at: new Date().toISOString() }).eq("id", id);
     await writeAudit(admin, { action: "restore", entityType: "promo_cover_campaign", entityId: id, ...actor, metadata: { name: c.name } });
-    return NextResponse.json({ ok: true, ...(await loadCampaignFull(admin, id)) }, { headers: NO_STORE });
+    return NextResponse.json({ ok: true, ...(await loadCampaignFull(admin, id)), album: await findPromoAlbum(admin, c).catch(() => null) }, { headers: NO_STORE });
   }
   if (c.deleted_at) return NextResponse.json({ error: "ชุดนี้อยู่ในถังขยะ — กู้คืนก่อนแก้" }, { status: 400 });
+
+  // แก้ชื่ออัลบั้มปกโปร (ไม่แตะเนื้อหาชุด — แก้ได้ทุกสถานะ)
+  if (typeof b.album_name === "string") {
+    try {
+      const r = await renamePromoAlbum(admin, c, b.album_name);
+      if (r.before !== r.album.name) await writeAudit(admin, { action: "update", entityType: "asset_collection", entityId: r.album.id, ...actor, metadata: { kind: "promo_cover_album", campaign_id: id, campaign: c.name, changes: auditDiff({ name: r.before }, { name: r.album.name }) } });
+      // สร้างอัลบั้มใหม่ (ชุดเก่าที่ยังไม่มีอัลบั้ม) → เก็บปกที่มีอยู่ลงไปด้วย
+      const album = (await syncPromoAlbum(admin, c, full.items)) ?? r.album;
+      return NextResponse.json({ ok: true, ...full, album }, { headers: NO_STORE });
+    } catch (e) { return NextResponse.json({ error: (e as Error).message }, { status: 400 }); }
+  }
 
   const locked = c.status === "live" || c.status === "ended" || c.status === "cancelled";
   const contentKeys = ["starts_at", "early_hours", "platforms", "frame_key", "add_parent_ids", "remove_item_ids", "set_items"];
@@ -116,7 +130,10 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   if (changes.length || Object.keys(itemChanges).length) {
     await writeAudit(admin, { action: "update", entityType: "promo_cover_campaign", entityId: id, ...actor, metadata: { name: next.name, changes, items: itemChanges, back_to_draft: reconfirm } });
   }
-  return NextResponse.json({ ok: true, back_to_draft: reconfirm, ...(await loadCampaignFull(admin, id)) }, { headers: NO_STORE });
+  const after = await loadCampaignFull(admin, id);
+  // เก็บปกโปรลงอัลบั้ม (ชื่อตามชุด) · ชื่อชุดเปลี่ยน = อัลบั้มเปลี่ยนตาม
+  const album = after ? await syncPromoAlbum(admin, after.campaign, after.items, { prevName: c.name }) : null;
+  return NextResponse.json({ ok: true, back_to_draft: reconfirm, ...after, album }, { headers: NO_STORE });
 }
 
 export async function DELETE(request: NextRequest, ctx: Ctx): Promise<NextResponse> {

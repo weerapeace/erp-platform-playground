@@ -3,9 +3,10 @@
  * 🎯 ป๊อปเลือกรุ่น (Parent SKU) แบบหน้า SKU การตลาด — ของกลาง
  *   แท็บ 🎯 SKU การตลาด = การ์ดรูป: แยกแบรนด์ · กรองป้ายหลัก (นับว่าเพิ่มไปแล้วกี่รุ่น) · ป้ายเสริม · 🎨 สีที่เหลือ
  *   แท็บ ☰ รายการสินค้า = ตาราง: ค้นหา · แบรนด์ · หมวด ERP (ถ้าส่งหมวดมา)
+ *   แท็บ 🛠 โหมดทำงาน (เปิดด้วย workTab) = เลือกงานในโหมดทำงาน → การ์ดเฉพาะรุ่นในงาน · ติ๊กทั้งงานได้ (components/marketing-sku-picker-work)
  *   ติ๊กได้หลายรุ่น (จำข้ามแท็บ/หน้า) → กดยืนยันทีเดียว · รุ่นที่ "เพิ่มไปแล้ว" (takenIds) ติ๊กซ้ำไม่ได้
  * single = เลือกได้รุ่นเดียว (กดการ์ด = เลือกแทนตัวเดิม) · initialSelected = ติ๊กไว้ก่อน · below = ส่วนเสริมใต้ตาราง (เช่น ติ๊ก SKU ลูกของรุ่นที่เลือก)
- * ใช้ที่: 🔗 เชื่อมอัลบั้ม SAMPLE กับสินค้า (single) · ➕ เพิ่มสินค้าเข้าเว็บ (website-add-products-modal) · 🛠 เพิ่มรุ่นเข้างาน (โหมดทำงาน หน้า SKU การตลาด)
+ * ใช้ที่: 🖼 เลือกรุ่นเปลี่ยนปกโปร (workTab) · 🔗 เชื่อมอัลบั้ม SAMPLE กับสินค้า (single) · ➕ เพิ่มสินค้าเข้าเว็บ (website-add-products-modal) · 🛠 เพิ่มรุ่นเข้างาน (โหมดทำงาน หน้า SKU การตลาด)
  * ข้อมูล: ผู้เรียกส่ง load() มา (ตัวโหลดกลาง lib/marketing/sku-list-db เบื้องหลัง) · ป๊อปนี้ไม่บันทึกอะไรเอง → onConfirm(ids)
  * ของกลาง: ERPModal · Pager · useViewPref · r2ImageUrl · GalleryColumns (จำนวนการ์ดต่อแถว จำรายคน)
  */
@@ -18,6 +19,7 @@ import { useGalleryColumns, GalleryColumnsControl, galleryTemplate } from "@/com
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { labelName, type MarketingBrand, type MarketingSkuItem, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { useWorkJobPick, WorkJobBar } from "@/components/marketing-sku-picker-work";
 
 export type SkuPickerItem = MarketingSkuItem & { category_id?: string | null };
 export type SkuPickerCatalog = {
@@ -35,7 +37,9 @@ export type SkuPickerCatalog = {
 /** คำที่ใช้เรียกรุ่นที่ "เพิ่มไปแล้ว" ในแต่ละที่ */
 export type SkuPickerTakenText = { badge: string; short: string; hide: string; row: string };
 
-const TABS = ["mkt", "list"] as const;
+type Tab = "mkt" | "list" | "work";
+const TABS: readonly Tab[] = ["mkt", "list"];
+const TABS_WORK: readonly Tab[] = ["mkt", "list", "work"];
 const ALL = "__all";
 const NONE = "__none";
 const PAGE_SIZE = 60;
@@ -49,7 +53,7 @@ const chip = (on: boolean) =>
 export function MarketingSkuPickerModal({
   open, onClose, title, description: descriptionProp,
   load, takenIds, taken: takenProp, startBrandId = null, warn, footerExtra, single = false, initialSelected, below,
-  confirmText, busyText: busyTextProp, onConfirm, tabPrefKey, colsPrefKey, showFullPageLink = true,
+  confirmText, busyText: busyTextProp, onConfirm, tabPrefKey, colsPrefKey, showFullPageLink = true, workTab = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -81,12 +85,16 @@ export function MarketingSkuPickerModal({
   tabPrefKey: string;
   colsPrefKey: string;
   showFullPageLink?: boolean;
+  /** เพิ่มแท็บ 🛠 โหมดทำงาน (เลือกรุ่นจากงานในโหมดทำงาน · ติ๊กทั้งงานได้) */
+  workTab?: boolean;
 }) {
   const t = useT();
   const description = descriptionProp ?? t("ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดยืนยันทีเดียว", "Tick as many models as you like (kept across tabs/pages), then confirm once");
   const taken = takenProp ?? takenDefault(t);
   const busyText = busyTextProp ?? t("กำลังบันทึก…", "Saving…");
-  const { view: tab, setView: setTab, saveDefault } = useViewPref(tabPrefKey, TABS, "mkt");
+  const { view: tab, setView: setTab, saveDefault } = useViewPref<Tab>(tabPrefKey, workTab ? TABS_WORK : TABS, "mkt");
+  const tabs = workTab ? TABS_WORK : TABS;
+  const work = useWorkJobPick(open && workTab && tab === "work");
   const [cat, setCatalog] = useState<SkuPickerCatalog | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [brand, setBrand] = useState<string>(ALL);
@@ -133,16 +141,19 @@ export function MarketingSkuPickerModal({
   const inBrand = useMemo(() => (cat?.items ?? []).filter((i) => brand === ALL || (brand === NONE ? !i.brand_id : i.brand_id === brand)), [cat, brand]);
   const term = q.trim().toLowerCase();
   const base = useMemo(() => inBrand.filter((i) => (!term || `${i.code} ${i.name}`.toLowerCase().includes(term)) && (!hideOn || !onShop.has(i.parent_sku_id))), [inBrand, term, hideOn, onShop]);
+  // 🛠 โหมดทำงาน: รุ่นในงานที่เลือก (ทุกแบรนด์) → ค้นหา/ซ่อนที่เพิ่มแล้ว
+  const workAll = useMemo(() => (work.ids ? (cat?.items ?? []).filter((i) => work.ids!.has(i.parent_sku_id)) : []), [cat, work.ids]);
+  const workRows = useMemo(() => workAll.filter((i) => (!term || `${i.code} ${i.name}`.toLowerCase().includes(term)) && (!hideOn || !onShop.has(i.parent_sku_id))), [workAll, term, hideOn, onShop]);
   const filtered = useMemo(
-    () =>
+    () => tab === "work" ? workRows :
       base.filter((i) =>
         tab === "mkt"
           ? label === ALL || (label === NONE ? !i.label_id || !labelMap.has(i.label_id) : i.label_id === label)
           : category === ALL || (category === NONE ? !i.category_id : i.category_id === category)
       ),
-    [base, tab, label, category, labelMap]
+    [base, tab, label, category, labelMap, workRows]
   );
-  useEffect(() => setPage(0), [brand, label, category, term, hideOn, tab]);
+  useEffect(() => setPage(0), [brand, label, category, term, hideOn, tab, work.jobId]);
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // นับต่อแบรนด์ / ต่อป้าย (ป้าย: รวม + เพิ่มไปแล้วกี่รุ่น — ของแบรนด์ที่เลือก)
@@ -186,6 +197,19 @@ export function MarketingSkuPickerModal({
       const n = new Set(s);
       for (const i of pageSelectable) {
         if (pageAllOn) n.delete(i.parent_sku_id);
+        else n.add(i.parent_sku_id);
+      }
+      return n;
+    });
+
+  // ติ๊กทั้งงาน (ทุกหน้า) / เอาออก
+  const workSelectable = workRows.filter((i) => !onShop.has(i.parent_sku_id));
+  const workAllOn = workSelectable.length > 0 && workSelectable.every((i) => sel.has(i.parent_sku_id));
+  const toggleWorkAll = () =>
+    setSel((s) => {
+      const n = new Set(s);
+      for (const i of workSelectable) {
+        if (workAllOn) n.delete(i.parent_sku_id);
         else n.add(i.parent_sku_id);
       }
       return n;
@@ -270,7 +294,7 @@ export function MarketingSkuPickerModal({
         <div className="space-y-3">
           {/* แท็บ + ลิงก์หน้าเต็ม */}
           <div className="flex items-end gap-1 border-b border-slate-200">
-            {TABS.map((tb) => (
+            {tabs.map((tb) => (
               <button
                 key={tb}
                 type="button"
@@ -280,7 +304,7 @@ export function MarketingSkuPickerModal({
                 }}
                 className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === tb ? "border-slate-900 font-medium text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800"}`}
               >
-                {tb === "mkt" ? t("🎯 SKU การตลาด", "🎯 Marketing SKUs") : t("☰ รายการสินค้า", "☰ Product list")}
+                {tb === "mkt" ? t("🎯 SKU การตลาด", "🎯 Marketing SKUs") : tb === "list" ? t("☰ รายการสินค้า", "☰ Product list") : t("🛠 โหมดทำงาน", "🛠 Work mode")}
               </button>
             ))}
             {showFullPageLink && (
@@ -331,6 +355,9 @@ export function MarketingSkuPickerModal({
                 )}
               </div>
             </>
+          ) : tab === "work" ? (
+            <WorkJobBar pick={work} shown={workRows.length} missing={work.ids ? work.ids.size - workAll.length : 0} selectable={workSelectable.length}
+              allOn={workAllOn} onTickAll={toggleWorkAll} single={single} />
           ) : (
             <div className="flex flex-wrap gap-2">
               <select value={brand} onChange={(e) => setBrand(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
@@ -361,7 +388,7 @@ export function MarketingSkuPickerModal({
               <input type="checkbox" checked={hideOn} onChange={(e) => setHideOn(e.target.checked)} className="w-4 h-4 accent-blue-600" />
               {taken.hide}
             </label>
-            {tab === "mkt" && <GalleryColumnsControl as="select" cols={cols} onChange={setCols} />}
+            {tab !== "list" && <GalleryColumnsControl as="select" cols={cols} onChange={setCols} />}
             {!single && pageSelectable.length > 0 && (
               <button type="button" onClick={togglePage} className="text-xs text-blue-600 hover:underline">
                 {pageAllOn ? t("เอาติ๊กหน้านี้ออก", "Untick this page") : t(`ติ๊กทั้งหน้านี้ (${pageSelectable.length})`, `Tick this page (${pageSelectable.length})`)}
@@ -370,9 +397,9 @@ export function MarketingSkuPickerModal({
           </div>
 
           {/* รายการ */}
-          {!filtered.length ? (
-            <p className="py-10 text-center text-sm text-slate-400">{t("ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น", "No products found — try another label/brand or search")}</p>
-          ) : tab === "mkt" ? (
+          {tab === "work" && (!work.ids || !work.jobs.length) ? null : !filtered.length ? (
+            <p className="py-10 text-center text-sm text-slate-400">{tab === "work" ? t("ไม่มีรุ่นในงานนี้ที่ตรงคำค้น (หรืออยู่ในชุดแล้วทั้งหมด)", "No models in this job match (or all are already added)") : t("ไม่พบสินค้า ลองเปลี่ยนป้าย/แบรนด์ หรือคำค้น", "No products found — try another label/brand or search")}</p>
+          ) : tab !== "list" ? (
             <div ref={gridWheelRef} className="grid grid-cols-2 gap-2.5 sm:[grid-template-columns:var(--cols)]" style={{ ["--cols" as string]: galleryTemplate(cols, "0.625rem") } as React.CSSProperties}>
               {pageRows.map((i) => {
                 const on = onShop.has(i.parent_sku_id);
