@@ -146,6 +146,8 @@ export default function SoOrdersPage() {
   // ป๊อปตั้งวันนัดส่ง (ทั้งใบ / เฉพาะรายการ / หลายใบ) — ./due-editor
   const [dueFor, setDueFor] = useState<{ title: string; subtitle?: string; value: string | null; baseDate: string | null; moHint: string | null; items: (due: string | null) => SoDueItem[]; label: (due: string | null) => string; reopen?: string } | null>(null);
   const [noDue, setNoDue] = useState(false);
+  // ลิงก์ ?nodue=1 (ทางลัดจากหน้าจัดการ LINE) = เปิดมากรอง "ยังไม่ใส่วันนัดส่ง" ไว้เลย
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("nodue") === "1") setNoDue(true); }, []);
   const [mergeIds, setMergeIds] = useState<string[] | null>(null);
   const [mergeHints, setMergeHints] = useState<MergeHint[]>([]);
   const [billFor, setBillFor] = useState<string[] | null>(null);

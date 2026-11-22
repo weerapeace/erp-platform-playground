@@ -1456,7 +1456,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "line-console", label: "ศูนย์จัดการ LINE", code: "LineConsole", category: "notify",
     source: { path: "components/line-console" },
-    what: "ตั้งโทเคนบอท กลุ่มปลายทาง เปิด/ปิดการแจ้งต่อเหตุการณ์ ของทุกระบบในที่เดียว",
+    what: "ตั้งโทเคนบอท กลุ่มปลายทาง เปิด/ปิดการแจ้งต่อเหตุการณ์ ของทุกระบบในที่เดียว · ป๊อป LineConsole + เนื้อหา LineConsoleBody (หน้าเต็ม /admin/line ใช้ตัวเดียวกัน)",
+    when: "อยากให้แอดมินตั้งค่าไลน์จากหน้าไหน → ลิงก์ไป /admin/line?tab=… หรือเปิดป๊อป LineConsole · ห้ามทำหน้าตั้งค่าไลน์ตัวที่ 2",
     notWhen: "การส่งข้อความจริงให้ผ่าน lib/line-send",
   },
 

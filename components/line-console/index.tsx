@@ -4,6 +4,7 @@
  * ศูนย์จัดการ LINE รวมทุกระบบ (ของกลาง) — เปิดจากปุ่ม "🔔 ศูนย์ LINE" บนหน้าผู้บริหาร
  * คุม china_app_settings.line_config ก้อนเดียว: โทเคนบอท · กลุ่มปลายทางทุกระบบ · เปิด/ปิดต่อเหตุการณ์
  * ใช้ /api/admin/line-console (gate admin.users) — สวิตช์ปิด = ตัวส่งจริงหยุดส่งทั้ง ERP
+ * LineConsoleBody = เนื้อหา (ใช้ทั้งป๊อปนี้ และหน้า /admin/line แท็บ "บอทและกลุ่มแจ้งเตือน") — แก้ที่นี่ที่เดียว ทั้งสองที่เปลี่ยนตาม
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -56,7 +57,8 @@ function QuotaBar({ q }: { q: BotRow["quota"] }) {
   );
 }
 
-export function LineConsole({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** เนื้อหาศูนย์ LINE · active=false = ยังไม่โหลด (ป๊อปปิดอยู่) · showCompany=false = ไม่โชว์ส่วนไลน์บริษัท (หน้า /admin/line มีแท็บของตัวเอง) */
+export function LineConsoleBody({ active = true, showCompany = true }: { active?: boolean; showCompany?: boolean }) {
   const toast = useToast();
   const [data, setData] = useState<ConsoleData | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,7 +77,7 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
       setData(j as ConsoleData); setPaste({}); setEditToken(false); setTokenInput(""); setSecretInput("");
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
   }, [toast]);
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  useEffect(() => { if (active) void load(); }, [active, load]);
 
   const post = async (body: Record<string, unknown>, okMsg: string): Promise<boolean> => {
     setBusy(true);
@@ -112,8 +114,7 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
   const slotList = data ? (Object.keys(data.slots) as LineSlotKey[]) : [];
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" storageKey="line-console" title="🔔 ศูนย์จัดการ LINE — ทุกระบบ"
-      footer={<button onClick={onClose} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
+    <>
       {!data ? <div className="text-center py-10 text-slate-400">กำลังโหลด…</div> : (
         <div className="space-y-5">
 
@@ -238,7 +239,7 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
           )}
 
           {/* ---- ไลน์บริษัท (แชท 1:1 พนักงาน+ลูกค้า · เมนูล่างจอต่อคน) ---- */}
-          <LineCompanySection />
+          {showCompany && <LineCompanySection />}
 
           {/* ---- กลุ่มปลายทาง (ทุก slot) ---- */}
           <div>
@@ -328,6 +329,15 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
 
         </div>
       )}
+    </>
+  );
+}
+
+export function LineConsole({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <ERPModal open={open} onClose={onClose} size="lg" storageKey="line-console" title="🔔 ศูนย์จัดการ LINE — ทุกระบบ"
+      footer={<><a href="/admin/line" className="mr-auto text-xs text-indigo-600 hover:underline">เปิดหน้าเต็ม จัดการ LINE</a><button onClick={onClose} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button></>}>
+      <LineConsoleBody active={open} />
     </ERPModal>
   );
 }

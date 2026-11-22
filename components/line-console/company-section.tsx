@@ -3,6 +3,7 @@
 /**
  * ส่วน "ไลน์บริษัท" ในศูนย์ LINE — เลือกบอทที่เป็นไลน์บริษัท · ตั้งปุ่มเมนูล่างจอ 4 ชุด (company-menu-editor) · สร้างเมนูในไลน์ · ดูพนักงาน/ลูกค้าที่ผูกไลน์
  * API: /api/admin/line-company · กติกา lib/line-company · คู่มือ docs/line-company-oa.md
+ * part: all = ทั้งหมด (ป๊อปศูนย์ LINE) · setup = บอท+ปุ่มเมนู+QR · people = คนที่ผูกไลน์ (หน้า /admin/line แยกแท็บ)
  * พนักงาน: ปลดผูก/ระงับที่หน้าสมาชิกไลน์ของฝ่ายบุคคล (ของเดิม) · ลูกค้า: ถอนผูก (ย้อนได้) / ระงับ / ตั้งชื่อเรียก ที่นี่
  */
 import { useCallback, useEffect, useState } from "react";
@@ -41,7 +42,9 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "");
 
-export function LineCompanySection() {
+export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | "people" } = {}) {
+  const showSetup = part !== "people";
+  const showPeople = part !== "setup";
   const toast = useToast();
   const [data, setData] = useState<Data | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -130,10 +133,11 @@ export function LineCompanySection() {
 
   return (
     <div>
-      <div className="text-xs font-semibold text-slate-500 mb-1">ไลน์บริษัท (พนักงาน + ลูกค้าทักแชทได้)</div>
-      <div className="text-[11px] text-slate-400 mb-2">บอทที่เลือกจะแยกคนให้เอง: พนักงาน · ลูกค้า · คนที่ยังไม่ผูก เห็นเมนูล่างจอคนละชุด · แชทลูกค้าเข้าห้องแชทรวม</div>
+      {part === "all" && <div className="text-xs font-semibold text-slate-500 mb-1">ไลน์บริษัท (พนักงาน + ลูกค้าทักแชทได้)</div>}
+      {showSetup && <div className="text-[11px] text-slate-400 mb-2">บอทที่เลือกจะแยกคนให้เอง: พนักงาน · ลูกค้า · คนที่ยังไม่ผูก เห็นเมนูล่างจอคนละชุด · แชทลูกค้าเข้าห้องแชทรวม</div>}
 
       <div className="border border-slate-200 rounded-lg p-2.5 space-y-2">
+        {showSetup && <>
         {/* เลือกบอท */}
         <div className="flex items-center gap-2 flex-wrap">
           <Icon value="🤖" className="text-slate-500 shrink-0" />
@@ -177,8 +181,11 @@ export function LineCompanySection() {
           <CompanyQrPanel qr={data.qr} shopRotatedAt={data.shop_qr_rotated_at} busy={busy} onChanged={load} />
         </div>
 
+        </>}
+
+        {showPeople && <>
         {/* คนที่ผูกไลน์ */}
-        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
+        <div className={`flex items-center gap-1.5 ${showSetup ? "pt-1 border-t border-slate-100" : ""}`}>
           <button onClick={() => setTab("employees")} className={`h-7 px-2.5 text-xs rounded-lg border ${tab === "employees" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}>
             พนักงาน {linkedEmp}{data.employees_active != null ? `/${data.employees_active}` : ""}{waitHr > 0 ? <span className="text-amber-700"> · รอ HR ยืนยัน {waitHr}</span> : null}
           </button>
@@ -237,6 +244,7 @@ export function LineCompanySection() {
                 </>}
           </div>
         )}
+        </>}
       </div>
     </div>
   );
