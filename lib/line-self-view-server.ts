@@ -84,14 +84,16 @@ async function warningPage(admin: Admin, me: SelfMe): Promise<SelfWarning[]> {
   }));
 }
 
-const WO_COLS = "id,wo_no,product_sku,product_name,stage,uom,qty,received_qty,status,dispatch_date,due_date,assignee_id,assignees";
+const WO_COLS = "id,wo_no,product_sku,product_name,stage,uom,qty,received_qty,status,dispatch_date,due_date,assignee_id,assignees,created_at";
 
 async function pieceworkPage(admin: Admin, me: SelfMe) {
+  // ใบที่ยังทำอยู่ (ทุกอายุ) + ใบที่สร้างใน 120 วัน · ใช้วันสร้างใบ (ใบจ่ายงานจริงส่วนใหญ่ไม่ได้กรอกวันจ่าย — เช็กแล้ว 141 ใบ)
   const since = new Date(Date.now() - 120 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const recent = `status.eq.dispatched,created_at.gte.${since}`;
   // ใบที่ฉันเป็นช่างหลัก + ใบที่มีชื่อฉันในรายชื่อช่างร่วม (2 คำค้น แล้วรวม — ไม่ประกอบ JSON ใส่ตัวกรอง or)
   const [a, b] = await Promise.all([
-    admin.from("mo_work_orders").select(WO_COLS).eq("is_active", true).eq("assignee_id", me.employeeId).gte("dispatch_date", since).limit(200),
-    admin.from("mo_work_orders").select(WO_COLS).eq("is_active", true).contains("assignees", [{ id: me.employeeId }]).gte("dispatch_date", since).limit(200),
+    admin.from("mo_work_orders").select(WO_COLS).eq("is_active", true).eq("assignee_id", me.employeeId).or(recent).limit(200),
+    admin.from("mo_work_orders").select(WO_COLS).eq("is_active", true).contains("assignees", [{ id: me.employeeId }]).or(recent).limit(200),
   ]);
   if (a.error || b.error) throw new Error("โหลดงานเหมาไม่สำเร็จ กรุณาลองใหม่");
   const byId = new Map<string, Row>();
@@ -107,7 +109,7 @@ async function pieceworkPage(admin: Admin, me: SelfMe) {
   const mine = mySubmissionTotals(me.employeeId, people, subs);
   const orders: SelfWorkOrder[] = wos.map((w) => ({
     id: t(w.id), wo_no: t(w.wo_no), product: t(w.product_name) || t(w.product_sku), stage: t(w.stage), uom: t(w.uom) || "ชิ้น",
-    qty: n(w.qty), received_qty: n(w.received_qty), status: t(w.status), dispatch_date: t(w.dispatch_date) || null, due_date: t(w.due_date) || null,
+    qty: n(w.qty), received_qty: n(w.received_qty), status: t(w.status), dispatch_date: t(w.dispatch_date) || t(w.created_at).slice(0, 10) || null, due_date: t(w.due_date) || null,
     my_sent_qty: mine.get(t(w.id))?.qty ?? 0, my_wage: mine.get(t(w.id))?.wage ?? 0, people: people.get(t(w.id)) ?? 1,
   })).sort((x, y) => (x.status === "dispatched" ? 0 : 1) - (y.status === "dispatched" ? 0 : 1) || (y.dispatch_date ?? "").localeCompare(x.dispatch_date ?? ""));
   return { orders, wage_this_month: wageThisMonth(me.employeeId, people, subs), open_count: orders.filter((o) => o.status === "dispatched").length };
