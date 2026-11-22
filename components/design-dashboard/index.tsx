@@ -451,16 +451,17 @@ export function DesignDashboard() {
   },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [scopedSheets, quickFilter, statusMeta, calDay]);
-  // ปฏิทิน: งานที่ยังไม่ปิด + มีกำหนดส่ง (ขอบเขตแบรนด์/คำค้นเดียวกับบอร์ด) · สี: เลยกำหนด แดง · เหลือ ≤2 วัน ส้ม · อื่น ๆ คราม · ในวันเดียวกันเรียงด่วนก่อน
+  // ปฏิทิน: งานที่ยังไม่ปิด + มีกำหนดส่ง (ขอบเขตแบรนด์/คำค้นเดียวกับบอร์ด)
+  // สีตามสถานะ (เจ้าของสั่ง 2026-11-22): ออกแบบ / กำลังทำตัวอย่าง = แดง · รอส่งลูกค้า = เหลือง · ส่งลูกค้าดูแล้ว = เขียว · นอกนั้น = เทา · ในวันเดียวกันเรียงแดงก่อน
   const calDocs = useMemo<CalDoc[]>(() => {
-    const rank = (dd: number | null) => (dd !== null && dd < 0 ? 0 : dd !== null && dd <= 2 ? 1 : 2);
+    const tone = (st: string) => (st === "design" || st === "revising" ? 0 : st === "quoted" ? 1 : st === "sent_customer" ? 2 : 3);
+    const COLOR = ["#e11d48", "#eab308", "#16a34a", "#94a3b8"];
     return scopedSheets
       .filter((s) => s.deadline && !statusMeta.finished.has(s.status))
-      .map((s) => ({ s, dd: daysUntil(s.deadline) }))
-      .sort((a, b) => rank(a.dd) - rank(b.dd))
-      .map(({ s, dd }) => ({
+      .sort((a, b) => tone(a.status) - tone(b.status))
+      .map((s) => ({
         id: s.id, no: s.code, sub: s.name, date: String(s.deadline).slice(0, 10),
-        color: rank(dd) === 0 ? "#e11d48" : rank(dd) === 1 ? "#f59e0b" : "#6366f1",
+        color: COLOR[tone(s.status)],
         title: `${s.code} · ${s.name}${s.brand_name ? ` · ${s.brand_name}` : ""} · ${statusMeta.map[s.status]?.label ?? s.status}`,
       }));
   }, [scopedSheets, statusMeta]);
@@ -840,10 +841,15 @@ export function DesignDashboard() {
               title={t("ปฏิทินกำหนดส่ง", "Deadlines")}
               selectedDay={calDay} onPickDay={(d) => setCalDay((cur) => (cur === d ? null : d))}
               onDropDay={canEdit && isDesktop ? (day, e) => { const id = e.dataTransfer.getData("text/plain"); if (id) void moveSheetDeadline(id, day); } : undefined}
-              hint={calDay
+              hint={<span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
+                {([["#e11d48", t("ออกแบบ / ทำตัวอย่าง", "Design / sample")], ["#eab308", t("รอส่งลูกค้า", "Ready to send")], ["#16a34a", t("ส่งลูกค้าดูแล้ว", "Sent to customer")], ["#94a3b8", t("อื่น ๆ", "Other")]] as const).map(([c, l]) => (
+                  <span key={c} className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ backgroundColor: c }} />{l}</span>
+                ))}
+                <span className="text-slate-400">·</span>
+                <span>{calDay
                 ? t(`กรอง: ส่ง ${new Date(`${calDay}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${filteredSheets.length} งาน · กดวันเดิมอีกครั้ง = ดูทั้งหมด`, `Filter: due ${calDay} · ${filteredSheets.length} jobs · click the day again to clear`)
                 : canEdit && isDesktop ? t("กดวัน = ดูเฉพาะงานส่งวันนั้น · ลากการ์ดมาวาง = เลื่อนกำหนดส่ง", "Click a day to filter · drag a card onto a day to move its deadline")
-                : t("กดวัน = ดูเฉพาะงานส่งวันนั้น", "Click a day to filter")} />
+                : t("กดวัน = ดูเฉพาะงานส่งวันนั้น", "Click a day to filter")}</span></span>} />
           )}
 
           <main className="min-w-0 space-y-4">

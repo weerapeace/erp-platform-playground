@@ -20,7 +20,7 @@
  *
  * ห้ามเขียนตารางปฏิทินเองในหน้าโมดูล — ใช้ตัวนี้
  */
-import { useMemo, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useMemo, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 
 export type CalDoc = {
   id: string;
@@ -51,7 +51,7 @@ export function DocCalendar({
   cursor: Date;
   onCursor: (d: Date) => void;
   onPick?: (id: string) => void;
-  hint?: string;
+  hint?: ReactNode;
   unit?: string;
   /** กดช่องวัน = เลือกวันนั้น (YYYY-MM-DD) — กดเอกสารในช่องก็นับเป็นเลือกวัน ถ้าไม่ได้ส่ง onPick */
   onPickDay?: (day: string) => void;
