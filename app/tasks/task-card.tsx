@@ -14,6 +14,7 @@ import { TaskHoverWrap, DEFAULT_HOVER_FIELDS } from "./task-hover-card";
 import { AssigneeStack } from "./assignee-avatar";
 import { TaskTypeChip } from "./task-type-chip";
 import { statusMeta, isTerminal } from "./use-statuses";
+import { taskProgress } from "./task-progress";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority } from "./data";
 import type { KanbanTheme, CardLook } from "./overview-customizer";
 import { BrandStrip } from "@/components/brand-strip";
@@ -55,8 +56,11 @@ export const cardGapPx = (cfg: KanbanTheme) => CARD_GAP_PX[cfg.cardGap ?? "norma
 // gallery = รูปใหญ่ 4:3 + ชื่อ + คน + วันส่ง · text = ไม่มีรูป เหลือชื่อ + คน + วันส่ง
 function applyLook(cfg: KanbanTheme, extra: CardExtra | undefined, look: CardLook): { cfg: KanbanTheme; extra: CardExtra | undefined } {
   const lean = { priority: false, taskType: false, taskNo: false, brand: false, progress: false, sku: false, assignee: true, due: true, compact: true };
-  if (look === "gallery") return { cfg: { ...cfg, ...lean, cover: true, coverPos: "top", coverSize: "auto" }, extra: { ...extra, statusPill: false, placeholder: false, coverCls: "aspect-[4/3]", imgW: Math.max(extra?.imgW ?? 320, 480) } };
-  if (look === "text") return { cfg: { ...cfg, ...lean, cover: false }, extra: { ...extra, statusPill: false, placeholder: false } };
+  // ป้ายประเภท/สถานะ/แถบคืบหน้า บนการ์ดสำเร็จรูป — เปิดเป็นค่าเริ่ม ปิดได้ใน ⚙️ (lookType/lookStatus/lookProgress · เจ้าของเลือก 2026-11-22)
+  const keep = { taskType: cfg.lookType !== false, progress: cfg.lookProgress !== false };
+  const pill = cfg.lookStatus !== false && (extra?.statusPill ?? cfg.groupBy !== "status");   // คอลัมน์ตามสถานะอยู่แล้ว = ไม่ต้องซ้ำ
+  if (look === "gallery") return { cfg: { ...cfg, ...lean, ...keep, cover: true, coverPos: "top", coverSize: "auto" }, extra: { ...extra, statusPill: pill, placeholder: false, coverCls: "aspect-[4/3]", imgW: Math.max(extra?.imgW ?? 320, 480) } };
+  if (look === "text") return { cfg: { ...cfg, ...lean, ...keep, cover: false }, extra: { ...extra, statusPill: pill, placeholder: false } };
   return { cfg, extra };
 }
 
@@ -181,6 +185,10 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
             {extra?.badge}
             {cfg.priority && pr && <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{priorityLabel(task.priority as CreativePriority)}</span>}
             {cfg.taskType !== false && task.task_type && <TaskTypeChip code={task.task_type} />}
+            {/* สถานะอยู่แถวเดียวกับป้ายประเภท (เจ้าของขอ 2026-11-22) */}
+            {extra?.statusPill && (() => { const m = statusMeta(task.status); return (
+              <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border whitespace-nowrap ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>
+            ); })()}
           </div>
           {showTaskNo && <span className="font-mono text-[10px] text-slate-400 shrink-0 ml-auto">{task.task_no}</span>}
         </div>
@@ -191,9 +199,6 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
             <span className="h-2 w-2 rounded-full" style={{ background: task.brand_color || "#cbd5e1" }} />{task.brand_label}
           </div>
         )}
-        {extra?.statusPill && (() => { const m = statusMeta(task.status); return (
-          <div className="mt-1.5"><span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span></div>
-        ); })()}
         {/* ผู้รับผิดชอบ/กำหนดส่ง/ความคืบหน้า ชิดล่างเสมอ (การ์ดสูงเท่ากัน แถวล่างตรงกัน) */}
         <div className={fill ? "mt-auto" : undefined}>
         {(cfg.assignee || cfg.due) && (
@@ -202,11 +207,13 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
             {cfg.due && <DueText task={task} rel={extra?.relDue} />}
           </div>
         )}
-        {cfg.progress && (
-          <div className="mt-2 pt-2 border-t border-slate-100">
-            <div className="h-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
+        {cfg.progress && (() => { const p = taskProgress(task, isTerminal(task.status)); return (
+          <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5"
+            title={p.source === "content" ? t(`คอนเทนต์พร้อม ${p.done}/${p.total}`, `Content ready ${p.done}/${p.total}`) : t(`ตามสถานะงาน ${p.pct}%`, `By task status ${p.pct}%`)}>
+            <div className="h-1 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full ${p.pct >= 100 ? "bg-emerald-500" : "bg-violet-400"}`} style={{ width: `${p.pct}%` }} /></div>
+            <span className="text-[10px] tabular-nums text-slate-400 shrink-0">{p.source === "content" ? `${p.done}/${p.total}` : `${p.pct}%`}</span>
           </div>
-        )}
+        ); })()}
         </div>
         </div>
       </div>

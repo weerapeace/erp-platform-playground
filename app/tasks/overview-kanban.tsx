@@ -36,6 +36,8 @@ function groupValue(task: CreativeTask, by: KanbanGroupBy): string {
   return task.task_type ?? NONE;
 }
 
+// จัดคอลัมน์ตามแบรนด์/ประเภท/ความสำคัญ → โชว์สถานะบนการ์ด (เจ้าของขอ 2026-11-22)
+const STATUS_PILL: CardExtra = { statusPill: true };
 function DraggableCard({ task, cfg, animCls, onClick, extra }: { task: CreativeTask; cfg: KanbanTheme; animCls?: string; onClick: () => void; extra?: CardExtra }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: task.id });
   return (
@@ -63,7 +65,7 @@ function Column({ col, tasks, cfg, accent, animCls, onCardClick, limit, onShowAl
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{tasks.length}</span>
       </div>
       <div ref={setNodeRef} style={{ gap: cardGapPx(cfg) }} className={`flex-1 min-h-[120px] flex flex-col p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
-        {shown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} />)}
+        {shown.map((tk) => <DraggableCard key={tk.id} task={tk} cfg={cfg} animCls={animCls} onClick={() => onCardClick(tk.id)} extra={cfg.groupBy !== "status" ? STATUS_PILL : undefined} />)}
         {hidden > 0 && (
           <button type="button" onClick={onShowAll}
             className="w-full rounded-lg border border-dashed border-slate-300 bg-white/70 py-2 text-xs font-medium text-violet-600 hover:border-violet-300 hover:bg-violet-50">

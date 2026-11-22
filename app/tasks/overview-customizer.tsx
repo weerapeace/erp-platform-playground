@@ -45,7 +45,9 @@ export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boo
   /** 🪟 ชี้ที่การ์ด = กล่องรูปใหญ่ + รายละเอียด (ไม่ตั้ง = เปิด) · hoverFields = สิ่งที่โชว์ (ไม่ตั้ง = DEFAULT_HOVER_FIELDS) — app/tasks/task-hover-card */
   hoverCard?: boolean; hoverFields?: HoverField[];
   /** หน้าตาการ์ด (ไม่ตั้ง = std) · wipGroup = จัดกลุ่มในช่องใหญ่ของ WIP (ไม่ตั้ง = status) */
-  cardLook?: CardLook; wipGroup?: WipGroup };
+  cardLook?: CardLook; wipGroup?: WipGroup;
+  /** บนการ์ดสำเร็จรูป (แกลเลอรี/ตัวหนังสือ): ป้ายประเภท · สถานะ · แถบความคืบหน้า (ไม่ตั้ง = เปิด · เจ้าของเลือก 2026-11-22) */
+  lookType?: boolean; lookStatus?: boolean; lookProgress?: boolean };
 export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)

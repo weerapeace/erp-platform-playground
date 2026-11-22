@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { approvedStatusKeys, defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, arrangeImagesMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, arrangeImagesMap, taskContentCountsMap, taskIdsForUser, setTaskReviewers, pushTasksLineTpl, taskLink, materializeContentSubtasks } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask, validateTaskFields } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -68,9 +68,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
 
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const [empMap, aMap, artMap] = await Promise.all([
+  const [empMap, aMap, cMap, artMap] = await Promise.all([
     employeeLabelMap(admin, rows.flatMap((r) => [r.assignee_id as string, r.reviewer_id as string, r.approver_id as string, r.assigned_by_id as string])),
     taskAssigneesMap(admin, rows.map((r) => String(r.id))),
+    taskContentCountsMap(admin, rows.map((r) => String(r.id))),   // คอนเทนต์เสร็จ/ทั้งหมด → แถบความคืบหน้าบนการ์ด
     arrangeImagesMap(admin, rows.map((r) => String(r.id))),   // งานเรียงพิมพ์ → รูป Artwork ที่จะพิมพ์ (ทำการ์ดโชว์รูป)
   ]);
   const items = rows.map((r) => {
@@ -80,6 +81,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (arr.length) it.assignee_label = arr.map((a) => a.label).filter(Boolean).join(", ");  // back-compat + ค้นหาได้
     const art = artMap.get(String(r.id));
     if (art?.length) it.arrange_image_keys = art;
+    const cc = cMap.get(String(r.id));
+    if (cc) { it.content_done = cc.done; it.content_total = cc.total; }
     return it;
   });
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });

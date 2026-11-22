@@ -14,12 +14,14 @@ import { HoverCardWrap, HoverRow, type HoverFieldDef } from "@/components/hover-
 import { r2ImageUrl } from "@/lib/r2-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { TaskTypeChip } from "./task-type-chip";
-import { statusMeta } from "./use-statuses";
+import { statusMeta, isTerminal } from "./use-statuses";
+import { taskProgress } from "./task-progress";
+import { TaskRemaining } from "./task-remaining";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority } from "./data";
 
 export type HoverField =
   | "image" | "title" | "taskNo" | "status" | "taskType" | "priority" | "brand" | "campaign"
-  | "product" | "assignees" | "reviewers" | "due" | "progress" | "description";
+  | "product" | "assignees" | "reviewers" | "due" | "progress" | "remaining" | "description";
 
 /** รายการที่เลือกได้ (ลำดับ = ลำดับที่โชว์ในกล่อง) */
 export const HOVER_FIELDS: HoverFieldDef<HoverField>[] = [
@@ -36,9 +38,10 @@ export const HOVER_FIELDS: HoverFieldDef<HoverField>[] = [
   { key: "reviewers", th: "ผู้ตรวจ", en: "Reviewers" },
   { key: "due", th: "กำหนดส่ง", en: "Due date" },
   { key: "progress", th: "ความคืบหน้า", en: "Progress" },
+  { key: "remaining", th: "เหลือทำอะไร (คอนเทนต์ + ความพร้อมสินค้า)", en: "What is left (content + product readiness)" },
   { key: "description", th: "รายละเอียดงาน", en: "Description" },
 ];
-export const DEFAULT_HOVER_FIELDS: HoverField[] = ["image", "title", "taskNo", "status", "taskType", "brand", "product", "assignees", "due", "progress", "description"];
+export const DEFAULT_HOVER_FIELDS: HoverField[] = ["image", "title", "taskNo", "status", "taskType", "brand", "product", "assignees", "due", "progress", "remaining", "description"];
 
 const imageKeyOf = (t: CreativeTask): string | null =>
   (t.parent_sku_image_key as string) || (t.cover_image_r2_key as string) || (t.sku_image_key as string) || null;
@@ -90,12 +93,13 @@ function HoverBody({ task, fields }: { task: CreativeTask; fields: HoverField[] 
         {has("assignees") && (task.assignees?.length ?? 0) > 0 && row(t("ผู้รับผิดชอบ", "Assignees"), <span className="inline-flex flex-wrap items-center gap-1"><AssigneeStack list={task.assignees} size={20} /><span className="text-slate-500">{(task.assignees ?? []).map((a) => a.label).filter(Boolean).join(", ")}</span></span>)}
         {has("reviewers") && (reviewers.length > 0 || task.reviewer_label) && row(t("ผู้ตรวจ", "Reviewers"), reviewers.length ? reviewers.map((r) => r.label).filter(Boolean).join(", ") : task.reviewer_label)}
         {has("due") && task.due_date && row(t("กำหนดส่ง", "Due"), <span className={overdue ? "font-semibold text-red-600" : ""}>{overdue && "⚠ "}{task.due_date}</span>)}
-        {has("progress") && (
+        {has("progress") && (() => { const p = taskProgress(task, isTerminal(task.status)); return (
           <div className="pt-0.5">
-            <div className="mb-0.5 flex justify-between text-[11px] text-slate-400"><span>{t("ความคืบหน้า", "Progress")}</span><span>{task.progress_percent}%</span></div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
+            <div className="mb-0.5 flex justify-between text-[11px] text-slate-400"><span>{p.source === "content" ? t("ความคืบหน้า (คอนเทนต์พร้อม)", "Progress (content ready)") : t("ความคืบหน้า", "Progress")}</span><span>{p.source === "content" ? `${p.done}/${p.total}` : `${p.pct}%`}</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${p.pct >= 100 ? "bg-emerald-500" : "bg-violet-400"}`} style={{ width: `${p.pct}%` }} /></div>
           </div>
-        )}
+        ); })()}
+        {has("remaining") && !isTerminal(task.status) && <TaskRemaining task={task} />}
         {has("description") && desc && (
           <p className="line-clamp-6 whitespace-pre-wrap border-t border-slate-100 pt-1.5 text-[12px] leading-relaxed text-slate-600">{desc}</p>
         )}
