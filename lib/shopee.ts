@@ -253,7 +253,8 @@ export async function shopeeGetModelList(accessToken: string, shopId: string | n
 
 // ───────── แปลงเป็นสำเนาย่อ (raw.shopee) — เก็บเฉพาะที่ใช้ ไม่เก็บคำอธิบายยาว ─────────
 export type ShopeeSlimModel = { model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน (has_promotion) — Shopee ไม่ให้แก้ราคาตัวนี้ */ promo?: boolean };
-export type ShopeeSlimTier = { name: string; options: string[] };
+/** images = รูปของแต่ละตัวเลือก (Shopee มีเฉพาะชั้นแรก) — ใช้แก้รูปตัวเลือก (lib/shopee-listing-edit planShopeeOptionImages) */
+export type ShopeeSlimTier = { name: string; options: string[]; images?: ({ id: string; url: string | null } | null)[] };
 export type ShopeeSlim = {
   item_id: string; status: string | null; update_time: number | null;
   image: string | null; image_count: number; category_id: string | null; item_sku: string | null; brand: string | null;
@@ -280,7 +281,11 @@ function stockOf(o: Obj): number | null {
 export function shopeeModelsToSlim(raw: ShopeeModelsRaw | null): { tiers: ShopeeSlimTier[]; models: ShopeeSlimModel[] } {
   if (!raw) return { tiers: [], models: [] };
   const tierObjs = raw.tier_variation.map(obj).filter((x): x is Obj => !!x);
-  const tiers: ShopeeSlimTier[] = tierObjs.map((t) => ({ name: str(t.name) ?? "", options: arr(t.option_list).map(obj).map((o) => str(o?.option) ?? "") }));
+  const tiers: ShopeeSlimTier[] = tierObjs.map((t) => {
+    const opts = arr(t.option_list).map(obj);
+    const images = opts.map((o) => { const im = obj(o?.image); const id = str(im?.image_id); return id ? { id, url: str(im?.image_url) } : null; });
+    return { name: str(t.name) ?? "", options: opts.map((o) => str(o?.option) ?? ""), ...(images.some(Boolean) ? { images } : {}) };
+  });
   const tierImg = (i: number): string | null => str(obj(obj(arr(tierObjs[0]?.option_list)[i])?.image)?.image_url);
   const models = raw.model.map(obj).filter((x): x is Obj => !!x).map((m) => {
     const idx = arr(m.tier_index).map((n) => Number(n));
@@ -523,6 +528,15 @@ export async function shopeeAddItem(accessToken: string, shopId: string | number
   const itemId = String(respOf(j).item_id ?? "").trim();
   if (!itemId || itemId === "0") throw new ShopeeApiError("Shopee ไม่ส่งรหัสสินค้ากลับมา — ดูใน Seller Centre ว่าสร้างแล้วหรือยัง ก่อนลองใหม่", "error_data");
   return { itemId, raw: j };
+}
+
+/**
+ * v2.product.update_tier_variation — แก้ "รายการตัวเลือก" ของสินค้าที่มีตัวเลือกแล้ว (เจ้าของสั่ง 2026-11-22: เปลี่ยนรูปของแต่ละสี)
+ * ส่ง tier_variation ครบทุกชั้น · ชื่อชั้น/ชื่อตัวเลือก/ลำดับเหมือนเดิม เปลี่ยนแค่ image.image_id ของชั้นแรก · ไม่ส่ง model_list (ไม่เปลี่ยนโครงตัวเลือก)
+ * ⚠️ ยังไม่ยืนยันจากเอกสารว่าไม่กระทบตัวเลือกเดิม → route ดึงกลับเช็กจำนวนตัวเลือก/ราคา/สต๊อกทุกครั้ง · ลองครั้งแรกกับสินค้าขายน้อย 1 ตัว
+ */
+export async function shopeeUpdateTierVariation(accessToken: string, shopId: string | number, itemId: string, tierVariation: Record<string, unknown>[]): Promise<Record<string, unknown>> {
+  return shopeeFetch("/api/v2/product/update_tier_variation", { accessToken, shopId, body: { item_id: Number(itemId), tier_variation: tierVariation } });
 }
 
 /** v2.product.init_tier_variation — ตั้งชั้นตัวเลือก + ตัวเลือก (หลัง add_item ≥5 วิ · standardise_tier_variation) · คืนคำตอบดิบ */

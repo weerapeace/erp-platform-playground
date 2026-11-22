@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   planShopeeDisplay, planShopeeEdit, shopeeDescriptionOf, shopeeLimitsOf, shopeeListingView, shopeeStatusBadge, shopeeTextLength, shopeeUnlistErrors,
   applyShopeeBulkPrice, planShopeePrices, shopeePriceBatches, shopeePriceResult, shopeePriceRowsFromView,
-  planShopeeImages, shopeeImagesMax, shopeeRefsForSend, shopeeImageIdOfRef, shopeeR2KeyOfRef, shopeeEditDescUploadRefs, shopeeEditResolveDesc,
+  planShopeeImages, shopeeImagesMax, shopeeRefsForSend, shopeeImageIdOfRef, shopeeR2KeyOfRef, shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeOptionImages, shopeeOptionResolve, shopeeOptionUploadRefs,
   type ShopeeListingView,
 } from "@/lib/shopee-listing-edit";
 import { listingHistoryText } from "@/lib/line-listing-edit";
@@ -256,5 +256,38 @@ describe("Shopee ลิ้นชัก — รายละเอียดแบ�
     expect(planShopeeEdit(v, { descImages: Array.from({ length: 13 }, (_, i) => `r2:${i}.jpg`) }).errors.join()).toContain("ไม่เกิน 12");
     expect(planShopeeEdit(v, { descImages: ["r2:a.jpg", "r2:a.jpg"] }).errors.join()).toContain("ซ้ำ");
     expect(planShopeeEdit(v, { descImages: ["https://x/y.jpg"] }).errors.join()).toContain("ไม่รู้จัก");
+  });
+});
+
+describe("Shopee ลิ้นชัก — รูปของแต่ละตัวเลือก (update_tier_variation · 2026-11-22)", () => {
+  const V = (imgs: (string | null)[]) => ({
+    status: "NORMAL",
+    optionTiers: [
+      { name: "สี", options: ["ดำ (01)", "ขาว (02)", "ชมพู (03)"].map((n, i) => ({ name: n, imageId: imgs[i] ?? null, imageUrl: null })) },
+      { name: "ไซซ์", options: [{ name: "M", imageId: null, imageUrl: null }] },
+    ],
+  });
+  test("เปลี่ยนรูปบางสี: ส่งทุกชั้นชื่อเดิม · รูปเดิมคงไว้ · ฝากเฉพาะ r2 · แทนเป็น image_id", () => {
+    const p = planShopeeOptionImages(V(["a", "b", "c"]), { "ขาว (02)": "r2:img/w.jpg" });
+    expect(p.errors).toEqual([]);
+    expect(p.changed).toBe(true);
+    expect(p.tierVariation).toEqual([
+      { name: "สี", option_list: [{ option: "ดำ (01)", image: { image_ref: "spi:a" } }, { option: "ขาว (02)", image: { image_ref: "r2:img/w.jpg" } }, { option: "ชมพู (03)", image: { image_ref: "spi:c" } }] },
+      { name: "ไซซ์", option_list: [{ option: "M" }] },
+    ]);
+    expect(shopeeOptionUploadRefs(p.tierVariation)).toEqual(["r2:img/w.jpg"]);
+    const tv = shopeeOptionResolve(p.tierVariation, new Map([["r2:img/w.jpg", "W1"]]))!;
+    expect((tv[0].option_list as { image?: { image_id: string } }[]).map((o) => o.image?.image_id)).toEqual(["a", "W1", "c"]);
+    expect(shopeeOptionResolve(p.tierVariation, new Map())).toBeNull();   // ฝากไม่ครบ = ไม่ส่งครึ่ง ๆ
+  });
+  test("ไม่มีอะไรเปลี่ยน = ไม่ส่ง · ต้องมีรูปครบทุกสี · ชื่อที่ไม่มีบนร้าน = เตือนแล้วข้าม · ไม่มีตัวเลือก = ทำไม่ได้", () => {
+    expect(planShopeeOptionImages(V(["a", "b", "c"]), { "ดำ (01)": "spi:a" }).changed).toBe(false);
+    expect(planShopeeOptionImages(V([null, null, null]), { "ดำ (01)": "r2:x.jpg" }).errors.join()).toContain("ครบทุกตัวเลือก");
+    expect(planShopeeOptionImages(V(["a", "b", "c"]), { "แดง": "r2:x.jpg", "ดำ (01)": "r2:y.jpg" }).warnings.join()).toContain("แดง");
+    expect(planShopeeOptionImages({ status: "NORMAL", optionTiers: [] }, { "ดำ": "r2:x.jpg" }).errors.join()).toContain("ไม่มีตัวเลือก");
+  });
+  test("อ่านรูปตัวเลือกจากของจริง (get_model_list → slim → มุมมอง)", () => {
+    const v = shopeeListingView(BASE, { models: [], tiers: [{ name: "สี", options: ["ดำ", "ขาว"], images: [{ id: "i1", url: "https://u/1" }, null] }] })!;
+    expect(v.optionTiers).toEqual([{ name: "สี", options: [{ name: "ดำ", imageId: "i1", imageUrl: "https://u/1" }, { name: "ขาว", imageId: null, imageUrl: null }] }]);
   });
 });

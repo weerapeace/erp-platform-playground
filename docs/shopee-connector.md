@@ -217,3 +217,10 @@
 - lib/shopee-listing-edit: มุมมองอ่านรูปในรายละเอียด (`descriptionImages`) · `descriptionEditable` = true เสมอ · `planShopeeEdit({ descImages })` สร้าง `description_type: extended` + `description_info` (ข้อความ + รูปต่อท้าย) · แก้ข้อความของสินค้าแบบมีรูป = คงรูปเดิม · สินค้าแบบข้อความใส่รูป = เปลี่ยนเป็นแบบมีรูป (เตือน)
 - POST /api/shopee/listing-edit รับ `desc_images: { before_ids, refs }` (refs = "spi:<image_id>" รูปเดิม / "r2:<key>" รูปจากระบบ · before_ids กันทับ) → ฝากรูปใหม่แบบคงสัดส่วน (`shopeeUploadRef(ref, "raw")` = scene desc ไม่บีบจัตุรัส) → update_item → ดึงกลับตรวจ (ข้อความ + จำนวนรูป) · ฝากไม่ผ่าน = หยุด ยังไม่แก้สินค้า · audit มีรายการ "รูปในรายละเอียด"
 - 🐛 แก้พร้อมกัน: ลงสินค้าใหม่ (7e878ebe) ฝากรูปในรายละเอียดแบบบีบจัตุรัส+เติมขอบ (รูปยาวจะเล็ก) → ตอนนี้ใช้แบบคงสัดส่วน (ยังไม่มีใครลงแบบมีรูปจริง)
+
+## รูปของแต่ละตัวเลือก (สี) ของสินค้าที่ลงแล้ว (เจ้าของสั่ง "ทำเลย" 2026-11-22)
+- POST /api/shopee/listing-edit `{ listing_id, option_images: { before: { ชื่อตัวเลือก: image_id เดิม }, refs: { ชื่อตัวเลือก: "spi:<id>" | "r2:<key>" } } }` — ส่งแยกจากชื่อ/รายละเอียด/รูปสินค้า
+- `planShopeeOptionImages` (lib/shopee-listing-edit): ส่งทุกชั้นด้วยชื่อ/ลำดับเดิม เปลี่ยนแค่รูปชั้นแรก · Shopee ต้องมีรูปครบทุกตัวเลือก · ตัวที่ไม่ส่ง = คงรูปเดิม · ชื่อที่ไม่มีบนร้าน = เตือนแล้วข้าม
+- route: ฝากรูปใหม่ (จัตุรัสพื้นขาว แบบรูปสินค้า) → `v2.product.update_tier_variation` (ไม่ส่ง model_list) → ดึงกลับเช็ก: รูปเปลี่ยนจริง · **รหัสตัวเลือก (model) ชุดเดิม** · ราคาตั้งเดิม — ถ้าเปลี่ยน = เตือนแดง "เช็ก BigSeller ด่วน" + audit structure_changed
+- ⚠️ ยังไม่ยืนยันจากเอกสารว่า update_tier_variation แบบเปลี่ยนแค่รูปไม่กระทบตัวเลือก → **ลองครั้งแรกกับสินค้าขายน้อย 1 ตัว** แล้วเช็ก Seller Centre + BigSeller
+- มุมมองสด: `view.optionTiers` (ชื่อชั้น · ตัวเลือก · imageId/imageUrl) · slim เก็บ `tiers[].images`

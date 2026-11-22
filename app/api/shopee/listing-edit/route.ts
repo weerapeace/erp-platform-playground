@@ -16,8 +16,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
-import { shopeeErrorText, shopeeUpdateItem } from "@/lib/shopee";
-import { shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
+import { shopeeErrorText, shopeeUpdateItem, shopeeUpdateTierVariation } from "@/lib/shopee";
+import { planShopeeOptionImages, shopeeOptionResolve, shopeeOptionUploadRefs, shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { loadShopeeListingLive, refetchShopeeLive, saveShopeeSlimCopy, shopeeUploadRef, shopeeWriteEcho } from "../shared";
@@ -37,7 +37,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: { listing_id?: string; before?: { name?: string; description?: string }; edit?: { name?: string | null; description?: string | null }; images?: { before_ids?: unknown; refs?: unknown };
     /** รูปในรายละเอียด (extended · 2026-11-21): before_ids = รหัสรูปเดิมตอนเปิด (กันทับ) · refs = ชุดใหม่ "spi:<id>" / "r2:<key>" */
-    desc_images?: { before_ids?: unknown; refs?: unknown } };
+    desc_images?: { before_ids?: unknown; refs?: unknown };
+    /** รูปของแต่ละตัวเลือก (2026-11-22): before = { ชื่อตัวเลือก: image_id เดิม } (กันทับ) · refs = { ชื่อตัวเลือก: "spi:<id>" | "r2:<key>" } · ส่งแยกจากอย่างอื่น */
+    option_images?: { before?: unknown; refs?: unknown } };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const wantText = !!body.edit && !!body.before;
@@ -45,13 +47,79 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (images && (!images.beforeIds || !images.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปไม่ครบ (before_ids + refs)" }, 400);
   const descImgs = body.desc_images ? { beforeIds: strList(body.desc_images.before_ids), refs: strList(body.desc_images.refs) } : null;
   if (descImgs && (!descImgs.beforeIds || !descImgs.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปในรายละเอียดไม่ครบ (before_ids + refs)" }, 400);
-  if (!listingId || (!wantText && !images && !descImgs)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
+  const strMap = (v: unknown): Record<string, string> | null => (v && typeof v === "object" && !Array.isArray(v) && Object.values(v as object).every((x) => typeof x === "string") ? v as Record<string, string> : null);
+  const optImgs = body.option_images ? { before: strMap(body.option_images.before), refs: strMap(body.option_images.refs) } : null;
+  if (optImgs && (!optImgs.before || !optImgs.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปตัวเลือกไม่ครบ (before + refs)" }, 400);
+  if (optImgs && (wantText || images || descImgs)) return reply({ ok: false, view: null, error: "รูปตัวเลือกต้องส่งแยกจากชื่อ/รายละเอียด/รูปสินค้า (กดทีละอย่าง)" }, 400);
+  if (!listingId || (!wantText && !images && !descImgs && !optImgs)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
 
   const admin = supabaseAdmin();
   const r = await loadShopeeListingLive(admin, listingId, user?.id ?? null);
   if (!r.ok) return reply({ ok: false, view: null, error: r.error }, r.status);
   if (isGoneStatus(r.row.status)) return reply({ ok: false, view: null, error: GONE_MSG }, 400);
   const view = r.view;
+
+  // ───── รูปของแต่ละตัวเลือก (สี) → update_tier_variation (คำสั่งแยกของ Shopee · เจ้าของสั่ง 2026-11-22) ─────
+  if (optImgs) {
+    const t0 = view.optionTiers[0]?.options ?? [];
+    const curMap = Object.fromEntries(t0.map((o) => [o.name, o.imageId ?? ""]));
+    if (Object.entries(optImgs.before!).some(([k, id]) => k in curMap && curMap[k] !== id)) return reply({ ok: false, view, error: `รูปตัวเลือก${CONFLICT}` }, 409);
+    const op = planShopeeOptionImages(view, optImgs.refs!);
+    if (op.errors.length) return reply({ ok: false, view, error: op.errors.join(" · ") }, 400);
+    if (!op.changed) return reply({ ok: true, view, summary: "ไม่มีอะไรเปลี่ยน", error: null });
+    const optChanges = [{ field: "tier_variation.images", label: "รูปตัวเลือก", old: curMap, new: optImgs.refs, text: `${op.changes[0]?.before ?? ""} → ${op.changes[0]?.after ?? ""}` }];
+    const auditOpt = (meta: Record<string, unknown>) => writeAudit(admin, {
+      action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { source: "shopee_listing_edit", item_id: r.itemId, shop_id: r.shopId, changes: optChanges, ...meta },
+    });
+    // ฝากรูปใหม่ (จัตุรัสพื้นขาว แบบรูปสินค้า) · ไม่ผ่าน = หยุด ยังไม่แก้สินค้า
+    const ratioO = view.imageRatio === "3:4" ? "3:4" as const : "1:1" as const;
+    const upO = new Map<string, string>();
+    for (const ref of shopeeOptionUploadRefs(op.tierVariation)) {
+      try { upO.set(ref, (await shopeeUploadRef(ref, ratioO)).imageId); }
+      catch (e) {
+        const error = `ฝากรูปตัวเลือกกับ Shopee ไม่สำเร็จ (${upO.size + 1}): ${(e as Error).message} — ยังไม่ได้แก้สินค้า`;
+        await auditOpt({ ok: false, error, raw_error: (e as Error).message });
+        return reply({ ok: false, view, error }, 502);
+      }
+    }
+    const tv = shopeeOptionResolve(op.tierVariation, upO);
+    if (!tv) { const error = "เตรียมรูปตัวเลือกไม่ครบ — ยังไม่ได้แก้สินค้า"; await auditOpt({ ok: false, error }); return reply({ ok: false, view, error }, 502); }
+    const beforeIds = view.models.map((m) => m.modelId).sort().join(",");
+    const beforePrice = Object.fromEntries(view.models.map((m) => [m.modelId, m.originalPrice ?? m.price]));
+    let echoO: ReturnType<typeof shopeeWriteEcho>;
+    try { echoO = shopeeWriteEcho(await shopeeUpdateTierVariation(r.accessToken, r.shopId, r.itemId, tv)); }
+    catch (e) {
+      const error = shopeeErrorText(e);
+      await auditOpt({ ok: false, error, raw_error: (e as Error).message, sent: tv });
+      return reply({ ok: false, view, error: `เปลี่ยนรูปตัวเลือกบน Shopee ไม่สำเร็จ: ${error}` }, 502);
+    }
+    // ดึงกลับเช็ก: รูปที่เปลี่ยนต้องเปลี่ยนจริง · ตัวเลือก (model) ชุดเดิม · ราคาเดิม
+    const oldIdx = new Map(t0.map((o, i) => [i, o.imageId ?? ""]));
+    const changedIdx = t0.map((o, i) => ((optImgs.refs![o.name] ?? "") && (optImgs.refs![o.name] !== (o.imageId ? `spi:${o.imageId}` : "")) ? i : -1)).filter((i) => i >= 0);
+    const landedO = (l: { base: Record<string, unknown>; models: Parameters<typeof shopeeListingView>[1] }) => {
+      const v2 = shopeeListingView(l.base, l.models);
+      const o2 = v2?.optionTiers[0]?.options ?? [];
+      return !!v2 && changedIdx.every((i) => !!o2[i]?.imageId && o2[i].imageId !== oldIdx.get(i));
+    };
+    const freshO = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, landedO);
+    const fv = freshO ? shopeeListingView(freshO.base, freshO.models, view.limits) : null;
+    const warningsO: string[] = [...op.warnings.filter((w) => !w.startsWith("เปลี่ยนเฉพาะรูป"))];
+    if (echoO.show) warningsO.push(`Shopee แจ้ง: ${echoO.show}`);
+    let structureChanged = false;
+    if (!fv) warningsO.push("Shopee ตอบรับแล้ว แต่ดึงข้อมูลกลับมาเช็กไม่ได้ — กด “ดึงตัวนี้จาก Shopee” แล้วเช็กตัวเลือก/สต๊อกใน Seller Centre");
+    else {
+      const afterIds = fv.models.map((m) => m.modelId).sort().join(",");
+      if (afterIds !== beforeIds) { structureChanged = true; warningsO.push("⚠️ ตัวเลือกบน Shopee ถูกสร้างใหม่ (รหัสตัวเลือกเปลี่ยน) — เช็กสต๊อกและการผูกใน BigSeller ด่วน"); }
+      const priceMoved = fv.models.filter((m) => beforePrice[m.modelId] != null && (m.originalPrice ?? m.price) !== beforePrice[m.modelId]).length;
+      if (priceMoved) warningsO.push(`⚠️ ราคาตั้งเปลี่ยน ${priceMoved} ตัวเลือกหลังส่ง — เช็กใน Seller Centre`);
+      if (!landedO(freshO!)) warningsO.push("Shopee รับคำสั่งแล้ว — รูปบนร้านอาจอัปเดตช้า กด “ดึงตัวนี้จาก Shopee” ภายหลังเพื่อยืนยัน");
+    }
+    if (freshO) { const err = await saveShopeeSlimCopy(admin, r.row, freshO); if (err) warningsO.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
+    const summaryO = "เปลี่ยนรูปตัวเลือกบน Shopee แล้ว";
+    await auditOpt({ ok: true, summary: summaryO, warnings: warningsO, refreshed: !!freshO, structure_changed: structureChanged, model_ids_before: beforeIds, model_ids_after: fv?.models.map((m) => m.modelId).sort().join(",") ?? null });
+    return reply({ ok: true, view: fv ?? view, summary: summaryO, warnings: warningsO, error: null });
+  }
   // มีคนแก้บนร้านระหว่างที่เปิดลิ้นชัก → ไม่ทับ (ให้ตรวจของล่าสุดแล้วแก้อีกครั้ง)
   const changedOnShop = wantText && ((body.edit!.name != null && norm(body.before!.name) !== norm(view.name))
     || (body.edit!.description != null && norm(body.before!.description) !== norm(view.description)));

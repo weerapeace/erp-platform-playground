@@ -10,7 +10,7 @@
  *     ✅ 2026-11-21 แก้แบบ extended ได้แล้ว (ข้อความ + รูปในรายละเอียด · แบบ A รูปต่อท้าย) — planShopeeEdit({ descImages }) · route ฝากรูป (scene desc) แล้วแทน image_ref → image_id
  *   - unlist_item: item_list ≤50 · สินค้าที่อยู่ในโปรโมชัน "ปิดขายไม่ได้" · รอตรวจ/ถูกแบน ปิด/เปิดไม่ได้ · ผลรายตัวอยู่ใน failure_list (HTTP 200)
  */
-import type { ShopeeSlimModel } from "@/lib/shopee";
+import type { ShopeeSlimModel, ShopeeSlimTier } from "@/lib/shopee";
 
 /** รูปในรายละเอียด (extended) — ใช้ทั้งลงสินค้าใหม่ (lib/shopee-create-plan) และแก้สินค้าที่ลงแล้ว · จำนวนสูงสุดยังไม่ยืนยันจากเอกสาร (ตั้ง 12 ไว้ก่อน) */
 export const SHOPEE_DESC_MAX_IMAGES = 12;
@@ -29,6 +29,8 @@ export type ShopeeListingView = {
   descriptionEditable: boolean;
   /** รูปในรายละเอียด (แบบ extended · เรียงตามที่ขึ้นบนร้าน) */
   descriptionImages: { id: string; url: string | null }[];
+  /** ชั้นตัวเลือก (ชื่อชั้น + ตัวเลือก + รูปของตัวเลือก — Shopee มีรูปเฉพาะชั้นแรก) · ไม่มีตัวเลือก = [] */
+  optionTiers: { name: string; options: { name: string; imageId: string | null; imageUrl: string | null }[] }[];
   images: string[];
   /** รหัสรูปบน Shopee เรียงตรงกับ images (ใช้ส่ง update_item · ว่าง = Shopee ไม่ส่งรหัสมา) */
   imageIds: string[];
@@ -88,7 +90,7 @@ export function shopeeDescriptionOf(base: Obj): { text: string; type: string; im
  * รายละเอียดสด (get_item_base_info) + ตัวเลือก (shopeeModelsToSlim · server) + ช่วงความยาว → มุมมองในลิ้นชัก
  * ไม่มี item_id = null
  */
-export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[] } | null, limits: ShopeeLimits | null = null): ShopeeListingView | null {
+export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]; tiers?: ShopeeSlimTier[] } | null, limits: ShopeeLimits | null = null): ShopeeListingView | null {
   const itemId = str(base.item_id);
   if (!itemId) return null;
   const desc = shopeeDescriptionOf(base);
@@ -102,6 +104,7 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
   return {
     itemId, name: String(base.item_name ?? ""), status: (str(base.item_status) ?? "").toUpperCase(),
     description: desc.text, descriptionType: desc.type, descriptionEditable: true, descriptionImages: desc.images,
+    optionTiers: (models?.tiers ?? []).map((t) => ({ name: t.name, options: t.options.map((o, i) => ({ name: o, imageId: t.images?.[i]?.id ?? null, imageUrl: t.images?.[i]?.url ?? null })) })),
     images: imgs.map((x) => x.url), imageIds: imgs.map((x) => x.id ?? ""), imageRatio: str(img?.image_ratio),
     categoryId: base.category_id != null ? String(base.category_id) : null,
     brand: str(obj(base.brand)?.original_brand_name), itemSku: str(base.item_sku),
@@ -225,6 +228,64 @@ export const SHOPEE_MAX_IMAGES = 9;
 export const shopeeImageRef = (id: string): string => `spi:${id}`;
 export const shopeeImageIdOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("spi:") ? ref.slice(4) || null : null);
 export const shopeeR2KeyOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) || null : null);
+
+// ───────── รูปของแต่ละตัวเลือก (สี) → v2.product.update_tier_variation (เจ้าของสั่ง 2026-11-22 "ทำเลย") ─────────
+// ส่งทุกชั้นด้วยชื่อ/ลำดับเดิม เปลี่ยนแค่รูปของชั้นแรก · Shopee: ถ้ามีรูปตัวเลือก ต้องมีครบทุกตัวในชั้นแรก
+export type ShopeeOptionImagePlan = {
+  changed: boolean;
+  /** tier_variation ที่จะส่ง (รูป = image_ref · route ฝาก r2 แล้วแทนเป็น image_id) */
+  tierVariation: Record<string, unknown>[];
+  changes: { label: string; before: string; after: string }[];
+  errors: string[]; warnings: string[];
+};
+/**
+ * want = { ชื่อตัวเลือกชั้นแรก: ref } ("spi:<image_id>" รูปเดิม · "r2:<key>" รูปจากระบบ) · ตัวที่ไม่ส่ง = คงรูปเดิม
+ */
+export function planShopeeOptionImages(v: Pick<ShopeeListingView, "optionTiers" | "status">, want: Record<string, string>): ShopeeOptionImagePlan {
+  const out: ShopeeOptionImagePlan = { changed: false, tierVariation: [], changes: [], errors: [], warnings: [] };
+  const tiers = v.optionTiers ?? [];
+  if (!tiers.length) { out.errors.push("สินค้านี้ไม่มีตัวเลือก — ไม่มีรูปตัวเลือกให้เปลี่ยน"); return out; }
+  if (v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE") out.errors.push("สินค้านี้ถูกลบแล้ว");
+  const t0 = tiers[0];
+  const names = new Set(t0.options.map((o) => o.name));
+  const unknown = Object.keys(want).filter((k) => !names.has(k));
+  if (unknown.length) out.warnings.push(`ไม่พบตัวเลือกชื่อ ${unknown.slice(0, 3).join(", ")} บนร้าน — ข้ามไป`);
+  const refs = t0.options.map((o) => String(want[o.name] ?? "").trim() || (o.imageId ? shopeeImageRef(o.imageId) : ""));
+  const cur = t0.options.map((o) => (o.imageId ? shopeeImageRef(o.imageId) : ""));
+  const diffIdx = refs.map((r, i) => (r !== cur[i] ? i : -1)).filter((i) => i >= 0);
+  out.changed = diffIdx.length > 0;
+  if (!out.changed) return out;
+  if (refs.some((r) => r && !shopeeImageIdOfRef(r) && !shopeeR2KeyOfRef(r))) out.errors.push("มีรูปตัวเลือกที่ระบบไม่รู้จัก — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่");
+  const missing = t0.options.filter((_, i) => !refs[i]).map((o) => o.name);
+  if (refs.some(Boolean) && missing.length) out.errors.push(`Shopee ต้องมีรูปครบทุกตัวเลือก — ยังขาด: ${missing.slice(0, 5).join(", ")}`);
+  out.tierVariation = tiers.map((t, ti) => ({
+    name: t.name,
+    option_list: t.options.map((o, oi) => ({ option: o.name, ...(ti === 0 && refs[oi] ? { image: { image_ref: refs[oi] } } : {}) })),
+  }));
+  out.changes.push({ label: "รูปตัวเลือก", before: `${cur.filter(Boolean).length} รูป`, after: `เปลี่ยน ${diffIdx.length} รูป (${diffIdx.slice(0, 4).map((i) => t0.options[i].name).join(", ")}${diffIdx.length > 4 ? " …" : ""})` });
+  out.warnings.push("เปลี่ยนเฉพาะรูป — ชื่อตัวเลือก ราคา สต๊อก คงเดิม (ระบบดึงกลับมาเช็กให้หลังส่ง)");
+  if (v.status === "REVIEWING") out.warnings.push("สินค้านี้กำลังรอ Shopee ตรวจ — แก้แล้วอาจต้องรอตรวจต่อ");
+  return out;
+}
+/** รูปตัวเลือกที่ต้องฝากใหม่ ("r2:" เท่านั้น) */
+export function shopeeOptionUploadRefs(tierVariation: Record<string, unknown>[]): string[] {
+  return [...new Set(tierVariation.flatMap((t) => ((t.option_list as Record<string, unknown>[] | undefined) ?? []).map((o) => String((o.image as Record<string, unknown> | undefined)?.image_ref ?? ""))).filter((r) => !!shopeeR2KeyOfRef(r)))];
+}
+/** แทน image_ref → image_id (รูปเดิม = รหัสใน ref · รูปใหม่ = idOf) · ฝากไม่ครบ = null (ไม่ส่งครึ่ง ๆ) */
+export function shopeeOptionResolve(tierVariation: Record<string, unknown>[], idOf: Map<string, string>): Record<string, unknown>[] | null {
+  let ok = true;
+  const out = tierVariation.map((t) => ({
+    ...t,
+    option_list: ((t.option_list as Record<string, unknown>[] | undefined) ?? []).map((o) => {
+      const ref = String((o.image as Record<string, unknown> | undefined)?.image_ref ?? "");
+      if (!ref) return { option: o.option };
+      const id = shopeeImageIdOfRef(ref) ?? idOf.get(ref) ?? null;
+      if (!id) { ok = false; return { option: o.option }; }
+      return { option: o.option, image: { image_id: id } };
+    }),
+  }));
+  return ok ? out : null;
+}
 
 /** รูปในรายละเอียดของ body (extended) ที่ต้องฝากใหม่ ("r2:" เท่านั้น — "spi:" = รูปเดิมบน Shopee) */
 export function shopeeEditDescUploadRefs(body: ShopeeEditPlan["body"]): string[] {
