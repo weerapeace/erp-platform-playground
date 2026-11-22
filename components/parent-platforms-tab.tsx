@@ -68,7 +68,7 @@ type Matched = Record<string, MatchedListing>;
 /** พรีวิวหน้าร้านของ 1 การ์ด — รูป (ลิงก์พร้อมใช้) + ราคา + ตัวเลือก · fromSystem = ยังไม่มีรูปจากร้าน ใช้รูปในระบบแทน */
 type ShopPreview = { images: string[]; price: number | null; sale: number | null; variants: ListingShopVariant[]; fromSystem: boolean };
 /** ร้านที่เช็กกับร้านจริงได้ (ดึงเฉพาะตัวที่เปลี่ยน · app/api/platform-catalog/refresh-changed) */
-const SHOP_CHECKABLE = new Set(["lazada", "shopee", "tiktok"]);
+const SHOP_CHECKABLE = new Set(["lazada", "shopee", "tiktok", "line_shopping"]);
 
 const isOnSaleOf = (d: Draft | undefined, m: Matched[string] | undefined) =>
   !!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id) || !!m;

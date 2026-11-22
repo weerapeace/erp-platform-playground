@@ -167,9 +167,9 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
   {
     id: "catalog-refresh", zone: "sales", kind: "auto", icon: "🔄",
     title: "ผู้อัปเดตรายการสินค้าบนร้าน", titleEn: "Shop catalog refresher",
-    does: "ทุกชั่วโมงดึงสินค้า Lazada / Shopee เฉพาะตัวที่เพิ่ม/แก้บนร้าน (เช่น ลงผ่าน BigSeller) เข้าระบบ แล้วจับคู่รหัสให้ — แท็บแพลตฟอร์มจะรู้ว่าสินค้าอยู่บนร้านแล้ว และกันลงซ้ำ",
+    does: "ทุกชั่วโมงดึงสินค้า Lazada / Shopee เฉพาะตัวที่เพิ่ม/แก้บนร้าน (เช่น ลงผ่าน BigSeller) + LINE SHOPPING ทั้งร้าน เข้าระบบ แล้วจับคู่รหัสให้ — แท็บแพลตฟอร์มจะรู้ว่าสินค้าอยู่บนร้านแล้ว และกันลงซ้ำ",
     trigger: "ทุกชั่วโมง (นาทีที่ 40)", cron: "/api/cron/catalog-refresh", everyHours: 1,
-    can: ["อ่านรายการสินค้าบนร้าน Lazada / Shopee", "บันทึก + จับคู่รหัสตรงในรายการสินค้าบนร้าน"], cannot: ["แก้อะไรบนร้าน", "ลงสินค้าขึ้นร้าน", "ติดป้ายว่าร้านลบแล้ว (ต้องดึงแบบเต็ม)"],
+    can: ["อ่านรายการสินค้าบนร้าน Lazada / Shopee / LINE SHOPPING", "บันทึก + จับคู่รหัสตรงในรายการสินค้าบนร้าน", "LINE: ติดป้ายตัวที่ร้านลบแล้ว (ดึงครบทั้งร้านทุกรอบ)"], cannot: ["แก้อะไรบนร้าน", "ลงสินค้าขึ้นร้าน", "Lazada/Shopee: ติดป้ายว่าร้านลบแล้ว (ต้องดึงแบบเต็ม)"],
     source: "บันทึกรอบล่าสุด + สถานะต่อร้าน ui_config catalog_refresh:<ร้าน>:<แบรนด์>", href: "/master/platform-catalog",
     files: ["app/api/cron/catalog-refresh/route.ts", "app/api/platform-catalog/refresh-changed.ts", "lib/catalog-refresh-plan.ts"],
   },

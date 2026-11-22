@@ -18,6 +18,7 @@ import { decryptSecret } from "@/lib/secret-box";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { appendDescImages, countPresent, lineHostImagesViaGallery } from "@/lib/line-desc-images";
+import { guardNotOnShop } from "../../platform-catalog/refresh-changed";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,6 +44,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const afterDisplay: "onsale" | "hide" = body.display === "onsale" ? "onsale" : "hide";
 
   const admin = supabaseAdmin();
+  // 🛡️ กันลงซ้ำ (เจ้าของอนุมัติ 2026-11-22 "เพิ่ม LINE ด้วย"): ข้อมูลร้านเก่ากว่า 2 ชม. → ดึงทั้งร้านก่อน แล้วดูว่าสินค้านี้อยู่บน LINE แล้วไหม · app/api/platform-catalog/refresh-changed
+  const shopGuard = await guardNotOnShop(admin, "line_shopping", "LINE SHOPPING", parent_sku_id, 25_000);
+  if (shopGuard) return NextResponse.json({ error: shopGuard.error }, { status: shopGuard.status });
   const b = await buildLineCreate(admin, parent_sku_id);
   if (!b.ok) return NextResponse.json({ error: b.error }, { status: b.status });
   const { preview: pv, payload, credential, draftProductId, descImageKeys } = b;

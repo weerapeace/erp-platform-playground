@@ -1,5 +1,5 @@
 /**
- * /api/cron/catalog-refresh — อัปเดตรายการสินค้าบนร้าน Lazada / Shopee "เฉพาะตัวที่เปลี่ยน" ทุกชั่วโมง
+ * /api/cron/catalog-refresh — อัปเดตรายการสินค้าบนร้าน Lazada / Shopee "เฉพาะตัวที่เปลี่ยน" + LINE SHOPPING ทั้งร้าน ทุกชั่วโมง
  * เจ้าของเลือก 2026-11-21 ข้อ 1 (บั๊ก LY22: ลง Lazada ผ่านทางอื่นแล้ว แต่ระบบไม่รู้ เพราะรายการร้านอัปเดตเฉพาะตอนกดดึงสินค้า)
  * vercel.json "40 * * * *" · ทุกแบรนด์ที่เชื่อม Lazada / Shopee → refreshShopChanged (app/api/platform-catalog/refresh-changed)
  *   ต่อจากรอบก่อน (รอบค้างทำต่อ) · บันทึกผลรอบ recordWorkerRun "catalog-refresh" (ออฟฟิศทีม AI)
@@ -15,6 +15,7 @@ import { shopeeConfigured } from "@/lib/shopee";
 import { getPlatformId } from "../../lazada/shared";
 import { lazadaConnectedBrandIds } from "../../lazada/orders-sync";
 import { shopeeConnectedBrandIds } from "../../shopee/orders-sync";
+import { lineConnectedBrandIds } from "../../line-shopping/orders-sync";
 import { refreshShopChanged, type RefreshPlatform, type RefreshResult } from "../../platform-catalog/refresh-changed";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const lzId = await getPlatformId(admin, "lazada");
   const spId = shopeeConfigured() ? await getPlatformId(admin, "shopee") : null;
+  const lsId = await getPlatformId(admin, "line_shopping");
   const jobs: { platform: RefreshPlatform; brandId: string }[] = [
     ...(lzId ? (await lazadaConnectedBrandIds(admin, lzId).catch(() => [] as string[])).map((b) => ({ platform: "lazada" as const, brandId: b })) : []),
     ...(spId ? (await shopeeConnectedBrandIds(admin, spId).catch(() => [] as string[])).map((b) => ({ platform: "shopee" as const, brandId: b })) : []),
+    // LINE: ดึงทั้งร้านทุกรอบ (ไม่มีตัวกรองเฉพาะตัวที่เปลี่ยน · ~10 ครั้ง/ร้าน/ชั่วโมง ไม่ชนโควตา) — เจ้าของอนุมัติ 2026-11-22
+    ...(lsId ? (await lineConnectedBrandIds(admin, lsId).catch(() => [] as string[])).map((b) => ({ platform: "line_shopping" as const, brandId: b })) : []),
   ];
   if (!cron) return NextResponse.json({ ok: true, dry: true, shops: jobs });
 

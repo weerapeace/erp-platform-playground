@@ -11,18 +11,12 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lineListProducts } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
-import { upsertCatalogListings, type CatalogSyncItem } from "@/lib/platform-catalog-sync";
+import { syncLineProductsFull } from "../products-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 60;
-
-const MAX_PAGES = 200;   // กันวนไม่จบ
-const PER_PAGE = 100;
-const asStr = (v: unknown): string | null => { const s = v == null ? "" : String(v).trim(); return s || null; };
-const asNum = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isNaN(n) ? null : n; };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
@@ -43,41 +37,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let apiKey: string;
   try { apiKey = await decryptSecret(stored); } catch { return NextResponse.json({ error: "ถอดรหัสคีย์ไม่ได้ (กุญแจหลักไม่ตรง/หาย?)" }, { status: 400 }); }
 
-  // 1) วนดึงสินค้าทุกหน้า — ยึด "ยอดที่ LINE รายงาน" (totalRow) เป็นหลัก
-  //    เผื่อ LINE แบ่งหน้าเล็กกว่าที่ขอ: วนต่อจนได้ครบตามยอด หรือหน้าว่าง (ไม่พึ่ง totalPage อย่างเดียว)
-  const products: Record<string, unknown>[] = [];
-  let page = 1, apiTotal = 0;
-  while (page <= MAX_PAGES) {
-    const res = await lineListProducts(apiKey, { page, perPage: PER_PAGE });
-    if (!res.ok) return NextResponse.json({ error: `ดึงสินค้าไม่สำเร็จ: ${res.error}` }, { status: 400 });
-    const got = res.rows ?? [];
-    if (page === 1) apiTotal = res.totalRow ?? 0;
-    products.push(...got);
-    if (got.length === 0) break;                                 // หน้าว่าง = จบ
-    if (apiTotal > 0 && products.length >= apiTotal) break;      // ครบตามที่ LINE รายงาน
-    if (apiTotal === 0 && got.length < PER_PAGE) break;          // ไม่รู้ยอดรวม + หน้าไม่เต็ม = จบ
-    page++;
-  }
-  if (products.length === 0) return NextResponse.json({ ok: true, fetched: 0, matched: 0, created: 0, updated: 0, error: null });
-
-  // 2) แปลงเป็นรายการมาตรฐาน (ระดับสินค้า + เก็บ variants ใน raw.line)
-  const items: CatalogSyncItem[] = [];
-  for (const p of products) {
-    const variants = Array.isArray(p.variants) ? p.variants as Record<string, unknown>[] : [];
-    const skus = variants.map((v) => asStr(v.sku)).filter(Boolean) as string[];
-    const prices = variants.map((v) => asNum(v.price)).filter((n): n is number => n != null);
-    const eid = asStr(p.id);
-    if (!eid) continue;
-    items.push({ external_product_id: eid, title: asStr(p.name), skus, price: prices.length ? Math.min(...prices) : null, raw: { line: p } });
-  }
-
-  // 3) บันทึก + จับคู่รหัสตรง (ของกลาง · ทีละชุด · ไม่ทับคู่เดิม · ไม่จับคู่ตัวที่กดข้าม)
-  //    ได้ครบตามยอดที่ LINE รายงาน (นับเลขสินค้าไม่ซ้ำ กันหน้าซ้อน) → ตัวเดิมที่ไม่เจอ = ติดป้าย "ไม่อยู่บนร้านแล้ว"
-  const complete = apiTotal > 0 && new Set(items.map((i) => i.external_product_id)).size >= apiTotal;
-  let saved;
-  try { saved = await upsertCatalogListings(admin, { platformId: platform_id, brandId: brand_id, source: "api", items, markMissing: complete }); }
-  catch (e) { return NextResponse.json({ error: `บันทึกไม่สำเร็จ: ${(e as Error).message}` }, { status: 400 }); }
-
-  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, complete, ...saved } });
-  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, complete, ...saved, error: null });
+  // ดึงทั้งร้าน + บันทึก + จับคู่ = ตัวดึงตัวเดียวของ LINE (../products-sync · ใช้ร่วมกับตัวดึงทุกชั่วโมง)
+  const r = await syncLineProductsFull(admin, { platformId: platform_id, brandId: brand_id, apiKey });
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: 400 });
+  const { ok: _ok, api_total: apiTotal, ...saved } = r;
+  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, ...saved } });
+  return NextResponse.json({ ok: true, api_total: apiTotal, ...saved, error: null });
 }

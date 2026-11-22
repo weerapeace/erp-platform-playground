@@ -28,9 +28,14 @@ import { getPlatformId, lazTokenOrReason } from "../lazada/shared";
 import { shopeeTokenOrReason } from "../shopee/shared";
 import { ttsTokenOrReason } from "../tiktok-shop/shared";
 import { syncTiktokProductsChanged } from "../tiktok-shop/products-sync";
+import { syncLineProductsFull } from "../line-shopping/products-sync";
+import { decryptSecret } from "@/lib/secret-box";
 
-export type RefreshPlatform = "lazada" | "shopee";
-export const REFRESH_PLATFORMS: RefreshPlatform[] = ["lazada", "shopee"];
+/** line_shopping = ดึงทั้งร้านทุกรอบ (LINE ไม่มีตัวกรอง "เฉพาะตัวที่เปลี่ยน" · เจ้าของอนุมัติ 2026-11-22 "เพิ่ม LINE ด้วย") */
+export type RefreshPlatform = "lazada" | "shopee" | "line_shopping";
+export const REFRESH_PLATFORMS: RefreshPlatform[] = ["lazada", "shopee", "line_shopping"];
+/** ชื่อ source ในประวัติ audit ของปุ่ม "ดึงสินค้าจากร้าน" แบบเต็ม */
+const FULL_PULL_SOURCE: Record<string, string> = { lazada: "lazada_api", shopee: "shopee_api", line_shopping: "line_api", tiktok: "tiktok_api" };
 export type RefreshResult = { platform: string; brand_id: string; ok: boolean; done: boolean; saved: number; newly_matched: number; error: string | null; fresh_at: string | null };
 
 const PAGE = 50;
@@ -60,7 +65,7 @@ async function writeState(admin: SupabaseClient, key: string, value: unknown) {
 async function fullPullBaselineMs(admin: SupabaseClient, platform: string, platformId: string, brandId: string): Promise<number | null> {
   const { data: a } = await admin.from("audit_logs").select("created_at, metadata->>run_started_at")
     .eq("entity_type", "platform_catalog").eq("action", "import")
-    .eq("metadata->>source", `${platform}_api`).eq("metadata->>brand_id", brandId).eq("metadata->>complete", "true")
+    .eq("metadata->>source", FULL_PULL_SOURCE[platform] ?? `${platform}_api`).eq("metadata->>brand_id", brandId).eq("metadata->>complete", "true")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
   const row = a as { created_at?: string; run_started_at?: string | null } | null;
   const fromAudit = Date.parse(String(row?.run_started_at || row?.created_at || ""));
@@ -154,7 +159,19 @@ async function pullShopee(admin: SupabaseClient, ctx: { platformId: string; bran
   return { done: true, cursor: "", sinceMs: ctx.sinceMs, saved, newly, error: null };
 }
 
-/** ดึงเฉพาะตัวที่เปลี่ยนของร้าน+แบรนด์นี้ (ต่อจากรอบก่อน) แล้วจดสถานะ — ไม่ throw */
+/** LINE: ดึงทั้งร้าน (ตัวดึงตัวเดียวของ LINE ../line-shopping/products-sync) · ครบตามยอดที่ LINE รายงาน = done */
+async function pullLineFull(admin: SupabaseClient, platformId: string, brandId: string): Promise<{ done: boolean; saved: number; newly: number; error: string | null }> {
+  const { data: cred } = await admin.from("platform_credentials").select("api_key").eq("brand_id", brandId).eq("platform_id", platformId).maybeSingle();
+  const stored = (cred as { api_key?: string } | null)?.api_key;
+  if (!stored) return { done: false, saved: 0, newly: 0, error: "ยังไม่ได้ใส่ API Key ของ LINE SHOPPING" };
+  let apiKey: string;
+  try { apiKey = await decryptSecret(stored); } catch { return { done: false, saved: 0, newly: 0, error: "ถอดรหัสคีย์ LINE ไม่ได้" }; }
+  const r = await syncLineProductsFull(admin, { platformId, brandId, apiKey });
+  if (!r.ok) return { done: false, saved: 0, newly: 0, error: r.error };
+  return { done: r.complete, saved: r.fetched, newly: r.newly_matched ?? 0, error: r.complete ? null : `ได้ ${r.fetched}/${r.api_total} ตัว (ไม่ครบตามยอดที่ LINE รายงาน)` };
+}
+
+/** ดึงเฉพาะตัวที่เปลี่ยนของร้าน+แบรนด์นี้ (ต่อจากรอบก่อน · LINE = ทั้งร้าน) แล้วจดสถานะ — ไม่ throw */
 export async function refreshShopChanged(admin: SupabaseClient, args: { platform: RefreshPlatform; brandId: string; budgetMs: number }): Promise<RefreshResult> {
   const { platform, brandId } = args;
   const base = { platform, brand_id: brandId, ok: false, done: false, saved: 0, newly_matched: 0 };
@@ -164,6 +181,12 @@ export async function refreshShopChanged(admin: SupabaseClient, args: { platform
     const key = catalogRefreshKey(platform, brandId);
     const prev = await readState(admin, key);
     const now = Date.now();
+    if (platform === "line_shopping") {
+      const r = await pullLineFull(admin, platformId, brandId);
+      const next = finishRefreshState(prev, { sinceMs: now, startedAtMs: now, cursor: "", done: r.done, error: r.error, saved: r.saved }, Date.now());
+      await writeState(admin, key, next);
+      return { ...base, ok: !r.error, done: r.done && !r.error, saved: r.saved, newly_matched: r.newly, error: r.error, fresh_at: next.last_done_at };
+    }
     const win = planRefreshWindow(prev, now, prev.last_done_at ? null : await fullPullBaselineMs(admin, platform, platformId, brandId));
     if (!win) return { ...base, error: "ยังไม่เคยดึงสินค้าจากร้านนี้ — กด \"ดึงสินค้าจากร้าน\" แบบเต็ม 1 ครั้งก่อน", fresh_at: null };
     const ctx = { platformId, brandId, sinceMs: win.sinceMs, startedAtMs: win.startedAtMs, cursor: win.cursor, budgetMs: args.budgetMs };
@@ -194,13 +217,20 @@ async function refreshTiktokRecent(admin: SupabaseClient, brandId: string, budge
 
 export type ShopCheck = { brandId: string | null; result: RefreshResult | null; onShop: { id: string; external_id: string | null; title: string | null } | null; freshAt: string | null };
 
-/** สินค้า 1 ตัว: ดึงตัวที่เปลี่ยนของร้านนั้น แล้วดูว่าสินค้านี้อยู่บนร้านแล้วไหม (จับคู่ไว้ · ไม่นับตัวที่ร้านลบแล้ว) */
-export async function checkParentOnShop(admin: SupabaseClient, platformCode: string, parentId: string, budgetMs: number): Promise<ShopCheck> {
+/**
+ * สินค้า 1 ตัว: ดึงตัวที่เปลี่ยนของร้านนั้น แล้วดูว่าสินค้านี้อยู่บนร้านแล้วไหม (จับคู่ไว้ · ไม่นับตัวที่ร้านลบแล้ว)
+ * LINE ดึงทั้งร้าน (~10-20 วิ) → ปุ่มเช็กกับร้าน (force) ดึงทุกครั้ง · ด่านก่อนลงจริงดึงเฉพาะตอนข้อมูลเก่ากว่า 2 ชม. (ตัวดึงทุกชั่วโมงทำให้สดอยู่แล้ว)
+ */
+export async function checkParentOnShop(admin: SupabaseClient, platformCode: string, parentId: string, budgetMs: number, opts: { force?: boolean } = {}): Promise<ShopCheck> {
   const { data: p } = await admin.from("parent_skus_v2").select("brand_id").eq("id", parentId).maybeSingle();
   const brandId = ((p as { brand_id?: string | null } | null)?.brand_id) ?? null;
   const platformId = await getPlatformId(admin, platformCode);
   let result: RefreshResult | null = null;
   if (brandId && (platformCode === "lazada" || platformCode === "shopee")) result = await refreshShopChanged(admin, { platform: platformCode, brandId, budgetMs });
+  else if (brandId && platformCode === "line_shopping") {
+    const fresh = opts.force ? null : (await catalogFreshness(admin, brandId)).line_shopping ?? null;
+    if (opts.force || isCatalogStale(fresh, Date.now())) result = await refreshShopChanged(admin, { platform: "line_shopping", brandId, budgetMs });
+  }
   else if (brandId && platformCode === "tiktok") result = await refreshTiktokRecent(admin, brandId, budgetMs);
   let onShop: ShopCheck["onShop"] = null;
   if (platformId) {
