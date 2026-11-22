@@ -27,6 +27,7 @@ import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { openLink } from "@/lib/open-link";
+import { EmbedModal } from "@/components/embed-modal";
 import { guessSkuForLine, isQuoteOpen, quoteChainIds, quoteConfirmPlan, quoteFailAction, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type QuoteConfirmPlan, type QuoteLineSkuMap, type SheetQuotation } from "@/lib/design-sheet-quotations";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
@@ -62,6 +63,8 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // quotation_id ที่กำลังทำ
   const [confirmPlan, setConfirmPlan] = useState<QuoteConfirmPlan | null>(null);   // หน้าต่าง "ยืนยัน · ผ่าน"
+  // กดเลขที่ใบ = เปิดใบเสนอราคาเป็นป๊อป (ของกลาง EmbedModal · เจ้าของขอ 2026-11-22) · Ctrl/คลิกกลาง = แท็บใหม่เหมือนเดิม · ปิดป๊อป = โหลดรายการใหม่ (เผื่อแก้ในป๊อป)
+  const [peek, setPeek] = useState<{ id: string; no: string } | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -191,7 +194,9 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
     { key: "no", header: t("เลขที่", "No."), width: "1.3fr", sortValue: (q) => q.quote_number ?? "",
       cell: (q) => (
         <div className="min-w-0">
-          <a href={openLink("/quotations", q.quotation_id)} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-700 hover:underline">{q.quote_number ?? t("ร่าง", "Draft")}</a>
+          <a href={openLink("/quotations", q.quotation_id)} target="_blank" rel="noopener noreferrer" title={t("เปิดใบเสนอราคา (Ctrl+คลิก = แท็บใหม่)", "Open quotation (Ctrl+click = new tab)")}
+            onClick={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); setPeek({ id: q.quotation_id, no: q.quote_number ?? t("ร่าง", "Draft") }); }}
+            className="font-semibold text-blue-700 hover:underline">{q.quote_number ?? t("ร่าง", "Draft")}</a>
           {q.quotation_id === cartId && <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-indigo-50 px-1 text-[11px] text-indigo-600"><Icon value="i:basket" className="text-[11px]" />{t("ในตะกร้า", "In cart")}</span>}
           {(() => {
             const sub = [
@@ -287,6 +292,7 @@ export function SheetQuotations({ sheetId, canEdit, refreshKey, cartId, onUseAsC
 
   return (
     <div className="mb-3 rounded-xl border border-slate-200 bg-white p-2.5">
+      {peek && <EmbedModal url={openLink("/quotations", peek.id)} title={t(`ใบเสนอราคา ${peek.no}`, `Quotation ${peek.no}`)} storageKey="dsd_quote_peek" onClose={() => { setPeek(null); void load(); }} />}
       {confirmPlan && (
         <ConfirmQuoteDialog plan={confirmPlan} busy={busy === confirmPlan.pick.quotation_id} linkedSkus={linkedSkus}
           onCreateSku={onCreateSku ? () => { setConfirmPlan(null); onCreateSku(); } : undefined}
