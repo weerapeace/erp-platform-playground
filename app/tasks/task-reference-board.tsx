@@ -11,6 +11,7 @@ import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { apiFetch } from "@/lib/api";
 import { LoadingState } from "@/components/state-views";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -28,11 +29,10 @@ export const taskReferenceUrl = (taskId: string) => `/tasks/reference/${encodeUR
 //  • กระดานกลาง CanvasSketch ห้องแยก entity_type=creative_task_brief (คนละห้องกับกระดานอ้างอิง)
 //  • รูปบรีฟที่แนบไว้แบบเดิม (reference_images) → ย้ายขึ้นกระดานเองตอนเปิดครั้งแรก (กระดานยังไม่เคยบันทึก) ครั้งเดียว
 //    ไม่ลบรูปชุดเดิมในฐานข้อมูล (เก็บไว้เป็นสำรอง) · ลบรูปบนกระดานแล้วไม่ถูกเติมกลับ (กระดานบันทึกแล้ว)
-//  • ค่าเริ่มต้นพับซ่อน · กดขยายแล้วจำค่าต่อเครื่อง · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
+//  • พับ/ขยายเองตามของบนกระดาน: ว่าง = พับ · มีของ = ขยาย (2026-11-22) · เปิดเต็มจอ = /tasks/reference/<id>?board=brief
 // ============================================================
 export const TASK_BRIEF_ENTITY = "creative_task_brief";
 export const taskBriefUrl = (taskId: string) => `${taskReferenceUrl(taskId)}?board=brief`;
-const BRIEF_FOLD_KEY = "task-brief-board-folded";
 
 export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", showOpenFull = true, foldable = true }: {
   taskId: string;
@@ -43,9 +43,23 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
   foldable?: boolean;
 }) {
   const t = useT();
-  const [folded, setFolded] = useState(foldable); // ค่าเริ่มต้น = พับซ่อน (เจ้าของสั่ง 2026-11-21) · กดขยายแล้วจำค่าต่อเครื่อง
-  useEffect(() => { if (!foldable) return; try { setFolded(localStorage.getItem(BRIEF_FOLD_KEY) !== "0"); } catch { /* ไม่มี storage = พับไว้ */ } }, [foldable]);
-  const toggleFold = () => setFolded((f) => { const n = !f; try { localStorage.setItem(BRIEF_FOLD_KEY, n ? "1" : "0"); } catch { /* ignore */ } return n; });
+  // พับ/ขยายอัตโนมัติตามของบนกระดาน (เจ้าของสั่ง 2026-11-22): ว่าง = พับ · มีของ = ขยาย · กดสลับเองได้ (เฉพาะตอนเปิดงานนี้อยู่)
+  const [folded, setFolded] = useState(foldable);
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!foldable) return;
+    let live = true; setCount(null); setFolded(true);
+    const seeds = seedRef.current.filter(Boolean).length;
+    apiFetch(`/api/canvas-sketch?entity_type=${TASK_BRIEF_ENTITY}&entity_id=${encodeURIComponent(taskId)}`)
+      .then((r) => r.json()).then((j) => {
+        if (!live) return;
+        const els = ((j?.data?.scene?.elements ?? []) as { isDeleted?: boolean }[]).filter((e) => !e.isDeleted).length;
+        const n = els || (!j?.data ? seeds : 0); // กระดานใหม่ที่มีรูปบรีฟเดิมจะถูกเติมตอนเปิด = นับว่ามีของ
+        setCount(n); setFolded(n === 0);
+      }).catch(() => { if (live) setCount(null); });
+    return () => { live = false; };
+  }, [taskId, foldable]);
+  const toggleFold = () => setFolded((f) => !f);
 
   const controlsRef = useRef<CanvasSketchControls | null>(null);
   const seedRef = useRef(seedImageUrls); seedRef.current = seedImageUrls;
@@ -67,7 +81,7 @@ export function TaskBriefBoard({ taskId, seedImageUrls = [], height = "50vh", sh
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-slate-400">🎨 {t("กระดานบรีฟ", "Brief board")}</span>
+        <span className="text-xs text-slate-400">🎨 {t("กระดานบรีฟ", "Brief board")}{foldable && count === 0 && <span className="ml-1 text-slate-300">· {t("ยังว่าง", "empty")}</span>}</span>
         <span className="ml-auto inline-flex items-center gap-1.5">
           {foldable && (
             <button type="button" onClick={toggleFold} className="inline-flex items-center h-7 px-2.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-600 hover:bg-slate-50">
