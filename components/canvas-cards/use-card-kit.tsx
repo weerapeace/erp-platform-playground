@@ -35,7 +35,9 @@ import { AssetPicker } from "@/components/asset-picker";
 import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { TableDrawer } from "@/app/tasks/table-drawer";
-import { usePushToast } from "@/components/toast";
+import { usePushToast, useToast } from "@/components/toast";
+import { frameSectionKind, slotInFrame, templateFrames, templatesFor, type BoardKind, type BoardSectionConfig, type BoardSectionTemplate, type SectionKind } from "@/lib/board-section-templates";
+import { loadSectionTemplates } from "./section-templates-cache";
 import { skuCardSkeleton, parentSkuCardSkeleton, marketingSkuCardSkeleton, designSheetCardSkeleton, trendCardSkeleton, assetCardSkeleton, contentCardSkeleton, perPlatformCardSkeleton, tableCardSkeleton, taskCardSkeleton, type ParentSkuVal, type MktSkuVal, type MktFieldKey, MKT_FIELDS_ALL, tt, type DsCardInfo, dsCardText, DS_CARD_STROKE, type TrendCardInfo, trendCardText, type AssetFieldKey, contentCardText, perPlatformCardText, MKT_FIELD_OPTS, postStatusStyle } from "./skeletons";
 import { ParentSkuMultiPick, MarketingSkuMultiPick, SkuMultiPick, DesignSheetMultiPick, BigTagPick } from "./multi-picks";
 import { AssetCardDrawer, SkuDrawer, CardsSummary, type ToolMenuItem } from "./drawers";
@@ -94,6 +96,8 @@ export type CardKitOptions = {
   contextLabel?: string;
   /** กระดานของงาน (กระดานบรีฟ): คอนเทนต์ที่สร้างจากกระดานผูกงานนี้ + แบรนด์ของงาน */
   task?: { id: string; brandId: string | null } | null;
+  /** ชนิดกระดาน — ใช้เลือกเทมเพลตโซน bento ที่ตั้งไว้ (/tasks/settings แท็บ เทมเพลตโซนกระดาน) · ไม่ส่ง = ไม่มีเทมเพลตโซน */
+  board?: BoardKind;
 };
 
 export type CardKit = {
@@ -111,13 +115,25 @@ export type CardKit = {
   openContentFrom: (seed: ContentSeed) => void;
   /** ป๊อปทั้งหมดของชุดการ์ด — วางไว้ที่ไหนก็ได้ในหน้า */
   ui: ReactNode;
+  /** ส่ง id ที่เลือกบนกระดานมา (onSelectionChange) — เลือกกรอบโซนงาน/คอนเทนต์ → โผล่ปุ่ม ＋ งาน / ＋ คอนเทนต์ */
+  onSelection: (ids: string[]) => void;
 };
 
 /** ของที่เลือกบนกระดาน → ตั้งต้นคอนเทนต์ใหม่ · onCreated = แจ้งกลับเพื่อแปะป้ายบนของที่ใช้แล้ว */
 export type ContentSeed = { title?: string; images: string[]; caption: string | null; sourceIds: string[]; onCreated?: (contentId: string) => void };
 
-export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], contextLabel, task = null }: CardKitOptions): CardKit {
+export function useCardKit({ sketchRef, campaign = null, sectionPresets: presetsIn = [], contextLabel, task = null, board }: CardKitOptions): CardKit {
   const t = useT();
+  // ── เทมเพลตโซน bento (lib/board-section-templates) ──
+  const [sectionCfg, setSectionCfg] = useState<BoardSectionConfig | null>(null);
+  useEffect(() => { if (board) loadSectionTemplates().then(setSectionCfg).catch(() => {}); }, [board]);
+  const sectionTpls: BoardSectionTemplate[] = board && sectionCfg ? templatesFor(sectionCfg, board) : [];
+  // ชื่อโซนสำเร็จรูป: หน้าส่งมาเอง > ชื่อโซนจากเทมเพลตของกระดานนี้
+  const sectionPresets = presetsIn.length ? presetsIn : [...new Set(sectionTpls.flatMap((x) => x.blocks.map((b) => b.name)))];
+  // กรอบโซนที่เลือกอยู่ (โซนงาน/คอนเทนต์) + กรอบเป้าหมายของการ์ดใบถัดไป
+  const [zone, setZone] = useState<{ id: string; name: string; kind: Exclude<SectionKind, "none"> } | null>(null);
+  const zoneTargetRef = useRef<string | null>(null);
+  const undoToast = useToast();
   const campaignId = campaign?.id ?? null;
   const [skuOpen, setSkuOpen] = useState(false);
   const [skuSel, setSkuSel] = useState<SkuPickerValue[]>([]); // SKU ที่เลือก (หลายอัน)
@@ -200,6 +216,36 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
     void sketchRef.current.insert([{ type: "frame", children: [], name: name.trim() || t("โซนใหม่", "New section"), x: 0, y: 0, width: 560, height: 400 }]);
     setSectionOpen(false); setSectionName("");
   };
+  // วางเทมเพลตโซนทั้งชุด (bento) — ย้อนกลับได้จากแจ้งผล (เอากรอบชุดนี้ออก) + Ctrl+Z บนกระดาน
+  const insertSectionTemplate = (tpl: BoardSectionTemplate) => {
+    if (!sketchRef.current) { pushToast("info", t("กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง", "Canvas not ready, please try again")); return; }
+    const batch = `sb${Date.now().toString(36)}`;
+    const frames = templateFrames(tpl).map((f) => ({ ...f, customData: { ...(f.customData as Record<string, unknown>), sectionBatch: batch } }));
+    void sketchRef.current.insert(frames);
+    setSectionOpen(false);
+    undoToast.undo(t(`วางเทมเพลตโซน “${tpl.name}” แล้ว (${frames.length} โซน)`, `Placed section template “${tpl.name}” (${frames.length} zones)`), () => {
+      sketchRef.current?.patchElements((el) => ((el.customData as Record<string, unknown> | undefined)?.sectionBatch === batch ? { ...el, isDeleted: true } : null));
+    });
+  };
+  // การ์ดใหม่ → วางในกรอบโซนเป้าหมาย (ถ้ามี) ต่อจากการ์ดเดิมในกรอบ แล้วผูกการ์ดเข้ากรอบ (ลากกรอบแล้วการ์ดตาม) · ไม่มีเป้าหมาย = กลางจอเหมือนเดิม
+  const placeCard = async (skeletons: Record<string, unknown>[], cardId: string) => {
+    const sk = sketchRef.current; if (!sk) return;
+    const fid = zoneTargetRef.current; zoneTargetRef.current = null;
+    const els = fid ? sk.getElements() : [];
+    const frame = fid ? (els.find((e) => e.id === fid && !e.isDeleted) as { id: string; x: number; y: number; width: number } | undefined) : undefined;
+    if (!frame) { await sk.insert(skeletons); return; }
+    const inFrame = new Set(els.filter((e) => !e.isDeleted && e.frameId === frame.id && (e.customData as Record<string, unknown> | undefined)?.kind).map((e) => String((e.groupIds as string[] | undefined)?.[0] ?? e.id)));
+    const slot = slotInFrame(frame, inFrame.size);
+    await sk.insert(skeletons.map((s) => ({ ...s, x: (Number(s.x) || 0) + slot.x, y: (Number(s.y) || 0) + slot.y })), { scene: true });
+    sk.patchElements((el) => ((el.customData as Record<string, unknown> | undefined)?.id === cardId && !el.frameId ? { ...el, frameId: frame.id } : null));
+  };
+  const onSelection = useCallback((ids: string[]) => {
+    if (ids.length !== 1 || !sketchRef.current) { setZone(null); return; }
+    const el = sketchRef.current.getElements().find((e) => e.id === ids[0]);
+    if (!el || el.type !== "frame") { setZone(null); return; }
+    const kind = frameSectionKind(el, sectionCfg);
+    setZone(kind === "none" ? null : { id: String(el.id), name: String(el.name ?? ""), kind });
+  }, [sectionCfg, sketchRef]);
   const confirmSku = () => {
     if (!skuSel.length || !sketchRef.current) return;
     // วางหลายใบเรียงข้างกันในครั้งเดียว (เลื่อน x ต่อใบ)
@@ -256,7 +302,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
       ? t(`วางการ์ดใบงาน ${n} ใบแล้ว`, `Placed ${n} design sheet card(s)`)
       : t("ใบงานที่เลือกอยู่บนกระดานแล้ว", "Selected sheets are already on the board"));
   };
-  const onTaskCreated = (tk: CreatedTask) => { void sketchRef.current?.insert(taskCardSkeleton(tk)); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
+  const onTaskCreated = (tk: CreatedTask) => { void placeCard(taskCardSkeleton(tk), tk.id); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
   const createContentCard = async () => {
     if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     try {
@@ -279,9 +325,9 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
         // วาง 1 การ์ด/แพลตฟอร์ม (เรียงแนวนอน) — ผูก content เดียวกัน
         const all: Record<string, unknown>[] = [];
         cForm.platforms.forEach((p, i) => { const dx = i * 270; for (const el of perPlatformCardSkeleton(base, p)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
-        void sketchRef.current?.insert(all);
+        void placeCard(all, cid);
       } else {
-        void sketchRef.current?.insert(contentCardSkeleton({ ...base, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null }));
+        void placeCard(contentCardSkeleton({ ...base, platforms: cForm.platforms, scheduled_at: cForm.scheduled_at || null }), cid);
       }
       setContentOpen(false); setCForm({ title: "", post_type: "image", platforms: [], scheduled_at: "", cardMode: "combined" });
       pushToast("success", t(`สร้างคอนเทนต์ ${content_no} + วางการ์ดแล้ว`, `Created content ${content_no} and placed card`));
@@ -476,8 +522,8 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
     sku: { icon: "📦", label: "SKU Card", hint: t("สินค้าราย SKU", "Product SKUs"), onClick: () => { setSkuSel([]); setSkuOpen(true); } },
     parent: { icon: "🧬", label: "Parent SKU", hint: t("สินค้าหลัก", "Parent products"), onClick: () => { setParentSel([]); setParentOpen(true); } },
     marketing: { icon: "🎯", label: t("SKU การตลาด", "Marketing SKU"), hint: t("รุ่น + ป้าย + สีที่เหลือ (จากหน้า SKU การตลาด)", "Model + labels + colors left"), onClick: () => { setMktSel([]); setMktOpen(true); } },
-    task: { icon: "✅", label: "Task Card", hint: t("สร้างงานใหม่ + วางการ์ด", "New task + card"), onClick: () => setTaskOpen(true) },
-    content: { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => { setCSeed(null); setContentOpen(true); } },
+    task: { icon: "✅", label: "Task Card", hint: t("สร้างงานใหม่ + วางการ์ด", "New task + card"), onClick: () => { zoneTargetRef.current = null; setTaskOpen(true); } },
+    content: { icon: "📱", label: "Content Card", hint: t("คอนเทนต์ที่จะโพสต์", "Content to post"), onClick: () => { zoneTargetRef.current = null; setCSeed(null); setContentOpen(true); } },
     trend: { icon: "🔥", label: t("เทรนด์", "Trend"), hint: t("บอร์ดเทรนด์ (โทนสี/ref/เลย์เอาต์)", "Trend boards"), onClick: () => setTrendOpen(true) },
     designSheet: { icon: "📐", label: t("ใบงานออกแบบ", "Design sheet"), hint: t("ดึงจาก Design Dashboard หรือสร้างใหม่", "From Design Dashboard, or create new"), onClick: () => { setDsSel([]); setDsPickOpen(true); } },
     section: { icon: "🗂", label: "Section", hint: t("กรอบแบ่งโซนบนกระดาน", "Frame to group the board"), onClick: () => setSectionOpen(true) },
@@ -655,6 +701,17 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
       <ERPModal open={sectionOpen} onClose={() => setSectionOpen(false)} title={t("เพิ่มโซน (Section)", "Add Section")} size="sm"
         footer={<button onClick={() => setSectionOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
         <div className="space-y-3">
+          {sectionTpls.length > 0 && <div className="space-y-1.5">
+            <p className="text-xs text-slate-400">{t("วางเทมเพลตโซนทั้งชุด (จัดแบบ bento · ตั้งได้ที่ ตั้งค่างาน → เทมเพลตโซนกระดาน)", "Place a whole section template (bento · set in Task settings → Board section templates)")}</p>
+            {sectionTpls.map((tp) => (
+              <button key={tp.id} onClick={() => insertSectionTemplate(tp)} className="w-full rounded-lg border border-violet-200 bg-violet-50/40 p-2 text-left hover:border-violet-400">
+                <span className="text-sm font-medium text-violet-800">🧱 {tp.name}</span> <span className="text-xs text-slate-400">· {tp.blocks.length} {t("โซน", "zones")}</span>
+                <span className="mt-1.5 grid gap-0.5" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gridAutoRows: "10px" }}>
+                  {tp.blocks.map((b) => <span key={b.id} className={`rounded-sm ${b.kind === "task" ? "bg-sky-200" : b.kind === "content" ? "bg-emerald-200" : "bg-violet-200"}`} style={{ gridColumn: `${b.x + 1} / span ${b.w}`, gridRow: `${b.y + 1} / span ${b.h}` }} />)}
+                </span>
+              </button>
+            ))}
+          </div>}
           {sectionPresets.length > 0 && <>
             <p className="text-xs text-slate-400">{t("เลือกโซนสำเร็จรูป (กดแล้ววางบนกระดานเลย)", "Choose a preset section (click to place it on the board)")}</p>
             <div className="grid grid-cols-1 gap-1.5">
@@ -743,5 +800,14 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets = [], co
     setContentOpen(true);
   }, []);
 
-  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui };
+  // แถบปุ่มของกรอบโซนที่เลือก (ลอยล่างกลางจอ) — ＋ งาน / ＋ คอนเทนต์ วางการ์ดในกรอบนั้น
+  const zoneBar = zone ? (
+    <div className="fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 shadow-lg">
+      <span className="max-w-[40vw] truncate text-xs text-slate-500">🧱 {zone.name}</span>
+      {zone.kind === "task"
+        ? <button type="button" onClick={() => { zoneTargetRef.current = zone.id; setTaskOpen(true); }} className="h-8 rounded-full bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700">＋ {t("งาน", "Task")}</button>
+        : <button type="button" onClick={() => { zoneTargetRef.current = zone.id; setCSeed(null); setContentOpen(true); }} className="h-8 rounded-full bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700">＋ {t("คอนเทนต์", "Content")}</button>}
+    </div>
+  ) : null;
+  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui: <>{ui}{zoneBar}</>, onSelection };
 }

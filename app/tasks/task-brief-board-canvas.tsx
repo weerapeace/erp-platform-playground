@@ -34,7 +34,7 @@ export default function TaskBriefCanvas({ taskId, brandId = null, taskTitle, hei
   const pushToast = usePushToast();
   const controlsRef = useRef<CanvasSketchControls | null>(null);
   const task = useMemo(() => ({ id: taskId, brandId }), [taskId, brandId]);
-  const kit = useCardKit({ sketchRef: controlsRef, task, contextLabel: taskTitle });
+  const kit = useCardKit({ sketchRef: controlsRef, task, contextLabel: taskTitle, board: "brief" });
   const [sel, setSel] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -96,7 +96,7 @@ export default function TaskBriefCanvas({ taskId, brandId = null, taskTitle, hei
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[k.parent, k.sku, k.content]} />
+        <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[k.parent, k.sku, k.content, k.section]} />
         {picked.length > 0 && (
           <button type="button" onClick={() => void createFromSelection()} disabled={busy}
             className="h-9 px-3 inline-flex items-center gap-1 text-sm font-medium rounded-lg text-white bg-violet-600 hover:bg-violet-700 disabled:opacity-50">
@@ -106,7 +106,7 @@ export default function TaskBriefCanvas({ taskId, brandId = null, taskTitle, hei
         {picked.length === 0 && <span className="text-[11px] text-slate-400">{t("เลือกรูป/ข้อความบนกระดาน → สร้างคอนเทนต์ได้", "Select images/text on the board to create content")}</span>}
       </div>
       <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab compactHelp controlsRef={controlsRef}
-        onReady={onReady} onCardOpen={(d) => { kit.onCardOpen(d); }} onSelectionChange={setSel} imageMaxPx={TASK_BOARD_IMAGE_MAX} />
+        onReady={onReady} onCardOpen={(d) => { kit.onCardOpen(d); }} onSelectionChange={(ids) => { setSel(ids); kit.onSelection(ids); }} imageMaxPx={TASK_BOARD_IMAGE_MAX} />
       {kit.ui}
     </div>
   );

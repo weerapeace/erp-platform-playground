@@ -81,7 +81,7 @@ export default function CampaignCanvasPage() {
   const name = detail?.campaign.name ?? t("แคมเปญ", "Campaign");
   // ชุดการ์ดกลาง — งาน/คอนเทนต์ที่สร้างจากกระดานนี้ผูกแคมเปญนี้ · ใบงานใหม่ใช้แบรนด์แคมเปญ
   const campaign = useMemo(() => ({ id, name, brandId: detail?.campaign.brand_id ?? null }), [id, name, detail?.campaign.brand_id]);
-  const kit = useCardKit({ sketchRef, campaign, sectionPresets: sectionPresets(), contextLabel: name });
+  const kit = useCardKit({ sketchRef, campaign, sectionPresets: sectionPresets(), contextLabel: name, board: "campaign" });
 
   // ⑦ ลากงานที่มีอยู่แล้วในแคมเปญ → วางบนกระดาน (เป็นการ์ดงาน)
   const [dragPanelOpen, setDragPanelOpen] = useState(false);
@@ -149,7 +149,7 @@ export default function CampaignCanvasPage() {
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
           {/* ความสูงวัดจากพื้นที่ที่เหลือจริง → กระดานเต็มถึงแถบล่างพอดี หน้าไม่เลื่อน toolbox ไม่จม */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={kit.onCardOpen} onReady={kit.onBoardReady} collab stickyTop={embed ? 72 : 128} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={kit.onCardOpen} onReady={kit.onBoardReady} onSelectionChange={kit.onSelection} collab stickyTop={embed ? 72 : 128} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (

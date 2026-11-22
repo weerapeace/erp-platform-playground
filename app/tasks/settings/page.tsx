@@ -27,6 +27,7 @@ import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { CaptionPromptsManager } from "./caption-prompts";
 import { ProductModeManager } from "../product-mode-settings";
 import { ReadinessRulesManager } from "../readiness-settings";
+import { BoardSectionTemplatesManager } from "../board-section-templates-settings";
 import { StatusWorkflowManager } from "../status-workflow-settings";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -38,8 +39,8 @@ import dynamic from "next/dynamic";
 // ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
 const FileHistoryView = dynamic(() => import("../file-history-view").then((m) => m.FileHistoryView), { ssr: false, loading: () => <LoadingState /> });
 
-type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "readiness" | "line" | "drive" | "brand_drive" | "ai_prompt" | "file_history";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "readiness", "line", "drive", "brand_drive", "ai_prompt", "file_history"];
+type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "readiness" | "board_sections" | "line" | "drive" | "brand_drive" | "ai_prompt" | "file_history";
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "readiness", "board_sections", "line", "drive", "brand_drive", "ai_prompt", "file_history"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -78,6 +79,7 @@ export default function TaskSettingsPage() {
       { key: "status", icon: "🚦", label: t("สถานะ + เส้นทาง", "Statuses + transitions"), desc: t("ชื่อ สี % ทางไปต่อ และเงื่อนไขก่อนเข้าแต่ละสถานะ", "Names, colors, %, next steps and entry rules per status") },
       { key: "submit", icon: "📤", label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
       { key: "readiness", icon: "✅", label: t("ความพร้อมสินค้า", "Product readiness"), desc: t("เช็กอะไรบ้างใต้ความคืบหน้าในลิ้นชักงาน", "What the task drawer checks under progress") },
+      { key: "board_sections", icon: "🧱", label: t("เทมเพลตโซนกระดาน", "Board section templates"), desc: t("ชุดโซน bento ของกระดานบรีฟ/แคมเปญ", "Bento zone sets for brief/campaign boards") },
     ] },
     { label: t("การแสดงผล", "Display"), items: [
       { key: "mysub", icon: "🧩", label: t("งานย่อยของฉัน", "My subtasks"), desc: t("จัดกลุ่ม/เรียงรายการงานย่อยของทุกคน", "Grouping and sorting of everyone's subtask list") },
@@ -117,6 +119,7 @@ export default function TaskSettingsPage() {
           : tab === "ai_prompt" ? <CaptionPromptsManager showToast={showToast} />
           : tab === "submit" ? <><ProductModeManager showToast={showToast} /><SubmitRequiredManager showToast={showToast} /></>
           : tab === "readiness" ? <ReadinessRulesManager showToast={showToast} />
+          : tab === "board_sections" ? <BoardSectionTemplatesManager showToast={showToast} />
           : tab === "subtype" ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-3xl mx-auto">
               <div className="px-5 py-4 border-b border-slate-100"><h2 className="font-semibold text-slate-800">🧩 {t("ชนิดงานย่อย", "Subtask types")}</h2></div>
