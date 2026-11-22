@@ -99,7 +99,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const platform_id = (pf as { id?: string } | null)?.id;
   if (!platform_id) return { ok: false, status: 400, error: "ยังไม่มีแพลตฟอร์ม LINE SHOPPING" };
 
-  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist, nameThHist, namePfHist, ctx] = await Promise.all([
+  const [{ data: parent }, { data: draft }, { data: skus }, { data: onShop }, descHist, nameThHist, namePfHist, ctx, descMainHist] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_platform, description, platform_description, brand_id, weight_g, platform_category_id").eq("id", parentSkuId).maybeSingle(),
     admin.from("platform_listing_drafts").select("title, description, category_path, extra, image_keys, description_image_keys, platform_product_id").eq("parent_sku_id", parentSkuId).eq("platform_id", platform_id).maybeSingle(),
     admin.from("skus_v2").select("id, code, color_th, color, color_platform_th, list_price, fake_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentSkuId).eq("is_active", true).order("code"),
@@ -110,6 +110,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
     loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "name_platform"),
     // ชุดรูปของสินค้าในระบบ (ลำดับเดียวกับหน้า Parent SKU · ตัวเดียวกับ Shopee/Lazada/TikTok) — พลาด = ใช้ปกตัวสี/ตัวขายแบบเดิม
     loadListingContexts(admin, [parentSkuId], platform_id).catch(() => []),
+    loadFieldHistoryValues(admin, "parent_skus_v2", parentSkuId, "description"),   // รายละเอียดสินค้าเวอร์ชันเก่า = สำเนา (BSAC008)
   ]);
   if (!parent) return { ok: false, status: 400, error: "ไม่พบสินค้า" };
   const p = parent as Record<string, unknown>;
@@ -143,7 +144,7 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
   const descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? ""), dDesc = String(d.description ?? "");
   // คัดลอกจากร้านต้นทาง (ลงร้านอื่นจากรายการนี้) = ตั้งใจ ใช้ร่าง · นอกนั้น ตัวเลือกกลาง: ร่างที่คนแก้เอง → Platform Description (สำเนาค่าเก่า = ไม่นับ)
   const descCopied = dDesc.trim() ? copiedLabel(extra, "description", dDesc) : null;
-  const pick = descCopied ? { text: dDesc, src: descCopied } : pickListingDescription(dDesc, { platform_description: descPf, description: descMain, platform_description_history: descHist }, "LINE");
+  const pick = descCopied ? { text: dDesc, src: descCopied } : pickListingDescription(dDesc, { platform_description: descPf, description: descMain, platform_description_history: descHist, description_history: descMainHist }, "LINE");
   const descRaw = pick.text;
   const descText = noteToHtml(descRaw, LINE_DESC_HTML);
   const descSrc = pick.src;

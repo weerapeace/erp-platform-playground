@@ -10,6 +10,11 @@ describe("pickListingDescription", () => {
     expect(isEditedListingDescription("ข้อความเก่า LY21 ปน", p)).toBe(false);
     expect(pickListingDescription("ข้อความเก่า LY21 ปน", p, "LINE")).toEqual({ text: "ข้อความใหม่ LY22", src: "Platform Description ของ Parent SKU" });
   });
+  it("ร่างที่ตรงกับ \"รายละเอียดสินค้า\" เวอร์ชันเก่า = สำเนา (เจอ 2026-11-22 BSAC008)", () => {
+    const p = { platform_description: "Platform Description ยาว 1,499 ตัวอักษร", description: "รายละเอียดใหม่", description_history: ["รายละเอียดเก่า 2 บรรทัด\nบรรทัดที่ 2"] };
+    expect(isEditedListingDescription("รายละเอียดเก่า 2 บรรทัด\nบรรทัดที่ 2", p)).toBe(false);
+    expect(pickListingDescription("รายละเอียดเก่า 2 บรรทัด\nบรรทัดที่ 2", p, "Lazada").text).toBe("Platform Description ยาว 1,499 ตัวอักษร");
+  });
   it("ร่างที่คนแก้เอง (ไม่ตรงสำเนาไหน) = ใช้ร่าง", () => {
     const p = { platform_description: "ใหม่", description: null, platform_description_history: ["เก่า"] };
     expect(pickListingDescription("พิมพ์เองสำหรับร้าน", p, "TikTok")).toEqual({ text: "พิมพ์เองสำหรับร้าน", src: "แก้ไว้สำหรับ TikTok" });

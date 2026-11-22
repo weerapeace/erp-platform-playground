@@ -51,6 +51,8 @@ export type TtsCreateParent = {
   description: string | null; platform_description: string | null;
   /** ค่าเก่าของคอลัมน์ platform_description (ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า */
   platform_description_history?: string[] | null;
+  /** ค่าเก่าของช่อง description (รายละเอียดสินค้า · ประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (เจอ 2026-11-22 BSAC008) */
+  description_history?: string[] | null;
   /** ชื่อเวอร์ชันเก่า (name_th/name_platform จากประวัติเวอร์ชัน) — ร่างที่ตรงค่าเหล่านี้ = สำเนาเก่า (lib/listing-title) */
   name_history?: string[] | null;
   weight_g: number | null; box: { l: number | null; w: number | null; h: number | null } | null;
