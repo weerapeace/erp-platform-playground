@@ -24,7 +24,7 @@ import { type PushToast } from "@/components/toast";
 
 type ToastFn = PushToast;   // ชนิดกลาง (components/toast)
 
-export function TaskParentBox({ task, canEdit, onSetParents, onOpen, pushToast }: {
+export function TaskParentBox({ task, canEdit, onSetParents, onOpen, pushToast, slim = false }: {
   task: TaskDetail;
   /** ผูก/เอาออกได้ (งานยังไม่ปิด + มีสิทธิ์แก้งาน) */
   canEdit: boolean;
@@ -33,6 +33,8 @@ export function TaskParentBox({ task, canEdit, onSetParents, onOpen, pushToast }
   /** เปิดตัวแก้สินค้ากลางของ Parent ตัวนี้ */
   onOpen: (parentId: string) => void;
   pushToast: ToastFn;
+  /** อยู่ในกล่อง "สินค้า" คู่กับแผงแก้สินค้า → ไม่โชว์รายการซ้ำ */
+  slim?: boolean;
 }) {
   const t = useT();
   const { can } = useAuth();
@@ -85,6 +87,23 @@ export function TaskParentBox({ task, canEdit, onSetParents, onOpen, pushToast }
   };
 
   const showPicker = canPick && (parents.length === 0 || adding);
+  // โหมดแก้ที่สินค้าเปิดอยู่ = แผงแก้สินค้าโชว์ Parent แล้ว → เหลือแถวชื่อสินค้าบาง ๆ + ปุ่มเอาออก (ไม่ซ้ำ · เจ้าของสั่ง 2026-11-22)
+  if (slim && directOn && parents.length > 0) return (
+    <div className={`space-y-0.5 ${busy ? "opacity-60 pointer-events-none" : ""}`}>
+      {parents.map((p) => (
+        <div key={p.id} className="flex items-center gap-1.5 text-[12px] group">
+          <button type="button" onClick={() => onOpen(p.id)} title={t("เปิดดู/แก้สินค้า", "Open product")} className="min-w-0 flex-1 text-left text-slate-500 hover:text-violet-700 truncate">
+            {p.code && <span className="font-mono text-slate-400 mr-1">{p.code}</span>}{p.name}
+          </button>
+          {canEdit && <button type="button" onClick={() => setUnlink(p)} title={t("เอาออกจากงานนี้", "Remove from this task")} aria-label={t("เอาออกจากงานนี้", "Remove from this task")} className="shrink-0 w-6 h-6 rounded text-slate-300 hover:text-red-600 hover:bg-red-50">✕</button>}
+        </div>
+      ))}
+      <ConfirmDialog open={!!unlink} onClose={() => { if (!busy) setUnlink(null); }} onConfirm={() => void doUnlink()} loading={busy} variant="danger"
+        title={t("เอา Parent SKU ออกจากงานนี้?", "Remove this Parent SKU from the task?")}
+        message={t(`"${unlink?.code ?? unlink?.name ?? ""}" จะไม่ผูกกับงานนี้แล้ว (สินค้าไม่ถูกลบ)`, `"${unlink?.code ?? unlink?.name ?? ""}" will no longer be linked to this task (the product is not deleted)`)}
+        confirmText={t("เอาออก", "Remove")} cancelText={t("ไม่เอาออก", "Keep")} />
+    </div>
+  );
   return (
     <div className={`bg-slate-50 rounded-lg p-3 text-sm ${busy ? "opacity-60 pointer-events-none" : ""}`}>
       <div className="flex items-center justify-between gap-2 mb-1.5">

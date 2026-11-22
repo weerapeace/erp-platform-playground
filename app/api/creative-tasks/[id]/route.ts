@@ -231,6 +231,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       await admin.from("erp_creative_task_parent_skus").delete().eq("task_id", id);
       if (mParents.length) await admin.from("erp_creative_task_parent_skus").insert(mParents.map((p) => ({ task_id: id, parent_sku_id: p })));
       patch.parent_sku_id = mParents[0] ?? null;
+      patch.readiness_at = null;   // สินค้าเปลี่ยน → ให้คำนวณความพร้อมใหม่เบื้องหลัง (lib/task-readiness-server)
     }
     if (mSkus) {
       await admin.from("erp_creative_task_skus").delete().eq("task_id", id);

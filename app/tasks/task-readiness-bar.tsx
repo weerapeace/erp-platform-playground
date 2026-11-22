@@ -25,7 +25,7 @@ export function loadReadinessRules(force = false): Promise<ReadinessRules> {
 }
 export function clearReadinessRulesCache() { rulesCache = null; }
 
-export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, status, onOpenParent, onResult, accent }: {
+export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, status, onOpenParent, onResult, accent, persist = false, onSaved }: {
   taskId: string;
   taskType: string | null;
   platforms: string[];
@@ -36,6 +36,10 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
   /** ส่งผลขึ้นไป (ใช้เตือนก่อนส่งตรวจ/เสร็จ) */
   onResult?: (items: ReadinessItem[]) => void;
   accent?: string;
+  /** บันทึกผลลงงาน (แถบบนการ์ดบอร์ดใช้) — เปิดเฉพาะในลิ้นชักงาน */
+  persist?: boolean;
+  /** บันทึกผลแล้ว (ค่าเปลี่ยน) → หน้าแม่โหลดรายการงานใหม่ให้การ์ดอัปเดต */
+  onSaved?: () => void;
 }) {
   const t = useT();
   const [parents, setParents] = useState<ReadinessParent[] | null>(null);
@@ -64,12 +68,21 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
   }, [parents, rules, taskType, platformsKey, listed]);
   // ส่งผลขึ้นไปเฉพาะตอนผลเปลี่ยนจริง (เทียบลายเซ็น) — หน้าแม่ setState แล้วเรนเดอร์ใหม่จะไม่วนกลับมา
   const sentSig = useRef("");
+  const savedSig = useRef("");
   useEffect(() => {
     if (!items) return;
     const sig = items.map((i) => `${i.key}:${i.ok ? 1 : 0}:${i.pending ? 1 : 0}:${i.issues.length}`).join("|");
     if (sig === sentSig.current) return;
     sentSig.current = sig; onResult?.(items);
+    // บันทึกผล (ผ่าน/ทั้งหมด) ให้แถบบนการ์ดบอร์ดงาน — รอสถานะลงร้านมาก่อน (ไม่บันทึกตอนยังมีข้อรอ) · ค่าเดิมเท่ากัน server ไม่เขียนซ้ำ
+    if (!persist || items.some((i) => i.pending)) return;
+    const s = readinessSummary(items); const key = `${s.done}/${s.total}`;
+    if (key === savedSig.current) return;
+    savedSig.current = key;
+    void apiFetch(`/api/creative-tasks/${taskId}/readiness`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done: s.done, total: s.total }) })
+      .then((r) => { if (r.ok) onSaved?.(); }).catch(() => undefined);
   }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [showAll, setShowAll] = useState(false);
 
   if (err) return <p className="text-[11px] text-slate-400">{t("ตรวจความพร้อมไม่สำเร็จ — ลองเปิดใหม่", "Couldn't check readiness — reopen to retry")}</p>;
   if (!items) return <div className="h-5 w-40 rounded bg-slate-100 animate-pulse" />;
@@ -82,13 +95,19 @@ export function TaskReadinessBar({ taskId, taskType, platforms, parentKey, statu
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <span>{t("ความพร้อมสินค้า", "Product readiness")}</span>
         <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width: `${pct}%`, background: sum.missing ? (accent || "#8b5cf6") : "#10b981" }} /></div>
-        <span className={sum.missing ? "text-slate-600 font-medium" : "text-emerald-600 font-medium"}>{sum.done}/{sum.total}</span>
+        <span className={sum.missing ? "text-slate-600 font-medium" : "text-emerald-600 font-medium"}>{sum.done}/{sum.total}{!sum.missing && sum.total > 0 ? ` ${t("ครบ", "done")}` : ""}</span>
+        {/* ครบ = เหลือแถบเดียว · ขาด = โชว์เฉพาะข้อที่ขาด · กดดูทั้งหมดได้ (เจ้าของเลือก 2026-11-22) */}
+        {sum.done > 0 && (
+          <button type="button" onClick={() => setShowAll((v) => !v)} className="shrink-0 rounded-md border border-slate-200 px-1.5 py-0.5 text-[10.5px] text-slate-500 hover:bg-slate-50">
+            {showAll ? t("ซ่อน ▴", "Hide ▴") : sum.missing ? t(`ครบแล้ว ${sum.done} ▾`, `${sum.done} done ▾`) : t("ดูรายการ ▾", "Show ▾")}
+          </button>
+        )}
       </div>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-1 empty:hidden">
         {items.map((it) => {
           const label = t(it.label, it.label_en);
           if (it.pending) return <span key={it.key} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-400">… {label}</span>;
-          if (it.ok) return <span key={it.key} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">✓ {label}</span>;
+          if (it.ok) return showAll ? <span key={it.key} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">✓ {label}</span> : null;
           const canJump = it.parentIds.length > 0;
           return (
             <button key={it.key} type="button" title={it.issues.join("\n")} disabled={!canJump}

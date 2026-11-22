@@ -127,6 +127,7 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle, 
   };
 
   const live = items.filter((c) => c.status !== "cancelled");
+  const [showCancelled, setShowCancelled] = useState(false);
   const doneCount = live.filter((c) => CONTENT_DONE.has(c.status)).length;
 
   return (
@@ -141,10 +142,10 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle, 
           </span>
         </div>
         {loading ? <div className="h-16 rounded-lg bg-slate-100 animate-pulse" />
-          : items.length === 0 ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">{t("ยังไม่มีคอนเทนต์ — กด ＋ เพิ่ม หรือสร้างจากกระดานบรีฟ", "No content yet — add one or create from the brief board")}</p>
+          : live.length === 0 && !showCancelled ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">{t("ยังไม่มีคอนเทนต์ — กด ＋ เพิ่ม หรือสร้างจากกระดานบรีฟ", "No content yet — add one or create from the brief board")}</p>
           : (
             <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-              {items.map((c) => (
+              {(showCancelled ? items : live).map((c) => (
                 <div key={c.id} className={`flex items-center gap-2 px-2.5 py-1.5 ${c.status === "cancelled" ? "opacity-50" : ""}`}>
                   <button onClick={() => setOpenId(c.id)} className="min-w-0 flex-1 text-left text-[13px] text-slate-700 hover:text-violet-700 truncate" title={c.title}>{c.title}</button>
                   <select value={c.status} onChange={(e) => void changeStatus(c, e.target.value as ContentStatus)} aria-label={t("สถานะคอนเทนต์", "Content status")}
@@ -155,6 +156,12 @@ export function TaskContentTab({ taskId, brandId, brands, pushToast, taskTitle, 
               ))}
             </div>
           )}
+        {/* คอนเทนต์ที่ยกเลิก ซ่อนไว้ กดดูได้ (เจ้าของเลือก 2026-11-22) */}
+        {!loading && items.length > live.length && (
+          <button type="button" onClick={() => setShowCancelled((v) => !v)} className="text-[11px] text-slate-400 hover:text-slate-600">
+            {showCancelled ? t("▴ ซ่อนที่ยกเลิกแล้ว", "▴ Hide cancelled") : t(`▸ ยกเลิกแล้ว ${items.length - live.length} (ซ่อนไว้)`, `▸ ${items.length - live.length} cancelled (hidden)`)}
+          </button>
+        )}
       </>) : (<>
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-slate-700">📱 {t("คอนเทนต์ของงานนี้", "Content for this task")} ({items.length})</p>

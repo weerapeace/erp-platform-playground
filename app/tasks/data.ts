@@ -47,8 +47,8 @@ export type CreativeTask = {
   priority: CreativePriority;
   status: CreativeStatus;
   progress_percent: number;
-  /** คอนเทนต์ของงาน (ไม่นับยกเลิก) — มากับรายการงาน ใช้ทำแถบความคืบหน้าบนการ์ด (task-progress.ts) */
-  content_done?: number; content_total?: number;
+  /** ความพร้อมสินค้าล่าสุด (ผ่าน/ทั้งหมด · null = ยังไม่เคยเช็ก) — แถบบนการ์ด (task-progress.ts · lib/task-readiness-server) */
+  readiness_done?: number | null; readiness_total?: number | null; readiness_at?: string | null;
   assignee_id: string | null; assignee_label: string | null;
   assignees?: SubtaskAssignee[];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย) — m2m
   reviewer_id: string | null; reviewer_label: string | null;

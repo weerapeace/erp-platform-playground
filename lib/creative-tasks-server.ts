@@ -547,27 +547,6 @@ export async function arrangeImagesMap(admin: Admin, taskIds: string[], maxPerTa
   return map;
 }
 
-/**
- * คอนเทนต์ของแต่ละงาน → Map<task_id, {done,total}> (ยกเลิก = ไม่นับ · พร้อม/ตั้งเวลา/โพสต์แล้ว = เสร็จ — lib/creative-tasks CONTENT_DONE)
- * ใช้ทำแถบความคืบหน้าบนการ์ดบอร์ดงาน (เจ้าของเลือก 2026-11-22) · แบ่งชุด id กัน URL ยาวเกิน
- */
-export async function taskContentCountsMap(admin: Admin, taskIds: string[]): Promise<Map<string, { done: number; total: number }>> {
-  const map = new Map<string, { done: number; total: number }>();
-  const ids = [...new Set(taskIds.filter(Boolean).map(String))];
-  const DONE = new Set(["ready", "scheduled", "published"]);
-  for (let i = 0; i < ids.length; i += 150) {
-    const { data } = await admin.from("erp_creative_content").select("task_id, status")
-      .in("task_id", ids.slice(i, i + 150)).eq("is_active", true);   // กรองยกเลิกใน JS (neq ตัดแถว status null ทิ้ง)
-    for (const r of (data ?? []) as { task_id: string; status: string | null }[]) {
-      if (r.status === "cancelled") continue;
-      const cur = map.get(String(r.task_id)) ?? { done: 0, total: 0 };
-      cur.total++; if (DONE.has(String(r.status))) cur.done++;
-      map.set(String(r.task_id), cur);
-    }
-  }
-  return map;
-}
-
 /** ผู้รับผิดชอบงานหลัก = ตั้งเอง (explicit) ∪ คนที่กดเริ่มงานย่อย → Map<task_id, AssigneeInfo[]> */
 export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise<Map<string, AssigneeInfo[]>> {
   const map = new Map<string, AssigneeInfo[]>();

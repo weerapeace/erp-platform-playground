@@ -21,7 +21,7 @@ export function validateTaskFields(body: Record<string, unknown>): string | null
 }
 
 export const SELECT = `id, task_no, title, description, task_type, brand_id, campaign_id, sku_id, parent_sku_id,
-  product_name, priority, status, progress_percent, assignee_id, reviewer_id, approver_id, assigned_by_id,
+  product_name, priority, status, progress_percent, readiness_done, readiness_total, readiness_at, assignee_id, reviewer_id, approver_id, assigned_by_id,
   start_date, due_date, completed_at, approval_status, asset_status, platforms,
   drive_folder_url, final_asset_url, published_url, blocker_status, blocker_reason,
   cover_image_r2_key, reference_html, reference_images,

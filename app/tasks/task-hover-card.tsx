@@ -93,9 +93,9 @@ function HoverBody({ task, fields }: { task: CreativeTask; fields: HoverField[] 
         {has("assignees") && (task.assignees?.length ?? 0) > 0 && row(t("ผู้รับผิดชอบ", "Assignees"), <span className="inline-flex flex-wrap items-center gap-1"><AssigneeStack list={task.assignees} size={20} /><span className="text-slate-500">{(task.assignees ?? []).map((a) => a.label).filter(Boolean).join(", ")}</span></span>)}
         {has("reviewers") && (reviewers.length > 0 || task.reviewer_label) && row(t("ผู้ตรวจ", "Reviewers"), reviewers.length ? reviewers.map((r) => r.label).filter(Boolean).join(", ") : task.reviewer_label)}
         {has("due") && task.due_date && row(t("กำหนดส่ง", "Due"), <span className={overdue ? "font-semibold text-red-600" : ""}>{overdue && "⚠ "}{task.due_date}</span>)}
-        {has("progress") && (() => { const p = taskProgress(task, isTerminal(task.status)); return (
+        {has("progress") && (() => { const p = taskProgress(task); return (
           <div className="pt-0.5">
-            <div className="mb-0.5 flex justify-between text-[11px] text-slate-400"><span>{p.source === "content" ? t("ความคืบหน้า (คอนเทนต์พร้อม)", "Progress (content ready)") : t("ความคืบหน้า", "Progress")}</span><span>{p.source === "content" ? `${p.done}/${p.total}` : `${p.pct}%`}</span></div>
+            <div className="mb-0.5 flex justify-between text-[11px] text-slate-400"><span>{p.source === "readiness" ? t("ความพร้อมสินค้า", "Product readiness") : t("ความคืบหน้า (ตามสถานะ)", "Progress (by status)")}</span><span>{p.source === "readiness" ? `${p.done}/${p.total}` : `${p.pct}%`}</span></div>
             <div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${p.pct >= 100 ? "bg-emerald-500" : "bg-violet-400"}`} style={{ width: `${p.pct}%` }} /></div>
           </div>
         ); })()}

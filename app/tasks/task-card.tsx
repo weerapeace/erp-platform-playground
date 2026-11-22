@@ -189,6 +189,10 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
             {extra?.statusPill && (() => { const m = statusMeta(task.status); return (
               <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border whitespace-nowrap ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>
             ); })()}
+            {/* ป้าย "ขาด N" = ความพร้อมสินค้ายังไม่ครบ (งานยังไม่ปิด) · ชี้การ์ดดูว่าขาดอะไร */}
+            {cfg.progress && !isTerminal(task.status) && (() => { const p = taskProgress(task); return p.missing > 0 ? (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border border-rose-200 bg-rose-50 text-rose-700 whitespace-nowrap">{t(`ขาด ${p.missing}`, `${p.missing} missing`)}</span>
+            ) : null; })()}
           </div>
           {showTaskNo && <span className="font-mono text-[10px] text-slate-400 shrink-0 ml-auto">{task.task_no}</span>}
         </div>
@@ -207,11 +211,11 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
             {cfg.due && <DueText task={task} rel={extra?.relDue} />}
           </div>
         )}
-        {cfg.progress && (() => { const p = taskProgress(task, isTerminal(task.status)); return (
+        {cfg.progress && (() => { const p = taskProgress(task); return (
           <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5"
-            title={p.source === "content" ? t(`คอนเทนต์พร้อม ${p.done}/${p.total}`, `Content ready ${p.done}/${p.total}`) : t(`ตามสถานะงาน ${p.pct}%`, `By task status ${p.pct}%`)}>
+            title={p.source === "readiness" ? t(`ความพร้อมสินค้า ${p.done}/${p.total}`, `Product readiness ${p.done}/${p.total}`) : t(`ตามสถานะงาน ${p.pct}% (ยังไม่ได้เช็กความพร้อมสินค้า)`, `By task status ${p.pct}% (readiness not checked yet)`)}>
             <div className="h-1 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full ${p.pct >= 100 ? "bg-emerald-500" : "bg-violet-400"}`} style={{ width: `${p.pct}%` }} /></div>
-            <span className="text-[10px] tabular-nums text-slate-400 shrink-0">{p.source === "content" ? `${p.done}/${p.total}` : `${p.pct}%`}</span>
+            <span className={`text-[10px] tabular-nums shrink-0 ${p.source === "readiness" && p.missing === 0 ? "text-emerald-600" : "text-slate-400"}`}>{p.source === "readiness" ? `${p.done}/${p.total}` : `${p.pct}%`}</span>
           </div>
         ); })()}
         </div>

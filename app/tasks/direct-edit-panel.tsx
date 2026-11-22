@@ -9,7 +9,7 @@
  *   3) ส่งงาน = ยืนยันรายการที่แก้ (ไม่ต้องอัปโหลดซ้ำ) → ผู้ตรวจเห็นรายการเดียวกัน อนุมัติ = จบ (ไม่ส่งซ้ำ: config.edit_mode=direct)
  * ของกลางที่ใช้: MasterRecordDrawer · ERPModal · ConfirmDialog · HoverImage · record-versions API
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
@@ -112,7 +112,7 @@ export function ChangeList({ changes, canUndo, onUndo, compact = false }: { chan
   );
 }
 
-export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, onClaim, changes, error, reloadChanges, pushToast }: {
+export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, parents, skus, canEdit, canUndo, onBeforeEdit, onAddParent, onClaim, changes, error, reloadChanges, pushToast, compact = false, extraActions }: {
   taskId: string; subId: string | null; approveTarget: string;
   /** ชื่องาน (หัวป๊อป "ดูรูปทั้งหมด") */
   taskTitle?: string;
@@ -129,6 +129,10 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
   onBeforeEdit: () => Promise<void>;
   changes: TaskChange[] | null; error: string | null; reloadChanges: () => Promise<void>;
   pushToast: ToastFn;
+  /** แบบย่อ (กล่อง "สินค้า" บนลิ้นชักงาน · 2026-11-22): ไม่มีบรรทัดอธิบายยาว · สิ่งที่แก้เหลือบรรทัดเดียว กดดูทั้งหมด */
+  compact?: boolean;
+  /** ปุ่มเพิ่มต่อท้ายแถวปุ่ม (เช่น ตรวจเร็ว) */
+  extraActions?: ReactNode;
 }) {
   const t = useT();
   const [editing, setEditing] = useState<{ kind: "parent" | "sku"; id: string } | null>(null);
@@ -197,8 +201,8 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
     </div>
   ) : null;
   return (
-    <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2.5">
-      <p className="text-[11px] text-violet-700">🔁 {t("โหมดใหม่ — แก้ที่สินค้าได้เลย ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ ไม่ต้องอัปโหลดซ้ำ", "New mode — edit the product directly. Old versions are kept and changes summarised for the reviewer. No re-upload needed.")}</p>
+    <div className={compact ? "space-y-2" : "rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2.5"}>
+      {!compact && <p className="text-[11px] text-violet-700">🔁 {t("โหมดใหม่ — แก้ที่สินค้าได้เลย ระบบเก็บเวอร์ชันเก่าและสรุปสิ่งที่แก้ให้ผู้ตรวจ ไม่ต้องอัปโหลดซ้ำ", "New mode — edit the product directly. Old versions are kept and changes summarised for the reviewer. No re-upload needed.")}</p>}
 
       {noProducts ? (
         picker ?? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">{t("งานนี้ยังไม่ได้ผูก Parent SKU — เพิ่มที่ช่อง \"Parent SKU\" ของงานก่อน", "No Parent SKU linked yet — add one in the task's \"Parent SKU\" field first")}</p>
@@ -227,12 +231,28 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
             🖼 {t("ดูรูปทั้งหมด", "View all images")}
           </button>
           {picker && !pickOpen && (
-            <button type="button" onClick={() => setPickOpen(true)} className="inline-flex items-center h-8 px-2.5 rounded-lg border border-dashed border-violet-300 text-xs text-violet-600 hover:bg-white">＋ {t("เพิ่ม Parent SKU", "Add Parent SKU")}</button>
+            <button type="button" onClick={() => setPickOpen(true)} className="inline-flex items-center h-8 px-2.5 rounded-lg border border-dashed border-violet-300 text-xs text-violet-600 hover:bg-white">＋ {compact ? "Parent" : t("เพิ่ม Parent SKU", "Add Parent SKU")}</button>
           )}
+          {extraActions}
         </div>
       )}
       {!noProducts && pickOpen && picker}
 
+      {compact ? (
+        // แบบย่อ: บรรทัดเดียว "สิ่งที่แก้ในงานนี้ N รายการ ›" (กดเปิดป๊อป — ย้อนกลับได้ในป๊อป)
+        <div className="border-t border-slate-100 pt-1.5 text-[11.5px]">
+          {error ? (
+            <button type="button" onClick={() => void reloadChanges()} className="text-red-600 hover:underline">⚠ {t("โหลดสิ่งที่แก้ไม่สำเร็จ — ลองใหม่", "Couldn't load changes — retry")}</button>
+          ) : changes === null ? <span className="text-slate-300">…</span>
+            : changes.length === 0 ? <span className="text-slate-400">{t("ยังไม่มีสิ่งที่แก้ในงานนี้", "No changes in this task yet")}</span>
+            : (
+              <button type="button" onClick={() => setAllOpen(true)} className="w-full flex items-center justify-between text-slate-600 hover:text-violet-700">
+                <span>{t(`สิ่งที่แก้ในงานนี้ ${changes.length} รายการ`, `${changes.length} change(s) in this task`)} ›</span>
+                {canUndo && <span className="text-slate-400">↩ {t("ย้อนกลับได้", "undoable")}</span>}
+              </button>
+            )}
+        </div>
+      ) : (
       <div>
         <p className="text-[11px] font-medium text-slate-500 mb-1">{t("สิ่งที่แก้ในงานนี้ (ระบบจดให้เอง)", "Changes made in this task (recorded automatically)")}</p>
         {error ? (
@@ -257,6 +277,7 @@ export function DirectEditPanel({ taskId, subId, approveTarget, taskTitle, paren
           </>
         )}
       </div>
+      )}
       {allOpen && changes && (
         <ERPModal open onClose={() => setAllOpen(false)} title={t(`สิ่งที่แก้ในงานนี้ (${changes.length})`, `Changes in this task (${changes.length})`)} size="md" defaultExpanded={false}>
           <ChangeList changes={changes} canUndo={canUndo} onUndo={setUndoTarget} />
@@ -338,13 +359,14 @@ export function isTaskDirectPanelOn(cfg: ProductModeCfg | null, task: DirectPane
   return isDirectTask(cfg, task.task_type, task.created_at) && !hasProductSubs;
 }
 
-export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, onClaim, pushToast }: {
+export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, onClaim, pushToast, compact, extraActions }: {
   task: DirectPanelTask;
   canEdit: boolean; canUndo: boolean;
   onAddParent?: (p: ParentSkuPickerValue) => Promise<void>;
   /** งานยังไม่มีผู้รับผิดชอบ → ปุ่มกลายเป็น "รับงาน + แก้ที่สินค้า" (ไม่ส่ง = ไม่มีทางรับงานจากตรงนี้) */
   onClaim?: () => Promise<void>;
   pushToast: ToastFn;
+  compact?: boolean; extraActions?: ReactNode;
 }) {
   const modeCfg = useProductModeCfg();
   const on = isTaskDirectPanelOn(modeCfg, task);
@@ -354,6 +376,6 @@ export function TaskDirectPanel({ task, canEdit, canUndo, onAddParent, onClaim, 
     <DirectEditPanel taskId={task.id} subId={null} approveTarget="sku_media" taskTitle={task.title}
       parents={task.parent_skus ?? []} skus={task.skus ?? []}
       canEdit={canEdit} canUndo={canUndo} onBeforeEdit={async () => { /* ระดับงาน: ใช้สถานะงานตามปกติ */ }}
-      onAddParent={onAddParent} onClaim={onClaim} changes={changes} error={error} reloadChanges={reload} pushToast={pushToast} />
+      onAddParent={onAddParent} onClaim={onClaim} changes={changes} error={error} reloadChanges={reload} pushToast={pushToast} compact={compact} extraActions={extraActions} />
   );
 }

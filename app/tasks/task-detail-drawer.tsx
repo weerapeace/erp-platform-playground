@@ -32,7 +32,8 @@ import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityPad, de
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
-import { TaskDirectPanel } from "./direct-edit-panel";
+import { TaskDirectPanel, isTaskDirectPanelOn } from "./direct-edit-panel";
+import { useProductModeCfg } from "./product-edit-mode";
 import { TaskParentBox } from "./task-parent-box";
 import { FileHistoryBox } from "./file-history-view";
 import { WorkJobLinkBox } from "./work-job-link-box";
@@ -180,8 +181,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [descTab, setDescTab] = useState<"text" | "notes">("text"); // กล่องรายละเอียด: แท็บ ข้อความ / โน้ตอ้างอิง
   const [filesOpen, setFilesOpen] = useState<boolean | null>(null);
   const pfStatus = usePlatformListedStatus(detail?.parent_skus ?? NO_PARENTS); // สถานะลงร้าน — ใช้ร่วมแถบ Platform + ความพร้อม // กล่องไฟล์/Drive (null = ตามว่ามีไฟล์ไหม)
+  const productModeCfg = useProductModeCfg();   // โหมดแก้ที่สินค้า (กล่อง "สินค้า" ไม่ซ้ำปุ่มดูรูป)
   const [refEdit, setRefEdit] = useState(false);  // เปิดตัวแก้โน้ตอ้างอิง (ใต้รายละเอียดงาน — แท็บอ้างอิงเลิกใช้ 2026-11-21 · กระดาน = กระดานบรีฟ)
-  const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
   const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
   const [refSaving, setRefSaving] = useState(false);
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
@@ -244,6 +245,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     );
   }
   const d = detail;
+  const directOn = isTaskDirectPanelOn(productModeCfg, d);
   const isClosed = isTerminal(d.status);
   // ปุ่ม อนุมัติ/ไม่ผ่าน/ให้แก้ = ตัดสินผลงาน → โชว์เฉพาะผู้มีสิทธิ์ "อนุมัติงาน" (server เช็กซ้ำอีกชั้น)
   const canApproveTask = can("tasks.approve" as Parameters<typeof can>[0]);
@@ -319,8 +321,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </div>
           <div className="flex items-center gap-1">
             <button onClick={copyTaskLink} title={t("คัดลอกลิงก์เปิดงานนี้", "Copy link to this task")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="link" /><span className="hidden sm:inline">{t("ลิงก์", "Link")}</span></button>
-            <button onClick={() => setQuickOpen(true)} title={t("ตรวจสินค้าเร็ว: Description · สี · ราคา · รูป (ดูอย่างเดียว)", "Quick product check: description, colors, prices, images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="inspect" />{t("ตรวจเร็ว", "Quick check")}</button>
-            <button onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (ดูอย่างเดียว)", "View all task images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>
+            {/* มีสินค้าผูกงาน → ปุ่ม ตรวจเร็ว/ดูรูป อยู่ในกล่อง "สินค้า" แล้ว (ไม่ซ้ำ · 2026-11-22) */}
+            {parentList.length === 0 && <button onClick={() => setImagesOpen(true)} title={t("ดูรูปทั้งหมดของงาน (ดูอย่างเดียว)", "View all task images (read-only)")} className="h-8 px-2 text-xs text-slate-600 hover:bg-slate-100 rounded-md inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>}
             <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
             {/* admin: ย้อน/ตั้งสถานะอิสระ (เห็นเฉพาะ admin) — อยู่ในเมนู ⋯ */}
             {isAdmin && (
@@ -353,36 +355,37 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {approvalLabel(d.approval_status)}</span>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{assetLabel(d.asset_status)}</span>
             </div>
-            {/* progress */}
+            {/* ความคืบหน้า = ความพร้อมสินค้า (แถบเดียว · เจ้าของสั่ง 2026-11-22) · ไม่มีสินค้า = % ตามสถานะ */}
             <div>
-              <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full" style={{ width: `${d.progress_percent}%`, background: progressBg(dth) }} /></div>
-              {parentList.length > 0 && (
-                <div className="mt-2.5">
-                  <TaskReadinessBar taskId={d.id} taskType={d.task_type} platforms={d.platforms ?? []} parentKey={parentList.map((x) => x.id).join(",")}
-                    status={pfStatus} onOpenParent={setOpenParentId} accent={dth.accent} />
-                </div>
-              )}
+              {parentList.length > 0 ? (
+                <TaskReadinessBar taskId={d.id} taskType={d.task_type} platforms={d.platforms ?? []} parentKey={parentList.map((x) => x.id).join(",")}
+                  status={pfStatus} onOpenParent={setOpenParentId} accent={dth.accent} persist onSaved={() => void onChanged()} />
+              ) : (<>
+                <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า (ตามสถานะ)", "Progress (by status)")}</span><span>{d.progress_percent}%</span></div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full" style={{ width: `${d.progress_percent}%`, background: progressBg(dth) }} /></div>
+              </>)}
               {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
             </div>
           </div>
 
-          {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
-          <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100" style={{ borderColor: dividerColorOf(dth) }}>
-            {([["task", t("📋 งาน", "📋 Task"), 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
-              <button key={k} onClick={() => setTab(k)} style={tab === k ? { background: `${dth.accent}1f`, color: dth.accent } : undefined} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "" : "text-slate-500 hover:bg-slate-50"}`}>
-                {label}{count > 0 && <span className="text-[11px] rounded-full px-1.5" style={tab === k ? { background: `${dth.accent}33`, color: dth.accent } : { background: "#e2e8f0", color: "#475569" }}>{count}</span>}
-              </button>
-            ))}
-          </div>
-
+          {/* แท็บ งาน/คอนเทนต์ เลิกใช้ 2026-11-22 (เจ้าของเลือก) — รายการคอนเทนต์อยู่ในกล่องบนแล้ว (เพิ่ม/จากบรีฟ/แนบที่มี/เปลี่ยนสถานะ/เปิดดู) */}
           {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
-          {tab === "task" && (<>
-          {/* แถบบนสุด 2 ช่อง: Parent SKU | รายการคอนเทนต์ (เจ้าของเลือก 2026-11-22) — จอแคบเรียงบน-ล่าง */}
-          <div className={`grid gap-3 px-5 pt-3 pb-1 ${twoCol ? "grid-cols-2" : "grid-cols-1"}`}>
-            <div className="min-w-0 flex flex-col gap-2">
+          <>
+          {/* แถบบนสุด 2 ช่อง: สินค้า | รายการคอนเทนต์ (เจ้าของเลือก 2026-11-22) — จอแคบเรียงบน-ล่าง */}
+          <div className={`grid gap-3 px-5 pt-3 pb-1 border-t border-slate-100 ${twoCol ? "grid-cols-2" : "grid-cols-1"}`} style={{ borderColor: dividerColorOf(dth) }}>
+            <div className="min-w-0 flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">{t("สินค้า", "Product")}</span>
+                {/* ตรวจเร็ว (+ ดูรูป เมื่อไม่มีแผงแก้สินค้า ซึ่งมีปุ่มดูรูปในตัว) — ย้ายมาจากหัวลิ้นชัก */}
+                {parentList.length > 0 && (
+                  <span className="ml-auto inline-flex items-center gap-1">
+                    {!directOn && <button type="button" onClick={() => setImagesOpen(true)} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="image" />{t("ดูรูป", "Images")}</button>}
+                    <button type="button" onClick={() => setQuickOpen(true)} title={t("ตรวจสินค้าเร็ว: Description · สี · ราคา · รูป (ดูอย่างเดียว)", "Quick product check: description, colors, prices, images (read-only)")} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1"><Icon name="inspect" />{t("ตรวจเร็ว", "Quick check")}</button>
+                  </span>
+                )}
+              </div>
               {/* 🔁 แก้ที่สินค้าจากหน้างาน (สรุปสิ่งที่แก้ทั้งงาน · ส่งตรวจใช้สถานะงานปกติ) */}
-              <TaskDirectPanel task={d} pushToast={pushToast}
+              <TaskDirectPanel task={d} pushToast={pushToast} compact
                 canEdit={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.created_by || user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
                 canUndo={!isClosed && (canApproveSub || (!!user?.id && (user.id === d.assignee_id || (d.assignees ?? []).some((a) => a.id === user.id))))}
                 onAddParent={async (p) => { await updateTask(d.id, { parent_sku_ids: [...(d.parent_skus ?? []).map((x) => x.id), p.id] }); await refresh(); }}
@@ -390,7 +393,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 onClaim={!isClosed && !!user?.id && !d.assignee_id && (d.assignees ?? []).length === 0
                   ? async () => { await claimTask(d.id); await refresh(); } : undefined} />
               {/* 📦 Parent SKU — ยังไม่มี = แนะนำจาก SKU ลูก / เลือก / สร้างใหม่ แล้วผูกเข้างาน */}
-              <TaskParentBox task={d} pushToast={pushToast} onOpen={setOpenParentId}
+              <TaskParentBox task={d} pushToast={pushToast} onOpen={setOpenParentId} slim
                 canEdit={!isClosed && can("tasks.edit" as Parameters<typeof can>[0])}
                 onSetParents={async (ids) => { await updateTask(d.id, { parent_sku_ids: ids }); await refresh(); }} />
             </div>
@@ -679,7 +682,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   {!isHidden(dth, "campaign") && (<div style={{ order: tOrderOf("campaign") }}><QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
                     active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
                     editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} /></div>)}
-                  {!isHidden(dth, "parent") && (<div style={{ order: tOrderOf("parent") }}><QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                  {/* มีสินค้าแล้ว = อยู่ในกล่อง "สินค้า" ด้านบน (ไม่ซ้ำ) · ยังไม่มี = เพิ่มจากตรงนี้ได้ */}
+                  {!isHidden(dth, "parent") && parentList.length === 0 && (<div style={{ order: tOrderOf("parent") }}><QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
                     active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
                     editor={
                       <div className="space-y-1.5">
@@ -811,11 +815,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           )}
 
-          </>)}
+          </>
 
-          {tab === "content" && (
-            <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} taskTitle={d.title} />
-          )}
         </div>
 
         {assetPickerOpen && (
