@@ -634,7 +634,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     copyNodes: (ids) => opsRef.current.copyNodes(ids),
     duplicateNodes: (ids) => opsRef.current.duplicateNodes(ids),
     removeNodes: (ids) => opsRef.current.removeNodes(ids),
-    setColor: (ids, color) => { const set = new Set(ids); setNodes((ns) => ns.map((n) => (set.has(n.id) ? { ...n, data: { ...n.data, color } } : n))); },
+    // เลือกจุดสีชุด = ล้างสีพื้น/เส้นที่ตั้งเองด้วย (ไม่งั้นกดจุดสีแล้วดูเหมือนไม่เปลี่ยน)
+    setColor: (ids, color) => { const set = new Set(ids); setNodes((ns) => ns.map((n) => { if (!set.has(n.id)) return n; const d = { ...n.data, color }; delete d.fill; delete d.stroke; return { ...n, data: d }; })); },
     iconScaleOf: (ids) => {
       const set = new Set(ids);
       const first = nodesRef.current.find((n) => set.has(n.id) && iconBoxBaseSize(boxOf(n)));
@@ -1044,7 +1045,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             <Controls showInteractive={false} position="bottom-left" />
             {/* เลือกหลายกล่อง → แถบเครื่องมือกลุ่มอันเดียวเหนือกลุ่ม */}
             {!readOnly && selectedIds.length > 1 && (
-              <NodeToolbar nodeId={selectedIds} isVisible position={Position.Top} offset={10}>
+              <NodeToolbar nodeId={selectedIds} isVisible position={Position.Top} offset={10} style={{ zIndex: 1100 }}>
                 <FlowTools ids={selectedIds} />
               </NodeToolbar>
             )}

@@ -26,8 +26,8 @@ function zoneHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const x = n.position.x - ox, y = n.position.y - oy;
   const title = esc(splitFlowLabel(n.data.label).title || "โซน");
   return `<div style="position:absolute;left:${x}px;top:${y}px;width:${n.width}px;height:${n.height}px;box-sizing:border-box">`
-    + `<div style="position:absolute;inset:0;border-radius:16px;background:${p.fill};opacity:.55"></div>`
-    + `<div style="position:absolute;inset:0;border-radius:16px;border:2px dashed ${p.stroke};opacity:.7"></div>`
+    + `<div style="position:absolute;inset:0;border-radius:16px;background:${n.data.fill ?? p.fill};opacity:.55"></div>`
+    + `<div style="position:absolute;inset:0;border-radius:16px;border:2px dashed ${n.data.stroke ?? p.stroke};opacity:.7"></div>`
     + `<div style="position:absolute;left:8px;top:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.75);font-size:14px;font-weight:700;color:${p.text};white-space:nowrap">${title}</div>`
     + `</div>`;
 }

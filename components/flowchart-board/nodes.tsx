@@ -537,14 +537,15 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
     return (
       <>
         {!readOnly && <NodeResizer isVisible={selected && !editing} minWidth={160} minHeight={100} lineClassName="fc-resize-line" handleClassName="fc-resize-handle" />}
+        {/* กรอบโซนอยู่ชั้นล่าง (z -1) → แถบเครื่องมือได้ชั้นเดียวกันจมใต้พื้นกระดาน กดสีไม่ได้ → ยกแถบขึ้นบน (แก้ 2026-11-22) */}
         {!readOnly && (
-          <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} align="start" offset={8}>
+          <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} align="start" offset={8} style={{ zIndex: 1100 }}>
             <FlowTools ids={[id]} single={{ kind, data, onEdit: startEdit }} />
           </NodeToolbar>
         )}
         <div className="fc-zone relative h-full w-full">
-          <div className="absolute inset-0 rounded-2xl" style={{ background: pal.fill, opacity: 0.55 }} />
-          <div className="absolute inset-0 rounded-2xl" style={{ border: `2px dashed ${pal.stroke}`, opacity: selected ? 1 : 0.7 }} />
+          <div className="absolute inset-0 rounded-2xl" style={{ background: data.fill ?? pal.fill, opacity: 0.55 }} />
+          <div className="absolute inset-0 rounded-2xl" style={{ border: `2px dashed ${data.stroke ?? pal.stroke}`, opacity: selected ? 1 : 0.7 }} />
           <div className={`fc-zone-handle absolute left-2 top-1.5 inline-flex max-w-[90%] items-center gap-1.5 rounded-lg px-2 py-1 ${readOnly ? "" : "cursor-grab"}`}
             style={{ color: pal.text, background: "rgba(255,255,255,.75)" }}
             title={readOnly ? undefined : t("ลากตรงนี้ = ย้ายทั้งกรอบพร้อมกล่องข้างใน · ดับเบิลคลิก = แก้ชื่อ", "Drag here to move the zone with its boxes · double-click to rename")}
