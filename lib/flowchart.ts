@@ -93,7 +93,8 @@ export type FlowPagePeek = { on?: boolean; img?: string; at?: string };
 export type FlowNodeData = { peek?: FlowPagePeek; line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
-export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step"> };
+/** color = สีเส้นที่ตั้งเอง #rrggbb (ไม่มี = ตามสไตล์กระดาน · เจ้าของสั่ง 2026-11-22) */
+export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step">; color?: string };
 
 /** แบบลูกศร (หักมุม = แบบเดิม) · svg = ไอคอนเล็ก 16×16 บนปุ่ม */
 export const FLOW_EDGE_SHAPES = ["step", "straight", "curve"] as const;
@@ -228,7 +229,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     const id = str(o.id); const source = str(o.source); const target = str(o.target);
     if (!id || eids.has(id) || !(ids.has(source) || isSysId(source)) || !(ids.has(target) || isSysId(target))) continue;   // ปลายเส้น = กล่องในกระดาน หรือกล่องของระบบ (sys:)
     const shape = edgeShapeOf(o);
-    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}) });
+    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}), ...(isHexColor(o.color) ? { color: o.color } : {}) });
     eids.add(id);
   }
   const out = withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
@@ -336,7 +337,7 @@ export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPin
       height: Math.round(n.height ?? n.measured?.height ?? 0) || undefined,
       data: n.data,
     })),
-    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "", shape: (e.data as { shape?: unknown } | undefined)?.shape })),
+    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "", shape: (e.data as { shape?: unknown } | undefined)?.shape, color: (e.data as { color?: unknown } | undefined)?.color })),
   }) ?? EMPTY_FLOW_SCENE;
 }
 

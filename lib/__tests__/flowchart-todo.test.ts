@@ -103,3 +103,15 @@ describe("ลากเส้นจากข้อในรายการงา�
     expect(handlePoint({ ...n, data: { items: [{ id: "b", text: "B" }, { id: "a", text: "A" }] } }, "i:b").y).toBe(49);
   });
 });
+
+describe("สีเส้น (2026-11-22)", () => {
+  it("เก็บสีเส้นที่ตั้งเอง · สีผิดรูปทิ้ง", () => {
+    const base = { kind: "flowchart", nodes: [
+      { id: "a", type: "step", position: { x: 0, y: 0 }, width: 100, height: 40, data: { label: "a" } },
+      { id: "b", type: "step", position: { x: 200, y: 0 }, width: 100, height: 40, data: { label: "b" } },
+    ] };
+    const s = parseFlowScene({ ...base, edges: [{ id: "e", source: "a", target: "b", sourceHandle: "r", targetHandle: "l", label: "", color: "#e11d48" }, { id: "f", source: "b", target: "a", sourceHandle: "r", targetHandle: "l", label: "", color: "red;x" }] })!;
+    expect(s.edges[0].color).toBe("#e11d48");
+    expect(s.edges[1].color).toBeUndefined();
+  });
+});

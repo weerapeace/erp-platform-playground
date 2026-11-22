@@ -123,7 +123,7 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
       sourceX: sp.x - b.x, sourceY: sp.y - b.y, sourcePosition: SIDE[sp.side],
       targetX: tp.x - b.x, targetY: tp.y - b.y, targetPosition: SIDE[tp.side],
     });
-    paths.push(`<path d="${d}" fill="none" stroke="${es.color}" stroke-width="${es.width}"${es.dash ? ` stroke-dasharray="${es.dash}"` : ""} marker-end="url(#fc-arrow)"/>`);
+    paths.push(`<path d="${d}" fill="none" stroke="${e.color ?? es.color}" stroke-width="${es.width}"${es.dash ? ` stroke-dasharray="${es.dash}"` : ""} marker-end="url(#fc-arrow)"/>`);
     if (e.label) labels.push(`<div style="position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;color:#475569;white-space:nowrap">${esc(e.label)}</div>`);
   }
   const svg = `<svg width="${b.w}" height="${b.h}" style="position:absolute;left:0;top:0;overflow:visible"><defs><marker id="fc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>${paths.join("")}</svg>`;

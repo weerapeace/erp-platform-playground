@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position, SelectionMode,
-  addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow,
+  addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow, useStoreApi,
   type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
 import { useT } from "@/components/i18n";
@@ -125,7 +125,14 @@ const toRFNodes = (s: FlowScene, selected?: Set<string>): FlowRFNode[] =>
     ...(n.type === "zone" ? { zIndex: -1, dragHandle: ".fc-zone-handle" } : {}),
   }));
 const toRFEdges = (s: FlowScene): Edge[] =>
-  s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow", markerEnd: MARKER, ...(e.shape ? { data: { shape: e.shape } } : {}) }));
+  s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow",
+    markerEnd: e.color ? { ...MARKER, color: e.color } : MARKER, ...(e.shape || e.color ? { data: { ...(e.shape ? { shape: e.shape } : {}), ...(e.color ? { color: e.color } : {}) } } : {}) }));
+/** เส้น → สีใหม่ (null = กลับตามสไตล์กระดาน) · หัวลูกศรสีเดียวกัน */
+const withColor = (e: Edge, color: string | null): Edge => {
+  const data = { ...(e.data ?? {}) } as Record<string, unknown>;
+  if (color) data.color = color; else delete data.color;
+  return { ...e, data, markerEnd: color ? { ...MARKER, color } : MARKER };
+};
 
 /** เส้น → แบบลูกศรใหม่ (หักมุม = เอา data.shape ออก ให้เหมือนเส้นเดิม) */
 const withShape = (e: Edge, shape: FlowEdgeShape): Edge => {
@@ -512,7 +519,20 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // ── แก้กระดาน ──
   // กล่องระบบ (sys:) ไม่ได้อยู่ใน nodes — ลากกล่องที่ปลดล็อก = จดตำแหน่งลง pins · การเปลี่ยนอื่นของกล่องระบบไม่สน
   // ลากกรอบเลือกที่เริ่มในกรอบโซน = เลือกกล่องข้างใน ไม่เลือกตัวกรอบโซน (เลือกกรอบ = กดหัวกรอบ · เจ้าของสั่ง 2026-11-21)
-  const marqueeRef = useRef(false);
+  //   onSelectionStart/End ของ React Flow ไม่ยิงตอนลากที่ว่าง (selectionOnDrag) → อ่าน userSelectionActive จากที่เก็บของ React Flow แทน (แก้ 2026-11-22)
+  const rfStore = useStoreApi();
+  const marqueeRef = { get current() { return rfStore.getState().userSelectionActive; } };
+  useEffect(() => {
+    let prev = rfStore.getState().userSelectionActive;
+    return rfStore.subscribe((st) => {
+      const now = st.userSelectionActive;
+      if (prev && !now) {   // ลากกรอบเลือกจบ → เอากรอบโซนออกจากที่เลือก (กันที่หลุดมาตอนปล่อยเมาส์)
+        const drop = () => setNodes((ns) => (ns.some((n) => n.type === "zone" && n.selected) ? ns.map((n) => (n.type === "zone" && n.selected ? { ...n, selected: false } : n)) : ns));
+        drop(); requestAnimationFrame(drop);
+      }
+      prev = now;
+    });
+  }, [rfStore]);
   const onNodesChange = useCallback((ch: NodeChange<BoardNode>[]) => {
     const own: NodeChange<FlowRFNode>[] = [];
     let moved: FlowPins | null = null;
@@ -728,6 +748,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     })),
     setEdgeLabel: (id, label) => setEdges((es) => es.map((e) => (e.id === id ? { ...e, label } : e))),
     setEdgeShape: (ids, shape) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withShape(e, shape) : e))); },
+    setEdgeColor: (ids, color) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withColor(e, color) : e))); },
     editEdgeLabel: (id) => {
       const cur = String(edges.find((e) => e.id === id)?.label ?? "");
       void askText({ title: t("ป้ายบนเส้น", "Line label"), initial: cur, placeholder: t("เช่น ใช่ / ไม่ใช่ / ถ้าเป็นรูปสินค้า", "e.g. Yes / No / If product image"), confirmText: t("ใช้ป้ายนี้", "Use label") })
@@ -1086,7 +1107,6 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             nodesDraggable={!readOnly} nodesConnectable={!readOnly} elementsSelectable
             multiSelectionKeyCode={["Shift", "Control", "Meta"]}
             deleteKeyCode={readOnly ? null : ["Delete", "Backspace"]}
-            onSelectionStart={() => { marqueeRef.current = true; }} onSelectionEnd={() => { marqueeRef.current = false; }}
             selectionOnDrag={!coarse} panOnDrag={coarse ? true : [1, 2]} selectionMode={SelectionMode.Partial} panActivationKeyCode="Space"
             onPaneContextMenu={(e) => { if (!coarse) e.preventDefault(); }}
             minZoom={0.2} maxZoom={2.5}

@@ -171,6 +171,8 @@ export type FlowBoardActions = {
   removeNodes: (ids: string[]) => void;
   openFolder: (path: string) => void;
   setEdgeLabel: (id: string, label: string) => void;
+  /** เปลี่ยนสีเส้น (null = ตามสไตล์กระดาน) */
+  setEdgeColor: (ids: string[], color: string | null) => void;
   /** เปลี่ยนแบบลูกศร (หักมุม · ตรง · โค้ง) */
   setEdgeShape: (ids: string[], shape: FlowEdgeShape) => void;
   editEdgeLabel: (id: string) => void;
@@ -921,7 +923,10 @@ export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleI
     const chk = (nid: string, h?: string | null) => { const it = itemOfHandle(h); if (!it) return false; const n = s.nodeLookup.get(nid); return !!(n?.data as FlowNodeData | undefined)?.items?.find((i) => i.id === it)?.done; };
     return chk(source, sourceHandleId) || chk(target, targetHandleId);
   });
-  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape, boardStyle } = useBoard();
+  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape, setEdgeColor, boardStyle } = useBoard();
+  const PAL = usePal();
+  const [colorOpen, setColorOpen] = useState(false);
+  const own = (data as { color?: string } | undefined)?.color;
   const es = FLOW_STYLE_EDGE[boardStyle];
   const shape = edgeShapeOf(data as { shape?: unknown } | undefined);
   const [path, lx, ly] = flowEdgePath(shape, { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
@@ -930,7 +935,7 @@ export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleI
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} interactionWidth={18}
-        style={{ stroke: selected ? "#7c3aed" : itemDone ? "#86efac" : es.color, strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : es.width, ...(itemDone && !selected ? { strokeDasharray: "5 4" } : es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
+        style={{ stroke: selected && !own ? "#7c3aed" : itemDone ? "#86efac" : own ?? es.color, strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : es.width, ...(itemDone && !selected ? { strokeDasharray: "5 4" } : es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
       {(text || (selected && !readOnly)) && (
         <EdgeLabelRenderer>
           <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", ...(selected ? { zIndex: 1100 } : {}) /* เลือกเส้นอยู่ = ปุ่มลัดลอยเหนือกล่อง (เส้นสั้นกล่องเคยบังปุ่ม) */ }}>
@@ -944,6 +949,22 @@ export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleI
                     <EdgeShapeIcon shape={s} />
                   </button>
                 ))}
+                <span className="mx-0.5 h-4 w-px bg-slate-200" />
+                {/* สีเส้น (เจ้าของสั่ง 2026-11-22) — สีชุดของกระดาน · สีเอง · กลับตามสไตล์ */}
+                {FLOW_COLORS.slice(0, 7).map((c) => (
+                  <button key={c} type="button" onClick={() => setEdgeColor([id], PAL[c].stroke)} title={t(`เส้นสี${PAL[c].th}`, `${PAL[c].en} line`)}
+                    className={`mx-px h-4 w-4 rounded-full border-2 ${own === PAL[c].stroke ? "ring-2 ring-violet-300 ring-offset-1" : ""}`} style={{ background: PAL[c].stroke, borderColor: "#fff", boxShadow: "0 0 0 1px #cbd5e1" }} />
+                ))}
+                <span className="relative">
+                  <button type="button" onClick={() => setColorOpen((v) => !v)} title={t("สีเส้นเอง", "Custom line colour")}
+                    className={`${chip} ${colorOpen ? "bg-violet-100 text-violet-700" : ""}`}><Icon value="i:palette" /></button>
+                  {colorOpen && (
+                    <span className="absolute left-0 top-full z-20 mt-1 block">
+                      <ColorPanel value={own ?? es.color} t={t} onChange={(hex) => setEdgeColor([id], hex)}
+                        onReset={() => { setEdgeColor([id], null); setColorOpen(false); }} resetLabel={t("กลับตามสไตล์กระดาน", "Back to the board style")} />
+                    </span>
+                  )}
+                </span>
                 <span className="mx-0.5 h-4 w-px bg-slate-200" />
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ใช่", "Yes"))}>{t("ใช่", "Yes")}</button>
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ไม่ใช่", "No"))}>{t("ไม่ใช่", "No")}</button>
