@@ -930,7 +930,8 @@ export type TaskTemplate = {
   platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
   require_parent_sku?: boolean;   // บังคับระบุ Parent SKU ตอนสร้างงาน (เช่น เพิ่มสี/แก้สี)
   icon?: string | null;           // อีโมจิโชว์บนการ์ดเทมเพลต (ตั้งที่หน้าเทมเพลต)
-  no_brand_only?: boolean;        // งานที่ไม่เกี่ยวกับแบรนด์ (เช่นเรียงพิมพ์) → โชว์เฉพาะตอนไม่ระบุแบรนด์
+  no_brand_only?: boolean;        // (ช่องเก่า) งานที่ไม่เกี่ยวกับแบรนด์ → ใช้ wizard_visibility แทน
+  wizard_visibility?: string | null; // โชว์ในหน้าสร้างงาน: all / brand / nobrand / hidden (lib/task-template-visibility)
 };
 export type RecurringRule = {
   id: string; name: string; template_id: string | null; template_label?: string | null;

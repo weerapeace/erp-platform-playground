@@ -6,13 +6,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
+import { cleanWizardVisibility, legacyNoBrandOnly } from "@/lib/task-template-visibility";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "default_reviewer_id", "due_offset_days", "description", "platforms", "steps", "content_items", "require_parent_sku", "icon", "no_brand_only"]);
+const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "default_reviewer_id", "due_offset_days", "description", "platforms", "steps", "content_items", "require_parent_sku", "icon", "no_brand_only", "wizard_visibility"]);
 // ผู้ตรวจหลายคน: เก็บ default_reviewer_ids (array) + sync default_reviewer_id เดี่ยว = ตัวแรก
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -37,11 +38,21 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     patch.default_reviewer_ids = revIds;
     patch.default_reviewer_id = revIds[0] ?? null;
   }
+  // โชว์ในหน้าสร้างงาน — ตรวจค่า + sync ช่องเก่า no_brand_only (hidden = ไม่แตะ)
+  if ("wizard_visibility" in patch) {
+    const v = cleanWizardVisibility(patch.wizard_visibility);
+    if (!v) return NextResponse.json({ error: "ค่าการโชว์ในหน้าสร้างงานไม่ถูกต้อง" }, { status: 400 });
+    patch.wizard_visibility = v;
+    const legacy = legacyNoBrandOnly(v);
+    if (legacy === undefined) delete patch.no_brand_only; else patch.no_brand_only = legacy;
+  }
   if (Object.keys(patch).length === 1) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
   const admin = supabaseAdmin();
+  const auditCols = Object.keys(patch).filter((k) => k !== "updated_at" && k !== "steps" && k !== "content_items");
+  const { data: before } = await admin.from("erp_creative_task_templates").select(["id", "name", ...auditCols].join(", ")).eq("id", id).maybeSingle();
   const { error } = await admin.from("erp_creative_task_templates").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-  await writeAudit(admin, { action: "update", entityType: "creative_template", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
+  await writeAudit(admin, { action: "update", entityType: "creative_template", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name: (before as { name?: string } | null)?.name ?? null, fields: Object.keys(patch).filter((k) => k !== "updated_at"), changes: auditDiff((before ?? {}) as unknown as Record<string, unknown>, Object.fromEntries(auditCols.map((k) => [k, patch[k]]))) } });
   return NextResponse.json({ success: true, error: null });
 }
 

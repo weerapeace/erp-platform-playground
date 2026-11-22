@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { cleanWizardVisibility, legacyNoBrandOnly } from "@/lib/task-template-visibility";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { employeeLabelMap, inactiveUserIdSet } from "@/lib/creative-tasks-server";
 
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
 type ContentItem = { title?: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_ids?: string[] };
-type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; default_reviewer_ids?: string[]; due_offset_days?: number | null; require_parent_sku?: boolean; icon?: string | null; no_brand_only?: boolean; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
+type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; default_reviewer_ids?: string[]; due_offset_days?: number | null; require_parent_sku?: boolean; icon?: string | null; no_brand_only?: boolean; wizard_visibility?: string; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
 
 // ผู้ตรวจเริ่มต้น (หลายคน) — ใช้ array ถ้าส่งมา ไม่งั้น fallback ค่าเดี่ยว
 function reviewerIds(body: Body): string[] { return [...new Set((Array.isArray(body.default_reviewer_ids) ? body.default_reviewer_ids : (body.default_reviewer_id ? [body.default_reviewer_id] : [])).filter(Boolean))] as string[]; }
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const steps = normalizeSteps(body.steps);
   const content_items = normalizeContent(body.content_items);
 
+  const wiz = cleanWizardVisibility(body.wizard_visibility) ?? (body.no_brand_only ? "nobrand" : "all");
   const admin = supabaseAdmin();
   const revIds = reviewerIds(body);
   const { data, error } = await admin.from("erp_creative_task_templates").insert({
@@ -108,7 +110,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand_id: body.brand_id || null, default_reviewer_id: revIds[0] || null, default_reviewer_ids: revIds,
     due_offset_days: (body.due_offset_days === null || body.due_offset_days === undefined || Number.isNaN(Number(body.due_offset_days))) ? null : Number(body.due_offset_days),
     require_parent_sku: !!body.require_parent_sku,
-    icon: (body.icon ?? "").toString().trim() || null, no_brand_only: !!body.no_brand_only,
+    icon: (body.icon ?? "").toString().trim() || null, no_brand_only: legacyNoBrandOnly(wiz) ?? !!body.no_brand_only, wizard_visibility: wiz,
     description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, content_items, created_by: user?.id ?? null,
   }).select("id, name").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

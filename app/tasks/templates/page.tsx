@@ -27,7 +27,8 @@ import { TeamFill } from "../team-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
-import { usePushToast, type ToastVariant } from "@/components/toast";
+import { usePushToast, useToast, type ToastVariant } from "@/components/toast";
+import { WIZARD_VISIBILITY_OPTIONS, wizardVisibilityOf, type WizardVisibility } from "@/lib/task-template-visibility";
 import { BrandSelect } from "@/components/brand-select";
 import { EmptyState, LoadingState } from "@/components/state-views";
 
@@ -68,7 +69,7 @@ export default function TemplatesPage() {
 // ============================================================
 // Templates tab (มีช่องไอคอน + ธง "ไม่เกี่ยวกับแบรนด์" ตั้งต่อเทมเพลต)
 // ============================================================
-const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false, icon: "", no_brand_only: false };
+const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[], due_offset_days: "", require_parent_sku: false, icon: "", wizard_visibility: "all" as WizardVisibility };
 
 function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) => void }) {
   const t = useT();
@@ -86,6 +87,18 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState<TaskTemplate | null>(null);
+  const toast = useToast();
+  // เปลี่ยน "โชว์ในหน้าสร้างงาน" จากการ์ดตรง ๆ (ลงประวัติที่ API) · ย้อนกลับได้จากแจ้งผล
+  const setVisibility = async (tpl: TaskTemplate, v: WizardVisibility) => {
+    const prev = wizardVisibilityOf(tpl);
+    if (prev === v) return;
+    const apply = async (val: WizardVisibility) => { await updateTemplate(tpl.id, { wizard_visibility: val }); setItems((xs) => xs.map((x) => (x.id === tpl.id ? { ...x, wizard_visibility: val } : x))); };
+    try {
+      await apply(v);
+      const label = WIZARD_VISIBILITY_OPTIONS.find((o) => o.value === v);
+      toast.undo(t(`${tpl.name}: ${label?.th ?? v}`, `${tpl.name}: ${label?.en ?? v}`), async () => { try { await apply(prev); } catch (e) { pushToast("error", (e as Error).message); } });
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
 
   const load = useCallback(async () => { try { setItems(await listTemplates()); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
   const reloadTypes = useCallback(async () => { try { setTypes(await listSubtaskTypes()); } catch { /* ignore */ } }, []);
@@ -103,7 +116,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
   const setContentD = (c: TemplateContentItem[]) => { setContentItems(c); setDirty(true); };
 
   const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setContentItems([]); setReviewers([]); setDirty(false); setOpen(true); };
-  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "", require_parent_sku: !!tpl.require_parent_sku, icon: tpl.icon ?? "", no_brand_only: !!tpl.no_brand_only }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
+  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [], due_offset_days: tpl.due_offset_days != null ? String(tpl.due_offset_days) : "", require_parent_sku: !!tpl.require_parent_sku, icon: tpl.icon ?? "", wizard_visibility: wizardVisibilityOf(tpl) }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setReviewers((tpl.default_reviewers && tpl.default_reviewers.length ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : []))); setDirty(false); setOpen(true); };
   const togglePlat = (v: string) => setFormD((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
 
   // EditStep → body step (type-driven)
@@ -112,7 +125,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อเทมเพลต", "Please enter a template name")); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, require_parent_sku: form.require_parent_sku, icon: form.icon.trim() || null, no_brand_only: form.no_brand_only, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, default_reviewer_ids: reviewers.map((r) => r.id), due_offset_days: form.due_offset_days ? Number(form.due_offset_days) : null, require_parent_sku: form.require_parent_sku, icon: form.icon.trim() || null, wizard_visibility: form.wizard_visibility, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
     try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); setDirty(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -124,6 +137,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
         name: `${tpl.name} (${t("สำเนา", "Copy")})`, task_type: tpl.task_type ?? null, default_priority: tpl.default_priority,
         brand_id: tpl.brand_id ?? null, default_reviewer_ids: tpl.default_reviewer_ids ?? (tpl.default_reviewer_id ? [tpl.default_reviewer_id] : []), due_offset_days: tpl.due_offset_days ?? null,
         description: tpl.description ?? null, platforms: tpl.platforms ?? [],
+        require_parent_sku: !!tpl.require_parent_sku, icon: tpl.icon ?? null, wizard_visibility: wizardVisibilityOf(tpl),
         steps: (Array.isArray(tpl.steps) ? tpl.steps : []).map((s) => stepBody(toEditStep(s))),
         content_items: Array.isArray(tpl.content_items) ? tpl.content_items : [],
       });
@@ -158,7 +172,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {g.items.map((tpl) => (
-                      <div key={tpl.id} onClick={() => openEdit(tpl)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 cursor-pointer">
+                      <div key={tpl.id} onClick={() => openEdit(tpl)} className={`bg-white rounded-xl border p-4 shadow-sm hover:border-violet-300 cursor-pointer ${wizardVisibilityOf(tpl) === "hidden" ? "border-dashed border-slate-300 opacity-70" : "border-slate-200"}`}>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{tpl.task_type ? taskTypeLabel(tpl.task_type) : t("งานทั่วไป", "General task")}</span>
                           <div className="flex items-center gap-2 shrink-0">
@@ -168,6 +182,13 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
                         </div>
                         <p className="font-semibold text-slate-800">{tpl.icon ? `${tpl.icon} ` : ""}{tpl.name}</p>
                         <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length} ${t("คอนเทนต์", "content")}` : ""}{tpl.due_offset_days != null ? ` · ⏱ +${tpl.due_offset_days}${t("ว", "d")}` : ""}</p>
+                        <label onClick={(e) => e.stopPropagation()} className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-400">
+                          {t("หน้าสร้างงาน:", "New task:")}
+                          <select value={wizardVisibilityOf(tpl)} onChange={(e) => void setVisibility(tpl, e.target.value as WizardVisibility)}
+                            className={`h-6 rounded-md border px-1 text-[11px] ${wizardVisibilityOf(tpl) === "hidden" ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-200 bg-white text-slate-600"}`}>
+                            {WIZARD_VISIBILITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{t(o.th, o.en)}</option>)}
+                          </select>
+                        </label>
                       </div>
                     ))}
                   </div>
@@ -198,11 +219,8 @@ function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: string) =
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS()} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><BrandSelect brands={brands} value={form.brand_id} onChange={(v) => setFormD((f) => ({ ...f, brand_id: v }))} emptyLabel={`— ${t("ไม่ระบุ", "None")} —`} /></ERPFormField>
-          <ERPFormField label={t("งานนี้ไม่เกี่ยวกับแบรนด์", "Not brand-specific")} hint={t("ติ๊กสำหรับงานที่ไม่ผูกแบรนด์ เช่น งานเรียงพิมพ์ — จะโชว์เฉพาะตอนเลือก “ไม่ระบุแบรนด์” ไม่ไปเกะกะในแบรนด์อื่น", "For work not tied to a brand (e.g. arrange print) — only shown when “No brand” is selected")}>
-            <label className="flex items-center gap-2 cursor-pointer h-8">
-              <input type="checkbox" checked={form.no_brand_only} onChange={(e) => setFormD((f) => ({ ...f, no_brand_only: e.target.checked }))} className="w-4 h-4 accent-violet-600" />
-              <span className="text-sm text-slate-600">{form.no_brand_only ? t("โชว์เฉพาะ “ไม่ระบุแบรนด์”", "Only under “No brand”") : t("โชว์ตามปกติ", "Normal")}</span>
-            </label>
+          <ERPFormField label={t("โชว์ในหน้าสร้างงาน", "Show in New Task")} hint={t("ซ่อนแล้วเทมเพลตยังอยู่ (งานประจำยังใช้ได้) เปิดกลับได้ทุกเมื่อ · เทมเพลตทั่วไป (ไม่ผูกแบรนด์) เลือกได้ว่าจะโชว์ตอนเลือกแบรนด์ หรือตอน “ไม่ระบุแบรนด์”", "Hidden templates stay (recurring rules still work) — turn back on anytime · General templates can show only with a brand or only with “No brand”")}>
+            <ERPSelect value={form.wizard_visibility} options={WIZARD_VISIBILITY_OPTIONS.map((o) => ({ value: o.value, label: t(o.th, o.en) }))} onChange={(e) => setFormD((f) => ({ ...f, wizard_visibility: e.target.value as WizardVisibility }))} />
           </ERPFormField>
           <ERPFormField label={t("แพลตฟอร์ม", "Platforms")}><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
           <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เริ่มต้น)", "Reviewer/Approver (default)")} hint={t("งานที่สร้างจากแม่แบบนี้จะตั้งผู้ตรวจเหล่านี้ให้ (เลือกได้หลายคน)", "Tasks from this template get these reviewers (multiple)")}><MultiUserPicker value={reviewers} onChange={(v) => { setReviewers(v); setDirty(true); }} disableCreate /></ERPFormField>

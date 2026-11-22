@@ -30,6 +30,7 @@ import { skippedSubtaskTypes, useProductModeCfg } from "./product-edit-mode";
 import { ArrangePrintEditor, specFromItems, specBasesFrom, type ArrangeItem, type ArrangeBase } from "./arrange-print-editor";
 import type { ArrangePrintType } from "./data";
 import { BrandSelect } from "@/components/brand-select";
+import { templateShownInWizard } from "@/lib/task-template-visibility";
 
 const priorityOptions = () => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: priorityLabel(k) }));
 
@@ -105,6 +106,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [tplDueOffset, setTplDueOffset] = useState<number | null>(null);   // กำหนดส่ง = วันที่สั่ง + X (จากแม่แบบ)
   const [defaultReviewers, setDefaultReviewers] = useState<UserPickerValue[]>([]);   // ผู้ตรวจเริ่มต้น (ค่ากลาง ui_config)
   const [step, setStep] = useState(1);
+  // ขั้น "งานย่อย + คอนเทนต์ social" ข้ามเป็นค่าเริ่ม — ติ๊ก "+ งานย่อย" ในขั้นข้อมูลงานถึงจะโชว์ · เทมเพลตที่มีงานย่อย/คอนเทนต์ติ๊กให้เอง (เจ้าของเลือก 2026-11-22)
+  const [withSubs, setWithSubs] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -143,7 +146,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? presetCampaign?.id ?? "", brand_id: presetCampaign?.brand_id ?? presetProducts?.brandId ?? "", parents: presetProducts?.parents ?? [], platforms: presetProducts?.platforms ?? [], order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId, presetCampaign?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? presetCampaign?.id ?? "", brand_id: presetCampaign?.brand_id ?? presetProducts?.brandId ?? "", parents: presetProducts?.parents ?? [], platforms: presetProducts?.platforms ?? [], order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setWithSubs(false); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId, presetCampaign?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -194,7 +197,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setTplId(id); setDirty(true); setTouched(new Set());   // เปลี่ยนแม่แบบ/แบรนด์ = ตั้งค่าเริ่มต้นใหม่ → กลับเป็นสีเทาหมด
     const tpl = templates.find((x) => x.id === id);
     setArrangeItems([]); setArrangeBases([]); setPrintedName("");   // เปลี่ยนแม่แบบ → ล้างรายการเรียงพิมพ์/รูปฐาน/ชื่อเสริม
-    if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); return; }
+    if (!tpl) { setSubs([]); setContentItems([]); setTplDueOffset(null); setWithSubs(false); return; }
+    setWithSubs((tpl.steps?.length ?? 0) > 0 || (tpl.content_items?.length ?? 0) > 0);
     // งานเรียงพิมพ์ → ตั้งชื่ออัตโนมัติ Printed_YYYY_MM_DD-# (# = เลขรันของวันนั้น นับจากงานเดิม)
     if ((tpl.steps ?? []).some((s) => s.type === "arrange_print")) {
       const d = new Date();
@@ -258,20 +262,21 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setFormErr(null);
     // งานเรียงพิมพ์: ข้ามขั้น "ข้อมูลงาน" ไปขั้นเรียงพิมพ์เลย (ข้อมูลย่อรวมอยู่ในขั้นนั้น)
     if (step === 1 && isArrangePrint) { setStep(3); return; }
+    if (step === 2 && !withSubs) { setStep(4); return; }
     setStep((s) => Math.min(4, s + 1));
   };
   const back = () => {
     setFormErr(null);
     if (step === 3 && isArrangePrint) { setStep(1); return; }
+    if (step === 4 && !withSubs) { setStep(2); return; }
     setStep((s) => Math.max(1, s - 1));
   };
   // วันที่สั่งเปลี่ยน → คำนวณกำหนดส่งใหม่ (แม่แบบ +X หรือ default +3) ถ้ายังไม่แก้กำหนดส่งเอง
   const setOrderDate = (v: string) => { const autoDue = !!v && (tplDueOffset != null || !touched.has("due_date")); updateForm({ order_date: v, ...(autoDue ? { due_date: addDaysStr(v, tplDueOffset ?? 3) } : {}) }); };
   // เทมเพลตของแบรนด์ที่เลือก (+ เทมเพลตทั่วไปที่ไม่ผูกแบรนด์)
   // ยกเว้นเทมเพลตที่ติ๊ก "ไม่เกี่ยวกับแบรนด์" (เช่นงานเรียงพิมพ์) → โชว์เฉพาะตอนเลือก "ไม่ระบุแบรนด์"
-  const brandTemplates = templates.filter((tp) => form.brand_id
-    ? ((tp.brand_id === form.brand_id || !tp.brand_id) && !tp.no_brand_only)
-    : !tp.brand_id);
+  // ตั้งต่อเทมเพลตได้ที่ /tasks/templates "โชว์ในหน้าสร้างงาน" (ทุกที่ / เฉพาะมีแบรนด์ / เฉพาะไม่ระบุแบรนด์ / ซ่อน) — lib/task-template-visibility
+  const brandTemplates = templates.filter((tp) => templateShownInWizard(tp, form.brand_id));
   // เทมเพลตที่เลือกบังคับระบุ Parent SKU ไหม (เช่น เพิ่มสี/แก้สี)
   const requireParent = !!templates.find((x) => x.id === tplId)?.require_parent_sku;
   // งานเรียงพิมพ์ (มีงานย่อยชนิด arrange_print) → ขั้น "งานย่อย" แสดง UI เลือกรูป+ขนาด+จำนวนแทน
@@ -288,7 +293,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     if (requireParent && form.parents.length === 0) { setStep(4); setFormErr(t("งานนี้ต้องระบุ Parent SKU (ตระกูลสินค้า) อย่างน้อย 1 รายการ","This task requires at least one Parent SKU")); return; }
     setSaving(true); setFormErr(null);
     const arrangeConfig = { ...specFromItems(arrangeItems), bases: specBasesFrom(arrangeBases), print_type: arrangePrintType };
-    const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
+    const subtasks = (withSubs || isArrangePrint ? subs : []).filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.type === "arrange_print" ? { ...s.config, arrange_print: arrangeConfig } : s.config }));
     const effTitle = isArrangePrint ? combinedTitle : form.title.trim();   // เรียงพิมพ์ = ชื่ออัตโนมัติ + ชื่อเสริม
     try {
       const { id, task_no } = await createTask({
@@ -302,7 +307,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         cover_image_r2_key: form.cover_image_r2_key || null,
         reference_images: form.reference_images,
         subtasks,
-        content_items: contentItems.filter((c) => c.title?.trim()),
+        content_items: withSubs ? contentItems.filter((c) => c.title?.trim()) : [],
       });
       setDirty(false);
       onCreated({ id, task_no, title: effTitle, subtasks: subtasks.map((s) => ({ title: s.title })) });
@@ -325,9 +330,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     >
       {/* step indicator — งานเรียงพิมพ์เหลือ 2 ขั้น (แบรนด์/เทมเพลต → เรียงพิมพ์) */}
       <div className="flex items-center gap-2 mb-4">
-        {(isArrangePrint ? [STEPS[0], t("เรียงพิมพ์", "Arrange print")] : STEPS).map((label, i) => {
-          const cur = isArrangePrint ? (step === 1 ? 1 : 2) : step;
-          const count = isArrangePrint ? 2 : STEPS.length;
+        {(isArrangePrint ? [STEPS[0], t("เรียงพิมพ์", "Arrange print")] : withSubs ? STEPS : [STEPS[0], STEPS[1], STEPS[3]]).map((label, i) => {
+          const cur = isArrangePrint ? (step === 1 ? 1 : 2) : withSubs ? step : (step >= 4 ? 3 : step);
+          const count = isArrangePrint ? 2 : withSubs ? STEPS.length : 3;
           const n = i + 1; const active = n === cur; const done = n < cur;
           return (
           <div key={`${i}-${label}`} className="flex items-center gap-2">
@@ -463,6 +468,16 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             <div className={wrapCls("cover")}><ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact /></div>
           </ERPFormField>
         </ERPFormSection>
+        {/* + งานย่อย / คอนเทนต์ social — ไม่ติ๊ก = ข้ามขั้นงานย่อยไปขั้นสินค้าเลย */}
+        <label className={`mt-3 flex items-start gap-2 rounded-lg border border-dashed px-3 py-2 cursor-pointer ${withSubs ? "border-violet-300 bg-violet-50/50" : "border-slate-200 hover:border-violet-200"}`}>
+          <input type="checkbox" checked={withSubs} onChange={(e) => { setWithSubs(e.target.checked); setDirty(true); }} className="mt-0.5 w-4 h-4 accent-violet-600" />
+          <span className="text-sm text-slate-700">
+            <span className="font-medium">{t("+ งานย่อย / คอนเทนต์ social", "+ Subtasks / social content")}</span>
+            <span className="block text-xs text-slate-400">{withSubs
+              ? t(`จะมีขั้น "งานย่อย" ให้ใส่ถัดไป${subs.length + contentItems.length ? ` (จากเทมเพลต ${subs.length} งานย่อย · ${contentItems.length} คอนเทนต์)` : ""}`, `A "Subtasks" step comes next${subs.length + contentItems.length ? ` (from template: ${subs.length} subtasks · ${contentItems.length} content)` : ""}`)
+              : t("ไม่ติ๊ก = ข้ามขั้นงานย่อย ไปเลือกสินค้าเลย", "Unticked = skip the Subtasks step, go straight to Products")}</span>
+          </span>
+        </label>
       </>)}
 
       {/* STEP 3A — งานเรียงพิมพ์ (เลือกรูป Artwork + ขนาด + จำนวน) */}
