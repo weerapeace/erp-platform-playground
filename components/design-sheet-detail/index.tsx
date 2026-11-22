@@ -1603,6 +1603,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const save = async () => {
     if (!form) return;
     if (!form.name.trim()) { setFormErr(t("กรุณาใส่ชื่องาน", "Please enter a job name")); return; }
+    // แบรนด์บังคับ (เจ้าของสั่ง 2026-11-22) — ใบงานไม่มีแบรนด์ไปตกกอง "ไม่ระบุแบรนด์" หาไม่เจอในแดชบอร์ด
+    if (!form.brand_id) { setFormErr(t("กรุณาเลือกแบรนด์", "Please pick a brand")); return; }
     // รหัสที่ค้างพิมพ์ในช่องเพิ่ม (ยังไม่กด Enter) → ถ้าซ้ำห้ามบันทึก, ถ้าใช้ได้ให้รวมเข้าไปด้วย
     const pending = skuInput.trim().toUpperCase();
     if (pending && skuCheck?.exists) { setFormErr(t(`รหัส Parent SKU "${pending}" มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`, `Parent SKU code "${pending}" already exists — duplicates not allowed`)); return; }
@@ -2041,7 +2043,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>;
       if (!chips.length) return (
         <label className="block">
-          <span className="text-[11px] text-slate-500">{t("แบรนด์", "Brand")}</span>
+          <span className="text-[11px] text-slate-500">{t("แบรนด์ *", "Brand *")}</span>
           <div className="flex gap-1.5 mt-0.5">
             <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
               className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
@@ -2054,7 +2056,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       );
       return (
         <div>
-          <span className="text-[11px] text-slate-500">{t("แบรนด์", "Brand")}</span>
+          <span className="text-[11px] text-slate-500">{t("แบรนด์ *", "Brand *")}</span>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {chips.map((b) => {
               const on = form.brand_id === b.id;
