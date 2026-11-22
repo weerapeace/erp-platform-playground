@@ -70,10 +70,16 @@ export type CanvasSketchControls = {
   /** ซิงค์การ์ดสด — builder คืน {text?, data?, imageUrl?, images?} เพื่ออัปเดตข้อความ/รูป/snapshot
    *  imageUrl: URL รูปเดียว · images: หลายรูป [รูปใหญ่, รูปเล็ก...] (รูปแรก=รูปใหญ่บนสุด ที่เหลือ=รูปเล็กแถวล่าง) · [] / null / "" = เอารูปออก · undefined = ไม่ยุ่งกับรูป */
   refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text?: string; data?: Record<string, unknown>; imageUrl?: string | null; images?: string[] | null; stroke?: string | null } | null>) => Promise<void>;
+  /** URL ของไฟล์รูปบนกระดาน (fileId → /api/r2-image?key=… ถ้าย้ายขึ้น R2 แล้ว) · ไม่มี = null */
+  getFileUrl: (fileId: string) => string | null;
+  /** วาดเส้นลูกศร "ติด" ระหว่าง element 2 ชิ้น (ลากชิ้นไหน เส้นตาม) · คืน id ของเส้น */
+  connect: (fromId: string, toId: string, customData?: Record<string, unknown>) => Promise<string | null>;
+  /** วางลิงก์เป็นกล่องฝัง (Pinterest/TikTok/YouTube…) หรือกล่องลิงก์ ที่จุดบนกระดาน (พิกัดจริง) · คืน id ของกล่องที่วาง (ตามลำดับลิงก์) */
+  placeLinks: (urls: string[], at: { x: number; y: number }, customData?: (url: string) => Record<string, unknown>) => Promise<string[]>;
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, onContentChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
 }: {
   /** คำแนะนำวิธีใช้เหลือไอคอน ? (ชี้ดู) แทนบรรทัดยาว — สำหรับกระดานในพื้นที่แคบ */
   compactHelp?: boolean;
@@ -102,6 +108,8 @@ export function CanvasSketch({
   onSaved?: () => void;
   /** ชิ้นที่เลือกบนกระดานเปลี่ยน (ส่ง id ที่เลือก) — ใช้โชว์ปุ่มตามการ์ดที่เลือก เช่น "แตกเช็กลิสต์" · เรียกเฉพาะตอนเปลี่ยนจริง */
   onSelectionChange?: (selectedIds: string[]) => void;
+  /** ชิ้นงานบนกระดานเปลี่ยนจากการแก้ "ในเครื่องนี้" (ไม่นับที่คนอื่นแก้ผ่าน collab) — ส่ง element ทั้งหมดรวมที่ถูกลบ (isDeleted) · ใช้จับเส้นเชื่อม/การลบ */
+  onContentChange?: (elements: Record<string, unknown>[]) => void;
 }) {
   const t = useT();
   const [scene, setScene] = useState<Scene | "loading">("loading");
@@ -134,6 +142,7 @@ export function CanvasSketch({
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
   const savedCbRef = useRef(onSaved);      savedCbRef.current = onSaved;
   const selCbRef   = useRef(onSelectionChange); selCbRef.current = onSelectionChange;
+  const contentCbRef = useRef(onContentChange); contentCbRef.current = onContentChange;
   const selSigRef  = useRef("");
   const editableRef = useRef(editable);    editableRef.current = editable;
   const hoistRef = useRef<((files: Record<string, any>) => void) | null>(null); // ตัวย้ายรูปขึ้น R2 (ตั้งค่าหลัง hoistImages นิยาม)
@@ -469,6 +478,57 @@ export function CanvasSketch({
         if (!n) return;
         api.updateScene({ elements: next });
         if (editable) queueSave();
+      },
+      getFileUrl: (fileId) => {
+        const api = apiRef.current; if (!api || !fileId) return null;
+        const f = (api.getFiles?.() ?? {})[fileId] as { dataURL?: string } | undefined;
+        return typeof f?.dataURL === "string" && !f.dataURL.startsWith("data:") ? f.dataURL : null;
+      },
+      // เส้นลูกศรผูกปลายทั้งสองข้าง (Excalidraw ขยับเส้นตามเองเมื่อลากชิ้นงาน) — เส้นจากขอบขวาของต้นทางไปขอบซ้ายปลายทาง
+      connect: async (fromId, toId, customData) => {
+        const api = apiRef.current; if (!api) return null;
+        const all = (api.getSceneElements() as any[]);
+        const a = all.find((e) => e.id === fromId), b = all.find((e) => e.id === toId);
+        if (!a || !b) return null;
+        try {
+          const lib: any = await import("@excalidraw/excalidraw");
+          const ax = a.x + (a.width || 0), ay = a.y + (a.height || 0) / 2, bx = b.x, by = b.y + (b.height || 0) / 2;
+          const [arrow] = lib.convertToExcalidrawElements([{ type: "arrow", x: ax, y: ay, points: [[0, 0], [bx - ax, by - ay]], strokeColor: "#7c3aed", strokeWidth: 2, endArrowhead: "arrow", customData: customData ?? {} }]);
+          const bound = { ...arrow, startBinding: { elementId: a.id, focus: 0, gap: 6 }, endBinding: { elementId: b.id, focus: 0, gap: 6 } };
+          const next = all.map((e) => (e.id === a.id || e.id === b.id)
+            ? { ...e, boundElements: [...((e.boundElements as any[]) ?? []).filter((x) => x?.id !== bound.id), { id: bound.id, type: "arrow" }], version: (e.version ?? 0) + 1 }
+            : e);
+          api.updateScene({ elements: [...next, bound], captureUpdate: lib.CaptureUpdateAction?.IMMEDIATELY });
+          if (editable) queueSave();
+          return String(bound.id);
+        } catch (e) { console.error("[canvas-sketch] connect failed:", e); return null; }
+      },
+      // ลิงก์ → กล่องฝัง (ตัวเดียวกับปุ่มแปลงลิงก์) · ลิงก์ที่ฝังไม่ได้ → กล่องข้อความลิงก์ (กดเปิดได้)
+      placeLinks: async (urls, at, customData) => {
+        const api = apiRef.current; if (!api || !urls.length) return [];
+        const lib: any = await import("@excalidraw/excalidraw");
+        const out: string[] = [];
+        let y = at.y;
+        for (const url of urls) {
+          const social = parseSocialLink(url);
+          const before = new Set((api.getSceneElements() as any[]).map((e) => e.id));
+          if (social) {
+            await placeSocialEmbeds([social], { at: { x: at.x, y } });
+          } else {
+            const els = lib.convertToExcalidrawElements([{ type: "text", x: at.x, y, text: `🔗 ${url.replace(/^https?:\/\//, "").slice(0, 60)}`, fontSize: 16, strokeColor: "#4c1d95", link: url }]);
+            api.updateScene({ elements: [...(api.getSceneElements() as any[]), ...els] });
+          }
+          const added = (api.getSceneElements() as any[]).filter((e) => !before.has(e.id));
+          const box = added[0];
+          if (box) {
+            out.push(String(box.id));
+            const cd = customData?.(url);
+            if (cd) api.updateScene({ elements: (api.getSceneElements() as any[]).map((e) => (e.id === box.id ? { ...e, customData: { ...(e.customData ?? {}), ...cd }, version: (e.version ?? 0) + 1 } : e)) });
+            y += (box.height || 60) + 24;
+          }
+        }
+        if (editable) queueSave();
+        return out;
       },
       // แทนที่การ์ดที่ match ด้วย skeleton ใหม่ (ลบเดิม+วางที่ตำแหน่งเดิม) — ใช้ re-render ตารางหลังแก้
       replaceCard: async (match, skeletons) => {
@@ -1189,6 +1249,7 @@ export function CanvasSketch({
               if (sig !== lastChangeSigRef.current) {
                 lastChangeSigRef.current = sig;
                 queueSave();
+                if (contentCbRef.current && !applyingRemoteRef.current) { try { contentCbRef.current(elements as Record<string, unknown>[]); } catch { /* ไม่ให้ผู้ฟังทำกระดานพัง */ } }
                 if (collab && !applyingRemoteRef.current) broadcast();
               }
             }

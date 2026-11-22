@@ -106,7 +106,7 @@ export default function TaskBriefCanvas({ taskId, brandId = null, taskTitle, hei
         {picked.length === 0 && <span className="text-[11px] text-slate-400">{t("เลือกรูป/ข้อความบนกระดาน → สร้างคอนเทนต์ได้", "Select images/text on the board to create content")}</span>}
       </div>
       <CanvasSketch entityType={TASK_BRIEF_ENTITY} entityId={taskId} height={height} collab compactHelp controlsRef={controlsRef}
-        onReady={onReady} onCardOpen={(d) => { kit.onCardOpen(d); }} onSelectionChange={(ids) => { setSel(ids); kit.onSelection(ids); }} imageMaxPx={TASK_BOARD_IMAGE_MAX} />
+        onReady={onReady} onCardOpen={(d) => { kit.onCardOpen(d); }} onSelectionChange={(ids) => { setSel(ids); kit.onSelection(ids); }} onContentChange={kit.onContentChange} imageMaxPx={TASK_BOARD_IMAGE_MAX} />
       {kit.ui}
     </div>
   );

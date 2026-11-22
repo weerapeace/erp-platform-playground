@@ -183,7 +183,19 @@ export function assetCardSkeleton(a: AssetRow, fields: AssetFieldKey[]): Record<
 }
 
 // ข้อความบนการ์ดคอนเทนต์ (รวม) — ใช้ทั้งตอนสร้าง + ตอน sync (refreshCards)
-export type ContentCardInfo = { content_no?: string | null; title?: string | null; platforms?: string[]; status?: string | null; scheduled_at?: string | null; caption?: string | null };
+export type ContentCardInfo = { content_no?: string | null; title?: string | null; platforms?: string[]; status?: string | null; scheduled_at?: string | null; caption?: string | null;
+  /** บรีฟ "รายการงานที่ต้องการ" (HTML จาก drawer) → โชว์สูงสุด 5 บรรทัด · refCount = จำนวน Ref ตัวอย่าง (เจ้าของสั่ง 2026-11-22) */
+  brief?: string | null; refCount?: number };
+
+/** บรีฟ HTML → บรรทัดข้อความ (ตัดแท็ก · สูงสุด max บรรทัด · บรรทัดยาวตัดเหลือ 60 ตัว) */
+export function briefLines(html: string | null | undefined, max = 5): string[] {
+  const txt = String(html ?? "").replace(/<(br|\/p|\/li|\/div|\/h\d)[^>]*>/gi, "\n").replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  const lines = txt.split("\n").map((l) => l.trim()).filter(Boolean);
+  const out = lines.slice(0, max).map((l) => (l.length > 60 ? `${l.slice(0, 60)}…` : l));
+  if (lines.length > max) out.push(`… +${lines.length - max}`);
+  return out;
+}
 
 export function contentCardText(c: ContentCardInfo): string {
   const platLine = (c.platforms ?? []).length ? (c.platforms ?? []).join(" · ") : "—";
@@ -191,7 +203,10 @@ export function contentCardText(c: ContentCardInfo): string {
   const st = c.status ? ` · ${c.status}` : "";
   const cap = (c.caption ?? "").trim();
   const capLine = cap ? `\n\n📝 ${cap.slice(0, 120)}${cap.length > 120 ? "…" : ""}` : "";
-  return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}${tt("แพลตฟอร์ม", "Platforms")}: ${platLine}${capLine}`;
+  const bl = briefLines(c.brief);
+  const briefBlock = bl.length ? `\n\n${bl.map((l) => `✎ ${l}`).join("\n")}` : "";
+  const refLine = c.refCount ? `\n🔗 Ref ${c.refCount}` : "";
+  return `📱 ${c.title ?? ""}\n${c.content_no ?? ""}${st}\n${sched}${tt("แพลตฟอร์ม", "Platforms")}: ${platLine}${briefBlock}${refLine}${capLine}`;
 }
 
 // สถานะโพสต์ต่อแพลตฟอร์ม (post_status[platform]) → บรรทัดเด่น + สีขอบการ์ด

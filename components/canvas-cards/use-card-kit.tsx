@@ -22,6 +22,7 @@ import { apiFetch } from "@/lib/api";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { ERPModal } from "@/components/modal";
 import { ContentCreateModal, type ContentCreatePreset, type ContentCreatedResult } from "@/app/tasks/content/content-create-modal";
+import { useContentRefs } from "./use-content-refs";
 import { usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -117,6 +118,8 @@ export type CardKit = {
   ui: ReactNode;
   /** ส่ง id ที่เลือกบนกระดานมา (onSelectionChange) — เลือกกรอบโซนงาน/คอนเทนต์ → โผล่ปุ่ม ＋ งาน / ＋ คอนเทนต์ */
   onSelection: (ids: string[]) => void;
+  /** ส่งชิ้นงานที่เปลี่ยนมา (CanvasSketch onContentChange) — จับเส้นเชื่อม Ref / การลบ Ref บนกระดาน */
+  onContentChange: (elements: Record<string, unknown>[]) => void;
 };
 
 /** ของที่เลือกบนกระดาน → ตั้งต้นคอนเทนต์ใหม่ · onCreated = แจ้งกลับเพื่อแปะป้ายบนของที่ใช้แล้ว */
@@ -229,6 +232,9 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const [assetView, setAssetView] = useState<Record<string, unknown> | null>(null); // การ์ดรูปที่กดดู
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
+  // 🔗 Ref ของคอนเทนต์ ↔ กระดาน (เชื่อม/ลากเส้น/วางจาก drawer/ถามตอนลบ) — ซิงก์การ์ดหลังเปลี่ยน (ref กันลำดับประกาศ)
+  const syncContentRef = useRef<() => Promise<void>>(async () => {});
+  const { onSelection: refsOnSelection, placeMissing: refsPlaceMissing, onContentChange: refsOnContentChange, bar: refsBar } = useContentRefs(sketchRef, { pushToast, t, onChanged: () => { void syncContentRef.current(); } });
   pushToastRef.current = pushToast as (v: "success" | "error" | "info", m: string) => void;
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
 
@@ -262,12 +268,13 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
     sk.patchElements((el) => ((el.customData as Record<string, unknown> | undefined)?.id === cardId && !el.frameId ? { ...el, frameId: frame.id } : null));
   };
   const onSelection = useCallback((ids: string[]) => {
+    refsOnSelection(ids);
     if (ids.length !== 1 || !sketchRef.current) { setZone(null); return; }
     const el = sketchRef.current.getElements().find((e) => e.id === ids[0]);
     if (!el || el.type !== "frame") { setZone(null); return; }
     const kind = frameSectionKind(el, sectionCfg);
     setZone(kind === "none" ? null : { id: String(el.id), name: String(el.name ?? ""), kind });
-  }, [sectionCfg, sketchRef]);
+  }, [sectionCfg, sketchRef, refsOnSelection]);
   const confirmSku = () => {
     if (!skuSel.length || !sketchRef.current) return;
     // วางหลายใบเรียงข้างกันในครั้งเดียว (เลื่อน x ต่อใบ)
@@ -408,10 +415,12 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   }, [sketchRef]);
   // ③ ซิงค์การ์ดคอนเทนต์ (ข้อความ: แคปชั่นย่อ/เวลาโพสต์/สถานะ) — สะท้อนการแก้ใน Drawer
   const syncContentCards = useCallback(async () => {
+    const refsByCid = new Map<string, { links: { url: string; label?: string }[]; images: string[] }>();
     await sketchRef.current?.refreshCards(async ({ kind, id, data }) => {
       if (kind !== "content" || !id) return null;
       try {
         const c = await getContent(id);
+        refsByCid.set(id, { links: c.ref_links ?? [], images: c.ref_image_keys ?? [] });
         const cover = c.cover_image_url ?? null;   // รูปหน้าปก (สื่อแนบ/SKU/งาน) — โผล่บนการ์ด + อัปเดตเมื่อแนบรูปทีหลัง
         const plat = data.platform as string | undefined;
         if (plat) {
@@ -421,10 +430,13 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
           const ps = c.post_status?.[plat] ?? null;   // สถานะโพสต์ต่อแพลตฟอร์ม → โชว์เด่น + สีขอบ
           return { text: perPlatformCardText({ content_no: c.content_no, title: c.title, status: c.status }, plat, cap, ps), data: { title: c.title, platform: plat }, images, stroke: postStatusStyle(ps).stroke };
         }
-        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
+        return { text: contentCardText({ content_no: c.content_no, title: c.title, platforms: c.platforms ?? [], status: c.status, scheduled_at: c.scheduled_at, caption: c.captions[0]?.caption ?? null, brief: c.brief ?? null, refCount: (c.ref_links?.length ?? 0) + (c.ref_image_keys?.length ?? 0) }), data: { title: c.title, platforms: c.platforms ?? [] }, imageUrl: cover };
       } catch { return null; }
     });
-  }, [sketchRef]);
+    // Ref ที่เพิ่มใน drawer แต่ยังไม่อยู่บนกระดาน → วางข้างการ์ด + เส้นเชื่อม
+    if (refsByCid.size) await refsPlaceMissing(refsByCid);
+  }, [sketchRef, refsPlaceMissing]);
+  syncContentRef.current = syncContentCards;
   // ④ ซิงค์การ์ดใบงานออกแบบ (ชื่อ/สถานะ/กำหนดส่ง/รูปหน้าปก + สีขอบตามสถานะ) — ยิงครั้งเดียวด้วย ?ids=
   const syncDesignSheetCards = useCallback(async () => {
     const ctrl = sketchRef.current; if (!ctrl) return;
@@ -819,5 +831,5 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
         : <button type="button" onClick={() => { zoneTargetRef.current = zone.id; setCSeed(null); setContentOpen(true); }} className="h-8 rounded-full bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-700">＋ {t("คอนเทนต์", "Content")}</button>}
     </div>
   ) : null;
-  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui: <>{ui}{zoneBar}</>, onSelection };
+  return { items, canDesign, onCardOpen, onBoardReady, syncAll, openContentFrom, ui: <>{ui}{zoneBar}{refsBar}</>, onSelection, onContentChange: refsOnContentChange };
 }
