@@ -37,8 +37,10 @@ function useDelayedOpen(delay: number | undefined, openNow: () => void, closeNow
 }
 
 export function HoverImage({
-  url, size = 28, previewSize = 256, alt = "", rounded = "rounded", fallback = "📦", className = "", delay, wheelZoom = true,
+  url, size = 28, previewSize = 256, alt = "", rounded = "rounded", fallback = "📦", className = "", delay, wheelZoom = true, onOpen,
 }: {
+  /** กด/แตะรูป → ให้ผู้เรียกเปิดเอง (เช่น ป๊อปเลื่อนดูหลายรูป ImageLightbox) แทนรูปใหญ่รูปเดียว */
+  onOpen?: () => void;
   /** หน่วงก่อนโชว์ (มิลลิวินาที) — ไม่ส่ง = ตามที่ผู้ใช้ตั้ง (ค่าเริ่ม 0) */
   delay?: number;
   /** ล้อเมาส์ซูมรูปลอย (ค่าเริ่ม true) */
@@ -100,7 +102,7 @@ export function HoverImage({
   return (
     <span ref={ref} className={`shrink-0 inline-block cursor-zoom-in ${className}`}
       onMouseEnter={canHover ? hover.enter : undefined} onMouseLeave={canHover ? hover.leave : undefined}
-      onClick={(e) => { e.stopPropagation(); hover.leave(); setZoom(true); }}>
+      onClick={(e) => { e.stopPropagation(); hover.leave(); if (onOpen) onOpen(); else setZoom(true); }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" style={dim} className={`object-cover border border-slate-200 ${rounded}`} />
       {box && !zoom && typeof document !== "undefined" && createPortal(

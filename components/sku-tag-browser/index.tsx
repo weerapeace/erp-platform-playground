@@ -22,7 +22,19 @@ import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
-import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง ย่อ/ขยาย)
+import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL, useCtrlWheel } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง ย่อ/ขยาย)
+import { useUserPref } from "@/lib/use-user-pref";
+import { HoverImage } from "@/components/hover-image";
+import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
+
+// 🔍 ขั้นซูมรูปในโหมดตาราง (1 = 36px) — Ctrl+ลูกกลิ้ง / ปุ่ม − % +
+const TBL_ZOOMS = [0.8, 1, 1.25, 1.5, 2, 2.5, 3];
+const TBL_IMG_BASE = 36;
+function nextTblZoom(z: number, d: 1 | -1): number {
+  let i = TBL_ZOOMS.findIndex((s) => s >= z - 0.001);
+  if (i < 0) i = TBL_ZOOMS.length - 1;
+  return TBL_ZOOMS[Math.max(0, Math.min(TBL_ZOOMS.length - 1, i + d))];
+}
 import { EmptyState } from "@/components/state-views";
 import { useStepHistory, readStep, patchStep } from "@/lib/use-step-history";   // ปุ่ม Back ย้อนทีละก้าว (ของกลาง)
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
@@ -202,6 +214,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   const setViewPersist = (v: "card" | "table") => { setView(v); try { localStorage.setItem("sku-browser-view", v); } catch { /* ignore */ } };
   // ขนาดการ์ด (ของกลาง) — จำรายคน · โหมดเลือก (ป๊อปอัป) จำแยก เพราะกล่องแคบกว่าหน้าเต็ม
   const gallery = useGalleryColumns(pick ? "sku-browser-pick" : "sku-browser", 6);
+  // 🔍 ขนาดรูปในโหมดตาราง (เจ้าของขอ 2026-11-22 "ctrl + scroll ขยายตาราง" · เลือกแบบ "ขยายแค่รูป") — จำกับบัญชี
+  const [tblZoom, setTblZoomRaw] = useUserPref<number>("sku_table_img_zoom", 1, (v) => (typeof v === "number" && v >= TBL_ZOOMS[0] && v <= TBL_ZOOMS[TBL_ZOOMS.length - 1] ? v : null));
+  const stepTblZoom = (d: 1 | -1) => setTblZoomRaw(nextTblZoom(tblZoom, d));
+  const tblWheelRef = useCtrlWheel((dir) => stepTblZoom(dir === 1 ? -1 : 1), view === "table");
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -578,12 +594,21 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
                     {SORTS.map((s) => <option key={s.key} value={s.key}>{t(s.label, s.en)}</option>)}
                   </select>
                 </div>
+                {/* 🔍 ขนาดรูปในตาราง (Ctrl+ลูกกลิ้งบนตารางก็ได้) — การ์ดใช้ตัวปรับขนาดการ์ดของกลางอยู่แล้ว */}
+                {view === "table" && (
+                  <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white text-[12px] text-slate-600" title={t("ขนาดรูปในตาราง — Ctrl + หมุนลูกกลิ้งบนตารางก็ได้", "Image size — or Ctrl + scroll on the table")}>
+                    <button type="button" onClick={() => stepTblZoom(-1)} disabled={tblZoom <= TBL_ZOOMS[0]} aria-label={t("รูปเล็กลง", "Smaller images")} className="h-8 w-7 hover:bg-slate-50 disabled:opacity-40">−</button>
+                    <button type="button" onClick={() => setTblZoomRaw(1)} className="h-8 min-w-[3rem] px-1 tabular-nums hover:bg-slate-50" title={t("กลับขนาดปกติ", "Reset size")}>{Math.round(tblZoom * 100)}%</button>
+                    <button type="button" onClick={() => stepTblZoom(1)} disabled={tblZoom >= TBL_ZOOMS[TBL_ZOOMS.length - 1]} aria-label={t("รูปใหญ่ขึ้น", "Bigger images")} className="h-8 w-7 hover:bg-slate-50 disabled:opacity-40">+</button>
+                  </div>
+                )}
             </CardViewBar>
             {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">{t(`กรองเฉพาะในหน้านี้ (${cards.length.toLocaleString("th-TH")} ตัว) — เลื่อนหน้าด้านล่างเพื่อตรวจหน้าถัดไป`, `Filtered within this page only (${cards.length.toLocaleString("en-US")}) — go to the next page to check more`)}</p>}
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
                 ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed} onOpenParent={(id) => setParentPeekId(id)}
+                    imgPx={Math.round(TBL_IMG_BASE * tblZoom)} wheelRef={tblWheelRef} attEntity={entity === "parent-skus" ? "parent_skus_v2" : "skus_v2"}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
@@ -834,20 +859,41 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   );
 }
 
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent }: {
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent, imgPx = 36, wheelRef, attEntity }: {
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
   sortKey: string; onSort: (col: string) => void;
   showCost?: boolean;   // มีสิทธิ์ดูต้นทุน → เพิ่มคอลัมน์ "ราคาซื้อ (ล่าสุด)"
   onOpenParent?: (parentId: string) => void;   // กด Parent ในแถว → เปิด drawer Parent
+  imgPx?: number;       // ขนาดรูปย่อ (Ctrl+ลูกกลิ้ง / ปุ่ม − % +)
+  wheelRef?: (el: HTMLElement | null) => void;   // ติด Ctrl+ลูกกลิ้ง (useCtrlWheel ของกลาง)
+  attEntity?: string;   // entity_type ของรูปในแกลเลอรี (skus_v2 / parent_skus_v2) → ป๊อปรูปเลื่อนดูรูปอื่นได้
 }) {
   const showParent = rows.some((r) => r.parent !== undefined);   // เฉพาะโหมด SKU (Parent เองไม่มีคอลัมน์นี้)
+  // 🖼 กดรูป = ป๊อปรูปใหญ่ (ของกลาง ImageLightbox) — เปิดรูปหลักทันที แล้วโหลดรูปอื่นของตัวนั้นมาให้เลื่อนดู
+  const [lb, setLb] = useState<{ images: LightboxImage[]; index: number } | null>(null);
+  const lbReq = useRef(0);
+  const openImages = (c: SkuCard) => {
+    if (!c.image) return;
+    const req = ++lbReq.current;
+    setLb({ images: [{ url: c.image, label: c.code }], index: 0 });
+    if (!attEntity) return;
+    apiFetch(`/api/attachments?entity_type=${attEntity}&entity_id=${encodeURIComponent(c.id)}`).then((r) => r.json()).then((j) => {
+      if (req !== lbReq.current) return;
+      const imgs = ((j?.data ?? []) as { public_url?: string; content_type?: string | null; file_name?: string }[])
+        .filter((a) => a.public_url && (!a.content_type || a.content_type.startsWith("image/")))
+        .map((a) => ({ url: a.public_url as string, label: `${c.code} · ${a.file_name ?? ""}` }));
+      if (imgs.length > 1) setLb((cur) => (cur ? { images: imgs, index: 0 } : cur));
+    }).catch(() => { /* โหลดรูปอื่นไม่ได้ = ดูรูปหลักรูปเดียว */ });
+  };
   return (
-    <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
+    <div ref={wheelRef} className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
+      <ImageLightbox images={lb?.images ?? []} index={lb ? lb.index : -1} onClose={() => { lbReq.current++; setLb(null); }}
+        onIndex={(i) => setLb((cur) => (cur ? { ...cur, index: i } : cur))} thumbnails={(lb?.images.length ?? 0) > 1} />
       <table className="w-full text-sm">
         <thead className="bg-slate-50 text-slate-500 text-[12px]">
           <tr className="text-left">
             <th className="px-2 py-2 w-8"></th>
-            <th className="px-2 py-2 w-12">รูป</th>
+            <th className="px-2 py-2" style={{ width: imgPx + 16 }}>รูป</th>
             <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
             <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
             {showParent && <th className="px-3 py-2 font-medium whitespace-nowrap" title="Parent SKU ของแถวนี้ — กดเพื่อเปิด">Parent</th>}
@@ -870,9 +916,8 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                   <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[10px] cursor-pointer ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
                 </td>
                 <td className="px-2 py-1.5">
-                  {c.image
-                    ? <img src={withImageWidth(c.image, 80) ?? c.image} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-slate-200" />
-                    : <div className="w-9 h-9 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs">—</div>}
+                  {/* ชี้ = รูปใหญ่ลอย · กด = ป๊อปเต็มจอ (ไม่เปิดลิ้นชัก) — ของกลาง HoverImage */}
+                  <HoverImage url={c.image} size={imgPx} previewSize={Math.max(256, imgPx * 3)} alt={c.code} fallback="—" onOpen={() => openImages(c)} />
                 </td>
                 <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
                 <td className="px-3 py-1.5"><span className="block whitespace-normal break-words leading-snug min-w-[16rem]">{c.name || <span className="text-slate-300">—</span>}</span></td>
