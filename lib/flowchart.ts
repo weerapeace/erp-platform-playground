@@ -169,7 +169,14 @@ const isKind = (v: unknown): v is FlowKind => typeof v === "string" && (FLOW_KIN
 const isColor = (v: unknown): v is FlowColor => typeof v === "string" && (FLOW_COLORS as readonly string[]).includes(v);
 const num = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
-const handleOrNull = (v: unknown): string | null => (typeof v === "string" && (FLOW_HANDLES as readonly string[]).includes(v) ? v : null);
+const handleOrNull = (v: unknown): string | null => (typeof v === "string" && ((FLOW_HANDLES as readonly string[]).includes(v) || isItemHandle(v)) ? v : null);
+/** จุดต่อเส้นของข้อในรายการงาน (ริมขวาของข้อ · เจ้าของสั่ง 2026-11-22 "ลากเส้นจากรายการได้") = "i:<id ข้อ>" — ผูกกับข้อ ไม่ใช่ลำดับ */
+export const itemHandleId = (itemId: string): string => `i:${itemId}`;
+export const isItemHandle = (v: unknown): v is string => typeof v === "string" && /^i:[A-Za-z0-9_-]{1,40}$/.test(v);
+export const itemOfHandle = (v: unknown): string | null => (isItemHandle(v) ? v.slice(2) : null);
+/** เส้นที่ต่อกับข้อนี้ของกล่องนี้ (ไว้ลบตามตอนลบข้อ / หาปลายเส้น) */
+export const edgesOfItem = <E extends { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>(edges: E[], nodeId: string, itemId: string): E[] =>
+  edges.filter((e) => (e.source === nodeId && e.sourceHandle === itemHandleId(itemId)) || (e.target === nodeId && e.targetHandle === itemHandleId(itemId)));
 
 /** สีที่ใช้จริงของกล่อง (ไม่ได้เลือก = สีตั้งต้นของชนิด) */
 export const nodeColor = (kind: FlowKind, data: Partial<FlowNodeData> | undefined): FlowColor =>
@@ -513,8 +520,13 @@ export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowSc
 }
 
 /** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */
-export function handlePoint(n: Pick<FlowSceneNode, "position" | "width" | "height">, h: string | null | undefined): { x: number; y: number; side: FlowHandle } {
+export function handlePoint(n: Pick<FlowSceneNode, "position" | "width" | "height"> & { data?: Partial<FlowNodeData> }, h: string | null | undefined): { x: number; y: number; side: FlowHandle } {
   const { x, y } = n.position; const w = n.width; const hh = n.height;
+  const item = itemOfHandle(h);
+  if (item) {   // ข้อในรายการงาน: ริมขวา ตามแถวของข้อ (ประมาณ — หัวการ์ด ~38px · แถวละ ~22px)
+    const idx = Math.max(0, (n.data?.items ?? []).findIndex((i) => i.id === item));
+    return { x: x + w, y: Math.min(y + hh - 8, y + 38 + idx * 22 + 11), side: "r" };
+  }
   switch (h) {
     case "t": return { x: x + w / 2, y, side: "t" };
     case "b": return { x: x + w / 2, y: y + hh, side: "b" };

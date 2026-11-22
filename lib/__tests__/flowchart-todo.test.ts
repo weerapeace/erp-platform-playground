@@ -82,3 +82,24 @@ describe("ป้ายความด่วน + ลำดับ (2026-11-22)", 
     expect(list.map((x) => [x.item.text, x.tag?.label])).toEqual([["ด่วน", "ด่วน"], ["ไม่มีป้าย", undefined]]);
   });
 });
+
+import { edgesOfItem, handlePoint, itemHandleId, itemOfHandle } from "@/lib/flowchart";
+describe("ลากเส้นจากข้อในรายการงาน (2026-11-22)", () => {
+  it("จุดต่อเส้นผูก id ข้อ · บันทึก/โหลดแล้วเส้นยังอยู่", () => {
+    expect(itemHandleId("n-abc")).toBe("i:n-abc");
+    expect(itemOfHandle("i:n-abc")).toBe("n-abc");
+    expect(itemOfHandle("r")).toBeNull();
+    const s = parseFlowScene({ kind: "flowchart", nodes: [
+      { id: "t", type: "todo", position: { x: 0, y: 0 }, width: 260, height: 150, data: { label: "x", items: [{ id: "a", text: "A" }, { id: "b", text: "B" }] } },
+      { id: "p", type: "step", position: { x: 400, y: 0 }, width: 100, height: 40, data: { label: "y" } },
+    ], edges: [{ id: "e", source: "t", sourceHandle: "i:b", target: "p", targetHandle: "l", label: "" }] })!;
+    expect(s.edges[0].sourceHandle).toBe("i:b");
+    expect(edgesOfItem(s.edges, "t", "b").length).toBe(1);
+    expect(edgesOfItem(s.edges, "t", "a").length).toBe(0);
+  });
+  it("ตำแหน่งปลายเส้นในรูป = ริมขวาตามแถวของข้อ (ตามลำดับปัจจุบัน)", () => {
+    const n = { position: { x: 0, y: 0 }, width: 260, height: 150, data: { items: [{ id: "a", text: "A" }, { id: "b", text: "B" }] } };
+    expect(handlePoint(n, "i:b")).toEqual({ x: 260, y: 38 + 22 + 11, side: "r" });
+    expect(handlePoint({ ...n, data: { items: [{ id: "b", text: "B" }, { id: "a", text: "A" }] } }, "i:b").y).toBe(49);
+  });
+});

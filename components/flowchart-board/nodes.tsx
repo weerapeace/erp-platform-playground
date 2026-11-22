@@ -4,7 +4,7 @@
 // สี/ขนาด/ชนิด อ่านจาก lib/flowchart (FLOW_PALETTE / FLOW_KIND_META) — ที่เดียวกับตอนบันทึกเป็นรูป
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, useStore, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { flowEdgePath } from "./edge-path";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
@@ -22,7 +22,7 @@ import { TextFormatBar, applyTextShortcut, domTextAdapter, isInTextBar, useLinkR
 import { richToPlain as richPlain } from "@/lib/flowchart-rich";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
-import { DEFAULT_TODO_TAGS, sortTodosByTag, type FlowTodoTag } from "@/lib/flowchart";
+import { DEFAULT_TODO_TAGS, sortTodosByTag, itemHandleId, itemOfHandle, type FlowTodoTag } from "@/lib/flowchart";
 
 /** ป้ายความด่วน 1 อัน (สีตามชุดสีของกระดาน) */
 function TodoTagChip({ tag, onClick, empty, t }: { tag?: FlowTodoTag; onClick?: (e: React.MouseEvent) => void; empty?: boolean; t: (th: string, en: string) => string }) {
@@ -186,6 +186,12 @@ export type FlowBoardActions = {
   capturePage: (id: string) => void;
   /** กล่องที่กำลังถ่ายภาพหน้าจออยู่ */
   capturingId: string | null;
+  /** ข้อในรายการงาน: ต่อกับกล่องไหนบ้าง (id กล่องปลายเส้น) · ลบข้อ = ลบเส้นของข้อด้วย · กระดานพาไปหากล่อง */
+  itemLinks: (nodeId: string, itemId: string) => string[];
+  removeItemEdges: (nodeId: string, itemIds: string[]) => void;
+  focusNode: (nodeId: string) => void;
+  /** แตะจุดของข้อ (ไม่ลาก) = โหมดต่อเส้น: แตะกล่องปลายทางต่อ */
+  linkFrom: { nodeId: string; handle: string } | null;
   /** ป้ายความด่วนของกระดาน (ตั้งเองได้ · ค่าตั้งต้น ด่วน/ไม่ด่วน/ว่างค่อยทำ) · null = กลับค่าตั้งต้น */
   todoTags: FlowTodoTag[];
   setTodoTags: (tags: FlowTodoTag[] | null) => void;
@@ -427,11 +433,18 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
   const prog = todoProgress(items);
   const { todoTags, setTodoTags } = useBoard();
   const tags = todoTags.length ? todoTags : DEFAULT_TODO_TAGS;
+  const [editId, setEditId] = useState<string | null>(null);
   const [tagMenu, setTagMenu] = useState<string | null>(null);   // ข้อที่เปิดเมนูป้ายอยู่
   const [tagEdit, setTagEdit] = useState(false);
   // ลากสลับลำดับ = ของกลาง sortable-list (มือถือ: แตะที่จับ = เมนู ขึ้น/ลง/บนสุด/ล่างสุด)
   const reorder = useDragReorder((from, to) => updateData(id, { items: moveItem(data.items ?? [], from, to) }), { group: `todo-${id}` });
-  const [editId, setEditId] = useState<string | null>(null);
+  const { itemLinks, removeItemEdges, focusNode, linkFrom } = useBoard();
+  // จุดต่อเส้นรายข้อย้ายตามแถว → บอก React Flow ให้วัดตำแหน่งจุดใหม่ (สลับ/เพิ่ม/ลบข้อ · ขนาดกล่องเปลี่ยน)
+  const updateInternals = useUpdateNodeInternals();
+  const order = items.map((i) => i.id).join("|");
+  useEffect(() => { updateInternals(id); }, [order, height, width, editId, updateInternals, id]);
+  /** ลบข้อ + เส้นของข้อนั้น (Ctrl+Z คืนทั้งคู่) */
+  const removeItems = (ids: string[]) => { setItems(items.filter((i) => !ids.includes(i.id))); removeItemEdges(id, ids); };
   const [adding, setAdding] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const addRef = useRef<HTMLInputElement>(null);
@@ -475,12 +488,17 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
             aria-label={it.text} className="nodrag nopan mt-[2px] h-3.5 w-3.5 shrink-0 cursor-pointer accent-emerald-600 disabled:cursor-default" />
           {editId === it.id
             ? <RichLineEditor initialHtml={it.rich || escHtml(it.text)}
-                onDone={(r) => { setEditId(null); if (!r) return; setItems(r.text ? items.map((i) => (i.id === it.id ? { ...i, text: r.text, rich: r.html } : i)) : items.filter((i) => i.id !== it.id)); }} />
+                onDone={(r) => { setEditId(null); if (!r) return; if (r.text) setItems(items.map((i) => (i.id === it.id ? { ...i, text: r.text, rich: r.html } : i))); else removeItems([it.id]); }} />
             : <div className={`min-w-0 flex-1 break-words leading-snug ${readOnly ? "" : "nodrag cursor-text"}`}
                 onClick={(e) => { if (readOnly) return; e.stopPropagation(); setEditId(it.id); }} onDoubleClick={(e) => e.stopPropagation()}>
                 <RichInline className={it.done ? "text-slate-400 line-through" : "text-slate-800"} html={it.rich} text={it.text || "—"} />
                 {it.done && it.by && <div className="text-[10px] text-slate-400">{t(`ติ๊กโดย ${it.by}`, `by ${it.by}`)}{it.at ? ` · ${fmtTodoAt(it.at)}` : ""}</div>}
               </div>}
+          {editId !== it.id && itemLinks(id, it.id).length > 0 && (
+            <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); focusNode(itemLinks(id, it.id)[0]); }}
+              title={t("ไปที่ปลายเส้นของข้อนี้", "Go to where this item's line leads")}
+              className="nodrag nopan mt-[1px] shrink-0 rounded px-0.5 text-violet-600 hover:bg-violet-50"><Icon value="i:link" /></button>
+          )}
           {editId !== it.id && (
             <TodoTagChip t={t} tag={tags.find((g) => g.key === it.tag)} empty={!readOnly}
               onClick={readOnly ? undefined : (e) => { e.stopPropagation(); setTagMenu((v) => (v === it.id ? null : it.id)); setTagEdit(false); }} />
@@ -504,8 +522,11 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
                 )}
             </div>
           )}
+          <Handle id={itemHandleId(it.id)} type="source" position={Position.Right} isConnectable={!readOnly}
+            className={`fc-h fc-item-h ${itemLinks(id, it.id).length ? "fc-item-h-on" : ""} ${linkFrom?.nodeId === id && linkFrom.handle === itemHandleId(it.id) ? "fc-item-h-pick" : ""}`}
+            title={t("ลากเส้นจากข้อนี้ · แตะ = เลือกแล้วแตะกล่องปลายทาง", "Drag a line from this item · tap, then tap the target box")} />
           {!readOnly && editId !== it.id && (
-            <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); setItems(items.filter((i) => i.id !== it.id)); }}
+            <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); removeItems([it.id]); }}
               title={t("ลบข้อนี้ (ย้อนกลับได้ Ctrl+Z)", "Delete this item (Ctrl+Z to undo)")}
               className="nodrag nopan invisible shrink-0 rounded px-0.5 text-slate-400 hover:text-rose-600 group-hover:visible"><Icon value="i:x" /></button>
           )}
@@ -894,7 +915,12 @@ export function EdgeShapeIcon({ shape, size = 16 }: { shape: FlowEdgeShape; size
 }
 
 /** เส้นต่อ (หักมุม / ตรง / โค้ง ตาม data.shape) + ป้าย · เลือกเส้นแล้วมีปุ่มลัด แบบเส้น / ใช่ / ไม่ใช่ / แก้ / ลบ */
-export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, label, selected, data }: EdgeProps) {
+export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleId, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, label, selected, data }: EdgeProps) {
+  // ปลายเส้นเป็นข้อในรายการงานที่ติ๊กเสร็จแล้ว → เส้นประจางสีเขียว (เจ้าของสั่ง 2026-11-22)
+  const itemDone = useStore((s) => {
+    const chk = (nid: string, h?: string | null) => { const it = itemOfHandle(h); if (!it) return false; const n = s.nodeLookup.get(nid); return !!(n?.data as FlowNodeData | undefined)?.items?.find((i) => i.id === it)?.done; };
+    return chk(source, sourceHandleId) || chk(target, targetHandleId);
+  });
   const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape, boardStyle } = useBoard();
   const es = FLOW_STYLE_EDGE[boardStyle];
   const shape = edgeShapeOf(data as { shape?: unknown } | undefined);
@@ -904,7 +930,7 @@ export function FlowEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePos
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} interactionWidth={18}
-        style={{ stroke: selected ? "#7c3aed" : es.color, strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : es.width, ...(es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
+        style={{ stroke: selected ? "#7c3aed" : itemDone ? "#86efac" : es.color, strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : es.width, ...(itemDone && !selected ? { strokeDasharray: "5 4" } : es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
       {(text || (selected && !readOnly)) && (
         <EdgeLabelRenderer>
           <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", ...(selected ? { zIndex: 1100 } : {}) /* เลือกเส้นอยู่ = ปุ่มลัดลอยเหนือกล่อง (เส้นสั้นกล่องเคยบังปุ่ม) */ }}>

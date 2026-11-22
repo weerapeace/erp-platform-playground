@@ -47,7 +47,7 @@ import {
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
   OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
-  openTodos, DEFAULT_TODO_TAGS, type FlowTodoTag,
+  openTodos, DEFAULT_TODO_TAGS, type FlowTodoTag, edgesOfItem, isItemHandle,
 } from "@/lib/flowchart";
 import { AUTO_STATUS_META, listAutos } from "@/lib/flow-automation";
 import { pushRecentShape } from "@/lib/flowchart-shapes";
@@ -207,6 +207,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [capturingId, setCapturingId] = useState<string | null>(null);
   const [boardTheme, setBoardTheme] = useState<FlowThemeKey>("std");
   const [todoTags, setTodoTags] = useState<FlowTodoTag[] | null>(null);   // ป้ายความด่วนของกระดาน (null = ด่วน/ไม่ด่วน/ว่างค่อยทำ)   // ชุดสีของกระดาน (บันทึกในกระดาน · ย้อนกลับได้)
+  // แตะจุดของข้อ (ไม่ลาก) = เลือกต้นเส้น → แตะกล่องปลายทาง = ต่อเส้น (มือถือ · จอคอมใช้ได้ด้วย) · Esc / แตะที่ว่าง = ยกเลิก
+  const [linkFrom, setLinkFrom] = useState<{ nodeId: string; handle: string } | null>(null);
+  useEffect(() => { if (!linkFrom) return; const k = (e: KeyboardEvent) => { if (e.key === "Escape") setLinkFrom(null); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [linkFrom]);
   const [pins, setPins] = useState<FlowPins>({});             // ตำแหน่งที่ย้ายของกล่องระบบ (บันทึกในกระดาน · ทุกคนเห็น)
   const [unlocked, setUnlocked] = useState<Set<string>>(() => new Set());   // กล่องระบบที่ปลดล็อกอยู่ (เฉพาะตอนนี้ ไม่บันทึก)
   const hideKey = `erp-flowchart-hide-own:${entityType}`;
@@ -671,6 +674,10 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     boardTheme,
     capturingId,
     todoTags: todoTags ?? DEFAULT_TODO_TAGS,
+    linkFrom,
+    itemLinks: (nodeId, itemId) => edgesOfItem(edges, nodeId, itemId).map((e) => (e.source === nodeId ? e.target : e.source)),
+    removeItemEdges: (nodeId, itemIds) => setEdges((es) => es.filter((e) => !itemIds.some((it) => edgesOfItem([e], nodeId, it).length))),
+    focusNode: (nodeId) => { void rf.fitView({ nodes: [{ id: nodeId }], padding: 0.6, maxZoom: 1.4, duration: 400 }); if (!isSysId(nodeId)) setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === nodeId }))); },
     setTodoTags: (g) => setTodoTags(g && g.length ? g : null),
     // กดปุ่มตา = เปิด/ปิด (เจ้าของสั่ง 2026-11-22 เอาการชี้ค้างออก เหลือแต่กดตา)
     peekPage: (href, label, rect) => { if (!rect) return; setPeek((cur) => (cur && cur.href === href ? null : { href, label, rect })); },
@@ -727,7 +734,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         .then((v) => { if (v !== null) setEdges((es) => es.map((e) => (e.id === id ? { ...e, label: v.trim() } : e))); });
     },
     removeEdge: (id) => setEdges((es) => es.filter((e) => e.id !== id)),
-  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme, capturingId, todoTags]);
+  }), [readOnly, t, openFolder, selectedIds, edges, menu.status, menu.menus, menu.apps, storageRules.rules, autoEditId, meName, recentShapes, rememberShape, boardStyle, boardTheme, capturingId, todoTags, linkFrom]);
   const actionsRef = useRef<FlowBoardActions | null>(null); actionsRef.current = actions;
 
   // ── ชั้นล็อก → กล่อง/เส้นของ React Flow (ไม่อยู่ใน nodes/edges — ไม่ถูกบันทึก ยกเว้นตำแหน่งที่ย้าย) ──
@@ -1036,6 +1043,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const p = pressRef.current; pressRef.current = null;
             if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) > 5 || Date.now() - p.at > 700) return;
             const id = p.el.getAttribute("data-nodeid"), side = p.el.getAttribute("data-handleid");
+            if (id && isItemHandle(side)) { setLinkFrom((cur) => (cur && cur.nodeId === id && cur.handle === side ? null : { nodeId: id, handle: side })); return; }
             const r = wrapRef.current?.getBoundingClientRect();
             if (!id || !r || !isFlowSide(side) || isSysId(id)) return;
             setNextMenu((cur) => (cur && cur.id === id && cur.side === side ? null : { id, side, x: e.clientX - r.left, y: e.clientY - r.top }));
@@ -1056,13 +1064,20 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             elevateNodesOnSelect={false}
-            onNodeClick={(_, n) => { if (isSysId(n.id)) locked?.onBoxClick?.(unSysId(n.id)); }}
+            onNodeClick={(_, n) => {
+              if (linkFrom && n.id !== linkFrom.nodeId) {   // โหมดต่อเส้นจากข้อ: แตะกล่องปลายทาง
+                const from = linkFrom; setLinkFrom(null);
+                onConnect({ source: from.nodeId, sourceHandle: from.handle, target: n.id, targetHandle: "l" });
+                return;
+              }
+              if (isSysId(n.id)) locked?.onBoxClick?.(unSysId(n.id));
+            }}
             onNodeDoubleClick={(_, n) => { if (isSysId(n.id)) toggleUnlock(n.id); }}
             onEdgeClick={(_, e) => { if (isSysId(e.id)) locked?.onLineClick?.(unSysId(e.id)); }}
             onEdgeDoubleClick={(_, e) => { if (!readOnly && !isSysId(e.id)) actions.editEdgeLabel(e.id); }}
             connectionMode={ConnectionMode.Loose}
             connectOnClick={false}
-            onPaneClick={() => setNextMenu(null)}
+            onPaneClick={() => { setNextMenu(null); setLinkFrom(null); }}
             onMoveStart={() => setNextMenu(null)}
             defaultEdgeOptions={{ type: "flow", markerEnd: MARKER }}
             connectionLineStyle={{ stroke: "#7c3aed", strokeWidth: 2 }}
@@ -1123,6 +1138,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
         </div>
       </div>
 
+      {linkFrom && (
+        <div className="fixed bottom-4 left-1/2 z-[1150] flex -translate-x-1/2 items-center gap-2 rounded-full bg-violet-700 px-4 py-2 text-[12.5px] text-white shadow-lg">
+          <Icon value="i:link" />{t("แตะกล่องปลายทางเพื่อต่อเส้น", "Tap the box to connect to")}
+          <button type="button" onClick={() => setLinkFrom(null)} className="rounded-full bg-white/20 px-2 text-[11px] hover:bg-white/30">{t("ยกเลิก", "Cancel")}</button>
+        </div>
+      )}
       {peek && <PagePeek href={peek.href} label={peek.label} anchor={peek.rect} t={t} onBig={() => { setPeek(null); setBigPage({ href: peek.href, label: peek.label }); }}
         onClose={() => setPeek(null)} />}
       {bigPage && <FlowPagePreview nodeId={null} page={bigPage} onClose={() => setBigPage(null)} />}

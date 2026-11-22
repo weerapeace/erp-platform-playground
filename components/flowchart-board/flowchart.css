@@ -33,3 +33,11 @@
 .fc-rich ul { list-style: disc; padding-left: 1.2em; text-align: left; }
 .fc-rich ol { list-style: decimal; padding-left: 1.2em; text-align: left; }
 .fc-rich b, .fc-rich strong { font-weight: 700; }
+/* จุดต่อเส้นรายข้อของรายการงาน (2026-11-22): โผล่ตอนชี้ที่ข้อ · ข้อที่มีเส้น = จุดทึบ · เลือกต้นเส้น (แตะ) = วงม่วง */
+.fc-board .react-flow__node .react-flow__handle.fc-item-h { width: 10px; height: 10px; right: -5px; border-color: #7c3aed; opacity: 0; }
+.fc-board .react-flow__node .group:hover > .react-flow__handle.fc-item-h,
+.fc-board .react-flow__node.selected .react-flow__handle.fc-item-h,
+.fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-on,
+.fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-pick { opacity: 1; }
+.fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-on { background: #7c3aed; }
+.fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-pick { background: #7c3aed; box-shadow: 0 0 0 4px #ddd6fe; }
