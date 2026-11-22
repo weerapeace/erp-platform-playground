@@ -45,3 +45,14 @@ describe("เทมเพลตโซนกระดาน", () => {
     expect(slotInFrame(f, 2).y).toBe(148 + 216);
   });
 });
+
+describe("โซนสำเร็จรูป (แก้ได้ในป๊อป)", () => {
+  it("ยังไม่เคยตั้ง = ชื่อเดิมของกระดานแคมเปญ", () => {
+    expect(cleanSectionConfig(null).presets.campaign).toContain("สินค้าใน Campaign");
+  });
+  it("เก็บค่าที่แก้ + ตัดซ้ำ/ว่าง · ลบหมด = ว่างได้", () => {
+    const c = cleanSectionConfig({ templates: [], presets: { campaign: [" A ", "A", "", 5], brief: [] } });
+    expect(c.presets.campaign).toEqual(["A"]);
+    expect(c.presets.brief).toEqual([]);
+  });
+});

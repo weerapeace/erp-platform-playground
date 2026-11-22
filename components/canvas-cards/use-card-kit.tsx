@@ -37,7 +37,8 @@ import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { TableDrawer } from "@/app/tasks/table-drawer";
 import { usePushToast, useToast } from "@/components/toast";
 import { frameSectionKind, slotInFrame, templateFrames, templatesFor, type BoardKind, type BoardSectionConfig, type BoardSectionTemplate, type SectionKind } from "@/lib/board-section-templates";
-import { loadSectionTemplates } from "./section-templates-cache";
+import { loadSectionTemplates, saveSectionTemplates } from "./section-templates-cache";
+import { BoardSectionTemplatesManager } from "@/app/tasks/board-section-templates-settings";
 import { skuCardSkeleton, parentSkuCardSkeleton, marketingSkuCardSkeleton, designSheetCardSkeleton, trendCardSkeleton, assetCardSkeleton, contentCardSkeleton, perPlatformCardSkeleton, tableCardSkeleton, taskCardSkeleton, type ParentSkuVal, type MktSkuVal, type MktFieldKey, MKT_FIELDS_ALL, tt, type DsCardInfo, dsCardText, DS_CARD_STROKE, type TrendCardInfo, trendCardText, type AssetFieldKey, contentCardText, perPlatformCardText, MKT_FIELD_OPTS, postStatusStyle } from "./skeletons";
 import { ParentSkuMultiPick, MarketingSkuMultiPick, SkuMultiPick, DesignSheetMultiPick, BigTagPick } from "./multi-picks";
 import { AssetCardDrawer, SkuDrawer, CardsSummary, type ToolMenuItem } from "./drawers";
@@ -128,12 +129,34 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const [sectionCfg, setSectionCfg] = useState<BoardSectionConfig | null>(null);
   useEffect(() => { if (board) loadSectionTemplates().then(setSectionCfg).catch(() => {}); }, [board]);
   const sectionTpls: BoardSectionTemplate[] = board && sectionCfg ? templatesFor(sectionCfg, board) : [];
-  // ชื่อโซนสำเร็จรูป: หน้าส่งมาเอง > ชื่อโซนจากเทมเพลตของกระดานนี้
-  const sectionPresets = presetsIn.length ? presetsIn : [...new Set(sectionTpls.flatMap((x) => x.blocks.map((b) => b.name)))];
+  // ชื่อโซนสำเร็จรูป: หน้าส่งมาเอง (แก้ไม่ได้) > รายการที่ตั้งไว้ของกระดานนี้ (เพิ่ม/แก้/ลบได้ในป๊อป)
+  const presetsEditable = !presetsIn.length && !!board;
+  const sectionPresets = presetsIn.length ? presetsIn : board && sectionCfg ? sectionCfg.presets[board] : [];
+  const [secEdit, setSecEdit] = useState(false);              // โหมดจัดการในป๊อป Section
+  const [tplEditor, setTplEditor] = useState<string | null>(null); // เปิดตัวแก้เทมเพลต bento (id หรือ "new")
+  const [presetDraft, setPresetDraft] = useState<Record<number, string>>({});
   // กรอบโซนที่เลือกอยู่ (โซนงาน/คอนเทนต์) + กรอบเป้าหมายของการ์ดใบถัดไป
   const [zone, setZone] = useState<{ id: string; name: string; kind: Exclude<SectionKind, "none"> } | null>(null);
   const zoneTargetRef = useRef<string | null>(null);
   const undoToast = useToast();
+  // บันทึกเทมเพลต/โซนสำเร็จรูป (ui_config ผ่าน API กลาง · ลงประวัติ) — undoPrev = ค่าก่อนแก้ ให้ปุ่มย้อนกลับในแจ้งผล
+  const saveSectionCfg = async (next: BoardSectionConfig, msg: string, undoPrev?: BoardSectionConfig) => {
+    try {
+      await saveSectionTemplates(next); setSectionCfg(next);
+      if (undoPrev) undoToast.undo(msg, async () => { try { await saveSectionTemplates(undoPrev); setSectionCfg(undoPrev); } catch (e) { pushToastRef.current?.("error", (e as Error).message); } });
+      else pushToastRef.current?.("success", msg);
+    } catch (e) { pushToastRef.current?.("error", (e as Error).message); }
+  };
+  const pushToastRef = useRef<((v: "success" | "error" | "info", m: string) => void) | null>(null);
+  const setPresets = (list: string[], msg: string, undoable: boolean) => {
+    if (!board || !sectionCfg) return;
+    const next = { ...sectionCfg, presets: { ...sectionCfg.presets, [board]: [...new Set(list.map((s) => s.trim()).filter(Boolean))] } };
+    void saveSectionCfg(next, msg, undoable ? sectionCfg : undefined);
+  };
+  const deleteSectionTemplate = (tpl: BoardSectionTemplate) => {
+    if (!sectionCfg) return;
+    void saveSectionCfg({ ...sectionCfg, templates: sectionCfg.templates.filter((x) => x.id !== tpl.id) }, t(`ลบเทมเพลต “${tpl.name}” แล้ว`, `Deleted template “${tpl.name}”`), sectionCfg);
+  };
   const campaignId = campaign?.id ?? null;
   const [skuOpen, setSkuOpen] = useState(false);
   const [skuSel, setSkuSel] = useState<SkuPickerValue[]>([]); // SKU ที่เลือก (หลายอัน)
@@ -208,6 +231,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
   const pushToast = usePushToast();   // แจ้งเตือนผ่าน toast กลาง (components/toast)
+  pushToastRef.current = pushToast as (v: "success" | "error" | "info", m: string) => void;
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
 
   // Section = Frame ของ Excalidraw (อยู่ข้างหลัง, เปลี่ยนชื่อ/ย่อขยายที่ตัวมันเอง, ลากของเข้าไปแล้วเลื่อนตามกัน)
@@ -697,37 +721,65 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
       {taskView && <TaskDetailDrawer taskId={String(taskView.id ?? "")} onClose={() => setTaskView(null)} onChanged={() => {}} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
 
-      {/* เลือกโซน (Section) จากชุดสำเร็จ หรือพิมพ์เอง */}
-      <ERPModal open={sectionOpen} onClose={() => setSectionOpen(false)} title={t("เพิ่มโซน (Section)", "Add Section")} size="sm"
-        footer={<button onClick={() => setSectionOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
+      {/* เลือกโซน (Section): เทมเพลต bento ทั้งชุด / โซนสำเร็จรูป / พิมพ์เอง · โหมด "จัดการ" = เพิ่ม แก้ ลบ (ย้อนกลับได้) — เจ้าของขอ 2026-11-22 */}
+      <ERPModal open={sectionOpen} onClose={() => { setSectionOpen(false); setSecEdit(false); setPresetDraft({}); }} title={t("เพิ่มโซน (Section)", "Add Section")} size="sm"
+        footer={<>
+          {board && <button onClick={() => { setSecEdit((v) => !v); setPresetDraft({}); }} className={`mr-auto h-9 px-3 text-sm rounded-lg border ${secEdit ? "border-violet-500 bg-violet-600 text-white" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>{secEdit ? t("✓ เสร็จ", "✓ Done") : t("✎ จัดการ", "✎ Manage")}</button>}
+          <button onClick={() => { setSectionOpen(false); setSecEdit(false); }} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
+        </>}>
         <div className="space-y-3">
-          {sectionTpls.length > 0 && <div className="space-y-1.5">
-            <p className="text-xs text-slate-400">{t("วางเทมเพลตโซนทั้งชุด (จัดแบบ bento · ตั้งได้ที่ ตั้งค่างาน → เทมเพลตโซนกระดาน)", "Place a whole section template (bento · set in Task settings → Board section templates)")}</p>
+          {(sectionTpls.length > 0 || (secEdit && board)) && <div className="space-y-1.5">
+            <p className="text-xs text-slate-400">{t("วางเทมเพลตโซนทั้งชุด (จัดแบบ bento)", "Place a whole section template (bento)")}</p>
             {sectionTpls.map((tp) => (
-              <button key={tp.id} onClick={() => insertSectionTemplate(tp)} className="w-full rounded-lg border border-violet-200 bg-violet-50/40 p-2 text-left hover:border-violet-400">
-                <span className="text-sm font-medium text-violet-800">🧱 {tp.name}</span> <span className="text-xs text-slate-400">· {tp.blocks.length} {t("โซน", "zones")}</span>
-                <span className="mt-1.5 grid gap-0.5" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gridAutoRows: "10px" }}>
-                  {tp.blocks.map((b) => <span key={b.id} className={`rounded-sm ${b.kind === "task" ? "bg-sky-200" : b.kind === "content" ? "bg-emerald-200" : "bg-violet-200"}`} style={{ gridColumn: `${b.x + 1} / span ${b.w}`, gridRow: `${b.y + 1} / span ${b.h}` }} />)}
-                </span>
-              </button>
+              <div key={tp.id} className="flex items-stretch gap-1.5">
+                <button onClick={() => (secEdit ? setTplEditor(tp.id) : insertSectionTemplate(tp))} className="min-w-0 flex-1 rounded-lg border border-violet-200 bg-violet-50/40 p-2 text-left hover:border-violet-400">
+                  <span className="text-sm font-medium text-violet-800">🧱 {tp.name}</span> <span className="text-xs text-slate-400">· {tp.blocks.length} {t("โซน", "zones")}{secEdit ? ` · ${t("กดเพื่อแก้", "click to edit")}` : ""}</span>
+                  <span className="mt-1.5 grid gap-0.5" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gridAutoRows: "10px" }}>
+                    {tp.blocks.map((b) => <span key={b.id} className={`rounded-sm ${b.kind === "task" ? "bg-sky-200" : b.kind === "content" ? "bg-emerald-200" : "bg-violet-200"}`} style={{ gridColumn: `${b.x + 1} / span ${b.w}`, gridRow: `${b.y + 1} / span ${b.h}` }} />)}
+                  </span>
+                </button>
+                {secEdit && <div className="flex flex-col gap-1">
+                  <button onClick={() => setTplEditor(tp.id)} title={t("แก้ชื่อ / ขนาด / ตำแหน่งโซน", "Edit name / size / position")} className="h-8 w-8 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">✎</button>
+                  <button onClick={() => deleteSectionTemplate(tp)} title={t("ลบเทมเพลต (ย้อนกลับได้)", "Delete template (undoable)")} className="h-8 w-8 rounded-lg border border-slate-200 text-sm text-rose-600 hover:bg-rose-50">✕</button>
+                </div>}
+              </div>
             ))}
+            {secEdit && <button onClick={() => setTplEditor("new")} className="h-9 w-full rounded-lg border border-dashed border-violet-300 text-sm text-violet-700 hover:bg-violet-50">＋ {t("เทมเพลตใหม่", "New template")}</button>}
           </div>}
-          {sectionPresets.length > 0 && <>
-            <p className="text-xs text-slate-400">{t("เลือกโซนสำเร็จรูป (กดแล้ววางบนกระดานเลย)", "Choose a preset section (click to place it on the board)")}</p>
+          {(sectionPresets.length > 0 || (secEdit && presetsEditable)) && <div className={sectionTpls.length > 0 || secEdit ? "border-t border-slate-100 pt-3" : ""}>
+            <p className="text-xs text-slate-400 mb-1.5">{secEdit ? t("แก้ชื่อ / ลบโซนสำเร็จรูป (เพิ่มได้จากช่องพิมพ์ข้างล่าง)", "Rename / remove preset zones (add from the box below)") : t("เลือกโซนสำเร็จรูป (กดแล้ววางบนกระดานเลย)", "Choose a preset section (click to place it on the board)")}</p>
             <div className="grid grid-cols-1 gap-1.5">
-              {sectionPresets.map((s) => (
+              {sectionPresets.map((s, i) => secEdit && presetsEditable ? (
+                <div key={`${i}-${s}`} className="flex gap-1.5">
+                  <input value={presetDraft[i] ?? s} onChange={(e) => setPresetDraft((d) => ({ ...d, [i]: e.target.value }))}
+                    onBlur={() => { const v = (presetDraft[i] ?? s).trim(); if (v && v !== s) setPresets(sectionPresets.map((x, j) => (j === i ? v : x)), t(`เปลี่ยนชื่อเป็น “${v}” แล้ว`, `Renamed to “${v}”`), true); setPresetDraft((d) => { const n = { ...d }; delete n[i]; return n; }); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" aria-label={t("ชื่อโซน", "Zone name")} />
+                  <button onClick={() => setPresets(sectionPresets.filter((_, j) => j !== i), t(`ลบโซน “${s}” แล้ว`, `Removed zone “${s}”`), true)} title={t("ลบ (ย้อนกลับได้)", "Remove (undoable)")} className="h-10 w-10 rounded-lg border border-slate-200 text-rose-600 hover:bg-rose-50">✕</button>
+                </div>
+              ) : (
                 <button key={s} onClick={() => insertSection(s)} className="w-full text-left h-10 px-3 rounded-lg border border-slate-200 text-sm text-slate-700 hover:border-violet-300 hover:bg-violet-50/40">{s}</button>
               ))}
             </div>
-          </>}
-          <div className={sectionPresets.length > 0 ? "border-t border-slate-100 pt-3" : ""}>
+          </div>}
+          <div className={sectionPresets.length > 0 || sectionTpls.length > 0 ? "border-t border-slate-100 pt-3" : ""}>
             <p className="text-xs text-slate-400 mb-1.5">{t("หรือพิมพ์ชื่อเอง", "Or type a custom name")}</p>
             <div className="flex gap-2">
-              <input value={sectionName} onChange={(e) => setSectionName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sectionName.trim() && insertSection(sectionName)} placeholder={t("ชื่อโซน...", "Section name...")} className="flex-1 h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+              <input value={sectionName} onChange={(e) => setSectionName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sectionName.trim() && insertSection(sectionName)} placeholder={t("ชื่อโซน...", "Section name...")} className="flex-1 min-w-0 h-9 border border-slate-200 rounded-lg px-2 text-sm" />
               <button onClick={() => sectionName.trim() && insertSection(sectionName)} disabled={!sectionName.trim()} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{t("เพิ่ม", "Add")}</button>
             </div>
+            {presetsEditable && sectionName.trim() && !sectionPresets.includes(sectionName.trim()) && (
+              <button onClick={() => { setPresets([...sectionPresets, sectionName.trim()], t(`เก็บ “${sectionName.trim()}” เป็นโซนสำเร็จรูปแล้ว`, `Saved “${sectionName.trim()}” as a preset`), true); setSectionName(""); }}
+                className="mt-1.5 text-xs text-violet-700 hover:underline">＋ {t("เก็บชื่อนี้เป็นโซนสำเร็จรูป (ไม่วางลงกระดาน)", "Save this name as a preset zone (don't place)")}</button>
+            )}
           </div>
         </div>
+      </ERPModal>
+
+      {/* ตัวแก้เทมเพลตโซน bento (ของกลางเดียวกับหน้าตั้งค่า) — ปิดแล้วโหลดเทมเพลตใหม่ */}
+      <ERPModal open={!!tplEditor} onClose={() => { setTplEditor(null); loadSectionTemplates(true).then(setSectionCfg).catch(() => {}); }} title={t("แก้เทมเพลตโซน (bento)", "Edit section template (bento)")} size="xl"
+        footer={<button onClick={() => { setTplEditor(null); loadSectionTemplates(true).then(setSectionCfg).catch(() => {}); }} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
+        {tplEditor && <BoardSectionTemplatesManager key={tplEditor} initialTplId={tplEditor} defaultBoard={board} showToast={(m) => pushToast("success", m)} />}
       </ERPModal>
 
       {/* ป๊อปอัปการ์ดโฟลเดอร์ (ของกลาง) — เก็บ path · ดับเบิลคลิกการ์ด = เปิดโฟลเดอร์ */}

@@ -25,7 +25,8 @@ const KIND_CLS: Record<SectionKind, string> = {
   content: "border-emerald-300 bg-emerald-50 text-emerald-800",
 };
 
-export function BoardSectionTemplatesManager({ showToast }: { showToast: (m: string) => void }) {
+/** initialTplId = เปิดมาที่เทมเพลตนี้ ("new" = สร้างเทมเพลตใหม่ทันที) · ใช้ทั้งหน้าตั้งค่า และป๊อป Section บนกระดาน */
+export function BoardSectionTemplatesManager({ showToast, initialTplId, defaultBoard }: { showToast: (m: string) => void; initialTplId?: string; defaultBoard?: BoardKind }) {
   const t = useT();
   const toast = useToast();
   const [saved, setSaved] = useState<BoardSectionConfig | null>(null);
@@ -35,10 +36,11 @@ export function BoardSectionTemplatesManager({ showToast }: { showToast: (m: str
   const [selId, setSelId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const newRef = useRef(false);
 
   useEffect(() => {
     apiFetch(`/api/ui-config?key=${BOARD_SECTION_TEMPLATES_KEY}`).then((r) => r.json())
-      .then((j) => { const c = cleanSectionConfig(j?.value ?? null); setSaved(c); setDraft(c); setTplId(c.templates[0]?.id ?? ""); })
+      .then((j) => { const c = cleanSectionConfig(j?.value ?? null); setSaved(c); setDraft(c); setTplId(initialTplId && c.templates.some((x) => x.id === initialTplId) ? initialTplId : c.templates[0]?.id ?? ""); if (initialTplId === "new") newRef.current = true; })
       .catch(() => { const c = cleanSectionConfig(null); setSaved(c); setDraft(c); setTplId(c.templates[0]?.id ?? ""); });
   }, []);
 
@@ -60,27 +62,36 @@ export function BoardSectionTemplatesManager({ showToast }: { showToast: (m: str
     finally { setSaving(false); }
   };
 
+  // เปิดมาจากปุ่ม "＋ เทมเพลตใหม่" ในป๊อป Section → สร้างร่างเทมเพลตใหม่ให้ทันที
+  useEffect(() => {
+    if (!draft || !newRef.current) return;
+    newRef.current = false;
+    const id = newId();
+    change((c) => ({ ...c, templates: [...c.templates, { id, name: t("เทมเพลตใหม่", "New template"), boards: defaultBoard ? [defaultBoard] : ["brief", "campaign"], blocks: [{ id: newId(), name: t("ไอเดีย", "Ideas"), x: 0, y: 0, w: 2, h: 1, kind: "none" }] }] }));
+    setTplId(id);
+  }, [draft, change, defaultBoard, t]);
+
   if (!draft) return <p className="text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</p>;
   const tpl = draft.templates.find((x) => x.id === tplId) ?? draft.templates[0] ?? null;
-  const patchTpl = (fn: (b: NonNullable<typeof tpl>) => NonNullable<typeof tpl>) => tpl && change((c) => ({ templates: c.templates.map((x) => (x.id === tpl.id ? fn(x) : x)) }));
+  const patchTpl = (fn: (b: NonNullable<typeof tpl>) => NonNullable<typeof tpl>) => tpl && change((c) => ({ ...c, templates: c.templates.map((x) => (x.id === tpl.id ? fn(x) : x)) }));
   const patchBlock = (id: string, p: Partial<SectionBlock>) => patchTpl((x) => ({ ...x, blocks: x.blocks.map((b) => (b.id === id ? { ...b, ...p } : b)) }));
   const sel = tpl?.blocks.find((b) => b.id === selId) ?? null;
 
   const addTemplate = () => {
     const id = newId();
-    change((c) => ({ templates: [...c.templates, { id, name: t("เทมเพลตใหม่", "New template"), boards: ["brief", "campaign"], blocks: [{ id: newId(), name: t("ไอเดีย", "Ideas"), x: 0, y: 0, w: 2, h: 1, kind: "none" }] }] }));
+    change((c) => ({ ...c, templates: [...c.templates, { id, name: t("เทมเพลตใหม่", "New template"), boards: defaultBoard ? [defaultBoard] : ["brief", "campaign"], blocks: [{ id: newId(), name: t("ไอเดีย", "Ideas"), x: 0, y: 0, w: 2, h: 1, kind: "none" }] }] }));
     setTplId(id); setSelId(null);
   };
   const dupTemplate = () => {
     if (!tpl) return;
     const id = newId();
-    change((c) => ({ templates: [...c.templates, { ...tpl, id, name: `${tpl.name} (${t("สำเนา", "copy")})`, blocks: tpl.blocks.map((b) => ({ ...b, id: newId() })) }] }));
+    change((c) => ({ ...c, templates: [...c.templates, { ...tpl, id, name: `${tpl.name} (${t("สำเนา", "copy")})`, blocks: tpl.blocks.map((b) => ({ ...b, id: newId() })) }] }));
     setTplId(id);
   };
   const delTemplate = () => {
     if (!tpl || !saved) return;
     const before = draft;
-    const next = { templates: draft.templates.filter((x) => x.id !== tpl.id) };
+    const next = { ...draft, templates: draft.templates.filter((x) => x.id !== tpl.id) };
     setHist((h) => [...h, before]); setDraft(next); setTplId(next.templates[0]?.id ?? ""); setSelId(null);
     void save(next).then(() => toast.undo(t(`ลบเทมเพลต “${tpl.name}” แล้ว`, `Deleted template “${tpl.name}”`), async () => { setDraft(before); setTplId(tpl.id); await save(before); }));
   };

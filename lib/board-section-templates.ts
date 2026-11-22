@@ -14,7 +14,21 @@ export type BoardKind = "brief" | "campaign";
 export type SectionKind = "none" | "task" | "content";
 export type SectionBlock = { id: string; name: string; x: number; y: number; w: number; h: number; kind: SectionKind };
 export type BoardSectionTemplate = { id: string; name: string; boards: BoardKind[]; blocks: SectionBlock[] };
-export type BoardSectionConfig = { templates: BoardSectionTemplate[] };
+/** presets = ชื่อโซนเดี่ยวสำเร็จรูปในป๊อป Section ต่อชนิดกระดาน (เพิ่ม/แก้/ลบได้ในป๊อป) */
+export type BoardSectionConfig = { templates: BoardSectionTemplate[]; presets: Record<BoardKind, string[]> };
+
+const DEFAULT_PRESETS: Record<BoardKind, string[]> = {
+  campaign: ["ไอเดีย (Brainstorming)", "Reference", "ข้อมูล (Information)", "สินค้าใน Campaign", "งาน (Tasks)"],
+  brief: ["ไอเดีย (Brainstorming)", "Reference", "ข้อมูล (Information)", "สินค้า", "คอนเทนต์ (Content)"],
+};
+const cleanNames = (v: unknown): string[] => [...new Set((Array.isArray(v) ? v : []).filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 60)).filter(Boolean))];
+function cleanPresets(raw: unknown): Record<BoardKind, string[]> {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    brief: Array.isArray(o.brief) ? cleanNames(o.brief) : [...DEFAULT_PRESETS.brief],
+    campaign: Array.isArray(o.campaign) ? cleanNames(o.campaign) : [...DEFAULT_PRESETS.campaign],
+  };
+}
 
 export const SECTION_KIND_OPTIONS: { value: SectionKind; th: string; en: string }[] = [
   { value: "none", th: "โซนทั่วไป", en: "Plain zone" },
@@ -46,7 +60,7 @@ export function cleanBlock(raw: unknown): SectionBlock | null {
 
 export function cleanSectionConfig(raw: unknown): BoardSectionConfig {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
-  if (!Array.isArray(o.templates)) return defaultSectionConfig();
+  if (!Array.isArray(o.templates)) return { ...defaultSectionConfig(), presets: cleanPresets(o.presets) };
   const templates: BoardSectionTemplate[] = [];
   for (const t of o.templates) {
     const r = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
@@ -56,12 +70,13 @@ export function cleanSectionConfig(raw: unknown): BoardSectionConfig {
     const blocks = (Array.isArray(r.blocks) ? r.blocks : []).map(cleanBlock).filter((b): b is SectionBlock => !!b);
     templates.push({ id: typeof r.id === "string" && r.id ? r.id : newId(), name, boards: boards.length ? [...new Set(boards)] : ["brief", "campaign"], blocks });
   }
-  return { templates };
+  return { templates, presets: cleanPresets(o.presets) };
 }
 
 /** ชุดตั้งต้น (ยังไม่เคยตั้ง) — แคมเปญ = ชื่อโซนสำเร็จรูปเดิมของกระดานแคมเปญ */
 export function defaultSectionConfig(): BoardSectionConfig {
   return {
+    presets: { brief: [...DEFAULT_PRESETS.brief], campaign: [...DEFAULT_PRESETS.campaign] },
     templates: [
       { id: "tpl_brief", name: "บรีฟงาน", boards: ["brief"], blocks: [
         { id: "b1", name: "ไอเดีย (Brainstorming)", x: 0, y: 0, w: 2, h: 2, kind: "none" },

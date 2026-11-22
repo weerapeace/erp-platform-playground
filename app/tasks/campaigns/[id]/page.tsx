@@ -21,7 +21,7 @@ import { CAMPAIGN_STATUS } from "../campaign-status";
 import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";
 import { getCampaign, updateCampaign, listSubtasks, type CampaignDetail, type CreativeTask } from "../../data";
 import { usePushToast } from "@/components/toast";
-import { taskCardSkeleton, tt } from "@/components/canvas-cards/skeletons";
+import { taskCardSkeleton } from "@/components/canvas-cards/skeletons";
 import { ToolMenu } from "@/components/canvas-cards/drawers";
 import { useCardKit } from "@/components/canvas-cards/use-card-kit";
 import { Icon } from "@/components/icon";
@@ -36,7 +36,6 @@ const KnowledgeDrawer = dynamic(() => import("../../knowledge-drawer").then((m) 
 const CampaignDrawer = dynamic(() => import("../campaign-drawer").then((m) => m.CampaignDrawer), { ssr: false });
 
 // โซนสำเร็จรูปสำหรับกระดานแคมเปญ
-const sectionPresets = (): string[] => [tt("ไอเดีย (Brainstorming)", "Brainstorming"), "Reference", tt("ข้อมูล (Information)", "Information"), tt("สินค้าใน Campaign", "Products in Campaign"), tt("งาน (Tasks)", "Tasks")];
 
 export default function CampaignCanvasPage() {
   const t = useT();
@@ -82,7 +81,7 @@ export default function CampaignCanvasPage() {
   const name = detail?.campaign.name ?? t("แคมเปญ", "Campaign");
   // ชุดการ์ดกลาง — งาน/คอนเทนต์ที่สร้างจากกระดานนี้ผูกแคมเปญนี้ · ใบงานใหม่ใช้แบรนด์แคมเปญ
   const campaign = useMemo(() => ({ id, name, brandId: detail?.campaign.brand_id ?? null }), [id, name, detail?.campaign.brand_id]);
-  const kit = useCardKit({ sketchRef, campaign, sectionPresets: sectionPresets(), contextLabel: name, board: "campaign" });
+  const kit = useCardKit({ sketchRef, campaign, contextLabel: name, board: "campaign" });   // โซนสำเร็จรูป/เทมเพลต = ตั้งในป๊อป Section (lib/board-section-templates)
 
   // ⑦ ลากงานที่มีอยู่แล้วในแคมเปญ → วางบนกระดาน (เป็นการ์ดงาน)
   const [dragPanelOpen, setDragPanelOpen] = useState(false);
