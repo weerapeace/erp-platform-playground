@@ -16,12 +16,13 @@ import { THEME_TEAM_KEY } from "@/lib/launcher-theme";
 import { PRINT_TEAM_PRESETS_KEY } from "@/lib/list-print";
 import { docPrintPerms } from "@/lib/doc-print-prefs";
 import { BLOCK_TEAM_PREFIX } from "@/lib/block-layout";
+import { FORM_LANG_TEAM_KEY } from "@/lib/form-lang-prefs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ค่ากลางที่ "ทุกคนที่ล็อกอิน" ต้องอ่านได้ (ไม่ต้องมีสิทธิ์สินค้า) — เช่น หน้าตาวงแอปหน้าแรก /apps · แก้ยังต้อง admin.users (ขึ้นต้น admin_)
-const LOGIN_READ_KEYS = new Set<string>([ORBIT_TEAM_KEY, THEME_TEAM_KEY, PRINT_TEAM_PRESETS_KEY]);
+const LOGIN_READ_KEYS = new Set<string>([ORBIT_TEAM_KEY, THEME_TEAM_KEY, PRINT_TEAM_PRESETS_KEY, FORM_LANG_TEAM_KEY]);   // FORM_LANG_TEAM_KEY = ภาษาที่แสดงในลิ้นชักกลาง (ค่าเริ่มต้นทีม)
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const key = (new URL(request.url).searchParams.get("key") ?? "").trim();

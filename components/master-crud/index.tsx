@@ -13,6 +13,8 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { Popover } from "@/components/popover";
 import { Icon } from "@/components/icon";
 import { formHiddenTabsKey, parseHiddenTabs, toggleHiddenTab, visibleTabKeys } from "@/lib/form-tab-prefs";
+import { FORM_LANG_TEAM_KEY, effectiveLangMode, formLangsKey, parseLangList, resolveShownLangs, teamLangsFor, toggleLang, withTeamLangs } from "@/lib/form-lang-prefs";
+import { LangSettingsButton } from "@/components/master-crud/lang-settings";
 import { ParentSkuPicker, SkuPicker } from "@/components/pickers";   // เลือกต้นทางในป๊อป "คัดลอกจากรุ่นอื่น" (ของกลาง)
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, StatusModuleContext, type CardConfig, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
@@ -1106,7 +1108,42 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const langStoreKey = `mc.lang.${config.moduleKey ?? config.apiPath}`;
   const [langMode,    setLangModeRaw] = useState<string>(() => { try { return localStorage.getItem(langStoreKey) || "th"; } catch { return "th"; } });
   const setLangMode = useCallback((m: string) => { setLangModeRaw(m); try { localStorage.setItem(langStoreKey, m); } catch { /* ไม่จำก็ใช้ได้ */ } }, [langStoreKey]);
+  // ⚙ ภาษาที่แสดง (เจ้าของขอ 2026-11-22 "จะได้ดูไม่รก") — ของฉัน (บัญชี) > ค่าแอดมิน > ทุกภาษา · lib/form-lang-prefs
+  const langScope = config.moduleKey ?? config.apiPath;
+  const availLangs = useMemo(() => LANG_ORDER.filter((l) => effectiveFields.some((f) => langPairsOf(f).includes(l))), [effectiveFields]);
+  const [myLangs, setMyLangs] = useUserPref<string[] | null>(formLangsKey(langScope), null, parseLangList);
+  const [teamLangValue, setTeamLangValue] = useState<unknown>(null);
+  const [teamLangSaving, setTeamLangSaving] = useState(false);
+  const hasLangPairs = availLangs.length > 0;
+  useEffect(() => {
+    if (!hasLangPairs) return;
+    let alive = true;
+    apiFetch(`/api/ui-config?key=${FORM_LANG_TEAM_KEY}`).then((r) => r.json()).then((j) => { if (alive) setTeamLangValue(j?.value ?? null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [hasLangPairs]);
+  const teamLangs = teamLangsFor(teamLangValue, langScope);
+  const shownLangs = useMemo(() => resolveShownLangs(availLangs, myLangs, teamLangs), [availLangs, myLangs, teamLangs]);
+  const effLangMode = effectiveLangMode(langMode, shownLangs);
   const [langField,   setLangField]   = useState<Record<string, string>>({});   // สลับรายช่อง (key = ช่องไทย) ทับค่าตั้งต้น — ปุ่ม TH/EN ที่หัวข้อช่อง (โหมดภาษาเดียว)
+  /** ภาษาที่ช่องนี้กำลังแสดง (โหมดภาษาเดียว) — ภาษาที่ถูกปิดไว้ = ไทย */
+  const fieldLang = (k: string): string => { const v = langField[k] ?? effLangMode; return v === "th" || shownLangs.includes(v) ? v : "th"; };
+  /** แอดมินตั้งค่าเริ่มต้นของทุกคน (ui_config admin_form_langs) — อ่านค่าล่าสุดก่อนเขียน ไม่ทับฟอร์มอื่น · audit ที่ API */
+  const saveTeamLangs = async (langs: string[] | null) => {
+    setTeamLangSaving(true);
+    try {
+      const cur = await apiFetch(`/api/ui-config?key=${FORM_LANG_TEAM_KEY}`).then((r) => r.json()).catch(() => null);
+      const next = withTeamLangs(cur?.value ?? teamLangValue, langScope, langs);
+      const res = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: FORM_LANG_TEAM_KEY, value: next }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setTeamLangValue(next);
+      notify.success(langs ? "ตั้งค่าเริ่มต้นภาษาของทุกคนแล้ว" : "ล้างค่าเริ่มต้นแล้ว — ทุกคนเห็นทุกภาษา");
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setTeamLangSaving(false);
+    }
+  };
   const [translating, setTranslating] = useState(false);
   const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
@@ -3448,9 +3485,18 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         {(() => {
           const pairFields = effectiveFields.filter((f) => langPairsOf(f).length > 0);
           // ภาษาที่มีให้เลือก = ไทย + ทุกภาษาที่มีช่องคู่ (en / ja ...) · โหมดคู่ = ไทยซ้าย + อีกภาษาขวา
-          const langOpts = ["th", ...LANG_ORDER.filter((l) => pairFields.some((f) => langPairsOf(f).includes(l)))];
+          //   ⚙ ภาษาที่ปิดไว้ (shownLangs) ไม่มีปุ่ม · เหลือไทยภาษาเดียว = ซ่อนแถบปุ่มภาษา เหลือแค่ ⚙
+          const langOpts = ["th", ...shownLangs];
           const langButtons = [...langOpts, ...langOpts.filter((l) => l !== "th").map((l) => `th|${l}`)];
-          const transTo = langMode.includes("|") ? langMode.split("|")[1] : (langMode !== "th" ? langMode : "en");
+          const transTo = effLangMode.includes("|") ? effLangMode.split("|")[1] : (effLangMode !== "th" ? effLangMode : (shownLangs[0] ?? "en"));
+          const langGear = availLangs.length > 0 ? (
+            <LangSettingsButton langs={availLangs} shown={shownLangs} isMine={myLangs !== null} label={langShort}
+              onToggle={(l) => setMyLangs(toggleLang(availLangs, shownLangs, l))}
+              onReset={() => setMyLangs(null)}
+              team={teamLangs} canTeam={can("admin.users")} teamSaving={teamLangSaving}
+              onTeamToggle={(l) => void saveTeamLangs(toggleLang(availLangs, teamLangs ?? availLangs, l))}
+              onTeamClear={() => void saveTeamLangs(null)} />
+          ) : null;
           const aiBtn = !!config.aiProductDetail && !!editingId && canEdit;
           const modeBtn = drawerMode === "view" && !!editingId && (entryModes.length > 0 || canEditModes);
           // 📋 คัดลอกจากรุ่นอื่น (ทุกกลุ่ม) — ช่องเรียงตาม layout (แท็บ → หัวข้อ) ป้ายกลุ่ม = ชื่อหัวข้อ
@@ -3477,11 +3523,17 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           const showTools = !isPhone || phoneToolsOpen || !!activeMode;
           return (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
-              {pairFields.length > 0 && (
+              {pairFields.length > 0 && langOpts.length > 1 && isPhone && (
+                <select value={effLangMode} onChange={(e) => { setLangMode(e.target.value); setLangField({}); }} aria-label={tr("ภาษา", "Language")}
+                  className="h-8 rounded-lg border border-indigo-300 bg-white px-2 text-[12.5px] font-semibold text-indigo-800">
+                  {langButtons.map((m) => <option key={m} value={m}>{tr("ภาษา: ", "Lang: ")}{m.includes("|") ? `${langShort("th")} | ${langShort(m.split("|")[1])}` : langShort(m)}</option>)}
+                </select>
+              )}
+              {pairFields.length > 0 && langOpts.length > 1 && !isPhone && (
               <div className="inline-flex items-center gap-0.5 rounded-lg border border-indigo-300 bg-white p-0.5" role="group" aria-label={tr("ภาษา", "Language")}>
                 {langButtons.map((m) => {
                   const two = m.includes("|");
-                  const on = two ? langMode === m : !langMode.includes("|") && pairFields.every((f) => (langField[f.key] ?? langMode) === m);
+                  const on = two ? effLangMode === m : !effLangMode.includes("|") && pairFields.every((f) => fieldLang(f.key) === m);
                   return (
                     <button key={m} type="button" onClick={() => { setLangMode(m); setLangField({}); }}
                       title={two ? tr(`ดูคู่กัน 2 คอลัมน์ — ไทยซ้าย ${langName(m.split("|")[1])}ขวา (จำไว้ให้ครั้งหน้า)`, `Side by side — Thai left, ${langName(m.split("|")[1])} right (remembered)`)
@@ -3494,6 +3546,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 })}
               </div>
               )}
+              {langGear}
               {isPhone && toolGroups > 0 && (
                 <button type="button" onClick={() => setPhoneToolsOpen((o) => !o)} aria-expanded={showTools}
                   className={`h-8 px-2.5 rounded-lg border text-[12.5px] font-medium inline-flex items-center gap-1 ${showTools ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600"}`}>
@@ -3551,7 +3604,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </button>
                 </div>
               )}
-              {!langMode.includes("|") && pairFields.some((f) => (langField[f.key] ?? langMode) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
+              {!effLangMode.includes("|") && pairFields.some((f) => fieldLang(f.key) === "en") && <span className="text-[11.5px] text-slate-400">{tr("กำลังดูช่องภาษาอังกฤษ · ช่องคำนวณ [EN] สร้างจากช่องอังกฤษให้อัตโนมัติ", "Viewing English fields · [EN] computed fields are built from the English ones")}</span>}
               {!isPhone && extraEl && <span className="ml-auto">{extraEl}</span>}
             </div>
           );
@@ -3571,7 +3624,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           //   โหมดคู่ "th|xx" (เจ้าของขอ 2026-11-22) = ช่องไทย + ช่องภาษา xx วางคู่กัน ครึ่งแถวต่อช่อง (มือถือเรียงลงมาเอง)
           const langPair = (f: FieldDef, lang = "en") => String((f.uiStyle as Record<string, unknown> | undefined)?.[`lang_${lang}`] ?? "");
           const enKeys = new Set(baseVisible.flatMap((f) => LANG_ORDER.map((l) => langPair(f, l))).filter(Boolean));
-          const twoCol = langMode.includes("|") ? langMode.split("|")[1] : null;
+          const twoCol = effLangMode.includes("|") ? effLangMode.split("|")[1] : null;
           // 📝 ปุ่ม "＋ แทรก" ข้างหัวข้อ (ทะเบียนฟิลด์ ui_style.insert_details) → แทรกช่องไทย + คู่อังกฤษ (ถ้ามี) ในคราวเดียว
           //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้/ขนาดช่อง (compartments) บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
           //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
@@ -3641,7 +3694,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 const en = enPair ? baseVisible.find((x) => x.key === enPair) : undefined;
                 const btn = insertBtn(f, en ? enPair : "");
                 // คู่ของแต่ละภาษาที่ช่องนี้มี (เฉพาะที่โชว์ในฟอร์ม)
-                const pairs = LANG_ORDER.map((l) => ({ l, key: langPair(f, l) })).map((p) => ({ ...p, field: p.key ? baseVisible.find((x) => x.key === p.key) : undefined }))
+                const pairs = shownLangs.map((l) => ({ l, key: langPair(f, l) })).map((p) => ({ ...p, field: p.key ? baseVisible.find((x) => x.key === p.key) : undefined }))   // ⚙ ภาษาที่ปิดไว้ = ไม่มีป้าย/ไม่โชว์ช่อง
                   .filter((p): p is { l: string; key: string; field: FieldDef } => !!p.field);
                 // ช่องคำนวณ (Name Platform [EN]/ญี่ปุ่น) = คำนวณสดจากฟอร์ม · ช่องปกติ = มีข้อความไหม
                 const filled = (p: { key: string; field: FieldDef }) => p.field.type === "computed" && p.field.textCompute
@@ -3673,7 +3726,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   ];
                 }
                 // ภาษาเดียว: ช่องภาษาที่เลือก "มานั่งแทนที่" ช่องไทย (ยืมกลุ่ม/ลำดับ/ความกว้าง) · ช่องที่ไม่มีคู่ภาษานั้น = ไทย
-                const m = langField[f.key] ?? langMode;
+                const m = fieldLang(f.key);
                 const cur = m === "th" ? undefined : pairs.find((p) => p.l === m);
                 const gear = namePartsBtn(f, en);
                 const pill = <LangPill mode={cur ? m : "th"} langs={["th", ...pairs.map((p) => p.l)]} filled={Object.fromEntries(pairs.map((p) => [p.l, filled(p)]))}
