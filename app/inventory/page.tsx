@@ -13,6 +13,8 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { StockMovement, MovementsResponse } from "@/app/api/inventory/movements/route";
 import type { StockBalance, BalancesResponse } from "@/app/api/inventory/balances/route";
 import type { ReorderItem, ReorderResponse } from "@/app/api/inventory/reorder/route";
+import type { InventoryHealth } from "@/app/api/inventory/health/route";
+import { Icon } from "@/components/icon";
 
 // ---- Movement type config ----
 const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> = {
@@ -35,6 +37,13 @@ type RefDetail = { kind: string; mo_no?: string | null; workers?: RefWorker[]; w
 
 const fmtQty   = (n: number) => Number(n).toLocaleString("th-TH");
 const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+const MOVES_PAGE = 500;   // โหลดประวัติทีละ 500 (เพดาน API)
+/** "3 วันก่อน" / "วันนี้" — ใช้ในป้ายเตือนการไหลอัตโนมัติ */
+const agoText = (iso: string | null) => {
+  if (!iso) return "ยังไม่เคย";
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  return d <= 0 ? "วันนี้" : `${d} วันก่อน`;
+};
 
 // ============================================================
 // Page
@@ -53,6 +62,12 @@ export default function InventoryPage() {
   const [balances, setBalances] = useState<StockBalance[]>([]);
   const [reorder, setReorder]   = useState<ReorderItem[]>([]);
   const [loading, setLoading]   = useState(true);
+  // ยอดจริงทั้งระบบ (เดิมเลขบนแท็บ = แค่จำนวนที่โหลดมา → แท็บที่ยังไม่เปิดขึ้น 0)
+  const [health, setHealth]     = useState<InventoryHealth | null>(null);
+  const [movesTotal, setMovesTotal] = useState<number | null>(null);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [balLoaded, setBalLoaded] = useState(false);
+  const [negOnly, setNegOnly]   = useState(false);   // ดูเฉพาะยอดติดลบ (จากป้ายเตือน)
   const [error,   setError]     = useState<string | null>(null);
 
   // ตั้งจุดสั่งซื้อ (min stock) modal
@@ -104,23 +119,33 @@ export default function InventoryPage() {
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
+  const loadHealth = useCallback(() => {
+    apiFetch("/api/inventory/health").then((r) => r.json())
+      .then((j: InventoryHealth) => { if (!j.error) setHealth(j); }).catch(() => {});
+  }, []);
+
   const fetchData = useCallback(async () => {
     setLoading(true); setError(null);
+    loadHealth();
     try {
       if (tab === "movements") {
-        const qs = filterWh ? `?warehouse_id=${filterWh}` : "";
-        const res = await apiFetch(`/api/inventory/movements${qs}`);
+        const qs = new URLSearchParams({ limit: String(MOVES_PAGE) });
+        if (filterWh) qs.set("warehouse_id", filterWh);
+        const res = await apiFetch(`/api/inventory/movements?${qs}`);
         const json: MovementsResponse = await res.json();
         if (json.error) throw new Error(json.error);
         setMoves(json.data);
+        setMovesTotal(json.total);
       } else if (tab === "stock") {
         const params = new URLSearchParams();
         if (filterWh) params.set("warehouse_id", filterWh);
         if (showLowOnly) params.set("low_stock", "true");
+        params.set("limit", "1000");
         const res = await apiFetch(`/api/inventory/balances?${params}`);
         const json: BalancesResponse = await res.json();
         if (json.error) throw new Error(json.error);
         setBalances(json.data);
+        setBalLoaded(true);
       } else {
         const res = await apiFetch(`/api/inventory/reorder`);
         const json: ReorderResponse = await res.json();
@@ -129,7 +154,22 @@ export default function InventoryPage() {
       }
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [tab, filterWh, showLowOnly]);
+  }, [tab, filterWh, showLowOnly, loadHealth]);
+
+  // โหลดประวัติเพิ่ม (ต่อท้าย) — เดิมเห็นแค่ 200 รายการล่าสุด
+  const loadMoreMoves = async () => {
+    setMoreBusy(true);
+    try {
+      const qs = new URLSearchParams({ limit: String(MOVES_PAGE), offset: String(moves.length) });
+      if (filterWh) qs.set("warehouse_id", filterWh);
+      const res = await apiFetch(`/api/inventory/movements?${qs}`);
+      const json: MovementsResponse = await res.json();
+      if (json.error) throw new Error(json.error);
+      setMoves((prev) => [...prev, ...json.data]);
+      setMovesTotal(json.total);
+    } catch (err) { setError(err instanceof Error ? err.message : "โหลดเพิ่มไม่ได้"); }
+    finally { setMoreBusy(false); }
+  };
 
   // ตั้งจุดสั่งซื้อ
   const openMinModal = (r: ReorderItem) => {
@@ -433,8 +473,8 @@ export default function InventoryPage() {
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-800">📦 Inventory</h1>
-            <p className="text-sm text-slate-500 mt-0.5">stock movement + balance ต่อคลัง — moving average cost</p>
+            <h1 className="text-2xl font-semibold text-slate-800">📦 คลังสินค้า</h1>
+            <p className="text-sm text-slate-500 mt-0.5">ยอดคงเหลือต่อคลัง · ประวัติเข้า-ออก · ต้นทุนเฉลี่ย</p>
           </div>
           {canCreate && (
             <div className="flex gap-2">
@@ -454,16 +494,49 @@ export default function InventoryPage() {
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
+        {/* 🩺 ป้ายเตือน: ยอดติดลบ + การไหลอัตโนมัติที่หยุด (อ่านอย่างเดียว) */}
+        {health && (health.negative_total > 0 || health.flows.some((f) => f.stalled)) && (
+          <div className="mb-4 grid gap-2 md:grid-cols-2">
+            {health.negative_total > 0 && (
+              <div className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-sm text-red-800">
+                <div className="flex items-center gap-1.5 font-medium"><Icon name="warning" size={16} /> ยอดติดลบ {fmtQty(health.negative_total)} รายการ — ตัวเลขคลังนี้ยังเชื่อไม่ได้</div>
+                <p className="text-xs text-red-700 mt-1">ระบบเบิกของออกไปแล้วแต่ไม่มีรับเข้า/ยอดยกมา ต้องตั้งยอดยกมาหรือนับใหม่ก่อน</p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {health.negative_by_wh.map((w) => (
+                    <button key={w.warehouse_id} onClick={() => { setTab("stock"); setFilterWh(w.warehouse_id); setNegOnly(true); }}
+                      className="h-7 px-2.5 text-xs rounded-lg bg-white border border-red-200 hover:bg-red-100">
+                      {w.name || w.code} · {fmtQty(w.count)} รายการ →
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {health.flows.some((f) => f.stalled) && (
+              <div className="px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-900">
+                <div className="flex items-center gap-1.5 font-medium"><Icon name="waiting" size={16} /> ระบบยังไม่ลงสต็อกให้อัตโนมัติบางจุด</div>
+                <ul className="mt-1 space-y-1">
+                  {health.flows.filter((f) => f.stalled).map((f) => (
+                    <li key={f.key} className="text-xs text-amber-800">
+                      <span className="font-medium">{f.label}</span> — ลงสต็อกล่าสุด {agoText(f.last_at)} · {f.pending_label} {fmtQty(f.pending)}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-amber-700 mt-1.5">ยอดคงเหลือจึงยังไม่ตรงของจริง — กำลังวางแผนต่อระบบให้ลงสต็อกเองอีกครั้ง</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Tabs + filter bar */}
         <div className="mb-4 flex items-center gap-3 flex-wrap">
           <div className="flex border border-slate-200 rounded-lg overflow-hidden">
             <button onClick={() => setTab("movements")}
               className={`h-9 px-4 text-sm font-medium ${tab === "movements" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
-              📜 Movements ({moves.length})
+              📜 ประวัติเคลื่อนไหว ({fmtQty(movesTotal ?? health?.movements_total ?? moves.length)})
             </button>
             <button onClick={() => setTab("stock")}
               className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "stock" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
-              📊 Stock Balance ({balances.length})
+              📊 ยอดคงเหลือ ({fmtQty(balLoaded ? balances.length : (health?.balances_total ?? 0))})
             </button>
             <button onClick={() => setTab("reorder")}
               className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "reorder" ? "bg-amber-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
@@ -476,6 +549,12 @@ export default function InventoryPage() {
             <label className="flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" checked={showLowOnly} onChange={e => setShowLowOnly(e.target.checked)} className="rounded border-slate-300" />
               เฉพาะ Out of Stock
+            </label>
+          )}
+          {tab === "stock" && (
+            <label className="flex items-center gap-2 text-xs text-red-700">
+              <input type="checkbox" checked={negOnly} onChange={e => setNegOnly(e.target.checked)} className="rounded border-slate-300" />
+              เฉพาะยอดติดลบ
             </label>
           )}
         </div>
@@ -514,6 +593,16 @@ export default function InventoryPage() {
         )}
 
         {tab === "movements" ? (
+          <>
+          {movesTotal !== null && movesTotal > moves.length && (
+            <div className="mb-2 flex items-center gap-2 flex-wrap text-xs text-slate-600">
+              <span>โหลดมาแล้ว {fmtQty(moves.length)} จาก {fmtQty(movesTotal)} รายการ (ล่าสุดก่อน) · ช่องค้นหาค้นเฉพาะที่โหลดแล้ว</span>
+              <button onClick={() => void loadMoreMoves()} disabled={moreBusy}
+                className="h-7 px-3 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50">
+                {moreBusy ? "กำลังโหลด…" : `โหลดเพิ่มอีก ${fmtQty(Math.min(MOVES_PAGE, movesTotal - moves.length))}`}
+              </button>
+            </div>
+          )}
           <DataTable
             tableId="inventory-movements"
             data={moves}
@@ -532,10 +621,11 @@ export default function InventoryPage() {
             ]}
             pageSize={20}
           />
+          </>
         ) : tab === "stock" ? (
           <DataTable
             tableId="inventory-balances"
-            data={balances}
+            data={negOnly ? balances.filter((b) => b.qty_on_hand < 0) : balances}
             columns={balanceColumns}
             loading={loading}
             searchableKeys={["product_sku", "product_name", "warehouse_name"]}
