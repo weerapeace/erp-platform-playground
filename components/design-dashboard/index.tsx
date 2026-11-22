@@ -27,9 +27,12 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } fr
 import { NewSheetFromLibraryModal, useCanSheetFromLibrary } from "@/components/design-library/new-sheet-from-library";
 import { LIB_HREF } from "@/components/design-library/shared";
 import { useStickyHeader } from "@/components/sticky-header";
-import { type ListResponse, type StatusResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
+import { type ListResponse, type StatusResponse, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
+import { BrandRail } from "./brand-rail";
+import { MoveTicker, type TickerMsg } from "./move-ticker";
+import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { BrandSettingsModal } from "./brand-settings-modal";
 import { StatusBoard } from "./status-board";
 import { PhoneTodayView } from "./phone-today";
@@ -75,7 +78,15 @@ export function DesignDashboard() {
   const [draggingSheetId, setDraggingSheetId] = useState<string | null>(null);
   const [dropTargetStatus, setDropTargetStatus] = useState<string | null>(null);
   const [movingSheetId, setMovingSheetId] = useState<string | null>(null);
-  const [moveMessage, setMoveMessage] = useState<MoveMessage | null>(null);
+  // ข้อความแจ้งผลเลื่อนในหัว (ย้ายสถานะ / เลื่อนกำหนดส่ง) + ปุ่มย้อนกลับ 5 วิ — ./move-ticker (เจ้าของเลือก 2026-11-22)
+  const [moveMessage, setMoveMessage] = useState<TickerMsg | null>(null);
+  const tickId = useRef(0);
+  const say = (type: TickerMsg["type"], text: string, undo?: () => void) => setMoveMessage({ id: ++tickId.current, type, text, undo });
+  // 📅 ปฏิทินกำหนดส่ง (แทนแถวแบรนด์ · 2026-11-22) — กดวัน = บอร์ดเหลือแค่งานส่งวันนั้น · ลากการ์ดมาวาง = เลื่อนกำหนดส่ง
+  const [calCursor, setCalCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [calDay, setCalDay] = useState<string | null>(null);
+  // แถบแบรนด์ซ้าย: ปักหมุดเปิดค้าง (จำต่อคน)
+  const [railPinned, setRailPinned] = useState(false);
   const [search, setSearch] = useState("");
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
   const [presentId, setPresentId] = useState<string | null>(null);       // แผงใบนำเสนอ A4 ของใบไหน (null = ปิด)
@@ -150,6 +161,15 @@ export function DesignDashboard() {
         if (fav.length && !brandPicked.current) setSelectedBrandKey(MINE_KEY); })   // มีแบรนด์โปรด = เปิดมาโชว์ของฉันก่อน
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_brand_rail").then((r) => r.json())
+      .then((j) => { if (j?.value?.pinned === true) setRailPinned(true); }).catch(() => {});
+  }, []);
+  const toggleRailPin = () => {
+    const pinned = !railPinned;
+    setRailPinned(pinned);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_rail", value: { pinned } }) }).catch(() => {});
+  };
   const saveBrandPrefs = (next: { order: string[]; hidden: string[]; fav: string[] }) => {
     setBrandPrefs(next);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_prefs", value: next }) }).catch(() => {});
@@ -425,9 +445,25 @@ export function DesignDashboard() {
     if (f === "overdue" || f === "due2" || f === "await_quote" || f === "nodl") return passPhoneFilter(sheet, f, statusMeta);
     return true;
   };
-  const filteredSheets = useMemo(() => (quickFilter === "all" ? scopedSheets : scopedSheets.filter((s) => passQuick(s, quickFilter))),
+  const filteredSheets = useMemo(() => {
+    const byDay = calDay ? scopedSheets.filter((s) => (s.deadline ?? "").slice(0, 10) === calDay) : scopedSheets;
+    return quickFilter === "all" ? byDay : byDay.filter((s) => passQuick(s, quickFilter));
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scopedSheets, quickFilter, statusMeta]);
+    [scopedSheets, quickFilter, statusMeta, calDay]);
+  // ปฏิทิน: งานที่ยังไม่ปิด + มีกำหนดส่ง (ขอบเขตแบรนด์/คำค้นเดียวกับบอร์ด) · สี: เลยกำหนด แดง · เหลือ ≤2 วัน ส้ม · อื่น ๆ คราม · ในวันเดียวกันเรียงด่วนก่อน
+  const calDocs = useMemo<CalDoc[]>(() => {
+    const rank = (dd: number | null) => (dd !== null && dd < 0 ? 0 : dd !== null && dd <= 2 ? 1 : 2);
+    return scopedSheets
+      .filter((s) => s.deadline && !statusMeta.finished.has(s.status))
+      .map((s) => ({ s, dd: daysUntil(s.deadline) }))
+      .sort((a, b) => rank(a.dd) - rank(b.dd))
+      .map(({ s, dd }) => ({
+        id: s.id, no: s.code, sub: s.name, date: String(s.deadline).slice(0, 10),
+        color: rank(dd) === 0 ? "#e11d48" : rank(dd) === 1 ? "#f59e0b" : "#6366f1",
+        title: `${s.code} · ${s.name}${s.brand_name ? ` · ${s.brand_name}` : ""} · ${statusMeta.map[s.status]?.label ?? s.status}`,
+      }));
+  }, [scopedSheets, statusMeta]);
   const filterCounts = useMemo(() => {
     const c = { all: scopedSheets.length, active: 0, urgent: 0, soon: 0, closed: 0, overdue: 0, due2: 0, await_quote: 0, nodl: 0 };
     for (const s of scopedSheets) for (const f of ["active", "urgent", "soon", "closed", "overdue", "due2", "await_quote", "nodl"] as const) if (passQuick(s, f)) c[f]++;
@@ -512,11 +548,16 @@ export function DesignDashboard() {
     setRefreshKey((key) => key + 1);
   }
 
-  async function moveSheetToStatus(sheetId: string, nextStatus: string) {
+  // ปุ่ม "ย้อนกลับ" เรียกทีหลัง 0-5 วิ → ต้องใช้ฟังก์ชันของรอบ render ล่าสุด (ไม่งั้นอ่าน sheets เก่า แล้วคิดว่าสถานะตรงอยู่แล้ว ไม่ยอมย้าย)
+  const latest = useRef({ moveSheetToStatus, moveSheetDeadline });
+  latest.current = { moveSheetToStatus, moveSheetDeadline };
+
+  async function moveSheetToStatus(sheetId: string, nextStatus: string, isUndo = false) {
     const sheet = sheets.find((item) => item.id === sheetId);
     if (!sheet || sheet.status === nextStatus || movingSheetId) return;
 
     const previousSheets = sheets;
+    const prevStatus = sheet.status;
     const nextLabel = statusMeta.map[nextStatus]?.label ?? nextStatus;
 
     setMovingSheetId(sheetId);
@@ -533,10 +574,11 @@ export function DesignDashboard() {
       });
       const json = await response.json() as { error?: string | null };
       if (!response.ok || json.error) throw new Error(json.error || t("\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't move status"));
-      setMoveMessage({ type: "success", text: t(`\u0e22\u0e49\u0e32\u0e22 ${sheet.code} \u0e44\u0e1b ${nextLabel} \u0e41\u0e25\u0e49\u0e27`, `Moved ${sheet.code} to ${nextLabel}`) });
+      if (isUndo) say("success", t(`\u0e22\u0e49\u0e2d\u0e19\u0e01\u0e25\u0e31\u0e1a\u0e41\u0e25\u0e49\u0e27 \u2014 ${sheet.code} \u0e01\u0e25\u0e31\u0e1a\u0e44\u0e1b ${nextLabel}`, `Undone \u2014 ${sheet.code} back to ${nextLabel}`));
+      else say("success", t(`\u0e22\u0e49\u0e32\u0e22 ${sheet.code} \u0e44\u0e1b ${nextLabel} \u0e41\u0e25\u0e49\u0e27`, `Moved ${sheet.code} to ${nextLabel}`), () => void latest.current.moveSheetToStatus(sheetId, prevStatus, true));
     } catch (e) {
       setSheets(previousSheets);
-      setMoveMessage({ type: "error", text: e instanceof Error ? e.message : t("\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't move status") });
+      say("error", e instanceof Error ? e.message : t("\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't move status"));
     } finally {
       setMovingSheetId(null);
       setDraggingSheetId(null);
@@ -544,11 +586,36 @@ export function DesignDashboard() {
     }
   }
 
+  // \u0e25\u0e32\u0e01\u0e01\u0e32\u0e23\u0e4c\u0e14\u0e21\u0e32\u0e27\u0e32\u0e07\u0e1a\u0e19\u0e27\u0e31\u0e19\u0e43\u0e19\u0e1b\u0e0f\u0e34\u0e17\u0e34\u0e19 = \u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e2a\u0e48\u0e07 (\u0e21\u0e35\u0e22\u0e49\u0e2d\u0e19\u0e01\u0e25\u0e31\u0e1a 5 \u0e27\u0e34) \u2014 \u0e1a\u0e31\u0e19\u0e17\u0e36\u0e01\u0e1c\u0e48\u0e32\u0e19 API \u0e43\u0e1a\u0e07\u0e32\u0e19\u0e40\u0e14\u0e34\u0e21 (\u0e25\u0e07\u0e1b\u0e23\u0e30\u0e27\u0e31\u0e15\u0e34\u0e43\u0e2b\u0e49\u0e40\u0e2d\u0e07)
+  async function moveSheetDeadline(sheetId: string, day: string | null, isUndo = false) {
+    const sheet = sheets.find((item) => item.id === sheetId);
+    setDraggingSheetId(null);
+    if (!sheet || movingSheetId) return;
+    const prev = sheet.deadline ? String(sheet.deadline).slice(0, 10) : null;
+    if (prev === day) return;
+    const label = day ? new Date(`${day}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : t("\u0e44\u0e21\u0e48\u0e21\u0e35\u0e01\u0e33\u0e2b\u0e19\u0e14", "no deadline");
+    setMovingSheetId(sheetId);
+    setSheets((items) => items.map((it) => (it.id === sheetId ? { ...it, deadline: day } : it)));
+    try {
+      const response = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheetId)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deadline: day }),
+      });
+      const json = await response.json() as { error?: string | null };
+      if (!response.ok || json.error) throw new Error(json.error || t("\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e2a\u0e48\u0e07\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't change the deadline"));
+      if (isUndo) say("success", t(`\u0e22\u0e49\u0e2d\u0e19\u0e01\u0e25\u0e31\u0e1a\u0e41\u0e25\u0e49\u0e27 \u2014 ${sheet.code} \u0e01\u0e33\u0e2b\u0e19\u0e14\u0e2a\u0e48\u0e07 ${label}`, `Undone \u2014 ${sheet.code} due ${label}`));
+      else say("success", t(`\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e2a\u0e48\u0e07 ${sheet.code} \u0e40\u0e1b\u0e47\u0e19 ${label} \u0e41\u0e25\u0e49\u0e27`, `${sheet.code} now due ${label}`), () => void latest.current.moveSheetDeadline(sheetId, prev, true));
+    } catch (e) {
+      setSheets((items) => items.map((it) => (it.id === sheetId ? { ...it, deadline: sheet.deadline } : it)));
+      say("error", e instanceof Error ? e.message : t("\u0e40\u0e25\u0e37\u0e48\u0e2d\u0e19\u0e01\u0e33\u0e2b\u0e19\u0e14\u0e2a\u0e48\u0e07\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08", "Couldn't change the deadline"));
+    } finally {
+      setMovingSheetId(null);
+    }
+  }
+
   function handleCardDragStart(event: DragEvent<HTMLDivElement>, sheet: DesignSheetListItem) {
     event.dataTransfer.setData("text/plain", sheet.id);
     event.dataTransfer.effectAllowed = "move";
     setDraggingSheetId(sheet.id);
-    setMoveMessage(null);
   }
 
   function handleColumnDragOver(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
@@ -700,29 +767,18 @@ export function DesignDashboard() {
             <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef} />
           </div>
         ) : (
-        /* หัวทั้งก้อน sticky แบบเหลือแค่แถบล่าง (ปุ่ม) — ป้าย/คำอธิบายเลื่อนหายไปเอง · ตอนติด: ซ่อนข้อความเดิม (ยังกินที่เท่าเดิม ไม่กระตุก) แล้วโชว์ชื่อหน้าแบบย่อแทน */
+        /* หัวแบบกะทัดรัดแถวเดียว (เจ้าของสั่ง 2026-11-22): ชื่อ + สรุป + ข้อความแจ้งผลเลื่อน (ย้ายสถานะ/เลื่อนกำหนดส่ง + ย้อนกลับ) · ขวา = ปุ่ม
+           — เอาป้าย Live กับคำอธิบายใต้ชื่อออก · กล่องเขียวเต็มกว้างเดิมย้ายมาเป็นข้อความเลื่อนในหัวนี้ */
         <div ref={sticky.headerRef} style={sticky.style}
-          className={`relative z-[15] -mt-2 mb-2 flex flex-wrap items-end justify-between gap-3 pb-2 pt-2 ${isDesktop ? "-mx-6 px-6" : "-mx-4 px-4"} ${sticky.stuck ? "border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur" : ""}`}>
-          <div className="relative min-w-0 flex items-start gap-2">
-            {sticky.stuck && (
-              <div className="absolute inset-x-0 bottom-0 flex h-9 min-w-0 items-center gap-2">
-                <span className="truncate text-base font-semibold text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</span>
-                <span className="shrink-0 truncate text-xs text-slate-400">{scopeLabel} · {activeJobs} {t("งานเดินอยู่", "active")}{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} {t("ใกล้ครบ", "due soon")}</span></> : null}</span>
-              </div>
-            )}
-            <BrandSlot theme={brandTheme} id="header_left" className={`shrink-0 mt-1 ${sticky.stuck ? "invisible" : ""}`} />
-            <div className={`min-w-0 ${sticky.stuck ? "invisible" : ""}`}>
-            <div data-gg-live-badge className="mb-2 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
-              Live design sheets dashboard
-            </div>
-            <h1 className="text-2xl font-semibold text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">
-              {t("ดึงใบงาน แบรนด์ และสถานะจากระบบจริงก่อน แล้วค่อยปรับหน้าตาเฉพาะแบรนด์ในขั้นถัดไป", "Live design sheets, brands and statuses from the system; brand-specific looks come next")}
-            </p>
-            </div>
+          className={`relative z-[15] -mt-2 mb-2 pb-2 pt-2 ${isDesktop ? "-mx-6 px-6" : "-mx-4 px-4"} ${sticky.stuck ? "border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur" : ""}`}>
+         <div ref={sticky.keepRef} className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <BrandSlot theme={brandTheme} id="header_left" className="shrink-0" />
+            <h1 className="shrink-0 text-lg font-semibold leading-tight text-slate-900">{t("แผนที่ภารกิจงานออกแบบ", "Design mission map")}</h1>
+            <span className="shrink-0 text-xs text-slate-400">{activeJobs} {t("งานเดินอยู่", "active")}{urgentJobs > 0 ? <> · <span className="text-rose-500">{urgentJobs} {t("ใกล้ครบ", "due soon")}</span></> : null}</span>
+            <MoveTicker msg={moveMessage} onDone={() => setMoveMessage(null)} className="ml-2 min-w-[140px] flex-1" />
           </div>
-          <div ref={sticky.keepRef} className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
             {/* ตัวสลับ จอคอม/แท็บเล็ต/มือถือ ย้ายไปเมนูโปรไฟล์แล้ว (เจ้าของสั่ง 2026-11-16) */}
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
@@ -732,15 +788,12 @@ export function DesignDashboard() {
                 <Icon value="📚" /> Design Library
               </a>
             )}
-            <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
-              {t("กลับ Design Sheets", "Back to Design Sheets")}
+            <a data-gg-action href="/master/design-sheets" title={t("กลับหน้า Design Sheets", "Back to Design Sheets")} className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
+              Design Sheets
             </a>
-            <button
-              data-gg-action
-              onClick={refreshDashboard}
-              className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white"
-            >
-              {t("รีเฟรชข้อมูล", "Refresh data")}
+            <button data-gg-action onClick={refreshDashboard} title={t("รีเฟรชข้อมูล", "Refresh data")} aria-label={t("รีเฟรชข้อมูล", "Refresh data")}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white/85 text-slate-600 shadow-sm hover:bg-white">
+              <Icon value="i:refresh" />
             </button>
             {selectedBrandId && (
               <button data-gg-action onClick={() => setThemeBuilderOpen(true)} title={t(`ปรับธีมของ ${selectedBrand?.name ?? "แบรนด์"}`, `Adjust theme for ${selectedBrand?.name ?? "brand"}`)}
@@ -754,8 +807,10 @@ export function DesignDashboard() {
               ＋ {t("เพิ่มงาน", "Add job")}{canFromLibrary && <span className="text-[10px] opacity-70">▾</span>}
             </button>
           </div>
+         </div>
         </div>
         )}
+        {isPhone && moveMessage && <MoveTicker msg={moveMessage} onDone={() => setMoveMessage(null)} className="mb-2 h-7 rounded-lg border border-slate-200 bg-white px-2" />}
 
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -763,21 +818,33 @@ export function DesignDashboard() {
           </div>
         )}
 
-        {moveMessage && (
-          <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${moveMessage.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
-            {moveMessage.text}
-          </div>
+        {/* แบรนด์: จอคอม = แถบซ้ายพับได้ (BrandRail ด้านล่าง · 2026-11-22) · มือถือ/แท็บเล็ต = แถวบนเหมือนเดิม */}
+        {!isDesktop && (
+          <BrandBar isPhone={isPhone} isDesktop={isDesktop} loading={loading} groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={pickBrand}
+            favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} onAddJob={openAddJob} />
         )}
-
-        {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
-        <BrandBar isPhone={isPhone} isDesktop={isDesktop} loading={loading} groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={pickBrand}
-          favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} onAddJob={openAddJob} />
 
         {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
         <BrandSettingsModal brandSettingsOpen={brandSettingsOpen} setBrandSettingsOpen={setBrandSettingsOpen} orderedAll={orderedAll} brandPrefs={brandPrefs} topBrands={topBrands} moveBrand={moveBrand} brandMark={brandMark} toggleHiddenBrand={toggleHiddenBrand} />
 
-        {/* บอร์ด (เต็มกว้าง) — แถวการ์ดสถิติ 4 ใบเอาออกแล้ว (เจ้าของขอ 2026-11-07 · จำนวนต่อแบบดูได้ในเมนูตัวกรอง) */}
-        <div className="space-y-4">
+        <div className={isDesktop ? "flex items-start gap-3" : ""}>
+        {isDesktop && (
+          <BrandRail groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={pickBrand} brandMark={brandMark} setBrandSettingsOpen={setBrandSettingsOpen}
+            onAddJob={openAddJob} favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} pinned={railPinned} onTogglePin={toggleRailPin} stickyTop={sticky.below ?? 0} />
+        )}
+        {/* บอร์ด — แถวการ์ดสถิติ 4 ใบเอาออกแล้ว (เจ้าของขอ 2026-11-07 · จำนวนต่อแบบดูได้ในเมนูตัวกรอง) */}
+        <div className="min-w-0 flex-1 space-y-4">
+          {/* 📅 ปฏิทินกำหนดส่ง (ของกลาง DocCalendar โหมดย่อ) — แทนแถวแบรนด์ (เจ้าของสั่ง 2026-11-22) · มุมมองไอเดีย/หน้า "วันนี้" มือถือ ไม่โชว์ */}
+          {viewMode !== "ideas" && !(isPhone && phoneView === "today") && (
+            <DocCalendar compact docs={calDocs} cursor={calCursor} onCursor={setCalCursor} unit={t("งาน", "jobs")}
+              title={t("ปฏิทินกำหนดส่ง", "Deadlines")}
+              selectedDay={calDay} onPickDay={(d) => setCalDay((cur) => (cur === d ? null : d))}
+              onDropDay={canEdit && isDesktop ? (day, e) => { const id = e.dataTransfer.getData("text/plain"); if (id) void moveSheetDeadline(id, day); } : undefined}
+              hint={calDay
+                ? t(`กรอง: ส่ง ${new Date(`${calDay}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${filteredSheets.length} งาน · กดวันเดิมอีกครั้ง = ดูทั้งหมด`, `Filter: due ${calDay} · ${filteredSheets.length} jobs · click the day again to clear`)
+                : canEdit && isDesktop ? t("กดวัน = ดูเฉพาะงานส่งวันนั้น · ลากการ์ดมาวาง = เลื่อนกำหนดส่ง", "Click a day to filter · drag a card onto a day to move its deadline")
+                : t("กดวัน = ดูเฉพาะงานส่งวันนั้น", "Click a day to filter")} />
+          )}
 
           <main className="min-w-0 space-y-4">
             {/* มือถือ ปุ่ม "วันนี้" แถบล่าง = รวมงานที่ต้องสนใจ (แทนบอร์ด · แถบแบรนด์ยังใช้กรองได้) */}
@@ -910,6 +977,7 @@ export function DesignDashboard() {
             )}
 
           </main>
+        </div>
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}
         {isPhone && !pickMode && (

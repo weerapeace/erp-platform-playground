@@ -1178,8 +1178,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "doc-calendar", label: "ปฏิทินเอกสาร", code: "DocCalendar", category: "table",
     source: { path: "components/doc-calendar" },
-    what: "เอาเอกสารที่มีวันที่มาวางบนปฏิทินรายเดือน (ดูอย่างเดียว)",
-    notWhen: "ถ้าต้องลากวางเพื่อตั้งวัน ให้ใช้ ScheduleBoard",
+    what: "เอาเอกสารที่มีวันที่มาวางบนปฏิทินรายเดือน · compact = ปฏิทินย่อ (ช่องเตี้ย ชิปเลขเอกสาร 2 ใบ/วัน ใส่ใน dashboard ได้) · onPickDay กดวันเพื่อกรอง/เลือกวัน · onDropDay รับการ์ดที่ลากมาจากที่อื่นมาวางบนวัน (เช่น ลากการ์ดบอร์ดมาเลื่อนกำหนดส่ง)",
+    notWhen: "ถ้าต้องมีกล่องงานยังไม่ลงวัน + ลากจัดตารางเต็มรูปแบบ ให้ใช้ ScheduleBoard",
   },
   {
     key: "schedule-board", label: "ปฏิทินลากวางตั้งวัน", code: "ScheduleBoard", category: "table",
