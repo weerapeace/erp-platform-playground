@@ -469,7 +469,7 @@ function HistoryStep({ app, onLoaded }: { app: StaffAppRow; onLoaded: () => void
               <div className="truncate text-slate-700">{v.note || `${d.label} · ${d.menus.length} เมนู`}</div>
               <div className="text-[11px] text-slate-400">{new Date(v.created_at).toLocaleString("th-TH")} · {v.created_by_name ?? "-"}</div>
             </div>
-            <button type="button" onClick={() => setAsk(v)} className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50"><Icon name="arrow-back-up" /> ใช้เวอร์ชันนี้เป็นร่าง</button>
+            <button type="button" onClick={() => setAsk(v)} className="h-8 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 hover:bg-slate-50"><Icon value="i:arrow-back-up" /> ใช้เวอร์ชันนี้เป็นร่าง</button>
           </div>
         );
       })}

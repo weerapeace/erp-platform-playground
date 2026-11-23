@@ -114,7 +114,7 @@ export function StaffAppTrash({ apps, onChanged }: { apps: StaffAppRow[]; onChan
               <div className="truncate text-slate-800">{a.label}</div>
               <div className="text-[11px] text-slate-400">ลบเมื่อ {a.deleted_at ? new Date(a.deleted_at).toLocaleString("th-TH") : "-"} · {cleanCount(a)} เมนู</div>
             </div>
-            <button type="button" onClick={() => void restore(a)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50"><Icon name="arrow-back-up" /> กู้คืน</button>
+            <button type="button" onClick={() => void restore(a)} className="h-8 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50"><Icon value="i:arrow-back-up" /> กู้คืน</button>
             <button type="button" onClick={() => setPurge(a)} className="h-8 rounded-lg border border-rose-200 px-3 text-xs text-rose-600 hover:bg-rose-50">ลบถาวร</button>
           </div>
         ))}
