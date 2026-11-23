@@ -140,18 +140,26 @@ export default function PurchaseVoucherFormPage() {
   const [billLinks, setBillLinks] = useState<BillLinkMap>({});
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
-  const applyData = useCallback((d: Detail) => {
+  // ★ 2026-11-23 ช่องที่พิมพ์แก้ค้าง (ยังไม่บันทึก) — แผงบิลร้าน/ใบส่งของสั่งโหลดใบใหม่แล้วต้องไม่ทับที่พิมพ์ไว้ (บั๊ก: ใส่ 60 กดใช้น้ำหนัก/คิว กลายเป็น 1)
+  const editedRef = useRef<{ h: Set<string>; ln: Record<string, Set<string>> }>({ h: new Set(), ln: {} });
+  const applyData = useCallback((d: Detail, keep = false) => {
     setData(d);
+    const keepH = keep ? new Set(editedRef.current.h) : new Set<string>();
+    const keepLn: Record<string, Set<string>> = keep ? Object.fromEntries(Object.entries(editedRef.current.ln).map(([k, v]) => [k, new Set(v)])) : {};
+    if (!keep) editedRef.current = { h: new Set(), ln: {} };
     const hd0 = d.header;
     // ข้อมูลเก่ามีเรทตัวเดียว (ship_rate) → ใส่ให้ช่องของวิธีคิดเดิม
     const rateCube = hd0.ship_rate_cube ?? (hd0.ship_method === "cube" ? hd0.ship_rate : null);
     const rateKg = hd0.ship_rate_kg ?? (hd0.ship_method === "weight" ? hd0.ship_rate : null);
-    setH({ voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "",
-      seller_ship_foreign: hd0.seller_ship_foreign == null ? "" : String(hd0.seller_ship_foreign), pay_fee_thb: hd0.pay_fee_thb == null ? "" : String(hd0.pay_fee_thb), paid_total_thb: hd0.paid_total_thb == null ? "" : String(hd0.paid_total_thb) });
+    const freshH = { voucher_date: hd0.voucher_date, fx_rate: hd0.fx_rate == null ? "" : String(hd0.fx_rate), ship_method: hd0.ship_method, ship_rate_cube: rateCube == null ? "" : String(rateCube), ship_rate_kg: rateKg == null ? "" : String(rateKg), ship_manual_total: hd0.ship_manual_total == null ? "" : String(hd0.ship_manual_total), note: hd0.note ?? "", carrier_id: hd0.carrier_id ?? "", carrier_name: hd0.carrier_name ?? "",
+      seller_ship_foreign: hd0.seller_ship_foreign == null ? "" : String(hd0.seller_ship_foreign), pay_fee_thb: hd0.pay_fee_thb == null ? "" : String(hd0.pay_fee_thb), paid_total_thb: hd0.paid_total_thb == null ? "" : String(hd0.paid_total_thb) };
+    setH((prev) => { if (!keepH.size) return freshH; const out = { ...freshH } as Record<string, unknown>; for (const k of keepH) out[k] = (prev as Record<string, unknown>)[k]; return out as typeof freshH; });
     const m: typeof ln = {};
     for (const l of d.lines) m[l.id] = { unit_price: l.unit_price == null ? "" : String(l.unit_price), cbm_per_unit: l.cbm_per_unit == null ? "" : String(l.cbm_per_unit), kg_per_unit: l.kg_per_unit == null ? "" : String(l.kg_per_unit), ship_method: l.ship_method === "cube" || l.ship_method === "weight" ? l.ship_method : "", qty: String(l.qty),
       discount: l.discount_pct ? String(l.discount_pct) : l.discount ? String(l.discount) : "", disc_mode: l.discount_pct ? "pct" : "amt" };
-    setLn(m); setDirty(false);
+    setLn((prev) => { for (const [lid, ks] of Object.entries(keepLn)) if (m[lid] && prev[lid]) for (const k of ks) (m[lid] as Record<string, unknown>)[k] = (prev[lid] as Record<string, unknown>)[k]; return m; });
+    if (keep) for (const lid of Object.keys(editedRef.current.ln)) if (!m[lid]) delete editedRef.current.ln[lid];   // แถวที่ถูกลบไปแล้ว ไม่ต้องจำ
+    setDirty(keepH.size > 0 || Object.entries(keepLn).some(([lid, s]) => s.size > 0 && !!m[lid]));
   }, []);
 
   const load = useCallback(async () => {
@@ -163,6 +171,14 @@ export default function PurchaseVoucherFormPage() {
       applyData(j.data as Detail);
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setLoading(false); }
+  }, [id, applyData]);
+  /** ★ 2026-11-23 แผงบิลร้าน/ใบส่งของเปลี่ยนข้อมูลแล้ว → โหลดใบใหม่แบบเงียบ: ไม่ขึ้นหน้าโหลด (แผงไม่หลุด) + เก็บช่องที่พิมพ์แก้ค้าง */
+  const reloadKeep = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/purchasing/vouchers/${id}`);
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && !j.error) applyData(j.data as Detail, true);
+    } catch { /* โหลดไม่ได้ = ข้อมูลเดิมบนจอ */ }
   }, [id, applyData]);
   useEffect(() => { if (canView && id) void load(); }, [load, canView, id]);
 
@@ -226,7 +242,7 @@ export default function PurchaseVoucherFormPage() {
     return m;
   }, [data, calc]);
 
-  const setHeader = (patch: Partial<typeof h>) => { setH((p) => ({ ...p, ...patch })); setDirty(true); };
+  const setHeader = (patch: Partial<typeof h>) => { for (const k of Object.keys(patch)) editedRef.current.h.add(k); setH((p) => ({ ...p, ...patch })); setDirty(true); };
   /** ★ 2026-11-14 รู้ยอดบาท ไม่รู้เรท → แก้ "ค่าสินค้า ฿" ในกล่องสรุป แล้วคิดเรทให้ใหม่ (ให้ยอดบาทตรงทุกสตางค์ · lib/landed-cost fxForTargetThb) */
   const setGoodsThb = (thb: number) => {
     if (!calcIn) return;
@@ -245,7 +261,7 @@ export default function PurchaseVoucherFormPage() {
     const got = computeVoucher({ ...calcIn.header, fx_rate: fx }, calcIn.lines).totals.shop_total_thb;
     toast.success(`ปรับเรทเป็น ${fx} — ยอดจ่ายร้าน ฿${fmtMoney(got)} ตรงยอดจ่ายจริง · กดบันทึกร่างเพื่อเก็บ`);
   };
-  const setLine = (lid: string, patch: Partial<LineEdit>) => { setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
+  const setLine = (lid: string, patch: Partial<LineEdit>) => { const s = editedRef.current.ln[lid] ?? (editedRef.current.ln[lid] = new Set()); for (const k of Object.keys(patch)) s.add(k); setLn((p) => ({ ...p, [lid]: { ...p[lid], ...patch } })); setDirty(true); };
   /** ★ 2026-11-15 บันทึกร่างทั้งหน้า — บิลร้านที่ค้าง (บันทึกอัตโนมัติยังไม่ทันส่ง) + หัวใบ/รายการ · ไม่ได้แก้อะไรก็กดได้ */
   const saveAll = async () => {
     await panelRef.current?.flush();
@@ -640,7 +656,7 @@ export default function PurchaseVoucherFormPage() {
                 {/* แผงต้องอยู่ตลอด (ซ่อนเฉย ๆ ในมุมรวม) — หน้าใบใช้บันทึกร่าง/งานแก้ PO ตอนยืนยันผ่าน controlRef */}
                 {foreign && (
                   <div className={hasBills && !billView ? "hidden" : ""}>
-                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} lineMoney={lineMoney} onLinks={setBillLinks} />
+                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={reloadKeep} controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} lineMoney={lineMoney} onLinks={setBillLinks} />
                   </div>
                 )}
                 {hasBills && !billView && (
@@ -865,13 +881,14 @@ export default function PurchaseVoucherFormPage() {
                     {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
                     <DeliveryBillPanel voucherId={id} readonly={readonly}
                       lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id }))}
-                      onApplied={load} controlRef={deliveryRef} onStatus={onDbStatus} />
+                      onApplied={reloadKeep} controlRef={deliveryRef} onStatus={onDbStatus}
+                      beforeApply={async () => (dirty ? await save() : true)} />
                   </div>
                 </CollapseCard>
 
                 {!foreign && (
                   <CollapseCard title="✨ มีบิลจีน? ให้ AI อ่าน + เติมราคา" summary="ใช้กับบิลร้านภาษาจีน">
-                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={load} bare controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} />
+                    <SellerBillPanel key={sellerKey} voucherId={id} readonly={readonly} onApplied={reloadKeep} bare controlRef={panelRef} hideSaveBar onStatus={onPanelStatus} />
                   </CollapseCard>
                 )}
               </div>

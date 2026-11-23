@@ -54,8 +54,10 @@ const inp = "h-8 px-1.5 text-xs border border-slate-200 rounded-md bg-white disa
 const ROW_SPAN = 10000;
 const toDraft = (b: BillRow): Draft => ({ tracking_no: b.tracking_no ?? "", bill_date: b.bill_date ?? "", lines: (b.lines ?? []).map((l) => ({ ...l, voucher_line_ids: [...(l.voucher_line_ids ?? [])] })) });
 
-export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, controlRef, onStatus }: {
+export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, controlRef, onStatus, beforeApply }: {
   voucherId: string; lines: VoucherLineLite[]; readonly: boolean; onApplied: () => void | Promise<void>;
+  /** ★ 2026-11-23 ก่อน "ใช้น้ำหนัก/คิว": หน้าใบบันทึกที่แก้ค้างก่อน (จำนวนชิ้นที่ใช้หารน้ำหนัก/คิวต้องเป็นค่าล่าสุด) · false = ยกเลิก */
+  beforeApply?: () => Promise<boolean>;
   controlRef?: React.MutableRefObject<DeliveryBillApi | null>; onStatus?: (s: DeliveryBillStatus) => void;
 }) {
   const toast = useToast();
@@ -142,6 +144,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   const patchBill = async (billId: string, apply: boolean, opts: { quiet?: boolean } = {}): Promise<{ ok: boolean; applied: number }> => {
     const d = draftRef.current[billId]; if (!d) return { ok: false, applied: 0 };
     const b = billsRef.current.find((x) => x.id === billId);
+    if (apply && beforeApply && !(await beforeApply())) return { ok: false, applied: 0 };   // ที่แก้ในหน้าใบ (จำนวน) บันทึกก่อน — ไม่งั้นหารด้วยจำนวนเก่า
     setBusy(billId);
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
