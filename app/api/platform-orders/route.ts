@@ -30,12 +30,13 @@ import {
 import { demoOrder, demoOrders, isDemoId } from "@/lib/platform-order-demo";
 import { cleanShipTo, isManualChannel, isOpenManualChannel, isMarketplace, isShippingActive, manualOrderNo, manualShipBy, type OrderShipping } from "@/lib/order-shipping";
 import { orderIdsByProduct, orderItemsWithMedia, productSummary } from "@/lib/platform-order-items-server";
+import { printSummaryOf } from "@/lib/print-log-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, shipping, cod_amount, raw->>channel, created_at";
+const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, shipping, cod_amount, raw->>channel, created_at, packed_at, buyer_message:raw->shopee->>message_to_seller";
 const PAGE_MAX = 200;
 const OPEN_STATUSES = ["new", "confirmed", "packed"];
 
@@ -53,6 +54,8 @@ type ListParams = {
   platformId: string; brandId: string; view: string; status: string; q: string; due: string; invoice: string; active?: boolean; booked?: boolean; qIds?: string[];
   /** วงกลมแพลตฟอร์มที่ปิดไว้ (การ์ดแบรนด์ 2026-11-22) — คู่ แบรนด์|* : แพลตฟอร์ม|phone */
   off?: OffPair[];
+  /** แท็บแบบ Zort (2026-11-23): รอชำระ = ผู้ซื้อยังไม่จ่าย · ส่งด่วน = ยังไม่ส่ง + ขนส่งด่วน (Instant/Same day) */
+  unpaid?: boolean; urgent?: boolean;
   /** ยอดขายจากเมล: ซ่อนคู่ แบรนด์×แพลตฟอร์ม ที่ดึงจาก API แล้ว (เจ้าของเลือก E2 — LM ไม่ใช้เมลแล้ว · IG Shopee ยังใช้) */
   apiPairs?: { brand_id: string; platform_id: string }[];
 };
@@ -67,6 +70,7 @@ function parseOff(raw: string): OffPair[] {
 }
 /** ยังไม่จ่าย (ไม่นับงาน) — ตรงกับ isUnpaidPlatformStatus + ON_HOLD · Lazada เก็บตัวพิมพ์เล็ก */
 const NOT_ACTIVE_PS = "UNPAID,ON_HOLD,unpaid,LINE_UNPAID,LINE_EXPIRED,WEB_UNPAID,WEB_VERIFYING";
+const UNPAID_PS = ["UNPAID", "unpaid", "LINE_UNPAID", "WEB_UNPAID", "WEB_VERIFYING"];
 
 /** คำค้น → ปลอดภัยสำหรับ or() ของ PostgREST (ตัด , ( ) ที่ทำให้ตัวกรองพัง) */
 const cleanQ = (q: string) => q.replace(/[,()*%\\]/g, " ").trim().slice(0, 60);
@@ -87,6 +91,8 @@ function applyFilters(q: any, p: ListParams) {
     q = o.brand === "*" ? q.or(pf) : q.or(`brand_id.is.null,brand_id.neq.${o.brand},${pf}`);
   }
   if (p.status && isPlatformOrderStatus(p.status)) q = q.eq("status", p.status);
+  if (p.unpaid) q = q.neq("status", "cancelled").in("platform_status", UNPAID_PS);
+  if (p.urgent) q = q.in("status", OPEN_STATUSES).or("carrier.ilike.*instant*,carrier.ilike.*same*day*,carrier.ilike.*ส่งด่วน*");
   // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction · TikTok ON_HOLD = ผู้ซื้อยังยกเลิกได้ ยังไม่นับ)
   if (p.active) q = q.in("status", OPEN_STATUSES).or(`platform_status.is.null,platform_status.not.in.(${NOT_ACTIVE_PS})`);
   const s = cleanQ(p.q);
@@ -112,6 +118,7 @@ function toRow(r: Record<string, unknown>): PlatformOrderRow {
     tax_invoice_requested: r.tax_invoice_request != null, created_at: String(r.created_at ?? ""),
     shipping_status: (r.shipping as OrderShipping | null)?.status ?? null, shipping_courier: (r.shipping as OrderShipping | null)?.courierCode ?? null,
     shipping_mode: (r.shipping as OrderShipping | null)?.mode ?? null, cod_amount: Number(r.cod_amount) || 0, channel: (r.channel as string) ?? null,
+    packed_at: (r.packed_at as string) ?? null, buyer_message: (r.buyer_message as string) ?? null,
   };
 }
 
@@ -175,7 +182,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const m = mById.get(String(it.id));
       return { ...it, image_key: m?.image_key ?? null, color: m?.color ?? null, box_name: m?.box_name ?? null, weight_g: m?.weight_g ?? null };
     });
-    return NextResponse.json({ order: { ...(order as Record<string, unknown>), platform_code }, items: withMedia, error: null });
+    // หน้ารายละเอียดแบบ Zort (2026-11-23): ชื่อแบรนด์/ร้าน · เอกสารที่พิมพ์แล้ว · คนแพ็ก · ประวัติ (audit)
+    const o = order as Record<string, unknown>;
+    const [brand, pfName, pk, pc, lb, packer, logs] = await Promise.all([
+      o.brand_id ? admin.from("brands").select("name").eq("id", String(o.brand_id)).maybeSingle() : Promise.resolve({ data: null }),
+      o.platform_id ? admin.from("erp_platforms").select("name_th").eq("id", String(o.platform_id)).maybeSingle() : Promise.resolve({ data: null }),
+      printSummaryOf(admin, "po_pick", [id]), printSummaryOf(admin, "po_pack", [id]), printSummaryOf(admin, "po_label", [id]),
+      o.packed_by ? admin.from("user_profiles").select("display_name").eq("id", String(o.packed_by)).maybeSingle() : Promise.resolve({ data: null }),
+      admin.from("audit_logs").select("action, metadata, created_at").eq("entity_type", "platform_orders").eq("entity_id", id).order("created_at", { ascending: false }).limit(30),
+    ]);
+    const extra = {
+      brand_name: (brand.data as { name?: string } | null)?.name ?? null,
+      platform_name: (pfName.data as { name_th?: string } | null)?.name_th ?? null,
+      docs: { pick: pk.get(id)?.last ?? null, pack: pc.get(id)?.last ?? null, label: lb.get(id)?.last ?? null },
+      packed_by_name: (packer.data as { display_name?: string } | null)?.display_name ?? null,
+      history: ((logs.data ?? []) as { action: string; metadata: Record<string, unknown> | null; created_at: string }[]).map((l) => ({
+        at: l.created_at, action: l.action, by: (l.metadata?.actor as string | undefined) ?? null,
+        status: ((l.metadata?.changes as { field?: string; after?: unknown; new?: unknown }[] | undefined) ?? []).filter((c) => c.field === "status").map((c) => String(c.after ?? c.new ?? ""))[0] || null,
+        note: (l.metadata?.source as string | undefined) ?? null,
+      })),
+    };
+    return NextResponse.json({ order: { ...o, platform_code, ...extra }, items: withMedia, error: null });
   }
 
   // ?ids=a,b,c → ออเดอร์ + รายการ หลายใบ (หน้าพิมพ์ใบหยิบ/ใบแพ็ก/ใบปะหน้า)
@@ -202,7 +229,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const p: ListParams = {
     platformId: (sp.get("platform_id") ?? "").trim(), brandId: (sp.get("brand_id") ?? "").trim(),
     view: (sp.get("view") ?? "todo").trim(), status: (sp.get("status") ?? "").trim(), q: (sp.get("q") ?? "").trim(),
-    due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1", booked: sp.get("booked") === "1",
+    due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1", booked: sp.get("booked") === "1", unpaid: sp.get("unpaid") === "1", urgent: sp.get("urgent") === "1",
     off: parseOff(sp.get("off") ?? ""),
   };
   const page = Math.max(1, Number(sp.get("page")) || 1);
@@ -216,7 +243,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     applyFilters(admin.from("platform_orders").select("id", { count: "exact", head: true }), { ...p, ...extra })
       .then((r: { count: number | null }) => r.count ?? 0);
   // การ์ด = ทั้งร้าน/ทั้งมุมมอง ไม่ขึ้นกับตัวกรองย่อย (สถานะ/คำค้น/กำหนดส่ง/ใบกำกับ)
-  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false };
+  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false, unpaid: false, urgent: false };
 
   // เรียง: ออเดอร์ล่าสุดก่อน (เจ้าของขอ 2026-11-22) · การ์ด "เลยกำหนดส่ง/ต้องส่งวันนี้" หรือ ?sort=due = ใกล้กำหนดส่งก่อน
   const byDue = sp.get("sort") === "due" || p.due === "late" || p.due === "today";
@@ -225,7 +252,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? listQ.order("ship_by_at", { ascending: true, nullsFirst: false }).order("created_at", { ascending: false })
     : listQ.order("ordered_at", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false });
   listQ = listQ.range((page - 1) * size, page * size - 1);
-  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist, booked, brandCards] = await Promise.all([
+  const [list, byStatus, todo, late, today, invReq, viewTodo, viewHist, booked, brandCards, unpaidN, urgentN] = await Promise.all([
     listQ,
     Promise.all(PLATFORM_ORDER_STATUSES.map((st) => count({ ...scope, status: st }))),
     count({ ...scope, view: "todo", active: true }),
@@ -236,16 +263,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     count({ ...scope, view: "history" }),
     count({ ...scope, view: "todo", booked: true }),
     loadBrandCards(admin, { ...p, ...scope, brandId: "", platformId: "", off: [], view: "todo", active: true }).catch(() => []),
+    count({ ...scope, view: "todo", unpaid: true }),
+    count({ ...scope, view: "todo", urgent: true }),
   ]);
   if (list.error) return NextResponse.json({ error: "โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const by: Record<string, number> = {};
   PLATFORM_ORDER_STATUSES.forEach((st, i) => { by[st] = byStatus[i]; });
   const listRows = ((list.data ?? []) as Record<string, unknown>[]).map(toRow);
-  const media = await orderItemsWithMedia(admin, listRows.map((r) => r.id)).catch(() => new Map());   // คอลัมน์สินค้า — พลาด = แสดงรายการโดยไม่มีสินค้า
+  const ids = listRows.map((r) => r.id);
+  const [media, pk, pc, lb] = await Promise.all([
+    orderItemsWithMedia(admin, ids).catch(() => new Map()),   // คอลัมน์สินค้า — พลาด = แสดงรายการโดยไม่มีสินค้า
+    printSummaryOf(admin, "po_pick", ids), printSummaryOf(admin, "po_pack", ids), printSummaryOf(admin, "po_label", ids),   // ป้ายเอกสารใต้เลขออเดอร์
+  ]);
   return NextResponse.json({
-    orders: listRows.map((r) => ({ ...r, ...productSummary(media.get(r.id) ?? []) })),
+    orders: listRows.map((r) => ({ ...r, ...productSummary(media.get(r.id) ?? []), docs: { pick: pk.has(r.id), pack: pc.has(r.id) || !!r.packed_at, label: lb.has(r.id) } })),
     total: list.count ?? 0, page, page_size: size,
-    summary: { by_status: by, todo, late, today, invoice_requested: invReq, booked, view_total: { todo: viewTodo, history: viewHist }, brand_cards: brandCards },
+    summary: { by_status: by, todo, late, today, invoice_requested: invReq, booked, view_total: { todo: viewTodo, history: viewHist }, brand_cards: brandCards, unpaid: unpaidN, urgent: urgentN },
     error: null,
   });
 }

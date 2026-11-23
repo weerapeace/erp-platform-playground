@@ -32,7 +32,42 @@ export type PlatformOrderRow = {
   cod_amount?: number; channel?: string | null;
   /** คอลัมน์ "สินค้า" — 3 รายการแรก (ชิ้นมากสุดก่อน) + รูป (lib/platform-order-items-server productSummary) */
   products?: { sku_code: string | null; name: string | null; qty: number; image_key: string | null }[];
+  /** ตาราง/หน้ารายละเอียดแบบ Zort (2026-11-23): แพ็กเสร็จเมื่อ (สถานีแพ็ค) · ข้อความผู้ซื้อ · เอกสารที่พิมพ์แล้ว (print_logs po_*) */
+  packed_at?: string | null; buyer_message?: string | null;
+  docs?: { pick: boolean; pack: boolean; label: boolean };
 };
+
+// ---- ตาราง/หน้ารายละเอียดแบบ Zort (เจ้าของเลือก 2026-11-23) — pure · มีเทสต์ ----
+/** ส่งด่วน (Instant / Same day / ส่งด่วน) — ดูจากชื่อขนส่ง */
+export const URGENT_CARRIER_RE = /instant|same.?day|express.?2h|ส่งด่วน|ภายใน.?2.?ชม/i;
+export const isUrgentCarrier = (carrier: string | null | undefined) => URGENT_CARRIER_RE.test(String(carrier ?? ""));
+export type PaymentState = "paid" | "unpaid" | "cod" | "refund" | "none";
+export const PAYMENT_STATE_META: Record<PaymentState, { label: string; tone: "success" | "warning" | "info" | "muted" }> = {
+  paid: { label: "ชำระครบ", tone: "success" }, unpaid: { label: "รอชำระ", tone: "warning" },
+  cod: { label: "เก็บปลายทาง", tone: "info" }, refund: { label: "คืนเงิน", tone: "muted" }, none: { label: "—", tone: "muted" },
+};
+/** สถานะการชำระเงินของออเดอร์ (คอลัมน์ "ชำระเงิน") */
+export function paymentState(o: { status: string; platform_status?: string | null; cod_amount?: number | null }): PaymentState {
+  const ps = String(o.platform_status ?? "").toUpperCase();
+  if (ps === "LINE_REFUND" || ps === "TO_RETURN" || ps === "RETURNED") return "refund";
+  if (o.status === "cancelled") return "none";
+  if (isUnpaidPlatformStatus(ps)) return "unpaid";
+  if (Number(o.cod_amount) > 0) return o.status === "shipped" ? "paid" : "cod";
+  return "paid";
+}
+/** วันที่แบบ Zort: "วันนี้ 16:49" · "เมื่อวาน 09:10" · "21/11 14:05" (เวลาไทย) */
+export function shortOrderDate(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const BKKMS = 7 * 3600_000;
+  const d = new Date(t + BKKMS);
+  const hm = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  const day = Math.floor((t + BKKMS) / 86_400_000) - Math.floor((now + BKKMS) / 86_400_000);
+  if (day === 0) return `วันนี้ ${hm}`;
+  if (day === -1) return `เมื่อวาน ${hm}`;
+  return `${d.getUTCDate()}/${d.getUTCMonth() + 1} ${hm}`;
+}
 export type PlatformOrderItemRow = {
   id: string; sku_code: string | null; matched_sku_id: string | null; matched_parent_sku_id?: string | null;
   name: string | null; qty: number; price: number | null; variant?: string | null;

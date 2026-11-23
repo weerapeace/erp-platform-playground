@@ -579,3 +579,33 @@ export async function shopeeUpdatePrice(accessToken: string, shopId: string | nu
   if (!body.price_list.length || body.price_list.length > 50) throw new ShopeeApiError("แก้ราคาได้ครั้งละ 1–50 ตัวเลือก", "error_param");
   return shopeeFetch("/api/v2/product/update_price", { accessToken, shopId, body });
 }
+
+// ───────── รายได้จริงต่อออเดอร์ (หน้ารายละเอียดออเดอร์ · เจ้าของเลือก 2026-11-23 ข้อ 3) ─────────
+/** บรรทัดรายได้/ค่าธรรมเนียม (บาท · ติดลบ = หักจากร้าน) — โชว์เฉพาะบรรทัดที่ Shopee ส่งมา */
+export type ShopeeIncome = { buyer_paid: number | null; escrow: number | null; lines: { key: string; label: string; amount: number }[] };
+/**
+ * v2.payment.get_escrow_detail → รายได้ที่ร้านได้จริง (pure · มีเทสต์)
+ *   escrow_amount = เงินที่ร้านได้ · buyer_total_amount = ผู้ซื้อจ่าย · ค่าธรรมเนียม/ส่วนลดร้าน = ติดลบ
+ */
+export function shopeeIncomeOf(j: Obj): ShopeeIncome {
+  const r = respOf(j);
+  const oi = obj(r.order_income) ?? {};
+  const n = (k: string) => num(oi[k]);
+  const lines: { key: string; label: string; amount: number }[] = [];
+  const add = (key: string, label: string, v: number | null, sign: 1 | -1 = 1) => { if (v != null && v !== 0) lines.push({ key, label, amount: sign * Math.abs(v) }); };
+  add("original_price", "ราคาสินค้า (ก่อนส่วนลด)", n("original_price") ?? n("order_original_price"));
+  add("seller_discount", "ส่วนลดจากร้าน", (n("seller_discount") ?? 0) + (n("voucher_from_seller") ?? 0) || null, -1);
+  add("shopee_discount", "ส่วนลดจาก Shopee (Shopee ออกให้)", (n("shopee_discount") ?? 0) + (n("voucher_from_shopee") ?? 0) + (n("coins") ?? 0) || null);
+  add("buyer_shipping", "ค่าส่งที่ผู้ซื้อจ่าย", n("buyer_paid_shipping_fee"));
+  add("shipping", "ค่าส่ง (ร้านจ่ายสุทธิ)", n("final_shipping_fee"), -1);
+  add("commission", "ค่าคอมมิชชั่น", n("commission_fee"), -1);
+  add("service", "ค่าบริการ", n("service_fee"), -1);
+  add("transaction", "ค่าธุรกรรมการชำระเงิน", n("seller_transaction_fee") ?? n("transaction_fee"), -1);
+  add("ams", "ค่าโฆษณา/แอฟฟิลิเอต", n("order_ams_commission_fee"), -1);
+  add("return", "คืนเงินผู้ซื้อ", n("seller_return_refund"), -1);
+  return { buyer_paid: n("buyer_total_amount"), escrow: n("escrow_amount"), lines };
+}
+/** ⚠️ อ่านอย่างเดียว */
+export async function shopeeGetEscrowDetail(accessToken: string, shopId: string | number, orderSn: string): Promise<ShopeeIncome> {
+  return shopeeIncomeOf(await shopeeFetch("/api/v2/payment/get_escrow_detail", { accessToken, shopId, query: { order_sn: orderSn } }));
+}

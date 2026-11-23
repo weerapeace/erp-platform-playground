@@ -14,6 +14,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import JsBarcode from "jsbarcode";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { ListPrintFrame } from "@/components/report/list-print-frame";
+import { usePrintLog } from "@/components/report/use-print-log";
 import { ListPrintPanel } from "@/components/report/list-print-panel";
 import { useListPrintSettings } from "@/components/report/use-list-print-settings";
 import { useAuth } from "@/components/auth";
@@ -74,6 +75,9 @@ function Inner() {
   }, [ids]);
 
   const isDemo = !!orders?.length && orders.every((o) => o.source === "demo");
+  // บันทึกว่าพิมพ์แล้ว (ป้ายเอกสาร หยิบ/แพ็ก/ปะหน้า ใต้เลขออเดอร์ในศูนย์ออเดอร์ · 2026-11-23) — ออเดอร์ตัวอย่างไม่บันทึก
+  const logItems = useMemo(() => (isDemo ? [] : (orders ?? []).filter((o) => !String(o.id).startsWith("demo-")).map((o) => ({ doc_id: o.id, doc_no: o.order_no ?? null }))), [orders, isDemo]);
+  usePrintLog(kind === "pack" ? "po_pack" : kind === "label" ? "po_label" : "po_pick", logItems);
   // ใบปะหน้าของออเดอร์ที่จองขนส่งแล้ว (ศูนย์ออเดอร์ › จัดส่ง) — จองจำลอง = ใบของเรามีลายน้ำ · จองจริง = ไฟล์จาก SHIPPOP (ขั้น 2)
   const [ship, setShip] = useState<{ html: string | null; sims: ShipSimLabel[]; booked: string[] } | null>(null);
   // ขนาดใบปะหน้าจาก SHIPPOP (ใช้กับการจองจริง/ทดลอง) — จำต่อเครื่อง

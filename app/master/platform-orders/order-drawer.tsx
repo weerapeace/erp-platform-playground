@@ -2,6 +2,7 @@
 
 // แผงรายละเอียดออเดอร์ (ลิ้นชักกลาง Drawer) — ปุ่มสถานะตามกติกากลาง lib/platform-order-status · ผู้รับ + ขนส่ง (lib/order-shipping) · ใบกำกับภาษี
 // รายการสินค้ามีรูป (ชี้ขยาย · HoverImage) + สี/กล่อง/น้ำหนัก — 2026-11-19
+// 2026-11-23: variant="panel" = แผง "จัดการออเดอร์" ในหน้ารายละเอียดเต็ม (/master/platform-orders/[id]) — ปุ่ม/ขนส่ง/ใบกำกับชุดเดียวกัน ไม่โชว์ข้อมูล/สินค้าซ้ำ
 
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog, Drawer } from "@/components/modal";
@@ -25,9 +26,11 @@ const ACTION_LABEL: Partial<Record<PlatformOrderStatus, string>> = {
   confirmed: "ยืนยัน (ตัดสต๊อก)", packed: "แพ็กแล้ว", shipped: "ส่งแล้ว", cancelled: "ยกเลิกออเดอร์",
 };
 
-export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onShip }: {
+export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onShip, variant = "drawer", reloadKey = 0 }: {
   id: string; canManage: boolean; onClose: () => void; onChanged: () => void; onInvoice: (id: string) => void; onShip: (id: string) => void;
+  variant?: "drawer" | "panel"; reloadKey?: number;
 }) {
+  const isPanel = variant === "panel";
   const toast = useToast();
   const [order, setOrder] = useState<Record<string, unknown> | null>(null);
   const [items, setItems] = useState<PlatformOrderItemRow[]>([]);
@@ -51,7 +54,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
       setAddr({ ...EMPTY_SHIP_TO, ...((j.order?.ship_to as ShipTo | null) ?? {}) }); setCod(String(Number(j.order?.cod_amount) || ""));
     } catch (e) { setErr((e as Error).message); }
   }, [id]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); }, [load, reloadKey]);
 
   // ขนส่ง: ยกเลิกการจอง / จำลองสถานะถัดไป
   const shipAction = async (action: "cancel" | "simulate") => {
@@ -103,10 +106,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
   const channelLabel = source === "manual" ? manualChannelLabel((order?.raw as { channel?: string } | null)?.channel) : "";
   const saveAddr = async () => { await patch({ ship_to: addr, cod_amount: Number(cod) || 0 }); setEditAddr(false); };
 
-  return (
-    <>
-      <Drawer open onClose={onClose} title={title} size="md" storageKey="platform-order-drawer"
-        footer={canManage && order ? (
+  const footer = canManage && order ? (
           <div className="flex w-full flex-wrap items-center gap-2">
             {next.map((s) => (
               <button key={s} onClick={() => void patch(s === "shipped" ? { status: s, tracking_no: tracking, carrier } : { status: s })} disabled={busy}
@@ -116,8 +116,9 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
             <div className="flex-1" />
             {canCancel && <button onClick={() => setAskCancel(true)} disabled={busy} className="h-9 rounded-lg border border-rose-200 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50">ยกเลิก</button>}
           </div>
-        ) : undefined}>
-        {err ? <p className="py-10 text-center text-sm text-rose-600">{err}</p> : !order ? <p className="py-10 text-center text-sm text-slate-400">กำลังโหลด…</p> : (
+  ) : undefined;
+  const body = (
+        err ? <p className="py-10 text-center text-sm text-rose-600">{err}</p> : !order ? <p className="py-10 text-center text-sm text-slate-400">กำลังโหลด…</p> : (
           <div className="space-y-5 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <StatusChip s={status} />
@@ -130,6 +131,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
             {shopManaged && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:refresh" className="mr-1" />ออเดอร์ {shopName} — สถานะตามร้าน {shopName} (อัปเดตเองทุก 15 นาที หรือกด ดึงออเดอร์ {shopName}) · จัดส่งใน {shopName} Seller Center / BigSeller จึงเปลี่ยนสถานะ/ตัดสต๊อกที่นี่ไม่ได้ (ออกใบกำกับภาษีได้)</p>}
             {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800"><Icon name="warning" className="mr-1" />{warn}</p>}
 
+            {!isPanel && <>
             <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1.5">
               <dt className="text-slate-400">ลูกค้า</dt><dd>{String(order.customer_name ?? "—")}</dd>
               <dt className="text-slate-400">ยอดรวม</dt><dd>{order.total != null ? `${Number(order.total).toLocaleString("th-TH")} ฿` : "—"}</dd>
@@ -156,6 +158,7 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
                 ))}
               </div>
             </div>
+            </>}
 
             {/* ผู้รับ — ออเดอร์ช่องทางของเรา (แก้ได้จนกว่าจะจองขนส่ง) · ออเดอร์ตัวอย่างโชว์ที่อยู่ตัวอย่าง */}
             {(ownChannel || demoRecipient) && (
@@ -223,8 +226,14 @@ export function OrderDrawer({ id, canManage, onClose, onChanged, onInvoice, onSh
             {msg && <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{msg}</p>}
             {!isPlatformOrderStatus(status) && <p className="text-xs text-rose-600">สถานะ “{status}” ไม่อยู่ในกติกากลาง — แจ้งผู้ดูแลระบบ</p>}
           </div>
-        )}
-      </Drawer>
+        )
+  );
+
+  return (
+    <>
+      {isPanel
+        ? <div className="space-y-3">{footer && <div className="rounded-xl border border-slate-200 bg-white p-3">{footer}</div>}{body}</div>
+        : <Drawer open onClose={onClose} title={title} size="md" storageKey="platform-order-drawer" footer={footer}>{body}</Drawer>}
       <ConfirmDialog open={askCancel} onClose={() => setAskCancel(false)} variant="danger" title="ยกเลิกออเดอร์นี้?"
         message={order?.stock_deducted ? "ระบบจะคืนสต๊อกที่ตัดไปแล้วกลับเข้าคลัง" : "ออเดอร์จะย้ายไปอยู่ในกลุ่ม ยกเลิก"}
         confirmText="ยกเลิกออเดอร์" cancelText="ไม่ยกเลิก" loading={busy}

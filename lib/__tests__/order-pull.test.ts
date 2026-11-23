@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { alertDue, countPullStates, pullAlerts, shopPullHealth, type ShopPullInput } from "@/lib/order-pull-health";
 import { lazMoney, lazOrderToPlatformOrder, lazTime } from "@/lib/lazada-orders";
 import { lineOrderToPlatformOrder } from "@/lib/line-shopping-orders";
+import { shopeeIncomeOf } from "@/lib/shopee";
 import {
-  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, offKey, toggleOffCircle, lazadaToInternal, lineShoppingStatus, needsAction,
+  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, offKey, toggleOffCircle, paymentState, isUrgentCarrier, shortOrderDate, lazadaToInternal, lineShoppingStatus, needsAction,
   platformStatusLabel, shopManagedName, webshopStatus, webshopToInternal,
 } from "@/lib/platform-order-status";
 
@@ -146,5 +147,36 @@ describe("วงกลมแพลตฟอร์มในการ์ดแบ�
   });
   it("การ์ดทุกแบรนด์ใช้ * · ออเดอร์ไม่ผูกแพลตฟอร์มใช้ phone", () => {
     expect(offKey(null, null)).toBe("*:phone");
+  });
+});
+
+describe("ตาราง/หน้ารายละเอียดแบบ Zort", () => {
+  it("สถานะชำระเงิน", () => {
+    expect(paymentState({ status: "new", platform_status: "READY_TO_SHIP" })).toBe("paid");
+    expect(paymentState({ status: "new", platform_status: "UNPAID" })).toBe("unpaid");
+    expect(paymentState({ status: "new", platform_status: "unpaid" })).toBe("unpaid");
+    expect(paymentState({ status: "new", cod_amount: 300 })).toBe("cod");
+    expect(paymentState({ status: "shipped", cod_amount: 300 })).toBe("paid");
+    expect(paymentState({ status: "cancelled" })).toBe("none");
+    expect(paymentState({ status: "shipped", platform_status: "TO_RETURN" })).toBe("refund");
+  });
+  it("ส่งด่วนดูจากชื่อขนส่ง", () => {
+    expect(isUrgentCarrier("Instant Delivery - ส่งทันที (แพ็ก 2 ชั่วโมง)")).toBe(true);
+    expect(isUrgentCarrier("Same Day")).toBe(true);
+    expect(isUrgentCarrier("SPX Express")).toBe(false);
+    expect(isUrgentCarrier(null)).toBe(false);
+  });
+  it("วันที่แบบ วันนี้/เมื่อวาน (เวลาไทย)", () => {
+    const now = Date.parse("2026-11-23T10:00:00Z");   // 17:00 ไทย
+    expect(shortOrderDate("2026-11-23T09:49:00Z", now)).toBe("วันนี้ 16:49");
+    expect(shortOrderDate("2026-11-22T02:10:00Z", now)).toBe("เมื่อวาน 09:10");
+    expect(shortOrderDate("2026-11-20T07:05:00Z", now)).toBe("20/11 14:05");
+    expect(shortOrderDate(null, now)).toBe("—");
+  });
+  it("รายได้จริง Shopee (escrow): หักค่าธรรมเนียม/ส่วนลดร้านเป็นลบ · ข้ามบรรทัดที่เป็น 0", () => {
+    const inc = shopeeIncomeOf({ response: { order_income: { buyer_total_amount: 349, original_price: 466, seller_discount: 117, voucher_from_seller: 0, commission_fee: 25, service_fee: 12, seller_transaction_fee: 4, escrow_amount: 308, final_shipping_fee: 0 } } });
+    expect(inc.buyer_paid).toBe(349);
+    expect(inc.escrow).toBe(308);
+    expect(inc.lines.map((l) => [l.key, l.amount])).toEqual([["original_price", 466], ["seller_discount", -117], ["commission", -25], ["service", -12], ["transaction", -4]]);
   });
 });

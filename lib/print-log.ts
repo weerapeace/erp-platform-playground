@@ -15,10 +15,11 @@
 // pattern_project = หน้าพิมพ์/ไฟล์ตัดของแพทเทิร์นในแอปสตูดิโอแพทเทิร์น (doc_id = pattern_projects.id) จาก /print/pattern-project/<id>
 // fabric_plan = ใบตัดผ้าจากหน้าวางแผนตัดผ้า (doc_id = manufacturing_orders.id ของแต่ละใบในแผน) จาก /print/fabric-plan
 // swatch_label = ป้ายแผงผ้า + QR (doc_id = sku_swatches.id) จาก /print/swatch-label?ids=
-export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan", "swatch_label"] as const;
+// po_pick / po_pack / po_label = ใบหยิบ / ใบแพ็ก / ใบปะหน้า ของศูนย์ออเดอร์ (doc_id = platform_orders.id) จาก /print/platform-orders · ป้ายเอกสารใต้เลขออเดอร์ (2026-11-23)
+export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan", "swatch_label", "po_pick", "po_pack", "po_label"] as const;
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 /** สิทธิ์ดู/บันทึกประวัติพิมพ์ต่อชนิด (ไม่ระบุ = ดูสินค้าได้ products.view) — ฝ่ายขายเปิดใบสั่งขายได้แต่อาจไม่มีสิทธิ์ดูสินค้า */
-export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view", pattern_project: "pattern_studio.view" };
+export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view", pattern_project: "pattern_studio.view", po_pick: "platform_orders.view", po_pack: "platform_orders.view", po_label: "platform_orders.view" };
 export const printDocPerm = (t: PrintDocType): string => PRINT_DOC_PERM[t] ?? "products.view";
 
 /** พิมพ์แบบไหน: print = กดพิมพ์ / Ctrl+P / บันทึก PDF จากหน้าต่างพิมพ์ · pdf = โหลด/เปิดไฟล์ PDF · link = เปิดไฟล์พิมพ์ในแท็บใหม่ / ส่งลิงก์ */
