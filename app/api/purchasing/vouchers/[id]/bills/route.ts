@@ -5,7 +5,9 @@
  *   POST   { r2_key, gr_id? }                               → ให้ AI อ่านรูป → บันทึกเป็นใบส่งของ · เลขขนส่งซ้ำกับใบอื่น = ส่ง duplicates กลับไปถาม "ใช้ร่วมไหม"
  *   POST   { action:"claim", bill_id, rows[], drop_bill_id? } → รับแถวของบิลนั้นเข้าใบนี้ (ใช้ร่วม / กล่องที่พักไว้) · drop = เอาสำเนาซ้ำของใบนี้ออก
  *   PATCH  { bill_id, tracking_no?, bill_date?, lines?, apply?, expected_updated_at? } → แก้ค่า/จับคู่/เจ้าของแถว · apply = ใช้น้ำหนัก/คิว เฉพาะแถวของใบนี้
+ *   POST   { action:"unapply", bill_id, before[] }        → ย้อน "ใช้น้ำหนัก/คิวให้อัตโนมัติ" หลังอ่าน (คืนคิว/กก.ต่อชิ้นเดิม + ล้างการจับคู่อัตโนมัติ)
  *   DELETE ?bill_id=                                        → ถอดใบส่งของ (ใช้ร่วมกับใบอื่น = แถวของใบนี้ไปพักไว้ บิลยังอยู่กับใบอื่น)
+ * ★ 2026-11-23 แบบ A: อ่านใบใหม่แล้วชัด (ใบนี้มีใบส่งของใบเดียว + จับคู่กล่องได้ครบ) → จับคู่ + ใช้น้ำหนัก/คิวให้เลย (ข้อ 2) · ย้อนได้
  * ★ 2026-11-22 ใช้ร่วมหลายใบ — แต่ละแถวเลือกได้ว่าเป็นของใบไหน (lib/delivery-bill-share · ไม่เพิ่มตาราง)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +17,8 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit, auditDiff } from "@/lib/audit";
 import { parseDeliveryBillImage, applyDeliveryBill, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
 import { rowOwner, rowsOf, otherOwners, billStatusAfter, matchCopyRow } from "@/lib/delivery-bill-share";
+import { autoMatchBoxes } from "@/lib/delivery-bill-check";
+import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isRefForCategory } from "@/lib/file-ref";
 import { voucherEditable } from "@/lib/voucher-revision";
 
@@ -133,6 +137,30 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   const { data: v } = await admin.from("purchase_vouchers_v2").select("id, status, editing_at, pv_no").eq("id", id).maybeSingle();
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
 
+  // ── ย้อน "ใช้น้ำหนัก/คิวให้อัตโนมัติ" (หลังอ่านใบส่งของ) ─────────────────────────
+  if (body.action === "unapply") {
+    if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว — กด แก้ไขใบ ก่อน" }, { status: 400 });
+    const billId = str(body.bill_id);
+    const before = (Array.isArray((body as { before?: unknown }).before) ? (body as { before: Row[] }).before : []).filter((x) => x && typeof x.id === "string");
+    const { data: b } = await admin.from("purchase_delivery_bills").select("*").eq("id", billId).not("is_active", "is", false).maybeSingle();
+    if (!b) return NextResponse.json({ error: "ไม่พบใบส่งของ" }, { status: 404 });
+    const { data: vlIds } = await admin.from("purchase_voucher_lines_v2").select("id").eq("voucher_id", id);
+    const mineIds = new Set(((vlIds ?? []) as Row[]).map((r) => String(r.id)));
+    let restored = 0;
+    for (const x of before) {
+      if (!mineIds.has(String(x.id))) continue;
+      const { error } = await admin.from("purchase_voucher_lines_v2").update({ kg_per_unit: optNum(x.kg_per_unit), cbm_per_unit: optNum(x.cbm_per_unit), ship_method: x.ship_method === "cube" || x.ship_method === "weight" ? x.ship_method : null }).eq("id", String(x.id)).eq("voucher_id", id);
+      if (!error) restored++;
+    }
+    const home = String((b as Row).voucher_id);
+    const lines = linesOf(b as Row).map((l) => (rowOwner(l, home) === id && l.auto ? { ...l, voucher_line_ids: [], applied_at: null, auto: false } : l));
+    await admin.from("purchase_delivery_bills").update({ lines, status: billStatusAfter(lines, home), updated_at: new Date().toISOString() }).eq("id", billId);
+    await recomputeVoucher(admin, id);
+    await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
+      metadata: { note: "ย้อนการใช้น้ำหนัก/คิวอัตโนมัติจากใบส่งของ", delivery_bill: billId, lines_restored: restored } });
+    return NextResponse.json({ ok: true, restored, error: null });
+  }
+
   // ── รับแถวเข้าใบนี้ (ใช้ร่วมกับใบอื่น / กล่องที่พักไว้) ─────────────────────────
   if (body.action === "claim") {
     if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว — กด แก้ไขใบ ก่อน แล้วค่อยรับแถวเข้าใบ" }, { status: 400 });
@@ -210,7 +238,32 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
         duplicates = dl.map((d) => ({ bill_id: String(d.id), voucher_id: String(d.voucher_id), pv_no: pv.get(String(d.voucher_id)) ?? null, created_at: String(d.created_at ?? "") }));
       }
     }
-    return NextResponse.json({ ok: true, data: ins, duplicates, error: null });
+    // ★ 2026-11-23 ข้อ 2: ชัด → จับคู่ + ใช้น้ำหนัก/คิวให้เลย — ใบนี้แก้ได้ · ไม่ซ้ำกับใบอื่น · ใบนี้ยังไม่มีใบส่งของอื่นที่มีกล่องของใบนี้ · จับคู่ได้ครบทุกกล่อง
+    let auto: { applied: number; before: Row[] } | null = null;
+    const newId = String((ins as Row).id);
+    if (!duplicates.length && voucherEditable(v as { status: string; editing_at?: string | null }) && parsed.lines.length > 0) {
+      const [{ data: ownB }, { data: shB }, { data: vls }] = await Promise.all([
+        admin.from("purchase_delivery_bills").select("id").eq("voucher_id", id).neq("kind", "seller").not("is_active", "is", false).neq("id", newId).limit(1),
+        admin.from("purchase_delivery_bills").select("id").contains("lines", [{ for_voucher_id: id }]).neq("kind", "seller").not("is_active", "is", false).limit(1),
+        admin.from("purchase_voucher_lines_v2").select("id, qty, item_sku_id, kg_per_unit, cbm_per_unit, ship_method").eq("voucher_id", id).not("is_active", "is", false),
+      ]);
+      const vrows = (vls ?? []) as Row[];
+      if (!((ownB ?? []) as Row[]).length && !((shB ?? []) as Row[]).length && vrows.length) {
+        const r = autoMatchBoxes(vrows.map((l) => ({ id: String(l.id), label: "", qty: Number(l.qty) || 0, is_product: !!l.item_sku_id })),
+          [{ id: newId, tracking_no: null, lines: parsed.lines.map((l) => ({ qty: l.qty, voucher_line_ids: [] })) }]);
+        if (r.complete && r.matches.length) {
+          const now = new Date().toISOString();
+          const lines2: DeliveryBillLine[] = parsed.lines.map((l, i) => { const m = r.matches.find((x) => x.idx === i); return m ? { ...l, voucher_line_ids: m.line_ids, auto: true, applied_at: now } : l; });
+          const before = vrows.map((l) => ({ id: String(l.id), kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null, ship_method: l.ship_method ?? null }));
+          const n = await applyDeliveryBill(admin, id, { tracking_no: parsed.tracking_no, lines: lines2 });
+          await admin.from("purchase_delivery_bills").update({ lines: lines2, status: billStatusAfter(lines2, id), applied_at: now, updated_at: now }).eq("id", newId);
+          await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
+            metadata: { note: "อ่านใบส่งของแล้วจับคู่ + ใช้น้ำหนัก/คิวให้อัตโนมัติ (ใบส่งของใบเดียว จับคู่ครบ)", delivery_bill_applied: newId, lines_updated: n, auto: true, before } });
+          auto = { applied: n, before };
+        }
+      }
+    }
+    return NextResponse.json({ ok: true, data: ins, duplicates, auto, error: null });
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 400 });
   }
@@ -267,6 +320,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
         for_voucher_id: fv && fv !== home ? fv : null,
         hold,
         applied_at: hold ? null : typeof l.applied_at === "string" && l.applied_at ? l.applied_at : null,
+        auto: !hold && l.auto === true && Array.isArray(l.voucher_line_ids) && l.voucher_line_ids.length > 0,
       };
     });
     patch.lines = lines;

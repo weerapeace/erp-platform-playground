@@ -124,10 +124,10 @@ export default function PurchaseVoucherFormPage() {
   const [panelStatus, setPanelStatus] = useState<{ pending: boolean; undecided: number; bills: number }>({ pending: false, undecided: 0, bills: 0 });
   // ★ 2026-11-22 ใบส่งของจากขนส่ง: ที่แก้ค้าง (ลบแถว/แก้ตัวเลข/จับคู่/เลือกของใบไหน) ต้องไม่หายเงียบ · ก่อนยืนยันเตือนค่าส่ง ฿0
   const deliveryRef = useRef<DeliveryBillApi | null>(null);
-  const [dbStatus, setDbStatus] = useState<DeliveryBillStatus>({ pending: false, mineRows: 0, unappliedRows: 0, unmappedRows: 0 });
+  const [dbStatus, setDbStatus] = useState<DeliveryBillStatus>({ pending: false, mineRows: 0, unappliedRows: 0, unmappedRows: 0, mismatchBills: 0 });
   const dbStatusRef = useRef(dbStatus);   // ค่าล่าสุด (หลังบันทึกแล้วตรวจต่อทันที)
   const onDbStatus = useCallback((s: DeliveryBillStatus) => { dbStatusRef.current = s; setDbStatus(s); }, []);
-  const [dbAsk, setDbAsk] = useState<{ kind: "unsaved" | "ship0"; next: "confirm" | "revise" } | null>(null);
+  const [dbAsk, setDbAsk] = useState<{ kind: "unsaved" | "ship0" | "weight"; next: "confirm" | "revise" } | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
   const [fxOpen, setFxOpen] = useState(false);
   const [fxDailyDate, setFxDailyDate] = useState<string | null>(null);   // ตั้งเรทกลางวันนี้จากหน้านี้แล้ว → ป้ายเรทเก่าหายทันที   // ★ 2026-11-22 แบบ B: แตะเรทในกล่องยอดเงิน → เปลี่ยนเรท (ใบนี้ / เรทกลางวันนี้)
@@ -455,10 +455,11 @@ export default function PurchaseVoucherFormPage() {
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
   /** ★ 2026-11-21 ข้อเสนอ 1 — ใบนี้ยังไม่มีค่าส่ง + ร้านเดียวกันมีใบอื่นที่ยังไม่มีค่าส่ง (≤ 14 วัน) → ถามก่อน "ส่งมาพร้อมใบอื่นไหม?" · ถามไม่ได้ = ยืนยันตามปกติ */
   /** ★ 2026-11-22 ก่อนยืนยัน / บันทึกการแก้ไข: ใบส่งของยังไม่บันทึก → ถาม · มีกล่องของใบนี้แต่ยังไม่ได้ใช้น้ำหนัก/คิว หรือค่าส่ง ฿0 → เตือน */
-  const preCheck = (next: "confirm" | "revise", skip: ("unsaved" | "ship0")[] = []) => {
+  const preCheck = (next: "confirm" | "revise", skip: ("unsaved" | "ship0" | "weight")[] = []) => {
     if (!skip.includes("unsaved") && deliveryRef.current?.pending()) { setDbAsk({ kind: "unsaved", next }); return; }
     const ds = dbStatusRef.current;
     if (!skip.includes("ship0") && ds.mineRows > 0 && (ds.unappliedRows > 0 || !(Number(t?.ship_total_thb ?? 0) > 0))) { setDbAsk({ kind: "ship0", next }); return; }
+    if (!skip.includes("weight") && ds.mismatchBills > 0) { setDbAsk({ kind: "weight", next }); return; }   // ★ 11-23 ข้อ 3: น้ำหนักสินค้าไม่ตรงกล่อง (หารด้วยจำนวนผิด)
     setDbAsk(null);
     if (next === "revise") startReviseSave(); else void askConfirmShip();
   };
@@ -880,7 +881,7 @@ export default function PurchaseVoucherFormPage() {
     
                     {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
                     <DeliveryBillPanel voucherId={id} readonly={readonly}
-                      lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id }))}
+                      lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id, kg_per_unit: l.kg_per_unit, cbm_per_unit: l.cbm_per_unit }))}
                       onApplied={reloadKeep} controlRef={deliveryRef} onStatus={onDbStatus}
                       beforeApply={async () => (dirty ? await save() : true)} />
                   </div>
@@ -1016,8 +1017,11 @@ export default function PurchaseVoucherFormPage() {
       {/* ★ 2026-11-22 ใบส่งของ: ยังไม่บันทึก / ค่าส่ง ฿0 — ถามก่อนยืนยันหรือบันทึกการแก้ไข */}
       {dbAsk && (
         <ERPModal open onClose={() => !dbBusy && setDbAsk(null)} size="sm" storageKey="pv-delivery-precheck"
-          title={dbAsk.kind === "unsaved" ? "ใบส่งของจากขนส่งยังไม่บันทึก" : dbStatus.unappliedRows > 0 ? "ยังไม่ได้ใช้น้ำหนัก/คิวจากใบส่งของ" : "ค่าส่งยังเป็น ฿0"}
-          footer={dbAsk.kind === "unsaved" ? <>
+          title={dbAsk.kind === "unsaved" ? "ใบส่งของจากขนส่งยังไม่บันทึก" : dbAsk.kind === "weight" ? "น้ำหนักสินค้าไม่ตรงกับกล่อง" : dbStatus.unappliedRows > 0 ? "ยังไม่ได้ใช้น้ำหนัก/คิวจากใบส่งของ" : "ค่าส่งยังเป็น ฿0"}
+          footer={dbAsk.kind === "weight" ? <>
+            <button onClick={() => setDbAsk(null)} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">กลับไปแก้</button>
+            <button onClick={() => preCheck(dbAsk.next, ["unsaved", "ship0", "weight"])} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ถูกแล้ว ยืนยันต่อ</button>
+          </> : dbAsk.kind === "unsaved" ? <>
             <button onClick={() => setDbAsk(null)} disabled={dbBusy} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">กลับไปแก้</button>
             <button onClick={() => { deliveryRef.current?.discard(); preCheck(dbAsk.next, ["unsaved"]); }} disabled={dbBusy} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ทิ้งที่แก้</button>
             <button onClick={() => void dbSaveThen()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{dbBusy ? "กำลังบันทึก…" : "บันทึกแล้วไปต่อ"}</button>
@@ -1026,7 +1030,9 @@ export default function PurchaseVoucherFormPage() {
             <button onClick={() => preCheck(dbAsk.next, ["unsaved", "ship0"])} disabled={dbBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยืนยันโดยไม่มีค่าส่ง</button>
             <button onClick={() => void dbApplyNow()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">{dbBusy ? "กำลังใส่…" : "ใช้เลย"}</button>
           </>}>
-          {dbAsk.kind === "unsaved"
+          {dbAsk.kind === "weight"
+            ? <p className="text-sm text-slate-600">มีใบส่งของ {dbStatus.mismatchBills} ใบที่น้ำหนัก/คิวรวมของสินค้า (จำนวน × ต่อชิ้น) ต่างจากกล่องเกิน 1.5 เท่า — มักเกิดจากใช้น้ำหนัก/คิวตอนจำนวนชิ้นยังไม่ถูก ค่าส่งจะเพี้ยน · แก้จำนวนให้ถูก แล้วกด ✓ ใช้น้ำหนัก/คิว อีกครั้ง (ดูแถบแดงที่ใบส่งของ)</p>
+            : dbAsk.kind === "unsaved"
             ? <p className="text-sm text-slate-600">มีที่แก้ในใบส่งของ (ลบแถว · แก้ตัวเลข · จับคู่สินค้า · เลือกว่ากล่องเป็นของใบไหน) ที่ยังไม่ได้กดบันทึก — ถ้าไปต่อโดยไม่บันทึก ที่แก้จะหาย</p>
             : <div className="text-sm text-slate-600 space-y-1">
                 <p>ใบนี้มีกล่องในใบส่งของ {dbStatus.mineRows} กล่อง{dbStatus.unappliedRows > 0 ? <> · ยังไม่ได้กด <b>ใช้น้ำหนัก/คิว</b> {dbStatus.unappliedRows} กล่อง</> : null}{dbStatus.unmappedRows > 0 ? <> · ยังไม่ได้จับคู่สินค้า {dbStatus.unmappedRows} กล่อง</> : null}</p>

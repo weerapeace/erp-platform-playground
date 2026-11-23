@@ -125,3 +125,48 @@ export function suggestBoxMatches(lines: CheckLine[], bills: CheckBill[]): { bil
   }
   return out;
 }
+
+/**
+ * ★ 2026-11-23 จับคู่กล่อง ↔ สินค้าให้เองเมื่อชัด (เจ้าของเลือกแบบ A: "ทำไมต้องจับคู่ ทั้งที่เลือกสินค้าจากบิลข้างบนแล้ว")
+ *   - ใบนี้มีกล่องเดียว (และยังว่าง) → ทุกสินค้าในใบอยู่กล่องนั้น
+ *   - หลายกล่อง → เดาจากจำนวน (suggestBoxMatches) · เหลือกล่องว่างกล่องเดียว + สินค้าที่ยังไม่อยู่กล่องไหน → ใส่กล่องนั้นทั้งหมด
+ *   bills = เฉพาะกล่องของใบนี้ (ดัชนีตามที่ส่งมา) · คืน all=true เมื่อเป็น "ทุกสินค้าในใบ"
+ *   complete = ทุกกล่องมีสินค้าแล้วหลังจับคู่ (ใช้ตัดสิน "ใช้น้ำหนัก/คิวให้เลย" หลังอ่านใบส่งของ)
+ */
+export function autoMatchBoxes(lines: CheckLine[], bills: CheckBill[]): { matches: { bill_id: string; idx: number; line_ids: string[]; all: boolean }[]; complete: boolean } {
+  const prods = lines.filter((l) => l.is_product);
+  const pool = prods.length ? prods : lines;
+  const ids = new Set(pool.map((l) => l.id));
+  const boxes: { bill_id: string; idx: number; qty: number | null; mapped: string[] }[] = [];
+  for (const b of bills) b.lines.forEach((x, idx) => boxes.push({ bill_id: b.id, idx, qty: x.qty, mapped: (x.voucher_line_ids ?? []).filter((id) => ids.has(id)) }));
+  const empty = boxes.filter((x) => x.mapped.length === 0);
+  if (pool.length === 0 || empty.length === 0) return { matches: [], complete: empty.length === 0 && boxes.length > 0 };
+  if (boxes.length === 1) return { matches: [{ bill_id: empty[0].bill_id, idx: empty[0].idx, line_ids: pool.map((l) => l.id), all: true }], complete: true };
+  const matches: { bill_id: string; idx: number; line_ids: string[]; all: boolean }[] = [];
+  const used = new Set(boxes.flatMap((x) => x.mapped));
+  for (const sgt of suggestBoxMatches(pool.map((l) => ({ ...l, is_product: true })), bills)) {
+    matches.push({ bill_id: sgt.bill_id, idx: sgt.idx, line_ids: [sgt.line_id], all: false });
+    used.add(sgt.line_id);
+  }
+  const left = empty.filter((x) => !matches.some((m) => m.bill_id === x.bill_id && m.idx === x.idx));
+  const free = pool.filter((l) => !used.has(l.id));
+  if (left.length === 1 && free.length > 0) matches.push({ bill_id: left[0].bill_id, idx: left[0].idx, line_ids: free.map((l) => l.id), all: free.length === pool.length });
+  const stillEmpty = empty.length - matches.length;
+  return { matches, complete: stillEmpty === 0 };
+}
+
+/**
+ * ★ 2026-11-23 เช็กกลับ: น้ำหนัก/คิวรวมของสินค้าในใบ (จำนวน × ต่อชิ้น) เทียบกล่องที่จับคู่ — ต่างเกิน 1.5 เท่า = ผิดปกติ
+ *   จับเคส "ใส่ 60 แต่ระบบหารด้วย 1" (ค่าส่งเพี้ยน ฿8,400) · เทียบเฉพาะบิลที่ใช้น้ำหนัก/คิวแล้ว
+ */
+export function boxWeightCheck(boxes: { weight_kg: number | null; m3: number | null; voucher_line_ids: string[] }[], lines: { id: string; qty: number; kg_per_unit: number | null; cbm_per_unit: number | null }[]):
+  { ok: boolean; box_kg: number; line_kg: number; box_m3: number; line_m3: number } {
+  const ids = new Set<string>();
+  let box_kg = 0, box_m3 = 0;
+  for (const b of boxes) { if (!(b.voucher_line_ids ?? []).length) continue; b.voucher_line_ids.forEach((id) => ids.add(id)); box_kg += Number(b.weight_kg) || 0; box_m3 += Number(b.m3) || 0; }
+  let line_kg = 0, line_m3 = 0;
+  for (const l of lines) if (ids.has(l.id)) { line_kg += (Number(l.qty) || 0) * (Number(l.kg_per_unit) || 0); line_m3 += (Number(l.qty) || 0) * (Number(l.cbm_per_unit) || 0); }
+  const off = (box: number, line: number) => box > 0 && line > 0 && (line > box * 1.5 || line < box / 1.5);
+  const r = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
+  return { ok: !(off(box_kg, line_kg) || off(box_m3, line_m3)), box_kg: r(box_kg, 4), line_kg: r(line_kg, 4), box_m3: r(box_m3, 6), line_m3: r(line_m3, 6) };
+}

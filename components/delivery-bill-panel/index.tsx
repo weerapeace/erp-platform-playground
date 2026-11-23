@@ -22,7 +22,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { DeliveryBillLine } from "@/lib/delivery-bill";
-import { normDesc, ruleForDescription, type DescRule } from "@/lib/delivery-bill-check";
+import { normDesc, ruleForDescription, autoMatchBoxes, boxWeightCheck, type DescRule } from "@/lib/delivery-bill-check";
 import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billDirty, matchCopyRow } from "@/lib/delivery-bill-share";
 import { QtyCheckCard, type BoxSuggestion } from "./qty-check";
 
@@ -31,7 +31,7 @@ export type BillRow = {
   total_weight_kg: number | null; total_m3: number | null; total_packages: number | null; lines: DeliveryBillLine[]; status: string; applied_at: string | null; created_at: string; updated_at?: string | null;
 };
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
-export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean };
+export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean; kg_per_unit?: number | null; cbm_per_unit?: number | null };
 type VOpt = { id: string; pv_no: string | null; status: string; voucher_date: string | null; seller_name: string | null; why: string };
 type ShortRow = { idx: number; no: number | null; description: string | null; qty: number | null; weight_kg: number | null; m3: number | null; owner?: string | null; applied?: boolean };
 type Dup = { bill_id: string; tracking_no: string; voucher_id: string; pv_no: string | null; created_at: string; rows: number; lines?: ShortRow[] };
@@ -44,7 +44,7 @@ export type DeliveryBillApi = {
   discard: () => void;
   applyAll: () => Promise<{ applied: number; unmapped: number; failed: number }>;
 };
-export type DeliveryBillStatus = { pending: boolean; mineRows: number; unappliedRows: number; unmappedRows: number };
+export type DeliveryBillStatus = { pending: boolean; mineRows: number; unappliedRows: number; unmappedRows: number; mismatchBills: number };
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
@@ -108,14 +108,28 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   const dirtyIds = useMemo(() => bills.map((b) => b.id).filter((bid) => isDirty(bid)), [bills, isDirty]);
 
   const parse = async (r2_key: string, gr_id?: string) => {
+    if (beforeApply && !(await beforeApply())) return;   // ★ 11-23 อาจใช้น้ำหนัก/คิวให้เลย → จำนวนในหน้าต้องบันทึกก่อน
     setBusy("parse");
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ r2_key, gr_id: gr_id ?? null }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as BillRow;
-      toast.success(`อ่านใบส่งของแล้ว: ${b.tracking_no ?? "ไม่พบรหัสขนส่ง"} · ${(b.lines ?? []).length} รายการ — ตรวจตัวเลขแล้วจับคู่สินค้า`);
-      await load();
+      const au = j.auto as { applied: number; before: unknown[] } | null | undefined;
+      if (au) {
+        // ข้อ 2: ชัด (ใบนี้มีใบส่งของใบเดียว จับคู่ครบ) → ใช้น้ำหนัก/คิวให้แล้ว · ย้อนกลับได้
+        toast.undo(`อ่านใบส่งของ ${b.tracking_no ?? ""} แล้ว · จับคู่ + ใส่น้ำหนัก/คิวให้อัตโนมัติ ${au.applied} รายการ — ตรวจได้ แก้ได้`, async () => {
+          const res2 = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unapply", bill_id: b.id, before: au.before }) });
+          const j2 = await res2.json().catch(() => ({}));
+          if (!res2.ok || j2.error) { toast.error("ย้อนไม่สำเร็จ: " + (j2.error ?? res2.status)); return; }
+          toast.success("ย้อนแล้ว — น้ำหนัก/คิวกลับเป็นค่าเดิม (ใบส่งของยังอยู่ จับคู่เองได้)");
+          await load(); await onApplied();
+        }, { ms: 12000 });
+        await load(); await onApplied();
+      } else {
+        toast.success(`อ่านใบส่งของแล้ว: ${b.tracking_no ?? "ไม่พบรหัสขนส่ง"} · ${(b.lines ?? []).length} รายการ`);
+        await load();
+      }
       // ข้อเสนอ 1: เลขขนส่งนี้อยู่ในใบอื่นแล้ว → ถามใช้ร่วม
       const d = (j.duplicates ?? []) as { voucher_id: string; pv_no: string | null }[];
       if (d.length) setDupAsk({ billId: b.id, dups: d });
@@ -148,7 +162,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     setBusy(billId);
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, tracking_no: d.tracking_no, bill_date: d.bill_date || null, lines: d.lines, apply, expected_updated_at: b?.updated_at ?? null }) });
+        body: JSON.stringify({ bill_id: billId, tracking_no: d.tracking_no, bill_date: d.bill_date || null, lines: effLines(billId, d.lines), apply, expected_updated_at: b?.updated_at ?? null }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) {
         if (j.stale) toast.action(String(j.error), "โหลดใหม่", () => { setDraft((p) => { const n = { ...p }; delete n[billId]; return n; }); void load(); }, { variant: "error" });
@@ -193,6 +207,18 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   };
   // แถวของใบนี้ในแต่ละบิล (ดัชนีจริง) — กล่องเช็กจำนวนดูเฉพาะแถวของใบนี้
   const mineIdx = useMemo(() => Object.fromEntries(bills.map((b) => [b.id, rowsOf(draft[b.id]?.lines ?? b.lines ?? [], b.voucher_id, voucherId)])), [bills, draft, voucherId]);
+  // ★ 2026-11-23 แบบ A: จับคู่กล่องให้เองเมื่อชัด (กล่องเดียว = ทุกสินค้าในใบ · หลายกล่องเดาจากจำนวน) — แสดง "อัตโนมัติ" · ส่งไปตอนบันทึก/ใช้ · ไม่นับเป็น "ยังไม่บันทึก"
+  const autoMap = useMemo(() => {
+    const out: Record<string, Record<number, { ids: string[]; all: boolean }>> = {};
+    if (readonly) return out;
+    const cbills = bills.map((b) => { const ls = draft[b.id]?.lines ?? b.lines ?? []; const idx = mineIdx[b.id] ?? []; return { id: b.id, tracking_no: null, idx, lines: idx.map((i) => ({ qty: ls[i].qty, voucher_line_ids: ls[i].voucher_line_ids })) }; });
+    const r = autoMatchBoxes(lines.map((l) => ({ id: l.id, label: l.item_name, qty: l.qty, is_product: !!l.is_product })), cbills);
+    for (const m of r.matches) { const cb = cbills.find((c) => c.id === m.bill_id); const real = cb?.idx[m.idx]; if (real == null) continue; (out[m.bill_id] ??= {})[real] = { ids: m.line_ids, all: m.all }; }
+    return out;
+  }, [bills, draft, mineIdx, lines, readonly]);
+  const autoMapRef = useRef(autoMap); autoMapRef.current = autoMap;
+  /** แถวที่จะส่งไปบันทึก/ใช้ = ที่แก้ + ที่ระบบจับคู่ให้ (เฉพาะกล่องที่ยังว่าง) */
+  const effLines = (billId: string, ls: DeliveryBillLine[]) => { const a = autoMapRef.current[billId]; return a ? ls.map((l, i) => (a[i] && l.voucher_line_ids.length === 0 ? { ...l, voucher_line_ids: a[i].ids, auto: true } : l)) : ls; };
   // ★ 2026-11-15 กล่องเช็กจำนวน: ระบบเดาสินค้าให้กล่องที่ยังว่าง → คนกดยืนยันก่อน (ยังไม่บันทึก จนกว่าจะกด บันทึก / ใช้น้ำหนัก/คิว)
   const applySuggest = (sugg: BoxSuggestion[]) => {
     setDraft((p) => {
@@ -271,19 +297,28 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     setSearchFor(null);
   };
 
+  // ★ 2026-11-23 ข้อ 3: เช็กกลับหลังใช้น้ำหนัก/คิวแล้ว — น้ำหนัก/คิวรวมของสินค้า (จำนวน × ต่อชิ้น) ต่างจากกล่องเกิน 1.5 เท่า = เตือน (จับเคสหารด้วยจำนวนผิด)
+  const weightCheckOf = (b: BillRow) => {
+    if (!appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId).done) return null;
+    const mine = rowsOf(b.lines ?? [], b.voucher_id, voucherId).map((i) => b.lines[i]);
+    const r = boxWeightCheck(mine, lines.map((l) => ({ id: l.id, qty: l.qty, kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null })));
+    return r.ok ? null : r;
+  };
+  const weightOff = (b: BillRow) => !!weightCheckOf(b);
   // ── สถานะให้หน้าใบ (ยังไม่บันทึก · แถวของใบนี้ที่ยังไม่ได้ใช้น้ำหนัก/คิว) ───────────
   const status = useMemo<DeliveryBillStatus>(() => {
-    let mineRows = 0, unappliedRows = 0, unmappedRows = 0;
+    let mineRows = 0, unappliedRows = 0, unmappedRows = 0, mismatchBills = 0;
     for (const b of bills) {
-      const ls = draft[b.id]?.lines ?? b.lines ?? [];
+      const ls = effLines(b.id, draft[b.id]?.lines ?? b.lines ?? []);
+      if (weightOff(b)) mismatchBills++;
       const st = appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
       const idx = rowsOf(ls, b.voucher_id, voucherId);
       mineRows += idx.length;
       unappliedRows += Math.max(0, st.mine - st.applied);
       unmappedRows += idx.filter((i) => (ls[i].voucher_line_ids ?? []).length === 0).length;
     }
-    return { pending: dirtyIds.length > 0, mineRows, unappliedRows, unmappedRows };
-  }, [bills, draft, dirtyIds, voucherId]);
+    return { pending: dirtyIds.length > 0, mineRows, unappliedRows, unmappedRows, mismatchBills };
+  }, [bills, draft, dirtyIds, voucherId, autoMap, lines]);   // eslint-disable-line react-hooks/exhaustive-deps
   const onStatusRef = useRef(onStatus); onStatusRef.current = onStatus;
   const statusKey = JSON.stringify(status);
   useEffect(() => { onStatusRef.current?.(status); }, [statusKey]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -300,7 +335,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
       applyAll: async () => {
         let applied = 0, failed = 0, unmapped = 0;
         for (const b of billsRef.current) {
-          const ls = draftRef.current[b.id]?.lines ?? b.lines ?? [];
+          const ls = effLines(b.id, draftRef.current[b.id]?.lines ?? b.lines ?? []);
           const idx = rowsOf(ls, b.voucher_id, voucherId);
           unmapped += idx.filter((i) => (ls[i].voucher_line_ids ?? []).length === 0).length;
           const st = appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
@@ -367,13 +402,15 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
           {bills.length === 0 && <div className="text-xs text-slate-300 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีใบส่งของ —</div>}
           {/* ★ 2026-11-15 เช็กจำนวน: รวมทุกใบส่งของ (มาหลายรอบ) เทียบกับในใบ → ครบ / ขาด / เกิน / ยังไม่มา · ★ 2026-11-22 เฉพาะกล่องของใบนี้ */}
           <QtyCheckCard lines={lines} readonly={readonly} onSuggest={applySuggest}
-            bills={bills.map((b) => { const ls = draft[b.id]?.lines ?? b.lines ?? []; return { id: b.id, tracking_no: (draft[b.id]?.tracking_no || b.tracking_no) ?? null, lines: (mineIdx[b.id] ?? []).map((i) => ls[i]) }; })} />
+            bills={bills.map((b) => { const ls = effLines(b.id, draft[b.id]?.lines ?? b.lines ?? []); return { id: b.id, tracking_no: (draft[b.id]?.tracking_no || b.tracking_no) ?? null, lines: (mineIdx[b.id] ?? []).map((i) => ls[i]) }; })} />
           {bills.map((b, bi) => {
             const d = draft[b.id] ?? toDraft(b);
             const home = b.voucher_id;
             const isHome = home === voucherId;
             const mine = rowsOf(d.lines, home, voucherId);
-            const mapped = mine.filter((i) => d.lines[i].voucher_line_ids.length > 0).length;
+            const am = autoMap[b.id] ?? {};
+            const mapped = mine.filter((i) => d.lines[i].voucher_line_ids.length > 0 || !!am[i]).length;
+            const wc = weightCheckOf(b);
             const tot = billTotalsFor(d.lines, home, voucherId);
             const st = appliedFor({ voucher_id: home, status: b.status, lines: b.lines ?? [] }, voucherId);
             const others = otherOwners(d.lines, home).filter((x) => x !== voucherId);
@@ -418,6 +455,11 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                     </> : <span>ⓘ ใบส่งของเลขนี้อัปโหลดไว้ใน {copies.map((c) => c.pv_no ?? "ใบอื่น").join(", ")} ด้วย — ใบนี้เป็นใบแรก ให้ใบนั้นกด &ldquo;ใช้ร่วม&rdquo; หรือเลือกช่อง &ldquo;ของใบ&rdquo; ที่นี่ว่ากล่องไหนเป็นของใบไหน</span>}
                   </div>
                 )}
+                {wc && (
+                  <div className="px-3 py-1.5 text-[11px] bg-red-50 border-t border-red-200 text-red-800">
+                    ⚠ น้ำหนักสินค้าในใบรวม {fmtN(wc.line_kg, 3)} กก. / {fmtN(wc.line_m3, 5)} คิว แต่กล่องที่จับคู่ {fmtN(wc.box_kg, 3)} กก. / {fmtN(wc.box_m3, 5)} คิว — จำนวนชิ้นในใบผิด หรือใช้น้ำหนัก/คิวตอนจำนวนยังไม่ถูก? {readonly ? "กด แก้ไขใบ แล้ว" : ""}แก้จำนวนให้ถูก แล้วกด ✓ ใช้น้ำหนัก/คิว อีกครั้ง (ค่าส่งจะคิดใหม่)
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead className="text-slate-500 bg-white border-b border-slate-100">
@@ -441,13 +483,16 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                       {d.lines.map((l, i) => {
                         const owner = rowOwner(l, home);
                         const isMine = owner === voucherId;
-                        const names = isMine ? (l.voucher_line_ids.map((id) => lines.find((x) => x.id === id)).filter(Boolean) as VoucherLineLite[]) : [];
+                        const auto = isMine && l.voucher_line_ids.length === 0 ? am[i] : undefined;
+                        const shownIds = auto ? auto.ids : l.voucher_line_ids;
+                        const names = isMine ? (shownIds.map((id) => lines.find((x) => x.id === id)).filter(Boolean) as VoucherLineLite[]) : [];
+                        const isAll = (auto?.all ?? false) || (l.auto === true && names.length > 1 && names.length === lines.filter((x) => x.is_product).length);
                         const dk = bi * ROW_SPAN + i;
                         const descKey = normDesc(l.description);
                         const rule = ruleForDescription(l.description, rules);
                         const ck = choiceKey(l, home);
                         return (
-                          <tr key={i} {...drag.rowProps(dk)} className={`${!isMine ? "bg-slate-50/80 text-slate-400" : l.voucher_line_ids.length === 0 ? "bg-amber-50/30" : ""} ${drag.rowCls(dk)}`}>
+                          <tr key={i} {...drag.rowProps(dk)} className={`${!isMine ? "bg-slate-50/80 text-slate-400" : names.length === 0 ? "bg-amber-50/30" : ""} ${drag.rowCls(dk)}`}>
                             <td className="px-2 py-1 whitespace-nowrap">
                               {!readonly && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="text-base align-middle" />}
                               <span className="font-mono text-[11px] text-slate-400 align-middle ml-0.5">{billLineNo(l.no, i)}</span>
@@ -492,8 +537,11 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                             </td>
                             <td className="px-2 py-1">
                               {isMine ? (
-                                <button disabled={readonly} onClick={() => setMapFor({ billId: b.id, idx: i })} className={`h-8 px-2 rounded-md border text-left max-w-[16rem] truncate ${names.length ? "border-sky-200 bg-sky-50 text-sky-800" : "border-amber-300 bg-amber-50 text-amber-700"} disabled:opacity-70`} title={names.map((n) => `${n.code || ""} ${stripCode(n.item_name)}`).join("\n") || "ยังไม่ได้จับคู่"}>
-                                  {names.length === 0 ? "＋ เลือกสินค้าในกล่องนี้" : `${names.length} ตัว: ${names.map((n) => n.code || stripCode(n.item_name)).join(", ")}`}
+                                <button disabled={readonly} onClick={() => { if (auto) setLine(b.id, i, { voucher_line_ids: auto.ids, auto: false }); setMapFor({ billId: b.id, idx: i }); }}
+                                  className={`h-8 px-2 rounded-md border text-left max-w-[18rem] truncate ${names.length ? "border-sky-200 bg-sky-50 text-sky-800" : "border-amber-300 bg-amber-50 text-amber-700"} disabled:opacity-70`}
+                                  title={(names.map((n) => `${n.code || ""} ${stripCode(n.item_name)}`).join("\n") || "ยังไม่ได้จับคู่") + (auto || l.auto ? "\n\nระบบจับคู่ให้เอง (ใบนี้มีกล่องเดียว หรือเดาจากจำนวน) — กดเพื่อแก้" : "")}>
+                                  {names.length === 0 ? "＋ เลือกสินค้าในกล่องนี้" : isAll ? `ทุกสินค้าในใบ (${names.length} ตัว)` : `${names.length} ตัว: ${names.map((n) => n.code || stripCode(n.item_name)).join(", ")}`}
+                                  {(auto || l.auto) && names.length > 0 && <span className="ml-1 text-[10px] text-sky-600">· อัตโนมัติ</span>}
                                 </button>
                               ) : (
                                 <span className="text-[11px] whitespace-nowrap">{l.hold === "parked" ? "พักไว้ — ยังไม่ลงใบไหน" : l.hold === "not_ours" ? "ไม่ใช่ของเรา" : `จับคู่ที่ ${pvOf(owner)}${l.applied_at ? " · ใช้แล้ว" : ""}`}</span>
@@ -518,7 +566,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
         <ERPModal open onClose={() => setMapFor(null)} size="md" storageKey="pv-bill-map"
           title="จับคู่สินค้ากับกล่องนี้" description={`${mapLine.description ?? "—"} · P/o.No ${mapLine.po_no ?? "—"} · Qty ${mapLine.qty ?? "—"} · ${mapLine.weight_kg ?? "—"} กก. · ${mapLine.m3 ?? "—"} คิว`}
           footer={<>
-            <button onClick={() => setLine(mapFor.billId, mapFor.idx, { voucher_line_ids: lines.map((l) => l.id) })} className="mr-auto h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
+            <button onClick={() => setLine(mapFor.billId, mapFor.idx, { auto: false, voucher_line_ids: lines.map((l) => l.id) })} className="mr-auto h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
             <button onClick={() => setMapFor(null)} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>
           </>}>
           <p className="text-[11px] text-slate-400 mb-2">น้ำหนัก/คิวของกล่องจะถูกหารด้วยจำนวนชิ้นรวมของสินค้าที่เลือก (ถือว่าทุกชิ้นในกล่องหนัก/ใหญ่เท่ากัน)</p>
@@ -528,7 +576,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
               const elsewhere = usedElsewhere(mapFor.billId, mapFor.idx, vl.id);
               return (
                 <label key={vl.id} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer ${on ? "bg-sky-50" : "hover:bg-slate-50"}`}>
-                  <input type="checkbox" checked={on} onChange={(e) => setLine(mapFor.billId, mapFor.idx, { voucher_line_ids: e.target.checked ? [...mapLine.voucher_line_ids, vl.id] : mapLine.voucher_line_ids.filter((x) => x !== vl.id) })} className="rounded border-slate-300" />
+                  <input type="checkbox" checked={on} onChange={(e) => setLine(mapFor.billId, mapFor.idx, { auto: false, voucher_line_ids: e.target.checked ? [...mapLine.voucher_line_ids, vl.id] : mapLine.voucher_line_ids.filter((x) => x !== vl.id) })} className="rounded border-slate-300" />
                   <span className="font-mono text-xs text-slate-500 w-24 shrink-0 truncate">{vl.code || "—"}</span>
                   <span className="flex-1 min-w-0 truncate text-slate-800" title={vl.item_name}>{stripCode(vl.item_name)}</span>
                   <span className="text-xs text-slate-500 tabular-nums shrink-0">{vl.qty.toLocaleString()} {vl.uom ?? ""}</span>

@@ -17,8 +17,11 @@ vi.mock("@/lib/delivery-bill", async (orig) => ({
   loadDescriptionRules: vi.fn(async () => []),
   parseDeliveryBillImage: vi.fn(),
 }));
+vi.mock("@/lib/file-ref", () => ({ isRefForCategory: () => true }));
+vi.mock("@/lib/purchase-voucher-server", async (orig) => ({ ...((await orig()) as object), recomputeVoucher: vi.fn(async () => {}) }));
 
 import { GET, POST, PATCH, DELETE } from "@/app/api/purchasing/vouchers/[id]/bills/route";
+import { parseDeliveryBillImage } from "@/lib/delivery-bill";
 
 const V15 = "00000000-0000-4000-8000-000000000015", V16 = "00000000-0000-4000-8000-000000000016";
 const B15 = "00000000-0000-4000-8000-0000000000b1", B16 = "00000000-0000-4000-8000-0000000000b2";
@@ -139,5 +142,46 @@ describe("กล่องที่พักไว้ (ข้อเสนอ 4)",
     const res = await POST(req("http://t/api", "POST", { action: "claim", bill_id: B16, rows: [1] }), params(V20));
     expect((await res.json()).ok).toBe(true);
     expect(linesOf(B16)[1]).toMatchObject({ for_voucher_id: V20, hold: null });
+  });
+});
+
+describe("★ 11-23 แบบ A ข้อ 2: อ่านใบส่งของแล้วชัด → จับคู่ + ใช้น้ำหนัก/คิวให้เลย · ย้อนได้", () => {
+  const V30 = "00000000-0000-4000-8000-000000000030";
+  beforeEach(() => {
+    tables.purchase_vouchers_v2.push({ id: V30, pv_no: "PV2026-10-02-002", status: "draft", editing_at: null, voucher_date: "2026-10-02", is_active: true });
+    tables.purchase_voucher_lines_v2.push(
+      { id: "pin1", voucher_id: V30, qty: 3, item_sku_id: "s1", kg_per_unit: null, cbm_per_unit: null, ship_method: null, is_active: true },
+      { id: "pin2", voucher_id: V30, qty: 3, item_sku_id: "s2", kg_per_unit: 0.01, cbm_per_unit: null, ship_method: null, is_active: true },
+      { id: "fee", voucher_id: V30, qty: 1, item_sku_id: null, kg_per_unit: null, cbm_per_unit: null, ship_method: null, is_active: true });
+    (parseDeliveryBillImage as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({ raw: {}, parsed: { tracking_no: "EK-99990001", bill_date: "2026-10-08", marking: null, delivery_area: null, carrier_text: null, total_weight_kg: 0.13, total_m3: 0.0005, total_packages: 1,
+      lines: [{ no: 1, stock: null, po_no: null, description: "METAL ACCY", pack: 1, package: "1-1", qty: 12, weight_kg: 0.13, m3: 0.0005, method: null, voucher_line_ids: [] }] } });
+  });
+  it("ใบนี้มีกล่องเดียว + ไม่มีใบส่งของอื่น → ทุกสินค้า (ไม่รวมค่าธรรมเนียม) + ใช้แล้ว + ส่งค่าเดิมกลับไว้ย้อน", async () => {
+    const res = await POST(req("http://t/api", "POST", { r2_key: "delivery-bills/x.jpg" }), params(V30));
+    const j = await res.json();
+    expect(j.auto).toMatchObject({ applied: 1 });
+    expect(applied.at(-1)!.voucher).toBe(V30);
+    expect(applied.at(-1)!.lines[0].voucher_line_ids).toEqual(["pin1", "pin2"]);
+    const nb = tables.purchase_delivery_bills.find((b) => b.voucher_id === V30)!;
+    expect((nb.lines as Row[])[0]).toMatchObject({ auto: true, voucher_line_ids: ["pin1", "pin2"] });
+    expect((nb.lines as Row[])[0].applied_at).toBeTruthy();
+    expect(j.auto.before.find((x: Row) => x.id === "pin2").kg_per_unit).toBe(0.01);
+    // ย้อน: คืนค่าเดิม + ล้างการจับคู่อัตโนมัติ
+    tables.purchase_voucher_lines_v2.find((l) => l.id === "pin2")!.kg_per_unit = 0.02;
+    const un = await POST(req("http://t/api", "POST", { action: "unapply", bill_id: nb.id, before: j.auto.before }), params(V30));
+    expect((await un.json()).ok).toBe(true);
+    expect(tables.purchase_voucher_lines_v2.find((l) => l.id === "pin2")!.kg_per_unit).toBe(0.01);
+    expect((nb.lines as Row[])[0]).toMatchObject({ voucher_line_ids: [], auto: false, applied_at: null });
+  });
+  it("ใบนี้มีใบส่งของอื่นอยู่แล้ว → ไม่ใช้ให้เอง (ให้คนกด)", async () => {
+    tables.purchase_delivery_bills.push({ id: "other", voucher_id: V30, kind: "carrier", is_active: true, lines: [] });
+    const j = await (await POST(req("http://t/api", "POST", { r2_key: "delivery-bills/x.jpg" }), params(V30))).json();
+    expect(j.auto).toBeNull();
+  });
+  it("เลขขนส่งซ้ำกับใบอื่น → ไม่ใช้ให้เอง (ถามใช้ร่วมก่อน)", async () => {
+    tables.purchase_delivery_bills.push({ id: "dup", voucher_id: V16, kind: "carrier", tracking_no: "EK-99990001", is_active: true, lines: [] });
+    const j = await (await POST(req("http://t/api", "POST", { r2_key: "delivery-bills/x.jpg" }), params(V30))).json();
+    expect(j.duplicates.length).toBe(1);
+    expect(j.auto).toBeNull();
   });
 });

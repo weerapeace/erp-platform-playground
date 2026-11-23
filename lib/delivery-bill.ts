@@ -35,6 +35,8 @@ export type DeliveryBillLine = {
   for_voucher_id?: string | null;
   hold?: "parked" | "not_ours" | null;
   applied_at?: string | null;
+  /** ★ 2026-11-23 ระบบจับคู่สินค้าให้เอง (แบบ A · lib/delivery-bill-check autoMatchBoxes) — คนแก้การจับคู่ = false */
+  auto?: boolean;
 };
 
 /** กฎ "คำใน Description → วิธีคิด" จากตั้งค่ากลาง (/m/freight-description-rules) · เรียงตาม sort_order กฎแรกที่เข้าชนะ */

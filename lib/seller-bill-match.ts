@@ -92,6 +92,26 @@ export type AliasRow = { alias_key: string; item_sku_id: string | null; item_nam
 
 const s = (v: unknown) => String(v ?? "").trim();
 export const stripCode = (name: string) => s(name).replace(/^\s*\[[^\]]*\]\s*/, "").trim() || s(name);
+
+/**
+ * ★ 2026-11-23 ชื่อในบิล (ไทย) กับสินค้าที่จับคู่ "ไม่เข้ากันเลย" → เตือนก่อนยืนยันแถว
+ *   เคสจริง: "ป้ายเข็มกลัดลายน่ารักรูปแมว" ถูกจับกับ "เทปใส 1.8 cm." ของ PO-2026-00075
+ *   ภาษาไทยไม่มีเว้นวรรค → เทียบตัวอักษรคู่ติดกัน (bigram) หลังตัดรหัส/ตัวเลข/หน่วย · ใช้คู่ร่วมน้อยกว่า 15% = ไม่เข้ากัน
+ *   ระวังเตือนผิด: เทียบเฉพาะเมื่อทั้งสองชื่อมีอักษรไทย และยาวพอ (ชื่อสั้น/ชื่ออังกฤษล้วน = ไม่เตือน)
+ */
+export function nameMismatch(billName: unknown, productName: unknown): boolean {
+  const TH = /[\u0E00-\u0E7F]/;
+  const a0 = s(billName), b0 = s(productName);
+  if (!TH.test(a0) || !TH.test(b0)) return false;
+  const norm = (x: string) => x.toLowerCase().replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*\)/g, " ")
+    .replace(/[0-9.,#×*+\-–_/\\:;'"“”‘’!?]+/g, " ").replace(/\b(cm|mm|kg|pcs|m|g)\b/g, " ").replace(/\s+/g, "");
+  const grams = (x: string) => { const out = new Set<string>(); for (let i = 0; i < x.length - 1; i++) out.add(x.slice(i, i + 2)); return out; };
+  const a = grams(norm(a0)), b = grams(norm(b0));
+  if (a.size < 3 || b.size < 3) return false;
+  let shared = 0;
+  for (const g of b) if (a.has(g)) shared++;
+  return shared / Math.min(a.size, b.size) < 0.15;
+}
 const round = (n: number, d = 4) => Math.round(n * 10 ** d) / 10 ** d;
 
 /** กุญแจจำคู่: ชื่อจีน + สเปก ตัดช่องว่าง/เครื่องหมาย/ตัวพิมพ์ + แปลงตัวอักษรเต็มความกว้าง (ｍｍ → mm) */

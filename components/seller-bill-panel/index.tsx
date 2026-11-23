@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, billLineDiscount, billRowCalc, billRowMismatch, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { nameMismatch, applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, autoSplitRounds, ensureRowIds, allocOf, editAlloc, addAllocRound, rebalanceAlloc, mergeSplitRows, expandAllocRows, normalizeBillLine, billLineDiscount, billRowCalc, billRowMismatch, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 import { SaveBar } from "@/components/save-bar";
 import { useUserPref } from "@/lib/use-user-pref";
 import { BillSummaryBox } from "./bill-summary";
@@ -139,6 +139,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   const [rowFilter, setRowFilter] = useUserPref<"all" | "todo" | "done">("pv.billRowFilter", "all", (r) => (r === "all" || r === "todo" || r === "done" ? r : null));
   const [focusRow, setFocusRow] = useState<string | null>(null);   // "billId|rid" แถวที่มีกรอบฟ้า (ว่าง = แถวแรกที่ยังไม่ยืนยัน)
   const [highAsk, setHighAsk] = useState<{ billId: string; n: number } | null>(null);
+  // ★ 2026-11-23 ข้อ 1: ชื่อในบิลกับสินค้าที่จับคู่ไม่เข้ากัน (เคสจริง: เข็มกลัดลายแมว ↔ เทปใส) → ถามก่อนยืนยัน
+  const [nameAsk, setNameAsk] = useState<{ billId: string; idx: number; bill: string; prod: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollToFocus = useRef(false);
   const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
@@ -327,10 +329,21 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   /** เปิดแถวที่ลงใบแล้วกลับมาแก้ (รายการในใบยังอยู่ — ยืนยันใหม่แล้วอัปเดตตาม) */
   const reopenRow = (billId: string, idx: number) => setLine(billId, idx, { decision: null });
   /** ยืนยันทุกแถวที่มั่นใจสูง → ลงใบพร้อมกันครั้งเดียว (ข้ามแถวที่ต้องย้าย PO ร้านอื่น) */
+  /** ชื่อสินค้าที่แถวจับคู่อยู่ (PO ร้านนี้ / สินค้านอกใบสั่งซื้อ) + ชื่อไทยในบิล — ไว้เช็ก "ชื่อไม่เข้ากัน" */
+  const rowProdName = (l: SellerBillLine) => (l.match_key ? gAny(l.match_key)?.item_name : null) ?? l.sku_pick?.name ?? null;
+  const rowThText = (l: SellerBillLine) => [l.name_th, l.spec_th].filter(Boolean).join(" ");
+  const rowNameOff = (l: SellerBillLine) => { const p = rowProdName(l); return !!p && nameMismatch(rowThText(l), p); };
+  const confirmRow = (billId: string, idx: number) => {
+    const row = (draftRef.current[billId] ?? [])[idx];
+    if (row && rowNameOff(row)) { setNameAsk({ billId, idx, bill: rowThText(row), prod: rowProdName(row) ?? "" }); return; }
+    decide(billId, idx, "confirmed");
+  };
   const confirmHigh = (billId: string) => {
     const cur = ensureRowIds(draftRef.current[billId] ?? []);
     const rids: string[] = [];
-    const next = cur.map((l) => { if (l.level === "ok" && l.match_key && !l.decision && !l.move_po) { rids.push(l.rid as string); return { ...l, decision: "confirmed" as const }; } return l; });
+    let offName = 0;
+    const next = cur.map((l) => { if (l.level === "ok" && l.match_key && !l.decision && !l.move_po) { if (rowNameOff(l)) { offName++; return l; } rids.push(l.rid as string); return { ...l, decision: "confirmed" as const }; } return l; });
+    if (offName) toast.warning(`ข้าม ${offName} แถวที่ชื่อในบิลกับสินค้าไม่เข้ากัน — เช็กแล้วกดยืนยันทีละแถว`);
     if (!rids.length) { toast.error("ไม่มีแถวที่มั่นใจสูงและยังไม่ได้ยืนยัน"); return; }
     setDraft((p) => ({ ...p, [billId]: next })); draftRef.current = { ...draftRef.current, [billId]: next };
     void applyRows(billId, rids, next).then((ok) => { if (ok) toast.success(`ลงใบแล้ว ${rids.length} แถว (แถวที่ระบบมั่นใจ)`); });
@@ -777,6 +790,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                                     {l.decision === "expense" ? <>ค่าใช้จ่าย: {billText || thText || "—"}</> : <>{prodName ?? (thText || billText || "—")}{prodCode && <span className="ml-1 font-mono text-[11px] font-normal text-slate-400">{prodCode}</span>}</>}
                                   </span>
                                   {poLabel && <span className="shrink-0 text-[11px] text-slate-400">· {poLabel}</span>}
+                                  {l.decision === "confirmed" && prodName && nameMismatch(thText, prodName) && <span className={`${CHIP_WARN} shrink-0`} title={`บิล: ${thText}\nสินค้า: ${prodName}\nชื่อไม่เข้ากัน — ถ้าจับคู่ผิด กด แก้ แล้วเลือกสินค้าใหม่ (ก่อนยืนยันใบ)`}>⚠ ชื่อไม่เข้ากัน</span>}
                                   {l.short_action === "reduce" && short > 0 && <span className={`${CHIP_WARN} shrink-0`} title="ทำตอนกด ยืนยัน + ออกเลข ที่หน้าใบ">ลด PO ตามบิล</span>}
                                   {mis && <span className={`${CHIP_WARN} shrink-0`} title={`บิลเขียน ¥${n2(mis.printed)} · จำนวน × ราคา ¥${n2(mis.calc)} — กด แก้ เพื่อแก้ตัวเลข`}>บิลเขียน ¥{n2(mis.printed)}</span>}
                                   {notIn && <span className={`${CHIP_WARN} shrink-0`}>ยังไม่ลงใบ</span>}
@@ -830,6 +844,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                               </span>
                             )}
                             {picked && <span className={`${CHIP_NEU} shrink-0`} title="ราคา ¥ จากบิล → ราคาต่อร้าน + ราคาบนสินค้า">นอกใบสั่งซื้อ</span>}
+                            {prodName && nameMismatch(thText, prodName) && <span className={`${CHIP_WARN} shrink-0`} title={`บิล: ${thText}\nสินค้า: ${prodName}\nชื่อไม่เข้ากัน — เช็กว่าจับคู่ถูกไหม`}>⚠ ชื่อไม่เข้ากัน</span>}
                           </div>
                           {/* บรรทัดล่าง: บิลเขียนว่าอะไร · PO · เฉพาะป้ายที่ต้องเช็ก */}
                           <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[11px] text-slate-500" title={(l.reasons ?? []).join("\n") || undefined}>
@@ -925,7 +940,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                             : l.level === "fee"
                               ? <button type="button" disabled={ro} onClick={() => decide(b.id, i, "expense")} title="ลงใบเป็นรายการค่าใช้จ่าย" className="h-7 px-2 text-[11px] rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50">เป็นค่าใช้จ่าย</button>
                               : g || picked
-                                ? <button type="button" disabled={ro} onClick={() => decide(b.id, i, "confirmed")} title="ยืนยัน = ลงใบสำคัญทันที" className="h-7 px-2.5 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยัน</button>
+                                ? <button type="button" disabled={ro} onClick={() => confirmRow(b.id, i)} title="ยืนยัน = ลงใบสำคัญทันที" className="h-7 px-2.5 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยัน</button>
                                 : <button type="button" disabled={ro} onClick={() => openPick(b.id, i)} className="h-7 px-2 text-[11px] rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50">เลือกจับคู่</button>}
                           {!ro && !busyRow && <RowMenu items={menu} />}
                           </span>
@@ -1069,6 +1084,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
           {!readonly && navRows.some((x) => !x.done) && (
             <div className="hidden md:block text-[11px] text-slate-400">แป้นพิมพ์: <b className="font-medium text-slate-500">↑ ↓</b> เลื่อนกรอบฟ้า · <b className="font-medium text-slate-500">Enter</b> = ยืนยันแถวที่มีกรอบ (ค่าใช้จ่าย = เป็นค่าใช้จ่าย · ยังไม่จับคู่ = เปิดเลือกจับคู่) แล้วไปแถวถัดไป · กดที่แถวเพื่อย้ายกรอบ</div>
           )}
+          <ConfirmDialog open={!!nameAsk} onClose={() => setNameAsk(null)} onConfirm={() => { const a = nameAsk; setNameAsk(null); if (a) decide(a.billId, a.idx, "confirmed"); }}
+            title="ชื่อในบิลกับสินค้าที่เลือกไม่เข้ากัน — ยืนยันไหม?"
+            message={`บิลเขียนว่า: ${nameAsk?.bill ?? ""}\nจับคู่กับ: ${nameAsk?.prod ?? ""}\n\nถ้าจับคู่ผิด ตอนยืนยันใบ ราคาจะไปเขียนทับสินค้าตัวนั้นใน PO — กด ยกเลิก แล้วเลือกสินค้าใหม่`}
+            confirmText="ถูกแล้ว ยืนยัน" cancelText="ยกเลิก · เลือกใหม่" variant="danger" />
           <ConfirmDialog open={!!highAsk} onClose={() => setHighAsk(null)} onConfirm={() => { const a = highAsk; setHighAsk(null); if (a) confirmHigh(a.billId); }}
             title={`ลงใบ ${highAsk?.n ?? 0} แถวที่ระบบมั่นใจ?`}
             message="ยืนยันทุกแถวที่จับคู่แล้วและระบบมั่นใจสูงในบิลนี้ — ลงใบสำคัญทันที (แถว ให้เช็ก และแถวที่ยังไม่จับคู่ ไม่รวม) · แก้ทีละแถวได้ภายหลังด้วยปุ่ม แก้"
