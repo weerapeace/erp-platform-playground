@@ -148,7 +148,8 @@ export default function TrendBoardPage() {
       <div className="flex flex-col gap-3 px-4 py-2 lg:flex-row">
         {/* กระดาน */}
         <div className="min-w-0 flex-1">
-          {id && <CanvasSketch entityType="creative_trend" entityId={id} height="calc(100vh - 200px)" controlsRef={sketchRef} onReady={onBoardReady} collab stickyTop={128} />}
+          {id && <CanvasSketch entityType="creative_trend" entityId={id} height="calc(100vh - 200px)" controlsRef={sketchRef} onReady={onBoardReady} collab stickyTop={128}
+            fullscreen="trend_board_fullscreen" fullscreenTitle={trend?.title} />}
         </div>
 
         {/* เช็คลิสต์ + ข้อมูลเทรนด์

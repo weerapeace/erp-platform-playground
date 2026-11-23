@@ -10,6 +10,9 @@
  *   - autoHide (เจ้าของขอ 2026-11-19 "ข้างบนให้เอาเมาส์ไปวางแล้วค่อยโชว์"): แถบปุ่มที่ห่อด้วย <FullscreenBar> ซ่อนไว้ขอบบน
  *       ชี้ขอบบน = เลื่อนลงมา · เมาส์ออก ~1 วิ = ซ่อน · ชิปกลางขอบบน (<FullscreenPeek>) ค้างไว้ กดแล้วเปิด/ปิดแถบ (มือถือใช้ทางนี้)
  *       ปุ่ม "ปักไว้" = แถบโชว์ค้าง (จำต่อคน `<prefKey>_pin`)
+ *   - float (เจ้าของเลือกแบบ B 2026-11-23 "อยากให้กระดานเต็มจอจริง ๆ"): กระดานกินทั้งจอ (100dvh + เว้นรอยบาก safe-area)
+ *       แถบปุ่ม <FullscreenBar> = แถบลอยเล็กล่างกลาง (ไม่ทับเครื่องมือวาดบนกลาง/ซูมล่างซ้ายของ Excalidraw) · ปุ่ม ˅ หุบเหลือชิป
+ *       มือถือยกแถบขึ้นเหนือแถบเครื่องมือล่างของ Excalidraw · CanvasSketch ใช้ผ่าน prop `fullscreen` (ทุกกระดานได้แบบเดียวกัน)
  * ใช้:
  *   const fs = useFullscreenStage("my_board_fullscreen", { active: isBoardTab, defaultOn: true, autoHide: true });
  *   <FullscreenStage fs={fs}>
@@ -42,13 +45,15 @@ export type FullscreenStageState = {
   /** ผู้ใช้ปักแถบให้โชว์ค้าง */
   pinned: boolean;
   setPinned: (v: boolean) => void;
+  /** แถบปุ่มลอยล่างกลาง (กระดานเต็มจอจริง) แทนแถบขอบบน */
+  float: boolean;
 };
 
 const parseBool = (v: unknown) => (typeof v === "boolean" ? v : null);
 
 /** active = หน้านี้กำลังโชว์กระดานอยู่ไหม (เช่น อยู่แท็บอื่น = false → ไม่เต็มจอ ไม่ฟังคีย์ แม้เป็นมือถือ) */
-export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; active?: boolean; defaultOn?: boolean; autoHide?: boolean } = {}): FullscreenStageState {
-  const { active = true, defaultOn = false, autoHide = false } = opts;
+export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; active?: boolean; defaultOn?: boolean; autoHide?: boolean; float?: boolean } = {}): FullscreenStageState {
+  const { active = true, defaultOn = false, autoHide = false, float = false } = opts;
   const hotkey = (opts.hotkey ?? true) && active;
   const [saved, setSaved] = useUserPref<boolean>(prefKey, defaultOn, parseBool);
   const [pinned, setPinned] = useUserPref<boolean>(`${prefKey}_pin`, false, parseBool);
@@ -95,10 +100,10 @@ export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; ac
     return () => { document.body.style.overflow = prev; };
   }, [on]);
 
-  return { on, phone, set, toggle, autoHide, pinned, setPinned };
+  return { on, phone, set, toggle, autoHide, pinned, setPinned, float };
 }
 
-type Hosts = { bar: HTMLElement | null; peek: HTMLElement | null };
+type Hosts = { bar: HTMLElement | null; peek: HTMLElement | null; float?: boolean };
 const StageCtx = createContext<Hosts | null>(null);
 
 /** กรอบที่กลายเป็นชั้นเต็มจอ — ไม่ย้ายลูกไปที่อื่น (กระดานไม่โหลดใหม่ตอนสลับ · ช่องแถบ/ชิปเป็นช่องคงที่ก่อน children) */
@@ -131,6 +136,34 @@ export function FullscreenStage({ fs, children, className = "space-y-2" }: { fs:
     setShown(false);
   };
 
+  const [collapsed, setCollapsed] = useState(false);
+  if (fs.on && fs.float) {
+    // กระดานเต็มจอจริง: ไม่มีขอบ/แถบบน · แถบปุ่มลอยล่างกลาง (หุบได้) · เว้นรอยบาก/แถบโฮมมือถือ
+    // มือถือ: ยกแถบขึ้นเหนือแถบเครื่องมือล่างของ Excalidraw (~5rem)
+    return (
+      <StageCtx.Provider value={{ bar, peek: null, float: true }}>
+        <div className="fixed inset-0 z-[45] flex flex-col overflow-hidden bg-white" data-fullscreen="1"
+          style={{ height: "100dvh", paddingTop: "env(safe-area-inset-top)", paddingLeft: "env(safe-area-inset-left)", paddingRight: "env(safe-area-inset-right)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+          {/* ⚠️ children ต้องอยู่ "ช่องที่ 4" เหมือนโหมดอื่น (3 ช่องแรกว่าง) — ไม่งั้น React สร้างกระดานใหม่ตอนสลับเต็มจอ (งานที่ยังไม่เซฟหาย) */}
+          {null}{null}{null}
+          {children}
+          <div data-fs-bar className="pointer-events-none absolute inset-x-2 z-30 flex justify-center bottom-[calc(env(safe-area-inset-bottom)+5rem)] md:bottom-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+            <div className={`pointer-events-auto max-w-full items-center gap-1 rounded-xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur ${collapsed ? "hidden" : "flex"}`}>
+              <div ref={setBar} className="flex min-w-0 flex-wrap items-center gap-1.5" />
+              <button type="button" onClick={() => setCollapsed(true)} title="หุบแถบ" aria-label="หุบแถบ"
+                className="inline-flex h-8 w-7 flex-shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"><Icon value="i:chevron-down" /></button>
+            </div>
+            {collapsed ? (
+              <button type="button" onClick={() => setCollapsed(false)} title="แสดงแถบเครื่องมือ"
+                className="pointer-events-auto inline-flex h-8 items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-3 text-xs text-slate-600 shadow-md hover:bg-slate-50">
+                <Icon value="i:chevron-up" />เครื่องมือ
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </StageCtx.Provider>
+    );
+  }
   const ctx: Hosts | null = hiding ? { bar, peek } : null;
   return (
     <StageCtx.Provider value={ctx}>
@@ -170,7 +203,7 @@ export function FullscreenStage({ fs, children, className = "space-y-2" }: { fs:
 /** แถบปุ่มที่ซ่อนไว้ขอบบนตอนเต็มจอ (autoHide) — order = ลำดับบนลงล่าง · นอกโหมดนี้ = แสดงที่เดิม */
 export function FullscreenBar({ children, order = 0 }: { children: ReactNode; order?: number }) {
   const ctx = useContext(StageCtx);
-  if (ctx?.bar) return createPortal(<div style={{ order }} className="min-w-0">{children}</div>, ctx.bar);
+  if (ctx?.bar) return createPortal(<div style={{ order }} className={ctx.float ? "flex min-w-0 flex-wrap items-center gap-1.5" : "min-w-0"}>{children}</div>, ctx.bar);
   return <>{children}</>;
 }
 

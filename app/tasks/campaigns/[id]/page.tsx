@@ -65,8 +65,8 @@ export default function CampaignCanvasPage() {
 
   const load = useCallback(async () => { try { setDetail(await getCampaign(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { const h = () => setFs(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
-  const toggleFs = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); };
+  // เต็มจอ = โหมดเต็มจอกลางของกระดาน (CanvasSketch fullscreen) — ไม่ใช้เต็มจอของเบราว์เซอร์แล้ว (เดิมยังเห็นแถบเมนู/หัวหน้า + ปุ่ม ✕ ของ Chrome)
+  const toggleFs = () => sketchRef.current?.toggleFullscreen?.();
   // รีโหลดกระดานล่าสุด (เซฟของเราก่อน → remount กระดาน → ดึง scene ใหม่) โดยไม่ต้อง F5 ที่เด้งหน้าแรก
   const refreshBoard = useCallback(async () => {
     setRefreshing(true);
@@ -107,6 +107,26 @@ export default function CampaignCanvasPage() {
   if (err) return <StandaloneShell title={t("แคมเปญ", "Campaign")} icon="i:ad" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
   const k = kit.items;
+  // ปุ่มของหน้า — ใช้ทั้งหัวหน้าปกติ และแถบลอยตอนเต็มจอ (ชุดเดียวกัน แก้ที่เดียว)
+  const pageTools = (
+    <>
+      {/* จัดปุ่มเป็นกลุ่มตามประเภท — เดิมเรียงยาว 14 ปุ่มจนแถบรก */}
+      <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[
+        k.sku, k.parent, k.marketing, k.task,
+        { icon: <Icon value="i:magnet" />, label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
+        k.content, k.trend,
+        ...(kit.canDesign ? [k.designSheet] : []),
+        k.cardStyle,
+      ]} />
+      <ToolMenu label={t("เครื่องมือ", "Tools")} icon={<Icon value="i:tools" />} tone="teal" items={[k.section, k.table, k.folder, k.asset]} />
+      <ToolMenu label={t("ข้อมูล", "Info")} icon={<Icon value="i:clipboard-list" />} tone="slate" items={[
+        k.cards,
+        { icon: <Icon value="i:books" />, label: t("ความรู้", "Knowledge"), hint: t("คลังความรู้ของทีม", "Team knowledge base"), onClick: () => setKnowledgeOpen(true) },
+        { icon: <Icon value="i:clipboard-list" />, label: t("รายละเอียดแคมเปญ", "Campaign details"), hint: t("แก้ข้อมูล/งานในแคมเปญ", "Edit campaign info"), onClick: () => setDrawerOpen(true) },
+      ]} />
+      <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"><Icon value={refreshing ? "i:hourglass" : "i:refresh"} /></button>
+    </>
+  );
   return (
     <StandaloneShell title={name} icon="i:ad" accent="violet">
       {/* GIF จิ้มเพื่อน — โผล่วิ่งบนหน้านี้ด้วย (ดูข้อความ/กดปิด · ตอบกลับทำที่หน้าแรก) */}
@@ -126,21 +146,7 @@ export default function CampaignCanvasPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {/* จัดปุ่มเป็นกลุ่มตามประเภท — เดิมเรียงยาว 14 ปุ่มจนแถบรก */}
-            <ToolMenu label={t("เพิ่มการ์ด", "Add card")} icon="＋" tone="violet" items={[
-              k.sku, k.parent, k.marketing, k.task,
-              { icon: <Icon value="i:magnet" />, label: t("ลากงานเข้า", "Drag tasks in"), hint: t("งานในแคมเปญที่ยังไม่อยู่บนกระดาน", "Campaign tasks not on the board yet"), onClick: openDragPanel },
-              k.content, k.trend,
-              ...(kit.canDesign ? [k.designSheet] : []),
-              k.cardStyle,
-            ]} />
-            <ToolMenu label={t("เครื่องมือ", "Tools")} icon={<Icon value="i:tools" />} tone="teal" items={[k.section, k.table, k.folder, k.asset]} />
-            <ToolMenu label={t("ข้อมูล", "Info")} icon={<Icon value="i:clipboard-list" />} tone="slate" items={[
-              k.cards,
-              { icon: <Icon value="i:books" />, label: t("ความรู้", "Knowledge"), hint: t("คลังความรู้ของทีม", "Team knowledge base"), onClick: () => setKnowledgeOpen(true) },
-              { icon: <Icon value="i:clipboard-list" />, label: t("รายละเอียดแคมเปญ", "Campaign details"), hint: t("แก้ข้อมูล/งานในแคมเปญ", "Edit campaign info"), onClick: () => setDrawerOpen(true) },
-            ]} />
-            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50"><Icon value={refreshing ? "i:hourglass" : "i:refresh"} /></button>
+            {pageTools}
             <button onClick={toggleFs} title={fs ? t("ออกเต็มจอ", "Exit fullscreen") : t("เต็มจอ", "Fullscreen")} className="h-9 w-9 inline-flex items-center justify-center text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value={fs ? "i:minimize" : "i:maximize"} /></button>
           </div>
         </div>
@@ -150,11 +156,12 @@ export default function CampaignCanvasPage() {
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) + เซฟกันทับด้วย version-guard */}
           {/* ความสูงวัดจากพื้นที่ที่เหลือจริง → กระดานเต็มถึงแถบล่างพอดี หน้าไม่เลื่อน toolbox ไม่จม */}
-          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={kit.onCardOpen} onReady={kit.onBoardReady} onSelectionChange={kit.onSelection} onContentChange={kit.onContentChange} collab stickyTop={embed ? 72 : 128} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 205px)" controlsRef={sketchRef} onCardOpen={kit.onCardOpen} onReady={kit.onBoardReady} onSelectionChange={kit.onSelection} onContentChange={kit.onContentChange} collab stickyTop={embed ? 72 : 128}
+            fullscreen="campaign_board_fullscreen" fullscreenTitle={name} fullscreenBar={pageTools} fullscreenButton={false} onFullscreenChange={setFs} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
-            <div className="absolute top-3 left-3 z-10 w-72 max-h-[70%] bg-white rounded-xl border border-slate-200 shadow-xl flex flex-col">
+            <div className={`${fs ? "fixed z-[46] top-16" : "absolute z-10 top-3"} left-3 w-72 max-h-[70%] bg-white rounded-xl border border-slate-200 shadow-xl flex flex-col`}>
               <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
                 <span className="text-sm font-semibold text-slate-700"><Icon value="i:magnet" className="mr-1" />{t("ลากงานเข้ากระดาน", "Drag task to board")}</span>
                 <button onClick={() => setDragPanelOpen(false)} className="h-6 w-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100">✕</button>

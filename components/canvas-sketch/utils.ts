@@ -36,6 +36,47 @@ export function sceneSig(els: { id?: string; version?: number }[]): string {
   return `${els.length}:${h}`;
 }
 
+/** ความสูงกระดานที่ทำให้ "จบพอดีขอบล่างจอ" (หน้าไม่ต้องเลื่อน) — นับของที่อยู่เหนือกระดาน (ตำแหน่งบนจริง) + ของที่อยู่ใต้กระดานทุกชั้น
+ *  (พี่น้องที่อยู่ "ใต้" กรอบ + ขอบล่างของกล่องแม่) · ไม่ขึ้นกับความสูงกระดานเอง → วัดซ้ำได้ค่าเดิม ไม่แกว่ง
+ *  ⚠️ สูตรเดิม (scrollHeight − สูงกระดาน) ใช้ไม่ได้ตอนกระดานเตี้ยกว่าจอ: scrollHeight ถูกปัดขึ้นเท่าจอ → กระดานหดได้อย่างเดียว ไม่เคยยืดกลับ
+ *  (เจอ 2026-11-23: กดเต็มจอเบราว์เซอร์ / ขยายหน้าต่าง → เหลือที่ว่างล่าง ~220px) */
+export function boardHeightToViewportBottom(el: HTMLElement, minH = 360): number {
+  const r = el.getBoundingClientRect();
+  let bottom = r.bottom;
+  let n: HTMLElement = el;
+  while (n !== document.body && n.parentElement) {
+    const p: HTMLElement = n.parentElement;
+    const nb = n.getBoundingClientRect().bottom;
+    for (let s = n.nextElementSibling; s; s = s.nextElementSibling) {
+      const cs = getComputedStyle(s);
+      if (cs.position === "fixed" || cs.position === "absolute" || cs.display === "none") continue;
+      const sr = s.getBoundingClientRect();
+      if (sr.height <= 0 || sr.top < nb - 1) continue; // อยู่ข้าง ๆ (แถวเดียวกัน) ไม่ใช่ข้างใต้
+      bottom = Math.max(bottom, sr.bottom + (parseFloat(cs.marginBottom) || 0));
+    }
+    const pcs = getComputedStyle(p);
+    bottom += (parseFloat(pcs.paddingBottom) || 0) + (parseFloat(pcs.borderBottomWidth) || 0);
+    n = p;
+  }
+  const above = r.top + window.scrollY;
+  const below = Math.max(0, bottom - r.bottom);
+  return Math.max(minH, Math.round(window.innerHeight - above - below - 4));
+}
+
+/** Esc ตอนกระดานเต็มจอ (Esc 2 จังหวะ):
+ *  "pass" = กำลังพิมพ์/วาด/เปิดเมนู/ถือเครื่องมืออื่น → ปล่อยให้ Excalidraw ยกเลิกเอง · "deselect" = มีของถูกเลือก → เราล้างการเลือก
+ *  (Excalidraw เองไม่ล้างการเลือกตอนกด Esc) · "exit" = ว่างแล้ว → ออกเต็มจอ */
+export function fullscreenEscAction(st: any): "pass" | "deselect" | "exit" {
+  if (!st) return "pass";
+  if (st.editingTextElement || st.newElement || st.multiElement || st.editingLinearElement || st.selectedLinearElement?.isEditing) return "pass";
+  if (st.openDialog || st.openMenu || st.openPopup || st.contextMenu) return "pass";
+  const tool = st.activeTool?.type;
+  if (tool && tool !== "selection" && tool !== "hand") return "pass";
+  const sel = st.selectedElementIds || {};
+  if (Object.keys(sel).some((k) => sel[k])) return "deselect";
+  return "exit";
+}
+
 // กล่องฝัง (วิดีโอ Pinterest/TikTok/YouTube) ต้องมี "พื้นทึบ" ไม่งั้น Excalidraw ถือว่าโปร่ง (ทะลุได้)
 // → ลากปลายเส้นไปวางกลางกล่องแล้วไม่ผูก ต้องเล็งขอบเป๊ะ ๆ (ขอบมองไม่เห็นเพราะวิดีโอบังอยู่) · พื้นขาวอยู่ใต้วิดีโอ มองไม่เห็น
 export const EMBED_FILL = { backgroundColor: "#ffffff", fillStyle: "solid" } as const;

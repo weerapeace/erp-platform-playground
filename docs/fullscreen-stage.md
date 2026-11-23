@@ -46,3 +46,6 @@ const fs = useFullscreenStage("my_board_fullscreen", { active: isBoardTab, defau
 
 ## ใช้อยู่ที่
 - แผนงานทีม `/tasks/plan` แท็บ "กระดาน" (ทั้งโหมดผังระบบ และกระดานวาด) — key `team_plan_board_fullscreen` · เปิดมาเต็มจอ + ซ่อนแถบ (แถบโหมด · ตัวกรอง · สรุป · เครื่องมือวาดของผัง)
+- กระดานแคนวาสกลาง (CanvasSketch) ผ่าน prop `fullscreen="<key>"` — แบบ **float** (เจ้าของเลือกแบบ B 2026-11-23): กระดานกิน 100dvh (เว้นรอยบาก safe-area) · ปุ่มของกระดาน + `fullscreenBar` ของหน้าย้ายไปแถบลอยล่างกลาง (หุบได้ · มือถือยกเหนือแถบล่างของ Excalidraw) · **Esc 2 จังหวะ** (จังหวะ 1 ล้างการเลือก/ปล่อยให้กระดานยกเลิกเครื่องมือ · จังหวะ 2 ออก — Excalidraw กิน Esc เอง ชั้น Esc กลางไม่ได้ยิน จึงดักที่กรอบกระดาน) · หน้ามีปุ่มเองเรียก `controls.toggleFullscreen()` + `fullscreenButton={false}`
+  - แคมเปญ `campaign_board_fullscreen` · เทรนด์ `trend_board_fullscreen` · แคนวาสแบรนด์ (Design dashboard) `design_brand_board_fullscreen`
+  - ⚠️ ลูกของชั้นเต็มจอต้องอยู่ช่องเดิม (ช่องที่ 4) ทุกโหมด ไม่งั้นกระดานถูกสร้างใหม่ตอนสลับ (งานที่ยังไม่เซฟหาย)

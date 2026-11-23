@@ -234,6 +234,7 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
         </span>
       </div>
       <CanvasSketch key={brandKey} entityType={BRAND_CANVAS_ENTITY} entityId={brandKey} editable={editable} collab height={height}
+        fullscreen="design_brand_board_fullscreen"
         controlsRef={ref}
         onReady={() => { void onBoardReady(); }}
         onSaved={() => applyBoardState(true)}

@@ -1,7 +1,7 @@
 // กล่องฝังวิดีโอ (Pinterest/TikTok) บนกระดาน ต้อง "ลากเส้นมาวางกลางกล่องแล้วผูก" ได้เหมือนการ์ดอื่น
 // ใช้ตัวตรวจผูกเส้นของ Excalidraw เอง (getHoveredElementForBinding) — เทียบกล่องโปร่ง (บั๊กเดิม) กับกล่องพื้นทึบ (bindableEmbed)
 import { beforeAll, describe, expect, it } from "vitest";
-import { bindableEmbed, EMBED_FILL } from "@/components/canvas-sketch/utils";
+import { bindableEmbed, EMBED_FILL, fullscreenEscAction } from "@/components/canvas-sketch/utils";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let X: any;
 beforeAll(async () => {
@@ -44,5 +44,23 @@ describe("กล่องฝังวิดีโอ ผูกเส้นได
     const solid = embed({ backgroundColor: "#ffc9c9" });
     expect(bindableEmbed(solid)).toBe(solid);
     expect(bindableEmbed(embed({ backgroundColor: "#ffffff00" }))).toMatchObject(EMBED_FILL);
+  });
+});
+
+describe("Esc 2 จังหวะ ตอนกระดานเต็มจอ", () => {
+  const idle = { selectedElementIds: {}, activeTool: { type: "selection" } };
+  it("ว่าง = ออกเต็มจอ", () => {
+    expect(fullscreenEscAction(idle)).toBe("exit");
+    expect(fullscreenEscAction({ ...idle, activeTool: { type: "hand" } })).toBe("exit");
+  });
+  it("มีของถูกเลือก = ล้างการเลือกก่อน (Excalidraw ไม่ล้างเอง)", () => {
+    expect(fullscreenEscAction({ ...idle, selectedElementIds: { a: true } })).toBe("deselect");
+  });
+  it("กำลังพิมพ์/วาด/เปิดเมนู/ถือเครื่องมืออื่น = ปล่อยให้กระดานจัดการ", () => {
+    expect(fullscreenEscAction({ ...idle, editingTextElement: { id: "t" } })).toBe("pass");
+    expect(fullscreenEscAction({ ...idle, activeTool: { type: "rectangle" } })).toBe("pass");
+    expect(fullscreenEscAction({ ...idle, openMenu: "canvas" })).toBe("pass");
+    expect(fullscreenEscAction({ ...idle, newElement: { id: "n" } })).toBe("pass");
+    expect(fullscreenEscAction(null)).toBe("pass");
   });
 });

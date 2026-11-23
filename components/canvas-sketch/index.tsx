@@ -15,7 +15,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useEffect, useRef, useCallback, type MutableRefObject, type MouseEvent as RMouseEvent } from "react";
+import { useState, useEffect, useRef, useCallback, type MutableRefObject, type MouseEvent as RMouseEvent, type ReactNode } from "react";
+import { FullscreenBar, FullscreenStage, useFullscreenStage, type FullscreenStageState } from "@/components/fullscreen-stage";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
@@ -27,7 +28,7 @@ import { Icon } from "@/components/icon";
 import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
-import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles, bindableEmbed, EMBED_FILL } from "./utils";
+import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles, bindableEmbed, EMBED_FILL, fullscreenEscAction, boardHeightToViewportBottom } from "./utils";
 import { parseSocialLink, socialEmbedSize, type SocialLink } from "@/lib/social-embed";
 import { SocialEmbedFrame, fetchSocialInfo } from "./social-embed-frame";
 import { LineTools } from "./line-tools";
@@ -61,6 +62,8 @@ export type CanvasSketchControls = {
   getElements: () => Record<string, unknown>[];
   /** กระดานนี้ยังไม่เคยบันทึกเลย (ยังไม่มีแถวในฐานข้อมูล) — ใช้เติมของตั้งต้นครั้งแรกครั้งเดียว เช่น ย้ายรูปบรีฟเดิมขึ้นกระดาน */
   isNewBoard: () => boolean;
+  /** เข้า/ออกโหมดเต็มจอ (เฉพาะกระดานที่ส่ง prop fullscreen) — ใช้กับปุ่มเต็มจอของหน้าเอง */
+  toggleFullscreen?: () => void;
   /** แก้ค่าบน element ที่มีอยู่ (คืน null = ไม่แก้ใบนั้น) — ใช้จัดตำแหน่งการ์ด/เปลี่ยนชื่อกรอบ · ไม่มีอะไรเปลี่ยนจริง = ไม่บันทึก */
   patchElements: (patch: (el: Record<string, unknown>) => Record<string, unknown> | null) => void;
   /** ลบการ์ด (ทั้งกลุ่ม) ที่ตรงเงื่อนไข match — เช่นลบการ์ดคอนเทนต์ทั้งหมดของ content id หนึ่งเมื่อคอนเทนต์ถูกลบ */
@@ -88,8 +91,21 @@ export type CardTextLine = { text: string; fontSize: number; fontFamily: number;
 export type CardTextsSpec = { texts: CardTextLine[]; align?: "left" | "center" | "right"; gap?: number; width?: number; bg?: string | null; stroke?: string | null; flag?: Record<string, unknown> };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, onContentChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, onContentChange, collab = false, stickyTop, fill: fillProp = false, imageMaxPx, compactHelp = false,
+  fullscreen, fullscreenTitle, fullscreenBar, fullscreenButton = true, onFullscreenChange,
 }: {
+  /** แจ้งหน้าเมื่อเข้า/ออกเต็มจอ (เช่น ย้ายแผงของหน้าให้ลอยเหนือชั้นเต็มจอ) */
+  onFullscreenChange?: (on: boolean) => void;
+  /** เปิดโหมดเต็มจอจริงของกระดาน (ของกลาง FullscreenStage แบบแถบลอยล่างกลาง) — ค่า = ชื่อที่จำต่อคน เช่น "campaign_board_fullscreen"
+   *  เต็มจอ = ซ่อนทุกอย่างของหน้า กระดานกิน 100dvh · ปุ่มของกระดาน + fullscreenBar ย้ายไปแถบลอย · Esc 2 จังหวะ · F = เข้า/ออก · มือถือเต็มจอเสมอ
+   *  ใช้กับกระดานที่เป็นทั้งหน้า (แคมเปญ/เทรนด์/บอร์ดงาน) — ห้ามใช้กับกระดานในลิ้นชัก/ป๊อป (ป๊อปมีปุ่มเต็มจอของตัวเอง) */
+  fullscreen?: string;
+  /** ชื่อกระดานที่โชว์หัวแถบลอยตอนเต็มจอ */
+  fullscreenTitle?: string;
+  /** ปุ่มของหน้า (เช่น เพิ่มการ์ด/เครื่องมือ/ข้อมูล) ที่ให้ไปอยู่ในแถบลอยตอนเต็มจอ */
+  fullscreenBar?: ReactNode;
+  /** โชว์ปุ่ม "เต็มจอ" ในแถบเครื่องมือของกระดาน (false = หน้ามีปุ่มเองแล้ว เรียก controls.toggleFullscreen) */
+  fullscreenButton?: boolean;
   /** คำแนะนำวิธีใช้เหลือไอคอน ? (ชี้ดู) แทนบรรทัดยาว — สำหรับกระดานในพื้นที่แคบ */
   compactHelp?: boolean;
   /** ย่อรูปที่วาง/ลากลงกระดานให้ด้านยาวไม่เกินกี่ px ก่อนเก็บขึ้น R2 (ค่าเดิม 1600) — ค่าเล็ก (เช่น 600) = เก็บเป็น webp ประหยัด ~90%
@@ -121,6 +137,12 @@ export function CanvasSketch({
   onContentChange?: (elements: Record<string, unknown>[]) => void;
 }) {
   const t = useT();
+  // ⛶ เต็มจอจริง (เจ้าของเลือกแบบ B 2026-11-23) — เปิดเฉพาะกระดานที่ส่ง fullscreen มา · เต็มจอ = ยืดเต็มพื้นที่ (fill)
+  const fsStage = useFullscreenStage(fullscreen ?? "canvas_fullscreen_unused", { active: !!fullscreen, float: true });
+  const fill = fillProp || fsStage.on;
+  const fsToggleRef = useRef(fsStage.toggle); fsToggleRef.current = fsStage.toggle; // controls.toggleFullscreen เรียกตัวล่าสุดเสมอ
+  const fsCbRef = useRef(onFullscreenChange); fsCbRef.current = onFullscreenChange;
+  useEffect(() => { fsCbRef.current?.(fsStage.on); }, [fsStage.on]);
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
@@ -445,6 +467,7 @@ export function CanvasSketch({
       // element ดิบบนกระดาน (ยังไม่ถูกลบ) — อ่านอย่างเดียว
       getElements: () => { const api = apiRef.current; return api ? ((api.getSceneElements() as Record<string, unknown>[]) ?? []) : []; },
       isNewBoard: () => baseRevRef.current === 0,
+      toggleFullscreen: () => fsToggleRef.current(),
       // แก้ค่าบน element เดิม (ตำแหน่ง/ชื่อกรอบ ฯลฯ) — bump version ให้ collab merge ได้ · ไม่มีอะไรเปลี่ยน = ไม่ยุ่งกับ scene
       patchElements: (patch) => {
         const api = apiRef.current; if (!api) return;
@@ -788,12 +811,8 @@ export function CanvasSketch({
     let raf = 0;
     const measure = () => {
       const el = wrapRef.current; if (!el) return;
-      const rect = el.getBoundingClientRect();
-      // "chrome" = ความสูงของทุกอย่างที่ไม่ใช่กระดาน (แถบบน + แถบล่าง + ขอบ) — ได้จากเอกสารทั้งหมดลบความสูงกระดานเอง
-      // จุดสำคัญ: ค่านี้ "ไม่ขึ้นกับ" ความสูงกระดาน → แทนค่าครั้งเดียวได้คำตอบที่ลงตัว ไม่แกว่ง
-      // (สูตรเดิมวัด below + มี guard overflow คอยหด → สลับโต-หด ทุกครั้งที่วัดใหม่ = แถบล่างขยับเรื่อย ๆ ตอนคลิก)
-      const chrome = Math.max(0, document.documentElement.scrollHeight - rect.height);
-      const h = Math.max(360, Math.round(window.innerHeight - chrome - 4));
+      // ของเหนือ + ใต้กระดาน วัดจากตำแหน่งจริง (ไม่ขึ้นกับความสูงกระดาน → ไม่แกว่ง · ยืดกลับได้เมื่อจอสูงขึ้น) — ดู utils
+      const h = boardHeightToViewportBottom(el);
       setAutoH((prev) => (prev != null && Math.abs(prev - h) <= 4 ? prev : h));  // ต่างไม่เกิน 4px = ถือว่าเท่าเดิม (กันสั่น/วนลูป)
     };
     const schedule = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); };
@@ -1113,6 +1132,24 @@ export function CanvasSketch({
   const [capSending, setCapSending] = useState(false);
   const [capMsg, setCapMsg] = useState<string | null>(null);
 
+  // Esc 2 จังหวะตอนเต็มจอ: Excalidraw กิน Esc เสมอ (ยกเลิกเลือก/เครื่องมือ · preventDefault+stopPropagation) ชั้น Esc กลางเลยไม่ได้ยิน
+  // → ดักก่อน (capture ที่กรอบกระดาน): ยังเลือก/แก้/วาดอะไรอยู่ = ปล่อยให้ Excalidraw ยกเลิกตามปกติ (จังหวะ 1) · ว่างแล้ว = ออกเต็มจอ (จังหวะ 2)
+  const fsOn = fsStage.on, fsSet = fsStage.set;
+  useEffect(() => {
+    const el = wrapRef.current; if (!el || !fsOn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const api = apiRef.current; if (!api || capArmed) return; // กำลังลากคลุมส่ง LINE = Esc ยกเลิกการลากก่อน
+      const act = fullscreenEscAction(api.getAppState());
+      if (act === "pass") return;
+      e.preventDefault(); e.stopPropagation();
+      if (act === "deselect") api.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} } }); // แก้แค่การเลือก ไม่แตะชิ้นงาน/ประวัติย้อน
+      else fsSet(false);
+    };
+    el.addEventListener("keydown", onKey, true);
+    return () => el.removeEventListener("keydown", onKey, true);
+  }, [fsOn, fsSet, capArmed]);
+
   const closeCap = useCallback(() => {
     setCapModal((m) => { if (m) URL.revokeObjectURL(m.url); return null; });
     setCapArmed(false); setCapBox(null); setCapCaption(""); setCapMsg(null); capStartRef.current = null;
@@ -1195,10 +1232,19 @@ export function CanvasSketch({
   }
 
   return (
-    <div className={fill ? "flex h-full min-h-0 flex-col gap-1.5" : "space-y-1.5"}>
+    <MaybeStage fs={fullscreen ? fsStage : null}>
+    <div className={fill ? "flex h-full min-h-0 flex-1 flex-col gap-1.5" : "space-y-1.5"}>
+      {/* เต็มจอ: ชื่อกระดาน + ปุ่มของหน้า ไปอยู่ต้นแถบลอย (นอกเต็มจอ = ไม่แสดงตรงนี้ หน้าวางเองที่หัวหน้า) */}
+      {fsStage.on && (fullscreenTitle || fullscreenBar) && (
+        <FullscreenBar order={10}>
+          {fullscreenTitle && <span className="max-w-[10rem] truncate px-1.5 text-sm font-semibold text-slate-800">{fullscreenTitle}</span>}
+          {fullscreenBar}
+        </FullscreenBar>
+      )}
+      <FullscreenBar order={20}>
       <div className={`flex flex-wrap items-center gap-2${!fill && stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
         style={!fill && stickyTop != null ? { top: stickyTop } : undefined}>
-        {compactHelp ? (
+        {fsStage.on ? null : compactHelp ? (
           // โหมดคำแนะนำย่อ (กระดานที่อยู่ในพื้นที่แคบ เช่น ลิ้นชักงาน) — เหลือไอคอน ? ชี้ดูวิธีใช้
           <span className="flex-1 min-w-0">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 text-[11px] text-slate-400 cursor-help"
@@ -1257,7 +1303,7 @@ export function CanvasSketch({
               💬 {t("คอมเมนต์", "Comment")}
             </button>
             {noteOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-white border border-slate-200 rounded-lg shadow-xl p-2">
+              <div className={`absolute right-0 z-30 w-64 bg-white border border-slate-200 rounded-lg shadow-xl p-2 ${fsStage.on ? "bottom-full mb-2" : "top-full mt-1"}`}>
                 {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
                 <textarea autoFocus value={noteText} onChange={(e) => setNoteText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submitNote(); } else if (e.key === "Escape") setNoteOpen(false); }}
@@ -1310,15 +1356,28 @@ export function CanvasSketch({
           </span>
         )}
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">{t("👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)", "👁 Read-only (no edit permission)")}</span>}
+        {fullscreen && fullscreenButton && !fsStage.on && (
+          <button type="button" onClick={fsStage.toggle} title={t("เต็มจอ (F)", "Fullscreen (F)")}
+            className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-50">
+            <Icon value="i:maximize" /> {t("เต็มจอ", "Fullscreen")}
+          </button>
+        )}
+        {fsStage.on && (
+          <button type="button" onClick={() => fsStage.set(false)} title={fsStage.phone ? t("ออกจากเต็มจอ", "Exit fullscreen") : t("ออกจากเต็มจอ (Esc 2 ครั้ง)", "Exit fullscreen (Esc twice)")}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-slate-800 px-2.5 text-[11px] font-medium text-white hover:bg-slate-700">
+            <Icon value="i:minimize" /> {t("ออก", "Exit")}{!fsStage.phone && <span className="text-slate-300">(Esc)</span>}
+          </button>
+        )}
       </div>
-      <div ref={wrapRef} className={`relative rounded-xl border border-slate-200 overflow-hidden bg-white${fill ? " min-h-0 flex-1" : ""}`} style={fill ? undefined : { height: autoH != null ? autoH : height }}>
+      </FullscreenBar>
+      <div ref={wrapRef} className={`relative overflow-hidden bg-white${fsStage.on ? "" : " rounded-xl border border-slate-200"}${fill ? " min-h-0 flex-1" : ""}`} style={fill ? undefined : { height: autoH != null ? autoH : height }}>
         {/* tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip (เช่น การ์ดโฟลเดอร์) */}
         {tip && (
           <div className="absolute z-20 pointer-events-none px-2 py-1 rounded-md bg-slate-800 text-white text-[11px] shadow-lg whitespace-nowrap max-w-[260px] truncate" style={{ left: tip.x + 12, top: tip.y + 12 }}>{tip.text}</div>
         )}
         {/* ป้ายสถานะบันทึก — ลอยกลางล่าง โชว์เฉพาะ "กำลังบันทึก/บันทึกแล้ว/ผิดพลาด" (ไม่โชว์ตอนแก้ไขเฉย ๆ) */}
         {editable && serverCanEdit && saveState !== "dirty" && (saveState !== "idle" || savedAt) && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5">
+          <div className={`absolute left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5 ${fsStage.on ? "top-14" : "bottom-3"}`}>
             <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium shadow-sm border bg-white/95 backdrop-blur ${
               saveState === "error" ? "text-rose-600 border-rose-200"
               : saveState === "saving" ? "text-blue-600 border-blue-200"
@@ -1413,5 +1472,11 @@ export function CanvasSketch({
           </div>
         </div>, document.body)}
     </div>
+    </MaybeStage>
   );
+}
+
+/** กระดานที่เปิดโหมดเต็มจอ → ห่อด้วยชั้นเต็มจอกลาง (ไม่เต็มจอ = กล่อง display:contents ไม่กระทบหน้าตาเดิม) · ไม่เปิด = ไม่ห่อ */
+function MaybeStage({ fs, children }: { fs: FullscreenStageState | null; children: ReactNode }) {
+  return fs ? <FullscreenStage fs={fs} className="contents">{children}</FullscreenStage> : <>{children}</>;
 }
