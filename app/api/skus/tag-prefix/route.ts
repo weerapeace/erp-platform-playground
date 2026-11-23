@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditDiff } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -79,12 +79,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้อัปเดต" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const { data: before } = await admin.from("product_families").select(Object.keys(patch).join(", ")).eq("id", body.id).maybeSingle();
   const { error } = await admin.from("product_families").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   await writeAudit(admin, {
     action: "set_family_defaults", entityType: "product_families", entityId: body.id,
-    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch,
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { ...patch, changes: auditDiff((before ?? null) as unknown as Record<string, unknown> | null, patch) },
   });
   return NextResponse.json({ id: body.id, ...patch, error: null });
 }

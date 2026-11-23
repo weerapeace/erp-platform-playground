@@ -19,6 +19,17 @@ import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
 import { formatCreditTerm, formatLeadTime } from "@/lib/credit-term";
 import type { ShopTermRow, ShopTermsResponse } from "@/app/api/purchasing/shop-terms/route";
+import { useSaveAll, SaveAllBar, DIRTY_ROW_CLASS } from "@/components/save-bar/save-all";
+
+type Terms = { credit_term: string | null; lead_time: string | null };
+async function patchTerms(id: string, v: Terms): Promise<string | null> {
+  const res = await apiFetch(`/api/master-v2/partners/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ purchase_credit_term: v.credit_term, purchase_lead_time: v.lead_time }),
+  });
+  const j = await res.json().catch(() => ({}));
+  return !res.ok || j.error ? String(j.error || "บันทึกไม่สำเร็จ") : null;
+}
 
 type Filter = "todo" | "used" | "all";
 
@@ -70,28 +81,42 @@ export function ShopTermsBoard() {
   const setDraftVal = (r: ShopTermRow, patch: Partial<{ credit_term: string | null; lead_time: string | null }>) =>
     setDraft((p) => ({ ...p, [r.id]: { ...valueOf(r), ...patch } }));
 
+  // บันทึก 1 ร้าน (ใช้ทั้งปุ่มรายแถว และ "บันทึกทั้งหมด") — สำเร็จแล้วอัปเดตแถว + ตัวเลขสรุป
+  const writeRow = async (r: ShopTermRow, v: Terms): Promise<string | null> => {
+    const err = await patchTerms(r.id, v);
+    if (err) return err;
+    setRows((list) => list.map((x) => (x.id === r.id ? { ...x, credit_term: v.credit_term, lead_time: v.lead_time } : x)));
+    setDraft((p) => { const c = { ...p }; delete c[r.id]; return c; });
+    setSummary((s) => {
+      const had = !!r.credit_term, has = !!v.credit_term;
+      const hadL = !!r.lead_time, hasL = !!v.lead_time;
+      return {
+        ...s,
+        with_credit: s.with_credit + (has ? 1 : 0) - (had ? 1 : 0),
+        with_lead: s.with_lead + (hasL ? 1 : 0) - (hadL ? 1 : 0),
+        pos_covered: s.pos_covered + (has && !had ? r.po_count : 0) - (!has && had ? r.po_count : 0),
+      };
+    });
+    return null;
+  };
+  // 💾 บันทึกทั้งหมด (ของกลาง) — ร้านที่แก้ค้าง · ย้อนกลับได้
+  const rowById = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const edited = useMemo(() => rows.map((r) => (draft[r.id] ? { ...r, ...draft[r.id] } : r)), [rows, draft]);
+  const sa = useSaveAll<ShopTermRow>({
+    items: edited, keyOf: (r) => r.id,
+    original: useCallback((r: ShopTermRow) => rowById.get(r.id), [rowById]),
+    isDirty: useCallback((r: ShopTermRow, o: ShopTermRow | undefined) => !!o && (r.credit_term !== o.credit_term || r.lead_time !== o.lead_time), []),
+    saveOne: (r) => writeRow(rowById.get(r.id) ?? r, { credit_term: r.credit_term, lead_time: r.lead_time }),
+    undoOne: (o) => patchTerms(o.id, { credit_term: o.credit_term, lead_time: o.lead_time }),
+    afterUndo: () => void load(), label: (r) => r.name,
+  });
+
   const save = async (r: ShopTermRow) => {
     const v = valueOf(r);
     setSaving(r.id);
     try {
-      const res = await apiFetch(`/api/master-v2/partners/${r.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ purchase_credit_term: v.credit_term, purchase_lead_time: v.lead_time }),
-      });
-      const j = await res.json();
-      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      setRows((list) => list.map((x) => (x.id === r.id ? { ...x, credit_term: v.credit_term, lead_time: v.lead_time } : x)));
-      setDraft((p) => { const c = { ...p }; delete c[r.id]; return c; });
-      setSummary((s) => {
-        const had = !!r.credit_term, has = !!v.credit_term;
-        const hadL = !!r.lead_time, hasL = !!v.lead_time;
-        return {
-          ...s,
-          with_credit: s.with_credit + (has ? 1 : 0) - (had ? 1 : 0),
-          with_lead: s.with_lead + (hasL ? 1 : 0) - (hadL ? 1 : 0),
-          pos_covered: s.pos_covered + (has && !had ? r.po_count : 0) - (!has && had ? r.po_count : 0),
-        };
-      });
+      const err = await writeRow(r, v);
+      if (err) throw new Error(err);
       toast.success(`บันทึก "${r.name}" แล้ว`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(null); }
@@ -153,7 +178,7 @@ export function ShopTermsBoard() {
               const v = valueOf(r);
               const dirty = isDirty(r);
               return (
-                <div key={r.id} className={`px-4 py-3 ${dirty ? "bg-amber-50/40" : ""}`}>
+                <div key={r.id} className={`px-4 py-3 ${dirty ? DIRTY_ROW_CLASS : ""}`}>
                   <div className="flex items-start gap-3 flex-wrap">
                     <div className="min-w-[190px] flex-1">
                       <div className="font-semibold text-[13.5px] flex items-center gap-1.5 flex-wrap">
@@ -195,6 +220,8 @@ export function ShopTermsBoard() {
           </div>
         )}
       </div>
+      {/* 💾 บันทึกทั้งหมด — แก้หลายร้านแล้วกดทีเดียว (Ctrl+S ได้) */}
+      {canEdit && <SaveAllBar sa={sa} unit="ร้าน" onDiscard={() => setDraft({})} sticky />}
     </div>
   );
 }

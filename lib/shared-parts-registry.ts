@@ -277,6 +277,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "save-bar.md",
   },
   {
+    key: "save-all", label: "บันทึกทั้งหมด (แก้หลายแถว)", code: "useSaveAll / SaveAllBar", category: "input",
+    source: { path: "components/save-bar/save-all" },
+    what: "แก้หลายแถวแล้วกด \"บันทึกทั้งหมด (N)\" ครั้งเดียว · แถวที่แก้ค้างมีแถบส้ม · บอกผลสำเร็จ/พลาด · ย้อนกลับได้ · Ctrl+S",
+    when: "ตาราง/ป๊อปที่แต่ละแถวแก้ได้และต้องบันทึก เช่น ค่าเริ่มต้น SKU ต่อประเภท · เทอมจ่ายร้าน",
+    notWhen: "ฟอร์มเดียว ใช้ SaveBar · หน้าที่บันทึกทันทีทุกการแก้ไม่ต้องมีปุ่ม",
+    doc: "save-bar.md",
+  },
+  {
     key: "split-panes", label: "กล่องแบ่งซ้าย-ขวา ดันกันได้", code: "SplitPanes", category: "input",
     source: { path: "components/split-panes" },
     what: "แบ่งหน้าเป็น 2 กล่องซ้าย-ขวา กดกล่องไหนกล่องนั้นขยายดันอีกฝั่งให้แคบ (หรือพับเหลือแถบ) จำฝั่งที่ขยายต่อคน ที่แคบเรียงบน-ล่างเอง",
