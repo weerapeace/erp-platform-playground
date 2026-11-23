@@ -96,10 +96,12 @@ function DocChips({ o }: { o: PlatformOrderRow }) {
 /** ป้ายใต้แถว: ส่งด่วน · ข้อความถึงร้าน */
 function OrderTags({ o }: { o: PlatformOrderRow }) {
   const urgent = isUrgentCarrier(o.carrier);
-  if (!urgent && !o.buyer_message) return null;
+  const opt = o.delivery_option && !/standard/i.test(o.delivery_option) ? o.delivery_option : null;
+  if (!urgent && !o.buyer_message && !opt) return null;
   return (
     <span className="mt-0.5 flex flex-wrap gap-x-2 text-[11px]">
       {urgent && <span className="text-rose-600"><Icon value="i:bolt" className="mr-0.5" />{o.carrier}</span>}
+      {opt && <span className="text-rose-600"><Icon value="i:tag" className="mr-0.5" />{opt}</span>}
       {o.buyer_message && <span className="max-w-[220px] truncate text-amber-700" title={o.buyer_message}><Icon value="i:message-circle" className="mr-0.5" />{o.buyer_message}</span>}
     </span>
   );

@@ -103,7 +103,7 @@ export async function syncShopeeOrders(admin: SupabaseClient, args: {
         return m.items.map((it) => {
           const s = it.sku_code ? skuBy.get(it.sku_code) : undefined;
           if (s) itemsMatched++;
-          return { order_id: orderId, sku_code: it.sku_code, matched_sku_id: s?.id ?? null, matched_parent_sku_id: s?.parent_sku_id ?? null, name: it.name, qty: it.qty, price: it.price, raw: { source: SHOPEE_ORDER_SOURCE, item_id: it.item_id, model_id: it.model_id, variant: it.variant } };
+          return { order_id: orderId, sku_code: it.sku_code, matched_sku_id: s?.id ?? null, matched_parent_sku_id: s?.parent_sku_id ?? null, name: it.name, qty: it.qty, price: it.price, raw: { source: SHOPEE_ORDER_SOURCE, item_id: it.item_id, model_id: it.model_id, variant: it.variant, original_price: it.original_price ?? null } };
         });
       });
       for (let i = 0; i < itemRows.length; i += 200) {

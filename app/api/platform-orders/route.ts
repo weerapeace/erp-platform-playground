@@ -36,7 +36,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, shipping, cod_amount, raw->>channel, created_at, packed_at, buyer_message:raw->shopee->>message_to_seller";
+const LIST_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, total, currency, ordered_at, ship_by_at, tracking_no, carrier, stock_deducted, source, invoice_so_id, tax_invoice_request, shipping, cod_amount, raw->>channel, created_at, packed_at, buyer_message:raw->shopee->>message_to_seller, tt_message:raw->tiktok->>buyer_message, delivery_option:raw->tiktok->>delivery_option_name";
 const PAGE_MAX = 200;
 const OPEN_STATUSES = ["new", "confirmed", "packed"];
 
@@ -118,7 +118,8 @@ function toRow(r: Record<string, unknown>): PlatformOrderRow {
     tax_invoice_requested: r.tax_invoice_request != null, created_at: String(r.created_at ?? ""),
     shipping_status: (r.shipping as OrderShipping | null)?.status ?? null, shipping_courier: (r.shipping as OrderShipping | null)?.courierCode ?? null,
     shipping_mode: (r.shipping as OrderShipping | null)?.mode ?? null, cod_amount: Number(r.cod_amount) || 0, channel: (r.channel as string) ?? null,
-    packed_at: (r.packed_at as string) ?? null, buyer_message: (r.buyer_message as string) ?? null,
+    packed_at: (r.packed_at as string) ?? null, buyer_message: (r.buyer_message as string) || (r.tt_message as string) || null,
+    delivery_option: (r.delivery_option as string) ?? null,
   };
 }
 

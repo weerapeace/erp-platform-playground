@@ -114,7 +114,7 @@ export async function syncLazadaOrders(admin: SupabaseClient, args: {
         return m.items.map((it) => {
           const s = it.sku_code ? skuBy.get(it.sku_code) : undefined;
           if (s) itemsMatched++;
-          return { order_id: orderId, sku_code: it.sku_code, matched_sku_id: s?.id ?? null, matched_parent_sku_id: s?.parent_sku_id ?? null, name: it.name, qty: it.qty, price: it.price, raw: { source: LAZADA_ORDER_SOURCE, shop_sku: it.shop_sku, variant: it.variant, order_item_ids: it.order_item_ids } };
+          return { order_id: orderId, sku_code: it.sku_code, matched_sku_id: s?.id ?? null, matched_parent_sku_id: s?.parent_sku_id ?? null, name: it.name, qty: it.qty, price: it.price, raw: { source: LAZADA_ORDER_SOURCE, shop_sku: it.shop_sku, variant: it.variant, order_item_ids: it.order_item_ids, original_price: it.original_price ?? null, paid_price: it.paid_price ?? null } };
         });
       });
       for (let i = 0; i < itemRows.length; i += 200) {

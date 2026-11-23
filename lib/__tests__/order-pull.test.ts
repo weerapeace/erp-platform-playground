@@ -4,7 +4,7 @@ import { lazMoney, lazOrderToPlatformOrder, lazTime } from "@/lib/lazada-orders"
 import { lineOrderToPlatformOrder } from "@/lib/line-shopping-orders";
 import { shopeeIncomeOf } from "@/lib/shopee";
 import {
-  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, offKey, toggleOffCircle, paymentState, isUrgentCarrier, shortOrderDate, lazadaToInternal, lineShoppingStatus, needsAction,
+  checkTransition, countsAsSale, isShopManaged, lazadaOrderStatus, offKey, toggleOffCircle, paymentState, isUrgentCarrier, shortOrderDate, orderMoney, lazadaToInternal, lineShoppingStatus, needsAction,
   platformStatusLabel, shopManagedName, webshopStatus, webshopToInternal,
 } from "@/lib/platform-order-status";
 
@@ -179,5 +179,21 @@ describe("ตาราง/หน้ารายละเอียดแบบ Zo
     expect(inc.buyer_paid).toBe(349);
     expect(inc.escrow).toBe(308);
     expect(inc.lines.map((l) => [l.key, l.amount])).toEqual([["original_price", 466], ["seller_discount", -117], ["commission", -25], ["service", -12], ["transaction", -4]]);
+  });
+});
+
+describe("ยอดเงินแบบ Zort ของ Lazada / TikTok (orderMoney)", () => {
+  it("Lazada: ราคา − คูปองร้าน = สุทธิร้าน · ผู้ซื้อจ่าย = ราคา − คูปองทั้งหมด + ค่าส่ง", () => {
+    const m = orderMoney("lazada", { lazada: { price: "439.00", voucher: 256.96, voucher_seller: 109.75, voucher_platform: 147.21, shipping_fee: 0, payment_method: "PROMPTPAY" } }, 439);
+    expect(m).toMatchObject({ original: 439, seller_discount: 109.75, platform_discount: 147.21, buyer_paid: 182.04, net: 329.25, method: "PROMPTPAY" });
+  });
+  it("TikTok: ราคาก่อนลด = sub_total + ส่วนลดร้าน + ส่วนลดแพลตฟอร์ม · สุทธิร้าน = sub_total + ส่วนลดแพลตฟอร์ม", () => {
+    const m = orderMoney("tiktok", { tiktok: { is_cod: false, payment_method_name: "PayLater", delivery_option_name: "Next-day delivery", payment: { sub_total: 888.5, seller_discount: 300, platform_discount: 101.5, shipping_fee: 0, total_amount: 896.23 } } }, 896.23);
+    expect(m).toMatchObject({ original: 1290, seller_discount: 300, platform_discount: 101.5, buyer_paid: 896.23, net: 990, method: "PayLater", delivery: "Next-day delivery" });
+    expect(orderMoney("tiktok", { tiktok: { is_cod: true, payment: { sub_total: 690 } } }, 690).method).toBe("เก็บเงินปลายทาง");
+  });
+  it("ไม่มีข้อมูล = ไม่เดา", () => {
+    expect(orderMoney("lazada", {}, 100)).toMatchObject({ original: null, net: 100 });
+    expect(orderMoney(null, null, null).net).toBeNull();
   });
 });

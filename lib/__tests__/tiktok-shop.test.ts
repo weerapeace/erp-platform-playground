@@ -47,8 +47,8 @@ describe("TikTok Shop — แปลงออเดอร์เป็นหัว
   test("1 แถว = 1 ชิ้น → รวมตาม SKU · ของแถมราคา 0", () => {
     const m = ttsOrderToPlatformOrder(ORDER, tiktokToInternal)!;
     expect(m.items).toEqual([
-      { sku_id: "s1", sku_code: "LM-W001-BK", name: "กระเป๋าสตางค์", variant: "ดำ", qty: 2, price: 590 },
-      { sku_id: "s9", sku_code: "GIFT-1", name: "ของแถม", variant: null, qty: 1, price: 0 },
+      { sku_id: "s1", sku_code: "LM-W001-BK", name: "กระเป๋าสตางค์", variant: "ดำ", qty: 2, price: 590, original_price: null },
+      { sku_id: "s9", sku_code: "GIFT-1", name: "ของแถม", variant: null, qty: 1, price: 0, original_price: 0 },
     ]);
   });
   test("ไม่เก็บที่อยู่/เบอร์ผู้รับ", () => {

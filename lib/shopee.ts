@@ -367,7 +367,7 @@ export async function shopeeGetOrderDetail(accessToken: string, shopId: string |
   return arr(respOf(j).order_list).map(obj).filter((x): x is Obj => !!x);
 }
 
-export type ShopeeOrderItem = { sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null; item_id: string | null; model_id: string | null };
+export type ShopeeOrderItem = { sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null; original_price?: number | null; item_id: string | null; model_id: string | null };
 export type ShopeeOrderMapped = {
   external_order_id: string;
   head: {
@@ -402,6 +402,7 @@ export function shopeeOrderToPlatformOrder(o: Obj, toInternal: (code: string | n
     byKey.set(key, {
       sku_code: code, name: str(li.item_name), variant: str(li.model_name), qty,
       price: num(li.model_discounted_price) ?? num(li.model_original_price),
+      original_price: num(li.model_original_price),
       item_id: li.item_id != null ? String(li.item_id) : null, model_id: li.model_id != null && String(li.model_id) !== "0" ? String(li.model_id) : null,
     });
   }

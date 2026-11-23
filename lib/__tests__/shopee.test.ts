@@ -249,8 +249,8 @@ describe("Shopee — ออเดอร์ (get_order_list / get_order_detail �
   test("รายการ: รหัส = model_sku (ไม่มีก็ item_sku) · จำนวน · ราคาหลังส่วนลด", () => {
     const m = shopeeOrderToPlatformOrder(ORDER, shopeeToInternal)!;
     expect(m.items).toEqual([
-      { sku_code: "BBP12-01", name: "กระเป๋าสะพาย", variant: "ดำ เทา ขาว แดง (01)", qty: 2, price: 490, item_id: "800123", model_id: "184839708451" },
-      { sku_code: "GIFT1", name: "ของแถม", variant: null, qty: 1, price: 0, item_id: "900", model_id: null },
+      { sku_code: "BBP12-01", name: "กระเป๋าสะพาย", variant: "ดำ เทา ขาว แดง (01)", qty: 2, price: 490, original_price: 2000, item_id: "800123", model_id: "184839708451" },
+      { sku_code: "GIFT1", name: "ของแถม", variant: null, qty: 1, price: 0, original_price: 0, item_id: "900", model_id: null },
     ]);
   });
   test("ไม่ใช่ COD = cod_amount 0 (ช่องห้ามว่าง) · สถานะไม่รู้จัก = new · ส่งแล้ว = shipped · ยกเลิก = cancelled", () => {

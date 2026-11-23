@@ -20,7 +20,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { formatDateTime } from "@/lib/date";
 import {
-  PAYMENT_STATE_META, SHIP_DUE_LABEL, isUrgentCarrier, paymentState, platformStatusLabel, platformStatusWarning, shipDue,
+  PAYMENT_STATE_META, SHIP_DUE_LABEL, isUrgentCarrier, orderMoney, paymentState, platformStatusLabel, platformStatusWarning, shipDue,
   type PlatformOrderItemRow,
 } from "@/lib/platform-order-status";
 import { manualChannelLabel } from "@/lib/order-shipping";
@@ -35,7 +35,7 @@ type Order = Record<string, unknown> & {
   packed_by_name?: string | null;
   history?: { at: string; action: string; by: string | null; status: string | null; note: string | null }[];
 };
-type Item = PlatformOrderItemRow & { raw?: { variant?: string | null } | null };
+type Item = PlatformOrderItemRow & { raw?: { variant?: string | null; original_price?: number | null; paid_price?: number | null } | null };
 type Income = { buyer_paid: number | null; escrow: number | null; lines: { key: string; label: string; amount: number }[]; at?: string };
 
 const THB = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 }));
@@ -90,7 +90,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
       setIncome({ loading: false, data: j.income as Income | undefined, reason: j.supported === false ? j.reason : undefined, error: j.error ?? undefined });
     } catch { setIncome({ loading: false, error: "โหลดรายได้ไม่สำเร็จ" }); }
   }, [id]);
-  useEffect(() => { if (order && !String(order.id).startsWith("demo-")) void loadIncome(); }, [order?.id, loadIncome]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (order && order.platform_code === "shopee" && !String(order.id).startsWith("demo-")) void loadIncome(); }, [order?.id, order?.platform_code, loadIncome]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => { setReloadKey((k) => k + 1); onChanged?.(); };
   const orderNo = String(order?.order_no ?? order?.external_order_id ?? "");
@@ -112,7 +112,11 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
   const channel = order.platform_code
     ? <PlatformBadge code={order.platform_code} name={order.platform_name ?? order.platform_code} size="xs" />
     : <span>{manualChannelLabel(raw.channel) || "สร้างเอง"}</span>;
-  const vatBase = total != null ? total / 1.07 : null;
+  // ยอดเงินแบบ Zort จากข้อมูลออเดอร์ (Lazada/TikTok ครบ · Shopee ส่วนลด/ค่าธรรมเนียมจริงมาจาก escrow) — lib/platform-order-status orderMoney
+  const money = orderMoney(order.platform_code, (order.raw ?? null) as Record<string, unknown> | null, total);
+  const isShopee = order.platform_code === "shopee";
+  const vatOn = isShopee ? total : money.net ?? total;
+  const vatBase = vatOn != null ? vatOn / 1.07 : null;
   // แผงจัดการออเดอร์ (ปุ่มสถานะ/ผู้รับ/ขนส่ง/ใบกำกับ — ชุดเดียวกับแผงข้างเดิม)
   const manage = (
     <div>
@@ -170,7 +174,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
                 ["รายการ", <span key="n" className="font-mono">{orderNo}</span>],
                 ["วันที่สั่ง", formatDateTime(order.ordered_at ?? order.created_at) || "—"],
                 ["ช่องทาง", <span key="c" className="flex flex-wrap items-center gap-1.5">{channel}{order.brand_name && <span className="text-xs text-slate-500">{order.brand_name}</span>}</span>],
-                ["ชำระเงิน", raw.shopee?.payment_method ? `${raw.shopee.payment_method}${raw.shopee.pay_time ? ` · ${formatDateTime(new Date(raw.shopee.pay_time * 1000).toISOString())}` : ""}` : pay.label],
+                ["ชำระเงิน", money.method ? `${money.method}${raw.shopee?.pay_time ? ` · ${formatDateTime(new Date(raw.shopee.pay_time * 1000).toISOString())}` : ""}` : pay.label],
               ]} />
             </Box>
             <Box icon="i:user" title="ลูกค้า">
@@ -187,7 +191,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
               <table className="w-full min-w-[520px] text-sm">
                 <thead><tr className="bg-slate-50 text-left text-xs text-slate-500">
                   <th className="px-2 py-1.5 font-medium">#</th><th className="px-2 py-1.5 font-medium">รหัส</th><th className="px-2 py-1.5 font-medium">ชื่อสินค้า</th>
-                  <th className="px-2 py-1.5 text-right font-medium">จำนวน</th><th className="px-2 py-1.5 text-right font-medium">ต่อหน่วย</th><th className="px-2 py-1.5 text-right font-medium">รวม</th>
+                  <th className="px-2 py-1.5 text-right font-medium">จำนวน</th><th className="px-2 py-1.5 text-right font-medium">ต่อหน่วย</th><th className="px-2 py-1.5 text-right font-medium">ส่วนลด/หน่วย</th><th className="px-2 py-1.5 text-right font-medium">รวม</th>
                 </tr></thead>
                 <tbody>
                   {items.map((it, i) => (
@@ -201,8 +205,16 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
                         </div>
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums">{it.qty}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{THB(it.price)}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">{it.price != null ? THB(Number(it.price) * Number(it.qty)) : "—"}</td>
+                      {(() => {
+                        const orig = it.raw?.original_price ?? it.price;
+                        const paid = it.raw?.paid_price ?? it.price;
+                        const disc = orig != null && paid != null && Number(orig) - Number(paid) > 0.005 ? Number(orig) - Number(paid) : 0;
+                        return (<>
+                          <td className="px-2 py-2 text-right tabular-nums">{THB(orig)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums text-slate-500">{disc ? THB(disc) : "—"}</td>
+                          <td className="px-2 py-2 text-right tabular-nums">{paid != null ? THB(Number(paid) * Number(it.qty)) : "—"}</td>
+                        </>);
+                      })()}
                     </tr>
                   ))}
                 </tbody>
@@ -223,6 +235,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
               <KV rows={[
                 ["ต้องส่งภายใน", order.ship_by_at ? formatDateTime(order.ship_by_at) : "—"],
                 ["ขนส่ง", carrier ?? "—"],
+                ...(money.delivery ? [["ตัวเลือกจัดส่ง", money.delivery] as [string, string]] : []),
                 ["Tracking No.", order.tracking_no ? <span key="t" className="font-mono">{String(order.tracking_no)}</span> : "—"],
                 ["เลขพัสดุร้าน", raw.shopee?.packages?.[0]?.package_number ?? (order.package_no ? String(order.package_no) : "—")],
                 ["แพ็กเสร็จ", order.packed_at ? `${formatDateTime(order.packed_at)}${order.packed_by_name ? ` · ${order.packed_by_name}` : ""}` : "—"],
@@ -230,7 +243,26 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
               ]} />
             </Box>
             <Box icon="i:coin" title="การชำระเงิน" right={income.data?.at ? <button type="button" onClick={() => void loadIncome(true)} className="text-xs text-sky-700 hover:underline" title={`ดึงล่าสุด ${formatDateTime(income.data.at)}`}>{income.loading ? "กำลังดึง…" : "ดึงใหม่"}</button> : null}>
-              {income.loading && !income.data ? <p className="text-xs text-slate-400">กำลังดึงรายได้จากร้าน…</p> : (
+              {!isShopee && money.original != null ? (
+                <div className="space-y-2">
+                  <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+                    <dt className="text-slate-500">ราคาสินค้า (ก่อนส่วนลด)</dt><dd className="text-right tabular-nums">{THB(money.original)}</dd>
+                    {!!money.seller_discount && <><dt className="text-slate-500">ส่วนลดจากร้าน</dt><dd className="text-right tabular-nums text-rose-600">−{THB(money.seller_discount)}</dd></>}
+                    {!!money.platform_discount && <><dt className="text-slate-500">ส่วนลดจากแพลตฟอร์ม (แพลตฟอร์มออกให้)</dt><dd className="text-right tabular-nums">{THB(money.platform_discount)}</dd></>}
+                    {!!money.shipping && <><dt className="text-slate-500">ค่าส่งที่ผู้ซื้อจ่าย</dt><dd className="text-right tabular-nums">{THB(money.shipping)}</dd></>}
+                    <dt className="text-slate-500">ผู้ซื้อจ่าย</dt><dd className="text-right tabular-nums">{THB(money.buyer_paid)}</dd>
+                    <dt className="font-semibold text-slate-800">มูลค่าสุทธิของร้าน</dt><dd className="text-right font-semibold tabular-nums text-emerald-700">{THB(money.net)}</dd>
+                  </dl>
+                  <p className="text-[11px] text-slate-400">{order.platform_code === "tiktok" ? "ค่าธรรมเนียม TikTok ยังดึงไม่ได้ — ต้องเปิดสิทธิ์การเงิน (Finance) ในแอป TikTok แล้วต่อร้านใหม่" : "ค่าธรรมเนียม Lazada ยังไม่ได้ดึง (เฟสถัดไป)"} · มูลค่าสุทธิ = ก่อนหักค่าธรรมเนียม</p>
+                  {vatBase != null && (
+                    <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-500">
+                      <dt>มูลค่าก่อนภาษี</dt><dd className="text-right tabular-nums">{THB(vatBase)}</dd>
+                      <dt>ภาษีมูลค่าเพิ่ม (7%)</dt><dd className="text-right tabular-nums">{THB((vatOn ?? 0) - vatBase)}</dd>
+                    </dl>
+                  )}
+                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${PAY_TONE[pay.tone]}`}>{pay.label}</span>
+                </div>
+              ) : income.loading && !income.data ? <p className="text-xs text-slate-400">กำลังดึงรายได้จากร้าน…</p> : (
                 <div className="space-y-2">
                   {income.data && (
                     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
@@ -244,7 +276,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
                   {vatBase != null && (
                     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-500">
                       <dt>มูลค่าก่อนภาษี</dt><dd className="text-right tabular-nums">{THB(vatBase)}</dd>
-                      <dt>ภาษีมูลค่าเพิ่ม (7%)</dt><dd className="text-right tabular-nums">{THB((total ?? 0) - vatBase)}</dd>
+                      <dt>ภาษีมูลค่าเพิ่ม (7%)</dt><dd className="text-right tabular-nums">{THB((vatOn ?? 0) - vatBase)}</dd>
                     </dl>
                   )}
                   <span className={`inline-block rounded-full px-2 py-0.5 text-xs ${PAY_TONE[pay.tone]}`}>{pay.label}</span>

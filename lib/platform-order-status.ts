@@ -34,6 +34,8 @@ export type PlatformOrderRow = {
   products?: { sku_code: string | null; name: string | null; qty: number; image_key: string | null }[];
   /** ตาราง/หน้ารายละเอียดแบบ Zort (2026-11-23): แพ็กเสร็จเมื่อ (สถานีแพ็ค) · ข้อความผู้ซื้อ · เอกสารที่พิมพ์แล้ว (print_logs po_*) */
   packed_at?: string | null; buyer_message?: string | null;
+  /** ตัวเลือกจัดส่งของร้าน (TikTok เช่น Next-day delivery) — ป้ายใต้แถว */
+  delivery_option?: string | null;
   docs?: { pick: boolean; pack: boolean; label: boolean };
 };
 
@@ -41,6 +43,48 @@ export type PlatformOrderRow = {
 /** ส่งด่วน (Instant / Same day / ส่งด่วน) — ดูจากชื่อขนส่ง */
 export const URGENT_CARRIER_RE = /instant|same.?day|express.?delivery|express.?2h|ส่งด่วน|ภายใน.?2.?ชม/i;   // Shopee "Express Delivery (SPX/SHP Food)" = ส่งด่วนในวัน · "SPX Express" เฉย ๆ = ส่งธรรมดา
 export const isUrgentCarrier = (carrier: string | null | undefined) => URGENT_CARRIER_RE.test(String(carrier ?? ""));
+
+/**
+ * ยอดเงินของออเดอร์แบบ Zort (หน้ารายละเอียด › การชำระเงิน) จากข้อมูลที่ดึงมากับออเดอร์ — pure · มีเทสต์ (เจ้าของขอ 2026-11-23 "มีของ Lazada, TikTok ด้วย")
+ *   original = ราคาสินค้าก่อนส่วนลด · seller_discount = ร้านออก · platform_discount = แพลตฟอร์มออกให้ (ร้านได้เงินส่วนนี้)
+ *   buyer_paid = ผู้ซื้อจ่าย · net = มูลค่าสุทธิของร้าน (ก่อนหักค่าธรรมเนียม) = ราคาสินค้า − ส่วนลดร้าน
+ *   ไม่รู้ข้อมูล = null (ไม่เดา) · Shopee: ส่วนลด/ค่าธรรมเนียมจริงมาจาก /api/platform-orders/income (escrow)
+ */
+export type OrderMoney = {
+  original: number | null; seller_discount: number | null; platform_discount: number | null; shipping: number | null;
+  buyer_paid: number | null; net: number | null; method: string | null; delivery: string | null;
+};
+const n2 = (v: unknown): number | null => { if (v == null || v === "") return null; const x = Number(String(v).replace(/,/g, "")); return Number.isFinite(x) ? x : null; };
+const r2 = (v: number) => Math.round(v * 100) / 100;
+export function orderMoney(platformCode: string | null | undefined, raw: Record<string, unknown> | null | undefined, total: number | null | undefined): OrderMoney {
+  const r = raw ?? {};
+  const empty: OrderMoney = { original: null, seller_discount: null, platform_discount: null, shipping: null, buyer_paid: total ?? null, net: total ?? null, method: null, delivery: null };
+  if (platformCode === "lazada") {
+    const lz = (r.lazada ?? {}) as Record<string, unknown>;
+    const price = n2(lz.price);
+    if (price == null) return empty;
+    const sd = n2(lz.voucher_seller) ?? 0, pd = n2(lz.voucher_platform) ?? 0, ship = n2(lz.shipping_fee) ?? 0;
+    const voucher = n2(lz.voucher) ?? sd + pd;
+    return { original: price, seller_discount: sd, platform_discount: pd, shipping: ship, buyer_paid: r2(price - voucher + ship), net: r2(price - sd), method: (lz.payment_method as string) || null, delivery: null };
+  }
+  if (platformCode === "tiktok") {
+    const tt = (r.tiktok ?? {}) as Record<string, unknown>;
+    const pay = (tt.payment ?? {}) as Record<string, unknown>;
+    const sub = n2(pay.sub_total);
+    if (sub == null) return { ...empty, method: (tt.payment_method_name as string) || null, delivery: (tt.delivery_option_name as string) || null };
+    const sd = n2(pay.seller_discount) ?? 0, pd = n2(pay.platform_discount) ?? 0;
+    return {
+      original: r2(sub + sd + pd), seller_discount: sd, platform_discount: pd, shipping: n2(pay.shipping_fee),
+      buyer_paid: n2(pay.total_amount) ?? total ?? null, net: r2(sub + pd),
+      method: (tt.is_cod ? "เก็บเงินปลายทาง" : null) ?? ((tt.payment_method_name as string) || null), delivery: (tt.delivery_option_name as string) || null,
+    };
+  }
+  if (platformCode === "shopee") {
+    const sp = (r.shopee ?? {}) as Record<string, unknown>;
+    return { ...empty, method: (sp.payment_method as string) || null };
+  }
+  return empty;
+}
 export type PaymentState = "paid" | "unpaid" | "cod" | "refund" | "none";
 export const PAYMENT_STATE_META: Record<PaymentState, { label: string; tone: "success" | "warning" | "info" | "muted" }> = {
   paid: { label: "ชำระครบ", tone: "success" }, unpaid: { label: "รอชำระ", tone: "warning" },

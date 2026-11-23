@@ -415,7 +415,7 @@ export async function ttsSearchOrders(accessToken: string, shopCipher: string, o
   return { orders, total: Number(d.total_count) || 0, nextPageToken: str(d.next_page_token) };
 }
 
-export type TtsOrderItem = { sku_id: string | null; sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null };
+export type TtsOrderItem = { sku_id: string | null; sku_code: string | null; name: string | null; variant: string | null; qty: number; price: number | null; original_price?: number | null };
 export type TtsOrderMapped = {
   external_order_id: string;
   head: {
@@ -450,7 +450,7 @@ export function ttsOrderToPlatformOrder(o: Record<string, unknown>, toInternal: 
     if (prev) { prev.qty += 1; continue; }
     byKey.set(key, {
       sku_id: str(li.sku_id), sku_code: str(li.seller_sku), name: str(li.product_name) ?? str(li.sku_name),
-      variant: str(li.sku_name), qty: 1, price: gift ? 0 : numOrNull(li.sale_price) ?? numOrNull(li.original_price),
+      variant: str(li.sku_name), qty: 1, price: gift ? 0 : numOrNull(li.sale_price) ?? numOrNull(li.original_price), original_price: gift ? 0 : numOrNull(li.original_price),
     });
   }
   return {

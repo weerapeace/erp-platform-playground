@@ -6,7 +6,7 @@
  */
 import { lazadaOrderStatus, lazadaToInternal, type PlatformOrderStatus } from "@/lib/platform-order-status";
 
-export type LazOrderItemMapped = { sku_code: string | null; name: string | null; qty: number; price: number | null; variant: string | null; shop_sku: string | null; order_item_ids: string[] };
+export type LazOrderItemMapped = { sku_code: string | null; name: string | null; qty: number; price: number | null; variant: string | null; shop_sku: string | null; order_item_ids: string[]; original_price?: number | null; paid_price?: number | null };
 export type LazOrderMapped = {
   external_order_id: string;
   head: {
@@ -64,7 +64,7 @@ export function lazOrderToPlatformOrder(o: Record<string, unknown>, items: Recor
     const price = lazMoney(it.item_price) ?? lazMoney(it.paid_price);
     const prev = by.get(key);
     if (prev) { prev.qty += 1; prev.order_item_ids.push(String(it.order_item_id ?? "")); }
-    else by.set(key, { sku_code: sku, name: str(it.name), qty: 1, price, variant: str(it.variation), shop_sku: str(it.shop_sku), order_item_ids: [String(it.order_item_id ?? "")] });
+    else by.set(key, { sku_code: sku, name: str(it.name), qty: 1, price, variant: str(it.variation), shop_sku: str(it.shop_sku), order_item_ids: [String(it.order_item_id ?? "")], original_price: lazMoney(it.item_price), paid_price: lazMoney(it.paid_price) });
     const promised = lazTime(it.promised_shipping_time) ?? lazTime(it.sla_time_stamp);
     if (promised) { const t = Date.parse(promised); if (shipBy == null || t < shipBy) shipBy = t; }
     tracking = tracking ?? str(it.tracking_code);
@@ -86,7 +86,7 @@ export function lazOrderToPlatformOrder(o: Record<string, unknown>, items: Recor
       cod_amount: cod,
       tracking_no: tracking, carrier, package_no: pkg,
       ship_by_at: shipBy == null ? null : new Date(shipBy).toISOString(),
-      raw: { lazada: raw },
+      raw: { lazada: { ...raw, ...(list[0] ? { item_keys: Object.keys(list[0]), shipping_provider_type: str(list[0].shipping_provider_type), shipping_type: str(list[0].shipping_type) } : {}) } },
     },
     items: [...by.values()],
   };
