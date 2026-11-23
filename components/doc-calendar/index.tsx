@@ -17,6 +17,8 @@
  *   • compact → ปฏิทินย่อ (ช่องเตี้ย ~30px · ชิปเลขเอกสารสูงสุด 2 ใบ/วัน + "+n") — ส่ง docs เรียงด่วนก่อน ชิปใช้สีของเอกสารเอง
  *     เช่น Design Dashboard (ปฏิทินกำหนดส่งแทนแถวแบรนด์ · 2026-11-22)
  *   • onDropDay → ลากของมาวางบนช่องวันได้ (หน้าแม่อ่าน e.dataTransfer เอง เช่น ลากใบงานมาเลื่อนกำหนดส่ง)
+ *   • actions   → ปุ่มเสริมท้ายแถบเดือน (compact) เช่น ปักหมุด / สรุป
+ *   • focusWeeks → (compact) โชว์แค่ N สัปดาห์ เริ่มสัปดาห์ของวันที่เลือก/วันนี้ (เช่น ปฏิทินที่ปักหมุดค้างจอ ย่อเหลือ 2 สัปดาห์)
  *
  * ห้ามเขียนตารางปฏิทินเองในหน้าโมดูล — ใช้ตัวนี้
  */
@@ -45,7 +47,7 @@ const money = (n: number) => "฿" + (Math.round(n) || 0).toLocaleString("th-TH"
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function DocCalendar({
-  docs, cursor, onCursor, onPick, hint, unit = "ใบ", onPickDay, selectedDay, disablePast = false, compact = false, onDropDay, title,
+  docs, cursor, onCursor, onPick, hint, unit = "ใบ", onPickDay, selectedDay, disablePast = false, compact = false, onDropDay, title, actions, focusWeeks,
 }: {
   docs: CalDoc[];
   cursor: Date;
@@ -65,6 +67,10 @@ export function DocCalendar({
   onDropDay?: (day: string, e: DragEvent<HTMLDivElement>) => void;
   /** หัวข้อซ้ายของแถบเดือน (compact) */
   title?: string;
+  /** ปุ่มเสริมท้ายแถบเดือน (compact) */
+  actions?: ReactNode;
+  /** (compact) โชว์แค่ N สัปดาห์ — เริ่มสัปดาห์ของวันที่เลือก หรือวันนี้ (ถ้าอยู่เดือนที่ดู) ไม่งั้นสัปดาห์แรกของเดือน */
+  focusWeeks?: number;
 }) {
   const [dragDay, setDragDay] = useState<string | null>(null);
   const byDay = useMemo(() => {
@@ -79,9 +85,17 @@ export function DocCalendar({
 
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const start = new Date(first); start.setDate(1 - first.getDay());
-  const cells = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
   const today = ymd(new Date());
-  const monthDocs = cells.filter((d) => d.getMonth() === cursor.getMonth()).flatMap((d) => byDay.get(ymd(d)) ?? []);
+  const monthCells = Array.from({ length: 42 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+  let cells = monthCells;
+  if (compact && focusWeeks && focusWeeks > 0) {
+    const ym = ymd(first).slice(0, 7);
+    const anchorKey = selectedDay && selectedDay.slice(0, 7) === ym ? selectedDay : today.slice(0, 7) === ym ? today : null;
+    const anchor = anchorKey ? new Date(`${anchorKey}T00:00:00`) : new Date(first);
+    const s0 = new Date(anchor); s0.setDate(anchor.getDate() - anchor.getDay());
+    cells = Array.from({ length: focusWeeks * 7 }, (_, i) => { const d = new Date(s0); d.setDate(s0.getDate() + i); return d; });
+  }
+  const monthDocs = monthCells.filter((d) => d.getMonth() === cursor.getMonth()).flatMap((d) => byDay.get(ymd(d)) ?? []);
   const monthTotal = monthDocs.reduce((n, o) => n + (Number(o.amount) || 0), 0);
 
   const dropProps = (k: string) => (onDropDay ? {
@@ -104,6 +118,7 @@ export function DocCalendar({
         {title && <span className="mr-1 text-xs font-semibold text-slate-700">{title}</span>}
         {nav(true)}
         <span className="ml-auto text-[11px] text-slate-500">{hint ?? <>เดือนนี้ <b className="text-slate-700">{monthDocs.length}</b> {unit}</>}</span>
+        {actions && <span className="flex shrink-0 items-center gap-1">{actions}</span>}
       </div>
       <div className="grid grid-cols-7 text-center text-[10px] text-slate-400">
         {["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"].map((d) => <div key={d}>{d}</div>)}

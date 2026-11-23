@@ -1,6 +1,6 @@
 "use client";
 // Design Dashboard: การ์ดใบงาน — แกลเลอรี (รูปเต็มใบ) / บอร์ด (ลากเปลี่ยนสถานะ · การ์ดเล็ก หรือ แถวย่อ) — แยกจาก index.tsx (Y1)
-import type { DragEvent } from "react";
+import type { DragEvent, ReactNode } from "react";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { StatusMeta } from "@/lib/design-sheets-meta";
 import type { BrandTheme } from "@/lib/brand-theme";
@@ -52,7 +52,35 @@ export type BoardCardProps = SheetCardProps & {
   handleCardDragStart: (event: DragEvent<HTMLDivElement>, sheet: DesignSheetListItem) => void;
   setDraggingSheetId: (id: string | null) => void;
   setDropTargetStatus: (key: string | null) => void;
+  /** ช่องที่โชว์บนการ์ด + ลำดับ (ของกลาง card-layout · null = ค่าเดิม BOARD_CARD_DEFAULT) */
+  cardFields?: string[] | null;
+  /** ขนาดรูปปก s/m/l (จำต่อคน) */
+  imgSize?: CardImgSize;
 };
+
+// ⚙️ ตั้งค่าการ์ดบอร์ด (เจ้าของขอ 2026-11-23) — เลือกช่อง/เรียงด้วยของกลาง CardLayoutEditor (scope "design-dashboard-card")
+export type CardImgSize = "s" | "m" | "l";
+export const BOARD_CARD_SCOPE = "design-dashboard-card";
+export const BOARD_CARD_FIELDS: { key: string; label: string }[] = [
+  { key: "cover", label: "รูปปก" },
+  { key: "name", label: "ชื่องาน" },
+  { key: "brand_dot", label: "จุดสีแบรนด์" },
+  { key: "code", label: "รหัส DS" },
+  { key: "brand_name", label: "ชื่อแบรนด์" },
+  { key: "library", label: "ป้าย Library" },
+  { key: "note", label: "ไอคอนโน้ต" },
+  { key: "deadline", label: "กำหนดส่ง" },
+  { key: "order_date", label: "วันที่สั่ง" },
+  { key: "status", label: "ป้ายสถานะ" },
+  { key: "waiting", label: "รออะไรอยู่ (เช็กลิสต์)" },
+  { key: "tags", label: "ป้าย ตีราคา / มีราคา / มี SKU / ใบเสนอราคา" },
+  { key: "excerpt", label: "รายละเอียดงานย่อ" },
+];
+/** ค่าเริ่มต้น = หน้าตาการ์ดแบบเดิมก่อนมีตัวตั้งค่า */
+export const BOARD_CARD_DEFAULT = ["cover", "name", "brand_dot", "code", "library", "note", "deadline", "waiting", "tags"];
+/** ช่องเล็กที่วางเรียงในบรรทัดเดียวกันได้ (ติดกันในลำดับ = รวมเป็นแถวเดียว) */
+const INLINE_FIELDS = new Set(["brand_dot", "code", "brand_name", "library", "note", "deadline", "order_date", "status"]);
+export const CARD_IMG_MIN_W: Record<CardImgSize, number> = { s: 110, m: 130, l: 170 };
 
 // การ์ดแบบแกลเลอรี (รูปเต็มใบ) — ใช้ทั้งมุมมองแกลเลอรี และบอร์ดมือถือ (แท็บสถานะ)
 export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, brandStrip, onLongPress }: SheetCardProps) {
@@ -150,7 +178,7 @@ function QtOpenTag({ sheet }: { sheet: DesignSheetListItem }) {
 // การ์ดบนบอร์ด (ลากเปลี่ยนสถานะได้บนจอคอม) — 2 ขนาดตาม cardSize:
 //   compact = รูปจัตุรัส + ชื่อ + เลขที่/กำหนดส่ง (ไม่มีกล่องโน้ตสูงคงที่แบบเดิม — โน้ตเป็น 📝 ชี้ดูได้)
 //   row     = รูปจิ๋ว 40px ซ้าย + ชื่อ/เลขที่/กำหนดส่ง ขวา (เห็นงานเยอะสุดต่อจอ · ชี้รูปแล้วขยายได้)
-export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, brandStrip, onLongPress, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus }: BoardCardProps) {
+export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, brandStrip, onLongPress, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus, cardFields, imgSize = "m" }: BoardCardProps) {
   const t = useT();
   const brandColor = safeColor(sheet.brand_color);
   const coverUrl = sheetCoverUrl(sheet);
@@ -161,14 +189,19 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
   const lp = useLongPress(() => onLongPress?.(sheet), { disabled: !onLongPress || pickMode || isDesktop });
   const activate = () => { if (lp.consumed() || isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
   const warm = () => { if (!pickMode && !isMoving) prefetchDesignSheet(sheet.id); };   // ⚡ ชี้การ์ด = โหลดใบงานไว้ก่อน
-  const cover = coverUrl ? (
+  const custom = !!cardFields && cardFields.length > 0;   // ตั้งเองแล้ว = ทำตามที่ตั้งทุกช่อง · ยังไม่ตั้ง = หน้าตาเดิม
+  const fields = custom ? cardFields! : BOARD_CARD_DEFAULT;
+  const has = (k: string) => fields.includes(k);
+  const rowBox = imgSize === "s" ? "h-8 w-8" : imgSize === "l" ? "h-14 w-14" : "h-10 w-10";
+  const tileBox = imgSize === "s" ? "h-16 w-full" : imgSize === "l" ? "aspect-[4/5] w-full" : "aspect-square w-full";
+  const cover = !has("cover") ? null : coverUrl ? (
     <CoverPreview off={hoverOn} url={sheet.cover_url}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img data-gg-cover src={coverUrl} alt={sheet.name} loading="lazy" decoding="async"
-        className={row ? "h-10 w-10 shrink-0 rounded border border-slate-100 bg-slate-50 object-contain" : "mb-1.5 aspect-square w-full rounded-md border border-slate-100 bg-slate-50 object-contain"} />
+        className={row ? `${rowBox} shrink-0 rounded border border-slate-100 bg-slate-50 object-contain` : `mb-1.5 ${tileBox} rounded-md border border-slate-100 bg-slate-50 object-contain`} />
     </CoverPreview>
   ) : (
-    <div data-gg-cover className={row ? "flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-100" : "mb-1.5 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-slate-100"}
+    <div data-gg-cover className={row ? `flex ${rowBox} shrink-0 items-center justify-center overflow-hidden rounded border border-slate-100` : `mb-1.5 flex ${tileBox} items-center justify-center overflow-hidden rounded-md border border-slate-100`}
       style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
       <BrandSlot theme={brandTheme} id="task_placeholder" size={row ? "max-h-6" : "max-h-10"} />
     </div>
@@ -182,6 +215,41 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
       <QtOpenTag sheet={sheet} />
     </div>
   );
+  // ตั้งค่าการ์ดเอง: วางทีละช่องตามลำดับที่เลือก · ช่องเล็กที่ติดกันรวมเป็นแถวเดียว
+  const inlineEl = (k: string) => {
+    switch (k) {
+      case "brand_dot": return <span key={k} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />;
+      case "code": return <span key={k} className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>;
+      case "brand_name": return sheet.brand_name ? <span key={k} className="min-w-0 truncate text-[10px] text-slate-500">{sheet.brand_name}</span> : null;
+      case "library": return sheet.in_library ? <span key={k} title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span> : null;
+      case "note": return sheet.note ? <span key={k} className="shrink-0 cursor-help text-[11px]" title={`📝 ${sheet.note}`}>📝</span> : null;
+      case "deadline": return <span key={k} className="ml-auto shrink-0"><CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>;
+      case "order_date": return sheet.order_date ? <span key={k} className="shrink-0 text-[10px] text-slate-400" title={t("วันที่สั่ง", "Order date")}>{t("สั่ง", "Ord")} {new Date(`${String(sheet.order_date).slice(0, 10)}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span> : null;
+      case "status": { const st = statusInfo.get(sheet.status); return <span key={k} className="shrink-0 rounded px-1 text-[9px] font-semibold" style={{ color: safeColor(st?.color), backgroundColor: `${safeColor(st?.color)}18` }}>{st?.label ?? sheet.status}</span>; }
+      default: return null;
+    }
+  };
+  const customBody = () => {
+    const out: ReactNode[] = [];
+    let group: string[] = [];
+    const flush = () => {
+      if (!group.length) return;
+      const els = group.map(inlineEl).filter(Boolean);
+      if (els.length) out.push(<div key={`g-${group[0]}`} className={`${out.length ? "mt-1" : ""} flex items-center gap-1 whitespace-nowrap`}>{els}</div>);
+      group = [];
+    };
+    for (const k of fields) {
+      if (k === "cover") continue;
+      if (INLINE_FIELDS.has(k)) { group.push(k); continue; }
+      flush();
+      if (k === "name") out.push(<div key={k} className={`${out.length ? "mt-1" : ""} ${row ? "truncate" : "line-clamp-2 leading-snug"} text-xs font-semibold text-slate-800`}>{sheet.name}</div>);
+      else if (k === "waiting" && !pickMode) out.push(<WaitingChip key={k} sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />);
+      else if (k === "tags" && tags) out.push(<div key={k}>{tags}</div>);
+      else if (k === "excerpt" && sheet.detail_excerpt) out.push(<div key={k} className="mt-1 line-clamp-2 text-[10px] leading-snug text-slate-500">{sheet.detail_excerpt}</div>);
+    }
+    flush();
+    return out;
+  };
   return (
     <SheetHoverWrap key={sheet.id} sheet={sheet} pref={hoverPref} status={statusInfo.get(sheet.status)} own={sheetIsOwn(sheet)} off={!!draggingSheetId || isMoving}
       deadline={{ label: deadlineLabel(sheet, statusMeta), tone: deadlineTone(sheet, statusMeta) }}>
@@ -204,7 +272,9 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
       {brandStrip && <BrandStrip color={brandColor} title={sheet.brand_name ?? undefined} />}
       <BrandSlot theme={brandTheme} id="task_corner" />
       {cover}
-      {row ? (
+      {custom ? (
+        row ? <div className="min-w-0 flex-1">{customBody()}</div> : <>{customBody()}</>
+      ) : row ? (
         <div className="min-w-0 flex-1">
           <div className="truncate text-xs font-semibold text-slate-800">{sheet.name}</div>
           <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap">

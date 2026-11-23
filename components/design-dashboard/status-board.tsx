@@ -13,7 +13,7 @@ import { useSwipeNav } from "@/lib/use-swipe-nav";
 
 const FOLD_W = 44;   // ความกว้างคอลัมน์ที่พับ (px)
 
-export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGalleryCard, isDesktop, isPhone, dropTargetStatus, handleColumnDragOver, handleColumnDragLeave, handleColumnDrop, brandTheme, foldedCols, onToggleFold, expandedCols, setExpandedCols, phoneCol, setPhoneStatus, stickyTop = null }: {
+export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGalleryCard, isDesktop, isPhone, dropTargetStatus, handleColumnDragOver, handleColumnDragLeave, handleColumnDrop, brandTheme, foldedCols, onToggleFold, expandedCols, setExpandedCols, phoneCol, setPhoneStatus, stickyTop = null, cardMinW = 130 }: {
   boardColumns: BoardColumn[];
   cardSize: "compact" | "row";
   renderBoardCard: (sheet: DesignSheetListItem) => ReactNode;
@@ -34,6 +34,8 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
   setPhoneStatus: (key: string) => void;
   /** หัวคอลัมน์ติดใต้หัวหน้าที่ติดบน (px · ของกลาง sticky-header) — null = ใต้แถบเมนูแอปตามเดิม */
   stickyTop?: number | null;
+  /** ความกว้างขั้นต่ำการ์ดเล็ก (px) — ตามขนาดรูปที่ตั้ง */
+  cardMinW?: number;
 }) {
   const t = useT();
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});   // คอลัมน์สถานะ (โหมดแท็บเล็ต: กดชิปสถานะแล้วเลื่อนไปคอลัมน์นั้น)
@@ -171,7 +173,7 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
                     /* ▦ การ์ดเล็ก = กริดในคอลัมน์ (การ์ด ~130px+ · คอลัมน์กว้างเรียงได้หลายใบ) · ☰ แถวย่อ = ซ้อนแถวละใบ */
                     /* (เคยลองแถวย่อแบ่ง 2 คอลัมน์ตอนคอลัมน์กว้าง — เจ้าของดูแล้วว่าดูยาก ให้เอาออก 2026-11-07) */
                     <div className={cardSize === "row" ? "space-y-1.5" : "grid gap-2"}
-                      style={cardSize === "row" ? undefined : { gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
+                      style={cardSize === "row" ? undefined : { gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinW}px, 1fr))` }}>
                       {shown.map(renderBoardCard)}
                     </div>
                   )}

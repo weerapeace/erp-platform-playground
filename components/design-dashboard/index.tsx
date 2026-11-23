@@ -28,7 +28,9 @@ import { NewSheetFromLibraryModal, useCanSheetFromLibrary } from "@/components/d
 import { LIB_HREF } from "@/components/design-library/shared";
 import { useStickyHeader } from "@/components/sticky-header";
 import { type ListResponse, type StatusResponse, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
-import { BoardCard, GalleryCard } from "./dashboard-cards";
+import { BoardCard, GalleryCard, BOARD_CARD_FIELDS, BOARD_CARD_SCOPE, CARD_IMG_MIN_W, type CardImgSize } from "./dashboard-cards";
+import { useCardLayout, CardLayoutEditor } from "@/components/card-layout";
+import { DeadlineSummaryModal } from "./deadline-summary";
 import { BrandBar } from "./brand-bar";
 import { BrandRail } from "./brand-rail";
 import { MoveTicker, type TickerMsg } from "./move-ticker";
@@ -261,6 +263,39 @@ export function DesignDashboard() {
     setCardSize(size);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_size", value: size }) }).catch(() => {});
   };
+  // ⚙️ ตั้งค่าการ์ดบอร์ด (เจ้าของขอ 2026-11-23): ช่องที่โชว์ + ลำดับ = ของกลาง card-layout (ของฉัน / ค่าเริ่มต้นทีม) · ขนาดรูป = จำต่อคน
+  const cardLayout = useCardLayout(BOARD_CARD_SCOPE);
+  const [cardLayoutOpen, setCardLayoutOpen] = useState(false);
+  const [cardImg, setCardImg] = useState<CardImgSize>("m");
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_card_img").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (v === "s" || v === "m" || v === "l") setCardImg(v); })
+      .catch(() => {});
+  }, []);
+  const changeCardImg = (v: CardImgSize) => {
+    setCardImg(v);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_img", value: v }) }).catch(() => {});
+  };
+  // 📌 ปักหมุดปฏิทินกำหนดส่ง (เจ้าของขอ 2026-11-23): ค้างบนจอตอนเลื่อนลง จะได้ลากการ์ดไปวางวันได้ · จำต่อคน · จอคอมเท่านั้น (ทัชลากการ์ดไม่ได้)
+  //   ค้างแล้วย่อเหลือ 2 สัปดาห์ (ไม่บังบอร์ด) · กด "ทั้งเดือน" ขยายได้
+  const [calPinned, setCalPinned] = useState(false);
+  const [calFull, setCalFull] = useState(false);
+  const [calStuck, setCalStuck] = useState(false);
+  const [calH, setCalH] = useState(0);
+  const calSentinel = useRef<HTMLDivElement | null>(null);
+  const calBox = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_cal_pinned").then((r) => r.json())
+      .then((j) => { if (typeof j?.value === "boolean") setCalPinned(j.value); })
+      .catch(() => {});
+  }, []);
+  const toggleCalPin = () => {
+    const next = !calPinned;
+    setCalPinned(next);
+    setCalFull(false);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_cal_pinned", value: next }) }).catch(() => {});
+  };
+  const [summaryOpen, setSummaryOpen] = useState(false);
   // แถบสีแบรนด์ซ้ายการ์ด (ของกลาง components/brand-strip · เจ้าของเลือกแบบแถบซ้าย 2026-11-07) — ค่าเริ่มต้นเปิด · ปิดได้ต่อคน
   const [brandStrip, setBrandStrip] = useState(true);
   useEffect(() => {
@@ -752,6 +787,12 @@ export function DesignDashboard() {
           { type: "section", key: "s-size", label: t("ขนาดการ์ด", "Card size") },
           { type: "radio", key: "c-compact", icon: "layout-grid", label: t("การ์ดเล็ก (มีรูป)", "Small cards (with image)"), checked: cardSize === "compact", onSelect: () => changeCardSize("compact") },
           { type: "radio", key: "c-row", icon: "list", label: t("แถวย่อ", "Compact rows"), checked: cardSize === "row", onSelect: () => changeCardSize("row") },
+          { type: "section", key: "s-img", label: t("ขนาดรูปบนการ์ด", "Card image size") },
+          { type: "radio", key: "img-s", icon: "photo", label: t("รูปเล็ก", "Small image"), checked: cardImg === "s", onSelect: () => changeCardImg("s") },
+          { type: "radio", key: "img-m", icon: "photo", label: t("รูปกลาง", "Medium image"), checked: cardImg === "m", onSelect: () => changeCardImg("m") },
+          { type: "radio", key: "img-l", icon: "photo", label: t("รูปใหญ่", "Large image"), checked: cardImg === "l", onSelect: () => changeCardImg("l") },
+          { key: "card-fields", icon: "settings", label: t("การ์ดโชว์อะไรบ้าง…", "Card fields…"), hint: cardLayout.fields ? t("ตั้งแล้ว", "Custom") : undefined, onSelect: () => setCardLayoutOpen(true),
+            title: t("เลือกช่องที่โชว์บนการ์ด + เรียงลำดับ (ของฉัน หรือค่าเริ่มต้นทั้งทีม) · ไม่ติ๊กรูปปก = การ์ดไม่มีรูป", "Choose and order the fields on each card") },
           { type: "divider", key: "d2" },
           { type: "submenu", key: "cols", icon: "columns", label: t("คอลัมน์ที่โชว์", "Columns shown"), width: 260,
             hint: hiddenBoardColumns.length ? t(`ซ่อน ${hiddenBoardColumns.length}`, `${hiddenBoardColumns.length} hidden`) : undefined,
@@ -788,6 +829,7 @@ export function DesignDashboard() {
       items: [
         ...(isDesktop ? [{ type: "submenu", key: "hover", icon: "eye", label: t("ชี้การ์ดแล้วโชว์", "Card hover preview"), hint: hoverPref.on ? t("เปิด", "On") : t("ปิด", "Off"), width: 300,
           render: () => <SheetHoverSettingsPanel pref={hoverPref} /> }] : []),
+        { key: "card-fields-s", icon: "layout-grid", label: t("ตั้งค่าการ์ด (โชว์อะไรบ้าง)", "Card fields"), hint: cardLayout.fields ? t("ตั้งแล้ว", "Custom") : undefined, onSelect: () => setCardLayoutOpen(true) },
         { key: "status", icon: "arrows-shuffle", label: t("จัดการสถานะ", "Manage statuses"), onSelect: () => setStatusMgr(true) },
         ...(canEdit ? [{ key: "checklist", icon: "list-check", label: t("Checklist งานใหม่", "New job checklist"), onSelect: () => setChecklistCfg(true),
           title: t("ข้อ ⏳ รออะไรอยู่ ที่ใส่ให้ทุกงานใหม่ (ตอนสร้างงานยังติ๊กออก/เพิ่มเฉพาะงานได้)", "Checklist items added to every new job") }] : []),
@@ -806,12 +848,31 @@ export function DesignDashboard() {
   // หน้า "วันนี้" (มือถือ) ใช้การ์ดแถวย่อเสมอ — ตัวเดียวกับบอร์ด
   const renderRowCard = (sheet: DesignSheetListItem) => (
     <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={null} movingSheetId={movingSheetId} cardSize="row" isDesktop={isDesktop}
-      handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus} />
+      handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus}
+      cardFields={cardLayout.fields} imgSize={cardImg} />
   );
   const renderBoardCard = (sheet: DesignSheetListItem) => (
     <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={draggingSheetId} movingSheetId={movingSheetId} cardSize={cardSize} isDesktop={isDesktop}
-      handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus} />
+      handleCardDragStart={handleCardDragStart} setDraggingSheetId={setDraggingSheetId} setDropTargetStatus={setDropTargetStatus}
+      cardFields={cardLayout.fields} imgSize={cardImg} />
   );
+  // 📌 ปฏิทินปักหมุด: รู้ว่า "ค้างอยู่" ไหม (จุดอ้างอิงเหนือปฏิทินเลื่อนพ้นหัวหน้า) + วัดความสูง → หัวคอลัมน์บอร์ดค้างต่อใต้ปฏิทิน
+  const calPinOn = calPinned && isDesktop;
+  useEffect(() => {
+    const el = calSentinel.current;
+    if (!calPinOn || !el || typeof IntersectionObserver === "undefined") { setCalStuck(false); return; }
+    const io = new IntersectionObserver(([e]) => setCalStuck(!e.isIntersecting && e.boundingClientRect.top < (sticky.below ?? 0) + 1),
+      { rootMargin: `-${Math.max(0, Math.round(sticky.below ?? 0))}px 0px 0px 0px` });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [calPinOn, sticky.below, viewMode]);
+  useEffect(() => {
+    const el = calBox.current;
+    if (!calPinOn || !el || typeof ResizeObserver === "undefined") { setCalH(0); return; }
+    const ro = new ResizeObserver(() => setCalH(el.offsetHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [calPinOn, viewMode]);
   const menuItem = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-50";
 
   // เนื้อหาทั้งหน้า (ไม่รวมป๊อปอัป/แถบล่างที่ portal ออกไป) — ถ้าเลือกดูแบบมือถือ/แท็บเล็ตบนจอที่กว้างกว่า
@@ -902,9 +963,30 @@ export function DesignDashboard() {
         {/* บอร์ด — แถวการ์ดสถิติ 4 ใบเอาออกแล้ว (เจ้าของขอ 2026-11-07 · จำนวนต่อแบบดูได้ในเมนูตัวกรอง) */}
         <div className="min-w-0 flex-1 space-y-4">
           {/* 📅 ปฏิทินกำหนดส่ง (ของกลาง DocCalendar โหมดย่อ) — แทนแถวแบรนด์ (เจ้าของสั่ง 2026-11-22) · มุมมองไอเดีย/หน้า "วันนี้" มือถือ ไม่โชว์ */}
-          {viewMode !== "ideas" && !(isPhone && phoneView === "today") && (
+          {viewMode !== "ideas" && !(isPhone && phoneView === "today") && (<>
+            {calPinOn && <div ref={calSentinel} aria-hidden className="-mb-4 h-px" />}
+            <div ref={calBox} className={calPinOn ? `sticky z-[12] rounded-xl ${calStuck ? "shadow-lg ring-2 ring-indigo-200" : ""}` : ""}
+              style={calPinOn ? { top: (sticky.below ?? 0) + 4 } : undefined}>
             <DocCalendar compact docs={calDocs} cursor={calCursor} onCursor={setCalCursor} unit={t("งาน", "jobs")}
               title={t("ปฏิทินกำหนดส่ง", "Deadlines")}
+              focusWeeks={calPinOn && calStuck && !calFull ? 2 : undefined}
+              actions={<>
+                {calPinOn && calStuck && (
+                  <button type="button" onClick={() => setCalFull((v) => !v)} title={calFull ? t("ย่อเหลือ 2 สัปดาห์", "Show 2 weeks") : t("ดูทั้งเดือน", "Show the whole month")}
+                    className="h-6 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">{calFull ? t("2 สัปดาห์", "2 weeks") : t("ทั้งเดือน", "Month")}</button>
+                )}
+                <button type="button" onClick={() => setSummaryOpen(true)} title={t("สรุปงานต้องส่ง (เลือกช่วงวัน) เป็นรูป JPG ให้พนักงานดู", "Deadline summary as a JPG image")}
+                  className="inline-flex h-6 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">
+                  <Icon name="image" size={13} />{t("สรุป", "Summary")}
+                </button>
+                {isDesktop && (
+                  <button type="button" onClick={toggleCalPin} aria-pressed={calPinned}
+                    title={calPinned ? t("เลิกปักหมุด (ปฏิทินเลื่อนตามหน้าปกติ)", "Unpin calendar") : t("ปักหมุด: ปฏิทินค้างบนจอตอนเลื่อนลง ลากการ์ดมาวางได้ง่าย", "Pin: keep the calendar on screen while scrolling")}
+                    className={`inline-flex h-6 items-center gap-1 rounded-lg border px-2 text-xs ${calPinned ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                    <Icon name="pin" size={13} />{calPinned ? t("ปักหมุดอยู่", "Pinned") : t("ปักหมุด", "Pin")}
+                  </button>
+                )}
+              </>}
               selectedDay={calDay} onPickDay={(d) => setCalDay((cur) => (cur === d ? null : d))}
               onDropDay={canEdit && isDesktop ? (day, e) => { const id = e.dataTransfer.getData("text/plain"); if (id) void moveSheetDeadline(id, day); } : undefined}
               hint={<span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-0.5">
@@ -916,7 +998,8 @@ export function DesignDashboard() {
                 ? t(`กรอง: ส่ง ${new Date(`${calDay}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })} · ${filteredSheets.length} งาน · กดวันเดิมอีกครั้ง = ดูทั้งหมด`, `Filter: due ${calDay} · ${filteredSheets.length} jobs · click the day again to clear`)
                 : canEdit && isDesktop ? t("กดวัน = ดูเฉพาะงานส่งวันนั้น · ลากการ์ดมาวาง = เลื่อนกำหนดส่ง", "Click a day to filter · drag a card onto a day to move its deadline")
                 : t("กดวัน = ดูเฉพาะงานส่งวันนั้น", "Click a day to filter")}</span></span>} />
-          )}
+            </div>
+          </>)}
 
           <main className="min-w-0 space-y-4">
             {/* มือถือ ปุ่ม "วันนี้" แถบล่าง = รวมงานที่ต้องสนใจ (แทนบอร์ด · แถบแบรนด์ยังใช้กรองได้) */}
@@ -1048,7 +1131,7 @@ export function DesignDashboard() {
                 </div>
               ) : (
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
-                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
+                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={calPinOn && calStuck && sticky.below != null ? sticky.below + 4 + calH : sticky.below} cardMinW={cardSize === "row" ? undefined : CARD_IMG_MIN_W[cardImg]} />
               )}
               {isPhone && viewMode === "board" && filteredSheets.length > 0 && <p className="mt-3 text-center text-[11px] text-slate-400">{t("ปัดซ้าย-ขวาตรงรายการ = ดูสถานะถัดไป", "Swipe the list left/right to see the next status")}{onCardLongPress ? t(" · กดค้างที่การ์ด = เปลี่ยนสถานะเร็ว", " · Press and hold a card to change its status") : ""}</p>}
             </section>
@@ -1160,6 +1243,13 @@ export function DesignDashboard() {
 
       {/* ⚙️ ตั้งค่า → Checklist งานใหม่ = ค่าใช้บ่อยของ ⏳ รออะไรอยู่ (ตัวเดียวกับ ⚙️ ในใบงาน) · สวิตช์ "ใบใหม่" = ใส่ให้ทุกงานใหม่ */}
       {checklistCfg && <ChecklistPresetsEditor presetType={DESIGN_WAITING.presetType} open onClose={() => setChecklistCfg(false)} title={t("Checklist งานใหม่", "New job checklist")} />}
+      {/* ⚙️ ตั้งค่าการ์ดบอร์ด (ของกลาง card-layout) — ของฉัน / ค่าเริ่มต้นทั้งทีม (สิทธิ์แก้ใบงาน) · ล้างได้ = กลับหน้าตาเดิม */}
+      {cardLayoutOpen && (
+        <CardLayoutEditor scopeKey={BOARD_CARD_SCOPE} available={BOARD_CARD_FIELDS} current={cardLayout.fields} canManageDefault={canEdit}
+          onClose={() => setCardLayoutOpen(false)} onSaved={() => { setCardLayoutOpen(false); void cardLayout.reload(); }} />
+      )}
+      {/* 🖼 สรุปกำหนดส่ง → รูป JPG (ขอบเขตเดียวกับบอร์ด) */}
+      <DeadlineSummaryModal open={summaryOpen} onClose={() => setSummaryOpen(false)} sheets={scopedSheets} statusMeta={statusMeta} scopeLabel={scopeLabel} />
 
       {statusMgr && (
         <WorkflowStatusManager

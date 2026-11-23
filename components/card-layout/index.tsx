@@ -78,6 +78,7 @@ export function CardLayoutEditor({ scopeKey, available, current, canManageDefaul
       description="เลือกข้อมูลที่จะโชว์บนการ์ด + เรียงลำดับ"
       footer={<>
         {canManageDefault && <button onClick={() => void reset("all")} disabled={saving} className="px-3 h-9 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ ล้างค่าเริ่มต้น</button>}
+        <button onClick={() => void reset("me")} disabled={saving} title="ลบที่ตั้งเอง กลับไปใช้ค่าเริ่มต้นของทีม (หรือหน้าตาเดิม)" className="px-3 h-9 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ คืนค่าเริ่มต้น (ของฉัน)</button>
         <button onClick={onClose} disabled={saving} className="ml-auto px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ปิด</button>
         {canManageDefault && <button onClick={() => void save("all")} disabled={saving} className="px-4 h-9 text-sm font-medium border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 disabled:opacity-50">{saving ? "…" : "บันทึกเป็นค่าเริ่มต้น (ทุกคน)"}</button>}
         <button onClick={() => void save("me")} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก (เฉพาะฉัน)"}</button>
