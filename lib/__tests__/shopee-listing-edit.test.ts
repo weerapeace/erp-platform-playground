@@ -291,3 +291,37 @@ describe("Shopee ลิ้นชัก — รูปของแต่ละต�
     expect(v.optionTiers).toEqual([{ name: "สี", options: [{ name: "ดำ", imageId: "i1", imageUrl: "https://u/1" }, { name: "ขาว", imageId: null, imageUrl: null }] }]);
   });
 });
+
+// ───────── ลิ้นชัก รอบ 2026-11-23: ข้อมูลครบ + ข้อมูลจำเพาะ ─────────
+import { planShopeeAttrs, shopeeAttrPayload, shopeeAttrsOfBase } from "@/lib/shopee-listing-edit";
+
+describe("ข้อมูลครบแบบหน้าลงสินค้า + ข้อมูลจำเพาะ (2026-11-23)", () => {
+  const RICH = {
+    ...BASE, condition: "NEW", gtin_code: "00", pre_order: { is_pre_order: false, days_to_ship: 2 },
+    logistic_info: [{ logistic_id: 7, logistic_name: "Shopee Express", enabled: true }, { logistic_id: 8, logistic_name: "Flash", enabled: false }],
+    attribute_list: [
+      { attribute_id: 100134, attribute_value_list: [{ value_id: 555, original_value_name: "หนัง PU" }] },
+      { attribute_id: 100999, attribute_value_list: [{ value_id: 0, original_value_name: "ไทย" }] },
+    ],
+  };
+  test("อ่านวันเตรียมส่ง · สภาพ · ขนส่ง · ข้อมูลจำเพาะ จาก get_item_base_info", () => {
+    const v = shopeeListingView(RICH, null)!;
+    expect(v).toMatchObject({ daysToShip: 2, preOrder: false, condition: "NEW", gtin: "00" });
+    expect(v.logistics).toEqual([{ name: "Shopee Express", enabled: true }, { name: "Flash", enabled: false }]);
+    expect(v.attrs).toEqual({ "100134": [{ id: "555", name: "หนัง PU" }], "100999": [{ name: "ไทย" }] });
+    expect(shopeeAttrsOfBase({})).toEqual({});
+  });
+  test("แก้ข้อมูลจำเพาะ: ส่งทั้งชุด (ของเดิม + ที่แก้) · ไม่เปลี่ยน = ไม่ส่ง · ช่องบังคับว่าง = ส่งไม่ได้", () => {
+    const v = shopeeListingView(RICH, null)!;
+    expect(planShopeeAttrs(v, { "100134": [{ id: "555", name: "หนัง PU" }] }).changed).toBe(false);
+    const p = planShopeeAttrs(v, { "100134": [{ id: "556", name: "หนังแท้" }] }, [{ id: "100134", name: "วัสดุ", required: true }]);
+    expect(p.changed).toBe(true);
+    expect(p.changes[0]).toEqual({ label: "ข้อมูลจำเพาะ: วัสดุ", before: "หนัง PU", after: "หนังแท้" });
+    expect(p.payload).toEqual(shopeeAttrPayload({ "100134": [{ id: "556", name: "หนังแท้" }], "100999": [{ name: "ไทย" }] }));
+    const miss = planShopeeAttrs(v, { "100999": [{ name: "จีน" }] }, [{ id: "200", name: "สไตล์", required: true }]);
+    expect(miss.errors[0]).toContain("สไตล์");
+    const clear = planShopeeAttrs(v, { "100134": [] });
+    expect(clear.changed).toBe(false);
+    expect(clear.warnings[0]).toContain("เอาค่าออกผ่านระบบไม่ได้");
+  });
+});

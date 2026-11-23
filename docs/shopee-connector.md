@@ -224,3 +224,13 @@
 - route: ฝากรูปใหม่ (จัตุรัสพื้นขาว แบบรูปสินค้า) → `v2.product.update_tier_variation` (ไม่ส่ง model_list) → ดึงกลับเช็ก: รูปเปลี่ยนจริง · **รหัสตัวเลือก (model) ชุดเดิม** · ราคาตั้งเดิม — ถ้าเปลี่ยน = เตือนแดง "เช็ก BigSeller ด่วน" + audit structure_changed
 - ⚠️ ยังไม่ยืนยันจากเอกสารว่า update_tier_variation แบบเปลี่ยนแค่รูปไม่กระทบตัวเลือก → **ลองครั้งแรกกับสินค้าขายน้อย 1 ตัว** แล้วเช็ก Seller Centre + BigSeller
 - มุมมองสด: `view.optionTiers` (ชื่อชั้น · ตัวเลือก · imageId/imageUrl) · slim เก็บ `tiers[].images`
+
+## ลิ้นชักสินค้าบนร้าน: ข้อมูลครบ · รูปในรายละเอียด · ข้อมูลจำเพาะ (เจ้าของเลือก 2026-11-23 · แบบ A + ข้อ 1-4)
+- 🐛 รูปปกที่หัวลิ้นชักหายสำหรับ Shopee (ลืมรูปของ Shopee ในตัวเลือกรูปปก) → แก้แล้ว
+- 🐛 แก้ข้อความรายละเอียดของสินค้าที่เป็นแบบมีรูป (extended) แล้วกดบันทึก → เดิมไม่ถูกส่ง (หน้าเว็บส่ง `plan.body.description` ซึ่งแบบ extended ไม่มี) → ส่งข้อความที่แก้ตรง ๆ แล้ว
+- **แท็บข้อมูลสินค้า**: หมวดเต็มภาษาไทย (`platform_category_options`) · แบรนด์ · น้ำหนัก · ขนาดกล่อง · เตรียมส่ง/พรีออเดอร์ · สภาพ · ขนส่งที่เปิด · รหัส/SKU/GTIN (อ่านจาก get_item_base_info — `ShopeeListingView` ช่องใหม่ `attrs/daysToShip/preOrder/condition/logistics/gtin`)
+- **รูปในรายละเอียด** (`ShopeeDescImagesBox`): ดู/ลากเรียง/ลบ/เพิ่มจากรูปในระบบ/อัปโหลดจากเครื่อง → ส่งพร้อมปุ่ม "บันทึกขึ้น Shopee" (`desc_images` → route ฝากรูป scene desc)
+  - ปุ่ม "อัปโหลดจากเครื่อง / คลังรูปทั้งหมด" อยู่ในป๊อปเลือกรูปกลาง `ListingImagePicker` (เปิดคลังรูปกลาง AssetPicker · รูปเข้าคลังด้วย) → ทุกจุดที่ใช้ป๊อปนี้ได้ด้วย (ปิดได้ `allowLibrary={false}`)
+- **แท็บข้อมูลจำเพาะ** (`ShopeeSpecsPanel`): ช่องของหมวด `GET /api/shopee/listing-detail?part=attrs&category_id=` (get_attribute_tree · จำไว้ 6 ชม.) · ช่องกรอกกลาง `LazadaAttrField` · แนะนำจากชื่อ/รายละเอียด (ฟรี) / AI ช่วยเติม (`attr-suggest-box`)
+  - ส่ง: `/api/shopee/listing-edit` ช่อง `attributes { before, values, fields }` → `planShopeeAttrs` ส่ง attribute_list **ทั้งชุด** (ของเดิม + ที่แก้) ไปกับ update_item ครั้งเดียวกัน · ช่องบังคับว่าง = ส่งไม่ได้ · เอาค่าออกผ่านระบบไม่ได้ (เตือน) · กันทับ 409 ถ้าช่องบนร้านเปลี่ยนระหว่างนั้น · ประวัติ "จากอะไรเป็นอะไร" ต่อช่อง
+  - ตัวแปลง attribute_list ↔ ช่องกรอกกลาง ย้ายมาไว้ `lib/shopee-listing-edit` (`shopeeAttrsOfBase` · `shopeeAttrPayload` · `shopeeAttrStateOf`) — `lib/shopee-create-plan` re-export ใช้ตัวเดียวกัน

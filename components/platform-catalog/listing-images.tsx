@@ -13,6 +13,7 @@
  * ของกลางที่ใช้: ERPModal · LoadingState · Icon · SortableList · HoverPreview
  */
 import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
@@ -21,6 +22,10 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { HoverPreview } from "@/components/hover-image";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { systemImageKey, systemImageRef } from "@/lib/line-listing-edit";
+import type { AssetRow } from "@/app/api/assets/shared";
+
+// คลังรูปกลาง (มีแท็บอัปโหลดจากเครื่อง) — หนัก โหลดตอนกดเท่านั้น
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 
 /** รูปในฟอร์ม → src ที่แสดงได้ ("r2:<key>" = ย่อจาก R2 · อื่น ๆ = ลิงก์ของร้าน) */
 export const listingImgSrc = (ref: string | null | undefined, w = 400): string => {
@@ -103,8 +108,10 @@ export function ListingImageGrid({ images, onChange, canEdit, max, platformName,
 
 /**
  * เลือกรูป — mode "product" = เพิ่มรูปสินค้า (เลือกได้หลายรูป ป๊อปค้างไว้) · "variant" = รูปของตัวเลือก (รูปสินค้าบนร้าน + คลังรูปในระบบ · เลือกแล้วผู้เรียกปิดเอง)
+ * ปุ่ม "อัปโหลดจากเครื่อง / คลังรูปทั้งหมด" (เจ้าของเลือก 2026-11-23 ข้อ 3) = คลังรูปกลาง AssetPicker (แท็บอัปโหลด) → รูปเข้าคลังด้วย ใช้ซ้ำร้านอื่นได้ → ได้ "r2:<key>" เหมือนรูปในระบบ
+ *   ปิดได้ด้วย allowLibrary={false}
  */
-export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, shopLabel = "รูปสินค้าบนร้าน", showShop, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker" }: {
+export function ListingImagePicker({ open, onClose, mode, title, description, shopImages, shopLabel = "รูปสินค้าบนร้าน", showShop, matchedParent, matchedCode, sysImages, isUsed, full, onPick, storageKey = "listing-drawer-image-picker", allowLibrary = true }: {
   open: boolean;
   onClose: () => void;
   mode: "product" | "variant";
@@ -125,11 +132,26 @@ export function ListingImagePicker({ open, onClose, mode, title, description, sh
   full?: boolean;
   onPick: (ref: string) => void;
   storageKey?: string;
+  /** ปุ่มอัปโหลดจากเครื่อง / เลือกจากคลังรูปทั้งหมด (ค่าเริ่ม เปิด) */
+  allowLibrary?: boolean;
 }) {
+  const [lib, setLib] = useState(false);
+  const pickAssets = (assets: AssetRow[]) => {
+    const refs = assets.map((a) => a.r2_key).filter((k): k is string => !!k).map(systemImageRef);
+    (mode === "variant" ? refs.slice(0, 1) : refs).forEach((ref) => onPick(ref));
+    setLib(false);
+  };
   return (
     <ERPModal open={open} onClose={onClose} size="lg" storageKey={storageKey} title={title} description={description}>
       {open && (
         <div className="space-y-3">
+          {allowLibrary && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2">
+              <button type="button" disabled={mode === "product" && !!full} onClick={() => setLib(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Icon name="upload" />อัปโหลดจากเครื่อง / คลังรูปทั้งหมด</button>
+              <span className="text-[11px] text-slate-500">รูปที่อัปโหลดเข้าคลังรูปกลางด้วย — ใช้ซ้ำกับร้านอื่นได้</span>
+            </div>
+          )}
           {(mode === "variant" || showShop) && (shopImages?.length ?? 0) > 0 && (
             <div>
               <div className="mb-1 text-xs text-slate-500">{shopLabel}</div>
@@ -171,6 +193,8 @@ export function ListingImagePicker({ open, onClose, mode, title, description, sh
           </div>
         </div>
       )}
+      {lib && <AssetPicker open onClose={() => setLib(false)} onSelect={pickAssets} multiple={mode === "product"} typeFilter="image"
+        title={title} contextLabel={matchedCode ?? undefined} defaultSearch={matchedCode ?? undefined} />}
     </ERPModal>
   );
 }

@@ -11,6 +11,7 @@
  *   - unlist_item: item_list ≤50 · สินค้าที่อยู่ในโปรโมชัน "ปิดขายไม่ได้" · รอตรวจ/ถูกแบน ปิด/เปิดไม่ได้ · ผลรายตัวอยู่ใน failure_list (HTTP 200)
  */
 import type { ShopeeSlimModel, ShopeeSlimTier } from "@/lib/shopee";
+import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
 
 /** รูปในรายละเอียด (extended) — ใช้ทั้งลงสินค้าใหม่ (lib/shopee-create-plan) และแก้สินค้าที่ลงแล้ว · จำนวนสูงสุดยังไม่ยืนยันจากเอกสาร (ตั้ง 12 ไว้ก่อน) */
 export const SHOPEE_DESC_MAX_IMAGES = 12;
@@ -51,9 +52,22 @@ export type ShopeeListingView = {
   inPromotion: boolean;
   updateTime: number | null;
   limits: ShopeeLimits | null;
+  // ── ข้อมูลครบแบบหน้าลงสินค้า (เจ้าของ 2026-11-23 "ข้อมูลสินค้าต้องมีทุกรายการที่จำเป็น") ──
+  /** ข้อมูลจำเพาะ (attribute_list) — รูปแบบเดียวกับช่องกรอกกลาง lib/tiktok-attrs · ไม่มี = {} */
+  attrs: TtsAttrState;
+  /** วันเตรียมส่ง (pre_order.days_to_ship) · พรีออเดอร์ */
+  daysToShip: number | null;
+  preOrder: boolean;
+  /** NEW / USED */
+  condition: string | null;
+  /** ขนส่งของสินค้านี้ (เปิด/ปิด) */
+  logistics: { name: string; enabled: boolean }[];
+  gtin: string | null;
 };
 
 export type ShopeeListingDetailResponse = { view: ShopeeListingView | null; fetched_at: string | null; saved?: boolean; error: string | null };
+/** GET /api/shopee/listing-detail?part=attrs — ช่องข้อมูลจำเพาะของหมวด + ชื่อหมวด (โหลดตอนเปิดแท็บ) */
+export type ShopeeAttrFieldsResponse = { fields: TtsAttrField[] | null; category_name: string | null; error: string | null };
 export type ShopeeWriteResponse = { ok: boolean; view: ShopeeListingView | null; summary?: string; warnings?: string[]; error: string | null };
 
 type Obj = Record<string, unknown>;
@@ -113,7 +127,75 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
     hasModel: base.has_model === true || ms.length > 0, models: ms,
     price: num(p?.current_price), originalPrice: num(p?.original_price), stock: s2,
     inPromotion: base.has_promotion === true, updateTime: num(base.update_time), limits,
+    attrs: shopeeAttrsOfBase(base),
+    daysToShip: num(obj(base.pre_order)?.days_to_ship), preOrder: obj(base.pre_order)?.is_pre_order === true,
+    condition: str(base.condition),
+    logistics: arr(base.logistic_info).map(obj).filter((l): l is Obj => !!l)
+      .map((l) => ({ name: str(l.logistic_name) ?? `ขนส่ง #${str(l.logistic_id) ?? "?"}`, enabled: l.enabled === true })),
+    gtin: str(base.gtin_code),
   };
+}
+
+// ───────── ข้อมูลจำเพาะ (attribute_list) — ใช้ทั้งลงสินค้าใหม่ (lib/shopee-create-plan re-export) และแก้สินค้าที่ลงแล้ว ─────────
+/** attribute_list ของ get_item_base_info → state ของช่องกรอกกลาง (ค่าในรายการ = value_id · พิมพ์เอง = ชื่อ) */
+export function shopeeAttrsOfBase(base: Obj): TtsAttrState {
+  const out: TtsAttrState = {};
+  for (const a of arr(base.attribute_list).map(obj)) {
+    const id = str(a?.attribute_id); if (!a || !id) continue;
+    const vals = arr(a.attribute_value_list).map(obj).filter((v): v is Obj => !!v)
+      .map((v): TtsAttrVal => { const vid = num(v.value_id); const nm = str(v.original_value_name); return vid && vid > 0 ? { id: String(vid), ...(nm ? { name: nm } : {}) } : { name: nm ?? undefined }; })
+      .filter((v) => v.id || v.name);
+    if (vals.length) out[id] = vals;
+  }
+  return out;
+}
+/** ค่าที่กรอก → attribute_list ของ add_item / update_item (ค่าในรายการ = value_id · พิมพ์เอง = value_id 0 + original_value_name) */
+export function shopeeAttrPayload(state: TtsAttrState): { attribute_id: number; attribute_value_list: { value_id: number; original_value_name?: string }[] }[] {
+  return Object.entries(state).map(([id, vals]) => ({
+    attribute_id: Number(id),
+    attribute_value_list: vals.map((v) => (v.id && /^\d+$/.test(v.id) && Number(v.id) > 0 ? { value_id: Number(v.id) } : { value_id: 0, original_value_name: str(v.name) ?? "" }))
+      .filter((v) => v.value_id > 0 || !!v.original_value_name),
+  })).filter((a) => Number.isFinite(a.attribute_id) && a.attribute_id > 0 && a.attribute_value_list.length);
+}
+/** ค่าที่ส่งมา (ร่าง extra.shopee_attrs / body ของ API) → state (กันค่าแปลก) */
+export function shopeeAttrStateOf(v: unknown): TtsAttrState {
+  const out: TtsAttrState = {};
+  const o = obj(v); if (!o) return out;
+  for (const [k, vals] of Object.entries(o)) {
+    if (!Array.isArray(vals)) continue;
+    const list = vals.map((x): TtsAttrVal => { const e = obj(x) ?? {}; const id = str(e.id); const name = str(e.name); return { ...(id ? { id } : {}), ...(name ? { name } : {}) }; }).filter((x) => x.id || x.name);
+    if (list.length) out[k] = list;
+  }
+  return out;
+}
+/** ลายเซ็นค่าของช่อง 1 ช่อง (ไม่สนลำดับ · id ก่อนชื่อ) — ไว้เทียบว่าเปลี่ยนไหม */
+export const shopeeAttrValSig = (vals: readonly TtsAttrVal[] | undefined): string =>
+  (vals ?? []).map((v) => (v.id && Number(v.id) > 0 ? `#${v.id}` : `"${String(v.name ?? "").trim().toLowerCase()}`)).sort().join("|");
+export const shopeeAttrValText = (vals: readonly TtsAttrVal[] | undefined): string => (vals ?? []).map((v) => v.name || v.id || "").filter(Boolean).join(", ") || "—";
+
+export type ShopeeAttrPlan = { changed: boolean; payload: ReturnType<typeof shopeeAttrPayload>; changes: { label: string; before: string; after: string }[]; errors: string[]; warnings: string[] };
+/**
+ * แก้ข้อมูลจำเพาะของสินค้าที่ลงแล้ว — ส่งทั้งชุด (ของเดิมบนร้าน + ที่แก้) ไม่ให้ช่องที่ไม่ได้แตะหาย
+ * fields = ช่องของหมวด (get_attribute_tree) ไว้ตรวจช่องบังคับ + ชื่อช่อง · ไม่มี = ไม่ตรวจ
+ */
+export function planShopeeAttrs(view: Pick<ShopeeListingView, "attrs" | "status">, want: TtsAttrState, fields?: readonly Pick<TtsAttrField, "id" | "name" | "required">[] | null): ShopeeAttrPlan {
+  const out: ShopeeAttrPlan = { changed: false, payload: [], changes: [], errors: [], warnings: [] };
+  const nameOf = new Map((fields ?? []).map((f) => [f.id, f.name]));
+  const merged: TtsAttrState = { ...view.attrs };
+  for (const [id, vals] of Object.entries(want)) {
+    const before = view.attrs[id];
+    if (shopeeAttrValSig(vals) === shopeeAttrValSig(before)) continue;
+    if (!vals.length) { if (before?.length) out.warnings.push(`ช่อง "${nameOf.get(id) ?? id}" เอาค่าออกผ่านระบบไม่ได้ — ค่าเดิมบน Shopee ยังอยู่`); continue; }
+    merged[id] = vals;
+    out.changes.push({ label: `ข้อมูลจำเพาะ: ${nameOf.get(id) ?? id}`, before: shopeeAttrValText(before), after: shopeeAttrValText(vals) });
+  }
+  out.changed = out.changes.length > 0;
+  if (!out.changed) return out;
+  const missing = (fields ?? []).filter((f) => f.required && !merged[f.id]?.length).map((f) => f.name);
+  if (missing.length) out.errors.push(`ช่องบังคับยังว่าง: ${missing.join(", ")}`);
+  out.payload = shopeeAttrPayload(merged);
+  if (view.status === "REVIEWING") out.warnings.push("สินค้านี้กำลังรอ Shopee ตรวจ — แก้แล้วอาจต้องรอตรวจต่อ");
+  return out;
 }
 
 // ───────── ป้ายสถานะ ─────────

@@ -27,8 +27,8 @@ import { splitSkus } from "@/lib/lazada-create-plan";
 import { pickListingDescription } from "@/lib/listing-description";
 import { pickListingTitle } from "@/lib/listing-title";
 import { listingColorName, listingDefaultImages } from "@/lib/listing-defaults";
-import { SHOPEE_DESC_MAX_IMAGES, SHOPEE_DESC_MIN_WIDTH, shopeeTextLength } from "@/lib/shopee-listing-edit";
-import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs";
+import { SHOPEE_DESC_MAX_IMAGES, SHOPEE_DESC_MIN_WIDTH, shopeeAttrPayload, shopeeAttrStateOf, shopeeAttrsOfBase, shopeeTextLength } from "@/lib/shopee-listing-edit";
+import type { TtsAttrField, TtsAttrState } from "@/lib/tiktok-attrs";
 import { applyAttrDefaults, DEFAULT_ATTR_RULES, type AttrDefaultRule } from "@/lib/listing-attr-defaults";
 
 /** สต๊อกตอนสร้าง (BigSeller ยังคุมสต๊อก — ไม่ส่งจำนวนจริง) · สถานะตอนสร้าง = ปิดขาย */
@@ -161,25 +161,8 @@ export function shopeeAttrFieldsOf(tree: Obj[]): TtsAttrField[] {
     };
   }).filter((f) => f.id && f.name);
 }
-/** ค่าที่กรอก → attribute_list ของ add_item (ค่าในรายการ = value_id · พิมพ์เอง = value_id 0 + original_value_name) */
-export function shopeeAttrPayload(state: TtsAttrState): { attribute_id: number; attribute_value_list: { value_id: number; original_value_name?: string }[] }[] {
-  return Object.entries(state).map(([id, vals]) => ({
-    attribute_id: Number(id),
-    attribute_value_list: vals.map((v) => (v.id && /^\d+$/.test(v.id) && Number(v.id) > 0 ? { value_id: Number(v.id) } : { value_id: 0, original_value_name: str(v.name) }))
-      .filter((v) => v.value_id > 0 || !!v.original_value_name),
-  })).filter((a) => Number.isFinite(a.attribute_id) && a.attribute_id > 0 && a.attribute_value_list.length);
-}
-/** ค่าคุณลักษณะในร่าง (extra.shopee_attrs) → state (กันค่าแปลก) */
-export function shopeeAttrStateOf(v: unknown): TtsAttrState {
-  const out: TtsAttrState = {};
-  const o = obj(v); if (!o) return out;
-  for (const [k, vals] of Object.entries(o)) {
-    if (!Array.isArray(vals)) continue;
-    const list = vals.map((x): TtsAttrVal => { const e = obj(x) ?? {}; const id = str(e.id); const name = str(e.name); return { ...(id ? { id } : {}), ...(name ? { name } : {}) }; }).filter((x) => x.id || x.name);
-    if (list.length) out[k] = list;
-  }
-  return out;
-}
+// ค่าที่กรอก ↔ attribute_list ย้ายไป lib/shopee-listing-edit (ใช้ร่วมกับลิ้นชักสินค้าบนร้าน 2026-11-23) — re-export ไว้ให้ที่เดิมใช้ต่อได้
+export { shopeeAttrPayload, shopeeAttrStateOf } from "@/lib/shopee-listing-edit";
 
 // ───────── "สินค้าแบบ" บนร้าน (get_item_base_info ของสินค้าที่ขายอยู่ แบรนด์เดียวกัน) → แบรนด์ / ขนส่ง / วันส่ง / ค่าคุณลักษณะ ─────────
 export type ShopeeLogistic = { logistic_id: number; name: string | null; enabled: boolean; shipping_fee?: number; size_id?: number; is_free?: boolean; /** ค่าส่งโดยประมาณตามน้ำหนัก (get_item_base_info · โชว์อย่างเดียว) */ estimated_fee?: number };
@@ -192,12 +175,7 @@ export function shopeeTemplateOf(base: Obj): ShopeeTemplate | null {
     const fee = num(l.shipping_fee), size = num(l.size_id), est = num(l.estimated_shipping_fee);
     return { logistic_id: num(l.logistic_id) ?? 0, name: str(l.logistic_name) || null, enabled: l.enabled === true, ...(fee != null ? { shipping_fee: fee } : {}), ...(size ? { size_id: size } : {}), ...(l.is_free === true ? { is_free: true } : {}), ...(est != null ? { estimated_fee: est } : {}) };
   }).filter((l) => l.logistic_id > 0);
-  const attrs: TtsAttrState = {};
-  for (const a of arrOf(base.attribute_list)) {
-    const id = str(a.attribute_id); if (!id) continue;
-    const vals = arrOf(a.attribute_value_list).map((v): TtsAttrVal => { const vid = num(v.value_id); const nm = str(v.original_value_name); return vid && vid > 0 ? { id: String(vid), ...(nm ? { name: nm } : {}) } : { name: nm }; }).filter((v) => v.id || v.name);
-    if (vals.length) attrs[id] = vals;
-  }
+  const attrs: TtsAttrState = shopeeAttrsOfBase(base);
   return {
     itemId, categoryId: base.category_id != null ? String(base.category_id) : null,
     brand: brandId != null ? { id: brandId, name: str(b?.original_brand_name) || "NoBrand" } : null,

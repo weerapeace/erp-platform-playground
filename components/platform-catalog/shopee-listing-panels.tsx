@@ -13,6 +13,8 @@
  * กฎ: lib/shopee-listing-edit (pure + เทสต์ — หน้าเว็บกับ API ใช้ตัวเดียวกัน) · แผนเฟส: docs/shopee-connector.md
  * เฟส 4B: ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก & ราคา → POST /api/shopee/listing-prices · มีผลทันที) — ปุ่มบันทึกเดียวกับชื่อ (ส่งราคาก่อน)
  * เฟส 4C: รูปสินค้า (แท็บรูป — ลากเรียง/ตั้งปก/ลบ/เพิ่มจากคลังรูปในระบบ) → ส่งพร้อมชื่อใน /api/shopee/listing-edit (รูปใหม่ฝากกับ Shopee ตอนกดบันทึก)
+ * 2026-11-23 (เจ้าของเลือก A + ข้อ 1-4): ข้อมูลครบแบบหน้าลงสินค้า (หมวดเต็ม · วันเตรียมส่ง · สภาพ · ขนส่ง) · รูปในรายละเอียด (ดู/เรียง/ลบ/เพิ่ม/อัปโหลด)
+ *   · แท็บข้อมูลจำเพาะ (ShopeeSpecsPanel · ช่องกรอกกลาง LazadaAttrField · แนะนำจากชื่อ/รายละเอียด) — ส่งพร้อมปุ่มบันทึกเดียวกัน
  * ยังไม่ทำ: ตัวเลือก (ดูอย่างเดียว) · สต๊อก (BigSeller ยังซิงค์อยู่ — ไม่แก้)
  * ของกลางที่ใช้: MiniTable · ConfirmDialog · ToggleSwitch · state-views · Icon · ./listing-images (ListingImageGrid · ListingImagePicker · useSystemImages)
  */
@@ -26,11 +28,15 @@ import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { MoneyInput } from "@/components/money-input";
 import {
-  applyShopeeBulkPrice, planShopeeDisplay, planShopeeEdit, planShopeeImages, planShopeePrices, shopeeImagesMax, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeRefsForSend,
-  shopeeStatusBadge, shopeeTextLength,
-  type ShopeeImagePlan, type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
+  applyShopeeBulkPrice, planShopeeAttrs, planShopeeDisplay, planShopeeEdit, planShopeeImages, planShopeePrices, shopeeAttrValSig, shopeeImageRef, shopeeImagesMax, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeRefsForSend,
+  shopeeStatusBadge, shopeeTextLength, SHOPEE_DESC_MAX_IMAGES,
+  type ShopeeAttrFieldsResponse, type ShopeeAttrPlan, type ShopeeImagePlan, type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
 } from "@/lib/shopee-listing-edit";
-import { ListingImageGrid, ListingImagePicker, useSystemImages } from "./listing-images";
+import { ttsAttrDef, ttsAttrFromText, ttsAttrToText, type TtsAttrField, type TtsAttrState } from "@/lib/tiktok-attrs";
+import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } from "./listing-images";
+import { ImageLightbox } from "@/components/image-lightbox";
+import { LazadaAttrField } from "./lazada-listing-panels";
+import { AttrSuggestButtons, AttrSuggestPanel, applyAttrHits, useAttrSuggest } from "./attr-suggest-box";
 
 export type ShopeeListingState = {
   listingId: string | null;
@@ -111,6 +117,17 @@ export type ShopeeEditApi = {
   images: string[] | null;
   setImages: (next: string[]) => void;
   imagePlan: ShopeeImagePlan | null;
+  /** รูปในรายละเอียด (2026-11-23): ลิงก์รูปเดิมบนร้าน / "r2:<key>" รูปใหม่ · null = ยังไม่มีข้อมูล */
+  descImages: string[] | null;
+  setDescImages: (next: string[]) => void;
+  descImagesDirty: boolean;
+  /** ข้อมูลจำเพาะ (2026-11-23): ค่าทั้งชุดในฟอร์ม · ช่องของหมวดโหลดเมื่อขอ (loadAttrFields) */
+  attrs: TtsAttrState | null;
+  setAttrs: (next: TtsAttrState) => void;
+  attrPlan: ShopeeAttrPlan | null;
+  attrFields: TtsAttrField[] | null;
+  attrMeta: { loading: boolean; error: string | null; categoryName: string | null };
+  loadAttrFields: () => void;
   changeCount: number;
   errors: string[];
   dirty: boolean;
@@ -127,13 +144,44 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
   const [description, setDescState] = useState<string | null>(null);
   const [prices, setPricesState] = useState<ShopeePriceRow[] | null>(null);
   const [images, setImagesState] = useState<string[] | null>(null);
+  const [descImages, setDescImagesState] = useState<string[] | null>(null);
+  const [attrs, setAttrsState] = useState<TtsAttrState | null>(null);
+  const [attrFields, setAttrFields] = useState<TtsAttrField[] | null>(null);
+  const [attrMeta, setAttrMeta] = useState<{ loading: boolean; error: string | null; categoryName: string | null; cat: string | null }>({ loading: false, error: null, categoryName: null, cat: null });
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   const priceBase = useMemo(() => (v ? shopeePriceRowsFromView(v) : null), [v]);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวอื่น / ดึงใหม่ / หลังบันทึก) → เริ่มจากของบนร้าน
-  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); setPricesState(priceBase); setImagesState(v ? v.images : null); }, [v, priceBase]);
+  // รูปในรายละเอียดในฟอร์ม = ลิงก์รูปบนร้าน (โชว์ได้ทันที) · ตอนส่งแปลงกลับเป็น "spi:<id>"
+  const descBase = useMemo(() => (v ? v.descriptionImages.map((x) => x.url ?? shopeeImageRef(x.id)) : null), [v]);
+  useEffect(() => { setNameState(v ? v.name : null); setDescState(v ? v.description : null); setPricesState(priceBase); setImagesState(v ? v.images : null); setDescImagesState(descBase); setAttrsState(v ? v.attrs : null); }, [v, priceBase, descBase]);
+  // ช่องข้อมูลจำเพาะของหมวด — โหลดเมื่อขอ (เปิดแท็บ / โหมดเช็กกับระบบ) · หมวดเปลี่ยน = โหลดใหม่
+  const catId = v?.categoryId ?? null;
+  const loadAttrFields = useCallback(() => {
+    if (!state.listingId || !catId || attrMeta.loading || (attrMeta.cat === catId && (attrFields || attrMeta.error))) return;
+    setAttrMeta((m) => ({ ...m, loading: true, error: null, cat: catId }));
+    apiFetch(`/api/shopee/listing-detail?part=attrs&listing_id=${encodeURIComponent(state.listingId)}&category_id=${encodeURIComponent(catId)}`)
+      .then((r) => r.json().catch(() => ({ fields: null, category_name: null, error: `HTTP ${r.status}` })) as Promise<ShopeeAttrFieldsResponse>)
+      .then((j) => { setAttrFields(j.fields); setAttrMeta({ loading: false, error: j.error, categoryName: j.category_name, cat: catId }); })
+      .catch(() => setAttrMeta({ loading: false, error: "โหลดช่องของหมวดไม่สำเร็จ", categoryName: null, cat: catId }));
+  }, [state.listingId, catId, attrMeta.loading, attrMeta.cat, attrMeta.error, attrFields]);
 
-  const plan = useMemo(() => (v && name != null && description != null ? planShopeeEdit(v, { name, description }) : null), [v, name, description]);
+  const descImagesDirty = !!descImages && !!descBase && descImages.join("|") !== descBase.join("|");
+  // ลิงก์รูปเดิม → "spi:<id>" · รูปใหม่คง "r2:<key>"
+  const descRefs = useMemo(() => {
+    if (!v || !descImages) return null;
+    const idOf = new Map(v.descriptionImages.map((x) => [x.url ?? shopeeImageRef(x.id), x.id]));
+    return descImages.map((u) => (idOf.has(u) ? shopeeImageRef(idOf.get(u)!) : u));
+  }, [v, descImages]);
+  const plan = useMemo(() => (v && name != null && description != null ? planShopeeEdit(v, { name, description, ...(descImagesDirty && descRefs ? { descImages: descRefs } : {}) }) : null), [v, name, description, descImagesDirty, descRefs]);
+  // ข้อมูลจำเพาะ: ส่งเฉพาะช่องที่ต่างจากบนร้าน (ตัวส่งรวมกับของเดิมให้เอง)
+  const attrWant = useMemo(() => {
+    if (!v || !attrs) return null;
+    const out: TtsAttrState = {};
+    for (const id of new Set([...Object.keys(attrs), ...Object.keys(v.attrs)])) if (shopeeAttrValSig(attrs[id]) !== shopeeAttrValSig(v.attrs[id])) out[id] = attrs[id] ?? [];
+    return out;
+  }, [v, attrs]);
+  const attrPlan = useMemo(() => (v && attrWant && Object.keys(attrWant).length ? planShopeeAttrs(v, attrWant, attrFields) : null), [v, attrWant, attrFields]);
   const pricePlan = useMemo(() => (v && prices ? planShopeePrices(v, prices) : null), [v, prices]);
   const imagePlan = useMemo((): ShopeeImagePlan | null => {
     if (!v || !images) return null;
@@ -145,10 +193,11 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
   const infoN = plan?.changes.length ?? 0;
   const priceN = pricePlan?.changes.length ?? 0;
   const imgN = imagePlan?.changed ? 1 : 0;
-  const changeCount = infoN + priceN + imgN;
+  const attrN = attrPlan?.changes.length ?? 0;
+  const changeCount = infoN + priceN + imgN + attrN;
   const dirty = changeCount > 0;
-  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? []), ...(imgN ? imagePlan!.errors : [])];
-  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); setImagesState(v.images); } };
+  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? []), ...(imgN ? imagePlan!.errors : []), ...(attrN ? attrPlan!.errors : [])];
+  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); setImagesState(v.images); setDescImagesState(descBase); setAttrsState(v.attrs); } };
 
   /** ส่งราคาก่อน (มีผลทันที) แล้วค่อยชื่อ/รายละเอียด/รูป (คำสั่งเดียว) · ราคาไม่ผ่านทั้งหมด = หยุด ไม่ส่งต่อ */
   const save = async () => {
@@ -175,13 +224,18 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
         (j.warnings ?? []).forEach((w) => toast.warning(w));
         latest = j.view;
       }
-      if ((infoN && plan) || (imgN && imagePlan)) {
+      // ชื่อ/รายละเอียด: ส่ง "ข้อความที่แก้" ตรง ๆ (🐛 เดิมส่ง plan.body.description — รายละเอียดแบบมีรูป (extended) ไม่มีช่องนี้ → แก้ข้อความแล้วไม่ถูกส่ง)
+      const nameChanged = !!plan?.body.item_name;
+      const textChanged = !!plan?.changes.some((c) => c.label === "รายละเอียด");
+      if (nameChanged || textChanged || descImagesDirty || (imgN && imagePlan) || attrN) {
         const r = await apiFetch("/api/shopee/listing-edit", {
           method: "POST",
           body: JSON.stringify({
             listing_id: state.listingId,
-            ...(infoN && plan ? { before: { name: v.name, description: v.description }, edit: { name: plan.body.item_name ?? null, description: plan.body.description ?? null } } : {}),
+            ...(nameChanged || textChanged ? { before: { name: v.name, description: v.description }, edit: { name: nameChanged ? plan!.body.item_name : null, description: textChanged ? description : null } } : {}),
+            ...(descImagesDirty && descRefs ? { desc_images: { before_ids: v.descriptionImages.map((x) => x.id), refs: descRefs } } : {}),
             ...(imgN && imagePlan ? { images: { before_ids: v.imageIds, refs: imagePlan.refs } } : {}),
+            ...(attrN && attrWant ? { attributes: { before: v.attrs, values: attrWant, fields: (attrFields ?? []).map((f) => ({ id: f.id, name: f.name, required: f.required })) } } : {}),
           }),
         });
         const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
@@ -202,7 +256,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     finally { setSaving(false); }
   };
 
-  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? []), ...(imgN ? imagePlan!.warnings : [])];
+  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? []), ...(imgN ? imagePlan!.warnings : []), ...(attrN ? attrPlan!.warnings : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount} รายการขึ้นร้าน Shopee?`} confirmText="ส่งขึ้น Shopee"
@@ -213,7 +267,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
             {(pricePlan?.changes ?? []).map((c) => (
               <li key={`p-${c.modelId}`}><span className="font-medium text-slate-700">ราคาตั้ง {c.label}:</span> {shopeePriceChangeText(c)}{c.promo ? <span className="text-orange-700"> · ในโปรโมชัน</span> : null}</li>
             ))}
-            {[...(plan?.changes ?? []), ...(imgN ? imagePlan!.changes : [])].map((c, i) => (
+            {[...(plan?.changes ?? []), ...(imgN ? imagePlan!.changes : []), ...(attrN ? attrPlan!.changes : [])].map((c, i) => (
               <li key={`i-${i}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
             ))}
           </ul>
@@ -226,6 +280,8 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     prices, setPrice: (modelId, price) => setPricesState((rows) => (rows ? rows.map((r) => (r.modelId === modelId ? { ...r, price } : r)) : rows)),
     setPrices: setPricesState, pricePlan,
     images, setImages: setImagesState, imagePlan,
+    descImages, setDescImages: setDescImagesState, descImagesDirty,
+    attrs, setAttrs: setAttrsState, attrPlan, attrFields, attrMeta: { loading: attrMeta.loading, error: attrMeta.error, categoryName: attrMeta.categoryName }, loadAttrFields,
     changeCount, errors, dirty, reset, ask: () => setAsking(true), saving, dialog,
   };
 }
@@ -348,7 +404,12 @@ function Counter({ n, min, max }: { n: number; min: number | null | undefined; m
 }
 
 /** แท็บข้อมูลสินค้า — แก้ชื่อ/รายละเอียดได้เมื่อมีสิทธิ์ · ที่เหลือดูอย่างเดียว */
-export function ShopeeInfoPanel({ state, edit }: { state: ShopeeListingState; edit: ShopeeEditApi }) {
+export function ShopeeInfoPanel({ state, edit, matchedParent = null, matchedCode = null }: {
+  state: ShopeeListingState; edit: ShopeeEditApi; matchedParent?: string | null; matchedCode?: string | null;
+}) {
+  // หมวดเต็ม (ชื่อไทย) มากับช่องข้อมูลจำเพาะ — โหลดตอนเปิดแท็บนี้ด้วย (จำไว้ที่เซิร์ฟเวอร์ 6 ชม.)
+  const { loadAttrFields } = edit;
+  useEffect(() => { if (state.view?.categoryId) loadAttrFields(); }, [state.view?.categoryId, loadAttrFields]);
   const g = gate(state); if (g) return g;
   const v = state.view!;
   const lockedStatus = v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE";
@@ -376,13 +437,123 @@ export function ShopeeInfoPanel({ state, edit }: { state: ShopeeListingState; ed
           ? <textarea value={desc} onChange={(e) => edit.setDescription(e.target.value)} rows={10} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm leading-relaxed focus:border-violet-400 focus:outline-none" />
           : <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{v.description || "—"}</div>}
       </div>
+      <ShopeeDescImagesBox state={state} edit={edit} canEdit={can} matchedParent={matchedParent} matchedCode={matchedCode} />
+      {/* ข้อมูลครบแบบหน้าลงสินค้า (เจ้าของ 2026-11-23) — ดูอย่างเดียว · แก้หมวด/ขนส่ง/น้ำหนักใน Seller Centre */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <ReadField label="รหัสสินค้าบน Shopee">{v.itemId}{v.itemSku ? ` · SKU ${v.itemSku}` : ""}</ReadField>
+        <ReadField label="หมวดบน Shopee">{edit.attrMeta.categoryName ?? (v.categoryId ? `รหัส ${v.categoryId}` : "—")}</ReadField>
         <ReadField label="แบรนด์">{v.brand ?? "—"}</ReadField>
-        <ReadField label="หมวด (รหัส Shopee)">{v.categoryId ?? "—"}</ReadField>
-        <ReadField label="น้ำหนัก / กล่อง">{v.weight != null ? `${v.weight} กก.` : "—"}{v.dims ? ` · ${v.dims.length ?? "?"}×${v.dims.width ?? "?"}×${v.dims.height ?? "?"} ซม.` : ""}</ReadField>
+        <ReadField label="น้ำหนัก">{v.weight != null ? `${v.weight} กก.` : "—"}</ReadField>
+        <ReadField label="ขนาดกล่อง (ย × ก × ส)">{v.dims ? `${v.dims.length ?? "?"} × ${v.dims.width ?? "?"} × ${v.dims.height ?? "?"} ซม.` : "—"}</ReadField>
+        <ReadField label="เตรียมส่ง">{v.preOrder ? `พรีออเดอร์ ${v.daysToShip ?? "?"} วัน` : v.daysToShip != null ? `ปกติ (${v.daysToShip} วัน)` : "—"}</ReadField>
+        <ReadField label="สภาพสินค้า">{v.condition === "NEW" ? "ใหม่" : v.condition === "USED" ? "มือสอง" : v.condition ?? "—"}</ReadField>
+        <ReadField label="ขนส่งที่เปิด">{v.logistics.filter((l) => l.enabled).map((l) => l.name).join(" · ") || "—"}</ReadField>
+        <ReadField label="รหัสสินค้าบน Shopee">{v.itemId}{v.itemSku ? ` · SKU ${v.itemSku}` : ""}{v.gtin && v.gtin !== "00" ? ` · GTIN ${v.gtin}` : ""}</ReadField>
       </div>
-      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ + รายละเอียด (แบบข้อความ) · รูปสินค้า (แท็บรูป) · ราคาตั้งต่อตัวเลือก (แท็บตัวเลือก &amp; ราคา) · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
+      <p className="text-[11px] text-slate-400">แก้ได้ตอนนี้: ชื่อ · รายละเอียด · รูปในรายละเอียด · รูปสินค้า (แท็บรูป) · ข้อมูลจำเพาะ (แท็บข้อมูลจำเพาะ) · ราคาตั้งต่อตัวเลือก · สต๊อกไม่แก้จากระบบ (BigSeller ยังซิงค์อยู่)</p>
+    </div>
+  );
+}
+
+/**
+ * รูปในรายละเอียด (extended · ต่อท้ายข้อความ) — ดู / ลากเรียง / ลบ / เพิ่มจากรูปในระบบ / อัปโหลดจากเครื่อง (ของกลาง ListingImagePicker → คลังรูปกลาง)
+ * ส่งพร้อมปุ่ม "บันทึกขึ้น Shopee" (route ฝากรูปแบบคงสัดส่วน scene desc) · เจ้าของถาม 2026-11-23 "ดูตรง Description Image ให้หน่อยว่าใช้ได้ยัง"
+ */
+function ShopeeDescImagesBox({ state, edit, canEdit, matchedParent, matchedCode }: {
+  state: ShopeeListingState; edit: ShopeeEditApi; canEdit: boolean; matchedParent: string | null; matchedCode: string | null;
+}) {
+  const [picker, setPicker] = useState(false);
+  const [zoom, setZoom] = useState(-1);
+  const sys = useSystemImages(matchedParent);
+  const v = state.view!;
+  const imgs = edit.descImages ?? [];
+  const max = SHOPEE_DESC_MAX_IMAGES;
+  return (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-600">รูปในรายละเอียด ({imgs.length}/{max}) — ต่อท้ายข้อความ</span>
+        <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700"><Icon name="done" />ร้านนี้ใช้ได้แล้ว{v.descriptionType === "extended" ? "" : " (ใส่รูปแล้วรายละเอียดจะเปลี่ยนเป็นแบบมีรูป)"}</span>
+        {edit.descImagesDirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">แก้แล้ว ยังไม่ส่ง</span>}
+      </div>
+      {imgs.length === 0 && !canEdit ? <p className="text-xs text-slate-500">ยังไม่มีรูปในรายละเอียด</p> : (
+        <ListingImageGrid images={imgs} onChange={edit.setDescImages} canEdit={canEdit} max={max} platformName="Shopee (รูปในรายละเอียด)" dragGroup="shopee-desc-images"
+          onOpen={setZoom}
+          onAdd={() => { sys.load(); setPicker(true); }} canAdd={canEdit && imgs.length < max} />
+      )}
+      {canEdit && <p className="mt-1 text-[11px] text-slate-400">เพิ่มได้จากรูปในระบบ หรืออัปโหลดจากเครื่อง (ในป๊อปเลือกรูป) · ลากเรียง / ลบได้ · กด “บันทึกขึ้น Shopee” ถึงจะส่ง</p>}
+      <ListingImagePicker open={picker} onClose={() => setPicker(false)} mode="product" title="เลือกรูปใส่รายละเอียด Shopee"
+        description={`เลือกได้อีก ${Math.max(0, max - imgs.length)} รูป · รูปยาวได้ (ไม่ตัดเป็นสี่เหลี่ยม)`} matchedParent={matchedParent} matchedCode={matchedCode}
+        sysImages={sys.images} isUsed={(ref) => imgs.includes(ref)} full={imgs.length >= max}
+        onPick={(ref) => edit.setDescImages([...(edit.descImages ?? []), ref].slice(0, max))} storageKey="shopee-desc-image-picker" />
+      <ImageLightbox images={imgs.map((u) => ({ url: listingImgSrc(u, 1600) }))} index={zoom} onClose={() => setZoom(-1)} onIndex={setZoom} />
+    </div>
+  );
+}
+
+/**
+ * แท็บข้อมูลจำเพาะ (attribute_list) — ช่องกรอกกลาง LazadaAttrField (ตัวเดียวกับหน้าลงสินค้า/TikTok/Lazada) + แนะนำจากชื่อ/รายละเอียด (ฟรี) / AI ช่วยเติม
+ * ส่งพร้อมปุ่ม "บันทึกขึ้น Shopee" — ส่งทั้งชุด (ของเดิม + ที่แก้) · ช่องบังคับว่าง = ส่งไม่ได้ (บอกชื่อช่อง)
+ */
+export function ShopeeSpecsPanel({ state, edit }: { state: ShopeeListingState; edit: ShopeeEditApi }) {
+  const { loadAttrFields } = edit;
+  useEffect(() => { if (state.view?.categoryId) loadAttrFields(); }, [state.view?.categoryId, loadAttrFields]);
+  const [more, setMore] = useState(false);
+  const [src, setSrc] = useState<Record<string, "text" | "ai">>({});
+  const v = state.view;
+  const fields = edit.attrFields ?? [];
+  const vals = edit.attrs ?? v?.attrs ?? {};
+  const sug = useAttrSuggest({
+    fields, values: vals,
+    text: () => `${edit.name ?? v?.name ?? ""}\n${edit.description ?? v?.description ?? ""}`,
+    ai: v && edit.canEdit ? { platform: "Shopee", name: edit.name ?? v.name, description: edit.description ?? v.description, category: edit.attrMeta.categoryName, imageKeys: [] } : null,
+  });
+  const g = gate(state); if (g) return g;
+  const view = state.view!;
+  const can = edit.canEdit && view.status !== "SELLER_DELETE" && view.status !== "SHOPEE_DELETE";
+  const main = fields.filter((f) => f.required || (view.attrs[f.id]?.length ?? 0) > 0);
+  const rest = fields.filter((f) => !main.includes(f));
+  const missing = fields.filter((f) => f.required && !(vals[f.id]?.length));
+  // ค่าบนร้านที่ไม่อยู่ในช่องของหมวด (หมวดเปลี่ยน / ช่องเก่า) — โชว์ไว้ให้รู้ ไม่แก้
+  const orphan = Object.keys(view.attrs).filter((id) => !fields.some((f) => f.id === id));
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-600">ข้อมูลจำเพาะของหมวด{edit.attrMeta.categoryName ? ` · ${edit.attrMeta.categoryName}` : ""}</span>
+        {missing.length > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">ช่องบังคับยังว่าง {missing.length}</span>}
+        {(edit.attrPlan?.changes.length ?? 0) > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">แก้แล้ว {edit.attrPlan!.changes.length} ช่อง ยังไม่ส่ง</span>}
+        {can && fields.length > 0 && <span className="ml-auto"><AttrSuggestButtons s={sug} /></span>}
+      </div>
+      <AttrSuggestPanel s={sug} onApply={(hits, source) => {
+        const { next, filledIds } = applyAttrHits(vals, hits);
+        edit.setAttrs(next); setSrc((m) => ({ ...m, ...Object.fromEntries(filledIds.map((id) => [id, source])) }));
+        if (filledIds.some((id) => rest.some((f) => f.id === id))) setMore(true);
+      }} />
+      {!view.categoryId ? <p className="text-xs text-slate-500">ไม่รู้หมวดของสินค้านี้ — กดดึงตัวนี้จาก Shopee</p>
+        : edit.attrMeta.loading && !edit.attrFields ? <LoadingState label="กำลังโหลดช่องของหมวดจาก Shopee…" />
+        : !edit.attrFields ? <ErrorState title={edit.attrMeta.error ?? "โหลดช่องของหมวดไม่สำเร็จ"} />
+        : fields.length === 0 ? <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องข้อมูลจำเพาะ</p>
+        : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(more ? [...main, ...rest] : main).map((f) => (
+                <div key={f.id}>
+                  <LazadaAttrField def={ttsAttrDef(f)} value={ttsAttrToText(vals[f.id])} base={ttsAttrToText(view.attrs[f.id])} can={can}
+                    suggested={src[f.id] ? (vals[f.id] ?? []).map((x) => x.id).filter((x): x is string => !!x) : undefined}
+                    onChange={(text) => {
+                      setSrc((m) => { const n = { ...m }; delete n[f.id]; return n; });
+                      const next = { ...vals }; const nv = ttsAttrFromText(f, text); if (nv.length) next[f.id] = nv; else delete next[f.id];
+                      edit.setAttrs(next);
+                    }} />
+                  {src[f.id] && <div className={`mt-0.5 text-[10px] ${src[f.id] === "ai" ? "text-violet-700" : "text-amber-700"}`}>มาจาก: {src[f.id] === "ai" ? "AI เดา · ตรวจก่อน (ยังไม่ส่ง)" : "แนะนำจากชื่อ/รายละเอียด (ยังไม่ส่ง)"}</div>}
+                </div>
+              ))}
+            </div>
+            {main.length === 0 && !more && <p className="text-xs text-slate-500">หมวดนี้ไม่มีช่องบังคับ และบนร้านยังไม่ได้กรอกช่องไหน</p>}
+            {rest.length > 0 && <button type="button" onClick={() => setMore((x) => !x)} className="text-xs text-violet-700 hover:underline">{more ? "ซ่อนช่องไม่บังคับ" : `แสดงช่องไม่บังคับ (${rest.length} ช่อง)`}</button>}
+            {orphan.length > 0 && <p className="text-[11px] text-slate-400">บนร้านมีค่าของช่องที่ไม่อยู่ในหมวดนี้แล้ว {orphan.length} ช่อง (ไม่แตะ)</p>}
+          </>
+        )}
+      {(edit.attrPlan?.warnings.length ?? 0) > 0 && edit.attrPlan!.warnings.map((w, i) => <p key={i} className="flex items-start gap-1 text-xs text-amber-700"><Icon name="warning" className="mt-0.5 shrink-0" />{w}</p>)}
+      <p className="text-[11px] text-slate-400">แก้แล้วกด “บันทึกขึ้น Shopee” ด้านล่าง (ถามก่อนส่ง · มีประวัติ) · ส่งทั้งชุด ช่องที่ไม่ได้แตะคงเดิม</p>
     </div>
   );
 }

@@ -44,7 +44,7 @@ import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
-import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPanel, ShopeeOptionsPanel, useShopeeDisplay, useShopeeEdit, useShopeeListing } from "./shopee-listing-panels";
+import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPanel, ShopeeOptionsPanel, ShopeeSpecsPanel, useShopeeDisplay, useShopeeEdit, useShopeeListing } from "./shopee-listing-panels";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -219,7 +219,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : spView ? (spView.hasModel ? spView.models.length : 1) : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
-    ...(isLazada ? [{ key: "attrs" as Tab, label: "ข้อมูลเฉพาะ" }] : []),
+    // ข้อมูลจำเพาะ (เจ้าของ 2026-11-23 "มีข้อมูลจำเพาะด้วยสิ Shopee, Tiktok") — Lazada · Shopee
+    ...(isLazada || isShopee ? [{ key: "attrs" as Tab, label: "ข้อมูลจำเพาะ" }] : []),
     { key: "images", label: `รูป${imgCount != null ? ` (${imgCount})` : ""}` },
     { key: "options", label: `ตัวเลือก & ราคา${optCount != null ? ` (${optCount})` : ""}` },
     { key: "match", label: "จับคู่" },
@@ -273,11 +274,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const priceDiffN = form ? form.variants.filter((v) => { const r = rowByKey.get(v.id); return r?.erp_pay != null && v.pay != null && Math.abs(v.pay - r.erp_pay) >= 1; }).length : 0;
 
   // ---------- หัวลิ้นชัก ----------
-  const cover = line?.images[0] ?? lazView?.images[0] ?? ttView?.images[0] ?? null;
+  // 🐛 2026-11-23 เจ้าของ "โชว์รูปด้วยสิ (รูปหาย)" — เดิมลืมรูปของ Shopee
+  const cover = line?.images[0] ?? lazView?.images[0] ?? ttView?.images[0] ?? (spView ? (spEdit.images ?? spView.images)[0] : null) ?? null;
   const header = detail && (
     <div className="flex items-start gap-3 border-b border-slate-100 pb-3">
       {cover
-        ? <button type="button" onClick={() => setLightbox(0)} className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-50"><img src={cover} alt="" className="h-full w-full object-cover" /></button>
+        ? <button type="button" onClick={() => setLightbox(0)} className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-50"><img src={imgSrc(cover, 200)} alt="" className="h-full w-full object-cover" /></button>
         : <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-300"><Icon name="image" /></div>}
       <div className="min-w-0 flex-1">
         <div className="line-clamp-2 text-sm font-medium text-slate-800" title={detail.title ?? ""}>{form?.name || lazView?.name || ttView?.title || detail.title || "—"}</div>
@@ -485,11 +487,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : null)
+                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : isShopee ? <ShopeeSpecsPanel state={sp} edit={spEdit} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} />)
+                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}

@@ -2,6 +2,8 @@
  * แก้ชื่อ / รายละเอียด / รูปสินค้า บน Shopee — ลิ้นชักสินค้าบนร้าน · เฟส 4A (ชื่อ/รายละเอียด) + 4C (รูป) · แก้ร้านจริง · หน้าเว็บถามก่อนเสมอ
  *  POST { listing_id, before?: { name, description }, edit?: { name?, description? }, images?: { before_ids, refs } }   (products.platforms.publish)
  *   images.refs = ชุดรูปใหม่ทั้งชุด เรียงตามลำดับ ("spi:<image_id>" = รูปเดิมบนร้าน · "r2:<key>" = รูปใหม่จากคลังรูปในระบบ)
+ *   attributes = ข้อมูลจำเพาะ (2026-11-23): { before: ค่าบนร้านตอนเปิด (กันทับ), values: ช่องที่แก้ (state ช่องกรอกกลาง), fields?: [{id,name,required}] }
+ *     → ส่ง attribute_list ทั้งชุด (ของเดิม + ที่แก้) ไปพร้อม update_item ครั้งเดียวกัน
  *
  *   ก่อนส่ง: ดึงสดจาก Shopee → ถ้าชื่อ/รายละเอียด/รูปบนร้านไม่ตรงกับตอนเปิดลิ้นชัก (before / before_ids) = 409 (มีคนแก้ในร้านระหว่างนั้น → ไม่ทับ)
  *   → planShopeeEdit + planShopeeImages (ส่งเฉพาะที่เปลี่ยน · ช่วงความยาว/จำนวนรูปตามร้าน)
@@ -17,7 +19,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { shopeeErrorText, shopeeUpdateItem, shopeeUpdateTierVariation } from "@/lib/shopee";
-import { planShopeeOptionImages, shopeeOptionResolve, shopeeOptionUploadRefs, shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
+import { planShopeeOptionImages, shopeeOptionResolve, shopeeOptionUploadRefs, shopeeEditDescUploadRefs, shopeeEditResolveDesc, planShopeeEdit, planShopeeImages, shopeeImageIdOfRef, shopeeListingView, shopeeR2KeyOfRef, planShopeeAttrs, shopeeAttrStateOf, shopeeAttrValSig, type ShopeeWriteResponse } from "@/lib/shopee-listing-edit";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import { publicImageUrl } from "@/lib/line-shopping-server";
 import { loadShopeeListingLive, refetchShopeeLive, saveShopeeSlimCopy, shopeeUploadRef, shopeeWriteEcho } from "../shared";
@@ -39,7 +41,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     /** รูปในรายละเอียด (extended · 2026-11-21): before_ids = รหัสรูปเดิมตอนเปิด (กันทับ) · refs = ชุดใหม่ "spi:<id>" / "r2:<key>" */
     desc_images?: { before_ids?: unknown; refs?: unknown };
     /** รูปของแต่ละตัวเลือก (2026-11-22): before = { ชื่อตัวเลือก: image_id เดิม } (กันทับ) · refs = { ชื่อตัวเลือก: "spi:<id>" | "r2:<key>" } · ส่งแยกจากอย่างอื่น */
-    option_images?: { before?: unknown; refs?: unknown } };
+    option_images?: { before?: unknown; refs?: unknown };
+    /** ข้อมูลจำเพาะ (2026-11-23) */
+    attributes?: { before?: unknown; values?: unknown; fields?: unknown } };
   try { body = await request.json(); } catch { return reply({ ok: false, view: null, error: "invalid JSON" }, 400); }
   const listingId = String(body.listing_id ?? "").trim();
   const wantText = !!body.edit && !!body.before;
@@ -50,8 +54,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const strMap = (v: unknown): Record<string, string> | null => (v && typeof v === "object" && !Array.isArray(v) && Object.values(v as object).every((x) => typeof x === "string") ? v as Record<string, string> : null);
   const optImgs = body.option_images ? { before: strMap(body.option_images.before), refs: strMap(body.option_images.refs) } : null;
   if (optImgs && (!optImgs.before || !optImgs.refs)) return reply({ ok: false, view: null, error: "ข้อมูลรูปตัวเลือกไม่ครบ (before + refs)" }, 400);
-  if (optImgs && (wantText || images || descImgs)) return reply({ ok: false, view: null, error: "รูปตัวเลือกต้องส่งแยกจากชื่อ/รายละเอียด/รูปสินค้า (กดทีละอย่าง)" }, 400);
-  if (!listingId || (!wantText && !images && !descImgs && !optImgs)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
+  const attrsIn = body.attributes ? { before: shopeeAttrStateOf(body.attributes.before), values: shopeeAttrStateOf(body.attributes.values),
+    fields: Array.isArray(body.attributes.fields) ? (body.attributes.fields as unknown[]).map((x) => { const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>; return { id: String(o.id ?? ""), name: String(o.name ?? o.id ?? ""), required: o.required === true }; }).filter((x) => x.id) : null } : null;
+  if (optImgs && (wantText || images || descImgs || attrsIn)) return reply({ ok: false, view: null, error: "รูปตัวเลือกต้องส่งแยกจากชื่อ/รายละเอียด/รูปสินค้า (กดทีละอย่าง)" }, 400);
+  if (!listingId || (!wantText && !images && !descImgs && !optImgs && !attrsIn)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ/รายละเอียด หรือ รูป)" }, 400);
 
   const admin = supabaseAdmin();
   const r = await loadShopeeListingLive(admin, listingId, user?.id ?? null);
@@ -130,9 +136,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const plan = planShopeeEdit(view, { ...(wantText ? { name: body.edit!.name ?? null, description: body.edit!.description ?? null } : {}), ...(descImgs ? { descImages: descImgs.refs! } : {}) });
   const imgPlan = images ? planShopeeImages(view, images.refs!) : null;
   const imgChanged = !!imgPlan?.changed;
-  const errors = [...plan.errors, ...(imgChanged ? imgPlan!.errors : [])];
+  // ข้อมูลจำเพาะ (2026-11-23): ช่องที่จะแก้ ต้องยังเป็นค่าเดิมตอนเปิดลิ้นชัก · ส่งทั้งชุด (ของเดิม + ที่แก้) ไม่ให้ช่องที่ไม่ได้แตะหาย
+  if (attrsIn && Object.keys(attrsIn.values).some((id) => shopeeAttrValSig(attrsIn.before[id]) !== shopeeAttrValSig(view.attrs[id]))) return reply({ ok: false, view, error: `ข้อมูลจำเพาะ${CONFLICT}` }, 409);
+  const attrPlan = attrsIn ? planShopeeAttrs(view, attrsIn.values, attrsIn.fields) : null;
+  const attrChanged = !!attrPlan?.changed;
+  const errors = [...plan.errors, ...(imgChanged ? imgPlan!.errors : []), ...(attrChanged ? attrPlan!.errors : [])];
   if (errors.length) return reply({ ok: false, view, error: errors.join(" · ") }, 400);
-  if (!plan.changes.length && !imgChanged) return reply({ ok: true, view, summary: "ไม่มีอะไรเปลี่ยน", error: null });
+  if (!plan.changes.length && !imgChanged && !attrChanged) return reply({ ok: true, view, summary: "ไม่มีอะไรเปลี่ยน", error: null });
 
   // ประวัติแบบกลาง "จากอะไรเป็นอะไร" (auditDiff) + ป้ายภาษาไทย (ลิ้นชักอ่าน label)
   const before: Record<string, unknown> = { ...(plan.body.item_name != null ? { item_name: view.name } : {}), ...(plan.body.description != null ? { description: view.description } : {}) };
@@ -142,6 +152,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     changes.push({ field: c.label === "รายละเอียด" ? "description_info.text" : "description_info.images", label: c.label, old: c.label === "รายละเอียด" ? view.description : view.descriptionImages.map((x) => x.id), new: c.label === "รายละเอียด" ? (plan.body.description_info?.extended_description.field_list.find((f) => f.field_type === "text")?.text ?? null) : descImgs?.refs ?? null, text: `${c.before} → ${c.after}` });
   }
   if (imgChanged) changes.push({ field: "image_id_list", label: "รูปสินค้า", old: view.imageIds, new: imgPlan!.refs, text: `${imgPlan!.changes[0]?.before ?? ""} → ${imgPlan!.changes[0]?.after ?? ""}` });
+  if (attrChanged) for (const c of attrPlan!.changes) changes.push({ field: "attribute_list", label: c.label, old: c.before, new: c.after, text: `${c.before} → ${c.after}` });
   const audit = (meta: Record<string, unknown>) => writeAudit(admin, {
     action: "update", entityType: "platform_catalog", entityId: r.row.id, actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { source: "shopee_listing_edit", item_id: r.itemId, shop_id: r.shopId, changes, ...meta },
@@ -173,7 +184,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const descResolved = shopeeEditResolveDesc(plan.body, descUp);
   const sentIds = imgChanged ? imgPlan!.refs.map((ref) => shopeeImageIdOfRef(ref) ?? uploaded.get(ref)!.imageId) : null;
-  const patch = { ...descResolved.body, ...(sentIds ? { image: { image_id_list: sentIds, ...(ratio === "3:4" ? { image_ratio: "3:4" } : {}) } } : {}) };
+  const patch = { ...descResolved.body, ...(sentIds ? { image: { image_id_list: sentIds, ...(ratio === "3:4" ? { image_ratio: "3:4" } : {}) } } : {}), ...(attrChanged ? { attribute_list: attrPlan!.payload } : {}) };
   const wantDescText = plan.body.description_info ? descResolved.text : plan.body.description ?? null;
 
   let echo: ReturnType<typeof shopeeWriteEcho>;
@@ -196,7 +207,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const v2 = shopeeListingView(l.base, null);
     return !!v2 && (plan.body.item_name == null || norm(v2.name) === norm(plan.body.item_name)) && (wantDescText == null || norm(v2.description) === norm(wantDescText))
       && (!plan.body.description_info || v2.descriptionImages.length === descResolved.imageIds.length)
-      && imagesLanded(v2.imageIds);
+      && imagesLanded(v2.imageIds)
+      && (!attrChanged || Object.entries(attrsIn!.values).every(([id, vals]) => !vals.length || shopeeAttrValSig(v2.attrs[id]) === shopeeAttrValSig(vals)));
   };
   const fresh = await refetchShopeeLive(r.accessToken, r.shopId, r.itemId, landed);
   // ✅ ลองจริง 2026-11-14 (BCG01-03): แก้ชื่อผ่าน แต่ข้อมูลที่ดึงกลับของ Shopee ช้ากว่าคำตอบ (ชื่อใหม่ขึ้นภายในไม่กี่นาที)
@@ -225,7 +237,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (st && st !== view.status) warnings.push(`สถานะบนร้านเปลี่ยนเป็น “${st}” หลังแก้`);
   }
   if (shown) { const err = await saveShopeeSlimCopy(admin, r.row, shown); if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`); }
-  const labels = [...plan.changes.map((c) => c.label), ...(imgChanged ? ["รูปสินค้า"] : [])];
+  const labels = [...plan.changes.map((c) => c.label), ...(imgChanged ? ["รูปสินค้า"] : []), ...(attrChanged ? [`ข้อมูลจำเพาะ ${attrPlan!.changes.length} ช่อง`] : [])];
+  if (attrChanged) warnings.push(...attrPlan!.warnings);
   const summary = `แก้${labels.join(" + ")}บน Shopee แล้ว`;
   await audit({
     ok: true, summary, warnings, refreshed: !!fresh, optimistic: !!fresh && !isLanded, status_after: freshView?.status ?? null,
