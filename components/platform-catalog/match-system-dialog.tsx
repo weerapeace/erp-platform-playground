@@ -70,7 +70,8 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
     setCheck(c);
     // ราคาไม่ติ๊กไว้ให้ก่อน — ร้านมักตั้งราคาเต็มสูงไว้ทำโปร ต้องให้คนดูแล้วติ๊กเอง
     // เรื่องที่มีคำเตือน "ตรวจก่อนส่ง" (เช่น รายละเอียดมาจากร่างที่แก้ไว้) ก็ไม่ติ๊กไว้ให้
-    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price" && !i.note?.startsWith("ตรวจก่อนส่ง")).map((i) => i.key)));
+    // ข้อมูลจำเพาะ (2026-11-23) ไม่ติ๊กไว้ให้ — ค่าระบบส่วนใหญ่มาจากค่าเริ่มต้นของร้าน อาจทับค่าที่ตั้งบนร้านไว้แล้วโดยตั้งใจ
+    setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price" && i.key !== "attrs" && !i.note?.startsWith("ตรวจก่อนส่ง")).map((i) => i.key)));
     onChangedRef.current?.(c);
   }, []);
 
