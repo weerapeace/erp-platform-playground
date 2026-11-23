@@ -584,7 +584,7 @@ export function useCardKit({ sketchRef, campaign = null, sectionPresets: presets
       const sig = JSON.stringify([style, v]);
       if (data.styled && data.styleSig === sig) return null;
       const texts = styledTexts(style, v).map((x) => ({ ...x, role: x.key }));
-      return { texts, align: style.align, gap: style.gap, width: style.width, ...(style.bg === "plain" ? { bg: "#ffffff", stroke: "#94a3b8" } : {}), flag: { styled: true, styleSig: sig } };
+      return { texts, gap: style.gap, width: style.width, ...(style.bg === "plain" ? { bg: "#ffffff", stroke: "#94a3b8" } : {}), flag: { styled: true, styleSig: sig } };
     });
   }, [sketchRef]);
   // การ์ดที่เพิ่งวาง/เปลี่ยน → ทำหน้าตาตามตั้งค่า (รอนิ่ง 0.8 วิ · เฉพาะเมื่อมีตั้งค่า · ใบที่เหมือนเดิมข้าม)

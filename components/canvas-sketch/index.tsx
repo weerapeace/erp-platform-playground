@@ -82,7 +82,10 @@ export type CanvasSketchControls = {
    *  build คืน null = ไม่แตะการ์ดใบนั้น · คืนจำนวนการ์ดที่เปลี่ยน */
   setCardTexts: (build: (card: { kind: string; id: string; data: Record<string, unknown> }) => CardTextsSpec | null) => Promise<number>;
 };
-export type CardTextsSpec = { texts: { text: string; fontSize: number; fontFamily: number; strokeColor: string; role: string }[]; align?: "left" | "center" | "right"; gap?: number; width?: number; bg?: string | null; stroke?: string | null; flag?: Record<string, unknown> };
+/** ข้อความในการ์ด 1 บรรทัด (ตัวตั้งค่าตัวอักษรกลาง lib/text-style) — align ต่อบรรทัด · bold = ซ้อนตัวอักษร · underline/strike = วาดเส้น · highlight = แถบสีหลังตัวอักษร
+ *  cont = บรรทัดต่อของช่องเดิม (ไม่เว้น gap) · ตัวเอียง: กระดานวาดทำไม่ได้ (ไม่มีช่องนี้) */
+export type CardTextLine = { text: string; fontSize: number; fontFamily: number; strokeColor: string; role: string; align?: "left" | "center" | "right"; bold?: boolean; underline?: boolean; strike?: boolean; highlight?: string; cont?: boolean };
+export type CardTextsSpec = { texts: CardTextLine[]; align?: "left" | "center" | "right"; gap?: number; width?: number; bg?: string | null; stroke?: string | null; flag?: Record<string, unknown> };
 
 export function CanvasSketch({
   entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, onSaved, onSelectionChange, onContentChange, collab = false, stickyTop, fill = false, imageMaxPx, compactHelp = false,
@@ -556,18 +559,29 @@ export function CanvasSketch({
           n++;
           const PAD = 12, W = spec.width ?? rect.width ?? 260, gap = spec.gap ?? 4;
           const imgs = els.filter((e) => e.type === "image");
-          for (const e of els) if (e.type === "text") kill.add(e.id);
+          for (const e of els) if (e.type === "text" || (e.customData as Record<string, unknown> | undefined)?.deco) kill.add(e.id);   // ข้อความเดิม + เส้น/ไฮไลต์/ตัวหนาซ้อนเดิม
           let y = imgs.length ? Math.max(...imgs.map((e) => (e.y ?? 0) + (e.height ?? 0))) + 8 : (rect.y ?? 0) + PAD;
-          for (const tx of spec.texts) {
+          spec.texts.forEach((tx, i) => {
+            if (i > 0 && !tx.cont) y += gap;
+            const align = tx.align ?? spec.align ?? "left";
+            const deco = { ...d, role: `deco:${tx.role}`, deco: true };
             const [el] = lib.convertToExcalidrawElements([{ type: "text", x: (rect.x ?? 0) + PAD, y, text: tx.text, fontSize: tx.fontSize, fontFamily: tx.fontFamily, strokeColor: tx.strokeColor,
-              textAlign: spec.align ?? "left", groupIds: rect.groupIds, customData: { ...d, role: tx.role } }]);
+              textAlign: align, groupIds: rect.groupIds, customData: { ...d, role: tx.role } }]);
             // จัดชิดกลาง/ขวาภายในกรอบ (กล่องข้อความกว้างตามตัวอักษร)
-            const w = el.width ?? 0, inner = W - PAD * 2;
-            const x = spec.align === "center" ? (rect.x ?? 0) + PAD + Math.max(0, (inner - w) / 2) : spec.align === "right" ? (rect.x ?? 0) + PAD + Math.max(0, inner - w) : (rect.x ?? 0) + PAD;
+            const w = el.width ?? 0, h = el.height ?? tx.fontSize * 1.25, inner = W - PAD * 2;
+            const x = align === "center" ? (rect.x ?? 0) + PAD + Math.max(0, (inner - w) / 2) : align === "right" ? (rect.x ?? 0) + PAD + Math.max(0, inner - w) : (rect.x ?? 0) + PAD;
+            const line = (lx: number, ly: number, len: number, color: string, sw: number) => lib.convertToExcalidrawElements([{ type: "line", x: lx, y: ly, points: [[0, 0], [Math.max(1, len), 0]], strokeColor: color, strokeWidth: sw, roughness: 0, groupIds: rect.groupIds, customData: deco }])[0];
+            // ไฮไลต์ = เส้นหนาเท่าความสูงบรรทัด (ปลายมน) วางหลังตัวอักษร
+            if (tx.highlight) { const sw = Math.max(4, h * 0.9), cap = sw / 2; added.push(line(x + cap - 2, y + h / 2, w - sw + 4, tx.highlight, sw)); }
             added.push({ ...el, x });
-            y += (el.height ?? tx.fontSize * 1.25) + gap;
-          }
-          const h = Math.max(60, y - (rect.y ?? 0) + PAD - gap);
+            // ตัวหนา = ซ้อนตัวอักษรเลื่อนขวานิดเดียว (ข้อความกระดานไม่มีน้ำหนักฟอนต์)
+            if (tx.bold) { const [b] = lib.convertToExcalidrawElements([{ type: "text", x: x + Math.max(0.5, tx.fontSize * 0.045), y, text: tx.text, fontSize: tx.fontSize, fontFamily: tx.fontFamily, strokeColor: tx.strokeColor, textAlign: align, groupIds: rect.groupIds, customData: deco }]); added.push(b); }
+            const sw = Math.max(1, Math.round(tx.fontSize / 12));
+            if (tx.underline) added.push(line(x, y + tx.fontSize * 1.1, w, tx.strokeColor, sw));
+            if (tx.strike) added.push(line(x, y + h * 0.52, w, tx.strokeColor, sw));
+            y += h;
+          });
+          const h = Math.max(60, y - (rect.y ?? 0) + PAD);
           patched.set(rect.id, { ...rect, width: W, height: h, ...(spec.bg ? { backgroundColor: spec.bg } : {}), ...(spec.stroke ? { strokeColor: spec.stroke } : {}),
             customData: { ...d, ...(spec.flag ?? {}) }, version: (rect.version ?? 0) + 1 });
         }
@@ -649,7 +663,7 @@ export function CanvasSketch({
         // เทียบ _imagesSig บน rect: เปลี่ยนชุดรูป → rebuild image (reuse fileId ตาม url กันไฟล์บวม) · เท่าเดิม → คงรูป จัดแค่ข้อความ/กรอบ
         let lib: any = null;
         const rebuilt = new Map<string, any[]>();      // gid → image element ใหม่ (หลัง rebuild)
-        const finalLay = new Map<string, { textY: number; rectH: number; sig?: string }>();
+        const finalLay = new Map<string, { textY: number; rectH: number; sig?: string; restyle?: boolean }>();
         for (const [gid, u] of updates) {
           const gEls = groups.get(gid) ?? [];
           const rect = gEls.find((e) => e.type === "rectangle"); if (!rect) continue;   // ไม่มีกรอบ = ไม่ใช่การ์ดแบบมีกล่อง
@@ -663,6 +677,8 @@ export function CanvasSketch({
           const textH = Math.round(Math.max(1, txt.split("\n").length) * fs * 1.25);
           const curSig = (rect.customData?._imagesSig as string | undefined) ?? "__none__";
           const newSig = (urls ?? []).join("|");
+          const styledCard = !!rect.customData?.styled;   // ตั้งค่าการ์ดแล้ว (หลายบรรทัด + เส้น) — ข้อความ/กรอบให้ setCardTexts จัด
+          if (styledCard && (urls === undefined || newSig === curSig)) continue;
           let imgBlock = 0; let sig: string | undefined;
 
           if (urls !== undefined && newSig !== curSig) {
@@ -693,7 +709,7 @@ export function CanvasSketch({
             const hasThumb = existingImgs.some((e) => e.customData?._imgRole === "thumb") || existingImgs.length > 1;
             imgBlock = (main?.height ?? 0) + PAD + (hasThumb ? THUMB + PAD : 0);
           }
-          finalLay.set(gid, { textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD, sig });
+          finalLay.set(gid, { textY: ry + PAD + imgBlock, rectH: PAD + imgBlock + textH + PAD, sig, restyle: styledCard });
         }
 
         // เขียนลง "กระดานตอนนี้" (ไม่ใช่ภาพตอนเริ่ม) — ระหว่างรอโหลดข้อมูล การ์ดอื่นอาจถูกซิงค์/ลาก/เพิ่มไปแล้ว ถ้าใช้ภาพเก่าจะทับของพวกนั้นกลับ
@@ -720,7 +736,7 @@ export function CanvasSketch({
           }
           if (el.type === "rectangle") {
             const sp = u.stroke ? { strokeColor: u.stroke } : {};   // เปลี่ยนสีขอบการ์ดตามสถานะ (เช่น โพสต์แล้ว=เขียว)
-            if (lay) return { ...el, ...sp, height: lay.rectH, customData: { ...merged, _imagesSig: lay.sig !== undefined ? lay.sig : (el.customData?._imagesSig ?? undefined) } };
+            if (lay) return { ...el, ...sp, height: lay.rectH, customData: { ...merged, _imagesSig: lay.sig !== undefined ? lay.sig : (el.customData?._imagesSig ?? undefined), ...(lay.restyle ? { styleSig: null } : {}) } };
             if (u.text != null) { const lines = u.text.split("\n").length; return { ...el, ...sp, height: 40 + lines * 18, customData: merged }; }
             return { ...el, ...sp, customData: merged };
           }

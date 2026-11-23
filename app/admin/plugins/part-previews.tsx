@@ -6,6 +6,8 @@ import { useState, type ComponentType } from "react";
 import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL } from "@/components/gallery-columns";
 import { EmptyState } from "@/components/state-views";
 import type { MiniLayout } from "@/components/mini-table/layout-switch";
+import { TextStyleControl } from "@/components/text-style-control";
+import { applyListPrefix, textStyleCss, type TextStyle } from "@/lib/text-style";
 
 const DEMO_ITEMS = [
   { code: "PIN6-S#G", name: "หมุด 6x6 หัวเรียบ สีทอง", price: 8 },
@@ -59,8 +61,21 @@ function GalleryColumnsPreview() {
   );
 }
 
+/** ตัวตั้งค่าตัวอักษรกลาง — กดไอคอนแล้วเลือก ข้อความตัวอย่างเปลี่ยนทันที */
+const DEMO_FONTS = [{ value: "Sarabun", label: "Sarabun", css: "Sarabun, sans-serif" }, { value: "Kanit", label: "Kanit", css: "Kanit, sans-serif" }, { value: "Prompt", label: "Prompt", css: "Prompt, sans-serif" }];
+function TextStylePreview() {
+  const [v, setV] = useState<TextStyle>({ size: 16, color: "#1e293b", list: "bullet" });
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+      <TextStyleControl value={v} onChange={setV} fonts={DEMO_FONTS} onReset={() => setV({ size: 16, color: "#1e293b" })} />
+      <div className="rounded-lg border border-slate-200 bg-white p-3 whitespace-pre-line" style={textStyleCss(v)}>{applyListPrefix("ถ่ายนางแบบถือ ฉากขาว\nโชว์ซิปด้านใน", v.list)}</div>
+    </div>
+  );
+}
+
 export const PART_PREVIEWS: Record<string, ComponentType> = {
   "gallery-columns": GalleryColumnsPreview,
+  "text-style-control": TextStylePreview,
 };
 
 /** ส่วน "ลองเล่น" ใน drawer — ของกลางที่ยังไม่มีตัวอย่าง = ไม่แสดงอะไร */

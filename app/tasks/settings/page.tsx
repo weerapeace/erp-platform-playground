@@ -37,7 +37,9 @@ import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-
 import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { IconField } from "@/components/icon/icon-field";
-import { cleanLabelStyle, labelTextStyle, LABEL_WEIGHT_OPTIONS, LABEL_SIZE_OPTIONS, type LabelWeight, type LabelSize } from "@/lib/task-type-label-style";
+import { cleanLabelStyle, labelTextStyle, labelToTextStyle, textStyleToLabel, LABEL_DEFAULT_PX } from "@/lib/task-type-label-style";
+import { TextStyleControl } from "@/components/text-style-control";
+import { Popover } from "@/components/popover";
 
 // ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
 // เทมเพลต + Prompt ต่อแบรนด์ ย้ายจาก /tasks/templates (เจ้าของขอ 2026-11-22) · คลังความรู้เข้าจากที่นี่ (ปุ่มลัดซ่อนไว้)
@@ -318,17 +320,22 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                     <div title={t("สีประเภท", "Color")}><ColorInput value={color || "#64748b"} onChange={(v) => setField(o, { color: v })} allowText={false} /></div>
                     {/* ไอคอน (ไอคอนเส้นกลาง) — ค่าเข้าร่างของแถว กดบันทึกค่อยเซฟ */}
                     <IconField size="sm" value={icon || ""} onChange={(v) => setField(o, { icon: v })} suggestFrom={label} placeholderIcon="i:category" title={t("ไอคอน", "Icon")} />
-                    {/* ตัวหนา + ขนาดป้าย — เฉพาะประเภทงาน (ใช้บนการ์ด/รายการทุกที่) */}
-                    {kind === "task_type" && (<>
-                      <select value={lStyle?.weight ?? ""} onChange={(e) => setField(o, { label_style: { ...(lStyle ?? {}), weight: e.target.value ? (Number(e.target.value) as LabelWeight) : undefined } })} title={t("น้ำหนักตัวอักษร", "Font weight")} className="h-7 rounded border border-slate-200 text-[11px] px-1 bg-white">
-                        <option value="">{t("ตัวอักษร: เดิม", "Weight: default")}</option>
-                        {LABEL_WEIGHT_OPTIONS.map((w) => <option key={w.value} value={w.value}>{t(w.th, w.en)}</option>)}
-                      </select>
-                      <select value={lStyle?.size ?? ""} onChange={(e) => setField(o, { label_style: { ...(lStyle ?? {}), size: (e.target.value || undefined) as LabelSize | undefined } })} title={t("ขนาดตัวอักษร", "Font size")} className="h-7 rounded border border-slate-200 text-[11px] px-1 bg-white">
-                        <option value="">{t("ขนาด: เดิม", "Size: default")}</option>
-                        {LABEL_SIZE_OPTIONS.map((z) => <option key={z.value} value={z.value}>{t(z.th, z.en)}</option>)}
-                      </select>
-                    </>)}
+                    {/* หน้าตาตัวอักษรป้าย — เฉพาะประเภทงาน (ใช้บนการ์ด/รายการทุกที่) · ตัวตั้งค่าตัวอักษรกลาง (กดไอคอน → แถบตั้งค่า) */}
+                    {kind === "task_type" && (
+                      <Popover align="right" panelClassName="p-2" trigger={(toggle, open) => (
+                        <button type="button" onClick={toggle} title={t("ตัวอักษรของป้าย (ขนาด หนา สี ไฮไลต์ ขีดเส้น)", "Label text style")}
+                          className={`h-7 w-8 inline-flex items-center justify-center rounded border ${open || lStyle ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}><Icon value="i:typography" size={15} /></button>
+                      )}>
+                        {() => (
+                          <div className="space-y-2">
+                            <div className="text-[11px] text-slate-500">{t("ตัวอักษรของป้าย — ใช้บนการ์ดและรายการงานทุกที่", "Label text — used on every card and list")}</div>
+                            <TextStyleControl value={labelToTextStyle(lStyle)} defaults={{ size: LABEL_DEFAULT_PX }} hide={{ font: true, align: true, list: true }}
+                              onChange={(v) => setField(o, { label_style: textStyleToLabel(v, lStyle) })}
+                              onReset={() => setField(o, { label_style: null })} />
+                          </div>
+                        )}
+                      </Popover>
+                    )}
                     {/* รูปไอคอน (อัปโหลด) — เฉพาะแพลตฟอร์ม (task_type ไม่มีคอลัมน์ icon_key) */}
                     {kind === "platform" && (<>
                       <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
