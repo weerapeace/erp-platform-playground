@@ -376,3 +376,13 @@
 - **ตารางตัวเลือก** รูป · สี · ราคา 2 ฝั่ง (`variantTable`) ใต้แถว "ชื่อตัวเลือก"
 - **รูปตัวเลือก** (เรื่องใหม่ `variant_images`) ส่งได้ TikTok (skus images ชั้นหลัก ต้องครบทุกค่า) · Lazada (รูปแรกของแต่ละ SKU · planLazadaSkuMedia) · LINE (imageUrl ต่อตัวเลือก) · Shopee (option_images ของ /api/shopee/listing-edit · ส่งแยกคำสั่ง · ต้องครบทุกตัวเลือกชั้นแรก · ตัวเลือกถูกสร้างใหม่ = กรอบแดง "เช็ก BigSeller ด่วน" · a20fd610)
 - รูปทุกแบบเทียบที่อยู่ตรง ๆ ไม่ได้ → ส่งครั้งแรกแล้วจำชุดใน `raw.sys_sync` (images_* / desc_images_* / vimg_*)
+
+## สินค้าซ้ำบนร้าน (?view=dupes · เจ้าของเลือก 2026-11-23 วิธี B + ข้อ 1-5)
+- 1 รุ่นในระบบ = หลายรายการบนร้าน (จับคู่แล้ว · ไม่นับตัวที่ไม่อยู่บนร้านแล้ว) → จัดกลุ่ม · เจอจริง Shopee Louis Montini 81 รุ่น (เกิน 86 รายการ)
+- กติกา pure `lib/platform-duplicates` (pickKeep · dupTags · buildDuplicateGroups) · API `/api/platform-catalog/duplicates` · หน้าจอ `components/platform-catalog/duplicates-view`
+- ข้อ 1 ตัวที่เก็บ: เปิดขาย → ยอดขาย 90 วัน (ออเดอร์ในระบบ) → อัปเดตล่าสุด → รหัสเก่ากว่า · กด "เก็บตัวนี้แทน" เปลี่ยนได้
+- วิธี B: ระบบไม่ลบเอง — "เปิดตัวถัดไปใน Seller Centre" เปิดแท็บรอไว้ → ข้อ 2 เช็กสด (โปรโมชัน · ออเดอร์ค้าง UNPAID/READY_TO_SHIP/PROCESSED/RETRY_SHIP/IN_CANCEL/TO_RETURN 60 วัน) → ไม่ปลอดภัย = ปิดแท็บ + บอกเหตุผล (กด "เปิดดูอยู่ดี" ได้)
+  - ลบในหลังร้านแล้วกด "เช็กว่าลบแล้ว" → ไม่เจอ/SELLER_DELETE = ติดป้าย removed + audit
+- ข้อ 3 "ไม่ใช่ตัวซ้ำ" = ui_config `platform_dupes_ignored:<platform>:<brand>` (ย้อนกลับได้ทันที · audit) · ตัวกรอง "ซ่อนไว้"
+- ข้อ 4 ตัวที่เปิดขายซ้อน → "ปิดขายแทน" (ConfirmDialog → /api/shopee/listing-display · เปิดกลับได้)
+- ข้อ 5 จัดกลุ่มได้ทุกร้าน · เช็กสด/เช็กว่าลบ/ปิดขาย = Shopee ก่อน (Lazada/TikTok ทีหลัง)
