@@ -15,11 +15,11 @@
  * ห้าม import "@/..." ที่นี่
  */
 
-export type DriftKey = "title" | "images" | "description" | "desc_images" | "options" | "variant_images" | "price";
-export const DRIFT_KEYS: readonly DriftKey[] = ["title", "images", "description", "desc_images", "options", "variant_images", "price"];
+export type DriftKey = "title" | "images" | "description" | "desc_images" | "options" | "variant_images" | "price" | "attrs";
+export const DRIFT_KEYS: readonly DriftKey[] = ["title", "images", "description", "desc_images", "options", "variant_images", "price", "attrs"];
 export const DRIFT_LABEL: Record<DriftKey, string> = {
   title: "ชื่อสินค้า", images: "รูป", description: "รายละเอียด", desc_images: "รูปในรายละเอียด",
-  options: "ชื่อตัวเลือก (สี/ไซซ์)", variant_images: "รูปตัวเลือก", price: "ราคา",
+  options: "ชื่อตัวเลือก (สี/ไซซ์)", variant_images: "รูปตัวเลือก", price: "ราคา", attrs: "ข้อมูลจำเพาะ",
 };
 
 /** same = ตรง · diff = ไม่ตรง · unknown = บอกไม่ได้ (ไม่นับเป็นปัญหา) */
@@ -54,14 +54,18 @@ export type VariantTableRow = {
 // ───────── ค่ากลาง 2 ฝั่ง ─────────
 /** image = ref รูปตัวเลือกฝั่งระบบ ("r2:<key>") */
 export type SysVariant = { code: string; values: string[]; price: number | null; special?: number | null; pay?: number | null; image?: string | null };
+/** ข้อมูลจำเพาะ: รหัสช่อง → ค่า (ค่าในรายการ = id · พิมพ์เอง = name) — รูปแบบเดียวกับช่องกรอกกลาง lib/tiktok-attrs (ไม่ import) */
+export type AttrValues = Record<string, { id?: string; name?: string }[]>;
 export type SystemValues = {
   description: string; imageRefs: string[]; variants: SysVariant[]; /** ชื่อที่จะส่ง (lib/listing-title) */ title?: string;
+  /** ข้อมูลจำเพาะที่ระบบจะส่ง (2026-11-23 · ตอนนี้ Shopee) + ชื่อช่อง · ไม่มี = ไม่เทียบเรื่องนี้ */ attrs?: AttrValues; attrNames?: Record<string, string>;
   /** รูปในรายละเอียด (รูป Description ของ Parent SKU · "r2:<key>") */ descImageRefs?: string[];
 };
 /** image = ลิงก์รูปตัวเลือกบนร้าน */
 export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null; image?: string | null };
 export type ShopValues = {
   /** ชื่อบนร้าน */ title?: string; description: string; imageCount: number; imageSig: string; variants: ShopVariant[];
+  /** ข้อมูลจำเพาะบนร้าน (2026-11-23) */ attrs?: AttrValues;
   /** ลิงก์รูปบนร้านตามลำดับ (ไว้โชว์) */ imageUrls?: string[];
   /** ลิงก์รูปในรายละเอียดบนร้าน (ไม่ส่ง = หาจาก <img> ในรายละเอียด) */ descImageUrls?: string[];
 };
@@ -276,11 +280,29 @@ export function variantTable(sys: SystemValues, shop: ShopValues): VariantTableR
   });
 }
 
+/** ลายเซ็นค่าของช่อง (ไม่สนลำดับ · id ก่อนชื่อ) */
+export const attrValSig = (vals: readonly { id?: string; name?: string }[] | undefined): string =>
+  (vals ?? []).map((v) => (v.id && Number(v.id) > 0 ? `#${v.id}` : `"${String(v.name ?? "").trim().toLowerCase()}`)).sort().join("|");
+export const attrValText = (vals: readonly { id?: string; name?: string }[] | undefined): string => (vals ?? []).map((v) => v.name || v.id || "").filter(Boolean).join(", ") || "(ว่าง)";
+/**
+ * ข้อมูลจำเพาะ (2026-11-23 เจ้าของ "เช็กกับระบบ") — เทียบเฉพาะช่องที่ระบบมีค่า (ระบบว่าง = ไม่นับ ไม่บังคับให้ร้านลบ)
+ * ร้านไม่ส่งข้อมูลมา / ระบบไม่มีค่าเลย = บอกไม่ได้
+ */
+export function compareAttrs(sys: SystemValues, shop: ShopValues): Omit<DriftItem, "sendable" | "cannot"> {
+  const want = Object.entries(sys.attrs ?? {}).filter(([, v]) => v.length);
+  const base = { key: "attrs" as const, before: `${Object.keys(shop.attrs ?? {}).length} ช่อง`, after: `${want.length} ช่อง` };
+  if (!shop.attrs || !want.length) return { ...base, state: "unknown", summary: "เทียบข้อมูลจำเพาะไม่ได้" };
+  const rows: DriftRow[] = want.filter(([id, v]) => attrValSig(v) !== attrValSig(shop.attrs![id]))
+    .map(([id, v]) => ({ label: sys.attrNames?.[id] ?? id, before: attrValText(shop.attrs![id]), after: attrValText(v) }));
+  return rows.length ? { ...base, state: "diff", summary: `ข้อมูลจำเพาะไม่ตรง ${rows.length} ช่อง`, rows } : { ...base, state: "same", summary: "ข้อมูลจำเพาะตรง" };
+}
+
 export function compareAll(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot">[] {
   const options = compareOptions(sys, shop);
   return [
     compareTitle(sys, shop), compareImages(sys, shop, sync), compareDescription(sys, shop), compareDescImages(sys, shop, sync),
     { ...options, table: variantTable(sys, shop) }, compareVariantImages(sys, shop, sync), comparePrice(sys, shop),
+    ...(sys.attrs ? [compareAttrs(sys, shop)] : []),
   ];
 }
 

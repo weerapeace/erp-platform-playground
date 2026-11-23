@@ -14,9 +14,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import {
-  compareAll, coreValue, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
-  type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
+  attrValSig, compareAll, coreValue, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
+  type AttrValues, type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
 } from "@/lib/platform-listing-drift";
+import { auditDiff, writeAudit } from "@/lib/audit";
 import { buildLineCreate } from "@/lib/line-create-payload";
 import { loadLazadaCreate } from "@/app/api/lazada/create-product/load";
 import { loadTiktokCreate } from "@/app/api/tiktok-shop/create-product/load";
@@ -24,7 +25,7 @@ import { loadShopeeCreate } from "@/app/api/shopee/create-product/load";
 import { loadShopeeListingLive } from "@/app/api/shopee/shared";
 import { loadLazListingLive } from "@/app/api/lazada/shared";
 import { loadTtsListingLive, ttsViewWithReview } from "@/app/api/tiktok-shop/shared";
-import { planShopeeEdit, planShopeeImages, planShopeeOptionImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
+import { planShopeeAttrs, planShopeeEdit, planShopeeImages, planShopeeOptionImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
 import {
   foreignDescImages, lazadaEditStateFromView, lazadaListingView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazMigrateImageXml, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia,
   type LazadaEditState, type LazadaListingView,
@@ -52,6 +53,22 @@ export type DriftCheck = {
   items: DriftItem[]; issues: DriftKey[]; checked_at: string;
   /** ไว้เปิดหน้าให้เช็กหลังส่ง (ของกลาง push-open) — รหัสสินค้าบนร้าน · รหัสร้าน · สถานะบนร้าน */
   external_product_id?: string | null; shop_ref?: string | null; listing_status?: string | null;
+  /** ค่าฝั่งระบบเต็ม ๆ (เฉพาะตอนตรวจสด · ไม่จดลงตาราง) — ลิ้นชักโหมด "เช็กกับระบบ" ใช้เติมฟอร์มเมื่อกด "ใช้ตามระบบ" (2026-11-23) */
+  sys?: DriftSysView;
+};
+export type DriftSysView = {
+  title: string | null; description: string; imageRefs: string[]; descImageRefs: string[];
+  /** ราคาต่อรหัส SKU (ราคาเต็มที่ระบบจะส่ง) */ prices: { code: string; price: number | null }[];
+  attrs: AttrValues | null; attrNames: Record<string, string> | null;
+};
+/** "ให้ระบบใช้ค่านี้" — เรื่องที่เขียนลงร่างของร้านได้ (ร่าง = ค่าฝั่งระบบของร้านนี้ ไม่แตะ Parent SKU ที่ใช้ทุกร้าน) */
+export const ADOPT_KEYS: readonly DriftKey[] = ["title", "description", "attrs"];
+export const ADOPT_CANNOT: Partial<Record<DriftKey, string>> = {
+  images: "รูปบนร้านไม่ได้อยู่ในคลังรูปของระบบ — ให้ระบบใช้ตามไม่ได้",
+  desc_images: "รูปบนร้านไม่ได้อยู่ในคลังรูปของระบบ — ให้ระบบใช้ตามไม่ได้",
+  variant_images: "รูปบนร้านไม่ได้อยู่ในคลังรูปของระบบ — ให้ระบบใช้ตามไม่ได้",
+  price: "ราคามาจากกติการาคาของระบบ — แก้ที่ราคาสินค้า/กติการาคาแทน",
+  options: "ชื่อตัวเลือกมาจาก SKU ในระบบ — แก้ที่ SKU แทน",
 };
 export type DriftFail = { ok: false; error: string; status: number };
 
@@ -88,7 +105,12 @@ async function systemValues(admin: Admin, code: string, parentId: string, userId
     const r = await loadShopeeCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })) } };
+    // ข้อมูลจำเพาะ (2026-11-23): ค่าที่ตัวช่วยลงสินค้าจะส่ง (ร่าง + ค่าเริ่มต้นของร้าน + ข้อมูลสินค้า) · ดึงช่องของหมวดไม่ได้ = ไม่เทียบเรื่องนี้
+    const attrs = p.attrs.loaded ? Object.fromEntries(Object.entries(p.attrs.values).filter(([, v]) => v.length)) : undefined;
+    return { ok: true, descSrc: p.description.src, sys: {
+      description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })),
+      ...(attrs ? { attrs, attrNames: Object.fromEntries(p.attrs.fields.map((f) => [f.id, f.name])) } : {}),
+    } };
   }
   if (code === "lazada") {
     const r = await loadLazadaCreate(admin, parentId, userId);
@@ -113,7 +135,10 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
   const variants: ShopVariant[] = v.hasModel ? v.models.map((m) => ({ code: m.sku, label: m.label ?? "", price: m.originalPrice ?? m.price, image: m.image })) : [{ code: null, label: "", price: v.originalPrice ?? v.price }];
   // รูปในรายละเอียด (extended description) — ตัวอ่านสดของ Shopee ส่งมาให้แล้ว (descriptionImages)
   const descImgs = v.descriptionImages ?? [];
-  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images, descImageUrls: descImgs.map((x) => x.url ?? x.id) };
+  const shop: ShopValues = { title: v.name, description: v.description, imageCount: v.imageIds.length, imageSig: listSig(v.imageIds), variants, imageUrls: v.images, descImageUrls: descImgs.map((x) => x.url ?? x.id), attrs: v.attrs };
+  // ข้อมูลจำเพาะ: ส่งเฉพาะช่องที่ระบบมีค่าและไม่ตรง (ตัวส่งรวมกับของเดิมบนร้านให้ — ช่องอื่นคงเดิม)
+  const attrWant = (): AttrValues => Object.fromEntries(Object.entries(base.sys.attrs ?? {}).filter(([id, vals]) => vals.length && attrValSig(vals) !== attrValSig(v.attrs[id])));
+  const attrPlan = () => planShopeeAttrs(v, attrWant(), Object.entries(base.sys.attrNames ?? {}).map(([id, name]) => ({ id, name, required: false })));
   const imgPlan = () => planShopeeImages(v, base.sys.imageRefs);
   const descPlan = () => planShopeeEdit(v, { description: base.sys.description });
   const titlePlan = () => planShopeeEdit(v, { name: base.sys.title ?? "" });
@@ -144,6 +169,7 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       : k === "options" ? OPT_CANNOT.shopee
       : k === "desc_images" ? null
       : k === "variant_images" ? errs(optPlan().errors)
+      : k === "attrs" ? errs(attrPlan().errors)
       : errs(pricePlan().errors),
     build: async (keys) => {
       const calls: DriftCall[] = [];
@@ -156,13 +182,17 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       const textKeys = keys.filter((k) => k === "title" || k === "description");
       if (textKeys.length) {
         const p = planShopeeEdit(v, { ...(keys.includes("title") ? { name: base.sys.title ?? "" } : {}), ...(keys.includes("description") ? { description: base.sys.description } : {}) });
-        if (p.body.item_name != null || p.body.description != null) { body.before = { name: v.name, description: v.description }; body.edit = { name: p.body.item_name ?? null, description: p.body.description ?? null }; }
+        // 🐛 2026-11-23: รายละเอียดแบบมีรูป (extended) ไม่มี p.body.description (ไปอยู่ description_info) → เดิมส่ง null = ข้อความไม่ถูกแก้ · ส่งข้อความระบบตรง ๆ
+        const descChanged = p.changes.some((c) => c.label === "รายละเอียด");
+        if (p.body.item_name != null || descChanged) { body.before = { name: v.name, description: v.description }; body.edit = { name: p.body.item_name ?? null, description: descChanged ? base.sys.description : null }; }
       }
       if (keys.includes("images")) { const p = imgPlan(); if (p.changed) body.images = { before_ids: v.imageIds, refs: p.refs }; }
       // รูปในรายละเอียด: route ฝากรูป (scene desc · คงสัดส่วน) แล้วแทนทั้งชุด · ข้อความคงเดิมถ้าไม่ได้ติ๊ก "รายละเอียด"
       if (keys.includes("desc_images") && base.sys.descImageRefs?.length) body.desc_images = { before_ids: descImgs.map((x) => x.id), refs: base.sys.descImageRefs };
+      // ข้อมูลจำเพาะ (2026-11-23) — route ส่ง attribute_list ทั้งชุดไปกับ update_item ครั้งเดียวกัน
+      if (keys.includes("attrs") && attrPlan().changed) body.attributes = { before: v.attrs, values: attrWant(), fields: Object.entries(base.sys.attrNames ?? {}).map(([id, name]) => ({ id, name, required: false })) };
       const edit = body.edit as { name: string | null; description: string | null } | undefined;
-      if (edit || body.images || body.desc_images) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : "", body.desc_images ? "รูปในรายละเอียด" : ""].filter(Boolean).join(" + "), body });
+      if (edit || body.images || body.desc_images || body.attributes) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : "", body.desc_images ? "รูปในรายละเอียด" : "", body.attributes ? "ข้อมูลจำเพาะ" : ""].filter(Boolean).join(" + "), body });
       // รูปตัวเลือก: ต้องส่งแยกคำสั่ง (route ไม่รับรวมกับชื่อ/รูป/รูปในรายละเอียด) · route เช็กตัวเลือก/ราคาหลังส่ง
       if (keys.includes("variant_images") && tier0 && optPlan().changed) {
         calls.push({ url: "/api/shopee/listing-edit", label: "รูปตัวเลือก", body: { listing_id: base.listingId, option_images: { before: Object.fromEntries(tier0.options.map((o) => [o.name, o.imageId])), refs: optWant() } } });
@@ -525,6 +555,7 @@ function itemsOf(ctx: Ctx): DriftItem[] {
     if (it.key === "desc_images" && it.state === "unknown" && !ctx.sys.descImageRefs?.length) return { ...it, sendable: false, cannot: null };
     if (it.key === "variant_images" && it.state === "unknown" && !ctx.sys.variants.some((x) => x.image)) return { ...it, sendable: false, cannot: null };
     if (it.state === "unknown" && !FIRST_SEND_KEYS.includes(it.key)) return { ...it, sendable: false, cannot: null };
+    if (it.key === "attrs" && ctx.code !== "shopee") return { ...it, sendable: false, cannot: "ยังส่งข้อมูลจำเพาะของร้านนี้จากระบบไม่ได้ — แก้ในลิ้นชักสินค้าบนร้าน" };
     let cannot: string | null;
     try { cannot = ctx.cannot(it.key); } catch (e) { cannot = (e as Error).message || "ตรวจไม่ได้"; }
     return { ...it, sendable: !cannot, cannot };
@@ -557,6 +588,7 @@ export async function checkListingDrift(admin: Admin, listingId: string, userId:
     return {
       ok: true, listing_id: listingId, platform_code: r.ctx.code, parent_sku_id: r.ctx.parentId, items, issues, checked_at: new Date().toISOString(),
       external_product_id: r.row.external_product_id, shop_ref: (acct as { external_shop_id?: string | null } | null)?.external_shop_id ?? null, listing_status: r.row.status,
+      sys: sysViewOf(r.ctx.sys),
     };
   } catch (e) {
     return { ok: false, error: (e as Error).message || "ตรวจไม่สำเร็จ", status: 500 };
@@ -577,6 +609,69 @@ export async function buildDriftCalls(admin: Admin, listingId: string, keys: Dri
   });
   try { return { ok: true, calls: ok.length ? await r.ctx.build(ok) : [], skipped, items }; }
   catch (e) { return { ok: false, error: (e as Error).message || "ประกอบคำสั่งไม่สำเร็จ", status: 400 }; }
+}
+
+/** ค่าฝั่งระบบสำหรับเติมฟอร์มลิ้นชัก (ไม่จดลงตาราง) */
+function sysViewOf(sys: SystemValues): DriftSysView {
+  return {
+    title: sys.title ?? null, description: sys.description, imageRefs: sys.imageRefs, descImageRefs: sys.descImageRefs ?? [],
+    prices: sys.variants.map((v) => ({ code: v.code, price: v.price })), attrs: sys.attrs ?? null, attrNames: sys.attrNames ?? null,
+  };
+}
+
+// ───────── "ให้ระบบใช้ค่านี้" (เจ้าของเลือก 2026-11-23 ข้อ 1): ค่าบนร้าน → ร่างของร้านนี้ (ไม่แตะ Parent SKU ที่ใช้ทุกร้าน) ─────────
+type DraftCols = { title: string | null; description: string | null; extra: Record<string, unknown> | null };
+/** ช่องในร่างของแต่ละเรื่อง — attrs เฉพาะ Shopee (extra.shopee_attrs · ตัวช่วยลงสินค้าอ่านค่านี้) */
+const ADOPT_EXTRA: Partial<Record<string, string>> = { shopee: "shopee_attrs" };
+export type AdoptResult = { ok: true; before: unknown; after: unknown; label: string; check: DriftCheck | DriftFail } | DriftFail;
+
+async function writeDraftField(admin: Admin, parentId: string, platformId: string, code: string, key: DriftKey, value: unknown, userId: string | null, meta: Record<string, unknown>): Promise<{ before: unknown } | { error: string }> {
+  const { data } = await admin.from("platform_listing_drafts").select("title, description, extra").eq("parent_sku_id", parentId).eq("platform_id", platformId).maybeSingle();
+  const d = (data ?? { title: null, description: null, extra: null }) as DraftCols;
+  const extraKey = ADOPT_EXTRA[code];
+  let before: unknown; const patch: Record<string, unknown> = {};
+  if (key === "title") { before = d.title; patch.title = value; }
+  else if (key === "description") { before = d.description; patch.description = value; }
+  else if (key === "attrs" && extraKey) {
+    before = d.extra?.[extraKey] ?? null;
+    const extra = { ...(d.extra ?? {}) }; if (value == null) delete extra[extraKey]; else extra[extraKey] = value;
+    patch.extra = extra;
+  } else return { error: ADOPT_CANNOT[key] ?? "เรื่องนี้ให้ระบบใช้ตามร้านไม่ได้" };
+  const { error } = await admin.from("platform_listing_drafts").upsert({ parent_sku_id: parentId, platform_id: platformId, ...patch, updated_by: userId, updated_at: new Date().toISOString() }, { onConflict: "parent_sku_id,platform_id" });
+  if (error) return { error: error.message };
+  const field = key === "attrs" ? `extra.${extraKey}` : key;
+  await writeAudit(admin, {
+    action: "update", entityType: "platform_listing_draft", entityId: null, actorId: userId, actorName: null,
+    metadata: { parent_sku_id: parentId, platform_id: platformId, source: "drift_adopt", key, changes: auditDiff({ [field]: before ?? null }, { [field]: value ?? null }), ...meta },
+  });
+  return { before };
+}
+
+/** เขียนค่าบนร้านตอนนี้ลงร่างของร้านนี้ แล้วตรวจใหม่ · คืน before ไว้ย้อนกลับ */
+export async function adoptShopValue(admin: Admin, listingId: string, key: DriftKey, userId: string | null): Promise<AdoptResult> {
+  if (!ADOPT_KEYS.includes(key)) return { ok: false, error: ADOPT_CANNOT[key] ?? "เรื่องนี้ให้ระบบใช้ตามร้านไม่ได้", status: 400 };
+  const r = await loadCtx(admin, listingId, userId);
+  if (!r.ok) return r;
+  const c = r.ctx;
+  if (key === "attrs" && !ADOPT_EXTRA[c.code]) return { ok: false, error: "ร้านนี้ยังให้ระบบใช้ข้อมูลจำเพาะตามร้านไม่ได้", status: 400 };
+  const value = key === "title" ? (c.shop.title ?? "").trim() : key === "description" ? c.shop.description : { ...(c.shop.attrs ?? {}) };
+  if (key !== "attrs" && !String(value).trim()) return { ok: false, error: "ค่าบนร้านว่าง — ไม่บันทึกทับ", status: 400 };
+  const w = await writeDraftField(admin, c.parentId!, r.row.platform_id, c.code, key, value, userId, { listing_id: listingId, direction: "shop_to_draft" });
+  if ("error" in w) return { ok: false, error: w.error, status: 400 };
+  return { ok: true, before: w.before, after: value, label: key === "attrs" ? "ข้อมูลจำเพาะ" : key === "title" ? "ชื่อสินค้า" : "รายละเอียด", check: await checkListingDrift(admin, listingId, userId) };
+}
+
+/** ย้อน "ให้ระบบใช้ค่านี้" — คืนค่าเดิมในร่าง (null = ลบค่าที่ร่างเคยไม่มี) */
+export async function undoAdopt(admin: Admin, listingId: string, key: DriftKey, before: unknown, userId: string | null): Promise<{ ok: true; check: DriftCheck | DriftFail } | DriftFail> {
+  if (!ADOPT_KEYS.includes(key)) return { ok: false, error: "ย้อนเรื่องนี้ไม่ได้", status: 400 };
+  const { data: l } = await admin.from("platform_catalog_listings").select("platform_id, matched_parent_sku_id").eq("id", listingId).maybeSingle();
+  const row = l as { platform_id: string; matched_parent_sku_id: string | null } | null;
+  if (!row?.matched_parent_sku_id) return { ok: false, error: "ไม่พบสินค้าที่จับคู่ไว้", status: 404 };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  const code = String((pf as { code?: string } | null)?.code ?? "");
+  const w = await writeDraftField(admin, row.matched_parent_sku_id, row.platform_id, code, key, before ?? null, userId, { listing_id: listingId, direction: "undo_adopt" });
+  if ("error" in w) return { ok: false, error: w.error, status: 400 };
+  return { ok: true, check: await checkListingDrift(admin, listingId, userId) };
 }
 
 /** หลังส่งสำเร็จ: จำชุดรูปที่ส่งจากระบบ (ไว้เทียบรอบหน้า) แล้วตรวจใหม่ */

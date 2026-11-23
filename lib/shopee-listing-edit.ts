@@ -550,3 +550,14 @@ export function applyShopeeBulkPrice(rows: ShopeePriceRow[], selected: Set<strin
   });
   return { rows: out, changed, error: null };
 }
+
+/** ราคาของระบบ (ต่อรหัส SKU) → แถวราคาในฟอร์ม — จับคู่ด้วยรหัส SKU บนร้าน · สินค้าไม่มีตัวเลือก = ตัวเดียวของระบบ (โหมดเช็กกับระบบ 2026-11-23) */
+export function shopeeRowsWithSysPrices(view: Pick<ShopeeListingView, "hasModel" | "models" | "itemSku">, rows: ShopeePriceRow[], sysPrices: readonly { code: string; price: number | null }[]): ShopeePriceRow[] {
+  const key = (s: string) => s.trim().toUpperCase();
+  const byCode = new Map(sysPrices.map((p) => [key(p.code), p.price]));
+  return rows.map((r) => {
+    const code = view.hasModel ? view.models.find((m) => m.modelId === r.modelId)?.sku : (sysPrices.length === 1 ? sysPrices[0].code : view.itemSku);
+    const p = code ? byCode.get(key(code)) : undefined;
+    return p != null ? { ...r, price: Math.round(p) } : r;
+  });
+}

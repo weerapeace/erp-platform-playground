@@ -29,7 +29,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { MoneyInput } from "@/components/money-input";
 import {
   applyShopeeBulkPrice, planShopeeAttrs, planShopeeDisplay, planShopeeEdit, planShopeeImages, planShopeePrices, shopeeAttrValSig, shopeeImageRef, shopeeImagesMax, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeRefsForSend,
-  shopeeStatusBadge, shopeeTextLength, SHOPEE_DESC_MAX_IMAGES,
+  shopeeRowsWithSysPrices, shopeeStatusBadge, shopeeTextLength, SHOPEE_DESC_MAX_IMAGES,
   type ShopeeAttrFieldsResponse, type ShopeeAttrPlan, type ShopeeImagePlan, type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
 } from "@/lib/shopee-listing-edit";
 import { ttsAttrDef, ttsAttrFromText, ttsAttrToText, type TtsAttrField, type TtsAttrState } from "@/lib/tiktok-attrs";
@@ -37,6 +37,7 @@ import { ListingImageGrid, ListingImagePicker, listingImgSrc, useSystemImages } 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { LazadaAttrField } from "./lazada-listing-panels";
 import { AttrSuggestButtons, AttrSuggestPanel, applyAttrHits, useAttrSuggest } from "./attr-suggest-box";
+import { CheckBadge, CheckSysBox, SysThumbs, type ListingCheckApi } from "./listing-check";
 
 export type ShopeeListingState = {
   listingId: string | null;
@@ -404,8 +405,10 @@ function Counter({ n, min, max }: { n: number; min: number | null | undefined; m
 }
 
 /** แท็บข้อมูลสินค้า — แก้ชื่อ/รายละเอียดได้เมื่อมีสิทธิ์ · ที่เหลือดูอย่างเดียว */
-export function ShopeeInfoPanel({ state, edit, matchedParent = null, matchedCode = null }: {
+export function ShopeeInfoPanel({ state, edit, matchedParent = null, matchedCode = null, chk = null }: {
   state: ShopeeListingState; edit: ShopeeEditApi; matchedParent?: string | null; matchedCode?: string | null;
+  /** โหมดเช็กกับระบบ (ของกลาง ./listing-check) — ป้ายตรง/ไม่ตรง + ค่าระบบใต้ช่อง */
+  chk?: ListingCheckApi | null;
 }) {
   // หมวดเต็ม (ชื่อไทย) มากับช่องข้อมูลจำเพาะ — โหลดตอนเปิดแท็บนี้ด้วย (จำไว้ที่เซิร์ฟเวอร์ 6 ชม.)
   const { loadAttrFields } = edit;
@@ -421,23 +424,28 @@ export function ShopeeInfoPanel({ state, edit, matchedParent = null, matchedCode
     <div className="space-y-3">
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">ชื่อสินค้าบน Shopee</span>
+          <span className="flex items-center gap-1.5 text-xs text-slate-500">ชื่อสินค้าบน Shopee <CheckBadge chk={chk} k="title" /></span>
           <Counter n={shopeeTextLength(name)} min={L?.nameMin} max={L?.nameMax} />
         </div>
         {can
           ? <input value={name} onChange={(e) => edit.setName(e.target.value)} className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-violet-400 focus:outline-none" />
           : <div className="min-h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{v.name}</div>}
+        <CheckSysBox chk={chk} k="title" sys={chk?.sys?.title ? <div className="text-slate-800">{chk.sys.title}</div> : null}
+          onUse={can && chk?.sys?.title ? () => edit.setName(chk.sys!.title!) : null} />
       </div>
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">รายละเอียดสินค้า{v.descriptionEditable ? "" : " (แบบมีรูป — แก้ใน Seller Centre)"}</span>
+          <span className="flex items-center gap-1.5 text-xs text-slate-500">รายละเอียดสินค้า{v.descriptionEditable ? "" : " (แบบมีรูป — แก้ใน Seller Centre)"} <CheckBadge chk={chk} k="description" /></span>
           <Counter n={shopeeTextLength(desc)} min={L?.descMin} max={L?.descMax} />
         </div>
         {can && v.descriptionEditable
           ? <textarea value={desc} onChange={(e) => edit.setDescription(e.target.value)} rows={10} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm leading-relaxed focus:border-violet-400 focus:outline-none" />
           : <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{v.description || "—"}</div>}
+        <CheckSysBox chk={chk} k="description"
+          sys={chk?.sys ? <div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-violet-100 bg-white px-2 py-1.5 text-slate-700">{chk.sys.description || "—"}</div> : null}
+          onUse={can && v.descriptionEditable && chk?.sys ? () => edit.setDescription(chk.sys!.description) : null} />
       </div>
-      <ShopeeDescImagesBox state={state} edit={edit} canEdit={can} matchedParent={matchedParent} matchedCode={matchedCode} />
+      <ShopeeDescImagesBox state={state} edit={edit} canEdit={can} matchedParent={matchedParent} matchedCode={matchedCode} chk={chk} />
       {/* ข้อมูลครบแบบหน้าลงสินค้า (เจ้าของ 2026-11-23) — ดูอย่างเดียว · แก้หมวด/ขนส่ง/น้ำหนักใน Seller Centre */}
       <div className="grid gap-3 sm:grid-cols-2">
         <ReadField label="หมวดบน Shopee">{edit.attrMeta.categoryName ?? (v.categoryId ? `รหัส ${v.categoryId}` : "—")}</ReadField>
@@ -458,8 +466,8 @@ export function ShopeeInfoPanel({ state, edit, matchedParent = null, matchedCode
  * รูปในรายละเอียด (extended · ต่อท้ายข้อความ) — ดู / ลากเรียง / ลบ / เพิ่มจากรูปในระบบ / อัปโหลดจากเครื่อง (ของกลาง ListingImagePicker → คลังรูปกลาง)
  * ส่งพร้อมปุ่ม "บันทึกขึ้น Shopee" (route ฝากรูปแบบคงสัดส่วน scene desc) · เจ้าของถาม 2026-11-23 "ดูตรง Description Image ให้หน่อยว่าใช้ได้ยัง"
  */
-function ShopeeDescImagesBox({ state, edit, canEdit, matchedParent, matchedCode }: {
-  state: ShopeeListingState; edit: ShopeeEditApi; canEdit: boolean; matchedParent: string | null; matchedCode: string | null;
+function ShopeeDescImagesBox({ state, edit, canEdit, matchedParent, matchedCode, chk }: {
+  state: ShopeeListingState; edit: ShopeeEditApi; canEdit: boolean; matchedParent: string | null; matchedCode: string | null; chk?: ListingCheckApi | null;
 }) {
   const [picker, setPicker] = useState(false);
   const [zoom, setZoom] = useState(-1);
@@ -473,7 +481,11 @@ function ShopeeDescImagesBox({ state, edit, canEdit, matchedParent, matchedCode 
         <span className="text-xs font-medium text-slate-600">รูปในรายละเอียด ({imgs.length}/{max}) — ต่อท้ายข้อความ</span>
         <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700"><Icon name="done" />ร้านนี้ใช้ได้แล้ว{v.descriptionType === "extended" ? "" : " (ใส่รูปแล้วรายละเอียดจะเปลี่ยนเป็นแบบมีรูป)"}</span>
         {edit.descImagesDirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">แก้แล้ว ยังไม่ส่ง</span>}
+        <CheckBadge chk={chk} k="desc_images" />
       </div>
+      <CheckSysBox chk={chk} k="desc_images" useLabel={`ใช้ตามระบบ (${chk?.sys?.descImageRefs.length ?? 0} รูป)`}
+        sys={chk?.sys?.descImageRefs.length ? <SysThumbs refs={chk.sys.descImageRefs} /> : null}
+        onUse={canEdit && chk?.sys?.descImageRefs.length ? () => edit.setDescImages(chk.sys!.descImageRefs.slice(0, SHOPEE_DESC_MAX_IMAGES)) : null} />
       {imgs.length === 0 && !canEdit ? <p className="text-xs text-slate-500">ยังไม่มีรูปในรายละเอียด</p> : (
         <ListingImageGrid images={imgs} onChange={edit.setDescImages} canEdit={canEdit} max={max} platformName="Shopee (รูปในรายละเอียด)" dragGroup="shopee-desc-images"
           onOpen={setZoom}
@@ -493,7 +505,7 @@ function ShopeeDescImagesBox({ state, edit, canEdit, matchedParent, matchedCode 
  * แท็บข้อมูลจำเพาะ (attribute_list) — ช่องกรอกกลาง LazadaAttrField (ตัวเดียวกับหน้าลงสินค้า/TikTok/Lazada) + แนะนำจากชื่อ/รายละเอียด (ฟรี) / AI ช่วยเติม
  * ส่งพร้อมปุ่ม "บันทึกขึ้น Shopee" — ส่งทั้งชุด (ของเดิม + ที่แก้) · ช่องบังคับว่าง = ส่งไม่ได้ (บอกชื่อช่อง)
  */
-export function ShopeeSpecsPanel({ state, edit }: { state: ShopeeListingState; edit: ShopeeEditApi }) {
+export function ShopeeSpecsPanel({ state, edit, chk = null }: { state: ShopeeListingState; edit: ShopeeEditApi; chk?: ListingCheckApi | null }) {
   const { loadAttrFields } = edit;
   useEffect(() => { if (state.view?.categoryId) loadAttrFields(); }, [state.view?.categoryId, loadAttrFields]);
   const [more, setMore] = useState(false);
@@ -520,8 +532,11 @@ export function ShopeeSpecsPanel({ state, edit }: { state: ShopeeListingState; e
         <span className="text-xs font-medium text-slate-600">ข้อมูลจำเพาะของหมวด{edit.attrMeta.categoryName ? ` · ${edit.attrMeta.categoryName}` : ""}</span>
         {missing.length > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">ช่องบังคับยังว่าง {missing.length}</span>}
         {(edit.attrPlan?.changes.length ?? 0) > 0 && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">แก้แล้ว {edit.attrPlan!.changes.length} ช่อง ยังไม่ส่ง</span>}
+        <CheckBadge chk={chk} k="attrs" />
         {can && fields.length > 0 && <span className="ml-auto"><AttrSuggestButtons s={sug} /></span>}
       </div>
+      <CheckSysBox chk={chk} k="attrs"
+        onUse={can && chk?.sys?.attrs ? () => edit.setAttrs({ ...vals, ...(chk.sys!.attrs as TtsAttrState) }) : null} />
       <AttrSuggestPanel s={sug} onApply={(hits, source) => {
         const { next, filledIds } = applyAttrHits(vals, hits);
         edit.setAttrs(next); setSrc((m) => ({ ...m, ...Object.fromEntries(filledIds.map((id) => [id, source])) }));
@@ -559,8 +574,9 @@ export function ShopeeSpecsPanel({ state, edit }: { state: ShopeeListingState; e
 }
 
 /** แท็บรูป — เฟส 4C: ลากเรียง / ตั้งปก / ลบ / เพิ่มจากคลังรูปในระบบ (ของกลาง ./listing-images · แบบเดียวกับ TikTok) · ไม่มีสิทธิ์ = ดูอย่างเดียว */
-export function ShopeeImagesPanel({ state, onOpen, edit, matchedParent, matchedCode }: {
+export function ShopeeImagesPanel({ state, onOpen, edit, matchedParent, matchedCode, chk = null }: {
   state: ShopeeListingState; onOpen: (index: number) => void; edit?: ShopeeEditApi | null; matchedParent?: string | null; matchedCode?: string | null;
+  chk?: ListingCheckApi | null;
 }) {
   const sys = useSystemImages(matchedParent ?? null);
   const [picking, setPicking] = useState(false);
@@ -575,6 +591,14 @@ export function ShopeeImagesPanel({ state, onOpen, edit, matchedParent, matchedC
     : "ดูอย่างเดียว";
   return (
     <div className="space-y-3">
+      {chk?.on && (
+        <div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">รูปสินค้าเทียบกับระบบ <CheckBadge chk={chk} k="images" /></div>
+          <CheckSysBox chk={chk} k="images" useLabel={`ใช้ตามระบบ (${chk.sys?.imageRefs.length ?? 0} รูป)`}
+            sys={chk.sys?.imageRefs.length ? <SysThumbs refs={chk.sys.imageRefs} /> : null}
+            onUse={can && chk.sys?.imageRefs.length ? () => edit!.setImages(chk.sys!.imageRefs.slice(0, max)) : null} />
+        </div>
+      )}
       {!can && images.length === 0
         ? <p className="rounded-lg border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">สินค้านี้ไม่มีรูปบน Shopee</p>
         : <ListingImageGrid images={images} onChange={(next) => edit?.setImages(next)} canEdit={can} max={max} platformName="Shopee" dragGroup="shopee-listing-images"
@@ -616,7 +640,7 @@ function ShopeeBulkPrice({ edit, selected }: { edit: ShopeeEditApi; selected: Se
 }
 
 /** แท็บตัวเลือก & ราคา — เฟส 4B แก้ "ราคาตั้ง" ต่อตัวเลือกได้ (ราคาที่ลูกค้าจ่ายมาจากโปรโมชัน · สต๊อกบนร้านไว้ดูเทียบ) */
-export function ShopeeOptionsPanel({ state, edit }: { state: ShopeeListingState; edit?: ShopeeEditApi | null }) {
+export function ShopeeOptionsPanel({ state, edit, chk = null }: { state: ShopeeListingState; edit?: ShopeeEditApi | null; chk?: ListingCheckApi | null }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const g = gate(state); if (g) return g;
   const v = state.view!;
@@ -652,8 +676,18 @@ export function ShopeeOptionsPanel({ state, edit }: { state: ShopeeListingState;
     { key: "price", header: "ลูกค้าจ่าย", width: "6rem", align: "right", sortValue: (m) => m.price, cell: (m) => <span className={m.price != null && m.originalPrice != null && m.price < m.originalPrice ? "font-medium text-rose-600" : ""}>{baht(m.price)}</span> },
     { key: "stock", header: "สต๊อกบนร้าน", width: "6rem", align: "right", sortValue: (m) => m.stock, cell: (m) => (m.stock == null ? "—" : m.stock.toLocaleString()) },
   ];
+  // ราคาของระบบ → แถวราคาในฟอร์ม (ตัวช่วยกลาง shopeeRowsWithSysPrices)
+  const useSysPrices = () => { if (edit?.prices && chk?.sys) edit.setPrices(shopeeRowsWithSysPrices(v, edit.prices, chk.sys.prices)); };
   return (
     <div className="space-y-2">
+      {chk?.on && (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">ราคา <CheckBadge chk={chk} k="price" /> · ชื่อตัวเลือก <CheckBadge chk={chk} k="options" /> · รูปตัวเลือก <CheckBadge chk={chk} k="variant_images" /></div>
+          <CheckSysBox chk={chk} k="price" onUse={canPrice ? useSysPrices : null} useLabel="ใช้ราคาตามระบบ" />
+          <CheckSysBox chk={chk} k="options" />
+          <CheckSysBox chk={chk} k="variant_images" />
+        </div>
+      )}
       {canPrice && edit && <ShopeeBulkPrice edit={edit} selected={selected} />}
       {canPrice && promoN > 0 && (
         <p className="flex items-start gap-1 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs text-orange-800"><Icon name="warning" className="mt-0.5 shrink-0" />{promoN.toLocaleString()} ตัวเลือกอยู่ในโปรโมชัน (ป้าย “โปร”) — Shopee มักไม่ให้แก้ราคาจนกว่าจะนำออกจากโปรโมชันใน Seller Centre · ตัวที่ไม่อยู่ในโปรแก้ได้ตามปกติ</p>

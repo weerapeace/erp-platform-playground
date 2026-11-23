@@ -1727,8 +1727,16 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "listing-images", label: "รูปสินค้าบนร้าน (เรียง/ปก/ลบ/เพิ่มจากระบบ)", code: "ListingImageGrid", category: "feature",
     source: { path: "components/platform-catalog/listing-images" },
     what: "ตารางรูปสินค้าของรายการบนร้าน (ช่องเล็ก ~88px เต็มแถวอัตโนมัติ · ชี้ = รูปใหญ่ HoverPreview) — ลากเรียง · ตั้งปก · ลบ (เหลือ ≥ 1) · ปุ่มเพิ่มจากคลังรูปของสินค้าที่จับคู่ + ป๊อปเลือกรูป (ListingImagePicker: เพิ่มรูปสินค้า / รูปตัวเลือก) · รูปจากระบบอยู่ในฟอร์มเป็น \"r2:<key>\" · useSystemImages(id, { withSkuImages: true }) ได้รูปทั้งหมดของแต่ละ SKU ด้วย (skuImages)",
-    when: "ลิ้นชักสินค้าบนร้าน: แท็บรูป LINE + Lazada · ป๊อปเลือกรูปตัวเลือก (LINE รายละเอียดตัวเลือก · Lazada รูป·น้ำหนัก·กล่อง)",
+    when: "ลิ้นชักสินค้าบนร้าน: แท็บรูป LINE + Lazada + Shopee · รูปในรายละเอียด Shopee · ป๊อปเลือกรูปตัวเลือก (LINE รายละเอียดตัวเลือก · Lazada รูป·น้ำหนัก·กล่อง) · ป๊อปเลือกรูปมีปุ่ม \"อัปโหลดจากเครื่อง / คลังรูปทั้งหมด\" (AssetPicker · 2026-11-23 · ปิดด้วย allowLibrary={false})",
     notWhen: "คลังรูปของสินค้าในระบบ (หน้า Parent SKU) ให้ใช้ ProductImageGallery · อัปโหลดไฟล์ใหม่ ให้ใช้ ImageAttach",
+    doc: "platform-catalog.md",
+  },
+  {
+    key: "listing-check", label: "โหมดเช็กกับระบบ (ลิ้นชักสินค้าบนร้าน)", code: "useListingCheck · CheckBadge · CheckSysBox · CheckSummaryBar", category: "feature",
+    source: { path: "components/platform-catalog/listing-check" },
+    what: "ปุ่ม \"เช็กกับระบบ\" ที่หัวลิ้นชัก → เทียบสด (ตัวเทียบกลาง lib/platform-listing-drift) แล้วโชว์ป้าย ตรงแล้ว/ไม่ตรง ในแต่ละช่อง + ค่าของระบบใต้ช่อง · \"ใช้ตามระบบ\" = เติมลงฟอร์ม (ยังไม่ส่ง) · \"ใช้ตามระบบทั้งหมด\" · \"ให้ระบบใช้ค่านี้\" = ค่าบนร้าน → ร่างของร้านนี้ (ชื่อ/รายละเอียด/ข้อมูลจำเพาะ · ย้อนได้)",
+    when: "ทุกแผงของลิ้นชักสินค้าบนร้านที่อยากให้เทียบกับระบบ (เริ่ม Shopee 2026-11-23 · TikTok/Lazada/LINE ตามมา)",
+    notWhen: "ห้ามเขียนตัวเทียบร้าน↔ระบบตัวที่ 2 — ค่าเทียบมาจาก /api/platform-catalog/drift เท่านั้น · ส่งหลายเรื่องจากหน้าเทียบรวมใช้ MatchSystemDialog",
     doc: "platform-catalog.md",
   },
   {

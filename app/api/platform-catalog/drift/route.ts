@@ -8,6 +8,9 @@
  *  POST { action:"build", listing_id, keys } → คำสั่งส่งของเรื่องที่ติ๊ก (หน้าเว็บยิงไป API แก้สินค้าบนร้านเดิม) { calls, skipped, items }
  *  POST { action:"mark", listing_id, keys }  → หลังส่งสำเร็จ: จำชุดรูปที่ส่ง + ตรวจใหม่ { check }
  *     build/mark = products.platforms.publish (นำไปสู่การแก้ร้านจริง · route ปลายทางตรวจสิทธิ์/ชนกัน/ลงประวัติเองอีกชั้น)
+ *  POST { action:"adopt", listing_id, key }               → "ให้ระบบใช้ค่านี้": ค่าบนร้านตอนนี้ → ร่างของร้านนี้ (ชื่อ/รายละเอียด/ข้อมูลจำเพาะ) { before, after, label, check }
+ *  POST { action:"adopt_undo", listing_id, key, before }  → ย้อนกลับค่าเดิมในร่าง { check }
+ *     adopt/adopt_undo = products.platforms.edit (แก้ร่างในระบบ · ไม่แตะร้าน · ประวัติ auditDiff) — เจ้าของเลือก 2026-11-23 ข้อ 1
  * ไม่แตะสต๊อก
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,7 +18,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { DRIFT_KEYS, type DriftKey } from "@/lib/platform-listing-drift";
-import { buildDriftCalls, checkListingDrift, driftListingsOfParent, loadStoredDrift, markDriftSent } from "@/lib/platform-listing-drift-server";
+import { adoptShopValue, buildDriftCalls, checkListingDrift, driftListingsOfParent, loadStoredDrift, markDriftSent, undoAdopt } from "@/lib/platform-listing-drift-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,10 +42,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: { action?: string; listing_id?: string; parent_sku_id?: string; keys?: unknown };
+  let body: { action?: string; listing_id?: string; parent_sku_id?: string; keys?: unknown; key?: string; before?: unknown };
   try { body = await request.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const action = String(body.action ?? "");
-  const denied = await guardApi(request, action === "recheck" ? "products.platforms.view" : "products.platforms.publish"); if (denied) return denied;
+  const perm = action === "recheck" ? "products.platforms.view" : action === "adopt" || action === "adopt_undo" ? "products.platforms.edit" : "products.platforms.publish";
+  const denied = await guardApi(request, perm); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
   const userId = user?.id ?? null;
@@ -59,6 +63,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const listingId = String(body.listing_id ?? "").trim();
   if (!listingId) return json({ error: "ต้องระบุ listing_id" }, 400);
   const keys = cleanKeys(body.keys);
+  if (action === "adopt" || action === "adopt_undo") {
+    const key = cleanKeys([body.key])[0];
+    if (!key) return json({ error: "ไม่รู้ว่าเรื่องไหน" }, 400);
+    const r = action === "adopt" ? await adoptShopValue(admin, listingId, key, userId) : await undoAdopt(admin, listingId, key, body.before ?? null, userId);
+    if (!r.ok) return json({ error: r.error }, r.status);
+    const { check, ...rest } = r;
+    return json({ ...rest, check: check.ok ? check : null, error: null });
+  }
   if (action === "build") {
     if (!keys.length) return json({ error: "เลือกเรื่องที่จะส่งก่อน" }, 400);
     const r = await buildDriftCalls(admin, listingId, keys, userId);

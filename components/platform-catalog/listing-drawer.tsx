@@ -45,6 +45,10 @@ import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
 import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
 import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPanel, ShopeeOptionsPanel, ShopeeSpecsPanel, useShopeeDisplay, useShopeeEdit, useShopeeListing } from "./shopee-listing-panels";
+import { CheckSummaryBar, CheckToggleButton, useListingCheck } from "./listing-check";
+import { shopeeImagesMax, shopeeRowsWithSysPrices } from "@/lib/shopee-listing-edit";
+import type { DriftKey } from "@/lib/platform-listing-drift";
+import type { TtsAttrState } from "@/lib/tiktok-attrs";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
@@ -60,6 +64,10 @@ const thDateTime = (iso: string) => { const d = new Date(iso); return Number.isN
 const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() === "" || !Number.isFinite(n) ? null : n; };
 /** รูปในฟอร์ม: "r2:<key>" = รูปจากระบบ (ย่อจาก R2) · อื่น ๆ = ลิงก์ของร้าน — ของกลาง ./listing-images */
 const imgSrc = listingImgSrc;
+// หน้าอัปเดตให้ตรง (ของกลาง) — เรื่องที่เติมฟอร์มในลิ้นชักไม่ได้ เช่น รูปตัวเลือก (โหลดตอนกด)
+const MatchSystemDialog = dynamic(() => import("./match-system-dialog").then((m) => m.MatchSystemDialog), { ssr: false });
+/** เรื่องที่ "ใช้ตามระบบ" เติมลงฟอร์ม Shopee ได้ */
+const SP_FILLABLE: readonly DriftKey[] = ["title", "description", "desc_images", "images", "attrs", "price"];
 
 export function ListingDrawer({ listingId, onClose, onChanged, canPublish, matchTab }: {
   listingId: string | null;
@@ -148,6 +156,37 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const spCanEdit = canPublish && isShopee && detail?.status !== "removed";
   const spEdit = useShopeeEdit(sp, spCanEdit, useCallback((name: string) => { if (listingId) onChanged?.(listingId, { title: name }); setReload((n) => n + 1); }, [listingId, onChanged]));
   const spDisp = useShopeeDisplay(sp, useCallback(() => { if (listingId) onChanged?.(listingId, {}); setReload((n) => n + 1); }, [listingId, onChanged]));
+
+  // โหมด "เช็กกับระบบ" (ของกลาง ./listing-check · เจ้าของเลือก 2026-11-23 แบบ A) — เริ่มที่ Shopee · ต้องจับคู่สินค้าในระบบแล้ว
+  const chk = useListingCheck(listingId, {
+    available: isShopee && !!detail?.matched_parent_sku_id && detail?.status !== "removed",
+    canAdopt: can("products.platforms.edit"),
+  });
+  const [matchOpen, setMatchOpen] = useState(false);
+  // บันทึกขึ้นร้านเสร็จ → เทียบใหม่ (ป้ายจะได้ตรงกับของบนร้านล่าสุด)
+  const spWasSaving = useRef(false);
+  useEffect(() => {
+    if (spWasSaving.current && !spEdit.saving && chk.on) chk.reload();
+    spWasSaving.current = spEdit.saving;
+  }, [spEdit.saving, chk]);
+  /** ข้อ 2: เติมค่าระบบลงทุกช่องที่ไม่ตรง (ยังไม่ส่ง) */
+  const spUseAll = () => {
+    const s = chk.sys, v = sp.view;
+    if (!s || !v) return;
+    const open = (k: DriftKey) => { const it = chk.item(k); return !!it && it.state === "diff" && it.sendable && !chk.filled.has(k); };
+    const done: DriftKey[] = [];
+    if (open("title") && s.title) { spEdit.setName(s.title); done.push("title"); }
+    if (open("description")) { spEdit.setDescription(s.description); done.push("description"); }
+    if (open("desc_images") && s.descImageRefs.length) { spEdit.setDescImages(s.descImageRefs.slice(0, 12)); done.push("desc_images"); }
+    if (open("images") && s.imageRefs.length) { spEdit.setImages(s.imageRefs.slice(0, shopeeImagesMax(v))); done.push("images"); }
+    if (open("attrs") && s.attrs) { spEdit.setAttrs({ ...(spEdit.attrs ?? v.attrs), ...(s.attrs as TtsAttrState) }); done.push("attrs"); }
+    if (open("price") && spEdit.prices) { spEdit.setPrices(shopeeRowsWithSysPrices(v, spEdit.prices, s.prices)); done.push("price"); }
+    chk.markFilled(done);
+    if (done.length) toast.info(`เติมค่าระบบแล้ว ${done.length} เรื่อง — ตรวจแล้วกด “บันทึกขึ้น Shopee” (ยังไม่ส่ง · กดยกเลิกที่แก้เพื่อย้อน)`);
+  };
+  // ยกเลิกที่แก้ = ล้างป้าย "ใช้ตามระบบแล้ว" ด้วย
+  const spDirty = spEdit.dirty;
+  useEffect(() => { if (!spDirty) chk.clearFilled(); }, [spDirty]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -290,6 +329,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
         </div>
         {/* ดูหน้าร้าน / หลังร้าน — ทุกแพลตฟอร์ม (lib/platform-links) */}
         {detail.status !== "removed" && <ListingLinks platformCode={detail.platform_code} externalProductId={detail.external_product_id} shopRef={detail.shop_ref} className="mt-1.5" />}
+        {chk.available && <div className="mt-1.5"><CheckToggleButton chk={chk} /></div>}
         {/* ลงร้านอื่นจากรายการนี้ — ใช้ข้อมูลรายการนี้เป็นต้นแบบ (เฟส 1: ไป LINE) */}
         {detail.status !== "removed" && detail.matched_parent_sku_id && isCopySourcePlatform(detail.platform_code) && can("products.platforms.edit") && (
           <button type="button" onClick={() => setCopyOpen(true)} title="ใช้ชื่อ รายละเอียด รูป จากรายการนี้ ลงสินค้าเดียวกันบนร้านอื่น"
@@ -480,6 +520,10 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
           : (
             <div className="space-y-3">
               {header}
+              {/* โหมดเช็กกับระบบ: สรุป + ใช้ตามระบบทั้งหมด (ข้อ 2) · เรื่องที่เติมฟอร์มไม่ได้ (รูปตัวเลือก) → หน้าอัปเดตให้ตรง */}
+              <CheckSummaryBar chk={chk} fillable={SP_FILLABLE} onUseAll={spEdit.canEdit ? spUseAll : undefined}
+                extra={chk.item("variant_images")?.state === "diff" && chk.item("variant_images")?.sendable && canPublish
+                  ? <button type="button" onClick={() => setMatchOpen(true)} className="h-7 rounded-md border border-violet-300 bg-white px-2 text-violet-800 hover:bg-violet-50">รูปตัวเลือก → หน้าอัปเดตให้ตรง</button> : null} />
               <ScrollTabs activeKey={tab} className="border-b border-slate-200">
                 {tabs.map((t) => (
                   <button key={t.key} type="button" data-tab-key={t.key} onClick={() => setTab(t.key)} aria-pressed={tab === t.key}
@@ -487,11 +531,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : isShopee ? <ShopeeSpecsPanel state={sp} edit={spEdit} /> : null)
+                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : isShopee ? <ShopeeSpecsPanel state={sp} edit={spEdit} chk={chk} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} />)
+                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} chk={chk} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} chk={chk} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} chk={chk} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}
@@ -518,6 +562,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isTiktok && ttDisp.dialog}
       {isTiktok && ttPub.dialog}
       {isShopee && spEdit.dialog}
+      {matchOpen && listingId && <MatchSystemDialog open listingId={listingId} shopName="Shopee" canPublish={canPublish} onClose={() => setMatchOpen(false)} onSent={() => { sp.reload(); chk.reload(); }} />}
       {isShopee && spDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}

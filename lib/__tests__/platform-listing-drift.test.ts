@@ -193,3 +193,30 @@ describe("เว้นบรรทัด + รูปในรายละเอ�
     expect(t[0].sys.image).toBe("/api/r2-image?key=a&w=200");
   });
 });
+
+// ───────── ข้อมูลจำเพาะ (โหมดเช็กกับระบบในลิ้นชัก · 2026-11-23) ─────────
+import { compareAttrs, attrValSig } from "@/lib/platform-listing-drift";
+import { shopeeRowsWithSysPrices } from "@/lib/shopee-listing-edit";
+
+describe("ข้อมูลจำเพาะ (attrs)", () => {
+  const shopBase = { description: "", imageCount: 0, imageSig: "", variants: [] } as ShopValues;
+  it("เทียบเฉพาะช่องที่ระบบมีค่า · id ก่อนชื่อ · ไม่สนลำดับ", () => {
+    const s = sys({ attrs: { "1": [{ id: "555", name: "หนัง PU" }], "2": [{ name: "ไทย" }] }, attrNames: { "1": "วัสดุ", "2": "ประเทศ" } });
+    const same = compareAttrs(s, { ...shopBase, attrs: { "1": [{ id: "555" }], "2": [{ name: " ไทย " }], "9": [{ name: "อื่น" }] } });
+    expect(same.state).toBe("same");
+    const diff = compareAttrs(s, { ...shopBase, attrs: { "1": [{ id: "556", name: "หนังแท้" }] } });
+    expect(diff.state).toBe("diff");
+    expect(diff.rows).toEqual([{ label: "วัสดุ", before: "หนังแท้", after: "หนัง PU" }, { label: "ประเทศ", before: "(ว่าง)", after: "ไทย" }]);
+    expect(compareAttrs(sys(), { ...shopBase, attrs: {} }).state).toBe("unknown");
+    expect(attrValSig([{ name: "B" }, { id: "2" }])).toBe(attrValSig([{ id: "2" }, { name: "b" }]));
+  });
+  it("compareAll มีเรื่องข้อมูลจำเพาะเฉพาะร้านที่ระบบส่งค่ามา", () => {
+    expect(compareAll(sys(), { ...shopBase }, null).some((i) => i.key === "attrs")).toBe(false);
+    expect(compareAll(sys({ attrs: { "1": [{ name: "x" }] } }), { ...shopBase, attrs: {} }, null).some((i) => i.key === "attrs")).toBe(true);
+  });
+  it("ราคาระบบ → แถวราคาในฟอร์ม Shopee (จับด้วยรหัส SKU)", () => {
+    const view = { hasModel: true, itemSku: null, models: [{ modelId: "m1", sku: "LY22-BK" }, { modelId: "m2", sku: "ly22-cr" }] } as never;
+    const rows = [{ modelId: "m1", label: "ดำ", price: 990, promo: false }, { modelId: "m2", label: "ครีม", price: 990, promo: false }];
+    expect(shopeeRowsWithSysPrices(view, rows, [{ code: "LY22-BK", price: 1190.4 }, { code: "LY22-CR", price: null }]).map((r) => r.price)).toEqual([1190, 990]);
+  });
+});
