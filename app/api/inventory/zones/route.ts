@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { apiCan } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM } from "@/lib/cost-access";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +14,7 @@ export type ZoneSummary = {
 export type ZonesResponse = { data: ZoneSummary[]; cost_hidden?: boolean; error: string | null };
 
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "stock.view"); if (denied) return denied;   // ไม่มีสิทธิ์ = 401/403 (เดิม RPC โยน error → 500)
   const { data, error } = await supabaseFromRequest(request).rpc("erp_inventory_zone_summary");
   if (error) return NextResponse.json({ data: [], error: error.message } satisfies ZonesResponse, { status: 500 });
   const canCost = await apiCan(request, COST_PERM);   // ไม่มีสิทธิ์ดูราคาทุน → มูลค่าเป็น 0
