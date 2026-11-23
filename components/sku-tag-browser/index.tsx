@@ -45,7 +45,8 @@ import { MaterialRequestButton } from "@/components/material-request";
 import { ParentSkuCreateModal } from "@/components/parent-sku-create-modal";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
-import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
+import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
+import { Icon } from "@/components/icon";
 // drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
 // loading: โชว์ "กำลังเปิด…" ทันทีระหว่างโหลดก้อนโค้ดครั้งแรก (ไม่ให้รู้สึกค้าง)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), {
@@ -699,7 +700,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
               {childGroups.map((g) => (
                 <button key={g.id} onClick={() => openGroup(g)}
                   className="text-left rounded-xl border border-slate-200 bg-white p-3.5 hover:border-indigo-300 hover:shadow-sm transition">
-                  <div className="flex items-center justify-between"><span className="text-2xl">{g.icon || "📁"}</span><span className="text-slate-300">›</span></div>
+                  <div className="flex items-center justify-between"><span className="text-2xl inline-flex"><Icon value={g.icon || "i:folder"} /></span><span className="text-slate-300">›</span></div>
                   <p className="text-sm font-medium text-slate-800 mt-1">{g.name}</p>
                   <p className="text-[11px] text-slate-400">{t("กลุ่ม", "Group")}</p>
                 </button>

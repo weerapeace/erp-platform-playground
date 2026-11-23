@@ -13,6 +13,8 @@ import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 export function LabelBadge({ label }: { label?: Pick<MarketingSkuLabel, "name" | "name_en" | "icon" | "color"> }) {
   const t = useT();
@@ -20,7 +22,7 @@ export function LabelBadge({ label }: { label?: Pick<MarketingSkuLabel, "name" |
   return (
     <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
       style={{ background: `${label.color}1f`, color: label.color, border: `1px solid ${label.color}55` }}>
-      {label.icon && <span>{label.icon}</span>}{labelName(label)}
+      {label.icon && <span className="inline-flex"><Icon value={label.icon} /></span>}{labelName(label)}
     </span>
   );
 }
@@ -114,8 +116,7 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
                 className={`rounded-xl border p-2.5 data-[drag-over=true]:border-blue-500 data-[drag-over=true]:bg-blue-50 ${dragIdx === i ? "opacity-50" : ""} ${changed ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   {canEdit && <DragHandle {...handleProps(i)} title={t("ลากเพื่อเรียงลำดับ", "Drag to reorder")} />}
-                  <input value={d.icon} onChange={(e) => set({ icon: e.target.value })} disabled={!canEdit} maxLength={8} placeholder="🔥"
-                    className={`${input} w-12 text-center`} title={t("ไอคอน (อีโมจิ)", "Icon (emoji)")} />
+                  <IconField value={d.icon} onChange={(v) => set({ icon: v })} disabled={!canEdit} suggestFrom={d.name} title={t("ไอคอน", "Icon")} />
                   <input value={d.name} onChange={(e) => set({ name: e.target.value })} disabled={!canEdit} maxLength={60} placeholder={t("ชื่อป้าย (ไทย)", "Label name (Thai)")}
                     className={`${input} flex-1 min-w-[10rem]`} title={t("ชื่อป้าย (ภาษาไทย)", "Label name (Thai)")} />
                   <input value={d.name_en} onChange={(e) => set({ name_en: e.target.value })} disabled={!canEdit} maxLength={60} placeholder={t("English (ไม่บังคับ)", "English (optional)")}
@@ -144,8 +145,7 @@ export function LabelListEditor({ kind, items, canEdit, onChanged, onDirtyChange
             <div className="rounded-xl border border-dashed border-slate-300 p-2.5">
               <div className="text-xs font-medium text-slate-500 mb-2">＋ {t("เพิ่มป้ายใหม่", "Add a new label")}</div>
               <div className="flex flex-wrap items-center gap-2">
-                <input value={adding.icon} onChange={(e) => setAdding({ ...adding, icon: e.target.value })} maxLength={8} placeholder="⭐"
-                  className={`${input} w-12 text-center`} />
+                <IconField value={adding.icon} onChange={(v) => setAdding((a) => ({ ...a, icon: v }))} suggestFrom={adding.name} />
                 <input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} maxLength={60} placeholder={t("ชื่อป้าย (ไทย) เช่น สินค้าใหม่", "Label name (Thai) e.g. สินค้าใหม่")}
                   onKeyDown={(e) => { if (e.key === "Enter") void addRow(); }} className={`${input} flex-1 min-w-[10rem]`} />
                 <input value={adding.name_en} onChange={(e) => setAdding({ ...adding, name_en: e.target.value })} maxLength={60} placeholder={t("English เช่น New Arrival", "English e.g. New Arrival")}

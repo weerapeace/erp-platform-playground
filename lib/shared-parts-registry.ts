@@ -78,6 +78,7 @@ export const SAME_JOB_LABEL: Record<string, string> = {
   "markup": "วาดรูปทรง / ข้อความบนรูป",
   "image-box": "ลากกรอบ / จุดบนรูป",
   "drawing-board": "กระดานวาด / แผนผัง",
+  "icon-pick": "เลือกไอคอน",
 };
 
 /**
@@ -96,6 +97,7 @@ export const JOB_VERDICT_LABEL: Record<JobVerdict, { label: string; hint: string
 };
 
 export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string }> = {
+  "icon-pick": { verdict: "merge", why: "2026-11-23 รวมแล้ว: ช่องไอคอนทุกที่ใช้ IconField · IconPicker ชื่อเดิมเป็นแค่ทางผ่านไป IconField · ป๊อปใหญ่ IconPickerModal เป็นส่วน \"ดูทั้งหมด\" ของ IconField (ใช้ตรงที่ /admin/icons)" },
   "select": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: แบบที่ 2 พิมพ์แล้วสั่งทำทันที + ปักดาวโปรด (ใช้ย้ายหมวดในหน้าจัดเว็บร้าน) · ตัวหลักเป็นช่องเลือกที่เก็บค่าในฟอร์ม" },
   "popup": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: ป๊อปฝังหน้าอื่นต้องใช้พื้นที่เต็มไม่มีขอบ มีปุ่มเปิดเต็มจอ และกันเมาส์หลุดตอนลาก ซึ่งป๊อปอัปกลางยังไม่มี · ใช้ผ่าน EmbedModal เท่านั้น" },
   "file-field": { verdict: "merge", why: "ช่องหลายไฟล์ใช้จุดเดียว และยังไม่ทำตามกฎที่เก็บไฟล์ ควรให้ช่องไฟล์เดี่ยวรับหลายไฟล์ได้แทน" },
@@ -1299,10 +1301,29 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ตอนสร้างช่องอ้างอิง เลือกว่าจะโชว์คอลัมน์ไหนของตารางปลายทาง (เลือกจากของจริง ไม่ต้องพิมพ์)",
   },
   {
-    key: "icon-picker", label: "เลือกไอคอน (อีโมจิ)", code: "IconPicker", category: "pick",
+    key: "icon-field", label: "ช่องเลือกไอคอน", code: "IconField", category: "pick",
+    source: { path: "components/icon/icon-field" },
+    what: "ช่องเลือกไอคอนเส้นกลางแบบดรอปดาวน์ติดช่อง: ค้นหาไทย/อังกฤษ · แนะนำจากชื่อ · ล่าสุด/ยอดนิยม · เลือกสีเส้น · ดูทั้งหมดแบ่งหมวด · ค่าอีโมจิเก่าโชว์ได้+แนะนำไอคอนใกล้เคียง · มีย้อนกลับ",
+    when: "ทุกช่องที่ให้ผู้ใช้ตั้งไอคอน (แอป · เมนู · หมวด · ประเภท · ป้าย · การ์ด) — ค่าที่ได้วาดด้วย Icon",
+    notWhen: "ห้ามทำช่องพิมพ์อีโมจิเอง · เว็บร้านใช้ SiteIconPicker (ชุดไอคอนร้าน) · ไอคอนติดตั้งแอป (PWA) ต้องเป็นรูป ใช้ ImageInput",
+    doc: "icon-system.md",
+    sameJob: "icon-pick", primary: true,
+  },
+  {
+    key: "icon-picker-modal", label: "ป๊อปเลือกไอคอน (ทั้งหมด)", code: "IconPickerModal", category: "pick",
+    source: { path: "components/icon/icon-picker-modal" },
+    what: "ป๊อปใหญ่เลือกไอคอนเส้นทั้งชุดแบ่งหมวด + อัปโหลดไอคอนของฉัน + แถบสี — ปุ่ม \"ดูทั้งหมด\" ของ IconField เปิดตัวนี้",
+    when: "หน้าตั้งค่าไอคอนทั้งระบบ (/admin/icons) หรือที่ต้องอัปโหลดไอคอนของฉันด้วย",
+    notWhen: "ช่องไอคอนทั่วไปในฟอร์ม ให้ใช้ IconField (มีป๊อปนี้ให้อยู่แล้ว)",
+    doc: "icon-system.md",
+    sameJob: "icon-pick",
+  },
+  {
+    key: "icon-picker", label: "เลือกไอคอน (ชื่อเดิม)", code: "IconPicker", category: "pick",
     source: { path: "components/icon-picker" },
-    what: "เลือกอีโมจิเป็นไอคอนของโมดูล/แท็ก",
-    notWhen: "หน้าจอใหม่ห้ามใช้อีโมจิ ให้ใช้ไอคอนกลาง (Icon + ตัวเลือกไอคอนในชุด icon)",
+    what: "ชื่อเดิมของช่องเลือกไอคอน (เคยเป็นอีโมจิ) — ตอนนี้ส่งต่อไป IconField ทั้งหมด โค้ดเดิมได้ไอคอนเส้นอัตโนมัติ",
+    notWhen: "หน้าใหม่ให้ใช้ IconField ตรง ๆ",
+    sameJob: "icon-pick", replacedBy: "icon-field",
   },
   {
     key: "site-icon-picker", label: "เลือกไอคอนเว็บร้าน", code: "SiteIconPicker", category: "pick",

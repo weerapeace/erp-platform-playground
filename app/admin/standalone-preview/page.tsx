@@ -7,6 +7,8 @@ import { useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 type AppGroup = { id: string; key: string; label: string; icon: string | null; icon_url: string | null };
 
@@ -16,7 +18,7 @@ function AppIcon({ app, cls = "text-lg" }: { app: AppGroup; cls?: string }) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(app.icon_url)}`} alt="" className="w-6 h-6 rounded object-contain shrink-0" />;
   }
-  return <span className={`${cls} shrink-0`}>{app.icon || "🧩"}</span>;
+  return <span className={`${cls} shrink-0 inline-flex`}><Icon value={app.icon || "i:puzzle"} /></span>;
 }
 
 // china-pay มีหน้า custom; ที่เหลือใช้เชลล์กลาง /app/<key>
@@ -99,20 +101,14 @@ export default function StandalonePreviewPage() {
             {/* แก้ไอคอนของแอปที่เลือก */}
             {selApp && (
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-2.5 space-y-2">
-                <div className="text-[11px] font-medium text-amber-700 flex items-center gap-1.5">🎨 ไอคอนแอป: <AppIcon app={selApp} cls="text-base" /> {selApp.label}</div>
+                <div className="text-[11px] font-medium text-amber-700 flex items-center gap-1.5"><Icon value="i:palette" /> ไอคอนแอป: <AppIcon app={selApp} cls="text-base" /> {selApp.label}</div>
                 <div className="flex items-center gap-2">
                   <ImageInput compact value={selApp.icon_url ?? null} onChange={(key) => patchApp(selApp.id, { icon_url: key })} folder="app-icons" />
                   <div className="text-[11px] text-slate-500 leading-tight">อัปรูปไอคอน<br />(ลากวาง/วาง/เลือกจากคลัง)</div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
-                    value={selApp.icon ?? ""}
-                    onChange={(e) => setApps((as) => as.map((a) => (a.id === selApp.id ? { ...a, icon: e.target.value } : a)))}
-                    onBlur={(e) => patchApp(selApp.id, { icon: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                    placeholder="🛒"
-                    className="w-16 h-9 px-2 text-center text-lg border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                  <div className="text-[11px] text-slate-500 leading-tight">หรือใช้อิโมจิ<br />(ใช้เมื่อไม่มีรูป)</div>
+                  <IconField value={selApp.icon ?? ""} onChange={(v) => patchApp(selApp.id, { icon: v || null })} suggestFrom={selApp.label} />
+                  <div className="text-[11px] text-slate-500 leading-tight">หรือเลือกไอคอน<br />(ใช้เมื่อไม่มีรูป)</div>
                 </div>
               </div>
             )}

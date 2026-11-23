@@ -33,6 +33,8 @@ import { BadgeEditor } from "./badge-editor";
 import { WorkMode, useWorkJobs } from "./work-mode";
 import { WorkJobModal } from "./work-job-modal";
 import { kindInfo } from "@/lib/marketing/work-jobs";
+import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 // table/grid = ดูและติดป้าย · work = 🛠 โหมดทำงาน (งานเป็นชุด + เช็กลิสต์ต่อรุ่น)
 const VIEWS = ["table", "grid", "work"] as const;
@@ -263,7 +265,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
 
   const labelOptions = useMemo(() => [
     { value: "", label: t("— ไม่มีป้าย —", "— No label —") },
-    ...labels.filter((l) => l.is_active).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon ?? undefined })),
+    ...labels.filter((l) => l.is_active).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon && isLegacyIconValue(l.icon) ? l.icon : undefined })),
   ], [labels, t]);
   const groupOrder = useCallback((name: string) => labels.find((l) => labelName(l) === name)?.sort_order ?? Number.MAX_SAFE_INTEGER, [labels]);
 
@@ -391,7 +393,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                     <button key={c.key} type="button" onClick={() => setLabelFilter(c.key)}
                       className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}>
                       {c.l && <span className="w-2 h-2 rounded-full" style={{ background: c.l.color }} />}
-                      {c.l?.icon && <span>{c.l.icon}</span>}
+                      {c.l?.icon && <span className="inline-flex"><Icon value={c.l.icon} /></span>}
                       {c.text}
                       <span className={on ? "text-slate-300" : "text-slate-400"}>{c.n.toLocaleString("th-TH")}</span>
                     </button>
@@ -418,7 +420,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 <select value={badgeFilter} onChange={(e) => setBadgeFilter(e.target.value)} aria-label={t("กรองป้ายเสริม", "Filter badges")}
                   className={`h-9 rounded-lg border px-2 text-sm ${badgeFilter ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700"}`}>
                   <option value="">{t("ป้ายเสริม: ทั้งหมด", "Badges: all")}</option>
-                  {badges.map((b) => <option key={b.id} value={b.id}>{b.icon ? `${b.icon} ` : ""}{labelName(b)} ({badgeUsage.get(b.id) ?? 0})</option>)}
+                  {badges.map((b) => <option key={b.id} value={b.id}>{b.icon && isLegacyIconValue(b.icon) ? `${b.icon} ` : ""}{labelName(b)} ({badgeUsage.get(b.id) ?? 0})</option>)}
                   <option value="__none">{t("ยังไม่มีป้ายเสริม", "No badge yet")}</option>
                 </select>
               )}
@@ -472,7 +474,7 @@ export function MarketingSkusView({ canManage, canLabels }: { canManage: boolean
                 {badges.length > 0 && (
                   <div className="w-44 text-slate-800">
                     <SearchableSelect value="__pick" disabled={busy}
-                      options={[{ value: "__pick", label: t("＋ ติดป้ายเสริม", "＋ Add badge") }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: labelName(b), badge: b.icon ?? undefined }))]}
+                      options={[{ value: "__pick", label: t("＋ ติดป้ายเสริม", "＋ Add badge") }, ...badges.filter((b) => b.is_active).map((b) => ({ value: b.id, label: labelName(b), badge: b.icon && isLegacyIconValue(b.icon) ? b.icon : undefined }))]}
                       onChange={(v) => { if (v !== "__pick") void addBadgeBulk(selIds, v); }} />
                   </div>
                 )}

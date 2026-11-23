@@ -9,6 +9,8 @@ import { LoadingState } from "@/components/state-views";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { useAuth } from "@/components/auth";
@@ -45,8 +47,8 @@ function StepFormModal({ initial, onSave, onClose }: { initial: StepDraft; onSav
       </div>}>
       <div className="space-y-3">
         <div className="flex gap-2">
-          <label className="w-16"><span className="text-xs text-slate-500">{t("ไอคอน", "Icon")}</span>
-            <input value={d.icon ?? ""} onChange={(e) => set("icon", e.target.value)} placeholder="📥" className={inCls + " text-center"} /></label>
+          <div className="shrink-0"><span className="block text-xs text-slate-500">{t("ไอคอน", "Icon")}</span>
+            <IconField value={d.icon ?? ""} onChange={(v) => set("icon", v)} suggestFrom={d.title ?? ""} /></div>
           <label className="flex-1"><span className="text-xs text-slate-500">{t("ชื่อขั้นตอน", "Step name")} *</span>
             <input value={d.title ?? ""} onChange={(e) => set("title", e.target.value)} className={inCls} /></label>
         </div>
@@ -81,8 +83,8 @@ function FlowFormModal({ initial, onSave, onClose }: { initial: FlowDraft; onSav
       </div>}>
       <div className="space-y-3">
         <div className="flex gap-2">
-          <label className="w-16"><span className="text-xs text-slate-500">{t("ไอคอน", "Icon")}</span>
-            <input value={d.icon ?? ""} onChange={(e) => setD((p) => ({ ...p, icon: e.target.value }))} placeholder="🎨" className={inCls + " text-center"} /></label>
+          <div className="shrink-0"><span className="block text-xs text-slate-500">{t("ไอคอน", "Icon")}</span>
+            <IconField value={d.icon ?? ""} onChange={(v) => setD((p) => ({ ...p, icon: v }))} suggestFrom={d.name ?? ""} /></div>
           <label className="flex-1"><span className="text-xs text-slate-500">{t("ชื่องาน", "Job name")} *</span>
             <input value={d.name ?? ""} onChange={(e) => setD((p) => ({ ...p, name: e.target.value }))} className={inCls} /></label>
         </div>
@@ -173,7 +175,7 @@ export default function WorkFlowsGuidePage() {
               <button key={f.flow_key} onClick={() => setSel(f.flow_key)}
                 className={`px-3.5 py-1.5 rounded-full text-sm border transition-colors ${sel === f.flow_key
                   ? "bg-indigo-50 text-indigo-700 border-indigo-200 font-medium" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>
-                {f.icon} {f.name}
+                {f.icon && <Icon value={f.icon} className="mr-1" />}{f.name}
               </button>
             ))}
             {edit && <button onClick={() => setFlowModal({})} className="px-3 py-1.5 rounded-full text-sm border border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50">＋ {t("เพิ่มงาน", "Add job")}</button>}
@@ -204,7 +206,7 @@ export default function WorkFlowsGuidePage() {
                         <button onClick={() => moveStep(i, 1)} disabled={i === cur.steps.length - 1} className="text-slate-400 hover:text-indigo-600 disabled:opacity-30 leading-none">▼</button>
                       </div>
                       <span className="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 text-xs flex items-center justify-center shrink-0">{s.step_no}</span>
-                      <span className="text-lg">{s.icon}</span>
+                      <span className="text-lg inline-flex"><Icon value={s.icon} /></span>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-slate-800 truncate">{s.title}</div>
                         <div className="text-xs text-slate-400 truncate">{s.storage_label} {s.link_url ? `· ${s.link_url}` : ""}</div>

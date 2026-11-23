@@ -19,6 +19,7 @@ import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { IconPicker } from "@/components/icon-picker";
+import { Icon } from "@/components/icon";
 import { TableLayoutPanel } from "@/components/table-layout-panel";
 import {
   STANDARD_ROW_ACTION_ICONS,
@@ -427,7 +428,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
         <div className="grid grid-cols-1 sm:grid-cols-[80px_1fr] gap-3">
           <div>
             <label className={labelCls}>ไอคอน</label>
-            <div className="mt-0.5"><IconPicker value={icon} onChange={setIcon} /></div>
+            <div className="mt-0.5"><IconPicker value={icon} onChange={setIcon} suggestFrom={label} /></div>
           </div>
           <div>
             <label className={labelCls}>ชื่อโมดูล (ที่โชว์ในเมนู)</label>
@@ -501,7 +502,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
                   className={`flex items-center gap-2 px-3 h-10 rounded-lg border text-sm transition-colors ${
                     on ? "border-blue-400 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"
                   }`}>
-                  <span>{a.icon ?? "📦"}</span>
+                  <span><Icon value={a.icon || "📦"} /></span>
                   <span className="flex-1 text-left truncate">{a.label}</span>
                   {on && <span className="text-blue-500">✓</span>}
                 </button>

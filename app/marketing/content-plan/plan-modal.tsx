@@ -20,11 +20,13 @@ import { appendBriefTemplate } from "@/lib/brief-templates";
 import { noteToHtml, noteToText, isEmptyNote } from "@/lib/rich-note";
 import { ERPDateTime24 } from "@/components/form";
 import { PlatformIcon } from "@/components/platform-icon";
+import { Icon } from "@/components/icon";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useToast, usePushToast } from "@/components/toast";
 import { createContent, updateContent, deleteContent, createTask, POST_TYPES, splitPostTypes, joinPostTypes, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META, placementId, parsePlacement, platformsFromPlacements, type PlacementType } from "@/lib/marketing/content-plan";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 /** is_active = เปิดอยู่ในหน้าแพลตฟอร์มกลาง (ปิดอยู่ก็ยังเลือกในแผนได้ ถ้าติ๊กไว้ในตั้งค่าหน้าแผน) */
 export type PlatformOpt = { value: string; label: string; color?: string | null; icon?: string | null; icon_key?: string | null; is_active?: boolean };
@@ -194,7 +196,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
       <div className="min-w-0">{body}{hint && <div className="mt-1 text-[11px] text-slate-400">{hint}</div>}</div>
     </div>
   );
-  const pillarOptions = [{ value: "", label: t("— ไม่ระบุแนว —", "— No pillar —") }, ...pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => ({ value: p.id, label: labelName(p), badge: p.icon ?? undefined }))];
+  const pillarOptions = [{ value: "", label: t("— ไม่ระบุแนว —", "— No pillar —") }, ...pillars.filter((p) => p.is_active || p.id === d.pillar_id).map((p) => ({ value: p.id, label: labelName(p), badge: p.icon && isLegacyIconValue(p.icon) ? p.icon : undefined }))];
   const goalOptions = [{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...CONTENT_GOALS.map((g) => ({ value: g.key, label: g.label, badge: g.icon }))];
   const brandOptions = [{ value: "", label: t("— ไม่ระบุแบรนด์ —", "— No brand —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))];
   const pillar = d.pillar_id ? pillars.find((p) => p.id === d.pillar_id) : undefined;
@@ -279,7 +281,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
                         onClick={() => setD((x) => ({ ...x, placements: all ? x.placements.filter((id) => !ids.includes(id)) : [...x.placements, ...ids.filter((id) => !x.placements.includes(id))] }))}
                         className={`w-24 flex-shrink-0 truncate rounded-md px-1.5 py-1 text-left text-xs transition-colors enabled:hover:bg-slate-100 ${all ? "font-semibold text-slate-900" : n > 0 ? "font-medium text-slate-700" : "text-slate-500"}`}>
                         <span className={`mr-1 inline-block h-3 w-3 rounded-[3px] border align-[-1px] ${all ? "border-slate-900 bg-slate-900" : n > 0 ? "border-slate-500 bg-slate-300" : "border-slate-300"}`} />
-                        {t.icon ? `${t.icon} ` : ""}{t.label}
+                        {t.icon && <Icon value={t.icon} className="mr-1" />}{t.label}
                       </button>
                     );
                   })()}

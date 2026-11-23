@@ -15,6 +15,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { IconPicker } from "@/components/icon-picker";
+import { Icon } from "@/components/icon";
 import { NewAppRequestModal } from "./new-app-request-modal";
 
 type MenuItem = {
@@ -182,7 +183,7 @@ export default function MiscPortalPage() {
                   {imgUrl(m.icon_url)
                     ? <img src={imgUrl(m.icon_url)!} alt="" className="w-14 h-14 rounded-2xl object-cover border border-pink-100"
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                    : <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center text-3xl">{m.icon ?? "🧩"}</div>}
+                    : <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center text-3xl"><Icon value={m.icon || "🧩"} /></div>}
                   <div className="text-sm font-semibold text-slate-700 text-center leading-tight">{m.label}</div>
                   {!m.is_active && <span className="text-[10px] text-slate-400">(ซ่อนอยู่)</span>}
 
@@ -230,9 +231,9 @@ export default function MiscPortalPage() {
               {/* พรีวิว */}
               {imgUrl(form.icon_url)
                 ? <img src={imgUrl(form.icon_url)!} alt="" className="w-12 h-12 rounded-xl object-cover border border-pink-100" />
-                : <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center text-2xl">{form.icon || "🧩"}</div>}
+                : <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-pink-100 to-rose-100 flex items-center justify-center text-2xl"><Icon value={form.icon || "🧩"} /></div>}
               <div className="flex items-center gap-2">
-                <IconPicker value={form.icon} onChange={(v) => setForm({ ...form, icon: v, icon_url: null })} />
+                <IconPicker value={form.icon} onChange={(v) => setForm({ ...form, icon: v, icon_url: null })} suggestFrom={form.label} />
                 <label className="h-10 px-3 leading-10 rounded-md border border-pink-200 text-sm text-rose-500 cursor-pointer hover:bg-pink-50">
                   อัปโหลดรูป
                   <input type="file" accept="image/*" className="hidden"

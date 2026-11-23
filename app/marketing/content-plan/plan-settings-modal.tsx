@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { PlatformIcon } from "@/components/platform-icon";
+import { IconField } from "@/components/icon/icon-field";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
@@ -199,8 +200,7 @@ export function PlanSettingsModal({ open, onClose, initialTab = "platforms", all
                           <button type="button" onClick={() => movePtype(i, 1)} disabled={i === ptypes.length - 1} className="h-3.5 text-[10px] leading-none text-slate-400 hover:text-slate-700 disabled:opacity-20" aria-label={tr("เลื่อนลง", "Move down")}>▼</button>
                         </span>
                       )}
-                      <input value={t.icon ?? ""} onChange={(e) => setPtype(i, { icon: e.target.value.slice(0, 8) || null })} disabled={!canEdit} placeholder="🏪" title={tr("ไอคอน (อีโมจิ)", "Icon (emoji)")}
-                        className="h-8 w-10 rounded-md border border-slate-200 text-center text-sm disabled:bg-slate-50" />
+                      <IconField size="sm" value={t.icon ?? ""} onChange={(v) => setPtype(i, { icon: v || null })} disabled={!canEdit} suggestFrom={t.label} title={tr("ไอคอน", "Icon")} />
                       <input value={t.label} onChange={(e) => setPtype(i, { label: e.target.value.slice(0, 40) })} disabled={!canEdit} placeholder={tr("ชื่อประเภท เช่น แต่งร้าน", "Type name, e.g. Shop decor")}
                         className={`h-8 w-36 rounded-md border px-2 text-sm disabled:bg-slate-50 ${t.label.trim() ? "border-slate-200" : "border-red-300"}`} />
                       <div className="flex flex-1 flex-wrap gap-1">

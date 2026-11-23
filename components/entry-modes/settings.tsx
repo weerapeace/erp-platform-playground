@@ -12,6 +12,8 @@ import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { SaveBar } from "@/components/save-bar";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 import { ENTRY_MODE_DEFAULTS, normalizeEntryModes, type EntryMode, type EntryModeItem, type EntryModeLevel } from "@/lib/entry-modes";
 import type { EntryModeField } from "./index";
 
@@ -66,7 +68,7 @@ export function EntryModeSettings({
   const modeDrag = useDragReorder((from, to) => { setDraft((d) => moveItem(d, from, to)); setSel(to); setDirty(true); }, { group: "em-modes" });
 
   const addMode = () => {
-    const n: EntryMode = { key: `m${Date.now().toString(36)}`, label: tr("โหมดใหม่", "New mode"), icon: "📝", items: [] };
+    const n: EntryMode = { key: `m${Date.now().toString(36)}`, label: tr("โหมดใหม่", "New mode"), icon: "i:file-text", items: [] };
     setDraft((d) => [...d, n]); setSel(draft.length); setDirty(true);
   };
   const pickable = fields.filter((f) => !NOT_PICKABLE.has(f.type ?? "") && !(cur?.items ?? []).some((it) => it.field === f.key)
@@ -104,7 +106,7 @@ export function EntryModeSettings({
             <div key={m.key} {...modeDrag.rowProps(i)} onClick={() => setSel(i)}
               className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md text-sm cursor-pointer ${i === sel ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"} ${modeDrag.rowCls(i)}`}>
               {!ro && <DragHandle {...modeDrag.handleProps(i)} />}
-              <span className="w-5 text-center">{m.icon || "📝"}</span>
+              <span className="w-5 inline-flex justify-center"><Icon value={m.icon || "i:file-text"} /></span>
               <span className="flex-1 min-w-0 truncate">{m.label}</span>
               <span className="text-[10.5px] text-slate-400 tabular-nums">{m.items.length}</span>
             </div>
@@ -118,8 +120,8 @@ export function EntryModeSettings({
         ) : (
           <div className="space-y-3 min-w-0">
             <div className="grid grid-cols-[64px_minmax(0,1fr)] sm:grid-cols-[64px_minmax(0,1fr)_minmax(0,1fr)] gap-2">
-              <label className="block"><span className="text-[11px] text-slate-500">{tr("ไอคอน", "Icon")}</span>
-                <input disabled={ro} value={cur.icon ?? ""} onChange={(e) => patchMode({ icon: e.target.value.slice(0, 4) })} className={`${inputCls} text-center`} /></label>
+              <div className="block"><span className="block text-[11px] text-slate-500">{tr("ไอคอน", "Icon")}</span>
+                <IconField disabled={ro} value={cur.icon ?? ""} onChange={(v) => patchMode({ icon: v })} suggestFrom={cur.label} /></div>
               <label className="block"><span className="text-[11px] text-slate-500">{tr("ชื่อโหมด", "Mode name")}</span>
                 <input disabled={ro} value={cur.label} onChange={(e) => patchMode({ label: e.target.value })} className={inputCls} placeholder={tr("เช่น ลงขายเว็บไซต์", "e.g. List on website")} /></label>
               <div className="col-span-2 sm:col-span-1"><span className="text-[11px] text-slate-500">{tr("ใครเห็นโหมดนี้ (ไม่เลือก = ทุกคน)", "Who sees it (none = everyone)")}</span>

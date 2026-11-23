@@ -30,6 +30,7 @@ import { DEFAULT_PLACEMENTS, type PlanTarget, type PlacementType } from "@/lib/m
 import { WeekView, MonthView, BoardView, BacklogPanel } from "./plan-views";
 import { RefreshPanel, useRefreshRules, refreshRuleLabel } from "./plan-refresh";
 import { refreshStatuses, bangkokDateKey, placementId, type RefreshStatus } from "@/lib/marketing/content-plan";
+import { Icon } from "@/components/icon";
 
 // รายละเอียดเต็ม/แคปชั่น = ContentDrawer ตัวเดิม (โหลดเมื่อเปิด)
 const ContentDrawer = dynamic(() => import("@/app/tasks/content/content-drawer").then((m) => m.ContentDrawer), { ssr: false });
@@ -301,7 +302,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
                   <button key={p.id} type="button" onClick={() => setPillarFilter(on ? "" : p.id)}
                     className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs ${on ? "text-white" : "bg-white text-slate-600 hover:border-slate-400"}`}
                     style={on ? { background: p.color, borderColor: p.color } : { borderColor: `${p.color}88` }}>
-                    {p.icon && <span>{p.icon}</span>}{labelName(p)}<span className={on ? "text-white/80" : "text-slate-400"}>{n}</span>
+                    {p.icon && <span className="inline-flex"><Icon value={p.icon} /></span>}{labelName(p)}<span className={on ? "text-white/80" : "text-slate-400"}>{n}</span>
                   </button>
                 );
               })}

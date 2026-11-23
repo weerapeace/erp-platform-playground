@@ -28,6 +28,8 @@ import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
 import { appHomeHref, appPickState, choosePageApp, visibleAppMenus } from "@/lib/app-orbit";
 import { clearAppPick, initialActiveApp, isFullWidthApp, pendingAppPick, pickActiveApp, rememberLastApp, setTabActiveApp } from "@/lib/active-app";
 import { Icon } from "@/components/icon";
+import { isLegacyIconValue, splitIconColor } from "@/lib/icon-registry";
+import { erpIconDef } from "@/lib/erp-icons";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
@@ -656,8 +658,13 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
     let href: string | null = null;
     if (ag?.icon_url) href = `/api/r2-image?key=${encodeURIComponent(ag.icon_url)}&w=64`;
     else if (ag?.icon) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="32" y="34" font-size="52" text-anchor="middle" dominant-baseline="central">${ag.icon}</text></svg>`;
-      href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+      // ไอคอนเส้นกลาง ("i:key#สี") วาดเป็นเส้น · อีโมจิเดิมวาดเป็นตัวอักษร · แบบอื่น (ไอคอนของฉัน) ข้าม
+      const { value: v, color } = splitIconColor(ag.icon);
+      const def = v.startsWith("i:") ? erpIconDef(v.slice(2)) : null;
+      const svg = def
+        ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color ?? "#334155"}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${def.d.map((d) => `<path d="${d}"/>`).join("")}</svg>`
+        : isLegacyIconValue(ag.icon) ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="32" y="34" font-size="52" text-anchor="middle" dominant-baseline="central">${ag.icon}</text></svg>` : null;
+      if (svg) href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
     }
     if (!href) return;
     let link = document.querySelector<HTMLLinkElement>("link#dynamic-app-favicon");

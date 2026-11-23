@@ -28,7 +28,7 @@ function validatePlacements(v: unknown): string | null {
     if (keys.has(t.key)) return "รหัสประเภทการลงซ้ำ";
     keys.add(t.key);
     if (typeof t.label !== "string" || !t.label.trim() || t.label.length > 40) return "ใส่ชื่อประเภทการลง (ไม่เกิน 40 ตัวอักษร)";
-    if (t.icon != null && (typeof t.icon !== "string" || t.icon.length > 8)) return "ไอคอนยาวเกินไป";
+    if (t.icon != null && (typeof t.icon !== "string" || t.icon.length > 64)) return "ไอคอนยาวเกินไป";
     if (!Array.isArray(t.platforms) || t.platforms.length === 0 || t.platforms.some((p) => typeof p !== "string" || !/^[a-z0-9_-]{1,60}$/i.test(p)))
       return `ประเภท "${t.label}" ต้องเลือกอย่างน้อย 1 ช่องทาง`;
   }

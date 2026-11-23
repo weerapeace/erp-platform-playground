@@ -16,6 +16,7 @@ import { KanbanSettingsControls } from "./kanban-settings";
 import { useCreativeStatuses } from "./use-statuses";
 import type { HoverField } from "./task-hover-card";
 import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
@@ -796,7 +797,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
                     : <span className="text-lg inline-flex"><Icon value={c.icon} /></span>}
                 </div>
                 <input value={c.label ?? ""} onChange={(e) => setCard(k, { label: e.target.value || null })} placeholder={CARD_LABEL[k]()} className="text-sm font-medium w-28 shrink-0 h-7 px-1.5 border border-slate-200 rounded bg-white" title={t("ชื่อการ์ด (เว้นว่าง = ค่าเริ่มต้น)", "Card label (blank = default)")} />
-                <input value={c.icon} onChange={(e) => setCard(k, { icon: e.target.value })} placeholder="emoji" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded bg-white" title={t("ไอคอน emoji", "emoji icon")} />
+                <IconField size="sm" value={c.icon} onChange={(v) => setCard(k, { icon: v })} suggestFrom={c.label ?? CARD_LABEL[k]()} title={t("ไอคอน", "Icon")} />
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `c:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
                     {busy === `c:${k}` ? "…" : <><Icon value="i:upload" className="mr-1" />{t("ไอคอน", "Icon")}</>}

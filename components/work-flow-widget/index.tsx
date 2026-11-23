@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import type { WorkFlow, WorkFlowStep } from "@/app/api/work-flows/route";
 
 // ชนิดที่เก็บ → ไอคอน + สี
@@ -36,7 +37,7 @@ export function WorkFlowSteps({ steps }: { steps: WorkFlowStep[] }) {
               <div className="w-52 shrink-0 bg-white border border-slate-200 rounded-xl p-3.5 flex flex-col">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 text-xs flex items-center justify-center shrink-0">{s.step_no}</span>
-                  <span className="text-lg">{s.icon}</span>
+                  <span className="text-lg inline-flex"><Icon value={s.icon} /></span>
                 </div>
                 <div className="text-sm font-medium text-slate-800 mb-1.5">{s.title}</div>
                 {hasFiles ? (
@@ -73,7 +74,7 @@ export function WorkFlowWidget({ flowKey, title }: { flowKey: string; title?: st
   return (
     <div className="bg-slate-50/60 border border-slate-200 rounded-xl p-3">
       <div className="flex items-center gap-2 mb-2">
-        <span>{flow.icon}</span>
+        <span className="inline-flex"><Icon value={flow.icon} /></span>
         <span className="text-sm font-medium text-slate-700">{title ?? `ขั้นตอน${flow.name} — เก็บอะไรไว้ที่ไหน`}</span>
         <a href="/master/work-flows" className="text-[11px] text-indigo-600 hover:underline ml-auto whitespace-nowrap">คู่มือทั้งหมด →</a>
       </div>

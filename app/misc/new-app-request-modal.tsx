@@ -11,6 +11,9 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 const DATA_PRESETS = [
   "ชื่อ / หัวข้อ", "รหัส / เลขที่", "วันที่", "จำนวน", "ราคา / เงิน", "สถานะ", "ผู้รับผิดชอบ",
@@ -22,7 +25,6 @@ const FEATURE_OPTIONS = [
   "ปฏิทิน / ไทม์ไลน์", "แดชบอร์ด / กราฟสรุป", "บาร์โค้ด / QR", "มอบหมายงาน",
   "หลายขั้นตอน (สถานะ / workflow)", "คอมเมนต์ / แชท", "ประวัติการแก้ไข", "ใช้บนมือถือ (PWA)",
 ];
-const EMOJI_QUICK = ["🧩", "📋", "📝", "📦", "💰", "🧮", "📅", "👕", "🏷️", "🚚", "🧾", "⭐", "🔧", "📊"];
 
 const PICKER_THRESHOLD = 6; // ตัวเลือกเกินจำนวนนี้ → เปลี่ยนเป็นปุ่มเปิด popup แทนโชว์ชิปเรียง
 const DRAFT_KEY = "misc_new_app_draft"; // เก็บร่างต่อ user (user_ui_prefs) — บันทึกอัตโนมัติ + โหลดกลับตอนเปิด
@@ -195,7 +197,7 @@ function MultiSelect({
 
 export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
-  const [icon, setIcon] = useState("🧩");
+  const [icon, setIcon] = useState("i:puzzle");
   const [iconImg, setIconImg] = useState<string | null>(null);       // โลโก้/รูปไอคอน (R2 key) — ถ้ามีจะใช้แทนอีโมจิ
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState("");
@@ -239,7 +241,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       const v = (j?.value ?? {}) as Record<string, unknown>;
       const has = !!(v.name || v.purpose || (Array.isArray(v.dataFields) && v.dataFields.length) || (Array.isArray(v.features) && v.features.length) || (Array.isArray(v.selModules) && v.selModules.length));
       if (has) {
-        setIcon(typeof v.icon === "string" ? v.icon : "🧩");
+        setIcon(typeof v.icon === "string" ? v.icon : "i:puzzle");
         setIconImg(typeof v.iconImg === "string" ? v.iconImg : null);
         setName(typeof v.name === "string" ? v.name : "");
         setPurpose(typeof v.purpose === "string" ? v.purpose : "");
@@ -285,7 +287,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
 
   const clearDraft = async () => {
     try { await apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: DRAFT_KEY, value: {} }) }); } catch {}
-    setIcon("🧩"); setIconImg(null); setName(""); setPurpose(""); setSelRoles([]); setUsersText("");
+    setIcon("i:puzzle"); setIconImg(null); setName(""); setPurpose(""); setSelRoles([]); setUsersText("");
     setDataFields([]); setFeatures([]); setExample(""); setSelModules([]); setNotes(""); setGenerated("");
     setHasDraft(false);
     setLoadedIdeaId(null);
@@ -323,7 +325,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
   // เปิดไอเดียกลับมาแก้ / สร้าง Prompt ต่อ
   const loadIdea = (it: AppIdea) => {
     const v = it.data;
-    setIcon(v.icon ?? "🧩"); setIconImg(v.iconImg ?? null); setName(v.name ?? ""); setPurpose(v.purpose ?? "");
+    setIcon(v.icon ?? "i:puzzle"); setIconImg(v.iconImg ?? null); setName(v.name ?? ""); setPurpose(v.purpose ?? "");
     setSelRoles(v.selRoles ?? []); setUsersText(v.usersText ?? ""); setDataFields(v.dataFields ?? []);
     setFeatures(v.features ?? []); setExample(v.example ?? ""); setSelModules(v.selModules ?? []); setNotes(v.notes ?? "");
     setGenerated(""); setShowIdeas(false);
@@ -343,7 +345,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
       "อ่าน CLAUDE.md ก่อน",
       "",
       `ช่วยสร้างแอปใหม่ในพอร์ทัล "งานอื่นๆ" (/misc)`,
-      `ชื่อแอป: ${iconImg ? "" : icon + " "}${name.trim()}`,
+      `ชื่อแอป: ${!iconImg && isLegacyIconValue(icon) ? icon + " " : ""}${name.trim()}`,
       `ไอคอน: ${iconText}`,
       "",
       `จุดประสงค์ (ช่วยแก้ปัญหา / ทำอะไร): ${purpose.trim()}`,
@@ -399,7 +401,7 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
               <div className="max-h-44 space-y-1 overflow-y-auto border-t border-indigo-100 px-2 py-1.5">
                 {ideas.map((it) => (
                   <div key={it.id} className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-white px-2 py-1.5">
-                    <span className="text-base leading-none">{it.iconImg ? "🖼️" : it.icon}</span>
+                    <span className="text-base leading-none"><Icon value={it.iconImg ? "i:photo" : it.icon} /></span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs font-medium text-slate-700">{it.title}</div>
                       <div className="text-[10px] text-slate-400">{new Date(it.savedAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</div>
@@ -419,30 +421,21 @@ export function NewAppRequestModal({ open, onClose }: { open: boolean; onClose: 
             <button type="button" onClick={() => void clearDraft()} className="rounded-md border border-amber-300 px-2 py-0.5 text-amber-700 hover:bg-amber-100">ล้างร่าง</button>
           </div>
         )}
-        {/* ไอคอน (อีโมจิ หรือ อัปรูป) + ชื่อ */}
+        {/* ไอคอน (ไอคอนเส้นกลาง หรือ อัปรูป) + ชื่อ */}
         <div className="flex items-start gap-2">
-          <label className="block">
+          <div className="block">
             <span className="text-[11px] font-medium text-slate-600">ไอคอน / รูป</span>
             <div className="mt-0.5 flex items-center gap-1.5">
-              {!iconImg && <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={4}
-                className="h-10 w-12 rounded-lg border border-slate-200 text-center text-lg focus:outline-none focus:ring-2 focus:ring-rose-300" />}
+              {!iconImg && <IconField value={icon} onChange={setIcon} suggestFrom={name} />}
               <ImageInput compact value={iconImg} onChange={setIconImg} folder="misc-app-icons" />
             </div>
-          </label>
+          </div>
           <label className="block flex-1">
             <span className="text-[11px] font-medium text-slate-600">ชื่อแอป *</span>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น ทะเบียนครุภัณฑ์"
               className="mt-0.5 h-10 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-300" />
           </label>
         </div>
-        {!iconImg && (
-          <div className="flex flex-wrap gap-1">
-            {EMOJI_QUICK.map((e) => (
-              <button key={e} type="button" onClick={() => setIcon(e)}
-                className={`h-8 w-8 rounded-lg border text-lg ${icon === e ? "border-rose-400 bg-rose-50" : "border-slate-200 hover:bg-slate-50"}`}>{e}</button>
-            ))}
-          </div>
-        )}
 
         <Field label="แอปนี้ช่วยทำอะไร / แก้ปัญหาอะไร *" hint="สั้น ๆ 1-2 ประโยค" value={purpose} onChange={setPurpose} area />
 

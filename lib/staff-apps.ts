@@ -83,7 +83,7 @@ export function cleanDraft(raw: unknown): StaffAppDraft {
     });
     if (menus.length >= STAFF_APP_LIMITS.menus) break;
   }
-  const icon = str(r.icon, 40);
+  const icon = str(r.icon, 64); // ไอคอนเส้นเก็บเป็น "i:<key>#rrggbb" ยาวได้ ~40 ตัว — เผื่อ 64
   const en = str(r.label_en, STAFF_APP_LIMITS.label);
   const color = str(r.theme_color, 7);
   const audience = cleanAudience(r.audience);

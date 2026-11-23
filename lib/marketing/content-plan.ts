@@ -8,6 +8,8 @@
  *   (cancelled ไม่แสดงในแผน)
  */
 
+import { isLegacyIconValue } from "@/lib/icon-registry";
+
 export type PlanStage = "idea" | "making" | "ready" | "scheduled" | "published";
 
 export const PLAN_STAGES: { key: PlanStage; label: string; icon: string; cls: string; dot: string }[] = [
@@ -197,7 +199,7 @@ export function placementLabelsFor(placements: string[] | null | undefined, plat
     const x = parsePlacement(id);
     if (!x || (platform && x.platform !== platform)) continue;
     const t = byKey.get(x.type);
-    const lbl = t ? `${t.icon ? `${t.icon} ` : ""}${t.label}` : x.type;
+    const lbl = t ? `${t.icon && isLegacyIconValue(t.icon) ? `${t.icon} ` : ""}${t.label}` : x.type;
     if (!out.includes(lbl)) out.push(lbl);
   }
   return out;

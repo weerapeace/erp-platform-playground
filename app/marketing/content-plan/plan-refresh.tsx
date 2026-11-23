@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
 import { PlatformIcon } from "@/components/platform-icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
@@ -41,7 +42,7 @@ export function useRefreshRules() {
 export function refreshRuleLabel(r: Pick<RefreshRule, "placement_type" | "platform">, types: PlacementType[], platforms: PlatformOpt[]): string {
   const t = r.placement_type ? types.find((x) => x.key === r.placement_type) : null;
   const pf = platforms.find((p) => p.value === r.platform)?.label ?? r.platform;
-  const typeLbl = r.placement_type ? (t ? `${t.icon ? `${t.icon} ` : ""}${t.label}` : r.placement_type) : tr("ทุกประเภท", "All types");
+  const typeLbl = r.placement_type ? (t ? `${t.icon && isLegacyIconValue(t.icon) ? `${t.icon} ` : ""}${t.label}` : r.placement_type) : tr("ทุกประเภท", "All types");
   return `${typeLbl} · ${pf}`;
 }
 
@@ -200,7 +201,7 @@ export function RefreshRulesEditor({ brandId, platforms, placementTypes, canEdit
       <select value={f.placement_type} disabled={disabled} className={`${cell} w-32 shrink-0`}
         onChange={(e) => { const t = placementTypes.find((x) => x.key === e.target.value); set({ placement_type: e.target.value, ...(t && f.platform && !t.platforms.includes(f.platform) ? { platform: "" } : {}) }); }}>
         <option value="">{t("ทุกประเภท", "All types")}</option>
-        {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon ? `${t.icon} ` : ""}{t.label}</option>)}
+        {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon && isLegacyIconValue(t.icon) ? `${t.icon} ` : ""}{t.label}</option>)}
         {f.placement_type && !placementTypes.some((t) => t.key === f.placement_type) && <option value={f.placement_type}>{f.placement_type} {t("(ถูกลบแล้ว)", "(deleted)")}</option>}
       </select>
       <select value={f.platform} onChange={(e) => set({ platform: e.target.value })} disabled={disabled} className={`${cell} w-28 shrink-0 ${f.platform ? "" : "border-red-300"}`}>

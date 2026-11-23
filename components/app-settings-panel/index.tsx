@@ -24,6 +24,7 @@ import { MenusAudienceTab } from "./menus-tab";
 import { saveMenuAudiences, sameAudience as same } from "./audience-save";
 import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown; sort_order: number; app_overrides?: unknown; app_keys?: string[] | null };
 type Role = { key: string; label: string; active?: boolean };
@@ -187,7 +188,7 @@ function WhoSeesWhat({ items, onSaved }: { items: AppSettingsMenuItem[]; onSaved
                   return (
                     <tr key={it.id} className={`border-t border-slate-100 ${dirty ? "bg-amber-50/60" : ""} ${hiddenInPreview ? "opacity-40" : ""}`}>
                       <td className={`px-3 py-2 ${it.parent_id && ids.has(it.parent_id) ? "pl-8" : ""}`}>
-                        <span className="mr-1.5">{it.icon ?? "•"}</span><span className="font-medium text-slate-800">{it.label}</span>
+                        <span className="mr-1.5"><Icon value={it.icon ?? "•"} /></span><span className="font-medium text-slate-800">{it.label}</span>
                         {hiddenInPreview && <span className="ml-1.5 rounded bg-slate-200 px-1 text-[10px] text-slate-600">ไม่เห็น</span>}
                         {it.permission_key && (() => {
                           // ตำแหน่งที่ควรเห็น (ติ๊กไว้ หรือทุกตำแหน่งถ้า "ทุกคน") แต่ยังไม่มีสิทธิ์ของเมนู → ไม่เห็นอยู่ดี
@@ -252,7 +253,7 @@ function PersonModal({ item, audience, names, onClose, onApply }: {
     onApply({ ...(audience ?? {}), users: allow.map((u) => u.id), hide_users: hide.map((u) => u.id).filter((id) => !allow.some((u) => u.id === id)) }, nm);
   };
   return (
-    <ERPModal open onClose={onClose} title={`👤 รายคน — ${item.icon ?? ""} ${item.label}`} size="md"
+    <ERPModal open onClose={onClose} title={`👤 รายคน — ${isLegacyIconValue(item.icon) ? `${item.icon} ` : ""}${item.label}`} size="md"
       description="ให้บางคนเห็นเพิ่ม (นอกจากตำแหน่งที่ติ๊ก) หรือซ่อนจากบางคน (ชนะทุกข้อ ยกเว้นแอดมิน)"
       footer={<>
         <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ยกเลิก</button>

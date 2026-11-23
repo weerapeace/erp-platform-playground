@@ -13,10 +13,12 @@
 ## ชิ้นส่วน
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `lib/erp-icons.ts` | ชุดไอคอนเส้น (Tabler Icons · MIT) ~230 ตัว — **สร้างอัตโนมัติ** ด้วย `scripts/gen-erp-icons.mjs` ห้ามแก้มือ |
+| `lib/erp-icons.ts` | ชุดไอคอนเส้น (Tabler Icons · MIT) 470 ตัว แบ่ง 19 หมวด (`ERP_ICON_GROUPS`) — **สร้างอัตโนมัติ** ด้วย `scripts/gen-erp-icons.mjs` ห้ามแก้มือ (ไอคอนวาดมือ/ปรับรูปเอง ใส่ใน `EXTRA` ของสคริปต์) |
 | `lib/icon-registry.ts` | ทะเบียนความหมาย `ICON_MEANINGS` (อีโมจิเดิม → ไอคอน + สี) · `resolveIcon` · `cleanIconSettings` (pure ใช้ได้ทั้งหน้าจอ/API) |
 | `components/icon/index.tsx` | `<Icon>` ตัววาดกลาง + ค่าตั้งค่ากลาง (โหลดครั้งเดียว จำในเครื่อง กันกระพริบ) |
-| `components/icon/icon-picker-modal.tsx` | `IconPickerModal` ป๊อปเลือกไอคอน (ไอคอนเส้น / ไอคอนของฉัน + อัปโหลด) |
+| `components/icon/icon-field.tsx` | **`IconField` ช่องเลือกไอคอน (ใช้ทุกช่องที่ผู้ใช้ตั้งไอคอน)** — ดรอปดาวน์ติดช่อง (มือถือ = แผ่นจากล่าง): ค้นหา · แนะนำจากชื่อ (`suggestFrom`) · ใช้ล่าสุด (จำในเครื่อง 12 ตัว) · ยอดนิยม · สีเส้น · ดูทั้งหมด · อีโมจิเก่ามีป้ายส้ม + ปุ่ม "ใช้ตัวนี้" (ไอคอนใกล้เคียงจากทะเบียนความหมาย) · เปลี่ยนแล้วมี "ย้อนกลับ" มุมจอ |
+| `components/icon/icon-picker-modal.tsx` | `IconPickerModal` ป๊อปเลือกไอคอนทั้งชุด แบ่งหมวด (ไอคอนเส้น / ไอคอนของฉัน + อัปโหลด) — ปุ่ม "ดูทั้งหมด" ของ IconField |
+| `components/icon-picker` | `IconPicker` ชื่อเดิม (เคยเป็นอีโมจิ) — ส่งต่อไป IconField แล้ว หน้าใหม่ใช้ IconField |
 | `components/icon/upload.ts` | อัปไอคอนของฉัน → R2 โฟลเดอร์ `erp-icons` (SVG แปลงเป็น PNG ในเบราว์เซอร์ก่อน) |
 | `app/api/admin/icon-settings` | GET อ่าน · PATCH บันทึก (สิทธิ์ `admin.users` + audit `icon_settings.update`) |
 | `app/admin/icons` | หน้าตั้งค่า (ทางเข้า: ปุ่ม 🔣 ในหน้า "จัดการเมนู") |
@@ -35,6 +37,18 @@ import { Icon } from "@/components/icon";
 
 ## ค่าไอคอนที่เก็บ (ข้อความเดียว · เข้ากับ `lib/website-icons` ของเว็บร้าน)
 - `i:<key>` ไอคอนเส้น · `c:<id>` ไอคอนของฉัน · `img:<r2 key>` รูปตรง ๆ · อื่น ๆ = อีโมจิ/ตัวอักษร
+- **สีเส้นต่อท้ายได้:** `i:truck#2563eb` (เก็บในคอลัมน์ icon เดิม ไม่ต้องเพิ่มคอลัมน์) · `splitIconColor` / `joinIconColor` ใน `lib/icon-registry` · สีที่เลือกชนะสีอัตโนมัติ
+- ⚠️ ทุกจุดที่**โชว์**ค่าไอคอนต้องวาดด้วย `<Icon value>` — พิมพ์ค่าตรง ๆ จะเห็น "i:truck" · ในข้อความล้วน (`<option>`, title) ใช้ `isLegacyIconValue(v) ? v : ""`
+- ไม่ต้องแปลงข้อมูลเก่า: อีโมจิเดิมวาดเป็นไอคอนเส้นให้อยู่แล้ว (ทะเบียนความหมาย) · ผู้ใช้กดเปลี่ยนเองทีละช่องผ่าน IconField
+
+## ช่องเลือกไอคอน (IconField)
+```tsx
+import { IconField } from "@/components/icon/icon-field";
+<IconField value={form.icon} onChange={(v) => setForm({ ...form, icon: v })} suggestFrom={form.label} />
+```
+- props: `allowColor` (ค่าเริ่ม true) · `allowClear` · `undo` (ค่าเริ่ม true · ปิดถ้าหน้ามีย้อนกลับของตัวเอง) · `size` sm/md/lg · `placeholderIcon` · `title`
+- ค่าว่าง = `""` (ถ้าตารางเก็บ null ให้แปลงเอง `v || null`)
+- ใช้แล้ว (2026-11-23): จัดการเมนู (เพิ่ม/แก้แอป · หมวด · เมนู) · ทุกหน้าที่เคยใช้ IconPicker · ข้อมูลหลัก · การตลาด · แอปจัดการงาน · คู่มือ · ขอแอปใหม่
 
 ## ใช้เมื่อไหร่ / ห้ามใช้เมื่อไหร่
 - ✅ ไอคอนในเมนู ปุ่ม หัวข้อ ป้ายสถานะ ป๊อป บนหน้าจอ ERP

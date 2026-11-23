@@ -12,6 +12,7 @@ import { useLang, useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { PlatformIcon } from "@/components/platform-icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { POST_TYPES, type BrandOption, type ContentItem } from "@/app/tasks/data";
@@ -19,6 +20,7 @@ import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { WEEKDAYS_TH, targetProgress, shortThaiDate, dowLabel, type PlanTarget, type PlanSlot, type SlotDraft, type PlacementType } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
 import { BrandSelect as CentralBrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 
 const TYPE_META = Object.fromEntries(POST_TYPES.map((t) => [t.value, t]));
 /** ชื่อวันภาษาอังกฤษ (ลำดับเดียวกับ WEEKDAYS_TH · index 0 = จันทร์) — ใช้ตอนสลับเป็นภาษาอังกฤษ */
@@ -27,7 +29,7 @@ const WEEKDAYS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 const placementLabel = (key: string | null | undefined, types: PlacementType[]) => {
   if (!key) return "";
   const t = types.find((x) => x.key === key);
-  return t ? `${t.icon ? `${t.icon} ` : ""}${t.label}` : `${key} ${tr("(ถูกลบแล้ว)", "(deleted)")}`;
+  return t ? `${t.icon && isLegacyIconValue(t.icon) ? `${t.icon} ` : ""}${t.label}` : `${key} ${tr("(ถูกลบแล้ว)", "(deleted)")}`;
 };
 const input = "h-9 rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
 
@@ -116,7 +118,7 @@ export function TargetsEditor({ brandId, platforms, placementTypes = [], canEdit
           <select value={add.placement_type} className={input} title={t("ประเภทการลง (ตั้งรายการได้ที่แท็บช่องทาง)", "Placement type (manage the list in the Channels tab)")}
             onChange={(e) => { const t = placementTypes.find((x) => x.key === e.target.value); setAdd({ ...add, placement_type: e.target.value, ...(t && add.platform && !t.platforms.includes(add.platform) ? { platform: "" } : {}) }); }}>
             <option value="">{t("ทุกประเภท", "All types")}</option>
-            {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon ? `${t.icon} ` : ""}{t.label}</option>)}
+            {placementTypes.map((t) => <option key={t.key} value={t.key}>{t.icon && isLegacyIconValue(t.icon) ? `${t.icon} ` : ""}{t.label}</option>)}
           </select>
           <select value={add.platform} onChange={(e) => setAdd({ ...add, platform: e.target.value })} className={input}>
             <option value="">{t("— ช่องทาง —", "— Channel —")}</option>
@@ -199,7 +201,7 @@ export function SlotsEditor({ brandId, platforms, pillars, canEdit, onChanged }:
       </select>
       <select value={f.pillar_id} onChange={(e) => set({ pillar_id: e.target.value })} disabled={disabled} className={`${input} w-32`}>
         <option value="">{t("แนว…", "Pillar…")}</option>
-        {pillars.filter((p) => p.is_active || p.id === f.pillar_id).map((p) => <option key={p.id} value={p.id}>{p.icon ? `${p.icon} ` : ""}{labelName(p)}</option>)}
+        {pillars.filter((p) => p.is_active || p.id === f.pillar_id).map((p) => <option key={p.id} value={p.id}>{p.icon && isLegacyIconValue(p.icon) ? `${p.icon} ` : ""}{labelName(p)}</option>)}
       </select>
       <input value={f.title} onChange={(e) => set({ title: e.target.value })} disabled={disabled} maxLength={200} placeholder={t("หัวข้อ เช่น สินค้าใหม่ประจำสัปดาห์", "Title, e.g. New product of the week")}
         className={`${input} min-w-[12rem] flex-1`} />
@@ -382,7 +384,7 @@ export function GenerateModal({ open, brandId, brandName, month, platforms, pill
                     <PlatformIcon code={c.platform} iconKey={p?.icon_key ?? p?.icon} size={14} />
                     {c.post_type && <span className="text-xs">{TYPE_META[c.post_type]?.icon}</span>}
                     <span className="min-w-0 flex-1 truncate text-slate-700">{c.title}</span>
-                    {pi && <span className="rounded-full px-2 py-0.5 text-[10px] text-white" style={{ background: pi.color }}>{pi.icon} {pi.name}</span>}
+                    {pi && <span className="rounded-full px-2 py-0.5 text-[10px] text-white" style={{ background: pi.color }}>{pi.icon && <Icon value={pi.icon} className="mr-0.5" />}{pi.name}</span>}
                   </div>
                 );
               })}

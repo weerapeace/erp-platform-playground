@@ -17,6 +17,7 @@ import { useSearchHotkey } from "@/lib/search-hotkey";
 import { AppAccessGate } from "@/components/app-access-gate";
 import { PayrollPeriodProvider, usePayrollPeriod, isFinishedPeriod } from "@/components/payroll/payroll-period-context";
 import { cachedGetJson } from "@/lib/shell-cache";
+import { Icon } from "@/components/icon";
 
 type NavItem = { href: string; icon: string; label: string; icon_url?: string | null };
 type NavGroup = { group: string; items: NavItem[] };
@@ -154,7 +155,7 @@ function PayrollShellInner({ children }: { children: React.ReactNode }) {
                   <span className="text-base">
                     {it.icon_url
                       ? <img src={it.icon_url} alt="" className="inline-block h-4 w-4 object-contain align-[-2px]" />
-                      : it.icon}
+                      : <Icon value={it.icon} />}
                   </span>
                   <span className="truncate">{it.label}</span>
                 </Link>

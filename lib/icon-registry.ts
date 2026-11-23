@@ -317,6 +317,29 @@ export function emojisOfMeaning(key: string, s: IconSettings): string[] {
   return out;
 }
 
+// ── ค่าไอคอน + สี ในช่องเดียว ("i:truck#2563eb") — ช่อง icon ในตารางไหนก็เก็บสีได้โดยไม่ต้องเพิ่มคอลัมน์ ──
+const ICON_COLOR_SUFFIX = /#([0-9a-f]{6})$/i;
+/** แยกค่าไอคอนกับสี · ค่าอีโมจิ/ไม่มีสี = color null */
+export function splitIconColor(v: string | null | undefined): { value: string; color: string | null } {
+  const s = (v ?? "").trim();
+  if (!/^(i|c|img):/.test(s)) return { value: s, color: null };
+  const m = s.match(ICON_COLOR_SUFFIX);
+  return m ? { value: s.slice(0, -7), color: `#${m[1].toLowerCase()}` } : { value: s, color: null };
+}
+/** รวมค่าไอคอน + สี (null = สีอัตโนมัติ) · อีโมจิเก็บสีไม่ได้ (คืนค่าเดิม) */
+export function joinIconColor(value: string, color: string | null): string {
+  const base = splitIconColor(value).value;
+  if (!base || !/^(i|c|img):/.test(base) || !color || !/^#[0-9a-f]{6}$/i.test(color)) return base;
+  return `${base}${color.toLowerCase()}`;
+}
+/** ค่านี้เป็นอีโมจิ/ตัวอักษรแบบเก่า (ไม่ใช่ไอคอนกลาง "i:"/"c:"/"img:") */
+export const isLegacyIconValue = (v: string | null | undefined): boolean => !!(v ?? "").trim() && !/^(i|c|img):/.test((v ?? "").trim());
+/** ไอคอนเส้นที่ใกล้เคียงกับอีโมจิเก่า (จากทะเบียนความหมาย) · ไม่รู้จัก = null */
+export function suggestIconForEmoji(emoji: string, s: IconSettings): string | null {
+  const m = meaningOfEmoji(emoji, s);
+  return m ? meaningIconValue(m, s) : null;
+}
+
 // ── แปลงเป็นสิ่งที่ต้องวาด ──
 export type ResolvedIcon =
   | { kind: "line"; d: string[]; color: string | null }
@@ -325,7 +348,10 @@ export type ResolvedIcon =
   | null;
 
 /** ค่าไอคอนตรง ๆ ("i:" / "c:" / "img:") → สิ่งที่วาด · ไม่ใช่รูปแบบนี้ = null */
-function resolveIconValue(v: string, s: IconSettings, color: string | null): ResolvedIcon {
+function resolveIconValue(raw: string, s: IconSettings, fallbackColor: string | null): ResolvedIcon {
+  // ค่าที่เลือกสีไว้ด้วย = "i:truck#2563eb" → สีที่ผู้ใช้เลือกชนะสีอัตโนมัติ
+  const { value: v, color: picked } = splitIconColor(raw);
+  const color = picked ?? fallbackColor;
   if (v.startsWith("i:")) {
     const def = erpIconDef(v.slice(2)) ?? siteIconDef(v.slice(2));
     return def ? { kind: "line", d: def.d, color } : null;

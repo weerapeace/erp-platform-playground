@@ -234,7 +234,7 @@ function InfoStep({ draft, patch }: { draft: StaffAppDraft; patch: (p: Partial<S
       </label>
       <div className="text-sm">
         <span className="mb-1 block text-slate-600">ไอคอน</span>
-        <IconPicker value={draft.icon ?? ""} onChange={(v) => patch({ icon: v })} />
+        <IconPicker value={draft.icon ?? ""} onChange={(v) => patch({ icon: v })} suggestFrom={draft.label} />
       </div>
       <div className="text-sm">
         <span className="mb-1 block text-slate-600">สีหัวแอป</span>

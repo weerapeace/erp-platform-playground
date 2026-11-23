@@ -88,3 +88,39 @@ describe("icon registry", () => {
     expect(cleanIconSettings(null)).toEqual(DEFAULT_ICON_SETTINGS);
   });
 });
+
+describe("icon value + color (IconField)", () => {
+  it("splits and joins a color suffix only on central icon values", async () => {
+    const { splitIconColor, joinIconColor, isLegacyIconValue } = await import("@/lib/icon-registry");
+    expect(splitIconColor("i:truck#2563EB")).toEqual({ value: "i:truck", color: "#2563eb" });
+    expect(splitIconColor("i:truck")).toEqual({ value: "i:truck", color: null });
+    expect(splitIconColor("📦")).toEqual({ value: "📦", color: null });
+    expect(joinIconColor("i:truck#111111", "#2563eb")).toBe("i:truck#2563eb");
+    expect(joinIconColor("i:truck#111111", null)).toBe("i:truck");
+    expect(joinIconColor("📦", "#2563eb")).toBe("📦");
+    expect(isLegacyIconValue("📦")).toBe(true);
+    expect(isLegacyIconValue("i:truck#2563eb")).toBe(false);
+    expect(isLegacyIconValue("")).toBe(false);
+  });
+
+  it("draws the picked color in every mode and ignores unknown icons", () => {
+    for (const mode of ["emoji", "line", "color"] as const) {
+      const r = resolveIcon({ value: "i:truck#2563eb" }, S({ mode }), mode);
+      expect(r).toMatchObject({ kind: "line", color: "#2563eb" });
+    }
+    expect(resolveIcon({ value: "i:no-such-icon#2563eb" }, S({ mode: "line" }), "line")).toBeNull();
+  });
+
+  it("suggests a line icon for a known legacy emoji", async () => {
+    const { suggestIconForEmoji } = await import("@/lib/icon-registry");
+    const m = ICON_MEANINGS[0];
+    expect(suggestIconForEmoji(m.emoji, S())).toBe(`i:${m.icon}`);
+    expect(suggestIconForEmoji("not-an-emoji", S())).toBeNull();
+  });
+
+  it("every icon has a valid group", async () => {
+    const { ERP_ICON_GROUPS } = await import("@/lib/erp-icons");
+    for (const i of ERP_ICONS) expect(ERP_ICON_GROUPS[i.g]).toBeTruthy();
+    expect(new Set(ERP_ICONS.map((i) => i.key)).size).toBe(ERP_ICONS.length);
+  });
+});

@@ -456,7 +456,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-600">ไอคอน</label>
-                    <div className="mt-1"><IconPicker value={icon} onChange={setIcon} /></div>
+                    <div className="mt-1"><IconPicker value={icon} onChange={setIcon} suggestFrom={label} /></div>
                   </div>
                   <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-900">
                     💡 ทุกตารางจะมีช่อง <code>ชื่อ</code> + สถานะเปิด/ปิด ให้อยู่แล้ว — ขั้นต่อไปเลือกช่องอื่นเพิ่ม

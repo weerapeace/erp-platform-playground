@@ -11,6 +11,7 @@ import { useToast } from "@/components/toast";
 import { useT, useLang } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
+import { Icon } from "@/components/icon";
 
 export function BadgeChip({ badge, size = "sm" }: { badge: Pick<MarketingSkuLabel, "name" | "name_en" | "icon" | "color">; size?: "xs" | "sm" }) {
   useLang();   // ฟังการสลับภาษา (ชิปนี้ไม่มีข้อความระบบ แต่ชื่อป้ายต้องเปลี่ยนตาม)
@@ -18,7 +19,7 @@ export function BadgeChip({ badge, size = "sm" }: { badge: Pick<MarketingSkuLabe
   return (
     <span className={`inline-flex max-w-full items-center gap-0.5 truncate rounded-full font-semibold text-white shadow-sm ${size === "xs" ? "px-1.5 py-px text-[10px]" : "px-2 py-0.5 text-[11px]"}`}
       style={{ background: badge.color }} title={name}>
-      {badge.icon && <span>{badge.icon}</span>}<span className="truncate">{name}</span>
+      {badge.icon && <span className="inline-flex"><Icon value={badge.icon} /></span>}<span className="truncate">{name}</span>
     </span>
   );
 }

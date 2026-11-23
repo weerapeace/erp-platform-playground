@@ -35,8 +35,8 @@ import { useToast, usePushToast } from "@/components/toast";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import dynamic from "next/dynamic";
-import { Icon, useIconSettings } from "@/components/icon";
-import { IconPickerModal } from "@/components/icon/icon-picker-modal";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 import { cleanLabelStyle, labelTextStyle, LABEL_WEIGHT_OPTIONS, LABEL_SIZE_OPTIONS, type LabelWeight, type LabelSize } from "@/lib/task-type-label-style";
 
 // ประวัติไฟล์ = ตัวเดียวกับมุมมอง "ประวัติไฟล์" ใน Task Manager (โหลดเมื่อเปิดแท็บ — ไม่ถ่วงหน้าตั้งค่า) · เจ้าของขอ 2026-11-12 ให้หาง่ายจากปุ่มตั้งค่า
@@ -231,8 +231,6 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
   };
   // ร่างแก้ไขต่อแถว (ชื่อ/สี/ไอคอน) — ไม่ autosave, กดปุ่ม 💾 ค่อยบันทึก (กันสีกระพริบ/ยิง API รัวตอนเลื่อนเลือกสี)
   const [draft, setDraft] = useState<Record<string, Partial<Option>>>({});
-  const [pickFor, setPickFor] = useState<string | null>(null);   // แถวที่กำลังเลือกไอคอนกลาง
-  const iconSettings = useIconSettings();
   const setField = (o: Option, patch: Partial<Option>) => setDraft((d) => ({ ...d, [o.id]: { ...d[o.id], ...patch } }));
   const clearDraft = (id: string) => setDraft((d) => { const n = { ...d }; delete n[id]; return n; });
   const isDirty = (o: Option) => {
@@ -318,11 +316,8 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
                   <div className="flex items-center gap-1.5 shrink-0">
                     {/* สีประเภท (มีทั้งประเภทงาน + แพลตฟอร์ม) */}
                     <div title={t("สีประเภท", "Color")}><ColorInput value={color || "#64748b"} onChange={(v) => setField(o, { color: v })} allowText={false} /></div>
-                    {/* ไอคอน emoji */}
-                    {!(icon && /^(i|c|img):/.test(icon)) && <input value={icon || ""} maxLength={2} placeholder="😀" onChange={(e) => setField(o, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />}
-                    {/* เลือกจากไอคอนกลาง · มีไอคอนกลางอยู่ = กดเพื่อเปลี่ยน · ✕ ล้างกลับเป็นไม่มีไอคอน */}
-                    <button type="button" onClick={() => setPickFor(o.id)} title={t("เลือกไอคอนกลาง", "Pick a shared icon")} className="h-7 w-7 inline-flex items-center justify-center border border-slate-200 rounded text-slate-500 hover:bg-slate-50"><Icon value={icon && /^(i|c):/.test(icon) ? icon : "i:category"} /></button>
-                    {icon && /^(i|c):/.test(icon) && <button type="button" onClick={() => setField(o, { icon: "" })} title={t("ล้างไอคอน", "Clear icon")} className="text-[11px] text-slate-400 hover:text-red-500">✕</button>}
+                    {/* ไอคอน (ไอคอนเส้นกลาง) — ค่าเข้าร่างของแถว กดบันทึกค่อยเซฟ */}
+                    <IconField size="sm" value={icon || ""} onChange={(v) => setField(o, { icon: v })} suggestFrom={label} placeholderIcon="i:category" title={t("ไอคอน", "Icon")} />
                     {/* ตัวหนา + ขนาดป้าย — เฉพาะประเภทงาน (ใช้บนการ์ด/รายการทุกที่) */}
                     {kind === "task_type" && (<>
                       <select value={lStyle?.weight ?? ""} onChange={(e) => setField(o, { label_style: { ...(lStyle ?? {}), weight: e.target.value ? (Number(e.target.value) as LabelWeight) : undefined } })} title={t("น้ำหนักตัวอักษร", "Font weight")} className="h-7 rounded border border-slate-200 text-[11px] px-1 bg-white">
@@ -355,17 +350,6 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
             </div>
           )}
       </div>
-      {/* เลือกไอคอนจากชุดไอคอนกลาง (แทนพิมพ์อีโมจิ) — ค่าเข้าร่างของแถว กดบันทึกค่อยเซฟ */}
-      {pickFor && (() => {
-        const o = opts.find((x) => x.id === pickFor);
-        const d = o ? draft[o.id] ?? {} : {};
-        const cur = o ? (("icon" in d ? d.icon : o.icon) ?? null) : null;
-        return (
-          <IconPickerModal open onClose={() => setPickFor(null)} title={t("เลือกไอคอน", "Pick icon")} settings={iconSettings}
-            value={cur && /^(i|c):/.test(cur) ? cur : null}
-            onPick={(v) => { if (o) setField(o, { icon: v ?? "" }); setPickFor(null); }} />
-        );
-      })()}
     </div>
   );
 }

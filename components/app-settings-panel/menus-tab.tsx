@@ -615,7 +615,7 @@ function AddMenuPanel({ appKey, appName, permName, candidates, loading, allMenus
           <div className="flex flex-wrap items-start gap-2">
             <div>
               <div className="mb-1 text-xs text-slate-500">ไอคอน</div>
-              <IconPicker value={icon} onChange={setIcon} />
+              <IconPicker value={icon} onChange={setIcon} suggestFrom={label} />
             </div>
             <label className="min-w-[12rem] flex-1">
               <div className="mb-1 text-xs text-slate-500">ชื่อเมนู</div>

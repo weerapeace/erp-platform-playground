@@ -5,14 +5,14 @@
  *   แท็บ 〰 ไอคอนเส้น (ชุด lib/erp-icons · ค้นหาไทย/อังกฤษได้) · 📁 ไอคอนของฉัน (อัปโหลดรูป/SVG หรือวางโค้ด SVG)
  *   คืนค่า "i:<key>" / "c:<id>" ผ่าน onPick · null = กลับไปใช้ไอคอนเริ่มต้น
  *   ส่ง onColor มา = มีแถบเลือกสี (สีอัตโนมัติ / สีด่วน 12 สี / เลือกเองจาก ColorInput) · โหมดนี้กดไอคอนแล้วป๊อปไม่ปิด (กด "เสร็จ")
- * ใช้ที่: /admin/icons (เปลี่ยนไอคอนของความหมาย) · ต่อไป: ช่องไอคอนเมนู/แอป
+ * ใช้ที่: /admin/icons (เปลี่ยนไอคอนของความหมาย) · ปุ่ม "ดูทั้งหมด" ของ IconField (ช่องเลือกไอคอนทุกที่ในระบบ — หน้าใหม่ใช้ IconField)
  *
  * <IconPickerModal open title="เลือกไอคอนให้ “บันทึก”" value={v} settings={s} onPick={...} onAddCustom={...} onClose={...} />
  */
 import { useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { ERP_ICONS } from "@/lib/erp-icons";
+import { ERP_ICONS, ERP_ICON_GROUPS } from "@/lib/erp-icons";
 import { ICON_COLOR_SWATCHES, type CustomIcon, type IconSettings } from "@/lib/icon-registry";
 import { ColorInput } from "@/components/color-picker";
 import { Icon } from "@/components/icon";
@@ -60,10 +60,12 @@ export function IconPickerModal({
   const [tint, setTint] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [grp, setGrp] = useState(-1);   // หมวดไอคอน · -1 = ทั้งหมด
   const lines = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return t ? ERP_ICONS.filter((i) => `${i.key} ${i.label}`.toLowerCase().includes(t)) : ERP_ICONS;
-  }, [q]);
+    if (t) return ERP_ICONS.filter((i) => `${i.key} ${i.label}`.toLowerCase().includes(t));
+    return grp < 0 ? ERP_ICONS : ERP_ICONS.filter((i) => i.g === grp);
+  }, [q, grp]);
 
   // มีแถบสี = แก้ทั้งไอคอนและสีในป๊อปเดียว → กดไอคอนแล้วยังไม่ปิด
   const pick = (v: string | null) => { onPick(v); if (!onColor) onClose(); };
@@ -150,7 +152,17 @@ export function IconPickerModal({
       {tab === "line" && (
         <>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา เช่น บันทึก, รถ, เงิน, truck"
-            className="w-full h-9 px-3 mb-3 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            className="w-full h-9 px-3 mb-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          {!q.trim() && (
+            <div className="flex gap-1 overflow-x-auto pb-2 mb-1">
+              {[-1, ...ERP_ICON_GROUPS.map((_, i) => i)].map((g) => (
+                <button key={g} type="button" onClick={() => setGrp(g)}
+                  className={`shrink-0 px-2.5 py-1 rounded-full text-xs border ${grp === g ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                  {g < 0 ? "ทั้งหมด" : ERP_ICON_GROUPS[g]}
+                </button>
+              ))}
+            </div>
+          )}
           {lines.length === 0 ? (
             <p className="text-sm text-slate-400 py-6 text-center">ไม่พบไอคอน “{q}” — ลองคำอื่น หรืออัปโหลดเองที่แท็บไอคอนของฉัน</p>
           ) : (

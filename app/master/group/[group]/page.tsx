@@ -15,6 +15,7 @@ import { ShellPresentContext } from "@/components/playground-shell";
 import { MasterPage } from "@/components/master-page";
 import { CreateModuleWizard } from "@/components/create-module-wizard";
 import { IconPicker } from "@/components/icon-picker";
+import { Icon } from "@/components/icon";
 import { usePermission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 
@@ -109,7 +110,7 @@ export default function ModuleGroupPage() {
       <div className="bg-white border-b border-slate-200 px-6 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-xl font-bold text-slate-900">{groupIcon} {groupParam || "กลุ่มโมดูล"}</h1>
+            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Icon value={groupIcon} /> {groupParam || "กลุ่มโมดูล"}</h1>
             <p className="text-sm text-slate-500 mt-0.5">รวมหลายตารางไว้ในหน้าเดียว — เลือกแท็บด้านล่าง</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -139,7 +140,7 @@ export default function ModuleGroupPage() {
           <div className="mt-3 flex flex-wrap items-end gap-3 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
             <div>
               <label className="block text-[11px] text-slate-500 mb-1">ไอคอน</label>
-              <IconPicker value={editIcon} onChange={setEditIcon} />
+              <IconPicker value={editIcon} onChange={setEditIcon} suggestFrom={editName} />
             </div>
             <div className="flex-1 min-w-[200px]">
               <label className="block text-[11px] text-slate-500 mb-1">ชื่อกลุ่ม</label>
@@ -161,7 +162,7 @@ export default function ModuleGroupPage() {
               className={`h-10 px-4 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 active === m.key ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
-              {m.icon ? `${m.icon} ` : ""}{m.label}
+              {m.icon ? <><Icon value={m.icon} />{" "}</> : null}{m.label}
             </button>
           ))}
         </div>

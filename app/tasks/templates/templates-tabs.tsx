@@ -30,6 +30,7 @@ import { WIZARD_VISIBILITY_OPTIONS, wizardVisibilityOf, type WizardVisibility } 
 import { BrandSelect } from "@/components/brand-select";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 const FREQ =[{ value: "daily", label: () => tr("รายวัน", "Daily") }, { value: "weekly", label: () => tr("รายสัปดาห์", "Weekly") }, { value: "monthly", label: () => tr("รายเดือน", "Monthly") }];
 const FREQ_LABEL = (): Record<string, string> => Object.fromEntries(FREQ.map((f) => [f.value, f.label()]));
@@ -174,16 +175,8 @@ export function TemplatesTab({ pushToast }: { pushToast: (t: ToastVariant, m: st
         </>}>
         <ERPFormSection title={t("ข้อมูลเทมเพลต", "Template Details")} columns={2}>
           <ERPFormField label={t("ชื่อเทมเพลต", "Template Name")} required span={2}><ERPInput value={form.name} onChange={(e) => setFormD((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ถ่ายรูปสินค้าใหม่", "e.g. New product photo shoot")} /></ERPFormField>
-          <ERPFormField label={t("ไอคอน (อีโมจิ)", "Icon (emoji)")} hint={t("โชว์บนการ์ดเทมเพลตตอนสร้างงาน · เว้นว่างได้", "Shown on the template card in the wizard · optional")}>
-            <div className="flex items-center gap-2">
-              <ERPInput value={form.icon} maxLength={4} placeholder="🖨️" className="w-20 text-center text-lg" onChange={(e) => setFormD((f) => ({ ...f, icon: e.target.value }))} />
-              <div className="flex flex-wrap gap-1">
-                {["🖨️", "🎨", "📸", "🎬", "🏷️", "🧵", "📦", "✏️", "🖼️", "📱"].map((em) => (
-                  <button key={em} type="button" onClick={() => setFormD((f) => ({ ...f, icon: em }))}
-                    className={`h-8 w-8 rounded-md border text-base leading-none ${form.icon === em ? "border-violet-400 bg-violet-50" : "border-slate-200 hover:bg-slate-50"}`}>{em}</button>
-                ))}
-              </div>
-            </div>
+          <ERPFormField label={t("ไอคอน", "Icon")} hint={t("โชว์บนการ์ดเทมเพลตตอนสร้างงาน · เว้นว่างได้", "Shown on the template card in the wizard · optional")}>
+            <IconField value={form.icon} onChange={(v) => setFormD((f) => ({ ...f, icon: v }))} suggestFrom={form.name} />
           </ERPFormField>
           <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS()} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>

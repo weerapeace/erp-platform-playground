@@ -14,6 +14,9 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ImageInput } from "@/components/image-input";
 import { useAuth } from "@/components/auth";
 import type { HelpGuide, HelpStep } from "@/app/api/help-guides/route";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 type StepDraft = { title: string; body: string; image_r2_key: string; link_url: string };
 const toDraft = (s: HelpStep): StepDraft => ({ title: s.title, body: s.body ?? "", image_r2_key: s.image_r2_key ?? "", link_url: s.link_url ?? "" });
@@ -109,7 +112,7 @@ function GuideEditor({ guide, onSaved, onCancel }: { guide: HelpGuide; onSaved: 
   return (
     <div className="space-y-3">
       <div className="flex gap-2">
-        <input value={icon} onChange={(e) => setIcon(e.target.value)} placeholder={t("ไอคอน", "Icon")} className="w-14 h-9 px-2 text-center text-lg border border-slate-200 rounded-lg" />
+        <IconField value={icon} onChange={setIcon} suggestFrom={title} placeholderIcon="i:book" title={t("ไอคอน", "Icon")} />
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่อคู่มือ", "Guide name")} className={inp} />
       </div>
       <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t("คำอธิบายสั้น ๆ (ไม่ใส่ก็ได้)", "Short description (optional)")} rows={2}
@@ -167,7 +170,7 @@ export function HelpGuideModal({ guideKey, guideId, onClose }: { guideKey?: stri
 
   return (
     <ERPModal open onClose={onClose} size="lg" storageKey="help-guide"
-      title={guide ? `${guide.icon ? `${guide.icon} ` : "📖 "}${guide.title}` : t("📖 วิธีใช้งาน", "📖 How to use")}
+      title={guide ? `${guide.icon ? (isLegacyIconValue(guide.icon) ? `${guide.icon} ` : "") : "📖 "}${guide.title}` : t("📖 วิธีใช้งาน", "📖 How to use")}
       description={editing ? guide?.description ?? undefined : undefined}
       footer={
         <div className="flex items-center justify-between w-full">
@@ -313,7 +316,7 @@ export function HelpGuidesManager() {
           <div className="space-y-2">
             {guides.map((g) => (
               <div key={g.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <span className="text-xl shrink-0">{g.icon || "📖"}</span>
+                <span className="text-xl shrink-0 inline-flex"><Icon value={g.icon || "i:book"} /></span>
                 <button onClick={() => setOpenId(g.id)} className="flex-1 min-w-0 text-left">
                   <p className="text-[14px] font-medium text-slate-800 truncate">{g.title}</p>
                   <p className="text-[11px] text-slate-400 truncate">{g.description || t(`${g.steps.length} ขั้นตอน`, `${g.steps.length} steps`)}</p>

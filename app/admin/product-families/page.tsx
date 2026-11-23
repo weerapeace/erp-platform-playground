@@ -12,6 +12,9 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { PermissionGate, AccessDenied } from "@/components/auth";
 import { FamilyTemplateView } from "@/app/admin/family-template/view";
 
@@ -21,7 +24,6 @@ type Tag = { id: string; name: string; group_id: string | null };
 const GROUPS_API = "/api/master-v2/product_family_groups";
 const TAGS_API = "/api/master-v2/product_families";
 const COLORS = ["#ef4444", "#f97316", "#f59e0b", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#64748b"];
-const ICONS = ["👜", "🎒", "🛍️", "👕", "👖", "👗", "👚", "🧥", "👟", "👠", "👢", "💍", "⌚", "🧣", "🧢", "🧤", "🪡", "🧵", "🔖", "🏷️", "📦", "💄", "🕶️", "👒", "🎀", "💎", "🧶", "🔩", "⚙️", "🧰"];
 
 // เปิดได้เฉพาะผู้ดูแลระบบ (หน้า admin orphan ไม่ผูกแอป)
 export default function ProductFamiliesHub() {
@@ -92,9 +94,9 @@ function groupOptions(groups: Group[]) {
   const tops = groups.filter((g) => !g.parent_group_id).sort(byOrder);
   const out: { id: string; label: string }[] = [];
   for (const top of tops) {
-    out.push({ id: top.id, label: `${top.icon ? top.icon + " " : ""}${top.name}` });
+    out.push({ id: top.id, label: `${top.icon && isLegacyIconValue(top.icon) ? top.icon + " " : ""}${top.name}` });
     for (const sub of groups.filter((g) => g.parent_group_id === top.id).sort(byOrder))
-      out.push({ id: sub.id, label: `   ↳ ${sub.icon ? sub.icon + " " : ""}${sub.name}` });
+      out.push({ id: sub.id, label: `   ↳ ${sub.icon && isLegacyIconValue(sub.icon) ? sub.icon + " " : ""}${sub.name}` });
   }
   return out;
 }
@@ -155,14 +157,8 @@ function GroupFormModal({ mode, parentId, group, groups, onClose, onSaved, setMs
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">ไอคอน</label>
-            <div className="flex flex-wrap gap-1 mb-2">
-              <button type="button" onClick={() => setIcon("")} title="ไม่มีไอคอน" className={`w-8 h-8 rounded-md border text-slate-300 ${!icon ? "ring-2 ring-blue-400 border-blue-300" : "border-slate-200"}`}>✕</button>
-              {ICONS.map((ic) => (
-                <button key={ic} type="button" onClick={() => setIcon(ic)} className={`w-8 h-8 rounded-md border text-lg leading-none hover:bg-slate-50 ${icon === ic ? "ring-2 ring-blue-500 border-blue-300 bg-blue-50" : "border-slate-200"}`}>{ic}</button>
-              ))}
-            </div>
-            <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={4} placeholder="หรือพิมพ์/วางอีโมจิเอง" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+            <span className="block text-xs font-medium text-slate-600 mb-1">ไอคอน</span>
+            <IconField value={icon} onChange={setIcon} suggestFrom={name} />
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={single} onChange={(e) => setSingle(e.target.checked)} className="rounded border-slate-300" />
@@ -267,7 +263,7 @@ function GroupsTab({ groups, tags, reload, patchGroup, setMsg }: {
       <button onClick={() => setGroupModal({ mode: "edit", group: g })} className={`flex-1 text-left px-2 py-1.5 text-sm flex items-center gap-1.5 min-w-0 ${isSub ? "text-slate-600" : "text-slate-700"}`}>
         {isSub && <span className="text-slate-300">↳</span>}
         <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/5" style={{ backgroundColor: g.color ?? "#cbd5e1" }} />
-        {g.icon && <span>{g.icon}</span>}
+        {g.icon && <span className="inline-flex"><Icon value={g.icon} /></span>}
         <span className="truncate">{g.name}</span>
         {g.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">เลือก 1</span>}
         <span className="text-[10px] text-slate-400">({tagCount(g.id)})</span>
@@ -306,7 +302,7 @@ function GroupsTab({ groups, tags, reload, patchGroup, setMsg }: {
               <div key={g.id}>
                 <div className="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1.5">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: g.color ?? "#cbd5e1" }} />
-                  {g.icon && <span>{g.icon}</span>}{g.parent_group_id && <span className="text-slate-300">↳ </span>}{g.name}
+                  {g.icon && <span className="inline-flex"><Icon value={g.icon} /></span>}{g.parent_group_id && <span className="text-slate-300">↳ </span>}{g.name}
                 </div>
                 {tags.filter((t) => t.group_id === g.id).sort((a, b) => a.name.localeCompare(b.name, "th")).map((t) => TagAssignRow(t, opts, setTagGroup))}
               </div>

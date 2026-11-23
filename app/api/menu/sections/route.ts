@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { authCacheHeaders } from "@/lib/auth-cache-headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { auditDiff, writeAuditFor } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,9 +69,18 @@ export async function PATCH(request: NextRequest) {
   // upsert ไอคอน/ลำดับ ของหมวดเดียว (lazy create)
   const app_key = (body.app_key ?? "").trim(); const name = (body.name ?? "").trim();
   if (!app_key || !name || !body.patch) return NextResponse.json({ error: "ต้องมี app_key, name, patch" }, { status: 400 });
+  const { data: before } = await admin.from("erp_menu_sections").select("icon, icon_url, sort_order").eq("app_key", app_key).eq("name", name).maybeSingle();
   const { data, error } = await admin.from("erp_menu_sections")
     .upsert({ app_key, name, ...body.patch, updated_at: now }, { onConflict: "app_key,name" })
     .select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ประวัติ: เปลี่ยนไอคอน/รูปหมวด (ตั้งค่ากลาง) — ลำดับอย่างเดียวไม่ต้องลง
+  if ("icon" in body.patch || "icon_url" in body.patch) {
+    const changes = auditDiff(before ?? {}, body.patch as Record<string, unknown>);
+    if (changes.length) await writeAuditFor(request, admin, {
+      action: "menu_section.update", entityType: "erp_menu_sections", entityId: (data?.id as string | undefined) ?? null,
+      metadata: { app_key, name, changes },
+    });
+  }
   return NextResponse.json({ data, error: null });
 }

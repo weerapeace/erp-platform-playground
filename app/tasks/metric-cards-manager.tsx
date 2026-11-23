@@ -11,11 +11,12 @@ import { CARD_COLORS } from "./overview-customizer";
 import { describeCond, type MetricDef, type MetricCond, type MetricDue } from "./metrics";
 import { BrandSelect } from "@/components/brand-select";
 import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 type Opt = { value: string; label: string };
 const COLOR_NAMES = Object.keys(CARD_COLORS);
 
-const EMPTY: MetricDef = { id: "", label: "", icon: "📌", color: "violet", cond: {} };
+const EMPTY: MetricDef = { id: "", label: "", icon: "i:pin", color: "violet", cond: {} };
 
 export function MetricCardsManager({ open, metrics, onChange, onClose, typeOptions, brands, statusOptions, priorityOptions }: {
   open: boolean;
@@ -82,7 +83,7 @@ export function MetricCardsManager({ open, metrics, onChange, onClose, typeOptio
       <div className="rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
         <div className="text-sm font-semibold text-slate-700">{draft.id ? t("แก้การ์ด", "Edit card") : t("สร้างการ์ดใหม่", "New card")}</div>
         <div className="flex items-center gap-2">
-          <input value={draft.icon} onChange={(e) => setDraft((d) => ({ ...d, icon: e.target.value }))} placeholder="📌" className="w-12 h-8 px-1 text-center text-base border border-slate-200 rounded bg-white" />
+          <IconField size="sm" value={draft.icon} onChange={(v) => setDraft((d) => ({ ...d, icon: v }))} suggestFrom={draft.label} />
           <input value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder={t("ชื่อการ์ด เช่น ครบกำหนดวันนี้", "Card name, e.g. Due today")} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded bg-white" />
         </div>
         <div className="flex items-center gap-1 flex-wrap">

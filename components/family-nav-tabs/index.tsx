@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { usePermission } from "@/components/auth";
 import { SearchableSelect } from "@/components/searchable-select";
 import { IconPicker } from "@/components/icon-picker";
+import { Icon } from "@/components/icon";
 
 // ทางลัดหน้าที่ใช้บ่อย (ไม่ใช่โมดูล) ให้เลือกเพิ่มเป็นแท็บได้ง่าย
 const PAGE_SHORTCUTS: ExtraTab[] = [
@@ -53,7 +54,7 @@ export function FamilyNavTabs({ active }: { active: "tags" | "template" }) {
           className={`h-10 px-4 inline-flex items-center gap-1 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
             pathname === t.href ? "border-blue-600 text-blue-700 bg-blue-50/60" : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}>
-          <span>{t.icon}</span><span>{t.label}</span>
+          <span><Icon value={t.icon} /></span><span>{t.label}</span>
         </Link>
       ))}
       {canManage && (
@@ -143,7 +144,7 @@ function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClos
           <div className="rounded-lg border border-dashed border-slate-200 p-2.5">
             <div className="text-[11px] text-slate-500 mb-1">หรือใส่ลิงก์เอง (หน้าอะไรก็ได้)</div>
             <div className="flex items-end gap-2">
-              <div><div className="text-[10px] text-slate-400 mb-0.5">ไอคอน</div><IconPicker value={cIcon} onChange={setCIcon} /></div>
+              <div><div className="text-[10px] text-slate-400 mb-0.5">ไอคอน</div><IconPicker value={cIcon} onChange={setCIcon} suggestFrom={cLabel} /></div>
               <div className="flex-1"><div className="text-[10px] text-slate-400 mb-0.5">ชื่อแท็บ</div>
                 <input value={cLabel} onChange={(e) => setCLabel(e.target.value)} placeholder="เช่น เข็มขัด" className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md" /></div>
               <div className="flex-1"><div className="text-[10px] text-slate-400 mb-0.5">ลิงก์ (href)</div>
@@ -156,7 +157,7 @@ function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClos
             {tabs.length === 0 && <div className="text-xs text-slate-400 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีแท็บเพิ่มเติม —</div>}
             {tabs.map((t, i) => (
               <div key={t.href} className="flex items-center gap-2 text-sm bg-slate-50 rounded-md px-2 py-1.5">
-                <span>{t.icon}</span>
+                <span><Icon value={t.icon} /></span>
                 <span className="flex-1 min-w-0 truncate">{t.label} <code className="text-[10px] text-slate-400">{t.href}</code></span>
                 <button onClick={() => setTabs((p) => p.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500">✕</button>
               </div>

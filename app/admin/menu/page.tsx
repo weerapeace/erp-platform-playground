@@ -19,11 +19,14 @@ import type { MenuSection } from "@/app/api/menu/sections/route";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 import { ConfirmDialog } from "@/components/modal";
 import { canHardDelete } from "@/lib/app-menu-membership";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null; default_href?: string | null };
 const ALL = "__all__";
 
-// ไอคอน (รูปอัปโหลด icon_url > emoji)
+// ไอคอน (รูปอัปโหลด icon_url > ไอคอนกลาง/อีโมจิเดิม — วาดผ่าน <Icon> เสมอ)
 function Ico({ icon, iconUrl, size = 18 }: { icon?: string | null; iconUrl?: string | null; size?: number }) {
   if (iconUrl) {
     // ไฟล์ Lottie (.json) = ไอคอนเคลื่อนไหวกลาง (ตัวอย่างในหน้าตั้งค่า = ขยับตลอด)
@@ -31,7 +34,7 @@ function Ico({ icon, iconUrl, size = 18 }: { icon?: string | null; iconUrl?: str
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(iconUrl)}`} alt="" className="rounded object-contain shrink-0" style={{ width: size, height: size }} />;
   }
-  return <span className="shrink-0 leading-none" style={{ fontSize: size }}>{icon || "📄"}</span>;
+  return <span className="shrink-0 leading-none inline-flex" style={{ fontSize: size }}><Icon value={icon || "i:file-text"} /></span>;
 }
 
 export default function MenuManagerPage() {
@@ -138,7 +141,7 @@ export default function MenuManagerPage() {
   };
 
   // ---------- App (โมดูลใหญ่ / PWA) ----------
-  const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
+  const [naApp, setNaApp] = useState({ key: "", label: "", icon: "i:package" });
   // ---- ตั้งค่าแอป: แก้แบบ "ร่าง" แล้วกดบันทึกทีเดียว (ชื่อ/ไอคอน/สี/หน้าแรก) ----
   const [appForm, setAppForm] = useState({ label: "", icon: "", icon_url: null as string | null, theme_color: null as string | null, theme_color2: null as string | null, header_image: null as string | null, header_style: "gradient" as string, default_href: null as string | null });
   const [appDelText, setAppDelText] = useState("");   // พิมพ์รหัสแอปยืนยันก่อนลบ (กันเผลอ)
@@ -199,9 +202,9 @@ export default function MenuManagerPage() {
   const addApp = async () => {
     if (!naApp.key.trim() || !naApp.label.trim()) { setErr("กรอกรหัส (key) + ชื่อแอป"); return; }
     const j = await apiFetch("/api/menu/apps", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ item: { key: naApp.key.trim().toLowerCase(), label: naApp.label.trim(), icon: naApp.icon || "📦", sort_order: (apps.length + 1) * 10, permission_key: null, is_active: true } }) }).then((r) => r.json());
+      body: JSON.stringify({ item: { key: naApp.key.trim().toLowerCase(), label: naApp.label.trim(), icon: naApp.icon || "i:package", sort_order: (apps.length + 1) * 10, permission_key: null, is_active: true } }) }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
-    setNaApp({ key: "", label: "", icon: "📦" }); setShowAddApp(false); flash("เพิ่มแอปแล้ว"); await reloadKeepDraft();
+    setNaApp({ key: "", label: "", icon: "i:package" }); setShowAddApp(false); flash("เพิ่มแอปแล้ว"); await reloadKeepDraft();
   };
   // ลบแอป — ป้องกันเผลอลบด้วยการพิมพ์รหัสแอปยืนยันที่ UI (ไม่ใช้ confirm ธรรมดา)
   const delApp = async (id: string) => {
@@ -250,20 +253,20 @@ export default function MenuManagerPage() {
   };
 
   // สร้างเมนูใหม่ (ในป๊อปอัป) → เพิ่มเข้าแอปที่เลือกให้เลย
-  const [na, setNa] = useState({ section: "", label: "", href: "", icon: "📄" });
+  const [na, setNa] = useState({ section: "", label: "", href: "", icon: "i:file-text" });
   const addItem = async () => {
     if (!na.label.trim() || !na.href.trim()) { setErr("กรอกชื่อ + ลิงก์"); return; }
     setBusy(true); setErr(null);
     try {
       const item: MenuRow = {
         section: na.section.trim() || "อื่น ๆ", section_order: 999, sort_order: 999,
-        icon: na.icon || "📄", label: na.label.trim(), href: na.href.trim(),
+        icon: na.icon || "i:file-text", label: na.label.trim(), href: na.href.trim(),
         show_in_sidebar: true, show_in_launcher: true, permission_key: null, is_active: true,
         app_keys: sel === ALL ? [] : [sel],
       };
       const j = await apiFetch("/api/menu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setNa({ section: "", label: "", href: "", icon: "📄" }); setAddNew(false); setAddOpen(false);
+      setNa({ section: "", label: "", href: "", icon: "i:file-text" }); setAddNew(false); setAddOpen(false);
       flash("เพิ่มเมนูแล้ว"); await reloadKeepDraft();
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
@@ -499,7 +502,7 @@ export default function MenuManagerPage() {
         </div>
         {showAddApp && (
           <div className="mb-4 flex flex-wrap items-end gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5">
-            <div><label className="text-[11px] text-slate-500">ไอคอน (emoji)</label><input value={naApp.icon} onChange={(e) => setNaApp({ ...naApp, icon: e.target.value })} className="block w-14 h-8 px-1 text-center text-base border border-slate-200 rounded" /></div>
+            <div><label className="block text-[11px] text-slate-500">ไอคอน</label><IconField value={naApp.icon} onChange={(v) => setNaApp((s) => ({ ...s, icon: v }))} suggestFrom={naApp.label} title="เลือกไอคอนแอป" className="!h-8" /></div>
             <div><label className="text-[11px] text-slate-500">รหัส (key)</label><input value={naApp.key} onChange={(e) => setNaApp({ ...naApp, key: e.target.value })} placeholder="purchasing" className="block w-28 h-8 px-2 text-xs font-mono border border-slate-200 rounded" /></div>
             <div><label className="text-[11px] text-slate-500">ชื่อแอป</label><input value={naApp.label} onChange={(e) => setNaApp({ ...naApp, label: e.target.value })} placeholder="จัดซื้อ" className="block w-36 h-8 px-2 text-sm border border-slate-200 rounded" /></div>
             <button onClick={addApp} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700">＋ เพิ่มแอป</button>
@@ -536,8 +539,8 @@ export default function MenuManagerPage() {
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAppIcon(f); e.target.value = ""; }} />
                       </label>
                       {appForm.icon_url
-                        ? <button onClick={() => setAppForm((f) => ({ ...f, icon_url: null }))} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป (ใช้ emoji)</button>
-                        : <input value={appForm.icon} onChange={(e) => setAppForm((f) => ({ ...f, icon: e.target.value }))} placeholder="emoji" className="w-16 h-6 px-1 text-center text-sm border border-slate-200 rounded" />}
+                        ? <button onClick={() => setAppForm((f) => ({ ...f, icon_url: null }))} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป (ใช้ไอคอนเส้น)</button>
+                        : <IconField value={appForm.icon} onChange={(v) => setAppForm((f) => ({ ...f, icon: v }))} suggestFrom={appForm.label} size="sm" title="เลือกไอคอนแอป" />}
                     </div>
                   </div>
                   <label className="text-xs text-slate-500">ชื่อแอป <span className="text-slate-400">(ใช้ในระบบ + ตอนติดตั้งแอปเดี่ยว)</span>
@@ -607,7 +610,7 @@ export default function MenuManagerPage() {
                     <span className="text-xs text-slate-500 whitespace-nowrap">🏠 หน้าแรก</span>
                     <select value={appForm.default_href ?? ""} onChange={(e) => setAppForm((f) => ({ ...f, default_href: e.target.value || null }))} className="w-48 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
                       <option value="">— เมนูแรกของแอป —</option>
-                      {appMenuForDefault.map((m) => <option key={m.id} value={m.href}>{m.icon} {m.label}</option>)}
+                      {appMenuForDefault.map((m) => <option key={m.id} value={m.href}>{isLegacyIconValue(m.icon) ? `${m.icon} ` : ""}{m.label}</option>)}
                     </select>
                   </div>
                   {/* A2: ซ่อน/โชว์แอป (บันทึกทันที) */}
@@ -708,14 +711,14 @@ export default function MenuManagerPage() {
                       <div className="w-9 h-9 rounded border border-slate-200 bg-white flex items-center justify-center overflow-hidden">
                         <Ico icon={secByName.get(g.section)?.icon} iconUrl={secByName.get(g.section)?.icon_url} size={secByName.get(g.section)?.icon_url ? 34 : 20} />
                       </div>
-                      <label className="text-xs text-slate-600 flex items-center gap-1">emoji
-                        <input defaultValue={secByName.get(g.section)?.icon ?? ""} onBlur={(e) => setSecMeta(g.section, { icon: e.target.value.trim() || null })} placeholder="🏭" className="w-14 h-7 px-1 text-center text-base border border-slate-200 rounded" /></label>
+                      <span className="text-xs text-slate-600 flex items-center gap-1">ไอคอน
+                        <IconField value={secByName.get(g.section)?.icon ?? ""} onChange={(v) => setSecMeta(g.section, { icon: v || null })} suggestFrom={g.section} size="sm" title="เลือกไอคอนหมวด" /></span>
                       <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer ${uploadingSec ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
                         {uploadingSec ? "กำลังอัป…" : "⬆ อัปรูป"}
                         <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/json,.json" className="hidden" disabled={uploadingSec}
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadSecIcon(g.section, f); e.target.value = ""; }} /></label>
                       {secByName.get(g.section)?.icon_url && <button onClick={() => setSecMeta(g.section, { icon_url: null })} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป</button>}
-                      <span className="text-[11px] text-slate-400">รูปจะชนะ emoji · แนะนำ ≥128px · ไอคอนขยับ: Lottie (.json) / GIF</span>
+                      <span className="text-[11px] text-slate-400">รูปจะชนะไอคอนเส้น · แนะนำ ≥128px · ไอคอนขยับ: Lottie (.json) / GIF</span>
                       <button onClick={() => setEditingSecIcon(null)} className="ml-auto text-xs text-slate-500 hover:text-slate-800">เสร็จ</button>
                     </div>
                   )}
@@ -758,7 +761,7 @@ export default function MenuManagerPage() {
                             <div className="flex items-center gap-1.5 text-slate-600">ไอคอน
                               <ImageInput compact value={it.icon_url ?? null} onChange={(key) => patch(it.id!, { icon_url: key })} folder="menu-icons" />
                               <span className="text-slate-400">หรือ</span>
-                              <input defaultValue={it.icon ?? ""} onBlur={(e) => patch(it.id!, { icon: e.target.value })} placeholder="🛒" title="อิโมจิ (ใช้เมื่อไม่มีรูป)" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded" /></div>
+                              <IconField value={it.icon ?? ""} onChange={(v) => patch(it.id!, { icon: v })} suggestFrom={it.label} size="sm" title="เลือกไอคอนเมนู (ใช้เมื่อไม่มีรูป)" /></div>
                             <label className="flex items-center gap-1.5 text-slate-600">{it.parent_id ? "หัวข้อใน dropdown" : "หมวด"}
                               <input list="section-list" defaultValue={it.section} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.section) patch(it.id!, { section: v }); }} className="w-36 h-7 px-2 border border-slate-200 rounded" /></label>
                             {/* เมนูแม่ (nested / เปิด dropdown) */}
@@ -768,7 +771,7 @@ export default function MenuManagerPage() {
                               <label className="flex items-center gap-1.5 text-slate-600">อยู่ใต้เมนู
                                 <select value={it.parent_id ?? ""} onChange={(e) => patch(it.id!, { parent_id: e.target.value || null })} className="w-40 h-7 px-1 border border-slate-200 rounded bg-white">
                                   <option value="">— เมนูหลัก —</option>
-                                  {eligibleParents(it).map((p) => <option key={p.id} value={p.id!}>{p.icon} {p.label}</option>)}
+                                  {eligibleParents(it).map((p) => <option key={p.id} value={p.id!}>{isLegacyIconValue(p.icon) ? `${p.icon} ` : ""}{p.label}</option>)}
                                 </select></label>
                             )}
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_sidebar} onChange={(e) => patch(it.id!, { show_in_sidebar: e.target.checked })} /> แถบเมนูซ้าย</label>
@@ -860,7 +863,7 @@ export default function MenuManagerPage() {
               ) : (
                 <div className="p-3 space-y-2">
                   <div className="flex gap-2">
-                    <div><label className="text-[11px] text-slate-500">ไอคอน</label><input value={na.icon} onChange={(e) => setNa({ ...na, icon: e.target.value })} className="block w-14 h-8 px-1 text-center text-base border border-slate-200 rounded" /></div>
+                    <div><label className="block text-[11px] text-slate-500">ไอคอน</label><IconField value={na.icon} onChange={(v) => setNa((s) => ({ ...s, icon: v }))} suggestFrom={na.label} title="เลือกไอคอนเมนู" className="!h-8" /></div>
                     <div className="flex-1"><label className="text-[11px] text-slate-500">ชื่อเมนู</label><input value={na.label} onChange={(e) => setNa({ ...na, label: e.target.value })} placeholder="เช่น รายงานขาย" className="block w-full h-8 px-2 text-sm border border-slate-200 rounded" /></div>
                   </div>
                   <div><label className="text-[11px] text-slate-500">ลิงก์ (href)</label><input value={na.href} onChange={(e) => setNa({ ...na, href: e.target.value })} placeholder="/m/..." className="block w-full h-8 px-2 text-sm font-mono border border-slate-200 rounded" /></div>

@@ -22,6 +22,7 @@ import { orbitAppMatches, orbitCardBox, orbitPose, orbitSnapTarget, searchOrbit,
 import { ORBIT_DEFAULT, type OrbitColor, type OrbitStyle } from "@/lib/app-orbit-style";
 import { pickActiveApp } from "@/lib/active-app";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { Icon } from "@/components/icon";
 import { useViewportLayout } from "@/components/device-view";
 
 const STAGE_H_HUB = 660;    // วงที่มีแผงกลางอยู่ข้างใน (วงรี/วงกลม)
@@ -48,7 +49,7 @@ function OrbitIcon({ icon, iconUrl, size }: { icon: string | null; iconUrl: stri
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={r2ImageUrl(iconUrl, size * 2) ?? ""} alt="" className="object-contain shrink-0" style={{ width: size, height: size }} />;
   }
-  return <span className="leading-none shrink-0" style={{ fontSize: size * 0.82 }}>{icon ?? "📦"}</span>;
+  return <span className="leading-none shrink-0" style={{ fontSize: size * 0.82 }}><Icon value={icon || "📦"} /></span>;
 }
 
 export function AppOrbit({ apps, query, onQueryChange, greeting, title = "วันนี้จะเข้าแอปไหน", accent, initialKey, style = ORBIT_DEFAULT, replayKey = 0 }: {

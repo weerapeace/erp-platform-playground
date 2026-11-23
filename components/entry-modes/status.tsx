@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { tr } from "@/lib/lang";
 import { ERPModal } from "@/components/modal";
+import { Icon } from "@/components/icon";
 import { PendingDataPanel } from "@/components/pending-data-report";
 import type { EntryModeStat } from "@/lib/entry-modes";
 import { fetchEntryModeStats } from "./index";
@@ -51,7 +52,7 @@ export function EntryModeStatusButton({ moduleKey, activeFilter, onFilter }: {
               return (
                 <div key={st.key} className={`rounded-md px-2 py-2 ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                   <div className="flex items-center gap-2">
-                    <span className="w-5 text-center">{st.icon || "📝"}</span>
+                    <span className="w-5 inline-flex justify-center"><Icon value={st.icon || "i:file-text"} /></span>
                     <span className="flex-1 min-w-0 truncate text-sm font-medium text-slate-800">{st.label}</span>
                     <button type="button" onClick={() => { setOpen(false); onFilter(on ? null : st.key); }}
                       className={`h-7 px-2 text-xs rounded-md border ${on ? "border-blue-300 bg-white text-blue-700" : "border-slate-200 text-slate-600 hover:bg-white"}`}>

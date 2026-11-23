@@ -3144,7 +3144,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         <div ref={headerRef} className="sticky top-0 z-40 bg-white pb-2 mb-2 sm:pb-3 sm:mb-3 border-b border-slate-100 flex items-start justify-between gap-2 sm:gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="text-lg sm:text-2xl font-semibold text-slate-800">
-              {config.icon && <span className="mr-2">{config.icon}</span>}{config.title}
+              {config.icon && <span className="mr-2"><Icon value={config.icon} /></span>}{config.title}
             </h1>
             {config.description && <p className="hidden sm:block text-sm text-slate-500 mt-0.5">{config.description}</p>}
           </div>

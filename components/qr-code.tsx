@@ -12,6 +12,7 @@
  * ห้ามเรียก import("qrcode") เองในหน้าอื่น — ให้ใช้ตัวนี้ (แก้ที่เดียว เช่น สี/ระดับกันผิดพลาด)
  */
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/icon";
 
 export type QrOptions = { width?: number; margin?: number; dark?: string; light?: string; ecc?: "L" | "M" | "Q" | "H" };
 
@@ -58,7 +59,7 @@ export function QrCode({ text, size = 180, className = "", alt = "QR code", logo
         style={{ width: box, height: box }}>
         {logo
           ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={logo} alt="" className="h-full w-full rounded-[20%] object-cover" />
-          : <span style={{ fontSize: Math.round(box * 0.6) }} className="leading-none">{logoText}</span>}
+          : <span style={{ fontSize: Math.round(box * 0.6) }} className="leading-none"><Icon value={logoText} /></span>}
       </div>
     </div>
   );

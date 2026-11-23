@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { DEFAULT_MORE_LABEL, effectiveSort, menuPlace, planLayoutSave, type AppMenuPlace } from "@/lib/app-menu-layout";
 import type { AppSettingsMenuItem } from "./index";
@@ -104,7 +105,7 @@ export function MenuLayoutTab({ appKey, appId, moreLabel, defaultHref, items, on
         <div>
           <div className="mb-1 text-xs text-slate-500">ตัวอย่างแถบเมนู</div>
           <div className="flex flex-wrap items-center gap-1 rounded-xl bg-slate-800 px-2.5 py-2 text-sm text-white/85">
-            {onBar.map((r) => <span key={r.id} className="inline-flex h-7 items-center gap-1 rounded-lg px-2 whitespace-nowrap"><span>{r.icon ?? "•"}</span>{r.label}</span>)}
+            {onBar.map((r) => <span key={r.id} className="inline-flex h-7 items-center gap-1 rounded-lg px-2 whitespace-nowrap"><span><Icon value={r.icon ?? "•"} /></span>{r.label}</span>)}
             {inMore.length > 0 && <span className="inline-flex h-7 items-center gap-1 rounded-lg bg-white/15 px-2 whitespace-nowrap">⋯ {shown} ▾ <span className="text-[11px] text-white/60">({inMore.length})</span></span>}
             {!onBar.length && !inMore.length && <span className="px-2 text-xs text-white/60">ไม่มีเมนูให้เห็นเลย</span>}
           </div>
@@ -121,7 +122,7 @@ export function MenuLayoutTab({ appKey, appId, moreLabel, defaultHref, items, on
             return (
               <div key={r.id} {...rowProps(i)} className={`flex flex-wrap items-center gap-2 border-t border-slate-100 px-3 py-2 first:border-t-0 ${changed ? "bg-amber-50/60" : ""} ${rowCls(i)}`}>
                 <DragHandle {...handleProps(i)} className="text-lg" />
-                <span className="w-6 text-center">{r.icon ?? "•"}</span>
+                <span className="w-6 text-center"><Icon value={r.icon ?? "•"} /></span>
                 <span className={`min-w-0 flex-1 truncate text-sm ${p === "hidden" ? "text-slate-400 line-through" : "font-medium text-slate-800"}`}>{r.label}</span>
                 {defaultHref && r.href === defaultHref && <span className="rounded bg-blue-50 px-1.5 text-[10px] text-blue-700">หน้าแรก</span>}
                 {kids > 0 && <span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500">▾ เมนูย่อย {kids}</span>}

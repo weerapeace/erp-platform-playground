@@ -164,7 +164,7 @@ export function normalizeEntryModes(raw: unknown): EntryMode[] {
     }
     const imagesMin = Math.max(0, Math.min(50, Math.round(Number(r.imagesMin) || 0)));
     const mode: EntryMode = { key, label, items };
-    const icon = str(r.icon, 8); if (icon) mode.icon = icon;
+    const icon = str(r.icon, 64); if (icon) mode.icon = icon;
     const roles = strList(r.roles); if (roles.length) mode.roles = roles;
     const families = strList(r.families); if (families.length) mode.families = families;
     if (imagesMin > 0) {

@@ -23,6 +23,7 @@ import { IconPicker } from "@/components/icon-picker";
 import { SearchableSelect } from "@/components/searchable-select";
 import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { HoverImage } from "@/components/hover-image";
 import { useToast } from "@/components/toast";
 import { askAndNestTag } from "@/lib/tag-nest";
@@ -563,7 +564,7 @@ export default function TagsManagerPage() {
                 return (
                   <div key={g.id} onDrop={onGroupDrop(g.id)} onDragOver={onGroupOver}
                     className="rounded-md border border-transparent hover:border-blue-300 hover:bg-blue-50/30 p-1 transition-colors">
-                    <div className="text-[11px] font-medium text-slate-500">{g.icon ? g.icon + " " : ""}{g.name}{g.single_select ? " · เลือก1" : ""}</div>
+                    <div className="text-[11px] font-medium text-slate-500">{g.icon ? <><Icon value={g.icon} />{" "}</> : null}{g.name}{g.single_select ? " · เลือก1" : ""}</div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                       {empty && <span className="text-[10px] text-slate-300">— ลากแท็กมาวางที่นี่ —</span>}
                       {direct.map(tagChip)}
@@ -847,7 +848,7 @@ function GroupManager({ groups, onClose, onChanged }: { groups: Grp[]; onClose: 
   const inp = "w-full h-9 px-2 text-sm border border-slate-200 rounded-md";
   const Row = ({ g, sub }: { g: Grp; sub?: boolean }) => (
     <div className={`flex items-center gap-2 px-3 py-2 text-sm ${sub ? "pl-8" : ""}`}>
-      <span className="text-lg">{g.icon ?? "🏷️"}</span>
+      <span className="text-lg"><Icon value={g.icon || "🏷️"} /></span>
       <span className="flex-1 min-w-0 truncate">{sub ? "↳ " : ""}{g.name}</span>
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${g.single_select ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
         {g.single_select ? "เลือก 1" : "หลายรายการ"}
@@ -868,14 +869,14 @@ function GroupManager({ groups, onClose, onChanged }: { groups: Grp[]; onClose: 
         {form ? (
           <div className="p-5 space-y-3">
             <div className="flex items-end gap-3">
-              <div><div className="text-[11px] text-slate-500 mb-1">ไอคอน</div><IconPicker value={form.icon} onChange={(v) => setForm((f) => f ? { ...f, icon: v } : f)} /></div>
+              <div><div className="text-[11px] text-slate-500 mb-1">ไอคอน</div><IconPicker value={form.icon} onChange={(v) => setForm((f) => f ? { ...f, icon: v } : f)} suggestFrom={form.name} /></div>
               <div className="flex-1"><div className="text-[11px] text-slate-500 mb-1">ชื่อกลุ่ม *</div>
                 <input autoFocus value={form.name} onChange={(e) => setForm((f) => f ? { ...f, name: e.target.value } : f)} className={inp} placeholder="เช่น สี" /></div>
             </div>
             <div>
               <div className="text-[11px] text-slate-500 mb-1">กลุ่มแม่ (ถ้าเป็นกลุ่มย่อย)</div>
               <SearchableSelect value={form.parent_group_id} onChange={(v) => setForm((f) => f ? { ...f, parent_group_id: v } : f)} placeholder="— ไม่มี (กลุ่มหลัก) —"
-                options={tops.filter((g) => g.id !== form.id).map((g) => ({ value: g.id, label: `${g.icon ?? ""} ${g.name}`.trim() }))} />
+                options={tops.filter((g) => g.id !== form.id).map((g) => ({ value: g.id, label: `${isLegacyIconValue(g.icon) ? g.icon : ""} ${g.name}`.trim() }))} />
             </div>
             <div>
               <div className="text-[11px] text-slate-500 mb-1">โหมดเลือกแท็กในกลุ่มนี้</div>

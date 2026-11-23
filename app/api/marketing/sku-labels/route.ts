@@ -35,7 +35,7 @@ function pickFields(b: LabelInput, requireName: boolean): { fields: Record<strin
     if (en.length > 60) return { fields: f, error: "ชื่ออังกฤษยาวเกิน 60 ตัวอักษร" };
     f.name_en = en || null;   // ว่าง = โหมด EN ใช้ชื่อไทย
   }
-  if ("icon" in b) f.icon = String(b.icon ?? "").trim().slice(0, 8) || null;
+  if ("icon" in b) f.icon = String(b.icon ?? "").trim().slice(0, 64) || null;
   if ("color" in b) f.color = cleanColor(b.color);
   if ("description" in b) f.description = String(b.description ?? "").trim().slice(0, 200) || null;
   if ("is_active" in b) f.is_active = b.is_active !== false;

@@ -14,6 +14,7 @@ import {
   placementLabelsFor, type PlanStage, type PlacementType,
 } from "@/lib/marketing/content-plan";
 import type { PlatformOpt } from "./plan-modal";
+import { Icon } from "@/components/icon";
 
 const TYPE_ICON = Object.fromEntries(POST_TYPES.map((t) => [t.value, t.icon]));
 const NO_PLATFORM = "__none";
@@ -63,7 +64,7 @@ export function PlanCard({ item, pillar, compact = false, showDate = false, canE
           <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
             <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             {types.map((t) => <span key={t}>{TYPE_ICON[t] ?? "•"}</span>)}
-            {pillar?.icon && <span>{pillar.icon}</span>}
+            {pillar?.icon && <span className="inline-flex"><Icon value={pillar.icon} /></span>}
             {!compact && pillar && <span className="truncate">{labelName(pillar)}</span>}
             {showDate && dk && <span className="ml-auto whitespace-nowrap text-slate-400">{shortThaiDate(dk)} {timeOf(item.scheduled_at)}</span>}
             {!showDate && !compact && item.scheduled_at && <span className="ml-auto text-slate-400">{timeOf(item.scheduled_at)}</span>}

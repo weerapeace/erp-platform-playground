@@ -3,6 +3,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { tokenize, scoreRow, ilikeOr } from "@/lib/search-score";
 import { getSearchScope, type SearchScope } from "@/lib/search-scopes";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 
 // ---- Types ----
 
@@ -135,7 +136,7 @@ async function searchPages(q: string, can: CanFn, limit: number, scope: SearchSc
     seenHref.add(r.href);
     const where = [myApps.map((a) => a.label).join(" / "), r.section].filter(Boolean).join(" · ");
     hits.push({
-      entity_type: "page", id: r.id, label: `${r.icon && !/^https?:|^\//.test(r.icon) ? `${r.icon} ` : ""}${r.label}`,
+      entity_type: "page", id: r.id, label: `${r.icon && !/^https?:|^\//.test(r.icon) && isLegacyIconValue(r.icon) ? `${r.icon} ` : ""}${r.label}`,
       sublabel: (via ? `${where} · ตรงกับคำค้น "${via}"` : where) || null,
       link_url: r.href, score,
     });
@@ -187,7 +188,7 @@ async function searchGuides(q: string, limit: number, scope: SearchScope | null)
 
     const base = g.description || `${gSteps.length} ขั้นตอน`;
     hits.push({
-      entity_type: "guide", id: g.id, label: `${g.icon ? `${g.icon} ` : ""}${g.title}`,
+      entity_type: "guide", id: g.id, label: `${g.icon && isLegacyIconValue(g.icon) ? `${g.icon} ` : ""}${g.title}`,
       sublabel: matchedStep ? `${base} · ขั้นที่ ${matchedStep.step_no}: ${matchedStep.title ?? ""}` : base,
       link_url: `/master/help-guides?guide=${g.id}`, score,
     });

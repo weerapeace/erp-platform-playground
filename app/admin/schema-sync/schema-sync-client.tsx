@@ -22,6 +22,8 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { SearchableSelect } from "@/components/searchable-select";
 import { TableColumnSelect } from "@/components/table-column-select";
 import { IconPicker } from "@/components/icon-picker";
+import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { apiFetch } from "@/lib/api";
 import { invalidateCache } from "@/lib/client-cache";
 import { useRoleOptions } from "@/lib/use-roles";
@@ -737,7 +739,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                                     className="flex items-center gap-2 w-full text-left text-sm font-semibold text-slate-700 hover:text-orange-600"
                                   >
                                     <span className={`inline-block w-3 text-slate-400 transition-transform ${isCollapsed ? "" : "rotate-90"}`}>▶</span>
-                                    <span>{meta.icon}</span>
+                                    <span><Icon value={meta.icon} /></span>
                                     <span>{meta.label}</span>
                                     <span className="text-xs text-slate-400 font-normal">({groupFields.length})</span>
                                   </button>
@@ -929,7 +931,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
               <div className="flex items-end gap-3">
                 <div>
                   <div className="text-[11px] text-slate-500 mb-1">ไอคอน</div>
-                  <IconPicker value={groupModal.icon} onChange={(v) => setGroupModal((m) => (m ? { ...m, icon: v } : m))} />
+                  <IconPicker value={groupModal.icon} onChange={(v) => setGroupModal((m) => (m ? { ...m, icon: v } : m))} suggestFrom={groupModal.name} />
                 </div>
                 <div className="flex-1">
                   <div className="text-[11px] text-slate-500 mb-1">ชื่อกลุ่ม</div>
@@ -972,7 +974,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                       <select value={groupDel.moveTo} onChange={(e) => setGroupDel({ ...groupDel, moveTo: e.target.value })}
                         className="w-full h-8 px-2 text-xs border border-slate-300 rounded-md bg-white">
                         <option value="">— เลือกกลุ่มปลายทาง —</option>
-                        {groupOptions.filter((o) => o.value !== g.value).map((o) => <option key={o.value} value={o.value}>{gMeta(o.value).icon} {gMeta(o.value).label}</option>)}
+                        {groupOptions.filter((o) => o.value !== g.value).map((o) => <option key={o.value} value={o.value}>{isLegacyIconValue(gMeta(o.value).icon) ? `${gMeta(o.value).icon} ` : ""}{gMeta(o.value).label}</option>)}
                       </select>
                     )}
                     <div className="flex justify-end gap-1.5">
@@ -983,7 +985,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   </div>
                 ) : (
                   <div key={g.value} className="flex items-center gap-2 px-4 py-2 text-sm">
-                    <span className="text-lg">{gMeta(g.value).icon}</span>
+                    <span className="text-lg"><Icon value={gMeta(g.value).icon} /></span>
                     <span className="flex-1 min-w-0 truncate">{gMeta(g.value).label} <code className="text-[10px] text-slate-400">{g.value}</code></span>
                     <button onClick={() => { setGroupMgr(false); setGroupModal({ mode: "edit", origKey: g.value, name: gMeta(g.value).label, icon: gMeta(g.value).icon }); }}
                       className="text-xs text-blue-600 hover:underline">แก้ไข</button>

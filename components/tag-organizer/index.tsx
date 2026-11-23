@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
 import { translateContent } from "@/lib/content-translate";
 import { subGroupOfTag as findSubGroupOfTag, parentTagOfGroup } from "@/lib/tag-hierarchy";
 import { TagUsageModal } from "@/components/tag-usage";
@@ -618,7 +619,7 @@ export function TagOrganizerModal({
       >
         <span className="text-slate-300 select-none">⠿</span>
         <span className={`${isSub ? "text-xs text-slate-500" : "text-sm font-medium text-slate-700"}`}>
-          {isSub ? "↳ " : (g.icon ? g.icon + " " : "")}{g.name}
+          {isSub ? "↳ " : (g.icon ? <Icon value={g.icon} className="mr-1" /> : null)}{g.name}
         </span>
         {g.en
           ? <span className="text-[10px] text-slate-400 truncate max-w-[160px]">· {g.en}</span>

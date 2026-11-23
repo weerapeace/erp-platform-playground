@@ -15,6 +15,7 @@ import { DateInput } from "@/components/date-input";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { getLang } from "@/lib/lang";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { useEntryModes } from "@/components/entry-modes";
@@ -99,7 +100,7 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
   const entryModes = useEntryModes("parent-skus-v2");
   const modeOptions = useMemo(() => [
     { value: "", label: t("— เปิดหน้าปกติ (ไม่เข้าโหมด) —", "— Normal view (no mode) —") },
-    ...(entryModes ?? []).map((m) => ({ value: m.key, label: m.label, badge: m.icon ?? undefined })),
+    ...(entryModes ?? []).map((m) => ({ value: m.key, label: m.label, badge: m.icon && isLegacyIconValue(m.icon) ? m.icon : undefined })),
     ...(form.entry_mode && entryModes && !entryModes.some((m) => m.key === form.entry_mode)
       ? [{ value: form.entry_mode, label: t(`(ไม่พบโหมด "${form.entry_mode}" — ถูกลบไปแล้ว)`, `(mode "${form.entry_mode}" not found — deleted)`) }] : []),
   ], [entryModes, form.entry_mode, t]);
@@ -112,7 +113,7 @@ export function WorkJobModal({ open, onClose, job, labels, presetIds, onSaved }:
 
   const labelOptions = useMemo(() => [
     { value: "", label: t("— ไม่ติดป้าย —", "— No label —") },
-    ...labels.filter((l) => l.is_active || l.id === form.auto_label_id).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon ?? undefined })),
+    ...labels.filter((l) => l.is_active || l.id === form.auto_label_id).map((l) => ({ value: l.id, label: labelName(l), badge: l.icon && isLegacyIconValue(l.icon) ? l.icon : undefined })),
   ], [labels, form.auto_label_id, t]);
 
   const save = async () => {

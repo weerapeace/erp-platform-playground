@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import { useAuth, usePermission, type Permission } from "@/components/auth";
 
 export type TagFilterValue = { tagIds: string[]; none: boolean };
@@ -99,9 +101,9 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
   const groupOptions = useMemo(() => {
     const out: { id: string; label: string }[] = [];
     for (const g of groups.filter((x) => !x.parent_group_id).sort(byOrder)) {
-      out.push({ id: g.id, label: `${g.icon ? g.icon + " " : ""}${g.name}` });
+      out.push({ id: g.id, label: `${g.icon && isLegacyIconValue(g.icon) ? g.icon + " " : ""}${g.name}` });
       for (const s of groups.filter((x) => x.parent_group_id === g.id).sort(byOrder)) {
-        out.push({ id: s.id, label: `　↳ ${s.icon ? s.icon + " " : ""}${s.name}` });
+        out.push({ id: s.id, label: `　↳ ${s.icon && isLegacyIconValue(s.icon) ? s.icon + " " : ""}${s.name}` });
       }
     }
     return out;
@@ -288,7 +290,7 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
                   <div key={g.id} className="border border-slate-100 rounded-lg">
                     <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-1.5 text-sm font-medium text-slate-700">
                       {GroupCheck(allIds)}
-                      {g.color && <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: g.color }} />}{g.icon && <span>{g.icon}</span>}{g.name}
+                      {g.color && <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: g.color }} />}{g.icon && <span className="inline-flex"><Icon value={g.icon} /></span>}{g.name}
                       {!manage && <span className="ml-auto text-[10px] text-slate-400 font-normal">เลือกทั้งกลุ่ม</span>}
                     </div>
                     <div className="p-1">
@@ -296,7 +298,7 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
                       {subs.filter((x) => x.t.length > 0).map(({ s, t }) => (
                         <div key={s.id} className="mt-1">
                           <div className="px-2 py-0.5 text-xs font-medium text-slate-500 flex items-center gap-1.5">
-                            {GroupCheck(t.map((x) => x.id))}↳ {s.icon ? s.icon + " " : ""}{s.name}
+                            {GroupCheck(t.map((x) => x.id))}↳ {s.icon && <Icon value={s.icon} className="mr-1" />}{s.name}
                           </div>
                           {t.map(TagRow)}
                         </div>

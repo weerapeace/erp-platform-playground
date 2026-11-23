@@ -16,6 +16,9 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss, ConfirmDialog } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
+import { isLegacyIconValue } from "@/lib/icon-registry";
 import type { LookupRow } from "@/app/api/lookups/route";
 import type { LookupType } from "@/app/api/lookups/types/route";
 
@@ -179,7 +182,7 @@ export default function LookupsAdminPage() {
                       : "bg-white border border-slate-200 text-slate-700 hover:border-orange-300"
                   }`}
                 >
-                  <span>{t.icon ?? "📁"}</span>
+                  <span className="inline-flex"><Icon value={t.icon || "i:folder"} /></span>
                   <span className="font-medium">{t.label}</span>
                   <code className="text-[10px] opacity-60">{t.lookup_type}</code>
                 </button>
@@ -196,8 +199,7 @@ export default function LookupsAdminPage() {
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 {typeEdit ? (
                   <span className="inline-flex items-center gap-1.5">
-                    <input value={typeEdit.icon} onChange={(e) => setTypeEdit({ ...typeEdit, icon: e.target.value })} maxLength={4} title="ไอคอน (emoji)"
-                      className="w-12 h-9 px-2 text-center text-base border border-slate-300 rounded-md" />
+                    <IconField value={typeEdit.icon} onChange={(v) => setTypeEdit((te) => (te ? { ...te, icon: v } : te))} suggestFrom={typeEdit.label} title="ไอคอน" />
                     <input value={typeEdit.label} autoFocus onChange={(e) => setTypeEdit({ ...typeEdit, label: e.target.value })}
                       onKeyDown={(e) => { if (e.key === "Enter") void saveType(); if (e.key === "Escape") setTypeEdit(null); }}
                       className="h-9 px-3 text-sm border border-orange-400 rounded-md focus:outline-none focus:ring-1 focus:ring-orange-500" />
@@ -207,7 +209,7 @@ export default function LookupsAdminPage() {
                 ) : (
                   <>
                     <h2 className="text-lg font-semibold text-slate-900">
-                      {activeType.icon} {activeType.label}
+                      {activeType.icon && <Icon value={activeType.icon} className="mr-1" />}{activeType.label}
                     </h2>
                     <button onClick={() => setTypeEdit({ label: activeType.label, icon: activeType.icon ?? "" })} title="เปลี่ยนชื่อ / ไอคอน ของ type นี้"
                       className="h-7 px-2 text-xs text-slate-500 border border-slate-200 rounded-md hover:bg-slate-50">✏️ แก้ชื่อ</button>
@@ -308,7 +310,7 @@ export default function LookupsAdminPage() {
       </div>
     <ConfirmDialog open={typeDel !== null} onClose={() => { if (!typeBusy) setTypeDel(null); }} onConfirm={() => void removeType()} loading={typeBusy}
         variant="danger" title="ลบ type นี้?" confirmText="ลบ type" cancelText="ไม่ลบ"
-        message={`${typeDel?.icon ?? ""} ${typeDel?.label ?? ""} (${typeDel?.lookup_type ?? ""}) — ลบได้เฉพาะ type ที่ไม่มีค่าข้างใน และไม่มีฟิลด์ไหนใช้อยู่ · ลบแล้วเรียกคืนไม่ได้ ต้องสร้างใหม่`} />
+        message={`${isLegacyIconValue(typeDel?.icon ?? "") ? typeDel?.icon ?? "" : ""} ${typeDel?.label ?? ""} (${typeDel?.lookup_type ?? ""}) — ลบได้เฉพาะ type ที่ไม่มีค่าข้างใน และไม่มีฟิลด์ไหนใช้อยู่ · ลบแล้วเรียกคืนไม่ได้ ต้องสร้างใหม่`} />
     </PlaygroundShell>
   );
 }
@@ -389,7 +391,7 @@ function RowEditor({
 function NewTypeModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void | Promise<void> }) {
   const [key,  setKey]  = useState("");
   const [label, setLabel] = useState("");
-  const [icon, setIcon]  = useState("📁");
+  const [icon, setIcon]  = useState("i:folder");
   const [saving, setSaving] = useState(false);
   const [err,  setErr]  = useState<string | null>(null);
 
@@ -435,13 +437,8 @@ function NewTypeModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
             />
           </div>
           <div>
-            <label className="text-xs text-slate-600 block mb-1">Icon (emoji 1 ตัว)</label>
-            <input
-              value={icon}
-              onChange={(e) => setIcon(e.target.value)}
-              maxLength={4}
-              className="w-16 h-9 px-3 text-lg text-center border border-slate-300 rounded-md"
-            />
+            <span className="text-xs text-slate-600 block mb-1">ไอคอน</span>
+            <IconField value={icon} onChange={setIcon} suggestFrom={label} />
           </div>
           {err && <div className="text-xs text-red-600">⚠ {err}</div>}
         </div>

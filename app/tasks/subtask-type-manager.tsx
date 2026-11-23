@@ -13,6 +13,7 @@ import { ColorInput } from "@/components/color-picker";
 import { listSubtaskTypes, updateSubtaskType, createSubtaskType, subtaskTypeHint, type SubtaskType } from "./data";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { Icon } from "@/components/icon";
+import { IconField } from "@/components/icon/icon-field";
 
 export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { showToast?: (m: string) => void; onChanged?: () => void }) {
   const t = useT();
@@ -96,7 +97,7 @@ export function SubtaskTypeManager({ showToast: showToastProp, onChanged }: { sh
                       <span className="leading-none"><Icon value={r.icon || "i:puzzle"} /></span><span className="truncate">{r.label_th}</span>
                     </span>
                     <div title={t("สีประจำ", "Color")}><ColorInput value={r.color || "#64748b"} onChange={(v) => setField(r.key, { color: v })} allowText={false} /></div>
-                    <input value={r.icon || ""} maxLength={2} placeholder="🧩" onChange={(e) => setField(r.key, { icon: e.target.value })} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                    <IconField size="sm" value={r.icon || ""} onChange={(v) => setField(r.key, { icon: v })} suggestFrom={r.label_th} placeholderIcon="i:puzzle" title={t("ไอคอน", "Icon")} />
                     <input value={r.label_th} onChange={(e) => setField(r.key, { label_th: e.target.value })} placeholder={t("ชื่อไทย", "Thai")} className="flex-1 min-w-[100px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                     <input value={r.label_en ?? ""} onChange={(e) => setField(r.key, { label_en: e.target.value })} placeholder="EN" title={t("ชื่ออังกฤษ (ว่าง=ใช้ไทย)", "English (blank = use Thai)")} className="w-28 text-sm text-slate-500 bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
                     <label className="flex items-center gap-1 text-[11px] text-slate-500"><input type="checkbox" checked={r.is_active} onChange={(e) => saveNow(r.key, { is_active: e.target.checked })} />{t("ใช้งาน", "Active")}</label>

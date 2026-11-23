@@ -16,6 +16,7 @@ import type { AdminUser } from "@/app/api/admin/users/route";
 import type { UserOverride } from "@/app/api/admin/user-permissions/route";
 import { ALL_WIDGETS, WIDGET_META, layoutForRole, type DashboardLayout, type DashboardView } from "@/lib/dashboard-widgets";
 import type { DashboardPanel } from "@/lib/dashboard-systems";
+import { Icon } from "@/components/icon";
 
 type AppLite = { key: string; label: string; icon: string | null; icon_url?: string | null; permission_key: string | null; is_active?: boolean };
 
@@ -51,7 +52,7 @@ function AppIco({ app, size = 22 }: { app: AppLite; size?: number }) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(app.icon_url)}&w=64`} alt="" className="rounded object-contain shrink-0" style={{ width: size, height: size }} />;
   }
-  return <span className="shrink-0 leading-none" style={{ fontSize: size }}>{app.icon ?? "🧩"}</span>;
+  return <span className="shrink-0 leading-none" style={{ fontSize: size }}><Icon value={app.icon || "🧩"} /></span>;
 }
 
 export default function RoleBoardPage() {

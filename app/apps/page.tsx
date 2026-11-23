@@ -33,6 +33,9 @@ import { ORBIT_MINE_KEY, ORBIT_TEAM_KEY, cleanOrbitStyle, orbitOverrideCount, re
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
+import { Icon } from "@/components/icon";
+import { isLegacyIconValue } from "@/lib/icon-registry";
+import { IconField } from "@/components/icon/icon-field";
 
 // ธีมหน้าแรก (ค่ากลางทีม + ของฉัน · ความชัด/ตำแหน่งรูป · ของตกแต่ง) → lib/launcher-theme + components/launcher-theme
 
@@ -49,8 +52,6 @@ type LauncherPrefs = {
   view?: "orbit" | "grid";                // มุมมองหน้าแรก: ◎ วงแอป (ค่าเริ่มต้น) / ▦ ตารางไอคอน
 };
 const EMPTY_PREFS: LauncherPrefs = { favorites: [], hidden: [], appOrder: {}, sectionOrder: [], labels: {}, icons: {}, iconImages: {}, sectionLabels: {} };
-// ชุด emoji ยอดนิยมสำหรับเปลี่ยนไอคอนแอป
-const ICON_CHOICES = "📦📋🛒🧾🗄️🏭🧑‍💼🏢🪪📊📜📥🖨️👥🔐⚙️✋🧩🌴💵📒🤝🏷️🧬🗂️📁📌⭐✅📈💼🔧🛠️📝📮🎯🚚🏪🧰🔔📞💬🖼️".match(/./gu) ?? [];
 
 // สีไล่เฉดสำหรับ tile ที่มาจากทะเบียนเมนู (วนสี)
 const TILE_COLORS = [
@@ -902,7 +903,7 @@ export default function AppLauncherPage() {
                   {prefs.iconImages[base.key]
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={r2ImageUrl(prefs.iconImages[base.key]) ?? ""} alt="" className="w-full h-full object-cover" />
-                    : (prefs.icons[base.key] || base.icon)}
+                    : <Icon value={prefs.icons[base.key] || base.icon} />}
                 </div>
                 <div className="text-sm font-semibold text-slate-800">{prefs.labels[base.key] || base.name}</div>
               </div>
@@ -924,15 +925,13 @@ export default function AppLauncherPage() {
                     <input type="file" accept="image/*" className="hidden" disabled={iconBusy} onChange={(e) => onPickIcon(base.key, e.target.files?.[0], prefs.labels[base.key] || base.name)} />
                   </label>
                   {prefs.iconImages[base.key] && (
-                    <button type="button" onClick={() => setAppIconImage(base.key, null)} className="text-[11px] text-red-500 hover:text-red-700">ลบรูป (ใช้อีโมจิ)</button>
+                    <button type="button" onClick={() => setAppIconImage(base.key, null)} className="text-[11px] text-red-500 hover:text-red-700">ลบรูป (ใช้ไอคอนเส้น)</button>
                   )}
                 </div>
-                <input value={prefs.icons[base.key] ?? ""} placeholder={base.icon} onChange={(e) => setAppIcon(base.key, e.target.value)}
-                  className="mt-1.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-lg outline-none focus:border-blue-400" />
-                <div className="mt-1.5 flex flex-wrap gap-1 max-h-28 overflow-auto">
-                  {ICON_CHOICES.map((em, i) => (
-                    <button key={i} type="button" onClick={() => { setAppIcon(base.key, em); setAppIconImage(base.key, null); }} className="w-8 h-8 rounded-lg hover:bg-slate-100 text-lg">{em}</button>
-                  ))}
+                <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+                  <IconField value={prefs.icons[base.key] || base.icon || ""} onChange={(v) => { setAppIcon(base.key, v); if (v) setAppIconImage(base.key, null); }}
+                    suggestFrom={prefs.labels[base.key] || base.name} title="เลือกไอคอนแอป" />
+                  เลือกไอคอนเส้น (ค้นหา/แนะนำจากชื่อ/เลือกสี)
                 </div>
               </div>
               <div className="flex justify-end pt-1">
@@ -969,7 +968,7 @@ function AppTileContent({ app }: { app: AppEntry }) {
         {app.iconImage
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={r2ImageUrl(app.iconImage) ?? ""} alt="" className="w-full h-full object-cover" />
-          : <span className="drop-shadow-sm">{app.icon}</span>}
+          : <span className="drop-shadow-sm"><Icon value={app.icon} /></span>}
       </div>
       <div className="text-sm font-semibold text-slate-900 leading-tight">{app.name}</div>
       <div className="text-[11px] text-slate-400 mt-0.5 leading-tight truncate">{app.subtitle}</div>
