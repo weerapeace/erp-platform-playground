@@ -71,6 +71,9 @@ export async function GET(request: NextRequest) {
   const fColor = (searchParams.get("color") ?? "").trim();
   const fUom = (searchParams.get("uom") ?? "").trim();
   const fSaleOk = searchParams.get("sale_ok");   // "true" | "false" | null
+  // กรองตามแท็ก (product_families.id) — เช่น เฉพาะ SKU แท็ก Packaging (Set บรรจุภัณฑ์สถานีแพ็ค 2026-11-23)
+  const fTag = (searchParams.get("tag") ?? "").trim();
+  const tagOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fTag);
   let fCategoryParentIds: string[] | null = null;
   let fUomId: string | null = null;
   if (fCategory) {
@@ -112,7 +115,7 @@ export async function GET(request: NextRequest) {
       sale_ok,
       is_active,
       parent_skus_v2 ( id, code, name_th, cover_image_r2_key, product_categories ( name ) ),
-      uom:uoms!uom_id ( name )
+      uom:uoms!uom_id ( name )${tagOk ? ",\n      tagf:skus_v2_product_family_m2m!inner ( tgt_id )" : ""}
     `, { count: "exact" })
     .eq("is_active", true);
   if (salesOnly) query = query.eq("sale_ok", true);
@@ -121,6 +124,7 @@ export async function GET(request: NextRequest) {
   if (fSaleOk === "false") query = query.eq("sale_ok", false);
   if (fColor) query = query.or(`color_th.eq.${fColor},color.eq.${fColor}`);
   if (fUomId) query = query.eq("uom_id", fUomId);
+  if (tagOk) query = query.eq("tagf.tgt_id", fTag);   // inner join กับตารางแท็ก — ไม่ต้องส่ง id ยาว ๆ ใน URL
   if (fCategoryParentIds) {
     // ไม่มี parent ในหมวดนี้ → ไม่มีผลลัพธ์
     if (fCategoryParentIds.length === 0) return NextResponse.json({ data: [], total: 0, error: null });

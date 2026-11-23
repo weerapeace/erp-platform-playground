@@ -44,14 +44,22 @@ const dimVal = (s: SkuPickerValue, k: DimKey): string => {
 };
 
 export function SkuMultiPickerModal({
-  open, onClose, onConfirm, excludeIds = [], salesOnly = false,
+  open, onClose, onConfirm, excludeIds = [], salesOnly = false, tag, title, description, tagHint,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (skus: SkuPickerValue[]) => void;
   excludeIds?: string[];
   salesOnly?: boolean;
+  /** กรองเฉพาะ SKU ที่ติดแท็กนี้ (มีช่องติ๊ก "เฉพาะแท็ก …" เปิดไว้ก่อน — เอาออกได้เพื่อค้นทุก SKU) */
+  tag?: { id: string; label: string } | null;
+  title?: string;
+  description?: string;
+  /** ข้อความใต้ช่องติ๊กแท็ก เช่น "เพิ่มแล้วระบบติดแท็กให้" */
+  tagHint?: string;
 }) {
+  const [tagOn, setTagOn] = useState(true);
+  useEffect(() => { if (open) setTagOn(true); }, [open]);
   const PAGE = 40;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkuPickerValue[]>([]);
@@ -100,6 +108,7 @@ export function SkuMultiPickerModal({
   const buildParams = useCallback((q: string, off: number) => {
     const params = new URLSearchParams({ search: q, limit: String(PAGE), offset: String(off) });
     if (salesOnly) params.set("sales_only", "true");
+    if (tag && tagOn) params.set("tag", tag.id);
     params.set("sort", sortKey === "list_price" ? "price" : sortKey === "name" ? "name" : "code");
     params.set("dir", sortDir);
     if (filterField && filterValue) {
@@ -109,7 +118,7 @@ export function SkuMultiPickerModal({
       else if (filterField === "uom_name") params.set("uom", filterValue);
     }
     return params;
-  }, [salesOnly, sortKey, sortDir, filterField, filterValue]);
+  }, [salesOnly, sortKey, sortDir, filterField, filterValue, tag, tagOn]);
 
   // off=0 → โหลดใหม่ (แทนที่) · off>0 → โหลดเพิ่ม (ต่อท้าย)
   const fetchPage = useCallback(async (q: string, off: number) => {
@@ -229,8 +238,8 @@ export function SkuMultiPickerModal({
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title="เลือกสินค้า"
-      description="ติ๊กเลือกได้หลายรายการ แล้วกดเพิ่ม"
+    <ERPModal open={open} onClose={onClose} size="lg" title={title ?? "เลือกสินค้า"}
+      description={description ?? "ติ๊กเลือกได้หลายรายการ แล้วกดเพิ่ม"}
       footer={
         <>
           <span className="mr-auto text-xs text-rose-500">เลือกแล้ว {picked.size} รายการ</span>
@@ -251,6 +260,15 @@ export function SkuMultiPickerModal({
           }}
           placeholder="🔍 ค้นหา SKU / ชื่อสินค้า... · วางรหัสหลายตัวจาก Excel ได้"
           className="h-10 w-full rounded-lg border border-pink-200 px-3 text-sm outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-100" />
+        {tag && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-slate-700">
+              <input type="checkbox" checked={tagOn} onChange={(e) => setTagOn(e.target.checked)} />
+              เฉพาะ SKU แท็ก <span className="rounded-full bg-violet-100 px-2 py-0.5 font-medium text-violet-800">{tag.label}</span>
+            </label>
+            {tagHint && <span className="text-slate-400">{tagHint}</span>}
+          </div>
+        )}
         {pasting && <div className="text-xs text-slate-500">กำลังหารหัสที่วาง…</div>}
         {pasteMsg && !pasting && (
           <div className={`rounded-lg border px-3 py-2 text-xs ${pasteMsg.missing.length ? "border-amber-200 bg-amber-50 text-amber-800" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>

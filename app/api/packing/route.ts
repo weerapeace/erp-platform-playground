@@ -20,6 +20,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
+import { categorySetMap, cleanSetItems, resolveParentPackaging, type PackagingSet } from "@/lib/packaging";
 import {
   cleanScanCode, packGate, shopCodeGuesses, bestGuess, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES, UNPAID_STATUSES,
   type BoxSize, type PackFinishStatus, type PackEditStatus,
@@ -129,13 +130,20 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
   ].filter((x): x is string => !!x))];
   const parentOnly = [...new Set(items.filter((i) => !i.matched_sku_id && i.matched_parent_sku_id).map((i) => String(i.matched_parent_sku_id)))];
   const [{ data: parentRows }, { data: siblingRows }, { data: packRows }] = await Promise.all([
-    parentIds.length ? admin.from("parent_skus_v2").select("id, code, name_th, sku_name, cover_image_r2_key, parcel_size_id, pack_note, pack_flags, pack_items").in("id", parentIds) : Promise.resolve({ data: [] }),
+    parentIds.length ? admin.from("parent_skus_v2").select("id, code, name_th, sku_name, cover_image_r2_key, parcel_size_id, pack_note, pack_flags, category_id, pack_set_id, pack_extra").in("id", parentIds) : Promise.resolve({ data: [] }),
     // สินค้าระดับรุ่น (ไม่รู้สี) — ยิงสีไหนของรุ่นนั้นก็นับ
     parentOnly.length ? admin.from("skus_v2").select("code, barcode, parent_sku_id").in("parent_sku_id", parentOnly).limit(500) : Promise.resolve({ data: [] }),
     // บรรจุภัณฑ์ที่ต้องใส่ (รอบ 6) — เฉพาะรายการที่ไม่อยู่ในถัง · เรียงตามลำดับกลาง
-    parentIds.length ? admin.from("packaging_items").select("id, name, image_r2_key, sort").eq("is_active", true).order("sort") : Promise.resolve({ data: [] }),
+    parentIds.length ? admin.from("packaging_sets").select("id, name, items, category_ids, sort, is_active").order("sort") : Promise.resolve({ data: [] }),
   ]);
-  const packList = (packRows ?? []) as { id: string; name: string; image_r2_key: string | null; sort: number }[];
+  // Set บรรจุภัณฑ์ (รอบ 7): Set ที่รุ่นตั้งเอง หรือ Set ของหมวด + SKU เสริม → ข้อมูล SKU (รหัส/ชื่อ/รูป)
+  const packSets = ((packRows ?? []) as PackagingSet[]).map((p) => ({ ...p, items: cleanSetItems(p.items), category_ids: p.category_ids ?? [] }));
+  const setsById = new Map(packSets.map((p) => [p.id, p]));
+  const setsByCat = categorySetMap(packSets);
+  const packOf = new Map(((parentRows ?? []) as Row[]).map((p) => [String(p.id), resolveParentPackaging({ pack_set_id: str(p.pack_set_id), pack_extra: p.pack_extra, category_id: str(p.category_id) }, setsById, setsByCat)]));
+  const packSkuIds = [...new Set([...packOf.values()].flatMap((r) => r.items.map((i) => i.sku_id)))];
+  const { data: packSkuRows } = packSkuIds.length ? await admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key").in("id", packSkuIds) : { data: [] };
+  const packSku = new Map(((packSkuRows ?? []) as Row[]).map((r) => [String(r.id), r]));
   const parents = new Map(((parentRows ?? []) as Row[]).map((p) => [String(p.id), p]));
   const sizeIds = [...new Set([...parents.values()].map((p) => str(p.parcel_size_id)).filter((x): x is string => !!x))];
   const { data: sizeRows } = sizeIds.length ? await admin.from("parcel_sizes").select("id, name, width_cm, length_cm, height_cm").in("id", sizeIds) : { data: [] };
@@ -169,7 +177,11 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
       guess_code: guess.has(String(i.id)) ? (str(sku?.code) ?? str(parent?.code)) : null,
       box: box ? box.name : null,
       codes: [...codes],
-      packaging: packList.filter((p) => ((parent?.pack_items as string[] | null) ?? []).includes(p.id)).map((p) => ({ id: p.id, name: p.name, image_key: p.image_r2_key, sort: p.sort })),
+      pack_set: parentId && packOf.get(parentId)?.set ? { id: packOf.get(parentId)!.set!.id, name: packOf.get(parentId)!.set!.name } : null,
+      packaging: (parentId ? packOf.get(parentId)?.items ?? [] : []).filter((i) => packSku.has(i.sku_id)).map((i) => {
+        const k = packSku.get(i.sku_id)!;
+        return { id: i.sku_id, code: str(k.code) ?? "", name: str(k.name_th) ?? str(k.code) ?? "", image_key: str(k.cover_image_r2_key), qty: i.qty };
+      }),
     };
   });
   const box = suggestBox(outItems.map((it) => {
@@ -356,6 +368,13 @@ const clipMeta = (v: unknown): Row | null => {
   };
 };
 
+/** บรรจุภัณฑ์ที่ใช้ (รอบ 7 · รายงานการใช้ ไม่ตัดสต๊อก) — ตรวจรูปแบบ ≤50 รายการ */
+const packagingMeta = (v: unknown): Row[] | null => {
+  if (!Array.isArray(v)) return null;
+  const out = v.slice(0, 50).map((x) => x as Row).filter((x) => typeof x?.sku_id === "string" && /^[0-9a-f-]{36}$/i.test(String(x.sku_id)))
+    .map((x) => ({ sku_id: String(x.sku_id), code: String(x.code ?? "").slice(0, 60), name: String(x.name ?? "").slice(0, 120), qty: Math.min(999, Math.max(1, Math.round(Number(x.qty) || 1))) }));
+  return out.length ? out : null;
+};
 const checksMeta = (v: unknown): Row => {
   if (!v || typeof v !== "object") return {};
   const c = v as Row;
@@ -407,6 +426,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       problem: status === "problem" ? (problem ?? "other") : null,
       problem_note: status === "problem" ? (str(body.problem_note)?.slice(0, 500) ?? null) : null,
       finish_method: method, clip: clipMeta(body.clip),
+      packaging: status === "done" ? packagingMeta(body.packaging) : null,
     };
     const { error } = await admin.from("packing_sessions").update(patch).eq("id", id).eq("status", "packing");
     if (error) return NextResponse.json({ error: "บันทึกการแพ็คไม่สำเร็จ" }, { status: 500 });

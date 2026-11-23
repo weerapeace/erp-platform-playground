@@ -41,7 +41,7 @@ import { PackQueue, type QueueRow } from "./queue";
 import { TodayPacked, type TodaySession } from "./today-list";
 
 // ── ข้อมูลจาก /api/packing ──
-type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; guessed?: "code" | "listing" | null; guess_code?: string | null; box: string | null; codes: string[]; packaging?: { id: string; name: string; image_key: string | null; sort?: number }[] };
+type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; guessed?: "code" | "listing" | null; guess_code?: string | null; box: string | null; codes: string[]; packaging?: { id: string; code: string; name: string; image_key: string | null; qty: number }[]; pack_set?: { id: string; name: string } | null };
 type ApiOrder = { id: string; order_no: string | null; platform: string | null; platform_code: string | null; customer_name: string | null; status: string; platform_status: string | null; ship_by_at: string | null; tracking_no: string | null; package_no: string | null; carrier: string | null; cod_amount: number; packed_at: string | null; packed_by_name: string | null; buyer_note: string | null };
 type ApiSession = { id: string; status: string; packer_id: string | null; packer_name: string | null; started_at: string };
 type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
@@ -206,6 +206,7 @@ export function PackingStation({ packerName, packerId }: { packerName: string; p
             box_used: a.boxUsed ?? a.data.box?.name ?? null, box_suggested: a.data.box?.name ?? null, checked_at: a.checkedAt,
             checks: { lines: a.lines.map((l) => ({ id: l.key, qty: l.qty, scanned: l.scanned, manual: l.manual, reason: l.reason })), wrong_scans: a.wrongScans, over_scans: a.overScans },
             clip: clipMeta,
+            packaging: status === "done" ? packagingSummary(a.lines).map((p) => ({ sku_id: p.id, code: p.code, name: p.name, qty: p.qty })) : undefined,
           });
           const j = await res.json().catch(() => ({}));
           if (!res.ok) toast.error(j.error || `บันทึกออเดอร์ ${a.data.order.order_no ?? ""} ไม่สำเร็จ`);
@@ -608,8 +609,7 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
   const boxInfo = useMemo(() => boxes.find((b) => b.name === boxName) ?? a.data.box, [boxes, boxName, a.data.box]);
   const [boxOpen, setBoxOpen] = useState(false);
   const hasPack = a.lines.some((l) => l.info.packaging?.length);
-  const packSum = useMemo(() => summarizePackaging(a.lines.map((l) => ({ qty: l.qty, packaging: l.info.packaging ?? [] })), new Map(a.lines.flatMap((l) => l.info.packaging ?? []).map((p) => [p.id, p.sort ?? 0]))), [a.lines]);
-  const packImg = useMemo(() => new Map(a.lines.flatMap((l) => l.info.packaging ?? []).map((p) => [p.id, p.image_key])), [a.lines]);
+  const packSum = useMemo(() => packagingSummary(a.lines), [a.lines]);
   return (
     <div className="flex flex-col gap-3">
       <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -666,7 +666,7 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
         {showPack && packSum.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 bg-violet-50/40 px-3 py-2 text-xs">
             <span className="font-medium text-slate-700">บรรจุภัณฑ์ที่ต้องใส่:</span>
-            {packSum.map((s) => <PackagingChip key={s.id} name={`${s.name} ×${s.qty}`} imageKey={packImg.get(s.id) ?? null} />)}
+            {packSum.map((s) => <PackagingChip key={s.id} name={`${s.name} ×${s.qty}`} imageKey={s.image_key} />)}
           </div>
         )}
         <ul className="divide-y divide-slate-100">
@@ -685,7 +685,12 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
                     {l.info.level === "none" && <span className="ml-1 text-amber-700">(จับคู่สินค้าไม่ได้ — ติ๊กมือ)</span>}
                   </p>
                   {l.manual > 0 && <p className="text-xs text-slate-500">ติ๊กมือ {l.manual} · {l.reason}</p>}
-                  {showPack && !!l.info.packaging?.length && <div className="mt-1 flex flex-wrap gap-1">{l.info.packaging.map((pk) => <PackagingChip key={pk.id} name={pk.name} imageKey={pk.image_key} />)}</div>}
+                  {showPack && !!l.info.packaging?.length && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1">
+                      {l.info.pack_set && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[11px] font-medium text-white">{l.info.pack_set.name}</span>}
+                      {l.info.packaging.map((pk) => <PackagingChip key={pk.id} name={pk.name} imageKey={pk.image_key} qty={pk.qty} />)}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <div className="flex items-center gap-1.5">
@@ -730,4 +735,9 @@ function StationStatus({ lastScanAt, record, camStatus, recording, elapsed, awak
       {station && <span className="ml-auto text-slate-400">{station}</span>}
     </div>
   );
+}
+
+/** สรุปบรรจุภัณฑ์ทั้งออเดอร์ (Set + SKU เสริม × จำนวนชิ้น) — ใช้ทั้งโชว์และเก็บตอนแพ็คเสร็จ (รายงานการใช้) */
+function packagingSummary(lines: Line[]) {
+  return summarizePackaging(lines.map((l) => ({ qty: l.qty, packaging: l.info.packaging ?? [] })));
 }
