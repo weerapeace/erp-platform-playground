@@ -189,7 +189,7 @@ export type FlowBoardActions = {
   /** กล่องที่กำลังถ่ายภาพหน้าจออยู่ */
   capturingId: string | null;
   /** ข้อในรายการงาน: ต่อกับกล่องไหนบ้าง (id กล่องปลายเส้น) · ลบข้อ = ลบเส้นของข้อด้วย · กระดานพาไปหากล่อง */
-  itemLinks: (nodeId: string, itemId: string) => string[];
+  itemLinks: (nodeId: string, itemId: string, side?: "r" | "l") => string[];
   removeItemEdges: (nodeId: string, itemIds: string[]) => void;
   focusNode: (nodeId: string) => void;
   /** แตะจุดของข้อ (ไม่ลาก) = โหมดต่อเส้น: แตะกล่องปลายทางต่อ */
@@ -524,9 +524,14 @@ function TodoList({ id, data, color, width, height, editingTitle, onTitleDone }:
                 )}
             </div>
           )}
-          <Handle id={itemHandleId(it.id)} type="source" position={Position.Right} isConnectable={!readOnly}
-            className={`fc-h fc-item-h ${itemLinks(id, it.id).length ? "fc-item-h-on" : ""} ${linkFrom?.nodeId === id && linkFrom.handle === itemHandleId(it.id) ? "fc-item-h-pick" : ""}`}
-            title={t("ลากเส้นจากข้อนี้ · แตะ = เลือกแล้วแตะกล่องปลายทาง", "Drag a line from this item · tap, then tap the target box")} />
+          {(["r", "l"] as const).map((side) => {
+            const hid = itemHandleId(it.id, side);
+            return (
+              <Handle key={side} id={hid} type="source" position={side === "l" ? Position.Left : Position.Right} isConnectable={!readOnly}
+                className={`fc-h fc-item-h ${side === "l" ? "fc-item-h-l" : ""} ${itemLinks(id, it.id, side).length ? "fc-item-h-on" : ""} ${linkFrom?.nodeId === id && linkFrom.handle === hid ? "fc-item-h-pick" : ""}`}
+                title={t("ลากเส้นจากข้อนี้ · แตะ = เลือกแล้วแตะกล่องปลายทาง", "Drag a line from this item · tap, then tap the target box")} />
+            );
+          })}
           {!readOnly && editId !== it.id && (
             <button type="button" {...stopAll} onClick={(e) => { e.stopPropagation(); removeItems([it.id]); }}
               title={t("ลบข้อนี้ (ย้อนกลับได้ Ctrl+Z)", "Delete this item (Ctrl+Z to undo)")}

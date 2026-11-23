@@ -115,3 +115,19 @@ describe("สีเส้น (2026-11-22)", () => {
     expect(s.edges[1].color).toBeUndefined();
   });
 });
+
+describe("จุดต่อด้านซ้ายของข้อ (2026-11-23)", () => {
+  it("il: = ด้านซ้าย · ข้อเดียวกันนับทั้ง 2 ด้าน · ตำแหน่งในรูปอยู่ซ้าย", () => {
+    expect(itemHandleId("a", "l")).toBe("il:a");
+    expect(itemOfHandle("il:a")).toBe("a");
+    const edges = [{ id: "1", source: "t", sourceHandle: "il:a", target: "p", targetHandle: "r" }, { id: "2", source: "q", sourceHandle: "r", target: "t", targetHandle: "i:a" }];
+    expect(edgesOfItem(edges, "t", "a").map((e) => e.id)).toEqual(["1", "2"]);
+    const n = { position: { x: 100, y: 0 }, width: 260, height: 150, data: { items: [{ id: "a", text: "A" }] } };
+    expect(handlePoint(n, "il:a")).toEqual({ x: 100, y: 49, side: "l" });
+    const s = parseFlowScene({ kind: "flowchart", nodes: [
+      { id: "t", type: "todo", position: { x: 0, y: 0 }, width: 260, height: 150, data: { label: "x", items: [{ id: "a", text: "A" }] } },
+      { id: "p", type: "step", position: { x: -300, y: 0 }, width: 100, height: 40, data: { label: "y" } },
+    ], edges: [{ id: "e", source: "t", sourceHandle: "il:a", target: "p", targetHandle: "r", label: "" }] })!;
+    expect(s.edges[0].sourceHandle).toBe("il:a");
+  });
+});

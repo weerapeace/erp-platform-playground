@@ -47,7 +47,7 @@ import {
   FLOW_EDGE_SHAPES, FLOW_EDGE_SHAPE_META, FLOW_PALETTE, edgeShapeOf, isEdgeShape, nodeColor, type FlowEdgeShape,
   isSysId, sysId, unSysId, type FlowPins,
   OPPOSITE_SIDE, isFlowSide, nextNodePos, type FlowSide, type FlowSceneNode,
-  openTodos, DEFAULT_TODO_TAGS, type FlowTodoTag, edgesOfItem, isItemHandle,
+  openTodos, DEFAULT_TODO_TAGS, type FlowTodoTag, edgesOfItem, isItemHandle, itemHandleId,
 } from "@/lib/flowchart";
 import { AUTO_STATUS_META, listAutos } from "@/lib/flow-automation";
 import { pushRecentShape } from "@/lib/flowchart-shapes";
@@ -695,7 +695,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     capturingId,
     todoTags: todoTags ?? DEFAULT_TODO_TAGS,
     linkFrom,
-    itemLinks: (nodeId, itemId) => edgesOfItem(edges, nodeId, itemId).map((e) => (e.source === nodeId ? e.target : e.source)),
+    itemLinks: (nodeId, itemId, side) => edgesOfItem(edges, nodeId, itemId)
+      .filter((e) => !side || (e.source === nodeId ? e.sourceHandle : e.targetHandle) === itemHandleId(itemId, side))
+      .map((e) => (e.source === nodeId ? e.target : e.source)),
     removeItemEdges: (nodeId, itemIds) => setEdges((es) => es.filter((e) => !itemIds.some((it) => edgesOfItem([e], nodeId, it).length))),
     focusNode: (nodeId) => { void rf.fitView({ nodes: [{ id: nodeId }], padding: 0.6, maxZoom: 1.4, duration: 400 }); if (!isSysId(nodeId)) setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === nodeId }))); },
     setTodoTags: (g) => setTodoTags(g && g.length ? g : null),
