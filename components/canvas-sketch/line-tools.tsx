@@ -13,7 +13,10 @@ import { useT } from "@/components/i18n";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type El = any;
 const COLORS = ["#64748b", "#7c3aed", "#059669", "#2563eb", "#d97706", "#e11d48", "#0891b2"];
-const SHAPES = new Set(["rectangle", "ellipse", "diamond"]);
+// ชิ้นที่ลากเส้นเชื่อมได้ — รวมกล่องฝังวิดีโอ (Pinterest/TikTok/YouTube = embeddable/iframe) ด้วย
+// (เดิมไม่มี → ปล่อยเส้นบนการ์ดวิดีโอแล้วไม่ติด เจ้าของเจอ 2026-11-23) · รูปไม่นับ: รูปในการ์ดจะแย่งเส้นจากกรอบการ์ด
+export const LINK_SHAPES = new Set(["rectangle", "ellipse", "diamond", "embeddable", "iframe"]);
+const SHAPES = LINK_SHAPES;
 type Side = "top" | "right" | "bottom" | "left";
 const SIDE_FP: Record<Side, [number, number]> = { top: [0.5, 0], right: [1, 0.5], bottom: [0.5, 1], left: [0, 0.5] };
 
@@ -46,6 +49,33 @@ export function LineTools({ apiRef, wrapRef, enabled }: { apiRef: MutableRefObje
   const [hover, setHover] = useState<El | null>(null);
   const [drag, setDrag] = useState<{ from: El; side: Side; x: number; y: number } | null>(null);
   const [labelEdit, setLabelEdit] = useState<string | null>(null);
+  const dragRef = useRef<{ from: El; side: Side; x: number; y: number } | null>(null);
+  const endDragRef = useRef<(ev: { clientX: number; clientY: number }) => void>(() => {});
+
+  // ระหว่างลากเส้น: วิดีโอที่ฝังไว้ (iframe) ห้ามกินเมาส์ — ไม่งั้นปล่อยบนวิดีโอแล้วเส้นไม่ติด + เส้นประค้างบนจอ
+  // + ฟังปล่อยเมาส์ทั้งหน้าต่าง (กันพลาด) · Esc = ยกเลิกการลาก
+  useEffect(() => {
+    if (!drag) return;
+    const wrap = wrapRef.current;
+    const frames = Array.from(wrap?.querySelectorAll("iframe") ?? []) as HTMLIFrameElement[];
+    const prev = frames.map((f) => f.style.pointerEvents);
+    frames.forEach((f) => { f.style.pointerEvents = "none"; });
+    const onMove = (e: PointerEvent) => { if (dragRef.current) setDrag({ ...dragRef.current, x: e.clientX, y: e.clientY }); };
+    const onUp = (e: PointerEvent) => { if (dragRef.current) endDragRef.current(e); };
+    const onCancel = () => { dragRef.current = null; setDrag(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      frames.forEach((f, i) => { f.style.pointerEvents = prev[i]; });
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [!!drag, wrapRef]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // รอ excalidraw API พร้อม แล้วฟังการเปลี่ยนแปลง (เลือก/เลื่อนจอ/ย่อขยาย) เพื่อขยับแถบตาม
   useEffect(() => {
@@ -160,11 +190,12 @@ export function LineTools({ apiRef, wrapRef, enabled }: { apiRef: MutableRefObje
     if (!hover) return;
     ev.preventDefault(); ev.stopPropagation();
     (ev.target as HTMLElement).setPointerCapture?.(ev.pointerId);
-    setDrag({ from: hover, side, x: ev.clientX, y: ev.clientY });
+    const d = { from: hover, side, x: ev.clientX, y: ev.clientY };
+    dragRef.current = d; setDrag(d);
   };
-  const moveDrag = (ev: React.PointerEvent) => { if (drag) setDrag({ ...drag, x: ev.clientX, y: ev.clientY }); };
-  const endDrag = (ev: React.PointerEvent) => {
-    const d = drag; setDrag(null);
+  const moveDrag = (ev: { clientX: number; clientY: number }) => { if (drag) setDrag({ ...drag, x: ev.clientX, y: ev.clientY }); };
+  const endDrag = (ev: { clientX: number; clientY: number }) => {
+    const d = dragRef.current; dragRef.current = null; setDrag(null);
     const lib = libRef.current; if (!d || !lib) return;
     const st2 = api.getAppState();
     const p = lib.viewportCoordsToSceneCoords({ clientX: ev.clientX, clientY: ev.clientY }, st2);
@@ -189,6 +220,7 @@ export function LineTools({ apiRef, wrapRef, enabled }: { apiRef: MutableRefObje
     commit([...next, arrow]);
     api.updateScene({ appState: { selectedElementIds: { [arrow.id]: true } } });
   };
+  endDragRef.current = endDrag;
 
   const bar = onlyLines && !st.editingTextElement && !drag ? (() => {
     const xs = lines.flatMap((l) => (l.points ?? [[0, 0]]).map((p: number[]) => l.x + p[0]));
@@ -251,7 +283,7 @@ export function LineTools({ apiRef, wrapRef, enabled }: { apiRef: MutableRefObje
 }
 
 /** การ์ด/กล่องที่อยู่ใต้จุด (เลือกอันเล็กสุด = อันบนสุดโดยประมาณ) · ไม่นับกรอบโซน/รูป/ข้อความ */
-function shapeAt(els: El[], x: number, y: number, pad: number): El | null {
+export function shapeAt(els: El[], x: number, y: number, pad: number): El | null {
   let best: El | null = null;
   for (const e of els) {
     if (e.isDeleted || !SHAPES.has(e.type) || e.locked) continue;

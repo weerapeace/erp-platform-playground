@@ -64,3 +64,14 @@ describe("Esc 2 จังหวะ ตอนกระดานเต็มจอ
     expect(fullscreenEscAction(null)).toBe("pass");
   });
 });
+
+describe("ตัวลากเส้นเชื่อม (จุดม่วง) รับการ์ดวิดีโอเป็นปลายทาง", () => {
+  it("ปล่อยบนกล่องฝังวิดีโอ = เจอการ์ดวิดีโอ · รูปไม่แย่งกรอบการ์ด", async () => {
+    const { shapeAt } = await import("@/components/canvas-sketch/line-tools");
+    const vid = { id: "v", type: "embeddable", x: 0, y: 0, width: 300, height: 500, isDeleted: false };
+    expect(shapeAt([vid], 150, 250, 0)?.id).toBe("v");
+    const card = { id: "c", type: "rectangle", x: 400, y: 0, width: 200, height: 200, isDeleted: false };
+    const img = { id: "i", type: "image", x: 410, y: 10, width: 100, height: 100, isDeleted: false };
+    expect(shapeAt([card, img], 450, 50, 0)?.id).toBe("c");
+  });
+});
