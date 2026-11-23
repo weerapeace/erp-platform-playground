@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { apiCan } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 
 // ---- Types ----
 
@@ -24,7 +26,9 @@ export type ReorderResponse = { data: ReorderItem[]; error: string | null };
 export async function GET(request: NextRequest) {
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_reorder_list");
   if (error) return NextResponse.json({ data: [], error: error.message } satisfies ReorderResponse, { status: 500 });
-  return NextResponse.json({ data: (data as ReorderItem[]) ?? [], error: null } satisfies ReorderResponse);
+  const canCost = await apiCan(request, COST_PERM);   // ไม่มีสิทธิ์ดูราคาทุน → ตัดทุนเป็น 0
+  const rows = ((data as ReorderItem[]) ?? []).map((r) => canCost ? r : { ...r, avg_cost: 0 });
+  return NextResponse.json({ data: rows, error: null } satisfies ReorderResponse);
 }
 
 // ---- PATCH /api/inventory/reorder — ตั้งค่า min_stock / reorder_qty ----

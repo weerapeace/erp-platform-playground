@@ -28,6 +28,7 @@ const KIND: Record<string, { emoji: string; bg: string; ring: string; text: stri
 
 export default function InventoryMapPage() {
   const canView = usePermission("stock.view");
+  const canCost = usePermission("products.cost.view");   // ดูราคาทุน — ไม่มี = ซ่อนมูลค่า (server ตัดเป็น 0 แล้วด้วย)
   const [zones, setZones] = useState<ZoneSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export default function InventoryMapPage() {
           </div>
         </div>
         <p className="text-sm text-slate-500 mb-1">ภาพรวมการไหลของสต๊อกตามโซน — คลิกโซนเพื่อดูรายการสินค้าข้างใน</p>
-        <p className="text-xs text-slate-400 mb-5">มูลค่ารวมทุกโซน: <span className="font-mono font-semibold text-slate-600">{fmtMoney(totalValue)}</span></p>
+        {canCost && <p className="text-xs text-slate-400 mb-5">มูลค่ารวมทุกโซน: <span className="font-mono font-semibold text-slate-600">{fmtMoney(totalValue)}</span></p>}
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
@@ -178,7 +179,7 @@ export default function InventoryMapPage() {
                   <th className="text-left font-medium px-2 py-1.5">SKU</th>
                   <th className="text-left font-medium px-2 py-1.5">สินค้า</th>
                   <th className="text-right font-medium px-2 py-1.5">คงเหลือ</th>
-                  <th className="text-right font-medium px-2 py-1.5">มูลค่า</th>
+                  {canCost && <th className="text-right font-medium px-2 py-1.5">มูลค่า</th>}
                 </tr>
               </thead>
               <tbody>
@@ -187,7 +188,7 @@ export default function InventoryMapPage() {
                     <td className="px-2 py-1.5 font-mono text-[11px] text-slate-500">{b.product_sku}</td>
                     <td className="px-2 py-1.5">{b.product_name}</td>
                     <td className={`px-2 py-1.5 text-right tabular-nums font-mono ${b.qty_on_hand < 0 ? "text-red-600" : "text-slate-700"}`}>{fmtQty(b.qty_on_hand)}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums font-mono text-xs text-slate-500">{fmtMoney(b.total_value)}</td>
+                    {canCost && <td className="px-2 py-1.5 text-right tabular-nums font-mono text-xs text-slate-500">{fmtMoney(b.total_value)}</td>}
                   </tr>
                 ))}
               </tbody>

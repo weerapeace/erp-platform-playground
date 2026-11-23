@@ -40,6 +40,7 @@ type RefWorker = { assignee_name: string | null; stage: string | null; qty: numb
 type RefDetail = { kind: string; mo_no?: string | null; workers?: RefWorker[]; wo?: Record<string, unknown> | null; gr?: Record<string, unknown> | null };
 
 const fmtQty   = (n: number) => Number(n).toLocaleString("th-TH");
+const COST_COLS = new Set(["unit_cost", "total_cost", "avg_cost", "total_value"]);   // คอลัมน์ที่ต้องมีสิทธิ์ดูราคาทุน
 const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 const MOVES_PAGE = 500;   // โหลดประวัติทีละ 500 (เพดาน API)
 /** "3 วันก่อน" / "วันนี้" — ใช้ในป้ายเตือนการไหลอัตโนมัติ */
@@ -59,6 +60,7 @@ export default function InventoryPage() {
   const canView   = usePermission("stock.view");
   const canCreate = usePermission("stock.create");
   const canAdjust = usePermission("stock.adjust");
+  const canCost   = usePermission("products.cost.view");   // ดูราคาทุน (ของกลาง lib/cost-access) — ไม่มี = ซ่อนทุน/มูลค่า (server ตัดเป็น 0 แล้วด้วย)
   const { user, can } = useAuth();
 
   const [tab, setTab] = useState<Tab>("overview");
@@ -391,6 +393,8 @@ export default function InventoryPage() {
     { id: "performed_by", accessorKey: "performed_by", header: "ผู้ทำ", size: 120 },
   ], []);
 
+  const moveCols = useMemo(() => canCost ? moveColumns : moveColumns.filter((c) => !COST_COLS.has(String(c.id))), [canCost, moveColumns]);
+
   // ---- Columns: balances ----
   const balanceColumns: ColumnDef<StockBalance>[] = useMemo(() => [
     {
@@ -458,6 +462,8 @@ export default function InventoryPage() {
     },
   ], []);
 
+  const balanceCols = useMemo(() => canCost ? balanceColumns : balanceColumns.filter((c) => !COST_COLS.has(String(c.id))), [canCost, balanceColumns]);
+
   // ---- Columns: reorder (จุดสั่งซื้อ) ----
   const reorderColumns = useMemo<ColumnDef<ReorderItem>[]>(() => [
     { id: "sku", accessorKey: "sku", header: "SKU", size: 110,
@@ -479,6 +485,8 @@ export default function InventoryPage() {
     { id: "avg_cost", accessorKey: "avg_cost", header: "ทุน/หน่วย", size: 100,
       cell: ({ getValue }) => <span className="tabular-nums font-mono text-xs">{fmtMoney(getValue() as number)}</span> },
   ], []);
+
+  const reorderCols = useMemo(() => canCost ? reorderColumns : reorderColumns.filter((c) => !COST_COLS.has(String(c.id))), [canCost, reorderColumns]);
 
   // summary
   const summary = useMemo(() => {
@@ -555,7 +563,9 @@ export default function InventoryPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
               <div className="p-3 rounded-xl border border-slate-200 bg-white">
                 <p className="text-[11px] text-slate-500">มูลค่าคลัง (ยอดบวก)</p>
-                <p className="text-lg md:text-xl font-semibold text-slate-800 tabular-nums">{health ? fmtMoney(overview.totalValue) : "…"}</p>
+                {canCost
+                  ? <p className="text-lg md:text-xl font-semibold text-slate-800 tabular-nums">{health ? fmtMoney(overview.totalValue) : "…"}</p>
+                  : <p className="mt-1 text-xs text-slate-400 flex items-center gap-1"><Icon name="lock" size={12} /> เห็นเฉพาะคนมีสิทธิ์ดูราคาทุน</p>}
               </div>
               <button onClick={() => goStock(null)} className="p-3 rounded-xl border border-slate-200 bg-white text-left hover:border-blue-300">
                 <p className="text-[11px] text-slate-500">รายการที่มีของ</p>
@@ -576,12 +586,13 @@ export default function InventoryPage() {
               <div className="p-3 md:p-4 rounded-xl border border-slate-200 bg-white">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-sm font-medium text-slate-700">แต่ละโซน</p>
-                  <p className="text-[11px] text-slate-400">กดคลังเพื่อดูยอด</p>
+                  <p className="text-[11px] text-slate-400">{canCost ? "แถบ = สัดส่วนมูลค่า" : "แถบ = สัดส่วนจำนวนรายการ"} · กดคลังเพื่อดูยอด</p>
                 </div>
                 <div className="flex h-3 rounded-full overflow-hidden bg-slate-100">
-                  {overview.kinds.filter((k) => k.value > 0).map((k) => (
-                    <div key={k.kind} className={KIND_BAR[k.kind] ?? "bg-slate-400"} style={{ width: `${(k.value / (overview.totalValue || 1)) * 100}%` }}
-                      title={`${KIND_LABEL[k.kind] ?? k.kind} ${fmtMoney(k.value)}`} />
+                  {overview.kinds.filter((k) => (canCost ? k.value : k.in_stock) > 0).map((k) => (
+                    <div key={k.kind} className={KIND_BAR[k.kind] ?? "bg-slate-400"}
+                      style={{ width: `${((canCost ? k.value : k.in_stock) / ((canCost ? overview.totalValue : overview.inStock) || 1)) * 100}%` }}
+                      title={`${KIND_LABEL[k.kind] ?? k.kind} ${canCost ? fmtMoney(k.value) : `${fmtQty(k.in_stock)} รายการ`}`} />
                   ))}
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -594,7 +605,7 @@ export default function InventoryPage() {
                         <span className="block text-[11px] text-slate-500">{KIND_LABEL[z.kind] ?? z.kind} · มีของ {fmtQty(z.in_stock)} รายการ</span>
                       </span>
                       <span className="text-right shrink-0">
-                        <span className="block text-sm font-medium tabular-nums text-slate-800">{fmtMoney(z.value)}</span>
+                        {canCost && <span className="block text-sm font-medium tabular-nums text-slate-800">{fmtMoney(z.value)}</span>}
                         {z.negative > 0 && <span className="block text-[11px] text-red-600">ติดลบ {fmtQty(z.negative)}</span>}
                       </span>
                     </button>
@@ -733,15 +744,15 @@ export default function InventoryPage() {
 
         {/* Summary cards (stock tab) */}
         {tab === "stock" && (
-          <div className="grid grid-cols-3 gap-2 md:gap-3 mb-4">
+          <div className={`grid ${canCost ? "grid-cols-3" : "grid-cols-2"} gap-2 md:gap-3 mb-4`}>
             <div className="p-3 bg-gradient-to-br from-blue-50 to-white border border-blue-200 rounded-xl">
               <p className="text-[10px] text-blue-600 uppercase">SKU ที่มี stock</p>
               <p className="text-xl font-bold text-blue-700 tabular-nums">{balances.length}</p>
             </div>
-            <div className="p-3 bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl">
+            {canCost && <div className="p-3 bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl">
               <p className="text-[10px] text-emerald-600 uppercase">มูลค่ารวม</p>
               <p className="text-base md:text-xl font-bold text-emerald-700 tabular-nums font-mono truncate">{fmtMoney(summary.totalValue)}</p>
-            </div>
+            </div>}
             <div className="p-3 bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl">
               <p className="text-[10px] text-red-600 uppercase">Out of Stock</p>
               <p className="text-xl font-bold text-red-700 tabular-nums">{summary.outOfStock}</p>
@@ -763,7 +774,7 @@ export default function InventoryPage() {
           <DataTable
             tableId="inventory-movements"
             data={moves}
-            columns={moveColumns}
+            columns={moveCols}
             loading={loading}
             searchableKeys={["movement_number", "product_sku", "product_name", "reference_label"]}
             searchPlaceholder="ค้นหา SM / SKU / สินค้า / อ้างอิง..."
@@ -789,7 +800,7 @@ export default function InventoryPage() {
             enableCards
             cardConfig={{ primary: "product_name", subtitle: "product_sku", image: "image_url", metrics: ["qty_on_hand", "qty_available"], lines: ["warehouse_name", "parent_code", "location_code"], layout: "horizontal", imageHeight: "sm", imageAspect: "square", columns: "1" }}
             data={negOnly ? balances.filter((b) => b.qty_on_hand < 0) : balances}
-            columns={balanceColumns}
+            columns={balanceCols}
             loading={loading}
             searchableKeys={["product_sku", "product_name", "parent_code", "warehouse_name"]}
             searchPlaceholder="ค้นหา SKU / สินค้า / รุ่น / คลัง..."
@@ -819,7 +830,7 @@ export default function InventoryPage() {
               <DataTable
                 tableId="inventory-reorder"
                 data={reorder}
-                columns={reorderColumns}
+                columns={reorderCols}
                 loading={loading}
                 searchableKeys={["sku", "name"]}
                 searchPlaceholder="ค้นหา SKU / สินค้า..."

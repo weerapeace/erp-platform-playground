@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 
 export type StockBalance = {
   product_id:       string;
@@ -24,7 +25,8 @@ export type StockBalance = {
   parent_name:      string | null;
 };
 
-export type BalancesResponse = { data: StockBalance[]; error: string | null };
+/** cost_hidden = ไม่มีสิทธิ์ดูราคาทุน → avg_cost/total_value ถูกตัดเป็น 0 (หน้าจอต้องซ่อนคอลัมน์) */
+export type BalancesResponse = { data: StockBalance[]; cost_hidden?: boolean; error: string | null };
 
 type Raw = Omit<StockBalance, "image_url" | "parent_id" | "parent_code" | "parent_name">;
 const CHUNK = 150;   // id ยาว → แบ่งก้อนกัน URL ยาวเกิน
@@ -39,7 +41,8 @@ export async function GET(request: NextRequest) {
     p_limit:          Math.min(1000, parseInt(searchParams.get("limit") ?? "500")),
   });
   if (error) return NextResponse.json({ data: [], error: error.message } satisfies BalancesResponse, { status: 500 });
-  const rows = (data as Raw[]) ?? [];
+  const canCost = await apiCan(request, COST_PERM);
+  const rows = ((data as Raw[]) ?? []).map((r) => canCost ? r : { ...r, avg_cost: 0, total_value: 0 });
 
   // เติมรูป + รุ่น (Parent) — ถ้าดึงไม่ได้ก็ยังคืนยอดได้ตามเดิม
   const skuInfo = new Map<string, { key: string | null; parent: string | null }>();
@@ -68,5 +71,5 @@ export async function GET(request: NextRequest) {
       parent_id: s?.parent ?? null, parent_code: p?.code ?? null, parent_name: p?.name ?? null,
     };
   });
-  return NextResponse.json({ data: out, error: null } satisfies BalancesResponse);
+  return NextResponse.json({ data: out, cost_hidden: !canCost, error: null } satisfies BalancesResponse);
 }

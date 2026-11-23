@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export type InventoryHealth = {
   last_movement_at: string | null;
   flows: FlowCheck[];
   zones: ZoneSummary[];
+  cost_hidden?: boolean;   // ไม่มีสิทธิ์ดูราคาทุน → value/neg_value = 0
   error: string | null;
 };
 
@@ -92,7 +94,8 @@ export async function GET(request: NextRequest) {
       if (q > 0) { z.in_stock++; z.value += v; if (!r.location_code) z.no_location++; }
       if (q < 0) { z.negative++; z.neg_value += v; negative_total++; negCount.set(r.warehouse_id, (negCount.get(r.warehouse_id) ?? 0) + 1); }
     }
-    const zones = [...zoneMap.values()];
+    const canCost = await apiCan(request, COST_PERM);
+    const zones = [...zoneMap.values()].map((z) => canCost ? z : { ...z, value: 0, neg_value: 0 });
     const negative_by_wh = [...negCount.entries()].map(([id, count]) => ({
       warehouse_id: id, code: whMap.get(id)?.code ?? "", name: whMap.get(id)?.name ?? "", count,
     })).sort((a, b) => b.count - a.count);
@@ -120,7 +123,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       movements_total: movTotal, balances_total: balTotal,
-      negative_total, negative_by_wh, zones,
+      negative_total, negative_by_wh, zones, cost_hidden: !canCost,
       last_movement_at: (lastAny.data?.created_at as string | undefined) ?? null,
       flows, error: null,
     } satisfies InventoryHealth);

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
+import { COST_PERM } from "@/lib/cost-access";
 
 export type StockMovement = {
   id:                 string;
@@ -28,7 +29,7 @@ export type StockMovement = {
   total_count:        number;
 };
 
-export type MovementsResponse = { data: StockMovement[]; total: number; error: string | null };
+export type MovementsResponse = { data: StockMovement[]; total: number; cost_hidden?: boolean; error: string | null };
 
 // ---- GET ?type=&warehouse_id=&product_id=&search= ----
 export async function GET(request: NextRequest) {
@@ -43,8 +44,9 @@ export async function GET(request: NextRequest) {
     p_offset:        Math.max(0, parseInt(searchParams.get("offset") ?? "0")),
   });
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message } satisfies MovementsResponse, { status: 500 });
-  const rows = (data as StockMovement[]) ?? [];
-  return NextResponse.json({ data: rows, total: Number(rows[0]?.total_count ?? 0), error: null } satisfies MovementsResponse);
+  const canCost = await apiCan(request, COST_PERM);   // ไม่มีสิทธิ์ดูราคาทุน → ตัดทุน/มูลค่าเป็น 0
+  const rows = ((data as StockMovement[]) ?? []).map((m) => canCost ? m : { ...m, unit_cost: 0, total_cost: 0 });
+  return NextResponse.json({ data: rows, total: Number(rows[0]?.total_count ?? 0), cost_hidden: !canCost, error: null } satisfies MovementsResponse);
 }
 
 // ---- POST create movement ----
