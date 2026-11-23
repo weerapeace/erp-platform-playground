@@ -39,6 +39,10 @@
       "schedule": "5 1 * * *"
     },
     {
+      "path": "/api/cron/marketing-alert",
+      "schedule": "20 2 * * *"
+    },
+    {
       "path": "/api/cron/platform-readiness",
       "schedule": "0,30 17-21 * * *"
     },

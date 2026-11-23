@@ -29,6 +29,7 @@ import { countsAsSale, isReportOnly, isUnpaidPlatformStatus, needsAction, shipDu
 import { r2ImageUrl } from "@/lib/r2-image";
 import { loadSkuStock } from "@/lib/sku-stock";
 import { loadPullInputs } from "@/lib/order-pull-server";
+import { loadOrderItems, loadPlatformOrders } from "@/lib/platform-sales-load";
 import { shopPullHealth } from "@/lib/order-pull-health";
 import { CATALOG_REFRESH_PREFIX, normalizeRefreshState } from "@/lib/catalog-refresh-plan";
 import {
@@ -41,7 +42,6 @@ export const revalidate = 0;
 export const maxDuration = 60;
 
 const STATUS_ORDER = ["new", "confirmed", "packed", "shipped", "cancelled"];
-const ITEM_CHUNK = 200;   // id ออเดอร์ต่อคำขอรายการสินค้า (URL ไม่ยาวเกิน · แถวไม่ถึงเพดาน 1,000)
 const isYmd = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
 const MAX_DAILY = 120;   // ช่วงยาวกว่านี้ → รวมเป็นรายเดือน
 const minYmd = (...ds: (string | null)[]) => ds.filter((d): d is string => !!d).sort()[0] ?? null;
@@ -80,13 +80,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const inDays = (o: OrderLite, a: string, b: string) => { const d = bkkYmd(o.ordered_at ?? null); return !!d && d >= a && d <= b; };
 
   // ออเดอร์ทั้งหมดในหน้าต่างเวลาเดียว (ตามฟิลเตอร์แพลตฟอร์ม/แบรนด์) — แบ่งใช้ในหน้านี้ ไม่ถามซ้ำ
-  const winOrders = await fetchAllPages<OrderLite>((a, b) => {
-    let oq = admin.from("platform_orders").select("id, platform_id, status, platform_status, source, total, ordered_at");
-    if (platformId) oq = oq.eq("platform_id", platformId);
-    if (brandId) oq = oq.eq("brand_id", brandId);
-    if (windowFrom) oq = oq.gte("ordered_at", bkkStartIso(windowFrom));
-    return oq.order("id", { ascending: true }).range(a, b);
-  });
+  const winOrders: OrderLite[] = await loadPlatformOrders(admin, { platformId, brandId, fromYmd: windowFrom });
   const orders = winOrders.filter(inRange);
   const sales = orders.filter(countsAsSale);
   const monthSales = winOrders.filter((o) => countsAsSale(o) && inDays(o, mtd.from, mtd.to));
@@ -95,17 +89,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const hourSales = singleDay && hourPrev ? winOrders.filter((o) => countsAsSale(o) && inDays(o, hourPrev, singleDay)) : [];
 
   // รายการสินค้าของทุกออเดอร์ที่นับเป็นยอดขาย (รวมทุกช่วง ไม่ซ้ำ) — ถามทีละชุด พร้อมกันทีละ 4
-  const needIds = [...new Set([...sales, ...monthSales, ...prevMonthSales, ...last30Sales, ...hourSales].map((o) => o.id))];
-  const items: ItemLite[] = [];
-  {
-    const chunks: string[][] = [];
-    for (let i = 0; i < needIds.length; i += ITEM_CHUNK) chunks.push(needIds.slice(i, i + ITEM_CHUNK));
-    for (let i = 0; i < chunks.length; i += 4) {
-      const got = await Promise.all(chunks.slice(i, i + 4).map((ids) => fetchAllPages<ItemLite>((a, b) =>
-        admin.from("platform_order_items").select("id, order_id, matched_sku_id, sku_code, name, qty, price").in("order_id", ids).order("id", { ascending: true }).range(a, b))));
-      for (const g of got) items.push(...g);
-    }
-  }
+  const items: ItemLite[] = await loadOrderItems(admin, [...sales, ...monthSales, ...prevMonthSales, ...last30Sales, ...hourSales].map((o) => o.id));
   const valByOrder = itemValueByOrder(items);
   const val = (o: OrderLite) => orderValue(o, valByOrder);
   const sumVal = (os: OrderLite[]) => os.reduce((s, o) => s + val(o), 0);
@@ -289,26 +273,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 // ตั้ง/ลบเป้ายอดขายรายเดือน (ทั้งหมด หรือ ต่อแบรนด์) — แก้ได้ ลบได้ ทุกครั้งลง audit
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
-  let body: { set_target?: boolean; month?: string; brand_id?: string | null; amount?: number | string | null };
+  // ➕ 2026-11-23: platform_code = เป้าแยกช่องทาง (หน้าภาพรวมการตลาด) · ไม่ส่ง = เป้ารวมเหมือนเดิม
+  let body: { set_target?: boolean; month?: string; brand_id?: string | null; platform_code?: string | null; amount?: number | string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "อ่านข้อมูลไม่ได้" }, { status: 400 }); }
   if (!body.set_target) return NextResponse.json({ error: "ไม่รู้จักคำสั่ง" }, { status: 400 });
   const ym = String(body.month ?? "").trim();
   if (!/^\d{4}-\d{2}$/.test(ym)) return NextResponse.json({ error: "เดือนไม่ถูกต้อง" }, { status: 400 });
   const brandId = String(body.brand_id ?? "").trim() || null;
+  const platformCode = String(body.platform_code ?? "").trim() || null;
+  if (platformCode && !/^[a-z0-9_]{2,32}$/.test(platformCode)) return NextResponse.json({ error: "ช่องทางไม่ถูกต้อง" }, { status: 400 });
   const amount = body.amount == null || body.amount === "" ? null : Number(body.amount);
   if (amount != null && (!Number.isFinite(amount) || amount < 0)) return NextResponse.json({ error: "จำนวนเงินไม่ถูกต้อง" }, { status: 400 });
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
   const { data: cur } = await admin.from("ui_config").select("value").eq("key", SALES_TARGET_KEY).maybeSingle();
-  const before = readSalesTarget((cur as { value?: unknown } | null)?.value, ym, brandId);
-  const next = writeSalesTarget((cur as { value?: unknown } | null)?.value, ym, brandId, amount);
+  const before = readSalesTarget((cur as { value?: unknown } | null)?.value, ym, brandId, platformCode);
+  const next = writeSalesTarget((cur as { value?: unknown } | null)?.value, ym, brandId, amount, platformCode);
   const { error } = await admin.from("ui_config").upsert({ key: SALES_TARGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  const after = readSalesTarget(next, ym, brandId);
+  const after = readSalesTarget(next, ym, brandId, platformCode);
   await writeAudit(admin, {
     action: after == null ? "delete" : before == null ? "create" : "update", entityType: "platform_sales_target", entityId: brandId,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { month: ym, brand_id: brandId, label: `เป้ายอดขาย ${ym}${brandId ? "" : " (ทุกแบรนด์)"}`, ...auditChangeMeta({ target: before }, { target: after }) },
+    metadata: { month: ym, brand_id: brandId, platform_code: platformCode, label: `เป้ายอดขาย ${ym}${brandId ? "" : " (ทุกแบรนด์)"}${platformCode ? ` · ${platformCode}` : ""}`, ...auditChangeMeta({ target: before }, { target: after }) },
   });
   return NextResponse.json({ ok: true, target: after, error: null });
 }

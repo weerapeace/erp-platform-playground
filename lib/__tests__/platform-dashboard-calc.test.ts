@@ -59,4 +59,12 @@ describe("platform-dashboard-calc", () => {
     expect(v0).toEqual({ "2026-11|*": 500000 });
     expect(writeSalesTarget(v1, "2026-11", null, null)).toEqual({ "2026-11|b1": 120000 });
   });
+
+  it("เป้าแยกช่องทาง ไม่ทับเป้าเดิม", () => {
+    const v = writeSalesTarget({ "2026-11|*": 500000 }, "2026-11", null, 300000, "shopee");
+    expect(v).toEqual({ "2026-11|*": 500000, "2026-11|*|shopee": 300000 });
+    expect(readSalesTarget(v, "2026-11", null)).toBe(500000);
+    expect(readSalesTarget(v, "2026-11", null, "shopee")).toBe(300000);
+    expect(readSalesTarget(v, "2026-11", null, "tiktok")).toBeNull();
+  });
 });

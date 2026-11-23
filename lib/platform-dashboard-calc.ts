@@ -104,18 +104,23 @@ export function hourlyBuckets<T extends { ordered_at?: string | null }>(orders: 
   return out;
 }
 
-/** เป้ายอดขายรายเดือน — ui_config `platform_sales_targets` = { "<YYYY-MM>|<brand_id หรือ *>": จำนวนเงิน } */
+/**
+ * เป้ายอดขายรายเดือน — ui_config `platform_sales_targets` = { "<YYYY-MM>|<brand_id หรือ *>": จำนวนเงิน }
+ * ➕ 2026-11-23 (หน้าภาพรวมการตลาด · เจ้าของขอตั้งเป้าแยกช่องทาง): ใส่รหัสช่องทาง → "<YYYY-MM>|<brand หรือ *>|<platform code>"
+ *   ไม่ใส่ช่องทาง = ช่องเดิมทุกอย่าง (เป้าที่ตั้งไว้แล้วไม่หาย)
+ */
 export const SALES_TARGET_KEY = "platform_sales_targets";
-export const salesTargetSlot = (ym: string, brandId: string | null | undefined): string => `${ym}|${brandId || "*"}`;
-export function readSalesTarget(v: unknown, ym: string, brandId: string | null | undefined): number | null {
+export const salesTargetSlot = (ym: string, brandId: string | null | undefined, platformCode?: string | null): string =>
+  `${ym}|${brandId || "*"}${platformCode ? `|${platformCode}` : ""}`;
+export function readSalesTarget(v: unknown, ym: string, brandId: string | null | undefined, platformCode?: string | null): number | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  const n = Number((v as Record<string, unknown>)[salesTargetSlot(ym, brandId)]);
+  const n = Number((v as Record<string, unknown>)[salesTargetSlot(ym, brandId, platformCode)]);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 /** ตั้ง/ลบเป้า (amount ว่าง/≤0 = ลบ) → ก้อนใหม่ (ไม่แก้ตัวเดิม) */
-export function writeSalesTarget(v: unknown, ym: string, brandId: string | null | undefined, amount: number | null): Record<string, number> {
+export function writeSalesTarget(v: unknown, ym: string, brandId: string | null | undefined, amount: number | null, platformCode?: string | null): Record<string, number> {
   const cur = v && typeof v === "object" && !Array.isArray(v) ? { ...(v as Record<string, number>) } : {};
-  const slot = salesTargetSlot(ym, brandId);
+  const slot = salesTargetSlot(ym, brandId, platformCode);
   if (amount != null && Number.isFinite(amount) && amount > 0) cur[slot] = Math.round(amount); else delete cur[slot];
   return cur;
 }

@@ -53,7 +53,7 @@ async function readAiUsage(admin: Admin, now: number) {
 
 /** หลักฐานจากแจ้งเตือนที่งานตั้งเวลาส่งออกไป (ครั้งล่าสุด + กี่วันที่มีการส่ง) */
 async function readNotifyEvidence(admin: Admin, now: number) {
-  const types = ["wo.due_soon", "subscription.renewal_soon", "content_album.reminder", "cashflow.low_cash", "perf.regression", "platform.cross_daily"];
+  const types = ["wo.due_soon", "subscription.renewal_soon", "content_album.reminder", "cashflow.low_cash", "perf.regression", "platform.cross_daily", "marketing.alert"];
   const list = rows(await admin.from("erp_notifications").select("event_type, created_at")
     .in("event_type", types).gte("created_at", sinceDays(now, 90)).order("created_at", { ascending: false }).limit(1500));
   const out: Record<string, { last: string | null; days: number }> = {};
@@ -241,7 +241,7 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
     }),
 
     // ── งานตั้งเวลาที่ดูหลักฐานจากแจ้งเตือน/คลังรูป ──
-    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions", "perf-watch", "platform-readiness", "platform-drift", "platform-cross-daily", "parent-computed-sync"], async () => {
+    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions", "perf-watch", "platform-readiness", "platform-drift", "platform-cross-daily", "parent-computed-sync", "marketing-alert"], async () => {
       workers["platform-readiness"] = cron("platform-readiness");
       workers["platform-drift"] = cron("platform-drift");
       workers["parent-computed-sync"] = cron("parent-computed-sync");
@@ -250,6 +250,7 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
       workers["album-reminders"] = cron("album-reminders", notifyStat(notif["content_album.reminder"]), notif["content_album.reminder"]?.last ?? null);
       workers["cashflow-alert"] = cron("cashflow-alert", notifyStat(notif["cashflow.low_cash"]), notif["cashflow.low_cash"]?.last ?? null);
       workers.subscriptions = cron("subscriptions", notifyStat(notif["subscription.renewal_soon"]), notif["subscription.renewal_soon"]?.last ?? null);
+      workers["marketing-alert"] = cron("marketing-alert", notifyStat(notif["marketing.alert"]), notif["marketing.alert"]?.last ?? null);
       workers["perf-watch"] = cron("perf-watch", notifyStat(notif["perf.regression"]), notif["perf.regression"]?.last ?? null);
     }),
     part(["drive-check", "look-hash"], async () => {

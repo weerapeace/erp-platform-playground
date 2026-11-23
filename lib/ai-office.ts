@@ -138,6 +138,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/platform-drift/route.ts", "lib/platform-listing-drift-server.ts", "lib/platform-listing-drift.ts"],
   },
   {
+    id: "marketing-alert", zone: "marketing", kind: "auto", icon: "📊",
+    title: "ผู้เฝ้ายอดขายการตลาด", titleEn: "Marketing watcher",
+    does: "ทุกเช้าดูยอดเทียบเป้า ยอดเมื่อวาน ออเดอร์ที่ยกเลิกเพราะฝั่งร้าน และสินค้าขายดีที่กำลังตก แล้วแจ้งกระดิ่ง",
+    trigger: `${DAILY} 09:20`, cron: "/api/cron/marketing-alert", everyHours: 24,
+    can: ["อ่านออเดอร์ทุกช่องทาง", "ส่งแจ้งเตือน"], cannot: ["แก้เป้า", "แก้ออเดอร์หรือโฆษณา"],
+    source: "บันทึกรอบล่าสุด + แจ้งเตือน marketing.alert (ส่งเฉพาะวันที่มีเรื่อง)", href: "/marketing/dashboard",
+    files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
+  },
+  {
     id: "platform-cross-daily", zone: "sales", kind: "auto", icon: "🧾",
     title: "ผู้สรุปเช็กข้ามร้าน", titleEn: "Cross-shop daily digest",
     does: "ทุกเช้าดูว่ามีรุ่นที่ยังไม่ลงบางร้าน หรือราคาบนร้านไม่ตรงระบบ เพิ่มขึ้นจากเมื่อวานไหม แล้วแจ้งกระดิ่ง",
