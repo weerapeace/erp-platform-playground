@@ -26,7 +26,7 @@ import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
-  SHOP_STATE_LABEL, SHOP_TABS, inShopQueue, inShopTab, notListedTrustworthy, shopStateOf,
+  DEFAULT_SHOP_TAB, SHOP_STATE_LABEL, SHOP_TABS, compareListedOrder, inShopQueue, inShopTab, notListedTrustworthy, shopStateOf,
   type ShopItem, type ShopParent, type ShopTab, type ShopViewResponse,
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
@@ -40,8 +40,10 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { GalleryColumnsControl, galleryTemplate, useGalleryColumns } from "@/components/gallery-columns";
 
-/** สถานะที่เลือกไว้ จำต่อคน (เจ้าของ 2026-11-19) */
+/** สถานะที่เลือกไว้ จำต่อคน (เจ้าของ 2026-11-19) · กุญแจ v2 (2026-11-23): ทุกคนเริ่มใหม่ที่ "ขายอยู่" แล้วจำต่อจากนั้น */
 const parseShopTab = (v: unknown): ShopTab | null => (SHOP_TABS.some((t) => t.key === v) ? v as ShopTab : null);
+/** การเรียง จำต่อคน (เจ้าของเลือก 2026-11-23 ข้อ 2) */
+const parseSort = (v: unknown): SortKey | null => (SORTS.some((s) => s.key === v) ? v as SortKey : null);
 /** ช่องว่างระหว่างการ์ด — ต้องตรงกับ gap-2 ของ MiniTable โหมดการ์ด */
 const CARD_GAP = "0.5rem";
 
@@ -52,9 +54,11 @@ const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").th
 
 const IMG_STATE_LABEL: Record<ShopParent["image_state"], string> = { ok: "มีรูปปก", sku_only: "มีรูป SKU · ยังไม่ตั้งปก", none: "ไม่มีรูปเลย" };
 
-type SortKey = "default" | "stock_desc" | "stock_asc" | "price_desc" | "price_asc" | "name";
+// เรียงตามลำดับที่ลงบนร้าน (เจ้าของ 2026-11-23) — จากรหัสสินค้าบนร้าน ใช้ได้ทุกร้าน (lib/platform-listing-health compareListedOrder)
+type SortKey = "listed_desc" | "listed_asc" | "stock_desc" | "stock_asc" | "price_desc" | "price_asc" | "name";
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "default", label: "เรียง: ล่าสุดก่อน" },
+  { key: "listed_desc", label: "ลงล่าสุดก่อน" },
+  { key: "listed_asc", label: "ลงเก่าสุดก่อน" },
   { key: "stock_desc", label: "สต๊อก มาก → น้อย" },
   { key: "stock_asc", label: "สต๊อก น้อย → มาก" },
   { key: "price_desc", label: "ราคา สูง → ต่ำ" },
@@ -108,10 +112,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const error = swr.error ? (swr.error.message || "โหลดข้อมูลไม่สำเร็จ") : null;
   const reload = swr.revalidate;
   const load = useCallback(() => { void reload(true); }, [reload]);
-  const [tab, setTab] = useUserPref<ShopTab>("platform_catalog_shop_tab", "all", parseShopTab);
+  const [tab, setTab] = useUserPref<ShopTab>("platform_catalog_shop_tab_v2", DEFAULT_SHOP_TAB, parseShopTab);
   const [queue, setQueue] = useState<QueueKey>("none");
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState<SortKey>("default");
+  const [sort, setSort] = useUserPref<SortKey>("platform_catalog_shop_sort", "listed_desc", parseSort);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -174,7 +178,8 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
     if (needle) rows = rows.filter((it) => `${it.title ?? ""} ${it.sku_code ?? ""} ${it.external_product_id ?? ""} ${it.matched_code ?? ""}`.toLowerCase().includes(needle));
     const nz = (n: number | null, dir: 1 | -1) => (n == null ? Number.POSITIVE_INFINITY : n * dir);
     const cmp: Record<SortKey, ((a: ShopItem, b: ShopItem) => number) | null> = {
-      default: null,
+      listed_desc: (a, b) => compareListedOrder(a.external_product_id, b.external_product_id, "desc"),
+      listed_asc: (a, b) => compareListedOrder(a.external_product_id, b.external_product_id, "asc"),
       stock_desc: (a, b) => nz(a.stock, -1) - nz(b.stock, -1),
       stock_asc: (a, b) => nz(a.stock, 1) - nz(b.stock, 1),
       price_desc: (a, b) => nz(effPrice(a), -1) - nz(effPrice(b), -1),
@@ -196,11 +201,13 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
 
   const tabCount = (t: ShopTab): number | null => {
     if (t === "notlisted") return notListed ? notListed.length : null;
-    if (noData && (t === "selling" || t === "out" || t === "hidden" || t === "review")) return null;
+    // ไฟล์ export ไม่มีสถานะ → หมด/ปิดขาย/รอตรวจ ไม่รู้ ("?") · "ขายอยู่" นับตัวที่ไม่รู้สถานะด้วย (ไม่รู้ก็ไม่ซ่อน)
+    if (noData && (t === "out" || t === "hidden" || t === "review")) return null;
     return items.filter((it) => inShopTab(it, t)).length;
   };
   const pickTab = (t: ShopTab) => { setTab(t); setQueue("none"); setPage(1); setSelected(new Set()); };
-  const pickQueue = (k: QueueKey) => { setQueue(k); setTab("all"); setPage(1); setSelected(new Set()); };
+  // เลือกกอง: ไม่เปลี่ยนแท็บที่จำไว้ (กองกรองแทนแท็บอยู่แล้ว) · ยกเว้นอยู่แท็บ "ยังไม่ลง" (เป็นสินค้าของเรา ไม่ใช่รายการบนร้าน)
+  const pickQueue = (k: QueueKey) => { setQueue(k); if (tab === "notlisted") setTab(DEFAULT_SHOP_TAB); setPage(1); setSelected(new Set()); };
 
   // ---------- สร้างงาน ----------
   const pickerOf = (id: string, code: string | null, name: string | null, coverKey: string | null): ParentSkuPickerValue =>
@@ -344,6 +351,10 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   }
 
   const queueOn = queue !== "none";
+  // ตัวเลขในชิปหมวด = นับตามที่กำลังดู (แท็บ/กอง) — เปิดมาที่ "ขายอยู่" ก็นับเฉพาะตัวที่ขายอยู่ ไม่ปนตัวปิดขาย
+  //   (ตารางสินค้าของเรา — ยังไม่ลง / ไม่มีรูปในระบบ — นับรายการบนร้านทั้งหมดเหมือนเดิม)
+  const catBase = parentMode ? allItems
+    : allItems.filter((it) => (queueOn ? inShopQueue(it, queue as Exclude<QueueKey, "none" | "noimg_erp">) : inShopTab(it, tab)));
   // รายการสถานะในแถบซ้ายของหน้าแม่ (จอใหญ่) — พับแถบ = เหลือตัวเลข (ชื่อขึ้นตอนชี้)
   const statusList = statusSlot ? createPortal(
     <div className="space-y-0.5">
@@ -379,8 +390,8 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       {data.categories.length > 0 && (
         <div className="scrollbar-hide flex items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible">
           <span className="shrink-0 text-xs text-slate-500 mr-0.5">หมวด</span>
-          {[{ id: "", name: "ทุกหมวด", n: allItems.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: allItems.filter((it) => it.category_id === c.id).length })),
-            ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])]
+          {[{ id: "", name: "ทุกหมวด", n: catBase.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: catBase.filter((it) => it.category_id === c.id).length })),
+            ...(catBase.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: catBase.filter((it) => !it.category_id).length }] : [])]
             .filter((c) => c.id === "" || c.n > 0 || cat === c.id)   // หมวดที่เป็น 0 ซ่อน (กติกาเดียวกับการ์ดกลาง)
             .map((c) => (
             <button key={c.id || "all"} type="button" onClick={() => { setCat(c.id); setPage(1); setSelected(new Set()); }} aria-pressed={cat === c.id}
@@ -391,7 +402,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       )}
 
-      <ShopQueues items={items} noImage={noImage} value={queue} onChange={pickQueue} compact />
+      <ShopQueues items={items} noImage={noImage} value={queue} tab={tab} onChange={pickQueue} onPickTab={pickTab} compact />
 
       <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
         {!statusSlot && <ScrollTabs activeKey={queueOn ? null : tab} className="border-b border-slate-200 px-1">

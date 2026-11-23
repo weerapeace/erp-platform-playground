@@ -5,7 +5,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
-import { useSelectMode, SelectModeButton, SelectModeBar } from "@/components/select-mode";   // ของกลาง: โหมดเลือก + Shift เลือกช่วง + กดค้าง
+import { useSelectMode, SelectModeBar } from "@/components/select-mode";   // ของกลาง: ติ๊กแล้วเข้าโหมดเลือก + Shift เลือกช่วง + กดค้าง
 import { CardZoom, type GalleryCols } from "@/components/gallery-columns";   // โหมดการ์ด: ซูม Ctrl+ลูกกลิ้ง
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -1212,7 +1212,7 @@ export function DataTable<T extends Record<string, unknown>>({
   // แสดง checkbox เลือกแถว เมื่อมี bulk actions หรือ bulk edit
   const hasBulk = bulkActions.length > 0 || (bulkEditFields.length > 0 && !!onBulkEdit);
   const showSelectCol = hasBulk || selectable;
-  // เลือกหลายแถว (ของกลาง select-mode): Shift+กด = ทั้งช่วงตามลำดับที่เห็น · ปุ่ม "เลือก" = โหมดเลือก · มือถือกดค้าง · Esc/Ctrl+A
+  // เลือกหลายแถว (ของกลาง select-mode): Shift+กด = ทั้งช่วงตามลำดับที่เห็น · ติ๊กแล้วเข้าโหมดเลือกเอง (ไม่มีปุ่ม "เลือก") · มือถือกดค้าง · Ctrl+A
   //   ลำดับแถวรู้ตอนวาดเท่านั้น (จัดกลุ่ม/พับกลุ่ม) → renderOrderRef เติมตอนวาดแถว · ⚠️ ต้องประกาศก่อน withSelectCol (ช่องติ๊กเรียก sm.pick)
   const renderOrderRef = useRef<string[]>([]);
   const selIdSet = useMemo(() => new Set(Object.keys(rowSelection).filter((k) => rowSelection[k])), [rowSelection]);
@@ -1844,8 +1844,6 @@ export function DataTable<T extends Record<string, unknown>>({
           </div>
         )}
 
-        {/* โหมดเลือก (ของกลาง select-mode) — เฉพาะตารางที่มีช่องติ๊ก */}
-        {showSelectCol && viewMode === "table" && <SelectModeButton mode={sm.mode} onToggle={sm.toggle} />}
 
         {/* Density toggle (เฉพาะ table) */}
         {viewMode === "table" && (
@@ -1998,7 +1996,7 @@ export function DataTable<T extends Record<string, unknown>>({
       {selMode && viewMode === "table" && (
         <div className="px-3 py-2 border-b border-slate-100">
           <SelectModeBar count={selectedCount} total={table.getRowModel().rows.length}
-            onAll={sm.selectAll} onClear={() => setRowSelection({})} onDone={sm.exit} />
+            onAll={sm.selectAll} onClear={() => setRowSelection({})} />
         </div>
       )}
 

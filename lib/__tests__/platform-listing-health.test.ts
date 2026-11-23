@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   effectivePrice, discountPct, priceFlags, listingShopDetail,
   summarizeListing, shopStateOf, duplicateCounts, duplicateKey, countsAsDuplicate, inShopTab, inShopQueue, notListedTrustworthy,
-  LOW_STOCK_MAX, LISTING_GONE_STATUS, isUnmatched, type ShopItem,
+  LOW_STOCK_MAX, LISTING_GONE_STATUS, isUnmatched, isOnSale, compareListedOrder, DEFAULT_SHOP_TAB, type ShopItem,
 } from "@/lib/platform-listing-health";
 
 // รูปร่างจริงจาก LINE SHOPPING (ย่อ) — WK42 ของ Louis Montini
@@ -140,9 +140,30 @@ describe("ชื่อ+รหัสซ้ำ", () => {
 });
 
 describe("แท็บ + กองงาน", () => {
-  it("แท็บขายอยู่ รวมใกล้หมด", () => {
-    expect(inShopTab(item({ state: "low" }), "selling")).toBe(true);
-    expect(inShopTab(item({ state: "out" }), "selling")).toBe(false);
+  it("แท็บขายอยู่ = เปิดขายอยู่ (รวมใกล้หมด/หมดแต่ยังเปิดขาย/รอตรวจ/ไม่รู้สถานะ) · ไม่รวมปิดขาย — เปิดหน้ามาเจอแท็บนี้ (เจ้าของ 2026-11-23)", () => {
+    expect(DEFAULT_SHOP_TAB).toBe("selling");
+    for (const st of ["selling", "low", "out", "review", "nodata"] as const) expect(inShopTab(item({ state: st }), "selling")).toBe(true);
+    expect(inShopTab(item({ state: "hidden" }), "selling")).toBe(false);
+    expect(inShopTab(item({ state: "hidden" }), "all")).toBe(true);
+    expect(isOnSale({ state: "gone" })).toBe(false);
+  });
+  it("กองปัญหา (ไม่มีรูป/ซ้ำ/ยังไม่จับคู่/ของขวัญ) นับเฉพาะตัวที่ขายอยู่ (ข้อ 1)", () => {
+    const off = { state: "hidden" as const };
+    expect(inShopQueue(item({ ...off, image: null, imageKnown: true }), "noimg_shop")).toBe(false);
+    expect(inShopQueue(item({ ...off, dup_count: 3 }), "dup")).toBe(false);
+    expect(inShopQueue(item({ ...off, matched_parent_sku_id: null }), "unmatched")).toBe(false);
+    expect(inShopQueue(item({ ...off, gift_on: false }), "nogift")).toBe(false);
+    expect(inShopQueue(item({ state: "out", matched_parent_sku_id: null }), "unmatched")).toBe(true);
+    expect(inShopQueue(item(off), "hidden")).toBe(true);
+  });
+  it("เรียงตามลำดับที่ลง: รหัสบนร้านมาก = ลงทีหลัง · รหัสไม่ใช่ตัวเลขไปท้ายเสมอ", () => {
+    const ids = ["44821923329", "57021919359", "9876543210", "abc", null, "1729000000000000001"];
+    const desc = [...ids].sort((a, b) => compareListedOrder(a, b, "desc"));
+    expect(desc).toEqual(["1729000000000000001", "57021919359", "44821923329", "9876543210", "abc", null]);
+    const asc = [...ids].sort((a, b) => compareListedOrder(a, b, "asc"));
+    expect(asc.slice(0, 4)).toEqual(["9876543210", "44821923329", "57021919359", "1729000000000000001"]);
+    expect(asc.slice(4)).toEqual(["abc", null]);
+    expect(compareListedOrder("007", "7")).toBe(0);
   });
   it("ยังไม่จับคู่ ไม่นับตัวที่กดไม่ต้องจับคู่", () => {
     expect(inShopTab(item({ matched_parent_sku_id: null }), "unmatched")).toBe(true);

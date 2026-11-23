@@ -407,9 +407,12 @@ export type ShopViewResponse = {
 
 export type ShopTab = "all" | "selling" | "out" | "hidden" | "review" | "unmatched" | "notlisted" | "gone";
 
+/** แท็บที่เปิดหน้ามาเจอ (เจ้าของ 2026-11-23: "ไม่ต้องโชว์ที่ปิดขาย" — เริ่มที่สินค้าที่ขายอยู่) */
+export const DEFAULT_SHOP_TAB: ShopTab = "selling";
+
 export const SHOP_TABS: { key: ShopTab; label: string }[] = [
-  { key: "all", label: "ทั้งหมด" },
   { key: "selling", label: "ขายอยู่" },
+  { key: "all", label: "ทั้งหมด" },
   { key: "out", label: "หมด" },
   { key: "hidden", label: "ปิดขาย" },
   { key: "review", label: "รอตรวจ" },
@@ -422,13 +425,19 @@ export const SHOP_TABS: { key: ShopTab; label: string }[] = [
 export const isUnmatched = (it: Pick<ShopItem, "matched_parent_sku_id" | "match_ignored"> & { state?: ShopState }): boolean =>
   !it.matched_parent_sku_id && !it.match_ignored && it.state !== "gone";
 
+/**
+ * ขายอยู่ = เปิดขายบนร้านอยู่ (ลูกค้าเห็น) — รวมตัวที่ของหมดแต่ยังเปิดขาย · รอตรวจ (ระบบเพิ่งลง ยังไม่ได้ดึงสถานะ) ·
+ * ไม่รู้สถานะ (ไฟล์ export ที่ไม่มีสถานะ — ไม่รู้ก็ไม่ซ่อน) · ไม่นับ ปิดขาย / ไม่อยู่บนร้านแล้ว (เจ้าของ 2026-11-23)
+ */
+export const isOnSale = (it: Pick<ShopItem, "state">): boolean => it.state !== "hidden" && it.state !== "gone";
+
 /** รายการนี้อยู่แท็บนี้ไหม (แท็บ notlisted เป็นสินค้าของเรา ไม่ใช่รายการบนร้าน → false เสมอ)
  *  ตัวที่ไม่อยู่บนร้านแล้ว อยู่แท็บ gone แท็บเดียว (ไม่ปนในทั้งหมด/ขายอยู่/…) */
 export function inShopTab(it: ShopItem, tab: ShopTab): boolean {
   if (it.state === "gone") return tab === "gone";
   switch (tab) {
     case "all": return true;
-    case "selling": return it.state === "selling" || it.state === "low";
+    case "selling": return isOnSale(it);
     case "out": return it.state === "out";
     case "hidden": return it.state === "hidden";
     case "review": return it.state === "review";
@@ -441,8 +450,11 @@ export function inShopTab(it: ShopItem, tab: ShopTab): boolean {
 
 export type ShopQueue = "out" | "low" | "hidden" | "review" | "noimg_shop" | "dup" | "unmatched" | "nogift" | "gone";
 
-/** กองที่ไม่นับรวมใน "งานที่ต้องทำ" (เยอะมาก/ไม่ด่วน — ไม่ให้กลบปัญหาอื่น) */
-export const SHOP_QUEUES_NOT_IN_TOTAL: ShopQueue[] = ["nogift"];
+/**
+ * กองที่นับเฉพาะตัวที่ขายอยู่ (เจ้าของเลือก 2026-11-23 ข้อ 1) — ตัวที่ปิดขายไม่เอามานับ ไม่ให้รก
+ * ดูตัวที่ปิดขายได้ในแท็บ "ทั้งหมด" / "ปิดขาย" · หมด/ใกล้หมด/รอตรวจ เป็นตัวเปิดขายอยู่แล้ว · ปิดขาย/ไม่อยู่บนร้าน = กองของมันเอง
+ */
+export const SHOP_QUEUES_ON_SALE_ONLY: readonly ShopQueue[] = ["noimg_shop", "dup", "unmatched", "nogift"];
 
 export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "danger" | "warning" | "info" | "neutral" }[] = [
   { key: "out", label: "หมดแต่ยังเปิดขาย", why: "ลูกค้าเห็นสินค้าแต่กดซื้อไม่ได้ — เติมสต๊อกหรือปิดขาย", tone: "danger" },
@@ -452,13 +464,14 @@ export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "d
   { key: "noimg_shop", label: "ไม่มีรูปบนร้าน", why: "สินค้าบนร้านไม่มีรูป — ทำรูปแล้วอัปขึ้นร้าน", tone: "warning" },
   { key: "dup", label: "ชื่อ+รหัสซ้ำ", why: "รายการบนร้านที่ชื่อและรหัสเหมือนกันทุกตัว — ตรวจว่าซ้ำจริงไหม", tone: "danger" },
   { key: "unmatched", label: "ยังไม่จับคู่", why: "ยังไม่รู้ว่าตรงกับสินค้าไหนในระบบ — ไปหน้าจับคู่ (ระบบเดาให้แล้ว)", tone: "neutral" },
-  { key: "nogift", label: "ยังไม่เปิดของขวัญ", why: "LINE ไม่ให้ตั้งผ่านระบบ — เปิด LINE Seller Center ติ๊ก “เปิดการส่งของขวัญ” + For Her / For Him / Couples แล้วกด “ดึงสินค้าจาก LINE” · ทำตัวที่เปิดขายก่อน", tone: "info" },
+  { key: "nogift", label: "ยังไม่เปิดของขวัญ", why: "LINE ไม่ให้ตั้งผ่านระบบ — เปิด LINE Seller Center ติ๊ก “เปิดการส่งของขวัญ” + For Her / For Him / Couples แล้วกด “ดึงสินค้าจาก LINE” (นับเฉพาะตัวที่ขายอยู่)", tone: "info" },
   { key: "gone", label: "ไม่อยู่บนร้านแล้ว", why: "ดึงสินค้าครบทั้งร้านแล้วไม่เจอ (ร้านลบไปแล้ว) — ล้างออกได้ที่หน้าจับคู่", tone: "neutral" },
 ];
 
-/** รายการนี้อยู่กองงานนี้ไหม (ตัวที่ไม่อยู่บนร้านแล้ว อยู่กอง gone กองเดียว) */
+/** รายการนี้อยู่กองงานนี้ไหม (ตัวที่ไม่อยู่บนร้านแล้ว อยู่กอง gone กองเดียว · กองปัญหานับเฉพาะตัวที่ขายอยู่ — SHOP_QUEUES_ON_SALE_ONLY) */
 export function inShopQueue(it: ShopItem, q: ShopQueue): boolean {
   if (it.state === "gone") return q === "gone";
+  if (SHOP_QUEUES_ON_SALE_ONLY.includes(q) && !isOnSale(it)) return false;
   switch (q) {
     case "out": return it.state === "out";
     case "low": return it.state === "low";
@@ -470,6 +483,22 @@ export function inShopQueue(it: ShopItem, q: ShopQueue): boolean {
     case "nogift": return it.gift_on === false;
     default: return false;
   }
+}
+
+// ───────── เรียงตามลำดับที่ลง ─────────
+
+/**
+ * เทียบลำดับที่ลงบนร้าน จากรหัสสินค้าบนร้าน (external_product_id) — ทุกร้านออกรหัสเรียงตามเวลาที่ลง
+ *   ตรวจกับวันที่ลงจริงของ Lazada (created_time) 2026-11-23: ลำดับตรงกัน 99.99% (1,450 รายการ)
+ *   Shopee / TikTok / LINE ไม่ได้เก็บวันที่ลงไว้ → ใช้รหัสได้เลย ไม่ต้องดึงจากร้านใหม่
+ * รหัสที่ไม่ใช่ตัวเลข (เช่น ไฟล์ export / เว็บ) ไปท้ายสุดเสมอ คงลำดับเดิม · dir "desc" = ลงล่าสุดก่อน
+ */
+export function compareListedOrder(a: string | null | undefined, b: string | null | undefined, dir: "asc" | "desc" = "desc"): number {
+  const na = a != null && /^\d+$/.test(a) ? a.replace(/^0+(?=\d)/, "") : null;
+  const nb = b != null && /^\d+$/.test(b) ? b.replace(/^0+(?=\d)/, "") : null;
+  if (na == null || nb == null) return na == null && nb == null ? 0 : na == null ? 1 : -1;
+  const c = na.length - nb.length || (na < nb ? -1 : na > nb ? 1 : 0);
+  return c === 0 ? 0 : dir === "desc" ? -c : c;
 }
 
 /** สัดส่วนที่ยังไม่จับคู่เกินนี้ → "ยังไม่ลง" เชื่อไม่ได้ (สินค้าที่ลงแล้วแต่ยังไม่จับคู่จะถูกนับว่ายังไม่ลง) */

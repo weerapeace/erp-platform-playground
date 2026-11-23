@@ -35,7 +35,7 @@ import { useAuthOptional } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { exportTable } from "@/lib/export";
 import { buildMiniExport } from "@/lib/mini-table-export";
-import { useSelectMode, SelectModeButton, SelectModeBar } from "@/components/select-mode";   // ของกลาง: โหมดเลือก + Shift เลือกช่วง + กดค้าง
+import { useSelectMode, SelectModeBar } from "@/components/select-mode";   // ของกลาง: ติ๊กแล้วเข้าโหมดเลือก + Shift เลือกช่วง + กดค้าง
 
 export type MiniColumn<T> = {
   key: string;
@@ -369,7 +369,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const allKeys = sorted.map(rowKey);
   const allSel = allKeys.length > 0 && allKeys.every((k) => sel.has(k));
   const setKeys = (keys: string[], on: boolean) => { const n = new Set(sel); keys.forEach((k) => (on ? n.add(k) : n.delete(k))); setSel(n); };
-  // เลือกหลายแถว (ของกลาง select-mode): กดช่องติ๊ก/แถว = สลับ · Shift+กด = ทั้งช่วงตามลำดับที่เห็น (ข้ามกลุ่มที่พับ) · ปุ่ม "เลือก" = โหมดเลือก · มือถือกดค้าง
+  // เลือกหลายแถว (ของกลาง select-mode): กดช่องติ๊ก/แถว = สลับ · Shift+กด = ทั้งช่วงตามลำดับที่เห็น (ข้ามกลุ่มที่พับ) · ติ๊กแล้วเข้าโหมดเลือกเอง (ไม่มีปุ่ม "เลือก") · มือถือกดค้าง
   const visibleKeys = useMemo(() => groups.filter((g) => !(groupCollapsible && closedG.has(g.name))).flatMap((g) => g.rows).map(rowKey),
     [groups, groupCollapsible, closedG, rowKey]);
   const sm = useSelectMode({ order: visibleKeys, selected: sel, onChange: setSel, enabled: !!selectable });
@@ -650,7 +650,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   ) : null;
 
   const total = rows.length, shown = sorted.length;
-  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy || canExport || selectable) && total > 0;
+  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy || canExport) && total > 0;   // (ไม่มีปุ่ม "เลือก" แล้ว — ตารางติ๊กได้ไม่ต้องมีแถบเครื่องมือเปล่า)
   const doExport = async () => {
     if (!exportOpts || exporting) return;
     const picked = selectable && selected && selected.size > 0 ? sorted.filter((r) => selected.has(rowKey(r))) : sorted;
@@ -716,14 +716,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
               {exporting ? t("กำลังส่งออก…", "Exporting…") : "⬇ Excel"}
             </button>
           )}
-          {selectable && shown > 0 && <SelectModeButton mode={sm.mode} onToggle={sm.toggle} />}
           {actionsInToolbar && <div className="ml-auto">{actions}</div>}
         </div>
       )}
 
       {selMode && shown > 0 && (
         <SelectModeBar className="mb-2 shrink-0" count={sel.size} total={visibleKeys.length}
-          onAll={sm.selectAll} onClear={() => setSel(new Set())} onDone={sm.exit} />
+          onAll={sm.selectAll} onClear={() => setSel(new Set())} />
       )}
 
       {!toolbarOn && CollapseBtns && shown > 0 && <div className="mb-2 flex shrink-0 items-center">{CollapseBtns}</div>}
