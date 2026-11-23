@@ -2,10 +2,11 @@
 /**
  * /admin/line — จัดการ LINE (หน้าเต็ม · เจ้าของเลือกแบบ A + ข้อ 1-5 · 2026-11-22)
  *   แถบตัวเลข: ผูกไลน์แล้ว (พนักงาน/ลูกค้า/แอดมิน) · รอ HR ยืนยัน · รอยืนยันร้าน · โควตาข้อความเดือนนี้ (กดไปแท็บนั้น)
- *   แท็บ: ภาพรวม (เช็กลิสต์ตั้งค่าครั้งแรก + ทางลัด) · ไลน์บริษัท (บอท/ปุ่มเมนู/QR) · บอทและกลุ่มแจ้งเตือน · คนที่ผูกไลน์ · ประวัติ
+ *   แท็บ: ภาพรวม (เช็กลิสต์ตั้งค่าครั้งแรก + ทางลัด) · ไลน์บริษัท (บอท/QR) · แต่งเมนูไลน์ (ปุ่ม + อัปรูปเอง · 2026-11-23)
+ *         · ร้านค้าในไลน์ (ทุกร้าน + QR รายร้าน + ดูแบบลูกค้า · 2026-11-23) · บอทและกลุ่มแจ้งเตือน · คนที่ผูกไลน์ · ประวัติ
  *   ใช้ชิ้นเดิมทั้งหมด (ไม่ทำซ้ำ): LineCompanySection part=setup|people · LineConsoleBody showCompany=false — ป๊อปศูนย์ LINE เดิมยังใช้ได้
  *   ข้อมูล: /api/admin/line-company · /api/admin/line-console · /api/admin/line-overview (ทางลัด/เช็กลิสต์/ประวัติ · กติกา lib/line-history)
- *   ลิงก์แท็บ ?tab=overview|company|bots|people|history · สิทธิ์ admin.users (เมนูอยู่แอปตั้งค่า เห็นเฉพาะแอดมิน)
+ *   ลิงก์แท็บ ?tab=overview|company|menu|shops|bots|people|history · สิทธิ์ admin.users (เมนูอยู่แอปตั้งค่า เห็นเฉพาะแอดมิน)
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -15,12 +16,15 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { LineCompanySection } from "@/components/line-console/company-section";
 import { LineConsoleBody } from "@/components/line-console";
+import { LineCompanyShops } from "@/components/line-console/company-shops";
 import { lineSetupSteps, type LineHistoryItem } from "@/lib/line-history";
 
-type Tab = "overview" | "company" | "bots" | "people" | "history";
+type Tab = "overview" | "company" | "menu" | "shops" | "bots" | "people" | "history";
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "ภาพรวม", icon: "chart" },
   { key: "company", label: "ไลน์บริษัท", icon: "company" },
+  { key: "menu", label: "แต่งเมนูไลน์", icon: "design" },
+  { key: "shops", label: "ร้านค้าในไลน์", icon: "store" },
   { key: "bots", label: "บอทและกลุ่มแจ้งเตือน", icon: "ai" },
   { key: "people", label: "คนที่ผูกไลน์", icon: "users" },
   { key: "history", label: "ประวัติ", icon: "history" },
@@ -107,7 +111,7 @@ export default function LineAdminPage() {
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {metric("ผูกไลน์แล้ว", co ? `${empLinked} / ${cusLinked}` : null, `พนักงาน / ลูกค้า · แอดมิน ${sum.overview?.admins_linked ?? "…"}`, "people")}
           {metric("รอ HR ยืนยัน", waitHr, "พนักงานที่ผูกด้วยรหัส+เบอร์", "people", !!waitHr)}
-          {metric("รอยืนยันร้าน", pendingCus, "ลูกค้าที่สแกน QR รวม", "people", !!pendingCus)}
+          {metric("รอยืนยันร้าน", pendingCus, "ลูกค้าที่สแกน QR รวม", "shops", !!pendingCus)}
           {metric("โควตาเดือนนี้", quotaText, q?.ok && q.limit ? `${(q.used ?? 0).toLocaleString()} / ${q.limit.toLocaleString()} ข้อความ` : "ข้อความที่ส่งออก (push)", "bots", q?.ok && !!q.limit && (q.used ?? 0) / q.limit >= 0.8)}
         </div>
 
@@ -133,7 +137,7 @@ export default function LineAdminPage() {
                         <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] ${s.done ? "bg-emerald-100 text-emerald-700" : "border border-slate-300 text-slate-500"}`}>{s.done ? <Icon name="done" /> : i + 1}</span>
                         <span className={s.done ? "text-slate-400 line-through" : "text-slate-700"}>{s.label}<span className="block text-[11px] text-slate-400 no-underline">{s.hint}</span></span>
                         {!s.done && (s.key === "token" || s.key === "bot" || s.key === "menus") && (
-                          <button type="button" onClick={() => setTab(s.key === "token" ? "bots" : "company")} className="ml-auto h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50">ไปตั้ง</button>
+                          <button type="button" onClick={() => setTab(s.key === "token" ? "bots" : s.key === "menus" ? "menu" : "company")} className="ml-auto h-7 shrink-0 rounded-md border border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50">ไปตั้ง</button>
                         )}
                       </li>
                     ))}
@@ -153,6 +157,8 @@ export default function LineAdminPage() {
             </div>
           )}
           {tab === "company" && <LineCompanySection part="setup" />}
+          {tab === "menu" && <LineCompanySection part="menu" />}
+          {tab === "shops" && <LineCompanyShops />}
           {tab === "bots" && <LineConsoleBody showCompany={false} />}
           {tab === "people" && (
             <div className="space-y-3">

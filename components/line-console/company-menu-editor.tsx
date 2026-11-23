@@ -4,6 +4,7 @@
  * ตั้งปุ่มเมนูล่างจอของไลน์บริษัท (อยู่ในส่วน "ไลน์บริษัท" ของศูนย์ LINE · components/line-console/company-section)
  *   4 ชุด: ยังไม่ผูก / พนักงาน / ลูกค้า / แอดมิน · แก้ชื่อ คำอธิบาย ลำดับ (ลากหูจับ) · ซ่อน · เอาออก · เพิ่มปุ่มจากรายการที่ระบบรองรับ
  *   บันทึกแล้วชุดเดิมเก็บเข้าประวัติ (ย้อนได้ 10 ชุด) · คนในไลน์เห็นปุ่มใหม่หลังกด "สร้างเมนูในไลน์" (ปุ่มอยู่ใน company-section)
+ * รูปที่ออกแบบเอง (อัปโหลด/เส้นแบ่งปุ่ม/แบบเปล่า/ย้อนกลับ): company-menu-images ใต้ตัวอย่าง (ต่อหน้าเมนูที่ดูอยู่)
  * กติกาปุ่ม/ขนาดรูป: lib/line-company · API: /api/admin/line-company (save_layout / revert_layout / reset_layout / preview)
  */
 import { useEffect, useMemo, useState } from "react";
@@ -12,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
+import { CompanyMenuImages, type MenuImagesView } from "@/components/line-console/company-menu-images";
 import {
   ADMIN_TABS, COMPANY_ACTIONS, COMPANY_MENU_KINDS, COMPANY_MENU_LABEL, HINT_MAX, LABEL_MAX, MAX_MENU_BUTTONS,
   actionsForKind, menuGrid, normalizeCompanyLayout, visibleButtons,
@@ -50,8 +52,10 @@ function MenuPreview({ kind, buttons, tab, onTab }: { kind: CompanyMenuKind; but
   );
 }
 
-export function CompanyMenuEditor({ layout, history, savedAt, busy, onSaved }: {
+export function CompanyMenuEditor({ layout, history, savedAt, busy, onSaved, images }: {
   layout: CompanyMenuLayout; history: LayoutHistoryItem[]; savedAt: string | null; busy?: boolean; onSaved: () => Promise<void> | void;
+  /** รูปที่ออกแบบเอง (ไม่ส่ง = ไม่มีส่วนอัปรูป) */
+  images?: MenuImagesView;
 }) {
   const toast = useToast();
   const [draft, setDraft] = useState<CompanyMenuLayout>(layout);
@@ -192,9 +196,10 @@ export function CompanyMenuEditor({ layout, history, savedAt, busy, onSaved }: {
             <div className="mt-1.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={img.url} alt="รูปเมนูจริงที่จะส่งให้ LINE" className="w-full rounded-lg border border-slate-200" />
-              <div className="text-[10px] text-slate-400 mt-0.5">รูปจริงขนาด 2500 px ที่จะส่งให้ LINE (จากปุ่มที่แก้อยู่ ยังไม่บันทึกก็ดูได้)</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">รูปที่ระบบวาด ขนาด 2500 px (จากปุ่มที่แก้อยู่ ยังไม่บันทึกก็ดูได้)</div>
             </div>
           )}
+          {images && <CompanyMenuImages menuKey={previewKey} layout={draft} images={images} onChanged={onSaved} />}
         </div>
       </div>
 

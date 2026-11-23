@@ -5,6 +5,8 @@
  * วาดด้วย sharp + ฟอนต์ Sarabun (ของกลางเดียวกับรูปรายงาน lib/email-report/image — satori ทำวรรณยุกต์ไทยหาย)
  * ปุ่มมาจากเลย์เอาต์ที่ตั้งในศูนย์ LINE (line_config.company_layout · กติกา lib/line-company)
  *
+ * รูปที่ออกแบบเอง (lib/line-company-images): หน้าไหนมีรูปที่จำนวนปุ่มตรง = ใช้รูปนั้น · ไม่ตรง/โหลดไม่ได้ = ใช้รูปที่ระบบวาด
+ *
  * publishCompanyMenus: สร้างเมนู 6 หน้าใหม่ (ยังไม่ผูก/พนักงาน/ลูกค้า + แอดมิน 3 แท็บ) → อัปโหลดรูป
  *   → ชี้ชื่อเล่นแท็บ (alias) ไปหน้าใหม่ → ตั้งเมนูกลางเป็นค่าตั้งต้น → ผูกเมนูให้ทุกคนที่ผูกไลน์แล้ว
  *   → ลบเมนูชุดเก่า (ทำทีหลังสุด — พังกลางทาง คนยังเห็นเมนูเก่าอยู่ ไม่ว่างเปล่า)
@@ -19,6 +21,8 @@ import { companyLayoutOf, companyMenusOf, type CompanyMenuState } from "@/lib/li
 import { listLinkedLineUsers } from "@/lib/line-identity";
 import type { LineBotView, LineConfig } from "@/lib/line-send";
 import { APPROVE_LIFF_ID } from "@/lib/approval-token";
+import { r2GetObject } from "@/lib/r2";
+import { menuButtonCount, menuImageFits, menuImagesOf } from "@/lib/line-company-images";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type SharpFn = typeof import("sharp");
@@ -94,6 +98,8 @@ const JSON_HEAD = { "Content-Type": "application/json" };
 
 export type PublishResult = {
   ok: boolean; error: string | null; menus?: CompanyMenuState;
+  /** หน้าที่ใช้รูปที่ออกแบบเอง · หน้าที่มีรูปแต่ใช้ไม่ได้ (ปุ่มเปลี่ยนจำนวน/โหลดไม่ได้) เลยใช้รูปที่ระบบวาด */
+  images?: { custom: PublishedMenuKey[]; fallback: PublishedMenuKey[] };
   linked?: { admins: number; employees: number; customers: number; failed: number };
 };
 
@@ -129,16 +135,32 @@ export async function publishCompanyMenus(admin: Admin, cfg: LineConfig, bot: Li
   const old = companyMenusOf(cfg);
   const { layout, saved_at } = companyLayoutOf(cfg);
   const created: Partial<Record<PublishedMenuKey, string>> = {};
+  const images = menuImagesOf(cfg.company_images);
+  const custom: PublishedMenuKey[] = []; const fallback: PublishedMenuKey[] = [];
+  /** รูปที่ออกแบบเองของหน้านี้ (ใช้ได้) → { bytes, type } · ไม่มี/ไม่ตรง = null */
+  const customImage = async (key: PublishedMenuKey): Promise<{ bytes: Uint8Array<ArrayBuffer>; type: string } | null> => {
+    const img = images.slots[key]?.current;
+    if (!img) return null;
+    if (!menuImageFits(img, menuButtonCount(key, layout))) { fallback.push(key); return null; }
+    try {
+      const obj = await r2GetObject(img.r2_key);
+      if (!obj) throw new Error("missing");
+      const bytes = new Uint8Array(await new Response(obj.body).arrayBuffer());
+      custom.push(key);
+      return { bytes, type: img.r2_key.endsWith(".png") ? "image/png" : "image/jpeg" };
+    } catch (e) { console.warn("[line-company] custom image", key, e); fallback.push(key); return null; }
+  };
   const rollback = async () => { for (const id of Object.values(created)) if (id) await call(bot.token, `${API}/richmenu/${encodeURIComponent(id)}`, { method: "DELETE" }); };
 
   for (const key of PUBLISHED_MENU_KEYS) {
-    const png = await renderCompanyMenuPng(key, layout).catch((e) => { console.error("[line-company] render", e); return null; });
-    if (!png) { await rollback(); return { ok: false, error: "วาดรูปเมนูไม่สำเร็จ (โหลดฟอนต์ไม่ได้?) ลองใหม่อีกครั้ง" }; }
+    const own = await customImage(key);
+    const png = own ? null : await renderCompanyMenuPng(key, layout).catch((e) => { console.error("[line-company] render", e); return null; });
+    if (!own && !png) { await rollback(); return { ok: false, error: "วาดรูปเมนูไม่สำเร็จ (โหลดฟอนต์ไม่ได้?) ลองใหม่อีกครั้ง" }; }
     const r = await call(bot.token, `${API}/richmenu`, { method: "POST", headers: JSON_HEAD, body: JSON.stringify(richMenuBody(key, layout, { liffId: APPROVE_LIFF_ID })) });
     const id = r.ok ? String(r.json?.richMenuId ?? "") : "";
     if (!id) { await rollback(); console.warn("[line-company] create menu", key, r.status, r.text); return { ok: false, error: lineErr("สร้างเมนู", r.status) }; }
     created[key] = id;
-    const up = await call(bot.token, `${DATA_API}/richmenu/${encodeURIComponent(id)}/content`, { method: "POST", headers: { "Content-Type": "image/png" }, body: new Uint8Array(png) });
+    const up = await call(bot.token, `${DATA_API}/richmenu/${encodeURIComponent(id)}/content`, { method: "POST", headers: { "Content-Type": own?.type ?? "image/png" }, body: own ? new Uint8Array(own.bytes) : new Uint8Array(png as Buffer) });
     if (!up.ok) { await rollback(); console.warn("[line-company] upload image", up.status, up.text); return { ok: false, error: lineErr("อัปโหลดรูปเมนู", up.status) }; }
   }
 
@@ -163,7 +185,8 @@ export async function publishCompanyMenus(admin: Admin, cfg: LineConfig, bot: Li
 
   return {
     ok: true, error: null,
-    menus: { ...created, published_at: new Date().toISOString(), published_by: actor ?? undefined, layout_saved_at: saved_at },
+    menus: { ...created, published_at: new Date().toISOString(), published_by: actor ?? undefined, layout_saved_at: saved_at, images_saved_at: images.saved_at },
+    images: { custom, fallback },
     linked: { admins: people.admins.length, employees: people.employees.length, customers: people.customers.length, failed },
   };
 }

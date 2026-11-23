@@ -24,7 +24,7 @@ import { APPROVE_LIFF_ID } from "@/lib/approval-token";
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 /** id เมนูล่างจอที่สร้างไว้ใน LINE (เก็บใน line_config.company_menus) · layout_saved_at = เลย์เอาต์ชุดที่ใช้ตอนสร้าง */
-export type CompanyMenuState = Partial<Record<PublishedMenuKey, string>> & { published_at?: string; published_by?: string; layout_saved_at?: string | null };
+export type CompanyMenuState = Partial<Record<PublishedMenuKey, string>> & { published_at?: string; published_by?: string; layout_saved_at?: string | null; images_saved_at?: string | null };
 
 /** ปุ่มเมนูที่ตั้งในศูนย์ LINE (line_config.company_layout) + ประวัติชุดก่อน ๆ (ย้อนกลับได้ 10 ชุด) */
 export type CompanyLayoutState = { layout: CompanyMenuLayout; saved_at: string | null; saved_by: string | null };

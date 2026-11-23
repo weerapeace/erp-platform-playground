@@ -3,18 +3,20 @@
 /**
  * ส่วน "ไลน์บริษัท" ในศูนย์ LINE — เลือกบอทที่เป็นไลน์บริษัท · ตั้งปุ่มเมนูล่างจอ 4 ชุด (company-menu-editor) · สร้างเมนูในไลน์ · ดูพนักงาน/ลูกค้าที่ผูกไลน์
  * API: /api/admin/line-company · กติกา lib/line-company · คู่มือ docs/line-company-oa.md
- * part: all = ทั้งหมด (ป๊อปศูนย์ LINE) · setup = บอท+ปุ่มเมนู+QR · people = คนที่ผูกไลน์ (หน้า /admin/line แยกแท็บ)
+ * part: all = ทั้งหมด (ป๊อปศูนย์ LINE) · setup = บอท+QR · menu = แต่งเมนูไลน์ (ปุ่ม + รูปที่ออกแบบเอง + สร้างเมนู) · people = คนที่ผูกไลน์ (หน้า /admin/line แยกแท็บ)
  * พนักงาน: ปลดผูก/ระงับที่หน้าสมาชิกไลน์ของฝ่ายบุคคล (ของเดิม) · ลูกค้า: ถอนผูก (ย้อนได้) / ระงับ / ตั้งชื่อเรียก ที่นี่
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { askConfirm, askText } from "@/components/modal/ask-dialog";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { useLineCustomerActions } from "@/components/line-console/customer-actions";
 import { Icon } from "@/components/icon";
 import type { CompanyMenuLayout } from "@/lib/line-company";
 import { CompanyMenuEditor, type LayoutHistoryItem } from "@/components/line-console/company-menu-editor";
 import { CompanyQrPanel, type CompanyQrData } from "@/components/line-console/company-qr-panel";
+import type { MenuImagesView } from "@/components/line-console/company-menu-images";
 import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 
 type Data = {
@@ -25,6 +27,7 @@ type Data = {
   layout: { layout: CompanyMenuLayout; saved_at: string | null; saved_by: string | null };
   layout_history: LayoutHistoryItem[];
   layout_pending: boolean;
+  images: MenuImagesView;
   qr: CompanyQrData;
   shop_qr_rotated_at: string | null;
   chat_enabled: boolean;
@@ -42,9 +45,10 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (d: string | null) => (d ? new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "");
 
-export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | "people" } = {}) {
-  const showSetup = part !== "people";
-  const showPeople = part !== "setup";
+export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | "menu" | "people" } = {}) {
+  const showSetup = part === "all" || part === "setup";
+  const showMenu = part === "all" || part === "menu";
+  const showPeople = part === "all" || part === "people";
   const toast = useToast();
   const [data, setData] = useState<Data | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -87,34 +91,13 @@ export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | 
     if (!j) return;
     const l = j.linked as { admins: number; employees: number; customers: number; failed: number } | undefined;
     toast.success(`สร้างเมนูในไลน์แล้ว · แอดมิน ${l?.admins ?? 0} · พนักงาน ${l?.employees ?? 0} · ลูกค้า ${l?.customers ?? 0} คน`);
+    const im = j.images as { custom: string[]; fallback: string[] } | undefined;
+    if (im?.fallback?.length) toast.warning(`มี ${im.fallback.length} หน้าที่รูปของคุณใช้ไม่ได้ (จำนวนปุ่มเปลี่ยน) เลยใช้รูปที่ระบบวาดแทน`);
     if (l?.failed) toast.warning(`ผูกเมนูให้ ${l.failed} คนไม่สำเร็จ — คนเหล่านั้นจะได้เมนูถูกเมื่อปิด-เปิดแชตใหม่ หรือกดสร้างเมนูอีกครั้ง`);
   };
 
-  const customerAction = async (c: Data["customers"][number], action: "unlink" | "block" | "unblock" | "rename") => {
-    const who = c.contact_name || c.line_name || "คนนี้";
-    if (action === "rename") {
-      const v = await askText({ title: "ชื่อเรียก (เช่น คุณนก ฝ่ายจัดซื้อ)", initial: c.contact_name });
-      if (v === null || v.trim() === c.contact_name) return;
-      if (await post({ link_id: c.id, action, contact_name: v })) toast.success("เปลี่ยนชื่อเรียกแล้ว");
-      return;
-    }
-    if (action === "block") {
-      const ok = await askConfirm({ title: `ระงับ ${who}?`, message: `ไลน์นี้จะดูข้อมูลของร้าน ${c.partner_name} ไม่ได้จนกว่าจะคืนสิทธิ์ (ยังทักแชทหาพนักงานได้)`, confirmText: "ระงับ", variant: "danger" });
-      if (!ok) return;
-    }
-    if (!(await post({ link_id: c.id, action }))) return;
-    if (action === "unlink") toast.undo(`ถอนผูก ${who} แล้ว`, async () => { if (await post({ link_id: c.id, action: "relink" })) toast.success("ย้อนการถอนผูกแล้ว"); });
-    else toast.success(action === "block" ? "ระงับแล้ว" : "คืนสิทธิ์แล้ว");
-  };
-
-  /** คำขอผูกร้านจาก QR ลูกค้ารวม — ยืนยัน (เลือกร้าน) / ปฏิเสธ · ย้อนกลับได้จากแจ้งผลมุมจอ */
-  const decide = async (c: Data["customers"][number], action: "approve" | "reject") => {
-    const pick = shopPick[c.id];
-    if (action === "approve" && !pick) { toast.warning("เลือกร้านในระบบก่อน"); return; }
-    if (action === "reject" && !(await askConfirm({ title: "ปฏิเสธคำขอนี้?", message: `"${c.requested_shop}" จะถูกปฏิเสธ (เก็บประวัติไว้ ย้อนกลับได้)`, confirmText: "ปฏิเสธ" }))) return;
-    if (!(await post({ decide: { link_id: c.id, action, partner_id: pick?.id ?? null } }))) return;
-    toast.undo(action === "approve" ? `ผูกกับ ${pick?.name} แล้ว` : "ปฏิเสธคำขอแล้ว", async () => { if (await post({ decide: { link_id: c.id, action: "undo" } })) toast.success("ย้อนกลับเป็นรอยืนยันแล้ว"); });
-  };
+  const { customerAction, decide: decideReq } = useLineCustomerActions(post);
+  const decide = (c: Data["customers"][number], action: "approve" | "reject") => decideReq(c, action, shopPick[c.id] ?? null);
 
   if (loadErr) return (
     <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 flex items-center gap-2">
@@ -134,7 +117,7 @@ export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | 
   return (
     <div>
       {part === "all" && <div className="text-xs font-semibold text-slate-500 mb-1">ไลน์บริษัท (พนักงาน + ลูกค้าทักแชทได้)</div>}
-      {showSetup && <div className="text-[11px] text-slate-400 mb-2">บอทที่เลือกจะแยกคนให้เอง: พนักงาน · ลูกค้า · คนที่ยังไม่ผูก เห็นเมนูล่างจอคนละชุด · แชทลูกค้าเข้าห้องแชทรวม</div>}
+      {(showSetup || showMenu) && <div className="text-[11px] text-slate-400 mb-2">บอทที่เลือกจะแยกคนให้เอง: พนักงาน · ลูกค้า · คนที่ยังไม่ผูก เห็นเมนูล่างจอคนละชุด · แชทลูกค้าเข้าห้องแชทรวม</div>}
 
       <div className="border border-slate-200 rounded-lg p-2.5 space-y-2">
         {showSetup && <>
@@ -156,10 +139,13 @@ export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | 
           <div className="text-[11px] text-slate-500 pl-6">ยังไม่มีบอท? เพิ่มบอทใหม่ในส่วน &ldquo;บอท&rdquo; ด้านบนก่อน (ต้องอยู่ Provider เดียวกับ LINE Login ของระบบ ไม่งั้นระบบจำคนไม่ได้) แล้วคัดลอก Webhook ไปวางใน LINE Developers</div>
         )}
 
+        </>}
+
+        {showMenu && <>
         {/* เมนูล่างจอ: ตั้งปุ่มได้ตั้งแต่ยังไม่มีบอท · สร้างในไลน์ได้เมื่อเลือกบอทแล้ว */}
-        <div className="pl-6 space-y-2 pt-1 border-t border-slate-100">
+        <div className={`space-y-2 ${showSetup ? "pl-6 pt-1 border-t border-slate-100" : ""}`}>
           <CompanyMenuEditor key={data.layout.saved_at ?? "default"} layout={data.layout.layout} history={data.layout_history}
-            savedAt={data.layout.saved_at} busy={busy} onSaved={load} />
+            savedAt={data.layout.saved_at} busy={busy} onSaved={load} images={data.images ?? {}} />
           {data.company_bot ? (
             <div className="flex items-center gap-2 flex-wrap">
               <button disabled={busy || !data.company_ready} onClick={() => void publish()}
@@ -167,14 +153,17 @@ export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | 
                 {busy ? "กำลังทำ…" : data.menus.published ? "สร้างเมนูในไลน์ใหม่" : "สร้างเมนูในไลน์"}
               </button>
               <span className={`text-[11px] ${data.layout_pending ? "text-amber-700" : "text-slate-500"}`}>
-                {data.layout_pending ? "แก้ปุ่มแล้ว แต่คนในไลน์ยังเห็นชุดเก่า — กดสร้างเมนูในไลน์ใหม่"
+                {data.layout_pending ? "แก้ปุ่ม/รูปแล้ว แต่คนในไลน์ยังเห็นชุดเก่า — กดสร้างเมนูในไลน์ใหม่"
                   : data.menus.published ? `สร้างล่าสุด ${fmt(data.menus.published_at)} · ระบบสลับเมนูให้เองเมื่อมีคนผูก/ถอนผูก` : "ยังไม่ได้สร้าง — ตอนนี้คนในไลน์จะเห็นเมนูที่ตั้งใน LINE OA Manager (ถ้ามี)"}
               </span>
             </div>
           ) : (
-            <div className="text-[11px] text-slate-500">ตั้งปุ่มรอไว้ได้เลย · เลือกบอทไลน์บริษัทด้านบนแล้วจะมีปุ่ม &ldquo;สร้างเมนูในไลน์&rdquo;</div>
+            <div className="text-[11px] text-slate-500">ตั้งปุ่มรอไว้ได้เลย · เลือกบอทไลน์บริษัท{showSetup ? "ด้านบน" : "ที่แท็บ ไลน์บริษัท"}แล้วจะมีปุ่ม &ldquo;สร้างเมนูในไลน์&rdquo;</div>
           )}
         </div>
+        </>}
+
+        {showSetup && <>
 
         {/* QR 3 แบบ + QR รายร้าน */}
         <div className="pl-6 pt-2 border-t border-slate-100">
@@ -185,7 +174,7 @@ export function LineCompanySection({ part = "all" }: { part?: "all" | "setup" | 
 
         {showPeople && <>
         {/* คนที่ผูกไลน์ */}
-        <div className={`flex items-center gap-1.5 ${showSetup ? "pt-1 border-t border-slate-100" : ""}`}>
+        <div className={`flex items-center gap-1.5 ${showSetup || showMenu ? "pt-1 border-t border-slate-100" : ""}`}>
           <button onClick={() => setTab("employees")} className={`h-7 px-2.5 text-xs rounded-lg border ${tab === "employees" ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-600"}`}>
             พนักงาน {linkedEmp}{data.employees_active != null ? `/${data.employees_active}` : ""}{waitHr > 0 ? <span className="text-amber-700"> · รอ HR ยืนยัน {waitHr}</span> : null}
           </button>

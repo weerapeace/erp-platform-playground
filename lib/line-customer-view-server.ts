@@ -5,12 +5,14 @@
  *   → ดึงใบสั่งขายของร้านนั้น (ไม่ยกเลิก · ไม่ถูกรวมเข้าใบอื่น · ส่งแล้วย้อนหลัง 90 วัน)
  *   → ขั้นงานคิดด้วยกติกาเดียวกับหน้าสถานะใบสั่งขาย (soLineProgress + loadMoDispatch + soLineStageMulti)
  *   → ส่งออกเฉพาะช่องที่ลูกค้าเห็นได้ (ไม่มีราคา/ยอดเงิน/ชื่อช่าง) → ลงประวัติการเปิดดู
- * ไม่รับรหัสร้านจากหน้าเว็บเด็ดขาด
+ * ไม่รับรหัสร้านจากหน้าเว็บเด็ดขาด — ยกเว้นแอดมิน (ไลน์ที่ผูกบัญชี ERP สิทธิ์แอดมิน) เลือก "ดูแทนร้าน" ได้ (as_partner · เจ้าของเลือกข้อ 2.1 · 2026-11-23)
+ * ดูบน PC จากหน้าจัดการ LINE: customerPreview (ล็อกอิน ERP + admin.users · ข้อ 2.3)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { writeAudit } from "@/lib/audit";
 import { verifyLineIdToken } from "@/lib/line-employee-portal-db";
+import { resolveLineIdentity } from "@/lib/line-identity";
 import { loadMoDispatch } from "@/lib/mo-dispatch";
 import { soLineProgress } from "@/lib/mo-so-rule";
 import { soLineStageMulti, soShipState } from "@/lib/so-order-stage";
@@ -27,10 +29,40 @@ const n = (v: unknown) => Number(v) || 0;
 const one = (v: unknown): Row | null => (Array.isArray(v) ? ((v[0] as Row) ?? null) : v && typeof v === "object" ? (v as Row) : null);
 const chunks = <T,>(a: T[], size = 200) => Array.from({ length: Math.ceil(a.length / size) }, (_, i) => a.slice(i * size, i * size + size));
 
-export type LineCustomerResult =
-  | { gate: Exclude<LineCustomerGate, "ok"> }
+/** ร้านที่แอดมินเลือกดูแทนได้ */
+export type AdminShopChoice = { id: string; name: string };
+type PageData =
   | { gate: "ok"; page: "orders"; shop: string; orders: CustomerOrder[] }
   | { gate: "ok"; page: "schedule"; shop: string; items: ScheduleItem[]; no_date: number; today: string };
+/** admin = ไลน์แอดมินที่ดูแทนร้าน (มีช่องเลือกร้าน) */
+export type LineCustomerResult = ({ gate: Exclude<LineCustomerGate, "ok"> } | PageData) & { admin?: { shops: AdminShopChoice[]; partner_id: string | null } };
+
+const UUID = /^[0-9a-f-]{36}$/i;
+
+/** ร้านที่มีงาน (ใบสั่งขาย 180 วันล่าสุด ไม่ยกเลิก) + ร้านที่มีคนผูกไลน์ — ใหม่สุดก่อน · ใช้กับช่อง "ดูแทนร้าน" */
+export async function adminShopChoices(admin: Admin): Promise<AdminShopChoice[]> {
+  const since = new Date(Date.now() - 180 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const [so, links] = await Promise.all([
+    admin.from("so_orders").select("customer_id,order_date,partners_v2(display_name,code,is_active)")
+      .neq("status", "cancelled").is("merged_into_id", null).gte("order_date", since).order("order_date", { ascending: false }).limit(1000),
+    admin.from("line_customer_links").select("partner_id,partners_v2(display_name,code,is_active)").in("status", ["linked", "blocked"]).limit(1000),
+  ]);
+  if (so.error || links.error) throw new Error("โหลดรายชื่อร้านไม่สำเร็จ กรุณาลองใหม่");
+  const out = new Map<string, AdminShopChoice>();
+  for (const r of [...((so.data ?? []) as Row[]).map((x) => ({ id: t(x.customer_id), p: one(x.partners_v2) })), ...((links.data ?? []) as Row[]).map((x) => ({ id: t(x.partner_id), p: one(x.partners_v2) }))]) {
+    if (!r.id || out.has(r.id) || r.p?.is_active === false) continue;
+    out.set(r.id, { id: r.id, name: t(r.p?.display_name) || t(r.p?.code) || "ร้านไม่มีชื่อ" });
+  }
+  return [...out.values()].slice(0, 300);
+}
+
+async function pageData(admin: Admin, partnerId: string, shop: string, page: LineCustomerPage): Promise<PageData & { count: number }> {
+  const orders = await customerOrders(admin, partnerId);
+  const today = thaiToday();
+  return page === "orders"
+    ? { gate: "ok", page, shop, orders, count: orders.length }
+    : { gate: "ok", page, shop, today, ...buildSchedule(orders, today), count: orders.length };
+}
 
 async function shopOf(admin: Admin, lineUserId: string): Promise<{ gate: Exclude<LineCustomerGate, "ok"> } | { gate: "ok"; partnerId: string; shop: string; linkId: string }> {
   const { data, error } = await admin.from("line_customer_links")
@@ -114,23 +146,51 @@ export async function customerOrders(admin: Admin, partnerId: string): Promise<C
   }).sort((a, b) => (a.shipped ? 1 : 0) - (b.shipped ? 1 : 0) || (b.order_date ?? "").localeCompare(a.order_date ?? ""));
 }
 
-/** เปิดหน้าเล็กลูกค้า 1 หน้า (POST /api/line-company/customer-view) */
-export async function lineCustomerView(input: { id_token?: unknown; page?: unknown }): Promise<LineCustomerResult> {
+/** เปิดหน้าเล็กลูกค้า 1 หน้า (POST /api/line-company/customer-view) · as_partner ใช้ได้เฉพาะไลน์แอดมิน */
+export async function lineCustomerView(input: { id_token?: unknown; page?: unknown; as_partner?: unknown }): Promise<LineCustomerResult> {
   if (!isLineCustomerPage(input.page)) throw new Error("ไม่รู้จักหน้านี้");
   const page: LineCustomerPage = input.page;
   const profile = await verifyLineIdToken(input.id_token, undefined, APPROVE_CHANNEL_ID);
   const lineUserId = t(profile.sub);
   const admin = supabaseAdmin();
+
+  // แอดมิน: เลือกร้านดูแทนได้ (ไม่ส่งมา = ร้านที่มีงานล่าสุด)
+  const ident = await resolveLineIdentity(admin, lineUserId);
+  if (ident.who === "admin") {
+    const shops = await adminShopChoices(admin);
+    const want = t(input.as_partner);
+    const pick = shops.find((x) => x.id === want) ?? shops[0] ?? null;
+    if (!pick) return { gate: "not_linked", admin: { shops, partner_id: null } };
+    const { count, ...data } = await pageData(admin, pick.id, pick.name, page);
+    await writeAudit(admin, {
+      action: "line_customer_view", entityType: "partners_v2", entityId: pick.id, actorId: ident.userId, actorName: ident.name,
+      metadata: { page, line_user_id: lineUserId, admin_preview: true, orders: count },
+    });
+    return { ...data, admin: { shops, partner_id: pick.id } };
+  }
+
   const who = await shopOf(admin, lineUserId);
   if (who.gate !== "ok") return { gate: who.gate };
-  const orders = await customerOrders(admin, who.partnerId);
-  const today = thaiToday();
-  const result: LineCustomerResult = page === "orders"
-    ? { gate: "ok", page, shop: who.shop, orders }
-    : { gate: "ok", page, shop: who.shop, today, ...buildSchedule(orders, today) };
+  const { count, ...data } = await pageData(admin, who.partnerId, who.shop, page);
   await writeAudit(admin, {
     action: "line_customer_view", entityType: "partners_v2", entityId: who.partnerId, actorName: who.shop,
-    metadata: { page, line_user_id: lineUserId, link_id: who.linkId, orders: orders.length },
+    metadata: { page, line_user_id: lineUserId, link_id: who.linkId, orders: count },
   });
-  return result;
+  return data;
+}
+
+/** ดูหน้าลูกค้าบน PC (หน้าจัดการ LINE · ผู้เรียกตรวจสิทธิ์ admin.users แล้ว) — ข้อมูลเดียวกับที่ร้านเห็นในไลน์ */
+export async function customerPreview(input: { partner_id: string; page: unknown; actorId: string | null; actorName: string | null }): Promise<LineCustomerResult> {
+  if (!isLineCustomerPage(input.page)) throw new Error("ไม่รู้จักหน้านี้");
+  if (!UUID.test(input.partner_id)) throw new Error("เลือกร้านก่อน");
+  const admin = supabaseAdmin();
+  const { data: p } = await admin.from("partners_v2").select("display_name,code,is_active").eq("id", input.partner_id).maybeSingle();
+  const pr = p as Row | null;
+  if (!pr) throw new Error("ไม่พบร้านนี้");
+  const { count, ...data } = await pageData(admin, input.partner_id, t(pr.display_name) || t(pr.code), input.page);
+  await writeAudit(admin, {
+    action: "line_customer_view", entityType: "partners_v2", entityId: input.partner_id, actorId: input.actorId, actorName: input.actorName,
+    metadata: { page: input.page, admin_preview: "pc", orders: count },
+  });
+  return data;
 }

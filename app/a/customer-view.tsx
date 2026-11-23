@@ -5,11 +5,13 @@
 //   เช็กร้านจาก LINE ใหม่ทุกครั้ง (id_token) · ไม่มีราคา/ยอดเงินเด็ดขาด
 //   สถานะงาน = ใบสั่งขายของร้าน + ขั้นงานต่อรายการ · ตารางส่งงาน = ปฏิทินกลาง (DocCalendar) + รายการตามวัน
 //   กติกา: lib/line-customer-view.ts · API: /api/line-company/customer-view
+//   แอดมินเปิดในไลน์ = มีช่อง "ดูแทนร้าน" (ข้อ 2.1) · preview = ดูบน PC จากหน้าจัดการ LINE (ข้อ 2.3 · /api/admin/line-company/customer-preview)
 // ============================================================
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { initLiffIdToken, type LiffSdk } from "@/lib/liff-client";
+import { apiFetch } from "@/lib/api";
 import {
   CUSTOMER_STAGE_COUNT, CUSTOMER_STAGE_TEXT, LINE_CUSTOMER_GATE_TEXT, LINE_CUSTOMER_PAGES, LINE_CUSTOMER_TITLE,
   type CustomerOrder, type LineCustomerPage, type ScheduleItem,
@@ -17,10 +19,11 @@ import {
 import type { SoLineStage } from "@/lib/so-order-stage";
 import { Box, Skeleton } from "./liff-parts";
 
-type Data =
+type Data = (
   | { gate: "not_linked" | "pending" | "blocked" }
   | { gate: "ok"; page: "orders"; shop: string; orders: CustomerOrder[] }
-  | { gate: "ok"; page: "schedule"; shop: string; items: ScheduleItem[]; no_date: number; today: string };
+  | { gate: "ok"; page: "schedule"; shop: string; items: ScheduleItem[]; no_date: number; today: string }
+) & { admin?: { shops: { id: string; name: string }[]; partner_id: string | null } };
 
 const TAB_ICON: Record<LineCustomerPage, string> = { orders: "package", schedule: "calendar" };
 const TAB_SHORT: Record<LineCustomerPage, string> = { orders: "สถานะงาน", schedule: "ตารางส่งงาน" };
@@ -31,8 +34,10 @@ const STAGE_PILL: Record<SoLineStage, string> = {
 const qty = (v: number) => v.toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const date = (d: string | null, long = false) => (d ? new Date(`${d.slice(0, 10)}T00:00:00+07:00`).toLocaleDateString("th-TH", long ? { weekday: "short", day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "2-digit" }) : "-");
 
-export function CustomerView({ initial }: { initial: LineCustomerPage }) {
+/** preview = ดูบน PC (ล็อกอิน ERP) ร้านที่ส่งมา — ไม่ใช้ LINE */
+export function CustomerView({ initial, preview }: { initial: LineCustomerPage; preview?: { partnerId: string } }) {
   const [page, setPage] = useState<LineCustomerPage>(initial);
+  const [asPartner, setAsPartner] = useState("");
   const [liff, setLiff] = useState<LiffSdk | null>(null);
   const [idToken, setIdToken] = useState("");
   const [data, setData] = useState<Data | null>(null);
@@ -40,38 +45,52 @@ export function CustomerView({ initial }: { initial: LineCustomerPage }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (preview) return;
     let alive = true;
     initLiffIdToken()
       .then((r) => { if (r && alive) { setLiff(r.liff); setIdToken(r.idToken); } })
       .catch((e: Error) => { if (alive) { setErr(e.message); setLoading(false); } });
     return () => { alive = false; };
-  }, []);
+  }, [preview]);
 
   const load = useCallback(async (p: LineCustomerPage) => {
-    if (!idToken) return;
+    if (!idToken && !preview) return;
     setLoading(true); setErr("");
     try {
-      const r = await fetch("/api/line-company/customer-view", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id_token: idToken, page: p }) });
+      const r = preview
+        ? await apiFetch(`/api/admin/line-company/customer-preview?partner=${encodeURIComponent(preview.partnerId)}&page=${p}`)
+        : await fetch("/api/line-company/customer-view", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id_token: idToken, page: p, ...(asPartner ? { as_partner: asPartner } : {}) }) });
       const j = await r.json().catch(() => ({ error: "โหลดไม่สำเร็จ กรุณาลองใหม่" }));
       if (!r.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ กรุณาลองใหม่");
       setData(j.data as Data);
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ กรุณาลองใหม่"); }
     finally { setLoading(false); }
-  }, [idToken]);
+  }, [idToken, preview, asPartner]);
   useEffect(() => { void load(page); }, [load, page]);
 
   const shop = data && data.gate === "ok" ? data.shop : null;
+  const adminShops = data?.admin?.shops ?? null;
 
   return (
-    <main className="mx-auto min-h-screen max-w-md bg-slate-50 pb-10 md:max-w-3xl">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 pt-4 backdrop-blur">
+    <main className={`mx-auto bg-slate-50 pb-10 ${preview ? "max-w-md" : "min-h-screen max-w-md md:max-w-3xl"}`}>
+      <header className={`${preview ? "" : "sticky top-0 z-10"} border-b border-slate-200 bg-white/95 px-4 pt-4 backdrop-blur`}>
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-bold text-slate-900">{LINE_CUSTOMER_TITLE[page]}</h1>
-            {shop && <p className="truncate text-xs text-slate-500">{shop}</p>}
+            {shop && !adminShops && <p className="truncate text-xs text-slate-500">{shop}</p>}
           </div>
-          {liff?.closeWindow && <button type="button" onClick={() => liff.closeWindow?.()} className="h-9 rounded-lg border border-slate-200 px-3 text-xs text-slate-600">ปิด</button>}
+          {!preview && liff?.closeWindow && <button type="button" onClick={() => liff.closeWindow?.()} className="h-9 rounded-lg border border-slate-200 px-3 text-xs text-slate-600">ปิด</button>}
         </div>
+        {adminShops && (
+          <label className="mt-2 flex items-center gap-2 rounded-lg border border-dashed border-indigo-300 bg-indigo-50/60 px-2.5 py-1.5 text-xs text-indigo-700">
+            <Icon name="view" /> <span className="shrink-0">ดูแทนร้าน</span>
+            <select value={data?.admin?.partner_id ?? ""} disabled={loading} onChange={(e) => setAsPartner(e.target.value)}
+              className="h-8 min-w-0 flex-1 rounded-md border border-indigo-200 bg-white px-2 text-sm text-slate-800">
+              {adminShops.length === 0 && <option value="">ยังไม่มีร้านที่มีงาน</option>}
+              {adminShops.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          </label>
+        )}
         <nav className="mt-3 grid grid-cols-2 gap-1">
           {LINE_CUSTOMER_PAGES.map((p) => (
             <button key={p} type="button" onClick={() => setPage(p)}
@@ -83,7 +102,7 @@ export function CustomerView({ initial }: { initial: LineCustomerPage }) {
       </header>
       <div className="space-y-3 p-4">
         {err ? (
-          <Box tone="danger" title="เปิดไม่สำเร็จ" body={err} action={idToken ? { label: "ลองใหม่", onClick: () => void load(page) } : undefined} />
+          <Box tone="danger" title="เปิดไม่สำเร็จ" body={err} action={idToken || preview ? { label: "ลองใหม่", onClick: () => void load(page) } : undefined} />
         ) : loading && !data ? <Skeleton /> : !data ? null : data.gate !== "ok" ? (
           <Box tone={data.gate === "pending" ? "warning" : "muted"} title={LINE_CUSTOMER_GATE_TEXT[data.gate].title} body={LINE_CUSTOMER_GATE_TEXT[data.gate].body} />
         ) : data.page !== page ? <Skeleton /> : data.page === "orders" ? (

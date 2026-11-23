@@ -29,6 +29,8 @@ import { POSTER_QR_KINDS, QR_KINDS, companyQrLink, posterQrCode, rotateQr, shopQ
 import { decideCustomerRequest, ensureCompanyQrState } from "@/lib/line-company-qr-server";
 import { DEFAULT_COMPANY_LAYOUT, PUBLISHED_MENU_KEYS, normalizeCompanyLayout, type CompanyMenuLayout, type PublishedMenuKey } from "@/lib/line-company";
 import { loadChatSettings, saveChatSettings } from "@/lib/chat/settings";
+import { menuImagesOf, type MenuImage } from "@/lib/line-company-images";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -74,7 +76,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     layout: companyLayoutOf(cfg),
     layout_history: companyLayoutHistoryOf(cfg).map((h) => ({ saved_at: h.saved_at, saved_by: h.saved_by, layout: h.layout })),
     // แก้ปุ่มแล้วยังไม่ได้กดสร้างเมนูใหม่ในไลน์ (คนในไลน์ยังเห็นชุดเก่า)
-    layout_pending: PUBLISHED_MENU_KEYS.every((k) => !!menus[k]) && (companyLayoutOf(cfg).saved_at ?? null) !== (menus.layout_saved_at ?? null),
+    layout_pending: PUBLISHED_MENU_KEYS.every((k) => !!menus[k]) && ((companyLayoutOf(cfg).saved_at ?? null) !== (menus.layout_saved_at ?? null)
+      || (menuImagesOf(cfg.company_images).saved_at ?? null) !== (menus.images_saved_at ?? null)),
+    // รูปเมนูที่ออกแบบเอง (ต่อหน้า: รูปปัจจุบัน + ประวัติ) · url = ผ่านตัวเสิร์ฟรูปกลาง
+    images: Object.fromEntries(Object.entries(menuImagesOf(cfg.company_images).slots).map(([k, sl]) => {
+      const view = (i: MenuImage) => ({ ...i, url: r2ImageUrl(i.r2_key), thumb: r2ImageUrl(i.r2_key, 500) });
+      return [k, { current: sl?.current ? view(sl.current) : null, history: (sl?.history ?? []).map(view) }];
+    })),
     chat_enabled: key ? chat.line_bots[key]?.enabled === true : false,
     // QR โปสเตอร์ 3 แบบ (ลิงก์หน้าเล็ก LIFF) — null = โหลดเลขรุ่นไม่ได้
     qr: qrState ? Object.fromEntries(POSTER_QR_KINDS.map((k) => {
@@ -250,9 +258,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     catch (e) { return err(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ", 500); }
     await writeAudit(admin, {
       action: "update", entityType: "line_config", actorId: user?.id ?? null, actorName: actor,
-      metadata: { field: "company_menus", bot: bot.key, published: true, linked: r.linked, layout: layoutSummary(companyLayoutOf(cfg).layout) },
+      metadata: { field: "company_menus", bot: bot.key, published: true, linked: r.linked, images: r.images, layout: layoutSummary(companyLayoutOf(cfg).layout) },
     });
-    return NextResponse.json({ ok: true, linked: r.linked, error: null });
+    return NextResponse.json({ ok: true, linked: r.linked, images: r.images, error: null });
   }
 
   // ---- ลูกค้าที่ผูกไลน์ ----

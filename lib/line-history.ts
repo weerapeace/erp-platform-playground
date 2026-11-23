@@ -41,6 +41,7 @@ export function describeLineHistory(r: LineHistoryRow): LineHistoryItem {
   if (a === "rotate_line_company_qr" || (a === "update" && m.field === "company_qr")) return { ...base, text: `เปลี่ยน${QR_NAME[s(m.kind)] ?? "QR"} (ใบเก่าใช้ไม่ได้แล้ว)`, tone: "warn" };
   if (a === "update" && m.field === "company_layout") return { ...base, text: LAYOUT_OP[s(m.op)] ?? "แก้ปุ่มเมนูไลน์บริษัท", tone: "normal" };
   if (a === "update" && m.field === "company_bot") return { ...base, text: "เปลี่ยนบอทที่ใช้เป็นไลน์บริษัท", tone: "warn" };
+  if (a === "update" && m.field === "company_images") return { ...base, text: m.op === "use_drawn" ? "กลับไปใช้รูปเมนูที่ระบบวาด" : m.op === "revert" ? "ย้อนไปใช้รูปเมนูรูปก่อน" : "อัปโหลดรูปเมนูไลน์ที่ออกแบบเอง", tone: "normal" };
   if (a === "update" && m.field === "company_menus") return { ...base, text: "สร้างเมนูในไลน์ใหม่", tone: "normal" };
   if (a === "update" && r.entity_type === "line_config") {
     const f = s(m.field);
@@ -74,6 +75,6 @@ export function lineSetupSteps(i: LineSetupInput): LineSetupStep[] {
     { key: "token", label: "ใส่โทเคนบอท", done: i.hasToken, hint: "แท็บ บอทและกลุ่มแจ้งเตือน" },
     { key: "bot", label: "เลือกบอทเป็น \"ไลน์บริษัท\"", done: i.companyBot && i.companyReady, hint: "แท็บ ไลน์บริษัท → บอทไลน์บริษัท" },
     { key: "developers", label: "ตั้งค่า LINE Developers (ผูก LINE Login กับบัญชีไลน์บริษัท + Add friend: Aggressive)", done: i.companyQrUsed, hint: "คู่มือ docs/line-company-oa.md · ติ๊กเองเมื่อมีคนสแกน QR สำเร็จครั้งแรก" },
-    { key: "menus", label: "กด \"สร้างเมนูในไลน์\" แล้วพิมพ์ QR ไปติด", done: i.menusPublished, hint: "แท็บ ไลน์บริษัท" },
+    { key: "menus", label: "กด \"สร้างเมนูในไลน์\" แล้วพิมพ์ QR ไปติด", done: i.menusPublished, hint: "แท็บ แต่งเมนูไลน์ (QR อยู่แท็บ ไลน์บริษัท)" },
   ];
 }
