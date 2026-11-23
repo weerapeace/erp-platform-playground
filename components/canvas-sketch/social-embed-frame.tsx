@@ -3,11 +3,11 @@
 // ตัวฝัง Pinterest / TikTok บนกระดาน — Excalidraw เรียกผ่าน renderEmbeddable (กล่องฝังที่ลิงก์เป็น Pinterest/TikTok)
 // ใช้ iframe ทางการของแต่ละเว็บ (lib/social-embed) · ลิงก์สั้น/เช็กพินถูกลบ ผ่าน /api/social-embed
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { EmptyState, LoadingState } from "@/components/state-views";
-import { pinRatioFromSize, pinterestFit, socialEmbedSrc, type SocialEmbedInfo, type SocialLink } from "@/lib/social-embed";
+import { instagramFit, pinRatioFromSize, pinterestFit, socialEmbedSrc, type SocialEmbedInfo, type SocialLink } from "@/lib/social-embed";
 
 const infoCache = new Map<string, Promise<SocialEmbedInfo | null>>();
 /** ถามข้อมูลลิงก์ (จำไว้ตลอดการเปิดหน้า · ขอซ้ำพร้อมกันได้คำตอบเดียว · พลาด = ลืม ให้ลองใหม่รอบหน้า) */
@@ -38,7 +38,24 @@ export function SocialEmbedFrame({ link, width, height }: { link: SocialLink; wi
     return () => { alive = false; };
   }, [link.url, needInfo]);
 
-  const name = link.kind === "pinterest" ? "Pinterest" : "TikTok";
+  // Instagram บอกความสูงจริงของตัวฝังผ่าน postMessage ("MEASURE") — รูปสี่เหลี่ยม/แนวตั้งสูงไม่เท่ากัน → ย่อ/ขยายพอดีไม่มีขอบขาว
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [igH, setIgH] = useState<number | null>(null);
+  useEffect(() => {
+    if (link.kind !== "instagram") return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== "https://www.instagram.com" || e.source !== frameRef.current?.contentWindow) return;
+      try {
+        const d = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+        const h = Number(d?.details?.height);
+        if (d?.type === "MEASURE" && h > 100 && h < 3000) setIgH(Math.round(h));
+      } catch { /* ข้อความอื่น ไม่ใช่ของเรา */ }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [link.kind]);
+
+  const name = link.kind === "pinterest" ? "Pinterest" : link.kind === "instagram" ? "Instagram" : "TikTok";
   const id = link.id ?? (info && info !== "loading" ? info.id : null);
   const openLink = { label: t(`เปิดใน ${name}`, `Open in ${name}`), onClick: () => window.open(link.url, "_blank", "noopener,noreferrer") };
 
@@ -51,6 +68,7 @@ export function SocialEmbedFrame({ link, width, height }: { link: SocialLink; wi
 
   const frame = (style?: CSSProperties) => (
     <iframe
+      ref={frameRef}
       className="excalidraw__embeddable"
       style={style}
       src={socialEmbedSrc(link.kind, id)}
@@ -65,6 +83,15 @@ export function SocialEmbedFrame({ link, width, height }: { link: SocialLink; wi
   );
   // TikTok: ตัวเล่นยืดเต็มกล่องเองทุกขนาด
   if (link.kind === "tiktok") return frame();
+  // Instagram: ตัวฝังสูงตามเนื้อหา ไม่ยืดตามกล่อง → วาดขนาดคงที่แล้วย่อ/ขยายทั้งก้อน (ยืด/หดกล่องได้ไม่ถูกตัด)
+  if (link.kind === "instagram") {
+    const f = instagramFit(width, height, igH);
+    return (
+      <div className="relative w-full h-full overflow-hidden bg-white">
+        {frame({ position: "absolute", left: f.left, top: f.top, width: f.frameW, height: f.frameH, transform: `scale(${f.scale})`, transformOrigin: "0 0" })}
+      </div>
+    );
+  }
   // Pinterest: ตัวฝังไม่ยืดตามกล่อง (หดเกินถูกตัด · ยืดเกิน 600 ไม่โต · สูงตามรูป) → วาดขนาดที่มันรับได้แล้วย่อ/ขยายทั้งก้อน
   const fit = pinterestFit(width, height, info && info !== "loading" ? pinRatioFromSize(info) : null);
   return (

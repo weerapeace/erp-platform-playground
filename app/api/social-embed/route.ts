@@ -4,7 +4,7 @@
  *
  * - ลิงก์สั้น (pin.it · vt./vm.tiktok.com · tiktok.com/t/) → ตามลิงก์ไปหาลิงก์เต็ม (ยอมเด้งเฉพาะโดเมน Pinterest/TikTok)
  * - Pinterest → ถามข้อมูลพินจาก widget API สาธารณะ (สัดส่วนรูป = ความสูงกรอบ · ไม่มีรูป = พินถูกลบ/ส่วนตัว)
- * - TikTok → ไม่ต้องถามอะไร (ขนาดตายตัว 325×578)
+ * - TikTok → ไม่ต้องถามอะไร (ขนาดตายตัว 325×578) · Instagram → ไม่ต้องถาม (ตัวฝังแจ้งเองถ้าโพสต์ถูกลบ/ส่วนตัว)
  * ความปลอดภัย: รับเฉพาะลิงก์ที่ lib/social-embed อ่านออก · ตัดเวลา 6 วิ · ไม่ส่ง cookie · ไม่อ่าน body ของการเด้งลิงก์ (HEAD)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const raw = (new URL(request.url).searchParams.get("url") ?? "").trim();
   let link = parseSocialLink(raw);
-  if (!link) return NextResponse.json({ data: null, error: "ไม่ใช่ลิงก์ Pinterest หรือ TikTok ที่ฝังได้" }, { status: 400 });
+  if (!link) return NextResponse.json({ data: null, error: "ไม่ใช่ลิงก์ Pinterest / TikTok / Instagram ที่ฝังได้" }, { status: 400 });
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 6000);
@@ -64,6 +64,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (link.kind === "pinterest") {
       const p = await pinterestInfo(id, ctrl.signal);
       out = { kind: "pinterest", id, url: link.url, ...socialEmbedSize("pinterest", p.ratio), available: p.available, image: p.image };
+    } else if (link.kind === "instagram") {
+      out = { kind: "instagram", id, url: link.url, ...socialEmbedSize("instagram"), available: true, image: null };
     } else {
       // TikTok: oEmbed ตอบ 200 แม้เลขคลิปไม่มีจริง → เช็กสถานะไม่ได้ ปล่อยให้ตัวเล่นของ TikTok แจ้ง "คลิปใช้ไม่ได้" เอง
       out = { kind: "tiktok", id, url: link.url, ...socialEmbedSize("tiktok"), available: true, image: null };

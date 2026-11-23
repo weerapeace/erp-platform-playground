@@ -106,3 +106,28 @@ describe("pinterestFit — ยืด/หดกล่องพินแล้ว�
     expect(pinRatioFromSize({ width: 345, height: 518 })).toBeCloseTo(564 / 689, 2);
   });
 });
+
+describe("Instagram (เจ้าของขอ 2026-11-23)", () => {
+  it("ลิงก์รีล/โพสต์/ทีวี → ตัวฝัง Instagram", async () => {
+    const { parseSocialLink, socialEmbedSrc, isSocialHost } = await import("@/lib/social-embed");
+    expect(parseSocialLink("https://www.instagram.com/reels/Dc--jilBzus/")).toEqual({ kind: "instagram", id: "Dc--jilBzus", short: false, url: "https://www.instagram.com/reel/Dc--jilBzus/" });
+    expect(parseSocialLink("https://www.instagram.com/reel/Dc--jilBzus/?igsh=abc")?.id).toBe("Dc--jilBzus");
+    expect(parseSocialLink("instagram.com/p/CxYz_12345/")?.url).toBe("https://www.instagram.com/p/CxYz_12345/");
+    expect(parseSocialLink("https://www.instagram.com/someuser/reel/Dc--jilBzus/")?.id).toBe("Dc--jilBzus");
+    expect(parseSocialLink("https://m.instagram.com/tv/CabcdEF/")?.url).toBe("https://www.instagram.com/tv/CabcdEF/");
+    expect(socialEmbedSrc("instagram", "Dc--jilBzus")).toBe("https://www.instagram.com/p/Dc--jilBzus/embed/");
+    expect(isSocialHost("www.instagram.com")).toBe(true);
+  });
+  it("ลิงก์โปรไฟล์/หน้าแรก/โดเมนปลอม = ไม่ฝัง", async () => {
+    const { parseSocialLink } = await import("@/lib/social-embed");
+    expect(parseSocialLink("https://www.instagram.com/someuser/")).toBeNull();
+    expect(parseSocialLink("https://www.instagram.com/")).toBeNull();
+    expect(parseSocialLink("https://instagram.com.evil.example/reel/Dc--jilBzus/")).toBeNull();
+  });
+  it("ย่อ/ขยายตัวฝังให้พอดีกล่อง", async () => {
+    const { instagramFit, IG_W, IG_H } = await import("@/lib/social-embed");
+    const f = instagramFit(IG_W / 2, IG_H);
+    expect(f.scale).toBeCloseTo(0.5);
+    expect(f.left).toBeCloseTo(0);
+  });
+});

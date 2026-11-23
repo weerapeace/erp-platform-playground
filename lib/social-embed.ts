@@ -1,15 +1,16 @@
 // ============================================================
-// Social Embed (ของกลาง) — แปลงลิงก์ Pinterest / TikTok → ตัวฝังทางการของแต่ละเว็บ
+// Social Embed (ของกลาง) — แปลงลิงก์ Pinterest / TikTok / Instagram → ตัวฝังทางการของแต่ละเว็บ
 //
 // Pinterest: assets.pinterest.com/ext/embed.html?id=<pin> (โชว์รูป · พินวิดีโอเล่นได้)
 // TikTok:    www.tiktok.com/player/v1/<video>          (ตัวเล่นวิดีโอทางการ)
+// Instagram: www.instagram.com/p/<shortcode>/embed/    (โพสต์/รีล · รีลกดเล่นในกล่องได้ · เจ้าของขอ 2026-11-23)
 // ลิงก์สั้น (pin.it · vt./vm.tiktok.com · tiktok.com/t/) ยังไม่มีเลขพิน/คลิป → ต้องให้ /api/social-embed ย่อเป็นลิงก์เต็มก่อน
 //
 // ใช้ที่: กระดาน CanvasSketch (วางลิงก์ → โชว์รูป/วิดีโอ) · API /api/social-embed
 // doc: docs/canvas-sketch.md
 // ============================================================
 
-export type SocialKind = "pinterest" | "tiktok";
+export type SocialKind = "pinterest" | "tiktok" | "instagram";
 /** id = เลขพิน/เลขคลิป (null = ลิงก์สั้น ยังไม่รู้เลข) · url = ลิงก์มาตรฐานที่เก็บบนกระดาน */
 export type SocialLink = { kind: SocialKind; id: string | null; short: boolean; url: string };
 /** ผลจาก /api/social-embed — available=false คือพิน/คลิปถูกลบหรือเป็นส่วนตัว */
@@ -18,8 +19,9 @@ export type SocialEmbedInfo = { kind: SocialKind; id: string; url: string; width
 // pinterest.com · es./th./www.pinterest.com · pinterest.co.uk · pinterest.com.au ฯลฯ
 const PIN_HOST = /^(?:[a-z]{2,3}\.)?pinterest\.[a-z]{2,3}(?:\.[a-z]{2})?$/;
 const TIKTOK_HOST = /^(?:[a-z0-9-]+\.)?tiktok\.com$/;
+const IG_HOST = /^(?:www\.|m\.)?instagram\.com$/;
 // ลิงก์ที่ไม่มี https:// นำหน้า (เช่น copy มาแค่ pin.it/xxx) → เติมให้เฉพาะโดเมนที่รู้จัก
-const BARE_HOST = /^(?:[a-z]{2,3}\.)?(?:pinterest\.[a-z.]+|pin\.it|tiktok\.com|v[tm]\.tiktok\.com)\//i;
+const BARE_HOST = /^(?:[a-z]{2,3}\.)?(?:pinterest\.[a-z.]+|pin\.it|tiktok\.com|v[tm]\.tiktok\.com|instagram\.com)\//i;
 
 /** ข้อความ/ลิงก์ → ลิงก์ Pinterest/TikTok ที่ฝังได้ (ไม่ใช่ = null)
  *  ตัดช่องว่าง/ขึ้นบรรทัดทิ้งก่อน เพราะลิงก์ในกล่องข้อความบนกระดานมักถูกตัดบรรทัด */
@@ -48,17 +50,26 @@ export function parseSocialLink(raw: string | null | undefined): SocialLink | nu
     const user = parts[0]?.startsWith("@") ? parts[0] : null;
     return { kind: "tiktok", id: m[1], short: false, url: user ? `https://www.tiktok.com/${user}/video/${m[1]}` : `https://www.tiktok.com/embed/v2/${m[1]}` };
   }
+
+  if (IG_HOST.test(host)) {
+    // /reel/<code> · /reels/<code> · /p/<code> · /tv/<code> · /<user>/reel/<code> — ลิงก์โปรไฟล์/หน้าแรก/เรื่องราว = ไม่ใช่โพสต์
+    const m = u.pathname.match(/^\/(?:[\w.]+\/)?(reels?|p|tv)\/([A-Za-z0-9_-]{5,})(?:\/|$)/);
+    if (!m) return null;
+    const type = m[1] === "p" ? "p" : m[1] === "tv" ? "tv" : "reel";
+    return { kind: "instagram", id: m[2], short: false, url: `https://www.instagram.com/${type}/${m[2]}/` };
+  }
   return null;
 }
 
 /** โดเมนที่ยอมให้ลิงก์สั้นเด้งไป (กันลิงก์สั้นพาไปเว็บอื่น) */
 export function isSocialHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
-  return h === "pin.it" || PIN_HOST.test(h) || TIKTOK_HOST.test(h);
+  return h === "pin.it" || PIN_HOST.test(h) || TIKTOK_HOST.test(h) || IG_HOST.test(h);
 }
 
 /** ลิงก์ iframe ของตัวฝังทางการ */
 export function socialEmbedSrc(kind: SocialKind, id: string): string {
+  if (kind === "instagram") return `https://www.instagram.com/p/${encodeURIComponent(id)}/embed/`; // /p/ ใช้ได้ทั้งโพสต์และรีล
   return kind === "pinterest"
     ? `https://assets.pinterest.com/ext/embed.html?id=${encodeURIComponent(id)}`
     : `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?music_info=1&description=1`;
@@ -66,11 +77,21 @@ export function socialEmbedSrc(kind: SocialKind, id: string): string {
 
 // ตัวฝังพินกว้าง 345 = ขนาดกลางของ Pinterest · ท้ายการ์ด (ชื่อ/ผู้ปักหมุด) สูง ~97px
 // ตัวฝังพินยืดได้แค่กว้าง ~160–600 (เกินนี้ถูกตัด/ไม่โตตาม) และสูงตามรูปเสมอ → ต้องย่อ/ขยายทั้งก้อนเอง (pinterestFit)
+// ตัวฝัง Instagram กว้างได้ ~326–540 สูงตามเนื้อหา (หัวโพสต์ + รูป/วิดีโอ + ท้าย) ไม่ยืดตามกล่อง → วาดขนาดคงที่แล้วย่อ/ขยายทั้งก้อน (instagramFit)
+export const IG_W = 360, IG_H = 660;
+/** วางตัวฝัง Instagram ในกล่องขนาดใดก็ได้ — วาดกว้าง IG_W (สูง = ที่ Instagram บอกมา หรือ IG_H) แล้วย่อ/ขยายทั้งก้อนให้พอดี + จัดกลาง */
+export function instagramFit(boxW: number, boxH: number, measuredH?: number | null): { frameW: number; frameH: number; scale: number; left: number; top: number } {
+  const w = Math.max(1, boxW), h = Math.max(1, boxH);
+  const fh = measuredH && measuredH > 100 ? measuredH : IG_H;
+  const scale = Math.min(w / IG_W, h / fh);
+  return { frameW: IG_W, frameH: fh, scale, left: (w - IG_W * scale) / 2, top: (h - fh * scale) / 2 };
+}
 const PIN_W = 345, PIN_FOOTER = 97, PIN_MIN_W = 236, PIN_MAX_W = 600;
 const validRatio = (ratio?: number | null) => (ratio && ratio > 0.2 && ratio < 5 ? ratio : null);
 /** ขนาดกรอบบนกระดาน — ratio = กว้าง/สูง ของรูปพิน (ไม่รู้ = ใช้ขนาดกลาง ๆ แล้วให้ผู้ใช้ยืดเอง) */
 export function socialEmbedSize(kind: SocialKind, ratio?: number | null): { width: number; height: number } {
   if (kind === "tiktok") return { width: 325, height: 578 };
+  if (kind === "instagram") return { width: IG_W, height: IG_H };
   return { width: PIN_W, height: Math.round(PIN_W / (validRatio(ratio) ?? 0.66) + PIN_FOOTER) };
 }
 

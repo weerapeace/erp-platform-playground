@@ -47,7 +47,7 @@ const renderEmbeddable = (el: any) => {
 };
 /** กล่องข้อความที่มีแค่ลิงก์ Pinterest/TikTok (วางไว้ก่อนกระดานรองรับ) — ไม่นับข้อความในกล่อง/การ์ด */
 const socialTextsOf = (els: any[]) => els.filter((e) => !e.isDeleted && e.type === "text" && !e.containerId && !e.customData?.kind
-  && /pin|tiktok/i.test(e.originalText ?? e.text ?? "") && parseSocialLink(e.originalText ?? e.text));
+  && /pin|tiktok|instagram/i.test(e.originalText ?? e.text ?? "") && parseSocialLink(e.originalText ?? e.text));
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
@@ -1323,7 +1323,7 @@ export function CanvasSketch({
         {editable && serverCanEdit && socialTextCount > 0 && (
           <button onClick={() => { void convertSocialTexts(); blurActive(); }} disabled={convertingSocial} title={t("ลิงก์ Pinterest/TikTok ที่วางไว้เป็นข้อความ → เปลี่ยนเป็นกล่องโชว์รูป/วิดีโอ เรียงเป็นแถวใต้จุดเดิม (ไม่ทับโน้ตข้าง ๆ · ลิงก์เดิมเก็บอยู่ในกล่อง)", "Pinterest/TikTok links pasted as text → image/video boxes in a row below where they were (won't cover nearby notes · the link is kept in the box)")}
             className="inline-flex items-center gap-1 text-[11px] text-rose-700 border border-rose-200 rounded-md px-2 py-0.5 hover:bg-rose-50 disabled:opacity-50">
-            {convertingSocial ? t("⏳ กำลังแปลง...", "⏳ Converting...") : `📌 ${t("แปลงลิงก์ Pinterest/TikTok เป็นรูป/วิดีโอ", "Show Pinterest/TikTok links as media")} (${socialTextCount})`}
+            {convertingSocial ? t("⏳ กำลังแปลง...", "⏳ Converting...") : `📌 ${t("แปลงลิงก์ Pinterest/TikTok/Instagram เป็นรูป/วิดีโอ", "Show Pinterest/TikTok/Instagram links as media")} (${socialTextCount})`}
           </button>
         )}
         {editable && serverCanEdit && (
