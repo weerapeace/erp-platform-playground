@@ -8,16 +8,17 @@
 //   2026-11-19 (เจ้าของเลือกจาก widget): คอลัมน์ "สินค้า" มีรูป · การ์ด "จองขนส่งแล้ว รอรับ" + จองเสร็จพาไปการ์ดนั้นและติดป้าย "เพิ่งจอง" · ค้นชื่อสินค้า/SKU ได้ · มือถือ = การ์ด
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { ERPInput } from "@/components/form";
-import { ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog, Drawer } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Pager } from "@/components/pager";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { ScrollTabs } from "@/components/scroll-tabs";
+import { OrderDetailView } from "./order-detail-view";
 import { PlatformBadge } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
@@ -156,8 +157,10 @@ function PlatformOrdersInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const router = useRouter();
-  const openOrder = useCallback((id: string) => router.push(`/master/platform-orders/${encodeURIComponent(id)}`), [router]);
+  // กดแถว = เปิดรายละเอียดในแผงข้าง (เจ้าของขอ 2026-11-23) · หน้าเต็มเปิดได้จากหัวแผง/เมนู ⋮
+  const [openId, setOpenId] = useState<string | null>(null);
+  const openOrder = useCallback((id: string) => setOpenId(id), []);
+  const fullUrl = (id: string) => `/master/platform-orders/${encodeURIComponent(id)}`;
   const [invoiceId, setInvoiceId] = useState<string | null>(null);
   const [askPacked, setAskPacked] = useState(false);
   const [shipIds, setShipIds] = useState<string[] | null>(null);
@@ -289,7 +292,8 @@ function PlatformOrdersInner() {
     { key: "menu", header: "", width: "2.5rem", align: "center", cell: (o) => (
       <span onClick={(e) => e.stopPropagation()}>
         <MenuBar menus={[{ key: "row", label: "ตัวเลือก", icon: "dots-vertical", iconOnly: true, align: "end", width: 220, items: [
-          { key: "open", label: "เปิดรายละเอียด", icon: "external-link", onSelect: () => openOrder(o.id) },
+          { key: "open", label: "เปิดรายละเอียด", icon: "layout-sidebar-right", onSelect: () => openOrder(o.id) },
+          { key: "full", label: "เปิดเต็มหน้า (แท็บใหม่)", icon: "external-link", onSelect: () => window.open(fullUrl(o.id), "_blank", "noopener") },
           { key: "copy", label: "คัดลอกเลขออเดอร์", icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(o.order_no ?? o.external_order_id ?? "").then(() => toast.success("คัดลอกแล้ว"), () => toast.error("คัดลอกไม่ได้")); } },
           { type: "divider", key: "d" },
           { key: "pick", label: "พิมพ์ใบหยิบ", icon: "list-check", onSelect: () => window.open(`/print/platform-orders?kind=pick&ids=${encodeURIComponent(o.id)}`, "_blank", "noopener") },
@@ -475,6 +479,13 @@ function PlatformOrdersInner() {
       {showManual && <ManualOrderModal brands={brands} defaultBrandId={brandId} onClose={() => setShowManual(false)} onCreated={(id) => { setShowManual(false); openOrder(id); }} />}
       {showProfile && <ShippingProfileModal brands={brands} defaultBrandId={brandId} canManage={canManage} onClose={() => setShowProfile(false)} />}
 
+      {openId && (
+        <Drawer open onClose={() => setOpenId(null)} size="xl" storageKey="platform-order-detail"
+          title={rows.find((r) => r.id === openId)?.order_no ?? "รายละเอียดออเดอร์"}
+          headerActions={() => <a href={fullUrl(openId)} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50" title="เปิดเต็มหน้าในแท็บใหม่ (ลิงก์ส่งต่อได้)"><Icon value="i:external-link" />เต็มหน้า</a>}>
+          <OrderDetailView key={openId} id={openId} layout="drawer" onChanged={() => void load()} />
+        </Drawer>
+      )}
       {invoiceId && <InvoiceModal orderId={invoiceId} canManage={canManage} onClose={() => setInvoiceId(null)} onIssued={() => void load()} />}
       <ConfirmDialog open={askPacked} onClose={() => setAskPacked(false)} onConfirm={() => void markPacked()} loading={busy}
         title={`ทำเครื่องหมาย "แพ็กแล้ว" ${sel.size} ออเดอร์?`} message="ออเดอร์ที่ส่งแล้ว/ยกเลิกแล้ว หรือมาจากอีเมล จะถูกข้าม (ระบบแจ้งจำนวนที่ไม่สำเร็จ)" confirmText="แพ็กแล้ว" />
