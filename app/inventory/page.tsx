@@ -13,8 +13,9 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { StockMovement, MovementsResponse } from "@/app/api/inventory/movements/route";
 import type { StockBalance, BalancesResponse } from "@/app/api/inventory/balances/route";
 import type { ReorderItem, ReorderResponse } from "@/app/api/inventory/reorder/route";
-import type { InventoryHealth } from "@/app/api/inventory/health/route";
+import type { InventoryHealth, ZoneSummary } from "@/app/api/inventory/health/route";
 import { Icon } from "@/components/icon";
+import { HoverImage } from "@/components/hover-image";
 
 // ---- Movement type config ----
 const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> = {
@@ -28,6 +29,9 @@ const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> 
 const KIND_EMOJI: Record<string, string> = { raw: "🟠", wip: "🔵", fg: "🟢", scrap: "🔴", sales: "🏬", general: "📦" };
 const KIND_ORDER: Record<string, number> = { raw: 1, wip: 2, fg: 3, scrap: 4, sales: 5, general: 6 };
 type WhTab = { id: string; code: string; name: string; kind: string };
+// ชื่อโซน + สีแถบ (แถบโซนในภาพรวม)
+const KIND_LABEL: Record<string, string> = { raw: "วัตถุดิบ", wip: "ระหว่างผลิต", fg: "สินค้าสำเร็จ", scrap: "ของเสีย", sales: "คลังขาย", general: "ทั่วไป" };
+const KIND_BAR: Record<string, string> = { raw: "bg-amber-500", wip: "bg-blue-500", fg: "bg-emerald-500", scrap: "bg-red-500", sales: "bg-violet-500", general: "bg-slate-400" };
 
 // drawer ดูรายละเอียดสินค้า (ของกลาง MasterRecordDrawer) — dynamic กัน import วน
 const SkuDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
@@ -49,7 +53,7 @@ const agoText = (iso: string | null) => {
 // Page
 // ============================================================
 
-type Tab = "movements" | "stock" | "reorder";
+type Tab = "overview" | "movements" | "stock" | "reorder";
 
 export default function InventoryPage() {
   const canView   = usePermission("stock.view");
@@ -57,7 +61,8 @@ export default function InventoryPage() {
   const canAdjust = usePermission("stock.adjust");
   const { user, can } = useAuth();
 
-  const [tab, setTab] = useState<Tab>("movements");
+  const [tab, setTab] = useState<Tab>("overview");
+  const [recent, setRecent] = useState<StockMovement[]>([]);   // ภาพรวม: เคลื่อนไหวล่าสุด
   const [moves, setMoves]       = useState<StockMovement[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
   const [reorder, setReorder]   = useState<ReorderItem[]>([]);
@@ -128,7 +133,15 @@ export default function InventoryPage() {
     setLoading(true); setError(null);
     loadHealth();
     try {
-      if (tab === "movements") {
+      if (tab === "overview") {
+        // ภาพรวม: เคลื่อนไหวล่าสุด 8 รายการ + จำนวนถึงจุดสั่งซื้อ (ตัวเลขอื่นมาจาก health)
+        const [mv, ro] = await Promise.all([
+          apiFetch(`/api/inventory/movements?limit=8`).then((r) => r.json() as Promise<MovementsResponse>),
+          apiFetch(`/api/inventory/reorder`).then((r) => r.json() as Promise<ReorderResponse>),
+        ]);
+        if (!mv.error) { setRecent(mv.data); setMovesTotal((t) => t ?? mv.total); }
+        if (!ro.error) setReorder(ro.data);
+      } else if (tab === "movements") {
         const qs = new URLSearchParams({ limit: String(MOVES_PAGE) });
         if (filterWh) qs.set("warehouse_id", filterWh);
         const res = await apiFetch(`/api/inventory/movements?${qs}`);
@@ -381,6 +394,11 @@ export default function InventoryPage() {
   // ---- Columns: balances ----
   const balanceColumns: ColumnDef<StockBalance>[] = useMemo(() => [
     {
+      id: "image_url", accessorKey: "image_url", header: "รูป", size: 56, enableSorting: false,
+      meta: { type: "image" },
+      cell: ({ row }) => <HoverImage url={row.original.image_url} size={36} previewSize={240} />,
+    },
+    {
       id: "warehouse_name", accessorKey: "warehouse_name", header: "คลัง", size: 160,
       cell: ({ row }) => (
         <div>
@@ -397,6 +415,10 @@ export default function InventoryPage() {
           <div className="text-sm text-slate-700 group-hover:text-blue-600 underline decoration-dotted decoration-slate-300 group-hover:decoration-blue-400">{row.original.product_name}</div>
         </button>
       ),
+    },
+    {
+      id: "parent_code", accessorKey: "parent_code", header: "รุ่น (Parent)", size: 120,
+      cell: ({ getValue }) => <span className="font-mono text-xs text-slate-600">{(getValue() as string | null) ?? "—"}</span>,
     },
     {
       id: "qty_on_hand", accessorKey: "qty_on_hand", header: "คงเหลือ", size: 110,
@@ -465,19 +487,37 @@ export default function InventoryPage() {
     return { totalValue, outOfStock };
   }, [balances]);
 
+  // ภาพรวม: รวมตามโซน (kind) สำหรับแถบ + การ์ดคลัง
+  const overview = useMemo(() => {
+    const zones = health?.zones ?? [];
+    const byKind = new Map<string, { kind: string; value: number; in_stock: number; negative: number; whs: ZoneSummary[] }>();
+    for (const z of zones) {
+      const k = byKind.get(z.kind) ?? { kind: z.kind, value: 0, in_stock: 0, negative: 0, whs: [] };
+      k.value += z.value; k.in_stock += z.in_stock; k.negative += z.negative; k.whs.push(z);
+      byKind.set(z.kind, k);
+    }
+    const kinds = [...byKind.values()].sort((a, b) => (KIND_ORDER[a.kind] ?? 9) - (KIND_ORDER[b.kind] ?? 9));
+    const totalValue = kinds.reduce((s, k) => s + k.value, 0);
+    const inStock = kinds.reduce((s, k) => s + k.in_stock, 0);
+    const noLoc = zones.reduce((s, z) => s + z.no_location, 0);
+    return { kinds, totalValue, inStock, noLoc };
+  }, [health]);
+  const stalledFlows = health?.flows.filter((f) => f.stalled) ?? [];
+  const goStock = (whId: string | null, neg = false) => { setTab("stock"); setFilterWh(whId); setNegOnly(neg); };
+
   // F14 fix: early return หลัง hooks ทั้งหมด (กัน React #310)
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>
-      <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="max-w-7xl mx-auto px-3 md:px-6 py-4 md:py-6">
+        <div className="flex items-start md:items-center justify-between gap-3 flex-wrap mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-800">📦 คลังสินค้า</h1>
+            <h1 className="text-xl md:text-2xl font-semibold text-slate-800">📦 คลังสินค้า</h1>
             <p className="text-sm text-slate-500 mt-0.5">ยอดคงเหลือต่อคลัง · ประวัติเข้า-ออก · ต้นทุนเฉลี่ย</p>
           </div>
           {canCreate && (
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button onClick={() => openCreate("in")}
                 className="h-9 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">📥 รับเข้า</button>
               <button onClick={() => openCreate("out")}
@@ -495,51 +535,168 @@ export default function InventoryPage() {
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
         {/* 🩺 ป้ายเตือน: ยอดติดลบ + การไหลอัตโนมัติที่หยุด (อ่านอย่างเดียว) */}
-        {health && (health.negative_total > 0 || health.flows.some((f) => f.stalled)) && (
-          <div className="mb-4 grid gap-2 md:grid-cols-2">
-            {health.negative_total > 0 && (
-              <div className="px-3 py-2.5 rounded-xl border border-red-200 bg-red-50 text-sm text-red-800">
-                <div className="flex items-center gap-1.5 font-medium"><Icon name="warning" size={16} /> ยอดติดลบ {fmtQty(health.negative_total)} รายการ — ตัวเลขคลังนี้ยังเชื่อไม่ได้</div>
-                <p className="text-xs text-red-700 mt-1">ระบบเบิกของออกไปแล้วแต่ไม่มีรับเข้า/ยอดยกมา ต้องตั้งยอดยกมาหรือนับใหม่ก่อน</p>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {health.negative_by_wh.map((w) => (
-                    <button key={w.warehouse_id} onClick={() => { setTab("stock"); setFilterWh(w.warehouse_id); setNegOnly(true); }}
-                      className="h-7 px-2.5 text-xs rounded-lg bg-white border border-red-200 hover:bg-red-100">
-                      {w.name || w.code} · {fmtQty(w.count)} รายการ →
-                    </button>
+        {tab !== "overview" && health && (health.negative_total > 0 || stalledFlows.length > 0) && (
+          <button onClick={() => setTab("overview")}
+            className="mb-3 w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-900 text-left hover:bg-amber-100">
+            <Icon name="warning" size={14} />
+            <span className="flex-1">
+              {health.negative_total > 0 && <>ยอดติดลบ {fmtQty(health.negative_total)} รายการ</>}
+              {health.negative_total > 0 && stalledFlows.length > 0 && " · "}
+              {stalledFlows.length > 0 && <>ระบบยังไม่ลงสต็อกเอง {stalledFlows.length} จุด</>}
+              {" — ตัวเลขยังไม่ตรงของจริง"}
+            </span>
+            <span className="text-amber-700 shrink-0">ดูภาพรวม →</span>
+          </button>
+        )}
+
+        {tab === "overview" && (
+          <div className="space-y-4 mb-4">
+            {/* การ์ดตัวเลข */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
+              <div className="p-3 rounded-xl border border-slate-200 bg-white">
+                <p className="text-[11px] text-slate-500">มูลค่าคลัง (ยอดบวก)</p>
+                <p className="text-lg md:text-xl font-semibold text-slate-800 tabular-nums">{health ? fmtMoney(overview.totalValue) : "…"}</p>
+              </div>
+              <button onClick={() => goStock(null)} className="p-3 rounded-xl border border-slate-200 bg-white text-left hover:border-blue-300">
+                <p className="text-[11px] text-slate-500">รายการที่มีของ</p>
+                <p className="text-lg md:text-xl font-semibold text-slate-800 tabular-nums">{health ? fmtQty(overview.inStock) : "…"}</p>
+              </button>
+              <button onClick={() => goStock(null, true)} className={`p-3 rounded-xl border text-left ${(health?.negative_total ?? 0) > 0 ? "border-red-200 bg-red-50 hover:bg-red-100" : "border-slate-200 bg-white"}`}>
+                <p className="text-[11px] text-red-700">ยอดติดลบ</p>
+                <p className="text-lg md:text-xl font-semibold text-red-700 tabular-nums">{health ? fmtQty(health.negative_total) : "…"}</p>
+              </button>
+              <button onClick={() => setTab("reorder")} className={`p-3 rounded-xl border text-left ${reorder.length > 0 ? "border-amber-200 bg-amber-50 hover:bg-amber-100" : "border-slate-200 bg-white"}`}>
+                <p className="text-[11px] text-amber-700">ถึงจุดสั่งซื้อ</p>
+                <p className="text-lg md:text-xl font-semibold text-amber-700 tabular-nums">{fmtQty(reorder.length)}</p>
+              </button>
+            </div>
+
+            {/* แถบโซน: สัดส่วนมูลค่าแต่ละโซน + การ์ดคลัง (กด = ดูยอดของคลังนั้น) */}
+            {health && overview.kinds.length > 0 && (
+              <div className="p-3 md:p-4 rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-slate-700">แต่ละโซน</p>
+                  <p className="text-[11px] text-slate-400">กดคลังเพื่อดูยอด</p>
+                </div>
+                <div className="flex h-3 rounded-full overflow-hidden bg-slate-100">
+                  {overview.kinds.filter((k) => k.value > 0).map((k) => (
+                    <div key={k.kind} className={KIND_BAR[k.kind] ?? "bg-slate-400"} style={{ width: `${(k.value / (overview.totalValue || 1)) * 100}%` }}
+                      title={`${KIND_LABEL[k.kind] ?? k.kind} ${fmtMoney(k.value)}`} />
                   ))}
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {overview.kinds.flatMap((k) => k.whs.filter((z) => z.rows > 0).map((z) => (
+                    <button key={z.warehouse_id} onClick={() => goStock(z.warehouse_id)}
+                      className="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-slate-50 text-left">
+                      <span className={`w-2 self-stretch rounded-full ${KIND_BAR[z.kind] ?? "bg-slate-400"}`} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm text-slate-800 truncate">{z.name || z.code}</span>
+                        <span className="block text-[11px] text-slate-500">{KIND_LABEL[z.kind] ?? z.kind} · มีของ {fmtQty(z.in_stock)} รายการ</span>
+                      </span>
+                      <span className="text-right shrink-0">
+                        <span className="block text-sm font-medium tabular-nums text-slate-800">{fmtMoney(z.value)}</span>
+                        {z.negative > 0 && <span className="block text-[11px] text-red-600">ติดลบ {fmtQty(z.negative)}</span>}
+                      </span>
+                    </button>
+                  )))}
                 </div>
               </div>
             )}
-            {health.flows.some((f) => f.stalled) && (
-              <div className="px-3 py-2.5 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-900">
-                <div className="flex items-center gap-1.5 font-medium"><Icon name="waiting" size={16} /> ระบบยังไม่ลงสต็อกให้อัตโนมัติบางจุด</div>
-                <ul className="mt-1 space-y-1">
-                  {health.flows.filter((f) => f.stalled).map((f) => (
-                    <li key={f.key} className="text-xs text-amber-800">
-                      <span className="font-medium">{f.label}</span> — ลงสต็อกล่าสุด {agoText(f.last_at)} · {f.pending_label} {fmtQty(f.pending)}
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-[11px] text-amber-700 mt-1.5">ยอดคงเหลือจึงยังไม่ตรงของจริง — กำลังวางแผนต่อระบบให้ลงสต็อกเองอีกครั้ง</p>
+
+            <div className="grid gap-3 lg:grid-cols-2">
+              {/* กล่อง "ต้องจัดการ" */}
+              <div className="p-3 md:p-4 rounded-xl border border-slate-200 bg-white">
+                <p className="text-sm font-medium text-slate-700 mb-2">ต้องจัดการ</p>
+                {!health ? <p className="text-xs text-slate-400">กำลังโหลด…</p> : (
+                  <ul className="space-y-2">
+                    {health.negative_total > 0 && (
+                      <li className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+                        <div className="flex items-center gap-1.5 font-medium"><Icon name="warning" size={16} /> ยอดติดลบ {fmtQty(health.negative_total)} รายการ</div>
+                        <p className="text-xs text-red-700 mt-0.5">เบิกของออกไปแล้วแต่ไม่มีรับเข้า/ยอดยกมา → ต้องตั้งยอดยกมาหรือนับใหม่ก่อน</p>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {health.negative_by_wh.map((w) => (
+                            <button key={w.warehouse_id} onClick={() => goStock(w.warehouse_id, true)}
+                              className="h-7 px-2.5 text-xs rounded-lg bg-white border border-red-200 hover:bg-red-100">
+                              {w.name || w.code} · {fmtQty(w.count)} →
+                            </button>
+                          ))}
+                        </div>
+                      </li>
+                    )}
+                    {stalledFlows.map((f) => (
+                      <li key={f.key} className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+                        <div className="flex items-center gap-1.5 font-medium"><Icon name="waiting" size={16} /> {f.label}</div>
+                        <p className="text-xs text-amber-800 mt-0.5">ลงสต็อกล่าสุด {agoText(f.last_at)} · {f.pending_label} {fmtQty(f.pending)}</p>
+                      </li>
+                    ))}
+                    {reorder.length > 0 && (
+                      <li>
+                        <button onClick={() => setTab("reorder")} className="w-full p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 text-left hover:bg-amber-100">
+                          <span className="flex items-center gap-1.5 font-medium"><Icon name="cart" size={16} /> ถึงจุดสั่งซื้อ {fmtQty(reorder.length)} รายการ →</span>
+                        </button>
+                      </li>
+                    )}
+                    {overview.noLoc > 0 && (
+                      <li className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-700">
+                        <div className="flex items-center gap-1.5"><Icon name="pin" size={16} /> มีของแต่ยังไม่ระบุชั้นวาง {fmtQty(overview.noLoc)} รายการ</div>
+                        <p className="text-xs text-slate-500 mt-0.5">ตั้งได้ที่แท็บยอดคงเหลือ → เมนูแถว &ldquo;ตั้งชั้นวาง&rdquo;</p>
+                      </li>
+                    )}
+                    {health.negative_total === 0 && stalledFlows.length === 0 && reorder.length === 0 && overview.noLoc === 0 && (
+                      <li className="flex items-center gap-1.5 text-sm text-emerald-700"><Icon name="done" size={16} /> ไม่มีเรื่องค้าง</li>
+                    )}
+                  </ul>
+                )}
               </div>
-            )}
+
+              {/* เคลื่อนไหวล่าสุด */}
+              <div className="p-3 md:p-4 rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-slate-700">เคลื่อนไหวล่าสุด</p>
+                  <button onClick={() => setTab("movements")} className="text-xs text-blue-600 hover:underline">ดูทั้งหมด →</button>
+                </div>
+                {loading && recent.length === 0 ? <p className="text-xs text-slate-400">กำลังโหลด…</p>
+                  : recent.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มีรายการ</p> : (
+                  <ul className="divide-y divide-slate-100">
+                    {recent.map((m) => {
+                      const t = MOVE_TYPE[m.movement_type] ?? MOVE_TYPE.adjust;
+                      return (
+                        <li key={m.id}>
+                          <button onClick={() => setMoveDetail(m)} className="w-full flex items-center gap-2 py-2 text-left hover:bg-slate-50">
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${t.color}`}>{t.label}</span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-sm text-slate-700 truncate">{m.product_name}</span>
+                              <span className="block text-[11px] text-slate-400 truncate">{m.reference_label || m.movement_number} · {agoText(m.created_at)}</span>
+                            </span>
+                            <span className="shrink-0 text-sm tabular-nums font-mono text-slate-700">{fmtQty(m.qty)}</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
         {/* Tabs + filter bar */}
         <div className="mb-4 flex items-center gap-3 flex-wrap">
-          <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+          <div className="flex border border-slate-200 rounded-lg overflow-x-auto max-w-full">
+            <button onClick={() => setTab("overview")}
+              className={`h-9 px-4 text-sm font-medium whitespace-nowrap ${tab === "overview" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              ภาพรวม
+            </button>
             <button onClick={() => setTab("movements")}
-              className={`h-9 px-4 text-sm font-medium ${tab === "movements" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              className={`h-9 px-4 text-sm font-medium whitespace-nowrap border-l border-slate-200 ${tab === "movements" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
               📜 ประวัติเคลื่อนไหว ({fmtQty(movesTotal ?? health?.movements_total ?? moves.length)})
             </button>
             <button onClick={() => setTab("stock")}
-              className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "stock" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              className={`h-9 px-4 text-sm font-medium whitespace-nowrap border-l border-slate-200 ${tab === "stock" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
               📊 ยอดคงเหลือ ({fmtQty(balLoaded ? balances.length : (health?.balances_total ?? 0))})
             </button>
             <button onClick={() => setTab("reorder")}
-              className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "reorder" ? "bg-amber-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              className={`h-9 px-4 text-sm font-medium whitespace-nowrap border-l border-slate-200 ${tab === "reorder" ? "bg-amber-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
               ⚠️ จุดสั่งซื้อ {reorder.length > 0 && <span className={`ml-1 px-1.5 rounded-full text-[10px] ${tab === "reorder" ? "bg-white/25" : "bg-amber-100 text-amber-700"}`}>{reorder.length}</span>}
             </button>
           </div>
@@ -560,7 +717,7 @@ export default function InventoryPage() {
         </div>
 
         {/* แท็บกรองคลัง (โซน) — คลิกง่ายกว่า dropdown */}
-        <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+        {tab !== "overview" && <div className="mb-4 flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-slate-400 mr-0.5">คลัง:</span>
           <button onClick={() => setFilterWh(null)}
             className={`h-8 px-3 text-xs font-medium rounded-lg border transition-colors ${filterWh === null ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
@@ -572,18 +729,18 @@ export default function InventoryPage() {
               {KIND_EMOJI[w.kind] ?? "📦"} {w.name}
             </button>
           ))}
-        </div>
+        </div>}
 
         {/* Summary cards (stock tab) */}
         {tab === "stock" && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-2 md:gap-3 mb-4">
             <div className="p-3 bg-gradient-to-br from-blue-50 to-white border border-blue-200 rounded-xl">
               <p className="text-[10px] text-blue-600 uppercase">SKU ที่มี stock</p>
               <p className="text-xl font-bold text-blue-700 tabular-nums">{balances.length}</p>
             </div>
             <div className="p-3 bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl">
               <p className="text-[10px] text-emerald-600 uppercase">มูลค่ารวม</p>
-              <p className="text-xl font-bold text-emerald-700 tabular-nums font-mono">{fmtMoney(summary.totalValue)}</p>
+              <p className="text-base md:text-xl font-bold text-emerald-700 tabular-nums font-mono truncate">{fmtMoney(summary.totalValue)}</p>
             </div>
             <div className="p-3 bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl">
               <p className="text-[10px] text-red-600 uppercase">Out of Stock</p>
@@ -592,7 +749,7 @@ export default function InventoryPage() {
           </div>
         )}
 
-        {tab === "movements" ? (
+        {tab === "overview" ? null : tab === "movements" ? (
           <>
           {movesTotal !== null && movesTotal > moves.length && (
             <div className="mb-2 flex items-center gap-2 flex-wrap text-xs text-slate-600">
@@ -623,13 +780,19 @@ export default function InventoryPage() {
           />
           </>
         ) : tab === "stock" ? (
+          <>
+          {!filterWh && !showLowOnly && health && health.balances_total > balances.length && balLoaded && (
+            <p className="mb-2 text-xs text-slate-500">แสดง {fmtQty(balances.length)} จาก {fmtQty(health.balances_total)} รายการ — เลือกคลังด้านบนเพื่อดูครบ</p>
+          )}
           <DataTable
             tableId="inventory-balances"
+            enableCards
+            cardConfig={{ primary: "product_name", subtitle: "product_sku", image: "image_url", metrics: ["qty_on_hand", "qty_available"], lines: ["warehouse_name", "parent_code", "location_code"], layout: "horizontal", imageHeight: "sm", imageAspect: "square", columns: "1" }}
             data={negOnly ? balances.filter((b) => b.qty_on_hand < 0) : balances}
             columns={balanceColumns}
             loading={loading}
-            searchableKeys={["product_sku", "product_name", "warehouse_name"]}
-            searchPlaceholder="ค้นหา SKU / สินค้า / คลัง..."
+            searchableKeys={["product_sku", "product_name", "parent_code", "warehouse_name"]}
+            searchPlaceholder="ค้นหา SKU / สินค้า / รุ่น / คลัง..."
             exportFilename="stock-balances"
             exportEntityType="erp_playground_stock_balance"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
@@ -642,6 +805,7 @@ export default function InventoryPage() {
             ]}
             pageSize={30}
           />
+          </>
         ) : (
           <>
             {!loading && reorder.length === 0 && (

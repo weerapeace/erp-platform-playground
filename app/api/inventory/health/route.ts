@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,6 +22,17 @@ export type FlowCheck = {
   stalled: boolean;
 };
 
+/** ภาพรวมต่อคลัง (แถบโซน + การ์ด) */
+export type ZoneSummary = {
+  warehouse_id: string; code: string; name: string; kind: string;
+  rows: number;       // แถวยอดคงเหลือ
+  in_stock: number;   // แถวที่มีของ (> 0)
+  negative: number;   // แถวติดลบ
+  value: number;      // มูลค่าเฉพาะยอดบวก (ยอดติดลบไม่นับ กันมูลค่าเพี้ยน)
+  neg_value: number;  // มูลค่าส่วนที่ติดลบ (ค่าลบ)
+  no_location: number;// มีของแต่ยังไม่ตั้งชั้นวาง
+};
+
 export type InventoryHealth = {
   movements_total: number;
   balances_total: number;
@@ -28,6 +40,7 @@ export type InventoryHealth = {
   negative_by_wh: { warehouse_id: string; code: string; name: string; count: number }[];
   last_movement_at: string | null;
   flows: FlowCheck[];
+  zones: ZoneSummary[];
   error: string | null;
 };
 
@@ -53,8 +66,10 @@ export async function GET(request: NextRequest) {
     const [movTotal, balTotal, negRows, whs, lastAny, lastIssue, lastGr, lastOnline] = await Promise.all([
       cnt(db.from("erp_playground_stock_movements").select("id", { count: "exact", head: true })),
       cnt(db.from("erp_playground_stock_balances").select("product_id", { count: "exact", head: true })),
-      db.from("erp_playground_stock_balances").select("warehouse_id").lt("qty_on_hand", 0).limit(5000),
-      db.from("erp_playground_warehouses").select("id, code, name"),
+      // ⚠️ เกิน 1,000 แถว PostgREST ตัดเงียบ → ไล่หน้าให้ครบ (strict: ไม่ครบ = ตอบ error ดีกว่าตัวเลขผิด)
+      fetchAllPages((from, to) => db.from("erp_playground_stock_balances").select("warehouse_id, qty_on_hand, avg_cost, location_code")
+        .order("product_id").order("warehouse_id").range(from, to), { strict: true }).then((data) => ({ data, error: null as { message: string } | null })),
+      db.from("erp_playground_warehouses").select("id, code, name, kind, active"),
       db.from("erp_playground_stock_movements").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
       lastOf("mo_issue_wip"),
       lastOf("goods_receipt"),
@@ -62,9 +77,22 @@ export async function GET(request: NextRequest) {
     ]);
     if (negRows.error) throw new Error(negRows.error.message);
 
-    const whMap = new Map(((whs.data ?? []) as { id: string; code: string; name: string }[]).map((w) => [w.id, w]));
+    type W = { id: string; code: string; name: string; kind: string | null; active: boolean | null };
+    const whMap = new Map(((whs.data ?? []) as W[]).map((w) => [w.id, w]));
     const negCount = new Map<string, number>();
-    for (const r of (negRows.data ?? []) as { warehouse_id: string }[]) negCount.set(r.warehouse_id, (negCount.get(r.warehouse_id) ?? 0) + 1);
+    const zoneMap = new Map<string, ZoneSummary>();
+    for (const w of whMap.values()) if (w.active !== false)
+      zoneMap.set(w.id, { warehouse_id: w.id, code: w.code, name: w.name, kind: w.kind ?? "general", rows: 0, in_stock: 0, negative: 0, value: 0, neg_value: 0, no_location: 0 });
+    let negative_total = 0;
+    for (const r of (negRows.data ?? []) as { warehouse_id: string; qty_on_hand: number; avg_cost: number; location_code: string | null }[]) {
+      const q = Number(r.qty_on_hand) || 0, v = q * (Number(r.avg_cost) || 0);
+      let z = zoneMap.get(r.warehouse_id);
+      if (!z) { const w = whMap.get(r.warehouse_id); z = { warehouse_id: r.warehouse_id, code: w?.code ?? "", name: w?.name ?? "", kind: w?.kind ?? "general", rows: 0, in_stock: 0, negative: 0, value: 0, neg_value: 0, no_location: 0 }; zoneMap.set(r.warehouse_id, z); }
+      z.rows++;
+      if (q > 0) { z.in_stock++; z.value += v; if (!r.location_code) z.no_location++; }
+      if (q < 0) { z.negative++; z.neg_value += v; negative_total++; negCount.set(r.warehouse_id, (negCount.get(r.warehouse_id) ?? 0) + 1); }
+    }
+    const zones = [...zoneMap.values()];
     const negative_by_wh = [...negCount.entries()].map(([id, count]) => ({
       warehouse_id: id, code: whMap.get(id)?.code ?? "", name: whMap.get(id)?.name ?? "", count,
     })).sort((a, b) => b.count - a.count);
@@ -92,12 +120,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       movements_total: movTotal, balances_total: balTotal,
-      negative_total: (negRows.data ?? []).length, negative_by_wh,
+      negative_total, negative_by_wh, zones,
       last_movement_at: (lastAny.data?.created_at as string | undefined) ?? null,
       flows, error: null,
     } satisfies InventoryHealth);
   } catch (e) {
-    return NextResponse.json({ movements_total: 0, balances_total: 0, negative_total: 0, negative_by_wh: [], last_movement_at: null, flows: [],
+    return NextResponse.json({ movements_total: 0, balances_total: 0, negative_total: 0, negative_by_wh: [], last_movement_at: null, flows: [], zones: [],
       error: e instanceof Error ? e.message : "โหลดไม่ได้" } satisfies InventoryHealth, { status: 500 });
   }
 }
