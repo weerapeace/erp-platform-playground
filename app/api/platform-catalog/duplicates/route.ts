@@ -86,6 +86,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // เช็กสิทธิ์ขั้นต่ำก่อนอ่านคำขอ (คำสั่งที่แก้ข้อมูลเช็ก products.platforms.edit ซ้ำด้านล่าง)
+  const deniedView = await guardApi(request, "products.platforms.view"); if (deniedView) return deniedView;
   let body: { action?: string; platform_id?: string; brand_id?: string; parent_id?: string; listing_id?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, error: "invalid JSON" }, { status: 400 }); }
   const action = str(body.action);
