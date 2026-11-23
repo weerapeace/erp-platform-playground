@@ -543,7 +543,7 @@ export function TiktokInfoPanel({ state, edit, matchedParent, matchedCode }: { s
       <TiktokPackageBox v={v} edit={edit} />
       <TiktokDeliveryBox by={{ listingId: state.listingId }} value={edit.delivery} base={edit.baseDelivery} baseNames={v.deliveryNames} can={can}
         onChange={(d) => edit.setDelivery(d)} weightKg={edit.pkg?.weight ?? v.pkg.weight} />
-      <TiktokAttrsBox v={v} edit={edit} can={can} />
+      {/* ข้อมูลจำเพาะ ย้ายไปแท็บของตัวเอง (TiktokSpecsPanel · เจ้าของ 2026-11-23 "มีข้อมูลจำเพาะด้วยสิ Shopee, Tiktok") */}
       <TiktokCodSizeBox v={v} edit={edit} can={can} matchedParent={matchedParent} matchedCode={matchedCode} listingId={state.listingId} />
       <TiktokDescriptionBox v={v} edit={edit} can={can} desc={desc} />
     </div>
@@ -551,6 +551,16 @@ export function TiktokInfoPanel({ state, edit, matchedParent, matchedCode }: { s
 }
 
 const TIKTOK_IMG_NOTE = "ลากเรียง · รูปแรก = ปก (ควรพื้นขาว) · รูปจากระบบจะถูกทำเป็น JPG จัตุรัสพื้นขาวแล้วฝากกับ TikTok ตอนกดบันทึก · TikTok จะตรวจรูปใหม่ก่อน ระหว่างตรวจร้านยังใช้รูปเดิม";
+
+/**
+ * แท็บข้อมูลจำเพาะ (2026-11-23) — กล่องคุณลักษณะของหมวดเดิม (TiktokAttrsBox) แยกมาเป็นแท็บเหมือน Shopee/Lazada · ส่งพร้อมปุ่มบันทึกเดียวกัน
+ */
+export function TiktokSpecsPanel({ state, edit }: { state: TiktokListingState; edit: TiktokEditApi }) {
+  const g = gate(state); if (g) return g;
+  const v = state.view!;
+  const can = edit.canEdit && edit.title != null && v.productStatus !== "FREEZE" && v.productStatus !== "DELETED";
+  return <div className="space-y-3"><TiktokAttrsBox v={v} edit={edit} can={can} /></div>;
+}
 
 /** รายละเอียดสินค้า — กดแก้ = กล่องแก้ข้อความกลาง (วาง/ลาก/แทรกรูป → ฝากกับ TikTok) · ไม่มีสิทธิ์ = ดูอย่างเดียว */
 function TiktokDescriptionBox({ v, edit, can, desc }: { v: TiktokListingView; edit: TiktokEditApi; can: boolean; desc: string }) {

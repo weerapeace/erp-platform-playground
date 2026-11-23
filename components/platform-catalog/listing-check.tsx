@@ -211,3 +211,26 @@ export function SysThumbs({ refs, max = 12 }: { refs: readonly string[]; max?: n
     </div>
   );
 }
+
+/** ปุ่ม "ใช้ตามระบบ" ต่อเรื่อง (ไม่มี = เรื่องนี้เติมฟอร์มไม่ได้ → ไปหน้าอัปเดตให้ตรง) */
+export type CheckFill = Partial<Record<DriftKey, () => void>>;
+/**
+ * กล่องเทียบหลายเรื่องรวมไว้บนสุดของแท็บ — ร้านที่ยังไม่ได้ใส่ป้ายรายช่อง (TikTok / Lazada / LINE · Shopee ใส่ในแต่ละช่องแล้ว)
+ * โชว์เฉพาะเรื่องที่ตัวเทียบตอบมา · ตรงแล้ว = ป้ายเขียวบรรทัดเดียว
+ */
+export function CheckTabBlock({ chk, keys, fill, sysOf }: { chk: ListingCheckApi | null | undefined; keys: readonly DriftKey[]; fill: CheckFill; sysOf?: Partial<Record<DriftKey, ReactNode>> }) {
+  if (!chk?.on) return null;
+  const shown = keys.filter((k) => chk.item(k));
+  if (!shown.length) return chk.loading ? <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">กำลังเทียบกับระบบ…</div> : null;
+  return (
+    <div className="space-y-2 rounded-xl border border-violet-100 bg-white p-2.5">
+      <div className="text-[11px] font-medium text-violet-800">เทียบกับระบบ (แท็บนี้)</div>
+      {shown.map((k) => (
+        <div key={k}>
+          <div className="flex items-center gap-1.5 text-xs text-slate-600">{DRIFT_LABEL[k]} <CheckBadge chk={chk} k={k} /></div>
+          <CheckSysBox chk={chk} k={k} sys={sysOf?.[k]} onUse={fill[k] ?? null} />
+        </div>
+      ))}
+    </div>
+  );
+}

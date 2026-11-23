@@ -43,9 +43,10 @@ import { DescImagesTest } from "./desc-images-test";
 import { LineGiftSection } from "./line-gift-section";
 import { ListingLinks } from "./listing-links";
 import { LazadaAttrsPanel, LazadaEditFooter, LazadaHeaderStatus, LazadaImagesPanel, LazadaInfoPanel, LazadaOptionsPanel, useLazadaAttrDefs, useLazadaDisplay, useLazadaEdit, useLazadaListing } from "./lazada-listing-panels";
-import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
+import { TiktokEditFooter, TiktokHeaderStatus, TiktokImagesPanel, TiktokInfoPanel, TiktokOptionsPanel, TiktokSpecsPanel, useTiktokDisplay, useTiktokEdit, useTiktokListing, useTiktokPublish } from "./tiktok-listing-panels";
 import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPanel, ShopeeOptionsPanel, ShopeeSpecsPanel, useShopeeDisplay, useShopeeEdit, useShopeeListing } from "./shopee-listing-panels";
-import { CheckSummaryBar, CheckToggleButton, useListingCheck } from "./listing-check";
+import { CheckSummaryBar, CheckTabBlock, CheckToggleButton, SysThumbs, useListingCheck, type CheckFill } from "./listing-check";
+import { DRIFT_LABEL, plainText } from "@/lib/platform-listing-drift";
 import { shopeeImagesMax, shopeeRowsWithSysPrices } from "@/lib/shopee-listing-edit";
 import type { DriftKey } from "@/lib/platform-listing-drift";
 import type { TtsAttrState } from "@/lib/tiktok-attrs";
@@ -66,8 +67,16 @@ const numOrNull = (raw: string) => { const n = Number(raw); return raw.trim() ==
 const imgSrc = listingImgSrc;
 // หน้าอัปเดตให้ตรง (ของกลาง) — เรื่องที่เติมฟอร์มในลิ้นชักไม่ได้ เช่น รูปตัวเลือก (โหลดตอนกด)
 const MatchSystemDialog = dynamic(() => import("./match-system-dialog").then((m) => m.MatchSystemDialog), { ssr: false });
-/** เรื่องที่ "ใช้ตามระบบ" เติมลงฟอร์ม Shopee ได้ */
-const SP_FILLABLE: readonly DriftKey[] = ["title", "description", "desc_images", "images", "attrs", "price"];
+/** เรื่องที่เทียบในแต่ละแท็บ (ร้านที่ใช้กล่องเทียบบนสุดของแท็บ — TikTok / Lazada / LINE) */
+const TAB_CHECK_KEYS: Partial<Record<string, readonly DriftKey[]>> = {
+  info: ["title", "description", "desc_images"], images: ["images"], options: ["price", "options", "variant_images"], attrs: ["attrs"],
+};
+const SHOP_NAME: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE" };
+/** ราคาของระบบ → แถวราคาที่มีรหัส SKU บนร้าน (TikTok / Lazada) */
+function withSysPrice<T extends { sellerSku: string | null; price: number | null }>(rows: T[], prices: readonly { code: string; price: number | null }[]): T[] {
+  const by = new Map(prices.map((p) => [p.code.trim().toUpperCase(), p.price]));
+  return rows.map((r) => { const p = r.sellerSku ? by.get(r.sellerSku.trim().toUpperCase()) : undefined; return p != null ? { ...r, price: Math.round(p) } : r; });
+}
 
 export function ListingDrawer({ listingId, onClose, onChanged, canPublish, matchTab }: {
   listingId: string | null;
@@ -159,7 +168,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
 
   // โหมด "เช็กกับระบบ" (ของกลาง ./listing-check · เจ้าของเลือก 2026-11-23 แบบ A) — เริ่มที่ Shopee · ต้องจับคู่สินค้าในระบบแล้ว
   const chk = useListingCheck(listingId, {
-    available: isShopee && !!detail?.matched_parent_sku_id && detail?.status !== "removed",
+    available: (isShopee || isLazada || isTiktok || !!detail?.line) && !!detail?.matched_parent_sku_id && detail?.status !== "removed",
     canAdopt: can("products.platforms.edit"),
   });
   const [matchOpen, setMatchOpen] = useState(false);
@@ -169,24 +178,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     if (spWasSaving.current && !spEdit.saving && chk.on) chk.reload();
     spWasSaving.current = spEdit.saving;
   }, [spEdit.saving, chk]);
-  /** ข้อ 2: เติมค่าระบบลงทุกช่องที่ไม่ตรง (ยังไม่ส่ง) */
-  const spUseAll = () => {
-    const s = chk.sys, v = sp.view;
-    if (!s || !v) return;
-    const open = (k: DriftKey) => { const it = chk.item(k); return !!it && it.state === "diff" && it.sendable && !chk.filled.has(k); };
-    const done: DriftKey[] = [];
-    if (open("title") && s.title) { spEdit.setName(s.title); done.push("title"); }
-    if (open("description")) { spEdit.setDescription(s.description); done.push("description"); }
-    if (open("desc_images") && s.descImageRefs.length) { spEdit.setDescImages(s.descImageRefs.slice(0, 12)); done.push("desc_images"); }
-    if (open("images") && s.imageRefs.length) { spEdit.setImages(s.imageRefs.slice(0, shopeeImagesMax(v))); done.push("images"); }
-    if (open("attrs") && s.attrs) { spEdit.setAttrs({ ...(spEdit.attrs ?? v.attrs), ...(s.attrs as TtsAttrState) }); done.push("attrs"); }
-    if (open("price") && spEdit.prices) { spEdit.setPrices(shopeeRowsWithSysPrices(v, spEdit.prices, s.prices)); done.push("price"); }
-    chk.markFilled(done);
-    if (done.length) toast.info(`เติมค่าระบบแล้ว ${done.length} เรื่อง — ตรวจแล้วกด “บันทึกขึ้น Shopee” (ยังไม่ส่ง · กดยกเลิกที่แก้เพื่อย้อน)`);
-  };
-  // ยกเลิกที่แก้ = ล้างป้าย "ใช้ตามระบบแล้ว" ด้วย
-  const spDirty = spEdit.dirty;
-  useEffect(() => { if (!spDirty) chk.clearFilled(); }, [spDirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ยกเลิกที่แก้ = ล้างป้าย "ใช้ตามระบบแล้ว" ด้วย (ทุกร้าน)
+  const anyDirty = spEdit.dirty || ttEdit.dirty || lazEdit.dirty;
+  useEffect(() => { if (!anyDirty) chk.clearFilled(); }, [anyDirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ttWasSaving = useRef(false), lazWasSaving = useRef(false);
+  useEffect(() => { if (ttWasSaving.current && !ttEdit.saving && chk.on) chk.reload(); ttWasSaving.current = ttEdit.saving; }, [ttEdit.saving, chk]);
+  useEffect(() => { if (lazWasSaving.current && !lazEdit.saving && chk.on) chk.reload(); lazWasSaving.current = lazEdit.saving; }, [lazEdit.saving, chk]);
 
   const disp = useLineDisplay((results) => {
     const r = results.find((x) => x.listing_id === listingId);
@@ -253,13 +250,53 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const line = detail?.line ?? null;
   const lazView = isLazada ? laz.view : null;
   const ttView = isTiktok ? tt.view : null;
+  // ── โหมดเช็กกับระบบ: "ใช้ตามระบบ" ต่อเรื่อง ต่อร้าน (เติมฟอร์มในลิ้นชัก · ยังไม่ส่ง) — เรื่องที่ไม่มีตัวเติม = ไปหน้าอัปเดตให้ตรง ──
+  const sysV = chk.sys;
+  const fill: CheckFill = !sysV ? {} : isShopee && sp.view && spEdit.canEdit ? {
+    ...(sysV.title ? { title: () => spEdit.setName(sysV.title!) } : {}),
+    description: () => spEdit.setDescription(sysV.description),
+    ...(sysV.descImageRefs.length ? { desc_images: () => spEdit.setDescImages(sysV.descImageRefs.slice(0, 12)) } : {}),
+    ...(sysV.imageRefs.length ? { images: () => spEdit.setImages(sysV.imageRefs.slice(0, shopeeImagesMax(sp.view!))) } : {}),
+    ...(sysV.attrs ? { attrs: () => spEdit.setAttrs({ ...(spEdit.attrs ?? sp.view!.attrs), ...(sysV.attrs as TtsAttrState) }) } : {}),
+    ...(spEdit.prices ? { price: () => spEdit.setPrices(shopeeRowsWithSysPrices(sp.view!, spEdit.prices!, sysV.prices)) } : {}),
+  } : isTiktok && ttView && ttEdit.canEdit ? {
+    ...(sysV.title ? { title: () => ttEdit.setTitle(sysV.title!) } : {}),
+    description: () => { ttEdit.setDescEdit(true); ttEdit.setDescription(sysV.description); },
+    ...(sysV.imageRefs.length ? { images: () => ttEdit.setImages(sysV.imageRefs) } : {}),
+    ...(ttEdit.prices ? { price: () => ttEdit.setPrices(withSysPrice(ttEdit.prices!, sysV.prices)) } : {}),
+  } : isLazada && laz.view && lazEdit.canEdit ? {
+    ...(sysV.title ? { title: () => lazEdit.setField("name", sysV.title!) } : {}),
+    description: () => { lazEdit.setDescEdit(true); lazEdit.setField("description", sysV.description); },
+    ...(sysV.imageRefs.length ? { images: () => lazEdit.setImages(sysV.imageRefs) } : {}),
+    ...(lazEdit.prices ? { price: () => lazEdit.setPrices(withSysPrice(lazEdit.prices!, sysV.prices)) } : {}),
+  } : detail?.line && form && canEdit ? {
+    ...(sysV.title ? { title: () => setField("name", sysV.title!) } : {}),
+    description: () => setField("description", sysV.description),
+    ...(sysV.imageRefs.length ? { images: () => setImages(() => sysV.imageRefs) } : {}),
+  } : {};
+  const fillKeys = Object.keys(fill) as DriftKey[];
+  /** ข้อ 2: เติมค่าระบบลงทุกช่องที่ไม่ตรง (ยังไม่ส่ง) */
+  const useAllSys = () => {
+    const done = fillKeys.filter((k) => { const it = chk.item(k); return !!it && it.state === "diff" && it.sendable && !chk.filled.has(k); });
+    done.forEach((k) => fill[k]!());
+    chk.markFilled(done);
+    if (done.length) toast.info(`เติมค่าระบบแล้ว ${done.length} เรื่อง — ตรวจแล้วกดบันทึกขึ้นร้าน (ยังไม่ส่ง · กดยกเลิกที่แก้เพื่อย้อน)`);
+  };
+  // เรื่องที่ไม่ตรง + ส่งได้ แต่เติมในลิ้นชักไม่ได้ (เช่น รูปตัวเลือก · รูปในรายละเอียดของ TikTok/Lazada/LINE) → หน้าอัปเดตให้ตรง
+  const dialogKeys = (chk.check?.items ?? []).filter((i) => i.state === "diff" && i.sendable && !fill[i.key]).map((i) => i.key);
+  const sysOf: Partial<Record<DriftKey, ReactNode>> = !sysV ? {} : {
+    title: sysV.title ? <div className="text-slate-800">{sysV.title}</div> : null,
+    description: <div className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-violet-100 bg-white px-2 py-1.5 text-slate-700">{plainText(sysV.description, { keepBlank: true }) || "—"}</div>,
+    images: sysV.imageRefs.length ? <SysThumbs refs={sysV.imageRefs} /> : null,
+    desc_images: sysV.descImageRefs.length ? <SysThumbs refs={sysV.descImageRefs} /> : null,
+  };
   const spView = isShopee ? sp.view : null;
   const imgCount = line ? line.images.length : lazView ? lazView.images.length : ttView ? (ttEdit.images ?? ttView.images).length : spView ? (spEdit.images ?? spView.images).length : null;
   const optCount = form ? form.variants.length : lazView ? lazView.skus.length : ttView ? ttView.skus.length : spView ? (spView.hasModel ? spView.models.length : 1) : null;
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "ข้อมูลสินค้า" },
     // ข้อมูลจำเพาะ (เจ้าของ 2026-11-23 "มีข้อมูลจำเพาะด้วยสิ Shopee, Tiktok") — Lazada · Shopee
-    ...(isLazada || isShopee ? [{ key: "attrs" as Tab, label: "ข้อมูลจำเพาะ" }] : []),
+    ...(isLazada || isShopee || isTiktok ? [{ key: "attrs" as Tab, label: "ข้อมูลจำเพาะ" }] : []),
     { key: "images", label: `รูป${imgCount != null ? ` (${imgCount})` : ""}` },
     { key: "options", label: `ตัวเลือก & ราคา${optCount != null ? ` (${optCount})` : ""}` },
     { key: "match", label: "จับคู่" },
@@ -521,9 +558,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
             <div className="space-y-3">
               {header}
               {/* โหมดเช็กกับระบบ: สรุป + ใช้ตามระบบทั้งหมด (ข้อ 2) · เรื่องที่เติมฟอร์มไม่ได้ (รูปตัวเลือก) → หน้าอัปเดตให้ตรง */}
-              <CheckSummaryBar chk={chk} fillable={SP_FILLABLE} onUseAll={spEdit.canEdit ? spUseAll : undefined}
-                extra={chk.item("variant_images")?.state === "diff" && chk.item("variant_images")?.sendable && canPublish
-                  ? <button type="button" onClick={() => setMatchOpen(true)} className="h-7 rounded-md border border-violet-300 bg-white px-2 text-violet-800 hover:bg-violet-50">รูปตัวเลือก → หน้าอัปเดตให้ตรง</button> : null} />
+              <CheckSummaryBar chk={chk} fillable={fillKeys} onUseAll={fillKeys.length ? useAllSys : undefined}
+                extra={dialogKeys.length && canPublish
+                  ? <button type="button" onClick={() => setMatchOpen(true)} title="เรื่องที่เติมในลิ้นชักไม่ได้ ส่งจากหน้าอัปเดตให้ตรง (ติ๊กเลือก → ยืนยัน)"
+                      className="h-7 rounded-md border border-violet-300 bg-white px-2 text-violet-800 hover:bg-violet-50">{dialogKeys.map((k) => DRIFT_LABEL[k]).join(" · ")} → หน้าอัปเดตให้ตรง</button> : null} />
+              {!isShopee && <CheckTabBlock chk={chk} keys={TAB_CHECK_KEYS[tab] ?? []} fill={fill} sysOf={sysOf} />}
               <ScrollTabs activeKey={tab} className="border-b border-slate-200">
                 {tabs.map((t) => (
                   <button key={t.key} type="button" data-tab-key={t.key} onClick={() => setTab(t.key)} aria-pressed={tab === t.key}
@@ -531,7 +570,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 ))}
               </ScrollTabs>
               {tab === "match" ? matchTabBody : tab === "history" ? historyTab
-                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : isShopee ? <ShopeeSpecsPanel state={sp} edit={spEdit} chk={chk} /> : null)
+                : tab === "attrs" ? (isLazada ? <LazadaAttrsPanel state={laz} edit={lazEdit} defsState={lazDefs} /> : isShopee ? <ShopeeSpecsPanel state={sp} edit={spEdit} chk={chk} /> : isTiktok ? <TiktokSpecsPanel state={tt} edit={ttEdit} /> : null)
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
@@ -562,7 +601,8 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
       {isTiktok && ttDisp.dialog}
       {isTiktok && ttPub.dialog}
       {isShopee && spEdit.dialog}
-      {matchOpen && listingId && <MatchSystemDialog open listingId={listingId} shopName="Shopee" canPublish={canPublish} onClose={() => setMatchOpen(false)} onSent={() => { sp.reload(); chk.reload(); }} />}
+      {matchOpen && listingId && <MatchSystemDialog open listingId={listingId} shopName={SHOP_NAME[detail?.platform_code ?? ""] ?? "ร้าน"} canPublish={canPublish} onClose={() => setMatchOpen(false)}
+        onSent={() => { if (isShopee) sp.reload(); if (isTiktok) tt.reload(); if (isLazada) laz.reload(); setReload((n) => n + 1); chk.reload(); }} />}
       {isShopee && spDisp.dialog}
       {line && <ImageLightbox images={(form?.images ?? line.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
       {!line && ttView && <ImageLightbox images={(ttEdit.images ?? ttView.images).map((u) => ({ url: imgSrc(u, 1600) }))} index={lightbox} onClose={() => setLightbox(-1)} onIndex={setLightbox} />}
