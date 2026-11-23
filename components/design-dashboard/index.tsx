@@ -32,6 +32,7 @@ import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
 import { BrandRail } from "./brand-rail";
 import { MoveTicker, type TickerMsg } from "./move-ticker";
+import { BrandCanvasView } from "./canvas-view";
 import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { BrandSettingsModal } from "./brand-settings-modal";
 import { StatusBoard } from "./status-board";
@@ -59,6 +60,13 @@ const DesignSheetSummaryBuilder = dynamic(() => import("@/components/design-shee
 // ลงออเดอร์จากใบงาน (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเมื่อใช้
 const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
 
+// มุมมองของหน้า — "canvas" = กระดานแคนวาสต่อแบรนด์ (./canvas-view · 2026-11-23)
+type ViewMode = "board" | "gallery" | "ideas" | "canvas";
+const VIEW_MODES: ViewMode[] = ["board", "gallery", "ideas", "canvas"];
+const isViewMode = (v: unknown): v is ViewMode => typeof v === "string" && (VIEW_MODES as string[]).includes(v);
+// มุมมองเริ่มต้นต่อแบรนด์ (ทั้งทีม) — ui_config key นี้ = { views: { [brandKey]: ViewMode } }
+const BRAND_VIEWS_KEY = "design_dashboard_brand_views";
+
 export function DesignDashboard() {
   const t = useT();
   const canEdit = usePermission("products.edit");
@@ -68,8 +76,30 @@ export function DesignDashboard() {
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedBrandKey, setSelectedBrandKey] = useState(GROUP_KEY.customer);   // แบรนด์เดียว หรือ "ทั้งกลุ่ม" (GROUP_KEY) หรือ ⭐ แบรนด์ของฉัน (MINE_KEY)
-  const brandPicked = useRef(false);   // ผู้ใช้กดเลือกเองแล้ว = ไม่สลับไป "แบรนด์ของฉัน" อัตโนมัติ
+  const brandPicked = useRef(false);
+  // 🧭 มุมมองเริ่มต้นต่อแบรนด์ (ทั้งทีม) — แบรนด์ที่ตั้งไว้ เปิดมาเป็นมุมมองนั้น · ไม่ได้ตั้ง = มุมมองที่ตัวเองเลือกล่าสุด
+  const [brandViews, setBrandViews] = useState<Record<string, ViewMode>>({});
+  const brandViewsRef = useRef<Record<string, ViewMode>>({});
+  brandViewsRef.current = brandViews;
+  const personalView = useRef<ViewMode>("board");
+  const selectedKeyRef = useRef<string>(GROUP_KEY.customer);   // ผู้ใช้กดเลือกเองแล้ว = ไม่สลับไป "แบรนด์ของฉัน" อัตโนมัติ
   const pickBrand = (key: string) => { brandPicked.current = true; setSelectedBrandKey(key); };
+  selectedKeyRef.current = selectedBrandKey;
+  useEffect(() => {
+    apiFetch(`/api/ui-config?key=${BRAND_VIEWS_KEY}`).then((r) => r.json())
+      .then((j) => { const v = (j?.value?.views ?? {}) as Record<string, unknown>; const clean: Record<string, ViewMode> = {}; for (const [k, m] of Object.entries(v)) if (isViewMode(m)) clean[k] = m; setBrandViews(clean); })
+      .catch(() => {});
+  }, []);
+  // เปลี่ยนแบรนด์ (หรือเพิ่งโหลดค่าเริ่มต้นของแบรนด์) → ใช้มุมมองของแบรนด์นั้น · ไม่มี = มุมมองส่วนตัว
+  const lastBrandForView = useRef<string>("");
+  useEffect(() => {
+    const want = brandViews[selectedBrandKey];
+    const brandChanged = lastBrandForView.current !== selectedBrandKey;
+    lastBrandForView.current = selectedBrandKey;
+    if (ideasLinkRef.current) return;   // เปิดจากลิงก์ไอเดีย → อยู่หน้าไอเดียก่อน
+    if (want) setViewMode(want);
+    else if (brandChanged) setViewMode(personalView.current);
+  }, [selectedBrandKey, brandViews]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -113,7 +143,7 @@ export function DesignDashboard() {
     id: s.id, code: s.code, name: s.name, brand_name: s.brand_name, cover_url: s.cover_url, updated_at: s.updated_at,
   })), [sheets]);
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
-  const [viewMode, setViewMode] = useState<"board" | "gallery" | "ideas">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี) / ไอเดีย (ยังไม่ใช่งานจริง)
+  const [viewMode, setViewMode] = useState<ViewMode>("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี) / ไอเดีย (ยังไม่ใช่งานจริง)
   const ideasLinkRef = useRef(false);   // เปิดด้วยลิงก์จากบอทไลน์ ?ideas=1 → มุมมองไอเดีย กล่องรอคัด (ไม่ทับค่าที่จำไว้)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle, wheelRef: galleryWheelRef } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
   // ── รูปแบบจอ (ของกลาง device-view): จอคอม / แท็บเล็ต / มือถือ — อัตโนมัติตามจอจริง หรือเลือกเอง (?device=) ──
@@ -177,7 +207,7 @@ export function DesignDashboard() {
   // จำมุมมองที่เลือกไว้รายคน (บอร์ด/การ์ดรูปใหญ่)
   useEffect(() => {
     apiFetch("/api/user-prefs?key=design_dashboard_view_mode").then((r) => r.json())
-      .then((j) => { const v = j?.value; if (!ideasLinkRef.current && (v === "board" || v === "gallery" || v === "ideas")) setViewMode(v); })
+      .then((j) => { const v = j?.value; if (isViewMode(v)) { personalView.current = v; if (!ideasLinkRef.current && !brandViewsRef.current[selectedKeyRef.current]) setViewMode(v); } })
       .catch(() => {});
   }, []);
   // 💡 ตัวเลขบนปุ่ม "ไอเดีย" = ชุดรอคัดจากกลุ่มไลน์ส่งไอเดีย (นับเบา ๆ ครั้งเดียวตอนเปิดหน้า · หน้าไอเดียอัปเดตเองเมื่อคัด)
@@ -239,8 +269,9 @@ export function DesignDashboard() {
   // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ของกลาง components/hover-card) — ตั้งค่าต่อคน
   const hoverPref = useSheetHoverPref();
   const hoverOn = hoverPref.on && hoverPref.fields.length > 0;
-  const changeViewMode = (mode: "board" | "gallery" | "ideas") => {
+  const changeViewMode = (mode: ViewMode) => {
     setViewMode(mode);
+    personalView.current = mode;
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_view_mode", value: mode }) }).catch(() => {});
   };
   useEffect(() => {
@@ -249,7 +280,10 @@ export function DesignDashboard() {
     const id = sp.get("open");
     if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
     if (sp.get("inbox") === "1") setInboxOpen(true);   // ลิงก์จากบอทไลน์ "ดูในระบบ" → เปิดกล่องงานจากไลน์
-    if (sp.get("ideas") === "1") { ideasLinkRef.current = true; setViewMode("ideas"); }   // ลิงก์จากบอทกลุ่มส่งไอเดีย → กล่องรอคัด
+    if (sp.get("ideas") === "1") { ideasLinkRef.current = true; setViewMode("ideas"); }
+    // ลิงก์ "เปิดกระดาน" จากใบงาน (?brand=<id>&view=canvas) → เลือกแบรนด์ + มุมมองนั้น (ไม่บันทึกเป็นค่าที่จำไว้)
+    const qb = sp.get("brand"); if (qb) { brandPicked.current = true; setSelectedBrandKey(qb); }
+    const qv = sp.get("view"); if (isViewMode(qv)) { personalView.current = qv; setViewMode(qv); }   // ลิงก์จากบอทกลุ่มส่งไอเดีย → กล่องรอคัด
     // ?convert=ID (แท็บ LINE ในศูนย์แจ้งเตือน "เปิดใบงาน") → เปิดฟอร์มสร้างใบงานจากร่างนั้นเลย · ไม่เจอ/เปิดไปแล้ว = ค้างที่กล่องจากไลน์
     const convertId = sp.get("convert");
     if (convertId) {
@@ -437,6 +471,12 @@ export function DesignDashboard() {
       return true;
     });
   }, [selectedBrandKey, isGroupKey, mineOn, favSet, sheets, search]);
+  // ใบงานของแบรนด์/กลุ่มที่เลือก (ไม่กรองคำค้น) — ใช้กับแคนวาส (การ์ดต้องไม่หายจากกระดานเพราะพิมพ์ค้นหา)
+  const brandSheets = useMemo(() => sheets.filter((sheet) => {
+    if (mineOn) return favSet.has(brandKeyOf(sheet));
+    if (isGroupKey) return sheetIsOwn(sheet) === (selectedBrandKey === GROUP_KEY.own);
+    return brandKeyOf(sheet) === selectedBrandKey;
+  }), [selectedBrandKey, isGroupKey, mineOn, favSet, sheets]);
   const passQuick = (sheet: DesignSheetListItem, f: typeof quickFilter) => {
     if (f === "active") return !statusMeta.finished.has(sheet.status);
     if (f === "urgent") return isUrgent(sheet, statusMeta);
@@ -655,7 +695,18 @@ export function DesignDashboard() {
     ["board", "i:layout-kanban", t("บอร์ด", "Board"), t("บอร์ดตามสถานะ", "Board by status")],
     ["gallery", "i:photo", t("การ์ดรูป", "Cards"), t("การ์ดรูปใหญ่", "Large image cards")],
     ["ideas", "i:bulb", t("ไอเดีย", "Ideas"), t("ไอเดีย (ยังไม่ใช่งานจริง) + รอคัดจากไลน์", "Ideas (not real jobs yet) + from LINE")],
+    ["canvas", "i:brush", t("แคนวาส", "Canvas"), t("กระดานแคนวาสของแบรนด์ — โซนสถานะ + รูป/ลิงก์อ้างอิง", "Brand canvas — status zones + reference images/links")],
   ] as const;
+  // ตั้ง/ล้าง มุมมองเริ่มต้นของแบรนด์ที่เลือก (ทั้งทีม · ต้องมีสิทธิ์แก้ใบงาน) — บันทึกทั้งก้อนลง ui_config (มีประวัติ setting_change)
+  const brandViewLabel = (m: ViewMode) => VIEW_TABS.find(([k]) => k === m)?.[2] ?? m;
+  const saveBrandView = (key: string, mode: ViewMode | null) => {
+    const next = { ...brandViews };
+    if (mode) next[key] = mode; else delete next[key];
+    setBrandViews(next);
+    void apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: BRAND_VIEWS_KEY, value: { views: next } }) })
+      .then((r) => { if (!r.ok) throw new Error(); say("success", mode ? t(`ตั้ง "${brandViewLabel(mode)}" เป็นมุมมองเริ่มต้นของ ${scopeLabel} แล้ว`, `"${brandViewLabel(mode)}" is now the default view for ${scopeLabel}`) : t(`ล้างมุมมองเริ่มต้นของ ${scopeLabel} แล้ว`, `Cleared the default view for ${scopeLabel}`)); })
+      .catch(() => { setBrandViews(brandViews); say("error", t("บันทึกมุมมองเริ่มต้นไม่สำเร็จ", "Couldn't save the default view")); });
+  };
   const toolbarMenus: MenuDef[] = ([
     {
       key: "filter", icon: "filter", width: 230,
@@ -681,6 +732,14 @@ export function DesignDashboard() {
         { type: "radio", key: "v-board", icon: "layout-kanban", label: t("บอร์ดตามสถานะ", "Board by status"), checked: viewMode === "board", onSelect: () => changeViewMode("board") },
         { type: "radio", key: "v-gallery", icon: "photo", label: t("การ์ดรูปใหญ่", "Large image cards"), checked: viewMode === "gallery", onSelect: () => changeViewMode("gallery") },
         { type: "radio", key: "v-ideas", icon: "bulb", label: t("ไอเดีย (ยังไม่ใช่งานจริง)", "Ideas (not real jobs yet)"), checked: viewMode === "ideas", onSelect: () => changeViewMode("ideas"), hint: ideaInbox > 0 ? ideaInbox : undefined },
+        { type: "radio", key: "v-canvas", icon: "brush", label: t("แคนวาสของแบรนด์", "Brand canvas"), checked: viewMode === "canvas", onSelect: () => changeViewMode("canvas") },
+        ...(canEdit ? [
+          { type: "divider", key: "d-bv" },
+          { type: "section", key: "s-bv", label: t(`มุมมองเริ่มต้นของ ${scopeLabel}`, `Default view for ${scopeLabel}`) },
+          ...(brandViews[selectedBrandKey] === viewMode ? [] : [{ key: "bv-set", icon: "pin", label: t(`ตั้ง "${brandViewLabel(viewMode)}" เป็นค่าเริ่มต้น`, `Make "${brandViewLabel(viewMode)}" the default`), onSelect: () => saveBrandView(selectedBrandKey, viewMode),
+            title: t("ทั้งทีมกดแบรนด์นี้แล้วเปิดมาเป็นมุมมองนี้ (แต่ละคนยังสลับเองได้)", "Everyone opening this brand starts in this view (each person can still switch)") }]),
+          ...(brandViews[selectedBrandKey] ? [{ key: "bv-clear", icon: "x", label: t(`ล้างค่าเริ่มต้น (ตอนนี้: ${brandViewLabel(brandViews[selectedBrandKey])})`, `Clear default (now: ${brandViewLabel(brandViews[selectedBrandKey])})`), onSelect: () => saveBrandView(selectedBrandKey, null) }] : []),
+        ] : []),
         ...(viewMode !== "ideas" ? [{ type: "divider", key: "d1" }] : []),
         ...(viewMode === "board" ? [
           { type: "section", key: "s-size", label: t("ขนาดการ์ด", "Card size") },
@@ -960,6 +1019,12 @@ export function DesignDashboard() {
                 /* ── 💡 ไอเดีย (ยังไม่ใช่งานจริง) — ใช้ช่องค้นหา + แบรนด์ที่เลือกในแถบซ้ายร่วมกัน · เริ่มงานจริงแล้วเปิดใบงานใหม่ให้ ── */
                 <IdeasView canEdit={canEdit} isAdmin={isAdmin} initialView={ideasLinkRef.current ? "inbox" : "all"} search={search} brandId={selectedBrand ? selectedBrand.key : null}
                   onPromoted={(id) => { refreshDashboard(); openDetail(id); }} onInboxCount={setIdeaInbox} />
+              ) : viewMode === "canvas" ? (
+                /* ── 🖌 แคนวาสของแบรนด์ (./canvas-view) — กระดานต่อแบรนด์ · ใช้ใบงานของแบรนด์ทั้งหมด (ไม่กรองคำค้น/วันในปฏิทิน กันการ์ดหายจากกระดาน) ── */
+                loading ? <div className="flex h-[50vh] items-center justify-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div> : (
+                  <BrandCanvasView brandKey={selectedBrandKey} columns={boardColumns.map((c) => ({ key: c.key, label: c.label, color: c.color }))} sheets={brandSheets}
+                    editable={canEdit && isDesktop} onOpenSheet={openDetail} onMoveStatus={(id, st) => void moveSheetToStatus(id, st)} height={isPhone ? "70vh" : "calc(100vh - 230px)"} />
+                )
               ) : loading ? (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   {[0, 1, 2, 3, 4].map((item) => <LoadingCard key={item} />)}

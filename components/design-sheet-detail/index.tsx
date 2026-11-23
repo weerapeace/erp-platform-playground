@@ -100,6 +100,7 @@ const BomFromCostWizard = dynamic(() => import("./bom-from-cost-wizard").then((m
 const BomToCostWizard = dynamic(() => import("./bom-to-cost-wizard").then((m) => m.BomToCostWizard), { ssr: false });
 const SkuMultiPickerModal = dynamic(() => import("@/components/sku-multi-picker").then((m) => m.SkuMultiPickerModal), { ssr: false });
 const WorkflowStatusManager = dynamic(() => import("@/components/workflow-status-manager").then((m) => m.WorkflowStatusManager), { ssr: false });
+const BrandCanvasRefs = dynamic(() => import("./brand-canvas-refs").then((m) => m.BrandCanvasRefs), { ssr: false });
 const PatternTicketLinks = dynamic(() => import("@/components/pattern-ticket-links").then((m) => m.PatternTicketLinks), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
@@ -2523,6 +2524,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     {fld.note}
                     {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
                     {form.id && <PatternTicketLinks sheetId={form.id} />}
+                    {/* 🖌 รูป/ลิงก์/ข้อความที่ลากเส้นผูกกับใบนี้บนกระดานแคนวาสของแบรนด์ (ไม่มี = ไม่โชว์) */}
+                    {form.id && <BrandCanvasRefs sheetId={form.id} brandId={form.brand_id} />}
                   </div>
                 ) }} />
             )}

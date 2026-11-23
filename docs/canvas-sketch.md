@@ -1,6 +1,6 @@
 # CanvasSketch — กระดานวาด Excalidraw (ของกลาง)
 
-`components/canvas-sketch/index.tsx` · API: `/api/canvas-sketch` · ตาราง: `erp_canvas_sketches` · ใช้จริง: Design Sheets แท็บ "🖌 กระดาน" · Campaign Canvas · บอร์ดจ่ายงาน มุมมอง "🗂 แคนวาส"
+`components/canvas-sketch/index.tsx` · API: `/api/canvas-sketch` · ตาราง: `erp_canvas_sketches` · ใช้จริง: Design Sheets แท็บ "🖌 กระดาน" · Campaign Canvas · บอร์ดจ่ายงาน มุมมอง "🗂 แคนวาส" · Design Dashboard มุมมอง "แคนวาส" ต่อแบรนด์ (`design_brand_canvas` · 1 กรอบ = 1 สถานะ · ลากข้ามกรอบ = เปลี่ยนสถานะ · ลูกศรผูกการ์ด = ของอ้างอิงโชว์ในใบงาน — `components/design-dashboard/canvas-view.tsx` + `lib/design-brand-canvas.ts`)
 
 ## ใช้ทำอะไร
 
