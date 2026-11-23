@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildCell, cellIssues, crossPriceDiff, emptyCell, listableMissing, listingDetails, matchPresence, missingShopCodes, presenceCounts, readyToList, rowHasIssue,
+  buildCell, cellIssues, crossPriceDiff, emptyCell, listableMissing, listingDetails, matchPresence, mergeCrossMaybe, missingShopCodes, presenceCounts, readyToList, rowHasIssue,
   titleHasBrand, titleHasCode, titleLength, type CrossCell, type CrossRow,
 } from "@/lib/platform-cross-shop";
 import type { SkuLite } from "@/lib/platform-variant-match";
@@ -141,5 +141,23 @@ describe("Website · ลงซ้ำ · พร้อมลงเลย", () => {
     expect(readyToList({ ...r, ready: { ...r.ready, lazada: { ...r.ready.lazada, ready: false } } }, shops)).toBe(false);
     expect(readyToList(row({ shopee: {}, lazada: {} }), shops)).toBe(false);
     expect(presenceCounts([r], shops)).toMatchObject({ ready: 1, dup: 0 });
+  });
+});
+
+describe("เติมตัวเดาคู่ทีหลัง (mergeCrossMaybe)", () => {
+  it("เติมเฉพาะช่องยังไม่ลง · ช่องที่ลงแล้ว/ปิดไม่แตะ · ไม่แก้ของเดิม", () => {
+    const r = row({ shopee: { st: "none" }, lazada: { st: "selling" }, tiktok: { st: "off" } });
+    const mb = { lid: "L1", title: "ชื่อบนร้าน", score: 0.9 };
+    const [out] = mergeCrossMaybe([r], { shopee: { P1: mb }, lazada: { P1: mb }, tiktok: { P1: mb } });
+    expect(out.cells.shopee.st).toBe("maybe");
+    expect(out.cells.shopee.maybe).toEqual(mb);
+    expect(out.cells.lazada.st).toBe("selling");
+    expect(out.cells.tiktok.st).toBe("off");
+    expect(r.cells.shopee.st).toBe("none");
+  });
+  it("ไม่มีตัวเดา = คืนแถวเดิม", () => {
+    const rows = [row({ shopee: { st: "none" } })];
+    expect(mergeCrossMaybe(rows, {})).toBe(rows);
+    expect(mergeCrossMaybe(rows, undefined)).toBe(rows);
   });
 });

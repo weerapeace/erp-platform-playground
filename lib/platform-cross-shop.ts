@@ -107,6 +107,23 @@ export type CrossShopResponse = {
   error: string | null;
 };
 
+/** ตัวเดาคู่ที่โหลดแยกทีหลัง (โหลดหน้าเร็วก่อน) — ร้าน → รุ่น → รายการบนร้านที่ตัวเดาชี้มา */
+export type CrossMaybe = Record<string, Record<string, NonNullable<CrossCell["maybe"]>>>;
+/** เติมช่อง "อาจมีแล้ว" ลงแถวที่โหลดมาแบบไม่เดาคู่ — แตะเฉพาะช่องที่ยังเป็น "ยังไม่ลง" (ไม่แก้ของเดิม คืนแถวใหม่) */
+export function mergeCrossMaybe(rows: CrossRow[], maybe: CrossMaybe | null | undefined): CrossRow[] {
+  if (!maybe || !Object.keys(maybe).length) return rows;
+  return rows.map((r) => {
+    let cells: CrossRow["cells"] | null = null;
+    for (const [code, byParent] of Object.entries(maybe)) {
+      const mb = byParent[r.id]; const c = r.cells[code];
+      if (!mb || !c || c.st !== "none") continue;
+      cells ??= { ...r.cells };
+      cells[code] = { ...c, st: "maybe", maybe: mb };
+    }
+    return cells ? { ...r, cells } : r;
+  });
+}
+
 export const emptyCell = (st: CrossCellState): CrossCell => ({
   st, listings: 0, lid: null, title: null, price: null, sale: null, pay_diff: 0, full_diff: 0, priced: 0, stock: null,
   vars: 0, v_unknown: 0, v_missing: 0, images: null, category: null, weight: null, maybe: null, dups: [],

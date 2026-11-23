@@ -4305,7 +4305,7 @@ function prettifyModuleKey(k: string): string {
 export function MasterRecordDrawer({
   moduleKey, recordId, onClose, onChanged, startInEdit, createDefaults, createTitle,
   apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, navIds,
-  formRenderers, fileAttachments, entryMode,
+  formRenderers, fileAttachments, entryMode, initialTab,
 }: {
   moduleKey: string;
   recordId: string | null;        // null = สร้างใหม่
@@ -4328,8 +4328,12 @@ export function MasterRecordDrawer({
   fileAttachments?: MasterCRUDConfig["fileAttachments"];
   /** 📝 เปิดแล้วเข้าโหมดลงรายละเอียดนี้เลย (key ของโหมด · ว่าง = หน้าปกติ) — ◀ ▶ ไปรุ่นอื่นยังอยู่ในโหมดเดิม */
   entryMode?: string | null;
+  /** เปิดมาที่แท็บนี้เลย (key ของแท็บ เช่น "platforms") — ไม่มีแท็บนี้/ซ่อนไว้ = แท็บแรกตามปกติ */
+  initialTab?: string;
 }) {
   const { user } = useAuth();
+  // ฝากแท็บไว้ก่อน LayoutTabs โผล่ (ข้อมูลยังโหลด) — LayoutTabs หยิบไปใช้ตอนมีแท็บนั้นแล้ว
+  useEffect(() => { if (initialTab) requestFormTab(moduleKey, initialTab); }, [moduleKey, recordId, initialTab]);
   const actor = user?.name ?? user?.email ?? undefined;
   const config: MasterCRUDConfig = useMemo(() => {
     // สินค้า (Parent/SKU) → ใช้แกลเลอรี "รูปสินค้า" อัตโนมัติทุกที่ที่เปิด drawer (ของกลาง) แม้ผู้เรียกไม่ได้ส่งมา
@@ -4683,11 +4687,20 @@ function LayoutTabs({
   const shownOrdered = ordered.filter((o) => shownKeys.includes(o.t.key));
   const orderedKeys = shownOrdered.map((o) => o.t.key);
   const [active, setActive] = useState<string>(orderedKeys[0] ?? "");
+  // แท็บที่ฝากไว้ (requestFormTab) — สลับครั้งเดียวเมื่อแท็บนั้นมีแล้ว
+  useEffect(() => {
+    const want = pendingFormTab.get(prefScope);
+    if (!want || !allKeys.includes(want)) return;
+    pendingFormTab.delete(prefScope);
+    if (hiddenMine.includes(want)) setHiddenMine(hiddenMine.filter((k) => k !== want));
+    setActive(want);
+  }, [prefScope, allKeys.join("|")]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ฟังคำสั่ง "ไปแท็บ" (gotoFormTab) — แท็บที่ฉันซ่อนไว้ = เปิดกลับให้ด้วย
   useEffect(() => {
     const on = (e: Event) => {
       const d = (e as CustomEvent<{ scope: string | null; key: string }>).detail;
       if (!d || d.scope !== prefScope || !allKeys.includes(d.key)) return;
+      if (pendingFormTab.get(prefScope) === d.key) pendingFormTab.delete(prefScope);
       if (hiddenMine.includes(d.key)) setHiddenMine(hiddenMine.filter((k) => k !== d.key));
       setActive(d.key);
     };
@@ -4827,6 +4840,13 @@ const TabPrefScope = createContext<string | null>(null);
 const GOTO_TAB_EVENT = "erp:goto-tab";
 export function gotoFormTab(scope: string | null, key: string): void {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(GOTO_TAB_EVENT, { detail: { scope, key } }));
+}
+// แท็บที่ขอไว้ก่อนฟอร์ม/ลิ้นชักจะโหลดเสร็จ (เช่น เปิดลิ้นชักไปแท็บแพลตฟอร์ม) — LayoutTabs หยิบไปครั้งเดียว
+const pendingFormTab = new Map<string | null, string>();
+/** เหมือน gotoFormTab แต่ "ฝากไว้" ด้วย ถ้าแท็บยังไม่ขึ้น (ลิ้นชักเพิ่งเปิด) จะสลับให้ทันทีที่แท็บนั้นโผล่ */
+export function requestFormTab(scope: string | null, key: string): void {
+  pendingFormTab.set(scope, key);
+  gotoFormTab(scope, key);
 }
 // แท็บพิเศษที่ผูก ctx แล้ว (พร้อม node) — ใช้ส่งเข้า LayoutTabs
 type BoundTab ={ key: string; label: string; icon?: string; node: React.ReactNode; inTab?: string; after?: string };

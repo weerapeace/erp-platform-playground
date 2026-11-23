@@ -3,12 +3,14 @@
  *
  *  GET ?brand_id=  (products.platforms.view · อ่านอย่างเดียว ไม่ส่งอะไรขึ้นร้าน)
  *    → CrossShopResponse (lib/platform-cross-shop): ร้าน + แถวละ 1 Parent SKU × ช่องละ 1 ร้าน (สถานะ/ราคา/ชื่อ/รายละเอียด/สต๊อก/ตัวเลือก)
+ *    &suggest=0   = ไม่เดาคู่ (เร็วกว่า ~3 เท่า) — หน้าเรียกแบบนี้ก่อนให้ตารางขึ้นเร็ว
+ *    &part=maybe  = ตัวเดาคู่อย่างเดียว → { maybe: CrossMaybe } — หน้าเรียกตามหลังเติมช่อง "อาจมีแล้ว" (mergeCrossMaybe)
  *  ประกอบข้อมูลที่ lib/platform-cross-shop-server · ความพร้อมลงไม่อยู่ที่นี่ (หน้าเรียก /api/product-platforms/create-readiness ทีละแถวที่อยู่บนจอ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { loadCrossShop } from "@/lib/platform-cross-shop-server";
+import { loadCrossShop, loadCrossShopMaybe } from "@/lib/platform-cross-shop-server";
 import type { CrossShopResponse } from "@/lib/platform-cross-shop";
 
 export const dynamic = "force-dynamic";
@@ -23,8 +25,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const empty: CrossShopResponse = { brand: null, shops: [], rows: [], unmatched: {}, error: null };
   if (!brandId) return NextResponse.json({ ...empty, error: "ต้องเลือกแบรนด์ก่อน" }, { status: 400, headers: NO_STORE });
   const t0 = Date.now();
+  const sp = request.nextUrl.searchParams;
+  if (sp.get("part") === "maybe") {
+    try {
+      const maybe = await loadCrossShopMaybe(supabaseAdmin(), brandId);
+      return NextResponse.json({ maybe, error: null }, { headers: { ...NO_STORE, "Server-Timing": `maybe;dur=${Date.now() - t0}` } });
+    } catch (e) {
+      console.error("[cross-shop maybe]", e);
+      return NextResponse.json({ maybe: {}, error: "เดาคู่ไม่สำเร็จ" }, { status: 500, headers: NO_STORE });
+    }
+  }
   try {
-    const data = await loadCrossShop(supabaseAdmin(), brandId);
+    const data = await loadCrossShop(supabaseAdmin(), brandId, { suggest: sp.get("suggest") !== "0" });
     const body: CrossShopResponse = { ...data, error: null };
     return NextResponse.json(body, { headers: { ...NO_STORE, "Server-Timing": `load;dur=${Date.now() - t0}` } });
   } catch (e) {

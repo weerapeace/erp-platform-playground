@@ -25,8 +25,8 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { exportTable, type ExportColumn } from "@/lib/export";
 import { readinessText, type CreateReadiness } from "@/lib/platform-create-readiness";
 import {
-  CROSS_DIMS, TITLE_LIMITS, WEBSITE, activeShops, cellIssues, listableMissing, matchPresence, missingShopCodes, presenceCounts, rowHasIssue, titleLength,
-  type CellIssue, type CrossCell, type CrossDim, type CrossReady, type CrossRow, type CrossShopResponse, type PresenceFilter,
+  CROSS_DIMS, TITLE_LIMITS, WEBSITE, activeShops, cellIssues, listableMissing, matchPresence, mergeCrossMaybe, missingShopCodes, presenceCounts, rowHasIssue, titleLength,
+  type CellIssue, type CrossCell, type CrossMaybe, type CrossDim, type CrossReady, type CrossRow, type CrossShopResponse, type PresenceFilter,
 } from "@/lib/platform-cross-shop";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import type { AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
@@ -36,6 +36,7 @@ const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/
 const ListingDrawer = dynamic(() => import("./listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
 const FakePriceDialog = dynamic(() => import("@/components/fake-price-dialog").then((m) => m.FakePriceDialog), { ssr: false });
 // หน้าเทียบ "บนร้าน → ตามระบบ" แล้วส่งให้ตรง (ของกลาง · ตัวเดียวกับแท็บแพลตฟอร์มของ Parent SKU)
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 const MatchSystemDialog = dynamic(() => import("./match-system-dialog").then((m) => m.MatchSystemDialog), { ssr: false });
 /** ร้านที่เทียบกับระบบได้ (= DRIFT_PLATFORMS ฝั่งเซิร์ฟเวอร์) */
 const DRIFT_CODES = ["shopee", "lazada", "tiktok", "line_shopping"];
@@ -256,13 +257,22 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   const canAdd = can("products.platforms.edit");
   const canPublish = can("products.platforms.publish");
   const isPhone = useMediaQuery("(max-width: 767px)");
+  // โหลด 2 จังหวะ: ① ตารางทั้งหมดแบบไม่เดาคู่ (เร็ว) ② ตัวเดาคู่ "อาจมีแล้ว" ตามมาทีหลัง (ช้าสุด ~70% ของเวลา) แล้วเติมลงช่อง
   const swr = useSWRLite<CrossShopResponse>(brandId ? `platform-cross-shop:${brandId}` : null, async () => {
-    const r = await apiFetch(`/api/platform-catalog/cross-shop?brand_id=${encodeURIComponent(brandId)}`);
+    const r = await apiFetch(`/api/platform-catalog/cross-shop?brand_id=${encodeURIComponent(brandId)}&suggest=0`);
     const j = await r.json() as CrossShopResponse;
     if (j.error) throw new Error(j.error);
     return j;
   }, { focusStaleMs: 10 * 60_000, timeoutMs: 60_000 });
-  const data = swr.data ?? null;
+  const maybeSwr = useSWRLite<CrossMaybe>(brandId && swr.data ? `platform-cross-shop-maybe:${brandId}` : null, async () => {
+    const r = await apiFetch(`/api/platform-catalog/cross-shop?brand_id=${encodeURIComponent(brandId)}&part=maybe`);
+    const j = await r.json() as { maybe?: CrossMaybe; error?: string | null };
+    if (j.error) throw new Error(j.error);
+    return j.maybe ?? {};
+  }, { focusStaleMs: 10 * 60_000, timeoutMs: 60_000 });
+  const guessing = !!swr.data && !maybeSwr.data && maybeSwr.loading;
+  const data = useMemo(() => (swr.data ? { ...swr.data, rows: mergeCrossMaybe(swr.data.rows, maybeSwr.data) } : null), [swr.data, maybeSwr.data]);
+  const reloadAll = useCallback(() => { void swr.revalidate(true); void maybeSwr.revalidate(true); }, [swr, maybeSwr]);
   const [dim, setDim] = useUserPref<CrossDim>("platform_cross_dim", "status", parseDim);
   const [presence, setPresence] = useState<PresenceFilter>("missing");
   const [onlyIssues, setOnlyIssues] = useState(true);
@@ -272,6 +282,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [addFor, setAddFor] = useState<{ parents: AddWizardParent[]; codes: string[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [parentOpen, setParentOpen] = useState<string | null>(null);   // กดช่องสินค้า → ลิ้นชัก Parent SKU แท็บแพลตฟอร์ม
   const [matchQ, setMatchQ] = useState<{ items: MatchItem[]; i: number; changed: boolean } | null>(null);   // ตรงกับระบบ: ไล่อัปเดตทีละรายการ
   const [exporting, setExporting] = useState(false);
   const canEditProducts = can("products.edit");
@@ -406,7 +417,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
         <div className="flex min-w-0 items-center gap-2">
           <HoverImage url={r2ImageUrl(r.cover_key, 160)} size={40} previewSize={300} rounded="rounded-md" fallback="—" />
           <div className="min-w-0">
-            <div className="font-mono text-xs font-medium text-slate-800">{r.code}</div>
+            <div className="font-mono text-xs font-medium text-slate-800 hover:text-blue-600 hover:underline" title="เปิดสินค้า (แท็บแพลตฟอร์ม)">{r.code}</div>
             <div className="truncate text-xs text-slate-500" title={r.name ?? ""}>{r.name ?? "—"}</div>
             <div className="text-[11px] text-slate-400">
               {dim === "price" ? `ระบบ ${baht(r.our.sale)}${r.our.full ? ` · เต็ม ${baht(r.our.full)}` : ""}`
@@ -433,6 +444,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   ], [shops, names, dim, bName, on]);
 
   const onCell = useCallback((r: CrossRow, colKey: string) => {
+    if (colKey === "product") { setParentOpen(r.id); return; }
     if (!colKey.startsWith("shop_")) return;
     const code = colKey.slice(5);
     const c = r.cells[code];
@@ -457,7 +469,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
   }, [swr]);
 
   if (!brandId) return <EmptyState title="เลือกแบรนด์ก่อน" hint="เช็กข้ามร้านดูทีละแบรนด์ — เลือกแบรนด์ที่แถบซ้าย" />;
-  if (!data && swr.loading) return <LoadingState label="กำลังรวมข้อมูลทุกร้าน… (ครั้งแรกอาจใช้ 5-15 วินาที)" />;
+  if (!data && swr.loading) return <LoadingState label="กำลังรวมข้อมูลทุกร้าน… (ครั้งแรกอาจใช้ 3-5 วินาที)" />;
   if (!data && swr.error) return <ErrorState title="โหลดข้อมูลไม่สำเร็จ" hint={swr.error.message} onRetry={() => void swr.revalidate(true)} />;
   if (!data) return null;
 
@@ -515,7 +527,12 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <Icon value="i:file-spreadsheet" />{exporting ? "กำลังส่งออก…" : `Excel (${filtered.length.toLocaleString()})`}
           </button>
-          <button type="button" onClick={() => void swr.revalidate(true)} disabled={swr.loading} title="โหลดข้อมูลใหม่ (ข้อมูลบนร้านมาจากรอบดึงสินค้าล่าสุด)"
+          {guessing && (
+            <span className="inline-flex items-center gap-1 text-xs text-amber-700" title="กำลังเดาว่ารายการบนร้านที่ยังไม่จับคู่ ตรงกับรุ่นไหน — เสร็จแล้วช่อง &quot;อาจมีแล้ว&quot; จะโผล่เอง">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-300 border-t-amber-600" />กำลังหา &quot;อาจมีแล้ว&quot;…
+            </span>
+          )}
+          <button type="button" onClick={reloadAll} disabled={swr.loading} title="โหลดข้อมูลใหม่ (ข้อมูลบนร้านมาจากรอบดึงสินค้าล่าสุด)"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
             <Icon value="i:refresh" />{swr.loading ? "กำลังโหลด…" : "รีเฟรช"}
           </button>
@@ -546,13 +563,14 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
           onCellClick={onCell} layout={isPhone ? "cards" : "table"} cardPick
           renderCard={(r) => (
             <div className="space-y-2 p-2">
-              <div className="flex min-w-0 items-center gap-2">
+              <button type="button" onClick={(e) => { e.stopPropagation(); setParentOpen(r.id); }} className="flex w-full min-w-0 items-center gap-2 text-left">
                 <HoverImage url={r2ImageUrl(r.cover_key, 120)} size={36} previewSize={240} rounded="rounded-md" fallback="—" />
-                <div className="min-w-0">
-                  <div className="font-mono text-xs font-medium text-slate-800">{r.code}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-mono text-xs font-medium text-blue-700">{r.code}</div>
                   <div className="truncate text-xs text-slate-500">{r.name ?? "—"}</div>
                 </div>
-              </div>
+                <Icon name="open" className="h-4 w-4 shrink-0 text-slate-300" />
+              </button>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
                 {shops.map((s) => (
                   <button key={s.code} type="button" onClick={(e) => { e.stopPropagation(); onCell(r, `shop_${s.code}`); }} className="min-w-0 text-left">
@@ -625,7 +643,7 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
           <button type="button" onClick={() => queueGo(queue.i)} className="h-8 rounded-lg border border-violet-200 bg-white px-2.5 text-xs hover:bg-violet-100">เปิดอีกครั้ง</button>
           <button type="button" disabled={queue.i === 0} onClick={() => queueGo(queue.i - 1)} className="h-8 rounded-lg border border-violet-200 bg-white px-2.5 text-xs hover:bg-violet-100 disabled:opacity-40">ก่อนหน้า</button>
           <button type="button" disabled={queue.i >= queue.items.length - 1} onClick={() => queueGo(queue.i + 1)} className="h-8 rounded-lg bg-violet-600 px-3 text-xs text-white hover:bg-violet-500 disabled:opacity-40">ถัดไป</button>
-          <button type="button" onClick={() => { setQueue(null); setOpenId(null); void swr.revalidate(true); }} className="h-8 rounded-lg px-2 text-xs text-violet-700 hover:bg-violet-100">จบ</button>
+          <button type="button" onClick={() => { setQueue(null); setOpenId(null); reloadAll(); }} className="h-8 rounded-lg px-2 text-xs text-violet-700 hover:bg-violet-100">จบ</button>
         </div>
       )}
 
@@ -723,7 +741,11 @@ export function CrossShopView({ brandId, brandName }: { brandId: string; brandNa
         <AddToPlatformWizard open parents={addFor.parents} brandId={brandId} initialPlatformCodes={addFor.codes}
           onClose={() => { setAddFor(null); setSelected(new Set()); }} onDone={() => void swr.revalidate(true)} />
       )}
-      <ListingDrawer listingId={openId} onClose={() => setOpenId(null)} canPublish={canPublish} onChanged={() => void swr.revalidate(true)} />
+      {parentOpen && (
+        <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentOpen} initialTab="platforms"
+          navIds={pageRows.map((x) => x.id)} onClose={() => setParentOpen(null)} onChanged={() => void swr.revalidate(true)} />
+      )}
+      <ListingDrawer listingId={openId} onClose={() => setOpenId(null)} canPublish={canPublish} onChanged={reloadAll} />
       {matchQ && (() => {
         const cur = matchQ.items[matchQ.i];
         const go = (i: number) => setMatchQ((q) => (q && i >= 0 && i < q.items.length ? { ...q, i } : q));

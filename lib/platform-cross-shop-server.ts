@@ -20,7 +20,7 @@ import { LISTING_HIDDEN_KEY, hiddenCodesOf, normalizeHiddenMap } from "@/lib/lis
 import { loadSkuStock } from "@/lib/sku-stock";
 import { loadReadiness } from "@/lib/platform-readiness-store";
 import { loadStoredDrift } from "@/lib/platform-listing-drift-server";
-import { WEBSITE, buildCell, emptyCell, listableMissing, type CellListing, type CrossRow, type CrossShop, type CrossShopResponse } from "@/lib/platform-cross-shop";
+import { WEBSITE, buildCell, emptyCell, listableMissing, type CellListing, type CrossRow, type CrossMaybe, type CrossShop, type CrossShopResponse } from "@/lib/platform-cross-shop";
 import type { SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -114,16 +114,7 @@ export async function loadCrossShop(admin: Admin, brandId: string, opts: { sugge
     for (const l of listingsByPf[i]) if (l.matched_parent_sku_id) (m.get(l.matched_parent_sku_id) ?? m.set(l.matched_parent_sku_id, []).get(l.matched_parent_sku_id)!).push(l);
     return m;
   });
-  const maybeBy = pfRows.map((_, i) => {
-    const m = new Map<string, { lid: string; title: string | null; score: number }>();
-    const s = sugg[i]; if (!s) return m;
-    for (const l of s.listings) {
-      const top = s.suggestions[l.id]?.[0]; if (!top) continue;
-      const prev = m.get(top.parent_sku_id);
-      if (!prev || top.score > prev.score) m.set(top.parent_sku_id, { lid: l.id, title: l.title ?? null, score: top.score });
-    }
-    return m;
-  });
+  const maybeBy = sugg.map(maybeMapOf);
 
   const rows: CrossRow[] = parents.map((p) => {
     const sell = sellable.get(p.id) ?? [];
@@ -168,6 +159,38 @@ export async function loadCrossShop(admin: Admin, brandId: string, opts: { sugge
     return row;
   });
   return { brand: brand ? { id: (brand as { id: string }).id, name: String((brand as { name: string | null }).name ?? "") } : null, shops, rows, unmatched };
+}
+
+type Suggest = Awaited<ReturnType<typeof computeMatchSuggestions>>;
+/** ตัวเดา top ต่อรุ่น (คะแนนสูงสุดต่อรุ่น) */
+function maybeMapOf(s: Suggest | null): Map<string, { lid: string; title: string | null; score: number }> {
+  const m = new Map<string, { lid: string; title: string | null; score: number }>();
+  if (!s) return m;
+  for (const l of s.listings) {
+    const top = s.suggestions[l.id]?.[0]; if (!top) continue;
+    const prev = m.get(top.parent_sku_id);
+    if (!prev || top.score > prev.score) m.set(top.parent_sku_id, { lid: l.id, title: l.title ?? null, score: top.score });
+  }
+  return m;
+}
+
+/**
+ * ตัวเดาคู่อย่างเดียว (ส่วนที่ช้าที่สุดของหน้าเช็กข้ามร้าน ~70% ของเวลา) — หน้าโหลดตารางแบบ suggest=false ก่อน
+ * แล้วค่อยเรียกตัวนี้เติมช่อง "อาจมีแล้ว" ทีหลัง (mergeCrossMaybe) · ข้ามร้านที่แบรนด์ซ่อน/เว็บไซต์
+ */
+export async function loadCrossShopMaybe(admin: Admin, brandId: string): Promise<CrossMaybe> {
+  const [{ data: pfs }, { data: hiddenCfg }] = await Promise.all([
+    admin.from("erp_platforms").select("id, code").in("code", [...SELLING_PLATFORMS]),
+    admin.from("ui_config").select("value").eq("key", LISTING_HIDDEN_KEY).maybeSingle(),
+  ]);
+  const hidden = new Set(hiddenCodesOf(normalizeHiddenMap((hiddenCfg as { value?: unknown } | null)?.value), brandId));
+  const list = ((pfs ?? []) as { id: string; code: string }[]).filter((p) => p.code !== WEBSITE && !hidden.has(p.code));
+  const out: CrossMaybe = {};
+  await Promise.all(list.map(async (p) => {
+    const m = maybeMapOf(await computeMatchSuggestions(admin, { platformId: p.id, brandId }));
+    if (m.size) out[p.code] = Object.fromEntries(m);
+  }));
+  return out;
 }
 
 /** หน้าร้านเว็บของเรา: parent → ชื่อร้านที่เผยแพร่อยู่ / ที่เพิ่มไว้แต่ซ่อน (เฉพาะร้าน active) */
