@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { guardApi } from "@/lib/api-auth";
 
 export type StockBalance = {
   product_id:       string;
@@ -29,6 +30,7 @@ type Raw = Omit<StockBalance, "image_url" | "parent_id" | "parent_code" | "paren
 const CHUNK = 150;   // id ยาว → แบ่งก้อนกัน URL ยาวเกิน
 
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "stock.view"); if (denied) return denied;   // ไม่มีสิทธิ์ = 401/403 (เดิม RPC โยน error → 500)
   const { searchParams } = new URL(request.url);
   const sb = supabaseFromRequest(request);
   const { data, error } = await sb.rpc("erp_playground_stock_balances_list", {

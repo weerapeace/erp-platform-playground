@@ -32,6 +32,7 @@ export type MovementsResponse = { data: StockMovement[]; total: number; error: s
 
 // ---- GET ?type=&warehouse_id=&product_id=&search= ----
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "stock.view"); if (denied) return denied;   // ไม่มีสิทธิ์ = 401/403 (เดิม RPC โยน error → 500)
   const { searchParams } = new URL(request.url);
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_stock_movements_list", {
     p_search:        searchParams.get("search") || null,
