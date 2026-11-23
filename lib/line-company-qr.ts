@@ -8,6 +8,7 @@
  *
  * ทุก QR = ลิงก์หน้าเล็ก LIFF  ?cq=<รหัส> (หน้า /a) · รหัสมี "เลขรุ่น" ที่เก็บใน line_config.company_qr
  *   กด "เปลี่ยน QR" = เปลี่ยนเลขรุ่น → QR ใบเก่าใช้ไม่ได้ทันที (ต้องพิมพ์ติดใหม่)
+ * menu.staff / menu.customer = ลิงก์จากปุ่มเมนูล่างจอของคนที่ยังไม่ผูก (ต้องเป็นเพื่อนไลน์บริษัทแล้วถึงเห็นเมนู) — ไม่มีเลขรุ่น ไม่เลิกใช้ตอนเปลี่ยน QR
  * QR ไม่ใช่ความลับ (โปสเตอร์ใครก็ถ่ายได้) — ความปลอดภัยมาจากขั้นยืนยันตัวตนหลังสแกน ไม่ใช่ตัว QR
  *   ยกเว้น QR รายร้าน: เซ็นรหัสร้านไว้ แก้เป็นร้านอื่นเองไม่ได้ (ใครได้ QR ร้านไป = ผูกร้านนั้นได้ → ให้เฉพาะร้านนั้น)
  */
@@ -79,6 +80,7 @@ export function parseQrCode(code: unknown, st: CompanyQrState): ParsedQr {
   const c = typeof code === "string" ? code.trim() : "";
   const [kind, a, b, extra] = c.split(".");
   if (extra !== undefined) return { ok: false, reason: "invalid" };
+  if (kind === "menu" && b === undefined && (a === "staff" || a === "customer")) return { ok: true, kind: a };
   if (kind === "staff" || kind === "customer" || kind === "admin") {
     if (b !== undefined || !a || !NONCE_RE.test(a)) return { ok: false, reason: "invalid" };
     return a === st[kind] ? { ok: true, kind } : { ok: false, reason: "rotated" };
@@ -93,6 +95,9 @@ export function parseQrCode(code: unknown, st: CompanyQrState): ParsedQr {
   }
   return { ok: false, reason: "invalid" };
 }
+
+/** ลิงก์จากปุ่มเมนูล่างจอ "ฉันเป็นพนักงาน/ลูกค้า" → หน้ายืนยันตัวตน (ไม่ผูกเลขรุ่น QR) */
+export const menuVerifyCode = (kind: "staff" | "customer") => `menu.${kind}`;
 
 /** ลิงก์ที่อยู่ใน QR — เปิดผ่าน LIFF (รู้ว่าเป็นใครในไลน์ + ชวนเพิ่มเพื่อนไลน์บริษัท) → หน้า /a?cq=<รหัส> */
 export function companyQrLink(code: string): string {

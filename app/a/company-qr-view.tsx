@@ -5,6 +5,8 @@
 //   พนักงาน  : กรอกรหัสพนักงาน + เบอร์ → ผูก (ผิดเกิน 5 ครั้ง/วัน = ล็อก) → รอ HR ยืนยันก่อนเห็นเงินเดือน/ใบเตือน
 //   ลูกค้า   : พิมพ์ชื่อร้าน → ส่งคำขอ → พนักงานยืนยันในห้องแชต
 //   รายร้าน  : เห็นชื่อร้าน → กดยืนยัน → ผูกทันที
+//   ทุกแบบ: ยังไม่เป็นเพื่อนไลน์บริษัท = ขั้นที่ 1 "เพิ่มเพื่อน" ก่อน (กรอกยังไม่ได้) → เป็นเพื่อนแล้วค่อยยืนยัน (เจ้าของเลือก 2026-11-23)
+//     เช็กเพื่อนด้วย liff.getFriendship (ต้องผูก LINE Login กับบัญชีไลน์บริษัทแล้ว) · เช็กไม่ได้ = ไม่บล็อก (โชว์ปุ่มเพิ่มเพื่อนท้ายหน้า)
 //   แอดมิน   : ล็อกอินบัญชี ERP → ผูกไลน์กับบัญชี (/api/account/line-link) → มีสิทธิ์แอดมิน = เมนูแอดมินขึ้นเอง
 // ============================================================
 import { useEffect, useState, type ReactNode } from "react";
@@ -12,7 +14,7 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { initLiffIdToken, type LiffProfile, type LiffSdk } from "@/lib/liff-client";
 
-type Info = { kind: "staff" | "customer" | "admin" | "shop"; shop_name: string | null; oa_add_url: string | null };
+type Info = { kind: "staff" | "customer" | "admin" | "shop"; shop_name: string | null; oa_add_url: string | null; oa_name: string | null };
 
 const TITLE: Record<Info["kind"], string> = {
   staff: "ผูกไลน์พนักงาน",
@@ -67,6 +69,22 @@ export function CompanyQrView({ code }: { code: string }) {
       setErpLogin((j as { linked?: boolean }).linked ? "linked" : "ok");
     }).catch(() => setErpLogin("need"));
   }, [info?.kind]);
+
+  // กลับมาจากหน้าเพิ่มเพื่อน → เช็กใหม่เอง (และมีปุ่ม "เพิ่มแล้ว" ให้กดเช็กเอง)
+  const [checking, setChecking] = useState(false);
+  const recheckFriend = async () => {
+    if (!liff?.getFriendship) return;
+    setChecking(true);
+    try { const fs = await liff.getFriendship(); setIsFriend(fs.friendFlag); } catch { /* เช็กไม่ได้ = คงค่าเดิม */ }
+    finally { setChecking(false); }
+  };
+  useEffect(() => {
+    if (isFriend !== false) return;
+    const on = () => { if (document.visibilityState === "visible") void recheckFriend(); };
+    document.addEventListener("visibilitychange", on); window.addEventListener("focus", on);
+    return () => { document.removeEventListener("visibilitychange", on); window.removeEventListener("focus", on); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFriend, liff]);
 
   const submit = async () => {
     if (!idToken) { setErr(liffErr || "กำลังเชื่อมต่อ LINE..."); return; }
@@ -130,6 +148,25 @@ export function CompanyQrView({ code }: { code: string }) {
       {liff?.closeWindow && (
         <button onClick={() => liff.closeWindow?.()} className="mt-5 h-11 w-full rounded-xl border border-slate-200 text-sm font-semibold text-slate-700">ปิดหน้านี้</button>
       )}
+    </div>
+  );
+
+  // ขั้นที่ 1: ต้องเป็นเพื่อนไลน์บริษัทก่อน
+  if (isFriend === false && info.oa_add_url) return wrap(
+    <div className="space-y-4 text-center">
+      <div className="flex items-center justify-center gap-2 text-xs">
+        <span className="rounded-full bg-emerald-600 px-2.5 py-1 font-semibold text-white">1 เพิ่มเพื่อน</span>
+        <span className="text-slate-300">→</span>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-500">2 {info.kind === "staff" ? "ยืนยันตัวตน" : info.kind === "admin" ? "เข้าสู่ระบบ" : "ยืนยันร้าน"}</span>
+      </div>
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><Icon name="chat" size={30} /></div>
+      <div>
+        <p className="text-lg font-bold text-slate-900">เพิ่มเพื่อน {info.oa_name || "ไลน์บริษัท"} ก่อน</p>
+        <p className="mt-1 text-sm text-slate-600">เพิ่มเพื่อนแล้วกลับมาหน้านี้ เพื่อ{TITLE[info.kind].replace(/^ผูกไลน์/, "ผูกไลน์")} · เมนูของคุณจะขึ้นในแชตนี้</p>
+      </div>
+      <a href={info.oa_add_url} className="block h-12 w-full rounded-xl bg-emerald-600 text-base font-semibold leading-[3rem] text-white">เพิ่มเพื่อน</a>
+      <button type="button" onClick={() => void recheckFriend()} disabled={checking}
+        className="h-11 w-full rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50">{checking ? "กำลังเช็ก..." : "เพิ่มเพื่อนแล้ว ไปต่อ"}</button>
     </div>
   );
 

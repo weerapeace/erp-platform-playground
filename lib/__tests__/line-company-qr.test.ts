@@ -45,3 +45,21 @@ describe("ไลน์บริษัท — QR", () => {
     expect(companyQrLink("staff.abcdefgh")).toMatch(/\?cq=staff\.abcdefgh$/);
   });
 });
+
+describe("ลิงก์จากปุ่มเมนูคนที่ยังไม่ผูก (menu.staff / menu.customer)", () => {
+  it("ใช้ได้เฉพาะพนักงาน/ลูกค้า · ไม่ผูกเลขรุ่น", async () => {
+    const { parseQrCode } = await import("@/lib/line-company-qr");
+    expect(parseQrCode("menu.staff", {})).toEqual({ ok: true, kind: "staff" });
+    expect(parseQrCode("menu.customer", {})).toEqual({ ok: true, kind: "customer" });
+    expect(parseQrCode("menu.admin", {}).ok).toBe(false);
+    expect(parseQrCode("menu.shop", {}).ok).toBe(false);
+    expect(parseQrCode("menu.staff.x", {}).ok).toBe(false);
+  });
+  it("ปุ่มเมนูคนทั่วไป = เปิดหน้ายืนยัน · คุยกับพนักงาน = postback เดิม", async () => {
+    const { richMenuBody, DEFAULT_COMPANY_LAYOUT, verifyPageLink, companyReplyText } = await import("@/lib/line-company");
+    const b = richMenuBody("guest", DEFAULT_COMPANY_LAYOUT, { liffId: "L" }) as { areas: { action: { type: string; uri?: string; data?: string } }[] };
+    expect(b.areas.filter((a) => a.action.type === "uri").map((a) => a.action.uri)).toEqual([verifyPageLink("L", "staff"), verifyPageLink("L", "customer")]);
+    expect(b.areas.some((a) => a.action.data === "cmp=talk")).toBe(true);
+    expect(companyReplyText("unknown", "i_am_staff", null, "L")).toContain("cq=menu.staff");
+  });
+});

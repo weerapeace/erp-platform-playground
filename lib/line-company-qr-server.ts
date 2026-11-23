@@ -40,19 +40,20 @@ async function partnerName(admin: Admin, partnerId: string): Promise<string | nu
 }
 
 /** หน้าเล็กถามว่า QR นี้คืออะไร — QR รายร้านบอกชื่อร้าน (ให้ลูกค้าเห็นว่ากำลังผูกร้านไหน) */
-export async function companyQrInfo(admin: Admin, code: unknown): Promise<{ kind: string; shop_name: string | null; oa_add_url: string | null }> {
+export async function companyQrInfo(admin: Admin, code: unknown): Promise<{ kind: string; shop_name: string | null; oa_add_url: string | null; oa_name: string | null }> {
   const cfg = await loadLineConfig(admin);
   const q = parseQrCode(code, qrStateOf(cfg.company_qr));
   if (!q.ok) throw new Error(QR_INVALID_TEXT[q.reason]);
   // ลิงก์เพิ่มเพื่อนไลน์บริษัท (เผื่อ LIFF ยังไม่ได้ตั้งให้ชวนเพิ่มเพื่อนเอง)
   const basic = companyBot(cfg)?.basic_id?.trim() ?? "";
   const oa_add_url = basic ? `https://line.me/R/ti/p/${encodeURIComponent(basic.startsWith("@") ? basic : `@${basic}`)}` : null;
+  const oa_name = companyBot(cfg)?.bot_name?.trim() || null;
   if (q.kind === "shop") {
     const name = await partnerName(admin, q.partnerId);
     if (!name) throw new Error("ร้านนี้ปิดใช้งานแล้ว ติดต่อพนักงานขาย");
-    return { kind: "shop", shop_name: name, oa_add_url };
+    return { kind: "shop", shop_name: name, oa_add_url, oa_name };
   }
-  return { kind: q.kind, shop_name: null, oa_add_url };
+  return { kind: q.kind, shop_name: null, oa_add_url, oa_name };
 }
 
 export type SubmitQrInput = { c?: unknown; id_token?: unknown; employee_code?: unknown; phone?: unknown; shop_name?: unknown; contact_name?: unknown };

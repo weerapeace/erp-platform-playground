@@ -182,6 +182,10 @@ const isLiffPageAction = (a: CompanyAction): a is LiffPageAction => (LIFF_PAGE_A
 const LIFF_PAGE_NAME: Record<LiffPageAction, string> = { payslip: "สลิปเงินเดือน", warning: "ใบเตือน", piecework: "งานเหมา", orders: "สถานะงาน", schedule: "ตารางส่งงาน" };
 export const liffPageLink = (liffId: string, act: LiffPageAction) => `https://liff.line.me/${liffId}?me=${act}`;
 
+/** ปุ่ม "ฉันเป็นพนักงาน/ลูกค้า" ของคนที่ยังไม่ผูก = เปิดหน้ายืนยันตัวตนทันที (cq=menu.staff|menu.customer · lib/line-company-qr) */
+const VERIFY_ACTIONS: Partial<Record<CompanyAction, "staff" | "customer">> = { i_am_staff: "staff", i_am_customer: "customer" };
+export const verifyPageLink = (liffId: string, kind: "staff" | "customer") => `https://liff.line.me/${liffId}?cq=menu.${kind}`;
+
 export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout, opts: { liffId?: string } = {}): Record<string, unknown> {
   const buttons = visibleButtons(layout[buttonsKindOf(key)]);
   const tab = adminTabOf(key);
@@ -201,6 +205,8 @@ export function richMenuBody(key: PublishedMenuKey, layout: CompanyMenuLayout, o
         bounds: richMenuCell(i, buttons.length, !!tab),
         action: opts.liffId && isLiffPageAction(b.act)
           ? { type: "uri", label: b.label.slice(0, LABEL_MAX), uri: liffPageLink(opts.liffId, b.act) }
+          : opts.liffId && VERIFY_ACTIONS[b.act]
+          ? { type: "uri", label: b.label.slice(0, LABEL_MAX), uri: verifyPageLink(opts.liffId, VERIFY_ACTIONS[b.act]!) }
           : { type: "postback", label: b.label.slice(0, LABEL_MAX), data: `${POSTBACK_PREFIX}${b.act}`, displayText: b.label },
       })),
     ],
@@ -248,8 +254,12 @@ export function companyReplyText(who: CompanyWho, act: CompanyAction, name?: str
   const hi = name ? `คุณ${name} ` : "";
   switch (act) {
     case "i_am_staff":
+      if (liffId) return `ยืนยันตัวตนพนักงาน: กดลิงก์นี้ แล้วกรอกรหัสพนักงาน + เบอร์โทร
+${verifyPageLink(liffId, "staff")}`;
       return "ผูกไลน์กับรหัสพนักงาน: สแกน QR บนบัตรที่ฝ่ายบุคคลให้ (ใช้ได้ครั้งเดียว) ถ้ายังไม่มีบัตร ขอจากฝ่ายบุคคลได้เลย\nผูกเสร็จแล้ว เมนูด้านล่างจะเปลี่ยนเป็นเมนูพนักงานเอง";
     case "i_am_customer":
+      if (liffId) return `ผูกไลน์กับร้านของคุณ: กดลิงก์นี้ แล้วพิมพ์ชื่อร้าน พนักงานจะยืนยันให้
+${verifyPageLink(liffId, "customer")}`;
       return "ผูกไลน์กับร้านของคุณ: ขอลิงก์ผูกไลน์จากพนักงานขายที่ดูแลร้าน เมื่อผูกแล้วจะดูออเดอร์และสินค้าของร้านได้ที่นี่\nหรือพิมพ์ถามในแชตนี้ได้เลย พนักงานจะตอบกลับ";
     case "talk":
       return "พิมพ์ข้อความหรือส่งรูปในแชตนี้ได้เลย พนักงานจะตอบกลับในแชตนี้";
