@@ -30,6 +30,7 @@ import { useCanvasRealtime } from "./use-canvas-realtime";
 import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles } from "./utils";
 import { parseSocialLink, socialEmbedSize, type SocialLink } from "@/lib/social-embed";
 import { SocialEmbedFrame, fetchSocialInfo } from "./social-embed-frame";
+import { LineTools } from "./line-tools";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
@@ -1320,8 +1321,8 @@ export function CanvasSketch({
           viewModeEnabled={!(editable && serverCanEdit)}
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
           initialData={scene
-            ? { elements: scene.elements as any, files: scene.files as any, appState: { objectsSnapModeEnabled: true }, scrollToContent: true }
-            : { appState: { objectsSnapModeEnabled: true } }}
+            ? { elements: scene.elements as any, files: scene.files as any, appState: { objectsSnapModeEnabled: true, currentItemArrowType: "elbow" }, scrollToContent: true }
+            : { appState: { objectsSnapModeEnabled: true, currentItemArrowType: "elbow" } }}
           onChange={(elements: any, appState: any, files: any) => {
             // จับ snapshot — แต่ "อย่า" ให้ตอน Excalidraw เคลียร์เป็นว่าง (teardown/ปิดหน้า) มาทับ snapshot ดี (กันเซฟว่าง)
             const hasLive = (elements as any[]).some((e) => !e.isDeleted);
@@ -1369,6 +1370,8 @@ export function CanvasSketch({
             return false;
           }}
         />
+        {/* เส้นบนกระดาน: แถบปรับเส้นตอนเลือกเส้น + จุดเชื่อมรอบการ์ด (ของกลาง line-tools · เส้นใหม่หักฉากเป็นค่าเริ่ม) */}
+        <LineTools apiRef={apiRef} wrapRef={wrapRef} enabled={editable && serverCanEdit && !capArmed} />
         {/* โหมดลากคลุมพื้นที่เพื่อแคปส่ง LINE — overlay จับเมาส์ทับกระดาน */}
         {capArmed && !capModal && (
           <div className="absolute inset-0 z-40 cursor-crosshair" onMouseDown={onCapDown} onMouseMove={onCapMove} onMouseUp={onCapUp}>
