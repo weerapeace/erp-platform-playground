@@ -65,7 +65,7 @@ export function lazOrderToPlatformOrder(o: Record<string, unknown>, items: Recor
     const prev = by.get(key);
     if (prev) { prev.qty += 1; prev.order_item_ids.push(String(it.order_item_id ?? "")); }
     else by.set(key, { sku_code: sku, name: str(it.name), qty: 1, price, variant: str(it.variation), shop_sku: str(it.shop_sku), order_item_ids: [String(it.order_item_id ?? "")], original_price: lazMoney(it.item_price), paid_price: lazMoney(it.paid_price) });
-    const promised = lazTime(it.promised_shipping_time) ?? lazTime(it.sla_time_stamp);
+    const promised = lazTime(it.promised_shipping_time) ?? lazTime(it.sla_time_stamp) ?? lazTime(it.fulfillment_sla);
     if (promised) { const t = Date.parse(promised); if (shipBy == null || t < shipBy) shipBy = t; }
     tracking = tracking ?? str(it.tracking_code);
     carrier = carrier ?? str(it.shipment_provider);
@@ -86,7 +86,7 @@ export function lazOrderToPlatformOrder(o: Record<string, unknown>, items: Recor
       cod_amount: cod,
       tracking_no: tracking, carrier, package_no: pkg,
       ship_by_at: shipBy == null ? null : new Date(shipBy).toISOString(),
-      raw: { lazada: { ...raw, ...(list[0] ? { item_keys: Object.keys(list[0]), shipping_provider_type: str(list[0].shipping_provider_type), shipping_type: str(list[0].shipping_type) } : {}) } },
+      raw: { lazada: { ...raw, ...(list[0] ? { item_keys: Object.keys(list[0]), shipping_provider_type: str(list[0].shipping_provider_type), shipping_type: str(list[0].shipping_type), sla: { sla_time_stamp: list[0].sla_time_stamp ?? null, promised_shipping_time: list[0].promised_shipping_time ?? null, fulfillment_sla: list[0].fulfillment_sla ?? null } } : {}) } },
     },
     items: [...by.values()],
   };
