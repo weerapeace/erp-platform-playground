@@ -100,11 +100,13 @@ export function HoverImage({
     );
   }
   return (
-    <span ref={ref} className={`shrink-0 inline-block cursor-zoom-in ${className}`}
+    // กล่องจองขนาดตายตัว (style={dim}) + รูป max-w-none — ในตารางที่คอลัมน์อื่นกว้างเต็ม (w-full) คอลัมน์รูปถูกเบียดจนแคบ
+    //   แล้ว img max-width:100% ของ Tailwind บีบรูปเหลือแท่งผอม (สูงเท่าเดิม กว้างหด) — เจอที่ตาราง SKU 2026-11-23
+    <span ref={ref} style={dim} className={`shrink-0 inline-block align-middle cursor-zoom-in ${className}`}
       onMouseEnter={canHover ? hover.enter : undefined} onMouseLeave={canHover ? hover.leave : undefined}
       onClick={(e) => { e.stopPropagation(); hover.leave(); if (onOpen) onOpen(); else setZoom(true); }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" style={dim} className={`object-cover border border-slate-200 ${rounded}`} />
+      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" style={dim} className={`max-w-none object-cover border border-slate-200 ${rounded}`} />
       {box && !zoom && typeof document !== "undefined" && createPortal(
         <div style={{ position: "fixed", left: box.left, top: box.top, zIndex: 9999 }}
           className="pointer-events-none bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5">
