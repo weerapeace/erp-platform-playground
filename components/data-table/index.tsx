@@ -5,6 +5,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
+import { useSelectMode, SelectModeButton, SelectModeBar } from "@/components/select-mode";   // ของกลาง: โหมดเลือก + Shift เลือกช่วง + กดค้าง
 import { CardZoom, type GalleryCols } from "@/components/gallery-columns";   // โหมดการ์ด: ซูม Ctrl+ลูกกลิ้ง
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -1211,6 +1212,15 @@ export function DataTable<T extends Record<string, unknown>>({
   // แสดง checkbox เลือกแถว เมื่อมี bulk actions หรือ bulk edit
   const hasBulk = bulkActions.length > 0 || (bulkEditFields.length > 0 && !!onBulkEdit);
   const showSelectCol = hasBulk || selectable;
+  // เลือกหลายแถว (ของกลาง select-mode): Shift+กด = ทั้งช่วงตามลำดับที่เห็น · ปุ่ม "เลือก" = โหมดเลือก · มือถือกดค้าง · Esc/Ctrl+A
+  //   ลำดับแถวรู้ตอนวาดเท่านั้น (จัดกลุ่ม/พับกลุ่ม) → renderOrderRef เติมตอนวาดแถว · ⚠️ ต้องประกาศก่อน withSelectCol (ช่องติ๊กเรียก sm.pick)
+  const renderOrderRef = useRef<string[]>([]);
+  const selIdSet = useMemo(() => new Set(Object.keys(rowSelection).filter((k) => rowSelection[k])), [rowSelection]);
+  const sm = useSelectMode({
+    order: () => renderOrderRef.current, selected: selIdSet, enabled: showSelectCol,
+    onChange: (next) => setRowSelection(Object.fromEntries([...next].map((k) => [k, true]))),
+  });
+  const smPick = sm.pick;
   const withSelectCol = useMemo<ColumnDef<T>[]>(() => {
     if (!showSelectCol) return allDefinedColumns;
     return [
@@ -1224,18 +1234,18 @@ export function DataTable<T extends Record<string, unknown>>({
             onChange={table.getToggleAllPageRowsSelectedHandler()} />
         ),
         cell: ({ row }) => (
-          // ของกลาง: กด "รอบ ๆ" checkbox (ทั้งช่อง) ก็ติ๊กได้ — พื้นที่กดกว้างขึ้น
-          <label onClick={e => e.stopPropagation()} className="flex items-center justify-center -my-1.5 -mx-2 py-1.5 px-2 cursor-pointer">
+          // ของกลาง: กด "รอบ ๆ" checkbox (ทั้งช่อง) ก็ติ๊กได้ — พื้นที่กดกว้างขึ้น · Shift+กด = เลือกทั้งช่วง (select-mode)
+          <label onClick={e => { e.stopPropagation(); e.preventDefault(); smPick(row.id, e); }} onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+            className="flex items-center justify-center -my-1.5 -mx-2 py-1.5 px-2 cursor-pointer">
             <input type="checkbox" className="rounded border-slate-300 text-blue-600"
-              checked={row.getIsSelected()}
-              onChange={row.getToggleSelectedHandler()} />
+              checked={row.getIsSelected()} readOnly />
           </label>
         ),
         enableSorting: false, enableHiding: false,
       },
       ...allDefinedColumns,
     ];
-  }, [allDefinedColumns, showSelectCol]);
+  }, [allDefinedColumns, showSelectCol, smPick]);
 
   const tableColumns = useMemo<ColumnDef<T>[]>(() => {
     // สรุปท้ายคอลัมน์ (ของกลาง) — ฉีด meta.summary จาก settings.summaries (sum/count/avg)
@@ -1392,6 +1402,11 @@ export function DataTable<T extends Record<string, unknown>>({
 
   const selectedRows  = useMemo(() => [...selectedData.values()], [selectedData]);
   const selectedCount = selectedRows.length;
+  // ติ๊กอยู่แล้ว (เดิม) หรืออยู่ในโหมดเลือก = กดแถว = ติ๊ก (ไม่เปิดรายละเอียด)
+  const selMode = showSelectCol && sm.mode;
+  const rowSelectClick = showSelectCol && (selMode || selectedCount > 0);
+  const orderBuf: string[] = [];   // ลำดับแถวที่วาดรอบนี้ (เติมตอนวาดแถว) → Shift+กด / Ctrl+A ใช้
+  renderOrderRef.current = orderBuf;
 
   // จำนวนคอลัมน์ของ skeleton — ตรึงให้นิ่งระหว่างโหลด ไม่ให้เด้งตอน registry/คอลัมน์ทยอยมา (กันกระพริบ)
   // อัปเดตเฉพาะตอน "ไม่โหลด" → ครั้งแรกใช้ค่า fallback 8, โหลดหน้าถัดไปใช้จำนวนคอลัมน์จริง (ตรงกับตาราง)
@@ -1829,6 +1844,9 @@ export function DataTable<T extends Record<string, unknown>>({
           </div>
         )}
 
+        {/* โหมดเลือก (ของกลาง select-mode) — เฉพาะตารางที่มีช่องติ๊ก */}
+        {showSelectCol && viewMode === "table" && <SelectModeButton mode={sm.mode} onToggle={sm.toggle} />}
+
         {/* Density toggle (เฉพาะ table) */}
         {viewMode === "table" && (
           <button
@@ -1974,6 +1992,13 @@ export function DataTable<T extends Record<string, unknown>>({
           })}
           <button onClick={clearColFilters} className="text-xs text-red-500 hover:text-red-700 ml-1">ล้างทั้งหมด</button>
           <button onClick={() => setShowFilterPanel(true)} className="text-xs text-blue-600 hover:text-blue-800 underline ml-auto">แก้ไข Filter</button>
+        </div>
+      )}
+
+      {selMode && viewMode === "table" && (
+        <div className="px-3 py-2 border-b border-slate-100">
+          <SelectModeBar count={selectedCount} total={table.getRowModel().rows.length}
+            onAll={sm.selectAll} onClear={() => setRowSelection({})} onDone={sm.exit} />
         </div>
       )}
 
@@ -2194,10 +2219,12 @@ export function DataTable<T extends Record<string, unknown>>({
                     ? (grp.map(r => r.getValue(imgColId)).find(v => v && String(v).trim()) as string | undefined)
                     : undefined;
                   if (!collapsed) for (const row of grp) {
+                    orderBuf.push(row.id);
                     out.push(
                       <React.Fragment key={row.id}>
-                        <tr onClick={() => { if (showSelectCol && selectedCount > 0) { row.toggleSelected(); return; } if (isRowClickable) handleRowClick(row.original); }}
-                          className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || (showSelectCol && selectedCount > 0) ? "cursor-pointer" : ""}`}>
+                        <tr onClick={(e) => { if (rowSelectClick) { smPick(row.id, e); return; } if (isRowClickable) handleRowClick(row.original); }}
+                    {...(showSelectCol ? sm.pressProps(row.id) : {})}
+                          className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || rowSelectClick ? "cursor-pointer" : ""} ${selMode ? "select-none" : ""}`}>
                           {row.getVisibleCells().map(cell => (
                             <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
                               {cell.column.columnDef.meta?.type === "image"
@@ -2226,6 +2253,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 </tr>
               ) : (
                 table.getRowModel().rows.map(row => {
+                  orderBuf.push(row.id);
                   const rc = evalRowColor(viewRowColorRules ?? layoutSettings?.row_color_rules, row.original as Record<string, unknown>);
                   const rcStyle: React.CSSProperties | undefined = rc
                     ? { boxShadow: `inset 3px 0 0 0 ${ROW_COLOR_BORDER[rc] ?? "#94a3b8"}`, ...(row.getIsSelected() ? {} : { backgroundColor: ROW_COLOR_BG[rc] ?? "#f8fafc" }) }
@@ -2233,9 +2261,10 @@ export function DataTable<T extends Record<string, unknown>>({
                   return (
                   <React.Fragment key={row.id}>
                   <tr
-                    onClick={() => { if (showSelectCol && selectedCount > 0) { row.toggleSelected(); return; } if (isRowClickable) handleRowClick(row.original); }}
+                    onClick={(e) => { if (rowSelectClick) { smPick(row.id, e); return; } if (isRowClickable) handleRowClick(row.original); }}
+                    {...(showSelectCol ? sm.pressProps(row.id) : {})}
                     style={rcStyle}
-                    className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || (showSelectCol && selectedCount > 0) ? "cursor-pointer" : ""}`}>
+                    className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || rowSelectClick ? "cursor-pointer" : ""} ${selMode ? "select-none" : ""}`}>
                     {row.getVisibleCells().map(cell => {
                       const pin = pinnedStyle(cell.column);
                       const isPinned = !!cell.column.getIsPinned();

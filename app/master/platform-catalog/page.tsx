@@ -949,7 +949,7 @@ export default function PlatformCatalogPage() {
       return (
         <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
           <span className="inline-flex items-center gap-1 text-xs text-slate-500 bg-slate-100 border border-dashed border-slate-300 rounded px-1.5 py-0.5 truncate" title={l.match_ignore_reason ?? ""}>
-            <Icon name="ban" />{quit ? "เลิกขายแล้ว" : `ไม่ต้องจับคู่${l.match_ignore_reason ? ` · ${l.match_ignore_reason}` : ""}`}
+            <Icon value="i:ban" />{quit ? "เลิกขายแล้ว" : `ไม่ต้องจับคู่${l.match_ignore_reason ? ` · ${l.match_ignore_reason}` : ""}`}
           </span>
           {canEdit && <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore([l.id], false, null)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50">เอากลับมาจับคู่</button>}
         </span>
@@ -958,7 +958,7 @@ export default function PlatformCatalogPage() {
     // ยังไม่จับคู่ → ปุ่ม "เลิกขาย" (ป๊อปเลือกเหตุผล "เลิกขายแล้ว" ไว้ก่อน เปลี่ยนเหตุผลได้)
     const quitBtn = canEdit && (
       <button type="button" disabled={ignoreBusy} onClick={() => askIgnore([l.id], IGNORE_REASON_DISCONTINUED)} title="เลิกขายแล้ว / ไม่ต้องจับคู่ — เอากลับมาได้ทุกเมื่อ"
-        className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50"><Icon name="ban" />เลิกขาย</button>
+        className="inline-flex items-center gap-0.5 text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50"><Icon value="i:ban" />เลิกขาย</button>
     );
     const top = suggestions[l.id]?.[0];
     if (st === "guess" && top) return (
@@ -1459,7 +1459,7 @@ export default function PlatformCatalogPage() {
                   <span className="flex-1 min-w-[14rem]">ปิดขายบนร้านและยังไม่จับคู่ {hiddenUnmatched.length.toLocaleString()} รายการ — ถ้าเลิกขายแล้ว ตั้งทีเดียวได้ (ไม่นับใน “ยังไม่จับคู่” · เอากลับมาได้ทุกเมื่อ)</span>
                   <button type="button" disabled={ignoreBusy} onClick={() => askIgnore(hiddenUnmatched.map((l) => l.id), IGNORE_REASON_DISCONTINUED)}
                     className="h-8 px-3 inline-flex items-center gap-1.5 text-sm whitespace-nowrap text-slate-700 border border-slate-300 bg-white rounded-lg hover:bg-slate-100 disabled:opacity-50">
-                    <Icon name="ban" />ตั้งเลิกขายทั้งหมดที่ปิดขาย ({hiddenUnmatched.length.toLocaleString()})
+                    <Icon value="i:ban" />ตั้งเลิกขายทั้งหมดที่ปิดขาย ({hiddenUnmatched.length.toLocaleString()})
                   </button>
                 </div>
               )}
@@ -1582,10 +1582,10 @@ export default function PlatformCatalogPage() {
             <button type="button" disabled={bulkBusy} onClick={() => setBulkAsk("selected")} className="h-8 px-3 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">✓ ยืนยันคู่ที่ระบบเดา ({selGuess.length.toLocaleString()})</button>
           )}
           {selIgnorable.length > 0 && (
-            <button type="button" disabled={ignoreBusy} onClick={() => askIgnore(selIgnorable)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50"><Icon name="ban" />เลิกขาย / ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
+            <button type="button" disabled={ignoreBusy} onClick={() => askIgnore(selIgnorable)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50"><Icon value="i:ban" />เลิกขาย / ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
           )}
           {selIgnored.length > 0 && (
-            <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50"><Icon name="arrow-back-up" />เอากลับมาจับคู่ ({selIgnored.length.toLocaleString()})</button>
+            <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50"><Icon value="i:arrow-back-up" />เอากลับมาจับคู่ ({selIgnored.length.toLocaleString()})</button>
           )}
           {selGone.length > 0 && (
             <button type="button" disabled={goneBusy} onClick={() => void clearGone(selGone)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"><Icon name="delete" />ล้างที่ไม่อยู่บนร้าน ({selGone.length.toLocaleString()})</button>

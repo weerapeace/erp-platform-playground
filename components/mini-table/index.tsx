@@ -35,6 +35,7 @@ import { useAuthOptional } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { exportTable } from "@/lib/export";
 import { buildMiniExport } from "@/lib/mini-table-export";
+import { useSelectMode, SelectModeButton, SelectModeBar } from "@/components/select-mode";   // ของกลาง: โหมดเลือก + Shift เลือกช่วง + กดค้าง
 
 export type MiniColumn<T> = {
   key: string;
@@ -367,8 +368,18 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
 
   const allKeys = sorted.map(rowKey);
   const allSel = allKeys.length > 0 && allKeys.every((k) => sel.has(k));
-  const toggleKey = (k: string) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); setSel(n); };
   const setKeys = (keys: string[], on: boolean) => { const n = new Set(sel); keys.forEach((k) => (on ? n.add(k) : n.delete(k))); setSel(n); };
+  // เลือกหลายแถว (ของกลาง select-mode): กดช่องติ๊ก/แถว = สลับ · Shift+กด = ทั้งช่วงตามลำดับที่เห็น (ข้ามกลุ่มที่พับ) · ปุ่ม "เลือก" = โหมดเลือก · มือถือกดค้าง
+  const visibleKeys = useMemo(() => groups.filter((g) => !(groupCollapsible && closedG.has(g.name))).flatMap((g) => g.rows).map(rowKey),
+    [groups, groupCollapsible, closedG, rowKey]);
+  const sm = useSelectMode({ order: visibleKeys, selected: sel, onChange: setSel, enabled: !!selectable });
+  const selMode = !!selectable && sm.mode;
+  const pickKey = (k: string, e?: { shiftKey?: boolean }) => sm.pick(k, e);
+  // ช่องติ๊กกดได้ทั้งช่อง (สูงเต็มแถว) — ไม่ต้องเล็งกล่องเล็ก · กดแล้วไม่เปิดรายละเอียด
+  const checkProps = (k: string) => ({
+    onClick: (e: React.MouseEvent) => { e.stopPropagation(); pickKey(k, e); },
+    onMouseDown: (e: React.MouseEvent) => { if (e.shiftKey) e.preventDefault(); },
+  });
 
   // grid template — เพิ่มช่อง checkbox นำหน้าถ้าเลือกได้ · คอลัมน์ที่ลากปรับแล้วใช้ px
   // พอดีเนื้อหา: minmax(ขั้นต่ำ, …fr) → ขั้นต่ำ · fr ล้วน → 10rem (แถวแต่ละแถวเป็น grid แยก ต้องเป็นค่าตายตัว ไม่งั้นคอลัมน์ไม่ตรงกัน)
@@ -382,7 +393,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const padY = touch ? "py-3" : dense ? "py-1.5" : "py-2";
   // แถวนอกจอ: เบราว์เซอร์ข้ามการจัดวาง/วาด · สูงประมาณไว้ก่อน แล้วจำความสูงจริงหลังเคยเห็น (auto) — แถบเลื่อนไม่กระโดด
   const lazyStyle: CSSProperties | undefined = lazyRows && measureOn ? { contentVisibility: "auto", containIntrinsicSize: `auto ${touch ? 72 : dense ? 44 : 56}px` } : undefined;
-  const boxCls = touch ? "w-5 h-5 accent-rose-600" : "w-4 h-4 accent-rose-600";
+  const boxCls = touch || selMode ? "w-5 h-5 accent-rose-600" : "w-4 h-4 accent-rose-600";
+  // ยืดช่องติ๊กให้สูงเต็มแถว (ชดเชย padding บน-ล่างของแถว) → พื้นที่กดกว้าง
+  const checkStretch = touch ? "-my-3 py-3" : dense ? "-my-1.5 py-1.5" : "-my-2 py-2";
   const cards = layout === "cards" && !!renderCard;
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
 
@@ -483,18 +496,19 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     // พื้นทึบของช่องที่ล็อก = สีที่ตาเห็นจริงของแถว (พื้นแถวโปร่ง 30–40% บนขาว) → ต่อกับขอบบน/ล่างของแถวเนียน ไม่เห็นเป็นกล่อง
     const lockBg = on ? "#fff9fa" : open ? "#fafcff" : zebra && idx % 2 ? "#fdfeff" : "#ffffff";
     const line = (
-      <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
-        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
+      <div key={open ? undefined : k} onClick={selMode ? (e) => pickKey(k, e) : onRowClick ? () => onRowClick(r) : undefined}
+        {...(selectable ? sm.pressProps(k) : {})}
+        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${selMode ? "cursor-pointer select-none hover:bg-rose-50/30" : onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
         style={{ gridTemplateColumns: tmpl, ...rowW, ...lazyStyle }}>
         {selectable && (
-          <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, lockBg, "check")}>
-            <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
+          <span className={`flex cursor-pointer items-center justify-center self-stretch rounded hover:bg-slate-100/70 ${checkStretch}`} {...checkProps(k)} style={lockStyle(0, lockBg, "check")}>
+            <input type="checkbox" checked={on} readOnly className={`${boxCls} pointer-events-none`} aria-label={t("เลือกแถวนี้", "Select row")} />
           </span>
         )}
         {columns.map((c, ci) => {
           const act = !!activeCell && activeCell(r) === c.key;
           return (
-            <div key={c.key} data-col={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg, "cell")} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
+            <div key={c.key} data-col={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg, "cell")} onClick={onCellClick && !selMode ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
               className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)} ${onCellClick ? `-mx-1 -my-1 rounded-md px-1 py-1 cursor-pointer ${act ? "bg-blue-100/70 ring-1 ring-blue-300" : "hover:bg-blue-50 hover:ring-1 hover:ring-blue-200"}` : ""}`}>
               {c.cell(r)}
             </div>
@@ -520,11 +534,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const open = !!renderExpanded && !!expandedKeys?.has(k);
     if (cardPick) {
       return (
-        <div key={k} onClick={() => (onRowClick ? onRowClick(r) : selectable && toggleKey(k))}
-          className={`relative overflow-hidden rounded-xl border bg-white cursor-pointer ${on ? "border-rose-400 ring-2 ring-rose-300" : "border-slate-200 hover:border-slate-400"}`}>
+        <div key={k} onClick={(e) => (selMode ? pickKey(k, e) : onRowClick ? onRowClick(r) : selectable && pickKey(k, e))}
+          {...(selectable ? sm.pressProps(k) : {})}
+          className={`relative overflow-hidden rounded-xl border bg-white cursor-pointer ${selMode ? "select-none" : ""} ${on ? "border-rose-400 ring-2 ring-rose-300" : "border-slate-200 hover:border-slate-400"}`}>
           {selectable && (
-            <span className="absolute top-1.5 left-1.5 z-10 flex rounded-md bg-white/90 p-1 shadow-sm" onClick={(e) => e.stopPropagation()}>
-              <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
+            <span className="absolute top-1 left-1 z-10 flex cursor-pointer rounded-md bg-white/90 p-1.5 shadow-sm" {...checkProps(k)}>
+              <input type="checkbox" checked={on} readOnly className={`${boxCls} pointer-events-none`} aria-label={t("เลือกรายการนี้", "Select item")} />
             </span>
           )}
           {renderCard!(r)}
@@ -532,11 +547,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       );
     }
     return (
-      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined} style={cardGrid && open ? { gridColumn: "1 / -1" } : undefined}
-        className={`relative rounded-xl border p-3 ${on ? "border-rose-300 bg-rose-50/40" : open ? "border-blue-300 bg-white" : "border-slate-200 bg-white"} ${onRowClick ? "cursor-pointer active:bg-blue-50/40" : ""}`}>
+      <div key={k} onClick={selMode ? (e) => pickKey(k, e) : onRowClick ? () => onRowClick(r) : undefined} style={cardGrid && open ? { gridColumn: "1 / -1" } : undefined}
+        {...(selectable ? sm.pressProps(k) : {})}
+        className={`relative rounded-xl border p-3 ${on ? "border-rose-300 bg-rose-50/40" : open ? "border-blue-300 bg-white" : "border-slate-200 bg-white"} ${selMode ? "cursor-pointer select-none" : onRowClick ? "cursor-pointer active:bg-blue-50/40" : ""}`}>
         {selectable && (
-          <span className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
-            <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
+          <span className="absolute top-1.5 left-1.5 z-10 flex cursor-pointer rounded-md p-1.5 hover:bg-slate-100/70" {...checkProps(k)}>
+            <input type="checkbox" checked={on} readOnly className={`${boxCls} pointer-events-none`} aria-label={t("เลือกรายการนี้", "Select item")} />
           </span>
         )}
         <div className={selectable ? "pl-8" : ""}>{renderCard!(r)}</div>
@@ -634,7 +650,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   ) : null;
 
   const total = rows.length, shown = sorted.length;
-  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy || canExport) && total > 0;
+  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy || canExport || selectable) && total > 0;
   const doExport = async () => {
     if (!exportOpts || exporting) return;
     const picked = selectable && selected && selected.size > 0 ? sorted.filter((r) => selected.has(rowKey(r))) : sorted;
@@ -700,8 +716,14 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
               {exporting ? t("กำลังส่งออก…", "Exporting…") : "⬇ Excel"}
             </button>
           )}
+          {selectable && shown > 0 && <SelectModeButton mode={sm.mode} onToggle={sm.toggle} />}
           {actionsInToolbar && <div className="ml-auto">{actions}</div>}
         </div>
+      )}
+
+      {selMode && shown > 0 && (
+        <SelectModeBar className="mb-2 shrink-0" count={sel.size} total={visibleKeys.length}
+          onAll={sm.selectAll} onClear={() => setSel(new Set())} onDone={sm.exit} />
       )}
 
       {!toolbarOn && CollapseBtns && shown > 0 && <div className="mb-2 flex shrink-0 items-center">{CollapseBtns}</div>}

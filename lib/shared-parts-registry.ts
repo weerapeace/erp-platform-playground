@@ -163,6 +163,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "bulk-action-bar.md",
   },
   {
+    key: "select-mode", label: "โหมดเลือก + Shift เลือกเป็นช่วง", code: "useSelectMode · SelectModeButton · SelectModeBar", category: "table",
+    source: { path: "components/select-mode" },
+    what: "เลือกหลายรายการแบบกดง่าย — Shift+กด = เลือกทั้งช่วงตามลำดับที่เห็น (ตัวตั้งต้นไม่ได้ติ๊ก = เอาออกทั้งช่วง แบบ Gmail) · ปุ่ม \"เลือก\" = โหมดเลือก กดตรงไหนของแถว/การ์ดก็ติ๊ก แทนการเปิดรายละเอียด · มือถือกดค้าง ~0.45 วิ = เข้าโหมด + ติ๊กตัวนั้น · Esc = ออก · Ctrl+A = เลือกทั้งหมดที่เห็น · กฎ pure lib/range-select (มีเทสต์)",
+    when: "มีให้ในตัวแล้วในตารางกลาง MiniTable (selectable) และ DataTable (ช่องติ๊ก) — ทุกหน้าได้เอง · รายการ/กริดที่เขียนเองและติ๊กได้ ให้เรียก useSelectMode แทนการเขียน shift/โหมดเลือกเอง",
+    notWhen: "ห้ามเขียน shift-click / โหมดเลือก / กดค้างเลือกเองในหน้า · เรียงลำดับด้วยการลากใช้ SortableList (มีเลือกหลายตัวของมันเอง)",
+    doc: "select-mode.md",
+  },
+  {
     key: "sort-th", label: "หัวคอลัมน์กดเรียง", code: "SortTh", category: "table",
     source: { path: "components/sort-th" },
     what: "หัวคอลัมน์ที่กดแล้วเรียงน้อยไปมาก / มากไปน้อย",
