@@ -7,6 +7,9 @@
  * POST { action: "save_accessory", id?, name, name_en?, group?, image_key?, sku_id?, sku_code? } → เพิ่ม/แก้ส่วนเสริมจากป๊อปเลือกในหน้าสูตร (รอบ 8)
  * POST { action: "delete_accessory", id }                             → ซ่อนส่วนเสริม (is_active = false · สูตรที่เลือกไว้แล้วยังมีสำเนาเดิม)
  *   ส่วนเสริม: เจ้าของเลือก 2026-11-15 "ทุกคนที่แก้สูตรได้" เพิ่ม/แก้/ลบได้ (เฉพาะรายการ accessory — ตัวเลือกอื่นยังต้อง design_library.manage)
+ * POST { action: "recipe_from_sheet", template_id, sheet_id, use_images? } → สูตรใหม่ผูกกับใบงาน (ปุ่ม "จัดการที่ Design Library" ในใบงาน · 2026-11-23)
+ *   รูปในใบงาน (ไฟล์แนบที่เป็นรูป) → รูปอ้างอิงของสูตร (key เดิม ไม่อัปซ้ำ) · ใบงานผูกสูตรอยู่แล้ว = คืนสูตรเดิม (ไม่สร้างซ้ำ) · ต้องมี products.edit ด้วย
+ * POST { action: "unlink_sheet", recipe_id }                          → ยกเลิกการเชื่อมสูตรกับใบงาน (ทั้งสองฝั่งยังอยู่ครบ)
  * สิทธิ์ design_library.edit · audit ทุกงาน · ทุนประมาณ (spec.cost) แก้ได้เฉพาะ products.cost.view — ไม่มีสิทธิ์ = คงค่าเดิมไว้
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -53,6 +56,57 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (error) return bad("สร้างสูตรไม่สำเร็จ กรุณาลองใหม่", 500);
     await audit("create", "design_library_recipes", data.id, { template_code: tpl.code, seq, copied_from: body.from_recipe_id ?? null });
     return NextResponse.json({ data, error: null });
+  }
+
+  if (body.action === "recipe_from_sheet") {
+    if (!(await apiCan(request, "products.edit"))) return bad("ต้องมีสิทธิ์แก้ไขใบงานออกแบบ (products.edit)", 403);
+    const templateId = String(body.template_id ?? ""), sheetId = String(body.sheet_id ?? "");
+    if (!UUID.test(templateId)) return bad("ไม่พบแม่แบบ");
+    if (!UUID.test(sheetId)) return bad("ไม่พบใบงาน");
+    const [{ data: tpl }, { data: sheet }, { data: linked }] = await Promise.all([
+      admin.from("design_library_templates").select("id, code, default_spec").eq("id", templateId).is("deleted_at", null).maybeSingle(),
+      admin.from("design_sheets").select("id, code, name").eq("id", sheetId).maybeSingle(),
+      admin.from("design_library_recipes").select("*").eq("design_sheet_id", sheetId).is("deleted_at", null).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    if (!sheet) return bad("ไม่พบใบงาน", 404);
+    if (linked) return NextResponse.json({ data: linked, existed: true, error: null });   // ผูกอยู่แล้ว → เปิดสูตรเดิม
+    if (!tpl) return bad("ไม่พบแม่แบบ (อาจถูกลบไปแล้ว)", 404);
+    const spec = cleanSpec(tpl.default_spec) as ReturnType<typeof cleanSpec>;
+    let refCount = 0;
+    if (body.use_images !== false) {
+      const { data: atts } = await admin.from("erp_playground_attachments").select("file_path, content_type, sort_order, is_primary")
+        .eq("entity_type", "design_sheet").eq("entity_id", sheetId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true });
+      const imgs = (atts ?? []).filter((a) => String(a.content_type ?? "").startsWith("image/") && a.file_path).slice(0, 12);
+      spec.refs = imgs.map((a, i) => ({ id: `ds${i}${Math.random().toString(36).slice(2, 6)}`, image_key: String(a.file_path), w: null, h: null, note: `จากใบงาน ${sheet.code}` }));
+      refCount = spec.refs.length;
+    }
+    const { data: last } = await admin.from("design_library_recipes").select("seq").eq("template_id", templateId).order("seq", { ascending: false }).limit(1).maybeSingle();
+    const seq = (Number(last?.seq) || 0) + 1;
+    const { data, error } = await admin.from("design_library_recipes").insert({
+      template_id: templateId, seq, name: String(sheet.name ?? "").slice(0, 200) || null, spec: cleanSpec(spec), design_sheet_id: sheetId,
+      created_by: actor.id, created_by_name: actor.name, updated_by_name: actor.name,
+    }).select("*").single();
+    if (error) return bad("สร้างสูตรไม่สำเร็จ กรุณาลองใหม่", 500);
+    await Promise.all([
+      audit("create", "design_library_recipes", data.id, { template_code: tpl.code, seq, from_sheet: sheetId, sheet_code: sheet.code, refs: refCount }),
+      audit("link_design_library", "design_sheet", sheetId, { recipe_id: data.id, template_code: tpl.code, seq, refs: refCount }),
+    ]);
+    return NextResponse.json({ data, existed: false, error: null });
+  }
+
+  if (body.action === "unlink_sheet") {
+    const id = String(body.recipe_id ?? "");
+    if (!UUID.test(id)) return bad("ไม่พบสูตร");
+    const { data: rec } = await admin.from("design_library_recipes").select("id, design_sheet_id").eq("id", id).maybeSingle();
+    if (!rec) return bad("ไม่พบสูตร", 404);
+    if (!rec.design_sheet_id) return NextResponse.json({ data: { ok: true }, error: null });
+    const { error } = await admin.from("design_library_recipes").update({ design_sheet_id: null, updated_by_name: actor.name, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return bad("ยกเลิกการเชื่อมไม่สำเร็จ", 500);
+    await Promise.all([
+      audit("update", "design_library_recipes", id, { changes: [{ field: "design_sheet_id", old: rec.design_sheet_id, new: null }] }),
+      audit("unlink_design_library", "design_sheet", String(rec.design_sheet_id), { recipe_id: id }),
+    ]);
+    return NextResponse.json({ data: { ok: true }, error: null });
   }
 
   if (body.action === "save_recipe") {

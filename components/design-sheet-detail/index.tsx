@@ -2534,7 +2534,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* 📐 รายละเอียดงาน — คงไว้หลังเปิดครั้งแรก (ซ่อนตอนอยู่แท็บอื่น) */}
             {form.id && specMounted && (
               <div className={modalTab === "spec" ? "" : "hidden"}>
-                <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef}
+                <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef} sheetName={form.name}
                   onSendToCost={sendSpecToCost} costSkuIds={curLines.map((r) => r.item_sku_id).filter((v): v is string => !!v)} />
               </div>
             )}

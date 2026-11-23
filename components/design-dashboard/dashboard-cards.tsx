@@ -103,6 +103,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
           <span className="font-mono text-[10px] text-slate-400">{sheet.code}</span>
+          {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
         </div>
         <div className="line-clamp-2 text-xs font-semibold text-slate-800">{sheet.name}</div>
         {st && (
@@ -209,6 +210,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
           <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
             <span className="truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
+            {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
           {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}
@@ -220,6 +222,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
           <div className="mt-1 flex items-center gap-1 whitespace-nowrap">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
             <span className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
+            {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
           {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}

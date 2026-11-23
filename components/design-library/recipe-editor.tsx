@@ -49,6 +49,7 @@ import { useHistory, usePinShortcuts } from "./pin-shortcuts";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { AccessoriesCard } from "./accessories";
 import { ViewTabs } from "./views";
+import { autoSyncSheet } from "./sheet-autosync";
 
 /** หัวข้อล่างของหน้าสูตร (รอบ 7: เป็นแท็บ · จำแท็บล่าสุดในเครื่อง) */
 type LowerTab = "size" | "cost" | "prompt" | "renders";
@@ -205,6 +206,9 @@ export function RecipeEditor({ id }: { id: string }) {
       const r = await api<Recipe>(`/api/design-library/actions`, { json: { action: "save_recipe", id, spec, name: meta.name, note: meta.note } });
       setB((p) => (p ? { ...p, recipe: { ...p.recipe, ...r, spec: cleanSpec(r.spec) } } : p));
       setDirty(false); toast.success("บันทึกสูตรแล้ว");
+      // ผูกใบงานอยู่ → ส่งรูปติดดาว/หน้ารายละเอียดงาน/ตารางสี กลับเข้าใบงานเอง (ไม่รวมตีราคา) — ./sheet-autosync
+      const sid = r.design_sheet_id ?? b?.sheet?.id ?? null;
+      autoSyncSheet(id, sid, (res) => { if (res.ok && b?.sheet) toast.info(`ซิงค์เข้าใบงาน ${b.sheet.code} แล้ว`); });
       return true;
     } catch (e) { toast.error((e as Error).message); return false; }
     finally { setSaving(false); }
@@ -437,7 +441,7 @@ export function RecipeEditor({ id }: { id: string }) {
         readOnly={readOnly} onChange={(p) => update((s) => ({ ...s, prompts: p }))} />}
 
       {/* ── รูปจาก GPT ── */}
-      {curTab === "renders" && <Renders recipeId={id} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
+      {curTab === "renders" && <Renders recipeId={id} sheetId={b.recipe.design_sheet_id ?? b.sheet?.id ?? null} renders={b.renders.filter((r) => (r.colorway_id ?? null) === cw)} allRenders={b.renders} colorwayId={cw} colorway={spec.colorways.length ? colorwayLabel(spec, cw) : null} canEdit={canEdit} canManage={canManage} vectorKey={t.vector_image_key}
         onChanged={(renders) => setB((p) => (p ? { ...p, renders } : p))}
         onVector={(key) => setB((p) => (p ? { ...p, template: { ...p.template, vector_image_key: key } } : p))} />}
 
@@ -684,8 +688,8 @@ function Warnings({ spec, b, stock, materials }: { spec: Spec; b: RecipeBundle; 
  * รูปจาก GPT (รอบ 6): แกลเลอรีเดียว ไม่แยกมุม — ลากวาง / Ctrl+V / เลือกหลายรูป · แยกตามชุดสีที่ดูอยู่
  * ⭐ ติดดาว = รูปที่ใช้ในใบสั่งทำตัวอย่าง / ส่งใบงาน / ปกการ์ด (ไม่มีดาว = รูปล่าสุด — chosenRenders) · รูปเก่าที่เคยแยกมุมยังอยู่ครบ (ป้ายมุมเดิม)
  */
-function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit, canManage, vectorKey, onChanged, onVector }: {
-  recipeId: string; renders: Render[]; allRenders: Render[]; colorwayId: string | null; colorway: string | null; canEdit: boolean; canManage: boolean; vectorKey: string | null;
+function Renders({ recipeId, sheetId, renders, allRenders, colorwayId, colorway, canEdit, canManage, vectorKey, onChanged, onVector }: {
+  recipeId: string; sheetId?: string | null; renders: Render[]; allRenders: Render[]; colorwayId: string | null; colorway: string | null; canEdit: boolean; canManage: boolean; vectorKey: string | null;
   onChanged: (r: Render[]) => void; onVector: (key: string) => void;
 }) {
   const toast = useToast();
@@ -707,7 +711,7 @@ function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit,
         const r = await api<Render>(`/api/design-library/actions`, { json: { action: "add_render", recipe_id: recipeId, view_key: "other", image_key: key, colorway_id: colorwayId } });
         added = [r, ...added];
       }
-      if (added.length) { onChanged([...added, ...allRenders]); toast.success(`เพิ่มรูปแล้ว ${added.length} รูป`); }
+      if (added.length) { onChanged([...added, ...allRenders]); toast.success(`เพิ่มรูปแล้ว ${added.length} รูป`); autoSyncSheet(recipeId, sheetId); }
     } catch (e) { toast.error((e as Error).message); if (added.length) onChanged([...added, ...allRenders]); }
     finally { setBusy(false); setProgress(null); }
   };
@@ -721,7 +725,7 @@ function Renders({ recipeId, renders, allRenders, colorwayId, colorway, canEdit,
   const star = async (r: Render) => {
     const next = !r.is_starred;
     onChanged(allRenders.map((x) => (x.id === r.id ? { ...x, is_starred: next } : x)));
-    try { await api(`/api/design-library/renders/${r.id}`, { method: "PATCH", json: { is_starred: next } }); }
+    try { await api(`/api/design-library/renders/${r.id}`, { method: "PATCH", json: { is_starred: next } }); autoSyncSheet(recipeId, sheetId); }
     catch (e) { toast.error((e as Error).message); onChanged(allRenders); }
   };
   const setVector = async (r: Render) => {

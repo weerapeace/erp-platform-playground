@@ -38,6 +38,8 @@ export type DesignSheetListItem = {
   drive_link: string | null; note: string | null; is_active: boolean;
   detail_excerpt: string | null;   // ตัวอย่างข้อความจาก "รายละเอียดงาน" (ตัด HTML แล้ว) ไว้โชว์บนการ์ด
   updated_at: string; cover_url: string | null;
+  /** 📚 มีสูตร Design Library ผูกใบนี้ (จัดการที่ Design Library) — ป้ายเล็กบนการ์ดแดชบอร์ด */
+  in_library?: boolean;
   // เฟส 8 (Canvas): สถานะความครบของขั้นตอน — ไว้โชว์ไฟบนการ์ด
   has_cost: boolean; has_quote: boolean; parent_count: number;
   // 🪟 กล่อง hover (Design Dashboard): รออะไรอยู่ · เสนอราคาครั้งล่าสุด · comment ลูกค้าล่าสุด
@@ -141,8 +143,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const commentsBy = new Map<string, { date: string | null; body: string }[]>();
   let waitingBy = new Map<string, ChecklistSummary>();
   let qtBy = new Map<string, SheetQuoteBadge>();
+  const inLibrary = new Set<string>();
   if (ids.length) {
-    const [cl, ql, cm, wt, qb] = await Promise.all([
+    const [cl, ql, cm, wt, qb, lib] = await Promise.all([
       admin.from("design_sheet_cost_lines").select("sheet_id").in("sheet_id", ids),
       admin.from("design_sheet_quotes").select("sheet_id, batch, round, quote_date, status, parent_code, qty, offered_price, note").in("sheet_id", ids),
       admin.from("design_sheet_comments").select("sheet_id, comment_date, body, created_at").in("sheet_id", ids)
@@ -151,7 +154,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       loadChecklistSummaries(admin, DESIGN_WAITING.moduleKey, ids).catch((e) => { console.error("[design-sheets] waiting", e); return new Map<string, ChecklistSummary>(); }),
       // ใบเสนอราคาที่ยังเปิด (ตารางผูก design_sheet_quotations) — พลาดก็แค่ไม่มีป้าย
       sheetQuoteBadges(admin, ids),
+      // 📚 ใบที่ผูกสูตร Design Library (พลาด = แค่ไม่มีป้าย)
+      admin.from("design_library_recipes").select("design_sheet_id").in("design_sheet_id", ids).is("deleted_at", null),
     ]);
+    for (const r of (lib.data ?? []) as Array<Record<string, unknown>>) if (r.design_sheet_id) inLibrary.add(String(r.design_sheet_id));
     waitingBy = wt;
     qtBy = qb;
     for (const r of (cl.data ?? []) as Array<Record<string, unknown>>) withCost.add(String(r.sheet_id));
@@ -175,7 +181,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       status: String(r.status ?? "design"), order_date: (r.order_date as string) ?? null, deadline: (r.deadline as string) ?? null,
       drive_link: (r.drive_link as string) ?? null, note: (r.note as string) ?? null, is_active: !!r.is_active,
       detail_excerpt: excerptHtml(r.detail as string | null),
-      updated_at: String(r.updated_at), cover_url: covers.get(id) ?? null,
+      updated_at: String(r.updated_at), cover_url: covers.get(id) ?? null, in_library: inLibrary.has(id),
       has_cost: withCost.has(id), has_quote: withQuote.has(id),
       parent_count: Array.isArray(r.parent_sku_codes) ? (r.parent_sku_codes as unknown[]).length : 0,
       waiting_for: ((r.waiting_for as string) ?? "").trim() || null,

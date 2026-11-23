@@ -21,6 +21,7 @@ import { ComponentPicker } from "@/components/material-picker";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SheetImagePicker } from "./sheet-image-picker";
 import { Icon } from "@/components/icon";
+import { LibraryLink } from "./library-link";
 import { useStickyHeader } from "@/components/sticky-header";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
@@ -43,7 +44,11 @@ const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 type Part = { code: string; name: string; group: string | null };
 const PART_NAME_PREFIX = "name:";   // ค่าในช่องเลือกของส่วนประกอบที่พิมพ์ชื่อเอง (ไม่อยู่ในรายการกลาง)
 
-export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, onSendToCost, costSkuIds = [] }: {
+export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, onSendToCost, costSkuIds = [], sheetName = "", onLibrarySynced }: {
+  /** ชื่องาน — ใช้เดาแม่แบบตอนกด "จัดการที่ Design Library" */
+  sheetName?: string;
+  /** ซิงค์จาก Design Library แล้ว → หน้าแม่โหลดรูปในใบงานใหม่ */
+  onLibrarySynced?: () => void;
   sheetId: string;
   canEdit: boolean;
   onDirtyChange?: (dirty: boolean) => void;
@@ -299,6 +304,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
 
   return (
     <div className="space-y-3">
+      {/* 📚 จัดการที่ Design Library (สร้าง/เปิดสูตรที่ผูกใบนี้ · ดึงกลับ) — ./library-link */}
+      <LibraryLink sheetId={sheetId} sheetName={sheetName} onSynced={() => { void load(); void loadParts(); onLibrarySynced?.(); }} />
       {emptyBox ?? (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         {/* ── ซ้าย: หน้ารูป + เครื่องมือ + รูปที่วาด ── */}

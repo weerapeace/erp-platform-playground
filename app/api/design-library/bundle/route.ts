@@ -1,6 +1,7 @@
 /**
  * 📚 Design Library — โหลดข้อมูลครบสำหรับ 1 หน้า (ลดการยิงหลายรอบ)
  * GET ?overview=1          → แม่แบบทั้งหมด + จำนวนสูตร + รูปผลล่าสุด (หน้าคลัง)
+ * GET ?sheet=<uuid>        → สูตรที่ผูกกับใบงานนี้ (แถบ "จัดการที่ Design Library" ในใบงาน) · ไม่มี = data null · + แม่แบบทั้งหมดไว้ให้เลือก (templates=1)
  * GET ?picker=1            → สูตรทุกแม่แบบ (ล่าสุดก่อน) + ปก + ใบงานที่เคยส่ง — ตัวเลือกสูตรของ Design Dashboard
  * GET ?template_id=<uuid>  → แม่แบบ + สูตรทั้งหมด (+ รูปผลล่าสุดต่อสูตร)
  * GET ?recipe_id=<uuid>    → สูตร + แม่แบบ + ตัวเลือกทั้งหมด + รูปผลทุกเวอร์ชัน + สต็อกสดของ SKU ในสูตร + ใบงานที่ส่งไปแล้ว (sheet)
@@ -65,6 +66,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ตัวเลือกสูตร (หน้า Design Dashboard → เพิ่มงาน → จาก Design Library): สูตรทุกแม่แบบ + ปก + ใบงานที่เคยส่ง
+  if (sp.get("sheet")) {
+    const sheetId = String(sp.get("sheet"));
+    if (!UUID.test(sheetId)) return fail("ไม่พบใบงาน", 400);
+    const [{ data: rec }, tplRes] = await Promise.all([
+      admin.from("design_library_recipes").select("id, template_id, seq, name, updated_at, updated_by_name").eq("design_sheet_id", sheetId).is("deleted_at", null).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+      sp.get("templates") ? admin.from("design_library_templates").select("id, code, name, description, category, image_key").is("deleted_at", null).eq("is_active", true).order("sort_order").order("code") : Promise.resolve({ data: null }),
+    ]);
+    let recipe = null as null | Record<string, unknown>;
+    if (rec) {
+      const [{ data: t }, { count }] = await Promise.all([
+        admin.from("design_library_templates").select("code, name").eq("id", rec.template_id).maybeSingle(),
+        admin.from("design_library_renders").select("id", { count: "exact", head: true }).eq("recipe_id", rec.id).eq("is_active", true),
+      ]);
+      recipe = { ...rec, template_code: t?.code ?? null, template_name: t?.name ?? null, render_count: count ?? 0 };
+    }
+    return NextResponse.json({ data: recipe, templates: tplRes.data ?? null, error: null });
+  }
+
   if (sp.get("picker")) {
     const [{ data: tpls, error: te }, { data: recs, error: re }] = await Promise.all([
       admin.from("design_library_templates").select("id, code, name, image_key, category").is("deleted_at", null).eq("is_active", true),
