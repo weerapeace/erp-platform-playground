@@ -6,7 +6,7 @@ import type { Attachment, AttachmentsResponse } from "@/app/api/attachments/rout
 import { ImageMarkupButton } from "@/components/image-markup-editor";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
-import { downscaleImageWidth } from "@/lib/image-resize";
+import { uploadGalleryFile } from "@/lib/gallery-upload";
 import { AssetPicker } from "@/components/asset-picker";
 import { ConfirmDialog } from "@/components/modal";
 import { useAuth } from "@/components/auth";
@@ -242,23 +242,14 @@ export function ImageManager({
     setUploading(true); setError(null);
     try {
       for (const orig of incoming) {
-        // ย่อรูป "ด้านกว้าง ≤ 1500px" ตอนอัป (คงสัดส่วน · เฉพาะรูป) — ไฟล์อื่นคงเดิม · เช็กขนาดหลังย่อ
-        const file = imageOnly ? await downscaleImageWidth(orig, 1500) : orig;
-        if (file.size > maxSizeBytes) { setError(`ไฟล์ ${orig.name} ใหญ่เกิน ${maxSizeMb}MB (แม้ย่อแล้ว)`); continue; }
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("entity_type", entityType);
-        fd.append("entity_id", entityId);
-        if (actor) fd.append("actor", actor);
-        if (imageOnly) {
-          fd.append("attachment_kind", "image_gallery");
-          fd.append("image_only", "1");
+        // ของกลาง lib/gallery-upload: ย่อด้านกว้าง ≤ 1500px (เฉพาะรูป) · เช็กขนาดหลังย่อ · POST /api/attachments
+        try {
+          await uploadGalleryFile(orig, { entityType, entityId, actor, imageOnly, maxItems, maxSizeBytes });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ";
+          if (msg.includes("ใหญ่เกิน")) { setError(msg); continue; }   // ไฟล์ใหญ่เกิน = ข้ามไฟล์นี้ (เหมือนเดิม)
+          throw e;
         }
-        if (maxItems > 0) fd.append("max_items", String(maxItems));
-        fd.append("max_size_bytes", String(maxSizeBytes));
-        const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
-        const json = await res.json();
-        if (json.error) throw new Error(json.error);
       }
       await fetchList();
     } catch (err: unknown) {

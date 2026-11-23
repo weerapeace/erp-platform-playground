@@ -24,6 +24,17 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { Pager } from "@/components/pager";
 import { useGalleryColumns, CardGrid, CardViewBar, GALLERY_LABEL, useCtrlWheel } from "@/components/gallery-columns";   // มุมมองการ์ดกลาง (Ctrl+ลูกกลิ้ง ย่อ/ขยาย)
 import { useUserPref } from "@/lib/use-user-pref";
+import { useAuth, usePermission } from "@/components/auth";
+import { useFileDrop } from "@/components/file-drop";
+import { usePhotoCapture } from "@/components/photo-capture";
+import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
+import { uploadGalleryFile, removeGalleryFile, GALLERY_MAX_ITEMS } from "@/lib/gallery-upload";
+
+/** ข้อมูลลากรูปลงการ์ด/แถว 1 รายการ (null = ไม่มีสิทธิ์แก้ / โหมดเลือก) */
+type ImgTarget = {
+  zone: Record<string, unknown>; over: boolean; up: UploadProgressState | null; touch: boolean;
+  camera: () => void; library: () => void;
+} | null;
 import { useViewportLayout } from "@/components/device-view";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { BottomSheet } from "@/components/modal";
@@ -45,7 +56,7 @@ import { MaterialRequestButton } from "@/components/material-request";
 import { ParentSkuCreateModal } from "@/components/parent-sku-create-modal";
 // ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
 import type { BulkEditField } from "@/components/data-table";
-import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
+import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
 import { Icon } from "@/components/icon";
 // drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
 // loading: โชว์ "กำลังเปิด…" ทันทีระหว่างโหลดก้อนโค้ดครั้งแรก (ไม่ให้รู้สึกค้าง)
@@ -329,6 +340,59 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
   const reloadFirst = async () => { try { const r = await fetchPage(page * LIMIT); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
+
+  // 🖼 ลากรูป (หลายรูป) มาวางบนการ์ด/แถว · Ctrl+V ตอนชี้ · มือถือแตะถ่าย/เลือกรูป → เข้าแกลเลอรีของตัวนั้น (เจ้าของขอ 2026-11-23)
+  //   ของกลาง: useFileDrop · usePhotoCapture · lib/gallery-upload (กติกาเดียวกับกล่องรูปในลิ้นชัก) · UploadProgress · toast "ย้อนกลับ"
+  const canEditImg = usePermission("products.edit") && !pick;
+  const { user: me } = useAuth();
+  const [imgUp, setImgUp] = useState<Record<string, UploadProgressState>>({});
+  const imgBusyRef = useRef<Set<string>>(new Set());
+  const capTarget = useRef<string | null>(null);
+  const galleryEntity = entity === "parent-skus" ? "parent_skus_v2" : "skus_v2";
+  const uploadImgs = async (id: string, files: File[]) => {
+    if (!canEditImg) return;
+    if (imgBusyRef.current.has(id)) { toast.error(t("รายการนี้กำลังอัปรูปอยู่ รอสักครู่", "Still uploading to this item")); return; }
+    const code = cards.find((x) => x.id === id)?.code ?? "";
+    const imgs = files.filter((f) => (f.type || "").startsWith("image/")).slice(0, GALLERY_MAX_ITEMS);
+    if (!imgs.length) { toast.error(t("ลากได้เฉพาะไฟล์รูป", "Images only")); return; }
+    imgBusyRef.current.add(id);
+    const added: string[] = [];
+    let count = 0;
+    let err: string | null = null;
+    for (const [i, f] of imgs.entries()) {
+      setImgUp((p) => ({ ...p, [id]: { label: t("กำลังอัปโหลด", "Uploading"), name: f.name, size: f.size, count: { current: i + 1, total: imgs.length }, pct: imgs.length > 1 ? Math.round((i / imgs.length) * 100) : null } }));
+      try {
+        const aid = await uploadGalleryFile(f, { entityType: galleryEntity, entityId: id, actor: me?.name ?? null });
+        count += 1;
+        if (aid) added.push(aid);
+      } catch (e) {
+        err = e instanceof Error ? e.message : t("อัปโหลดไม่สำเร็จ", "Upload failed");
+        if (err.includes("สูงสุด")) break;   // เต็ม 9 รูปแล้ว — ไฟล์ที่เหลือไม่ต้องลอง
+      }
+    }
+    imgBusyRef.current.delete(id);
+    setImgUp((p) => { const n = { ...p }; delete n[id]; return n; });
+    await reloadFirst();
+    if (count > 0) {
+      const msg = t(`เพิ่ม ${count} รูปให้ ${code} แล้ว`, `Added ${count} image(s) to ${code}`);
+      if (added.length === count) {
+        toast.action(msg, t("ย้อนกลับ", "Undo"), async () => {
+          for (const a of [...added].reverse()) { try { await removeGalleryFile(a, me?.name ?? null); } catch { /* ข้ามรูปที่ลบไม่ได้ */ } }
+          await reloadFirst();
+          toast.success(t("เอารูปที่เพิ่งเพิ่มออกแล้ว", "Removed the images just added"));
+        });
+      } else toast.success(msg);
+    }
+    if (err) toast.error(err);
+  };
+  const imgDrop = useFileDrop((files, key) => { void uploadImgs(key, files); }, { accept: "image/", disabled: !canEditImg, onReject: () => toast.error(t("ลากได้เฉพาะไฟล์รูป", "Images only")) });
+  const imgCap = usePhotoCapture({ onFiles: (fs) => { const id = capTarget.current; if (id) void uploadImgs(id, fs); }, disabled: !canEditImg });
+  const imgTarget = (id: string) => canEditImg ? {
+    zone: imgDrop.zone(id), over: imgDrop.over === id, up: imgUp[id] ?? null,
+    touch: imgCap.touch,
+    camera: () => { capTarget.current = id; imgCap.openCamera(); },
+    library: () => { capTarget.current = id; imgCap.openLibrary(); },
+  } : null;
   // คัดลอก SKU (หลังยืนยัน) → รีเฟรช + เด้งเปิดตัวใหม่ที่เพิ่งสร้าง
   const doCopy = async (id: string) => {
     try {
@@ -473,7 +537,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   };
 
   return (
-    <div>
+    <div {...(canEditImg ? imgDrop.guard : {})}>
+      {canEditImg && imgCap.ui}
       {/* สลับ SKU / Parent SKU + ปุ่มเพิ่ม — ซ่อนในโหมดเลือก (pick) เพราะขอซื้อได้เฉพาะ SKU */}
       {/* 📱 มือถือ (เจ้าของเลือก 2026-11-22 แบบ A): แท็บเลื่อนซ้ายขวา · ปุ่ม ＋ ลอยมุมขวาล่าง · ปุ่มรองรวมในเมนู ⋯ (แผ่นเลื่อนขึ้นจากล่าง) */}
       {!pick && isPhone && (() => {
@@ -655,14 +720,14 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">{t("หน้านี้ไม่มีรายการที่ข้อมูลไม่ครบ 🎉", "Nothing incomplete on this page 🎉")}</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed} onOpenParent={(id) => setParentPeekId(id)}
+                ? <SkuTable rows={shown} imgTargetOf={imgTarget} selected={pick ? pickedSet : selected} selectMode={selectMode} showCost={costAllowed} onOpenParent={(id) => setParentPeekId(id)}
                     imgPx={Math.round(TBL_IMG_BASE * tblZoom)} wheelRef={tblWheelRef} compact={isPhone} attEntity={entity === "parent-skus" ? "parent_skus_v2" : "skus_v2"}
                     onToggle={pick ? ((id) => { const c = shown.find((x) => x.id === id); if (c) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); } }) : toggleSel}
                     onOpen={(id) => { if (pick) { const c = shown.find((x) => x.id === id); if (c) onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(id); return; } setPeekId(id); }}
                     sortKey={sortKey} onSort={(k) => { setSortKey(k); setPage(0); patchNav({ page: 0 }); }} />
                 : <CardGrid gallery={gallery} className="select-none">
                     {shown.map((c) => (
-                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} thumbW={gallery.thumbW(320)} onOpenParent={(id) => setParentPeekId(id)}
+                      <SkuCardView key={c.id} c={c} img={imgTarget(c.id)} fields={cardFields} extraDefs={extraDefs} thumbW={gallery.thumbW(320)} onOpenParent={(id) => setParentPeekId(id)}
                         // pick: ติ๊กตามที่ผู้เรียกเลือกไว้ · manage: ติ๊กตามระบบ bulk
                         selected={pick ? pickedSet.has(c.id) : selected.has(c.id)} selectMode={pick ? true : selectMode}
                         onClick={() => { if (justDragged.current) return; if (pick) { onPick?.(c as { id: string; code?: string; name?: string; image?: string | null }); onPickSku?.(c.id); return; } if (selectMode) return; setPeekId(c.id); }}
@@ -808,8 +873,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
   );
 }
 
-function SkuCardView({ c, fields, extraDefs, thumbW = 320, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter, onOpenParent }: {
+function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter, onOpenParent }: {
   c: SkuCard; fields: string[]; extraDefs: FieldDef[]; selected: boolean; selectMode: boolean;
+  /** ลากรูปมาวาง / มือถือแตะถ่าย-เลือกรูป (null = แก้ไม่ได้) */
+  img?: ImgTarget;
   /** ความกว้างรูปที่ขอ — การ์ดเล็ก (ซูมออก) ขอรูปเล็ก โหลดเร็ว */
   thumbW?: number;
   onClick: () => void; onPointerDownCard: () => void; onPointerDownHandle: () => void; onPointerEnter: () => void;
@@ -822,11 +889,23 @@ function SkuCardView({ c, fields, extraDefs, thumbW = 320, selected, selectMode,
   const warns = cardWarnings(c);
   return (
     <div role="button" tabIndex={0} title={c.name ? `${c.code} · ${c.name}` : c.code}
+      {...(img?.zone ?? {})}
       onClick={onClick}
       onPointerDown={(e) => { if (e.button === 0) onPointerDownCard(); }}
       onPointerEnter={onPointerEnter}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
-      className={`relative text-left rounded-xl border bg-white overflow-hidden hover:shadow-sm transition cursor-pointer ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+      className={`relative text-left rounded-xl border bg-white overflow-hidden hover:shadow-sm transition cursor-pointer ${img?.over ? "border-indigo-500 ring-2 ring-indigo-300" : selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+      {/* 🖼 ลากรูปมาวาง: ไฮไลต์ทั้งการ์ด · กำลังอัป: แถบ UploadProgress ทับล่างการ์ด */}
+      {img?.over && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-indigo-50/90 border-2 border-dashed border-indigo-400 rounded-xl text-indigo-700 text-[13px] font-medium pointer-events-none">
+          <Icon name="upload" size={22} />{c.image ? "ปล่อยเพื่อเพิ่มรูป" : "ปล่อยเพื่อใส่รูป"}
+        </div>
+      )}
+      {img?.up && (
+        <div className="absolute inset-x-1.5 bottom-1.5 z-20 rounded-lg border border-slate-200 bg-white/95 p-1.5 shadow-sm" onClick={(e) => e.stopPropagation()}>
+          <UploadProgress {...img.up} />
+        </div>
+      )}
       <span
         onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onPointerDownHandle(); }}
         onClick={(e) => { e.stopPropagation(); }}
@@ -836,7 +915,15 @@ function SkuCardView({ c, fields, extraDefs, thumbW = 320, selected, selectMode,
         <div className="relative aspect-[5/4] bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
             ? <img src={withImageWidth(c.image, thumbW) ?? c.image} alt={c.code} loading="lazy" draggable={false} className="w-full h-full object-contain" />
-            : <span className="text-3xl text-slate-300">🏷️</span>}
+            : img
+              // ยังไม่มีรูป + แก้ได้: PC = "ลากรูปมาวาง" · มือถือ = ปุ่มถ่ายรูป / เลือกรูป (ของกลาง usePhotoCapture)
+              ? (img.touch
+                ? <div className="flex flex-col items-center gap-1.5" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+                    <button type="button" onClick={img.camera} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="camera" size={14} />ถ่ายรูป</button>
+                    <button type="button" onClick={img.library} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="photo" size={14} />เลือกรูป</button>
+                  </div>
+                : <div className="flex flex-col items-center gap-1 text-slate-400 text-[12px]"><Icon name="upload" size={22} />ลากรูปมาวาง<span className="text-[10px]">หรือชี้แล้วกด Ctrl+V</span></div>)
+              : <span className="text-3xl text-slate-300">🏷️</span>}
           {c.image_from_child && <span className={`${GALLERY_LABEL} absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white`} title="Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก">ตัวอย่างจากลูก</span>}
         </div>
       )}
@@ -907,8 +994,9 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   );
 }
 
-function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent, imgPx = 36, wheelRef, attEntity, compact = false }: {
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSort, showCost = false, onOpenParent, imgPx = 36, wheelRef, attEntity, compact = false, imgTargetOf }: {
   compact?: boolean;    // 📱 มือถือ = แถวกะทัดรัด
+  imgTargetOf?: (id: string) => ImgTarget;   // 🖼 ลากรูปวางลงแถว / มือถือแตะถ่าย-เลือกรูป
   rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
   sortKey: string; onSort: (col: string) => void;
   showCost?: boolean;   // มีสิทธิ์ดูต้นทุน → เพิ่มคอลัมน์ "ราคาซื้อ (ล่าสุด)"
@@ -934,6 +1022,18 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
       if (imgs.length > 1) setLb((cur) => (cur ? { images: imgs, index: 0 } : cur));
     }).catch(() => { /* โหลดรูปอื่นไม่ได้ = ดูรูปหลักรูปเดียว */ });
   };
+  // ช่องรูปของแถว: มีรูป = HoverImage (ชี้/กด) · ไม่มีรูป + แก้ได้ = PC บอกให้ลากวาง · มือถือ = ปุ่มกล้อง · กำลังอัป = แถบ UploadProgress
+  const imgCell = (c: SkuCard, size: number, previewSize?: number) => {
+    const it = imgTargetOf?.(c.id) ?? null;
+    if (it?.up) return <div style={{ width: Math.max(size, 120) }}><UploadProgress {...it.up} /></div>;
+    if (!c.image && it) {
+      return it.touch
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); it.library(); }} title="เพิ่มรูป"
+            style={{ width: size, height: size }} className="shrink-0 inline-flex items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-slate-400"><Icon name="camera" size={16} /></button>
+        : <span title="ลากรูปมาวางที่แถวนี้ หรือชี้แล้วกด Ctrl+V" style={{ width: size, height: size }} className="shrink-0 inline-flex items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-slate-400"><Icon name="upload" size={14} /></span>;
+    }
+    return <HoverImage url={c.image} size={size} previewSize={previewSize} alt={c.code} fallback="—" onOpen={() => openImages(c)} />;
+  };
   const lightbox = (
     <ImageLightbox images={lb?.images ?? []} index={lb ? lb.index : -1} onClose={() => { lbReq.current++; setLb(null); }}
       onIndex={(i) => setLb((cur) => (cur ? { ...cur, index: i } : cur))} thumbnails={(lb?.images.length ?? 0) > 1} />
@@ -948,11 +1048,11 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
           const w = cardWarnings(c);
           const price = c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : (showCost && c.buy_price ? fmtBuy(c.buy_price) : "—");
           return (
-            <div key={c.id} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
-              className={`flex items-center gap-2.5 px-2.5 py-2 cursor-pointer ${sel ? "bg-indigo-50" : "active:bg-slate-50"}`}>
+            <div key={c.id} {...(imgTargetOf?.(c.id)?.zone ?? {})} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
+              className={`flex items-center gap-2.5 px-2.5 py-2 cursor-pointer ${imgTargetOf?.(c.id)?.over ? "bg-indigo-100" : sel ? "bg-indigo-50" : "active:bg-slate-50"}`}>
               <span onClick={(e) => { e.stopPropagation(); onToggle(c.id); }}
                 className={`shrink-0 inline-flex w-5 h-5 rounded border items-center justify-center text-[11px] ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
-              <HoverImage url={c.image} size={Math.max(40, imgPx)} alt={c.code} fallback="—" onOpen={() => openImages(c)} />
+              {imgCell(c, Math.max(40, imgPx))}
               <div className="flex-1 min-w-0">
                 <div className="font-mono text-[11px] text-slate-500 truncate">{c.code}{!c.is_active && <span className="ml-1 text-slate-400">· ปิด</span>}</div>
                 <div className="text-[13px] text-slate-800 leading-snug line-clamp-2">{c.name || <span className="text-slate-300">—</span>}</div>
@@ -991,14 +1091,14 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
             const w = cardWarnings(c);
             const sel = selected.has(c.id);
             return (
-              <tr key={c.id} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
-                className={`border-t border-slate-100 cursor-pointer ${sel ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
+              <tr key={c.id} {...(imgTargetOf?.(c.id)?.zone ?? {})} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
+                className={`border-t border-slate-100 cursor-pointer ${imgTargetOf?.(c.id)?.over ? "bg-indigo-100 outline outline-2 outline-dashed outline-indigo-400 -outline-offset-2" : sel ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
                 <td className="px-2 py-1.5" onClick={(e) => { e.stopPropagation(); onToggle(c.id); }}>
                   <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[10px] cursor-pointer ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
                 </td>
                 <td className="px-2 py-1.5">
                   {/* ชี้ = รูปใหญ่ลอย · กด = ป๊อปเต็มจอ (ไม่เปิดลิ้นชัก) — ของกลาง HoverImage */}
-                  <HoverImage url={c.image} size={imgPx} previewSize={Math.max(256, imgPx * 3)} alt={c.code} fallback="—" onOpen={() => openImages(c)} />
+                  {imgCell(c, imgPx, Math.max(256, imgPx * 3))}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
                 <td className="px-3 py-1.5"><span className="block whitespace-normal break-words leading-snug min-w-[16rem]">{c.name || <span className="text-slate-300">—</span>}</span></td>
