@@ -5,5 +5,6 @@
 export const CHROMELESS_PREFIXES = ["/login", "/auth", "/print/", "/a/", "/s/", "/offer/", "/employee-line"] as const;
 
 export function isChromelessPath(pathname: string, extra: readonly string[] = []): boolean {
-  return [...CHROMELESS_PREFIXES, ...extra].some((p) => pathname.startsWith(p));
+  // "/a/" ต้องจับ "/a" เฉย ๆ ด้วย (หน้าเล็กในไลน์ LIFF = /a?me=… — เคยหลุด ตัว Pet เด้งทับหน้าในไลน์ 2026-11-23)
+  return [...CHROMELESS_PREFIXES, ...extra].some((p) => pathname.startsWith(p) || (p.endsWith("/") && pathname === p.slice(0, -1)));
 }
