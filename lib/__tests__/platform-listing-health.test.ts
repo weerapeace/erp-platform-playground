@@ -140,9 +140,10 @@ describe("ชื่อ+รหัสซ้ำ", () => {
 });
 
 describe("แท็บ + กองงาน", () => {
-  it("แท็บขายอยู่ = เปิดขายอยู่ (รวมใกล้หมด/หมดแต่ยังเปิดขาย/รอตรวจ/ไม่รู้สถานะ) · ไม่รวมปิดขาย — เปิดหน้ามาเจอแท็บนี้ (เจ้าของ 2026-11-23)", () => {
+  it("แท็บขายอยู่ = เปิดขายอยู่ (รวมใกล้หมด/หมดแต่ยังเปิดขาย/ไม่รู้สถานะ) · ไม่รวมปิดขาย/รอตรวจ — เปิดหน้ามาเจอแท็บนี้ (เจ้าของ 2026-11-23)", () => {
     expect(DEFAULT_SHOP_TAB).toBe("selling");
-    for (const st of ["selling", "low", "out", "review", "nodata"] as const) expect(inShopTab(item({ state: st }), "selling")).toBe(true);
+    for (const st of ["selling", "low", "out", "nodata"] as const) expect(inShopTab(item({ state: st }), "selling")).toBe(true);
+    expect(inShopTab(item({ state: "review" }), "selling")).toBe(false);   // TikTok DRAFT ยังไม่ขึ้นร้าน
     expect(inShopTab(item({ state: "hidden" }), "selling")).toBe(false);
     expect(inShopTab(item({ state: "hidden" }), "all")).toBe(true);
     expect(isOnSale({ state: "gone" })).toBe(false);

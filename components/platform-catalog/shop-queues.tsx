@@ -17,7 +17,7 @@ export type QueueKey = ShopQueue | "noimg_erp" | "none";
 
 /** การ์ดที่เป็นแท็บ (ไม่ใช่กอง) */
 const TAB_CARDS: { tab: ShopTab; label: string; hint: string }[] = [
-  { tab: "selling", label: "สินค้าที่ขายอยู่", hint: "เปิดขายอยู่บนร้าน (รวมตัวที่ของหมดแต่ยังเปิดขาย) · ไม่โชว์ตัวที่ปิดขาย" },
+  { tab: "selling", label: "สินค้าที่ขายอยู่", hint: "เปิดขายอยู่บนร้าน (รวมตัวที่ของหมดแต่ยังเปิดขาย) · ไม่โชว์ตัวที่ปิดขาย / รอตรวจ" },
   { tab: "all", label: "สินค้าทั้งหมด", hint: "ทุกรายการบนร้าน รวมตัวที่ปิดขาย" },
 ];
 const tabKey = (t: ShopTab) => `tab:${t}`;
