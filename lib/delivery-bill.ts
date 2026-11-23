@@ -135,8 +135,8 @@ export function normDate(v: unknown): string | null {
 export function splitBillLineToVoucherLines(line: { weight_kg: number | null; m3: number | null }, targets: { id: string; qty: number }[]): { id: string; kg_per_unit: number | null; cbm_per_unit: number | null }[] {
   const sumQty = targets.reduce((a, t) => a + (Number(t.qty) || 0), 0);
   if (sumQty <= 0) return targets.map((t) => ({ id: t.id, kg_per_unit: null, cbm_per_unit: null }));
-  const kg = line.weight_kg != null ? Math.round((line.weight_kg / sumQty) * 1_000_000) / 1_000_000 : null;
-  const cbm = line.m3 != null ? Math.round((line.m3 / sumQty) * 1_000_000) / 1_000_000 : null;
+  const kg = line.weight_kg != null ? Math.round((line.weight_kg / sumQty) * 1e9) / 1e9 : null;
+  const cbm = line.m3 != null ? Math.round((line.m3 / sumQty) * 1e9) / 1e9 : null;
   return targets.map((t) => ({ id: t.id, kg_per_unit: kg, cbm_per_unit: cbm }));
 }
 
@@ -160,8 +160,8 @@ export async function applyDeliveryBill(admin: Admin, voucherId: string, bill: {
   let n = 0;
   for (const [id, a] of acc) {
     const patch: Row = {};
-    if (a.hasKg) patch.kg_per_unit = Math.round(a.kg * 1_000_000) / 1_000_000;
-    if (a.hasCbm) patch.cbm_per_unit = Math.round(a.cbm * 1_000_000) / 1_000_000;
+    if (a.hasKg) patch.kg_per_unit = Math.round(a.kg * 1e9) / 1e9;   // ★ 11-23 9 ตำแหน่ง: ของชิ้นเล็กมาก (ห่วง 1,000 ชิ้น/0.0012 คิว) ปัด 6 ตำแหน่งแล้วค่าส่งหาย 17%
+    if (a.hasCbm) patch.cbm_per_unit = Math.round(a.cbm * 1e9) / 1e9;
     if (a.method) patch.ship_method = a.method;
     if (Object.keys(patch).length === 0) continue;
     const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", id).eq("voucher_id", voucherId);
