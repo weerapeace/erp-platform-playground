@@ -375,6 +375,8 @@ export const meaningIconValue = (m: IconMeaning, s: IconSettings): string => s.o
  *   name  = ชื่อความหมาย (โค้ดใหม่ใช้แบบนี้ เช่น name="save")
  *   value = ค่าที่เก็บไว้เดิม (อีโมจิในเมนู/DB หรือ "i:" / "c:" / "img:")
  * ค่า "i:"/"c:"/"img:" = ผู้ใช้เลือกไอคอนเจาะจงแล้ว → วาดตามนั้นทุกโหมด
+ * name ที่ไม่ใช่ความหมาย แต่เป็นชื่อไอคอนเส้นในชุด (เช่น name="plus") → วาดไอคอนนั้นทุกโหมด เหมือน "i:plus"
+ *   (เดิมไม่วาดอะไรเงียบ ๆ — เจอ 46 จุดทั้งระบบ 2026-11-23 · แก้ที่นี่ที่เดียว)
  */
 export function resolveIcon(input: { name?: string; value?: string | null }, s: IconSettings, mode: IconMode = s.mode): ResolvedIcon {
   const raw = (input.value ?? "").trim();
@@ -384,7 +386,10 @@ export function resolveIcon(input: { name?: string; value?: string | null }, s: 
     if (/^(i|c|img):/.test(raw)) return null; // ค่าไอคอนที่หาไม่เจอ (ถูกลบ) — ไม่วาดดีกว่าโชว์รหัส
   }
   const m = input.name ? iconMeaning(input.name) : raw ? meaningOfEmoji(raw, s) : null;
-  if (!m) return raw ? { kind: "text", text: raw } : null;
+  if (!m) {
+    if (input.name && !raw) return resolveIconValue(`i:${input.name}`, s, null);
+    return raw ? { kind: "text", text: raw } : null;
+  }
   if (mode === "emoji") return { kind: "text", text: raw || m.emoji };
   return resolveIconValue(meaningIconValue(m, s), s, meaningColor(m, s, mode)) ?? { kind: "text", text: raw || m.emoji };
 }

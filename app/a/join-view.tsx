@@ -145,7 +145,7 @@ export function JoinView({ token }: { token: string }) {
 
   if (done) return wrap(
     <div className="py-6 text-center">
-      <Icon name="success" size={44} className="mx-auto text-emerald-600" />
+      <Icon value="i:circle-check" size={44} className="mx-auto text-emerald-600" />
       <p className="mt-3 text-lg font-bold text-slate-900">{t.doneTitle}</p>
       <p className="mt-1 text-sm text-slate-600">{t.doneText}</p>
       {isFriend !== true && (

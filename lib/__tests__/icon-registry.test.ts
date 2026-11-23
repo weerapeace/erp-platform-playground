@@ -59,6 +59,15 @@ describe("icon registry", () => {
     expect(resolveIcon({ name: "delete" }, c)).toEqual({ kind: "img", src: "erp-icons/u/1.png", tint: true, color: null });
   });
 
+  it("a name that is not a meaning but is a line icon in the set draws that icon in every mode", () => {
+    expect(iconMeaning("plus")).toBeNull();
+    for (const mode of ["emoji", "line", "color"] as const) {
+      expect(resolveIcon({ name: "plus" }, S({ mode }))).toEqual({ kind: "line", d: erpIconDef("plus")!.d, color: null });
+    }
+    expect(resolveIcon({ name: "not-a-real-icon" }, S({ mode: "line" }))).toBeNull();
+    expect(resolveIcon({ name: "save" }, S())).toEqual({ kind: "text", text: "💾" });   // ความหมายเดิมยังทำงานเหมือนเดิม
+  });
+
   it("explicit i:/c:/img: values are drawn in every mode; missing ones draw nothing", () => {
     expect(resolveIcon({ value: "i:truck" }, S())).toMatchObject({ kind: "line" });
     expect(resolveIcon({ value: "i:not-a-real-icon" }, S())).toBeNull();

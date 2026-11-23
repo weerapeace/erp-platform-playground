@@ -479,7 +479,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             <Popover panelClassName="w-60 p-1"
               trigger={(toggle) => (
                 <button onClick={toggle} aria-label={t("เมนูเพิ่มเติม", "More")} title={t("ปิดอัลบั้ม / ลบอัลบั้ม", "Close / delete album")}
-                  className="h-9 px-3 inline-flex items-center gap-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon name="more" />{t("เพิ่มเติม", "More")}</button>
+                  className="h-9 px-3 inline-flex items-center gap-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"><Icon value="i:dots-vertical" />{t("เพิ่มเติม", "More")}</button>
               )}>
               {(close) => (
                 <div className="flex flex-col text-sm">
