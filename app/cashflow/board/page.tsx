@@ -14,6 +14,12 @@
  *  - เลือกดูทีละบริษัทได้ (ไอ.เอส.จี. / หลุยส์ / ยังไม่ระบุ) — แต่ละบริษัทมีเงินในบัญชีและเส้นเงินคงเหลือของตัวเอง
  *    ลากการ์ด = เลื่อนวันเท่านั้น ไม่เปลี่ยนบริษัท
  *
+ *  - มี 5 มุมมอง (จำต่อเครื่อง): รายสัปดาห์ (ค่าเริ่มต้น) · รายวัน (ไฟล์นี้) · สมุดบัญชี · กราฟ · ปฏิทิน → components/cashflow/board-views
+ *    การ์ดใช้ร่วมกันที่ components/cashflow/board-card
+ *  - เงินกันขั้นต่ำ = ค่าตั้งกลาง lib/cashflow-settings (ใช้ร่วมกับหน้า /cashflow + แจ้งเตือน) ต่ำกว่า = เหลือง
+ *  - ตัวกรองด่วน (เข้า/ออก/ประเภท) กรองแค่การ์ด — ยอดคงเหลือคิดจากทุกรายการเสมอ
+ *  - ลองเลื่อนแล้วย้อนกลับทีละขั้นได้ (ปุ่มแถบล่าง / Ctrl+Z)
+ *
  * ใช้ข้อมูลชุดเดียวกับหน้า /cashflow (API /api/cashflow) และสูตรจาก lib/cashflow.ts
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -39,6 +45,16 @@ import type { CashflowApiData } from "@/app/api/cashflow/route";
 import type { PlanResult } from "@/app/api/cashflow/plan/route";
 import type { BoardNote } from "@/app/api/cashflow/notes/route";
 import type { AssignResult } from "@/app/api/cashflow/assign-company/route";
+import { MoneyInput } from "@/components/money-input";
+import { useToast } from "@/components/toast";
+import { DEFAULT_CASHFLOW_SETTINGS, type CashflowSettings } from "@/lib/cashflow-settings";
+import { Card, GroupCard, TONE_TEXT, balanceTone, shortTHB, type BoardCard } from "@/components/cashflow/board-card";
+import {
+  BoardViewSwitcher, CalendarView, ChartView, LedgerView, WeekView, useBoardView, type BoardViewProps,
+} from "@/components/cashflow/board-views";
+
+/** ตัวกรองด่วน — กรองแค่การ์ดที่โชว์ · เส้น/ยอดคงเหลือยังคิดจากทุกรายการเสมอ (ไม่งั้นตัวเลขหลอก) */
+type DirFilter = "all" | "in" | "out";
 
 const RANGES = [
   { days: 45,  label: "6 สัปดาห์" },
@@ -55,17 +71,6 @@ const NOTE_COLORS: Record<string, { chip: string; card: string; label: string }>
   green:  { chip: "bg-emerald-300", card: "bg-emerald-50 border-emerald-300 text-emerald-900", label: "เขียว" },
 };
 
-const shortTHB = (n: number) => {
-  const a = Math.abs(n), s = n < 0 ? "-" : "";
-  if (a >= 1_000_000) return `${s}${(a / 1_000_000).toFixed(2)}ล`;
-  if (a >= 1_000) return `${s}${Math.round(a / 1_000)}k`;
-  return `${s}${Math.round(a)}`;
-};
-
-/** การ์ด 1 ใบ หรือกองที่รวมของร้านเดียวกันไว้ */
-type BoardCard =
-  | { kind: "single"; key: string; ev: CashflowEvent }
-  | { kind: "group"; key: string; party: string; events: CashflowEvent[]; total: number; direction: "in" | "out"; movable: boolean; companyId: string | null };
 
 export default function CashBoardPage() {
   const canView = usePermission("cashflow.view");
@@ -81,6 +86,8 @@ export default function CashBoardPage() {
 
   /** วันใหม่ที่ยังไม่ได้ยืนยัน — key = id ของ event */
   const [pending, setPending] = useState<Record<string, string>>({});
+  /** ชุด pending ก่อนหน้าแต่ละขั้น — ปุ่ม "ย้อนกลับ" / Ctrl+Z */
+  const [history, setHistory] = useState<Record<string, string>[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [groupByParty, setGroupByParty] = useState(false);
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
@@ -91,6 +98,42 @@ export default function CashBoardPage() {
   const [noteEdit, setNoteEdit] = useState<Partial<BoardNote> & { note_date: string } | null>(null);
   /** การ์ดที่กดเปิดดูรายละเอียดอยู่ (เก็บแค่ id — เนื้อหาอ่านสด ๆ จะได้อัปเดตตามตอนเลื่อนวัน) */
   const [detailId, setDetailId] = useState<string | null>(null);
+  const toast = useToast();
+
+  // ---- มุมมอง (จำต่อคน) + ตัวกรองด่วน ----
+  const [view, setView] = useBoardView();
+  const [dirFilter, setDirFilter] = useState<DirFilter>("all");
+  const [srcFilter, setSrcFilter] = useState<CashflowSource | "all">("all");
+
+  // ---- เงินกันขั้นต่ำ (ค่าตั้งกลางร่วมกับหน้า /cashflow + แจ้งเตือน) ----
+  const [cfSettings, setCfSettings] = useState<CashflowSettings>(DEFAULT_CASHFLOW_SETTINGS);
+  const [bufferEdit, setBufferEdit] = useState<number | null>(null);
+  useEffect(() => {
+    if (!canView) return;
+    apiFetch("/api/cashflow/settings").then((r) => r.json())
+      .then((j) => { if (j?.data) setCfSettings(j.data as CashflowSettings); })
+      .catch(() => { /* ใช้ค่าตั้งต้น */ });
+  }, [canView]);
+  const buffer = cfSettings.safetyBuffer;
+
+  const saveBuffer = async (value: number, opts?: { silent?: boolean }) => {
+    const before = cfSettings;
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/cashflow/settings", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ safetyBuffer: Math.max(0, value) }),
+      });
+      const j = await res.json();
+      if (j?.error) { toast.error(j.error); return; }
+      setCfSettings(j.data as CashflowSettings);
+      setBufferEdit(null);
+      if (!opts?.silent) {
+        toast.undo(`ตั้งเงินกันขั้นต่ำเป็น ${THB(value)} แล้ว`, () => saveBuffer(before.safetyBuffer, { silent: true }));
+      }
+    } catch { toast.error("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setSaving(false); }
+  };
 
   const from = todayISO();
   const to = addDaysISO(from, rangeDays);
@@ -107,7 +150,7 @@ export default function CashBoardPage() {
         if (cf?.error) setError(cf.error);
         else {
           setData(cf.data as CashflowApiData);
-          if (!keepPendingRef.current) { setPending({}); setSelected(new Set()); }
+          if (!keepPendingRef.current) { setPending({}); setHistory([]); setSelected(new Set()); }
         }
         keepPendingRef.current = false;
         if (!nt?.error) setNotes((nt.data ?? []) as BoardNote[]);
@@ -158,13 +201,36 @@ export default function CashBoardPage() {
     const m = new Map<string, CashflowEvent[]>();
     for (const e of events) {
       if (e.date < from || e.date > to) continue;
+      if (dirFilter !== "all" && e.direction !== dirFilter) continue;
+      if (srcFilter !== "all" && e.source !== srcFilter) continue;
       const list = m.get(e.date) ?? [];
       list.push(e);
       m.set(e.date, list);
     }
     for (const list of m.values()) list.sort((a, b) => b.amount - a.amount);
     return m;
+  }, [events, from, to, dirFilter, srcFilter]);
+
+  /** แหล่งที่มีจริงในช่วงนี้ — ใช้ทำปุ่มกรองประเภท (ไม่โชว์ประเภทที่ไม่มีรายการ) */
+  const sourcesInRange = useMemo(() => {
+    const m = new Map<CashflowSource, number>();
+    for (const e of events) {
+      if (e.date < from || e.date > to) continue;
+      const k = e.source as CashflowSource;
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [events, from, to]);
+  const filtering = dirFilter !== "all" || srcFilter !== "all";
+
+  /** วัน (ที่มีรายการ) ที่เงินยังไม่ติดลบ แต่ต่ำกว่าเงินกันขั้นต่ำ — นับแบบเดียวกับ "วันที่เงินติดลบ" */
+  const lowDays = useMemo(() => {
+    let count = 0, first: string | null = null;
+    for (const d of series.days) {
+      if (d.balance >= 0 && d.balance < buffer) { count += 1; if (!first) first = d.date; }
+    }
+    return { count, first };
+  }, [series, buffer]);
 
   /** แปลงรายการของแต่ละวันเป็นการ์ด — รวมกองตามร้านถ้าเปิดโหมดรวม */
   const cardsByDay = useMemo(() => {
@@ -231,16 +297,39 @@ export default function CashBoardPage() {
     [detailId, events],
   );
 
-  /** ย้ายใบเดียวไปวันที่กำหนด (ใช้จากป๊อปรายละเอียด — ไม่ต้องลาก) */
+  // ---- ประวัติการลอง (ย้อนกลับทีละขั้น / Ctrl+Z) — ยังไม่ได้บันทึกอะไรลงเอกสาร ----
+  const changePending = (next: Record<string, string>) => {
+    setHistory((h) => [...h.slice(-49), pending]);
+    setPending(next);
+  };
+  const undoStep = useCallback(() => {
+    setHistory((h) => {
+      if (!h.length) return h;
+      setPending(h[h.length - 1]);
+      return h.slice(0, -1);
+    });
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // e.code กันแป้นพิมพ์ภาษาไทย (กด Ctrl+Z ตอนเป็นภาษาไทย e.key ไม่ใช่ "z")
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "z" || e.key === "Z" || e.code === "KeyZ")) {
+        e.preventDefault(); undoStep();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undoStep]);
+
+  /** ย้ายใบเดียวไปวันที่กำหนด (ใช้จากป๊อปรายละเอียด — ไม่ต้องลาก · ทางหลักบนมือถือ) */
   const moveOne = (id: string, day: string) => {
     const src = (data?.events ?? []).find((e) => e.id === id);
     if (!src?.movable) return;
-    setPending((p) => {
-      const next = { ...p };
-      if (day === src.date) delete next[id];
-      else next[id] = day;
-      return next;
-    });
+    const next = { ...pending };
+    if (day === src.date) delete next[id];
+    else next[id] = day;
+    changePending(next);
   };
 
   // ---- เลือก / ลาก ----
@@ -273,16 +362,14 @@ export default function CashBoardPage() {
     const ids = dragIds;
     setDragIds(null);
     if (!ids?.length) return;
-    setPending((p) => {
-      const next = { ...p };
-      for (const id of ids) {
-        const src = (data?.events ?? []).find((e) => e.id === id);
-        if (!src?.movable) continue;
-        if (day === src.date) delete next[id];
-        else next[id] = day;
-      }
-      return next;
-    });
+    const next = { ...pending };
+    for (const id of ids) {
+      const src = (data?.events ?? []).find((e) => e.id === id);
+      if (!src?.movable) continue;
+      if (day === src.date) delete next[id];
+      else next[id] = day;
+    }
+    changePending(next);
   };
 
   const confirmMoves = async () => {
@@ -403,7 +490,7 @@ export default function CashBoardPage() {
           <span className="text-xs text-slate-400 mr-2">{formatDate(from)} – {formatDate(to)}</span>
 
           <button onClick={() => setGroupByParty((v) => !v)}
-                  className={`h-8 px-3 text-sm rounded-lg border transition-colors ${
+                  className={`h-8 px-3 text-sm rounded-lg border transition-colors ${view === "ledger" ? "hidden" : ""} ${
                     groupByParty ? "bg-slate-800 border-slate-800 text-white"
                       : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
             🗂 รวมการ์ดของร้านเดียวกัน
@@ -428,6 +515,47 @@ export default function CashBoardPage() {
                                 unassignedCount={unassignedCount} />
           </div>
         )}
+
+        {/* ---- มุมมอง + ตัวกรองด่วน + เงินกันขั้นต่ำ ---- */}
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <BoardViewSwitcher value={view} onChange={setView} />
+          <span className="text-[11px] text-slate-400 md:hidden w-full">บนมือถือ: กดการ์ด → เลือกวันใหม่ (แทนการลาก)</span>
+        </div>
+        <div className="mt-2 flex items-center gap-1.5 flex-wrap text-sm">
+          <span className="text-xs text-slate-500 mr-0.5">แสดง</span>
+          {([["all", "ทั้งหมด"], ["in", "เงินเข้า"], ["out", "เงินออก"]] as const).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setDirFilter(k)}
+                    className={`h-7 px-2.5 text-xs rounded-full border transition-colors ${
+                      dirFilter === k
+                        ? k === "in" ? "bg-emerald-600 border-emerald-600 text-white" : k === "out" ? "bg-rose-600 border-rose-600 text-white" : "bg-slate-800 border-slate-800 text-white"
+                        : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              {label}
+            </button>
+          ))}
+          <span className="w-px h-5 bg-slate-200 mx-1" />
+          {sourcesInRange.map(([src, n]) => (
+            <button key={src} type="button" onClick={() => setSrcFilter(srcFilter === src ? "all" : src)}
+                    className={`h-7 px-2.5 text-xs rounded-full border transition-colors ${
+                      srcFilter === src ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              {CASHFLOW_SOURCE[src].label} <span className="opacity-60">{n}</span>
+            </button>
+          ))}
+          {filtering && (
+            <button type="button" onClick={() => { setDirFilter("all"); setSrcFilter("all"); }}
+                    className="h-7 px-2 text-xs text-blue-700 underline">ล้างตัวกรอง</button>
+          )}
+          <span className="ml-auto" />
+          <button type="button" onClick={() => canManage ? setBufferEdit(buffer) : undefined}
+                  title={canManage ? "ตั้งเงินที่ต้องเหลือในบัญชีอย่างน้อย (ใช้ร่วมกับการแจ้งเตือนเงินจะขาด)" : "ต้องมีสิทธิ์ตั้งค่ากระแสเงินสดถึงจะแก้ได้"}
+                  className={`h-7 px-2.5 text-xs rounded-full border border-amber-300 bg-amber-50 text-amber-800 ${canManage ? "hover:bg-amber-100" : "cursor-default"}`}>
+            เงินกันขั้นต่ำ <b className="tabular-nums">{THB(buffer)}</b>{canManage && " ✎"}
+          </button>
+        </div>
+        {filtering && (
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            กำลังกรองการ์ดอยู่ — ยอดคงเหลือ/กราฟยังคิดจากทุกรายการ (ไม่งั้นตัวเลขจะหลอก)
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[264px_minmax(0,1fr)] min-h-[70vh]">
@@ -444,6 +572,11 @@ export default function CashBoardPage() {
             <Stat label="วันที่เงินติดลบ" value={`${stats.red} วัน`}
                   sub={stats.redFirst ? `เริ่มติดลบ ${formatDayMonthTH(stats.redFirst)}` : "เงินพอตลอดช่วง"}
                   tone={stats.red ? "text-red-600" : "text-emerald-600"} box={stats.red ? "warn" : "good"} />
+            {buffer > 0 && (
+              <Stat label={`วันที่ต่ำกว่าเงินกันขั้นต่ำ (${shortTHB(buffer)})`} value={`${lowDays.count} วัน`}
+                    sub={lowDays.first ? `เริ่ม ${formatDayMonthTH(lowDays.first)}` : "เหนือเกณฑ์ตลอดช่วง"}
+                    tone={lowDays.count ? "text-amber-700" : "text-emerald-600"} box={lowDays.count ? undefined : "good"} />
+            )}
           </div>
 
           {companySummaries.length > 1 && (
@@ -464,19 +597,7 @@ export default function CashBoardPage() {
                   : stats.red > baseStats.red ? `แย่ลง ${stats.red - baseStats.red} วัน`
                   : "ยังไม่ช่วย ลองเลื่อนใบที่ยอดใหญ่กว่านี้"}
               </p>
-              <div className="flex gap-2 mt-2.5">
-                <button onClick={() => setPending({})}
-                        className="h-8 px-3 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
-                  คืนค่าเดิม
-                </button>
-                {canManage && (
-                  <button onClick={() => setConfirmOpen(true)}
-                          className="h-8 px-3 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-                    ยืนยัน {movedEvents.length} ใบ
-                  </button>
-                )}
-              </div>
-              {!canManage && <p className="text-[11px] text-blue-500 mt-2">ลากดูได้ แต่ต้องมีสิทธิ์ตั้งค่ากระแสเงินสดถึงจะบันทึกวันใหม่ได้</p>}
+              <p className="text-[11px] text-blue-500 mt-2">ย้อนกลับ / ยืนยัน ที่แถบล่างของกระดาน</p>
             </div>
           )}
 
@@ -487,6 +608,7 @@ export default function CashBoardPage() {
             <LegendRow color="bg-violet-500" text="🔒 เลื่อนไม่ได้ — งวดผ่อน / เงินเดือน / รายการประจำ" />
             <div className="flex items-center gap-2"><span className="w-4 border-t-2 border-blue-600 shrink-0" /> เส้นเงินคงเหลือ</div>
             <LegendRow color="bg-red-400" text="ช่องแดง = เงินติดลบวันนั้น" />
+            <LegendRow color="bg-amber-200" text="ช่องเหลือง = ต่ำกว่าเงินกันขั้นต่ำ" />
             <LegendRow color="bg-amber-300" text="โน้ตแปะวัน — กด ＋ ที่หัวคอลัมน์" />
             {companies.length > 0 && <LegendRow color="bg-sky-300" text="ป้ายเล็กบนการ์ด = เป็นของบริษัทไหน" />}
           </div>
@@ -531,8 +653,24 @@ export default function CashBoardPage() {
           )}
           {loading && !data && <div className="text-center text-slate-400 py-24">กำลังจัดของขึ้นกระดาน…</div>}
 
-          {data && (
+          {data && view !== "day" && (() => {
+            const vp: BoardViewProps = {
+              days, today: from, cardsByDay, byDay, levelByDay, startBalance: series.startBalance, buffer,
+              dragIds, overDay, pending, selected, openGroups, companies, showCompany: companyFilter === COMPANY_ALL,
+              originalDate: (id) => data.events.find((e) => e.id === id)?.date ?? "",
+              onDragStart: startDrag, onDragEnd: () => { setDragIds(null); setOverDay(null); },
+              onOver: setOverDay, onDrop: drop, onToggleSelect: toggleSelect, onOpenDetail: setDetailId,
+              onToggleGroup: (k) => setOpenGroups((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
+            };
+            return view === "week" ? <WeekView {...vp} />
+              : view === "ledger" ? <LedgerView {...vp} />
+              : view === "chart" ? <ChartView {...vp} />
+              : <CalendarView {...vp} />;
+          })()}
+
+          {data && view === "day" && (
             <Board
+              buffer={buffer}
               days={days} cardsByDay={cardsByDay} notesByDay={notesByDay} byDay={byDay}
               levelByDay={levelByDay} balanceByDay={balanceByDay} today={from}
               dragIds={dragIds} overDay={overDay} pending={pending} selected={selected}
@@ -551,8 +689,66 @@ export default function CashBoardPage() {
               onEditNote={(n) => setNoteEdit({ ...n })}
             />
           )}
+
+          {/* ---- แถบล่าง: ของที่ลองเลื่อนไว้ (ยังไม่บันทึก) — ย้อนกลับทีละขั้น / คืนทั้งหมด / ยืนยัน ---- */}
+          {(movedEvents.length > 0 || history.length > 0) && (
+            <div className="sticky bottom-0 z-40 border-t border-blue-200 bg-blue-50/95 backdrop-blur px-3 md:px-4 py-2.5 flex items-center gap-2 flex-wrap">
+              <span className="text-sm text-blue-800 mr-auto">
+                ลองเลื่อนไว้ <b>{movedEvents.length}</b> ใบ · ยังไม่บันทึก
+                <span className="hidden sm:inline text-blue-600"> · วันติดลบ {baseStats.red} → {stats.red}
+                  {buffer > 0 && <> · ต่ำสุด {shortTHB(stats.low)}</>}</span>
+              </span>
+              <button type="button" onClick={undoStep} disabled={!history.length} title="ย้อนกลับ 1 ขั้น (Ctrl+Z)"
+                      className="h-8 px-3 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40">
+                ↶ ย้อนกลับ
+              </button>
+              {movedEvents.length > 0 && (
+                <button type="button" onClick={() => changePending({})}
+                        className="h-8 px-3 text-xs text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                  คืนค่าทั้งหมด
+                </button>
+              )}
+              {canManage && movedEvents.length > 0 && (
+                <button type="button" onClick={() => setConfirmOpen(true)}
+                        className="h-8 px-3 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+                  ยืนยัน {movedEvents.length} ใบ
+                </button>
+              )}
+              {!canManage && movedEvents.length > 0 && (
+                <span className="w-full text-[11px] text-blue-500">ลองดูได้ แต่ต้องมีสิทธิ์ตั้งค่ากระแสเงินสดถึงจะบันทึกวันใหม่ได้</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ---- ป๊อปตั้งเงินกันขั้นต่ำ (ค่ากลาง ใช้ร่วมกับหน้า /cashflow + แจ้งเตือน) ---- */}
+      <ERPModal
+        open={bufferEdit !== null}
+        onClose={() => setBufferEdit(null)}
+        title="เงินกันขั้นต่ำ"
+        description="เงินที่ต้องเหลือในบัญชีอย่างน้อย — วันไหนต่ำกว่านี้กระดานจะเป็นสีเหลือง"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2 w-full">
+            <button onClick={() => setBufferEdit(null)}
+                    className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={() => bufferEdit !== null && saveBuffer(bufferEdit)} disabled={saving || bufferEdit === buffer}
+                    className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "กำลังบันทึก…" : "บันทึก"}
+            </button>
+          </div>
+        }
+      >
+        {bufferEdit !== null && (
+          <div className="space-y-2">
+            <MoneyInput value={bufferEdit} onChange={(v) => setBufferEdit(Math.max(0, Number(v || 0)))} />
+            <p className="text-xs text-slate-500">
+              ค่านี้ใช้ร่วมกันทั้งระบบ — กราฟหน้ากระแสเงินสด และแจ้งเตือน "เงินจะขาด" ทุกเช้าก็ใช้ค่าเดียวกัน · 0 = เตือนเมื่อติดลบเท่านั้น
+            </p>
+          </div>
+        )}
+      </ERPModal>
 
       {/* ---- ป๊อปยืนยันเลื่อนวัน ---- */}
       <ConfirmDialog
@@ -851,6 +1047,10 @@ function CardDetailModal({ ev, originalDate, selected, companies, canManage, sav
                 <div className="w-40">
                   <DateInput value={ev.date} onChange={(iso) => iso && onMove(ev.id, iso)} />
                 </div>
+                <button onClick={() => onMove(ev.id, addDaysISO(ev.date, -7))}
+                        className="h-8 px-2.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                  −7 วัน
+                </button>
                 {[7, 15, 30].map((d) => (
                   <button key={d} onClick={() => onMove(ev.id, addDaysISO(ev.date, d))}
                           className="h-8 px-2.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
@@ -897,6 +1097,8 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
 );
 
 type BoardProps = {
+  /** เงินกันขั้นต่ำ — ต่ำกว่านี้ระบายเหลือง + เส้นประส้ม */
+  buffer: number;
   days: string[];
   cardsByDay: Map<string, BoardCard[]>;
   notesByDay: Map<string, BoardNote[]>;
@@ -929,7 +1131,7 @@ type BoardProps = {
 function Board(p: BoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [path, setPath] = useState<{ line: string; area: string; zeroY: number; w: number; h: number } | null>(null);
+  const [path, setPath] = useState<{ line: string; area: string; zeroY: number; bufY: number; w: number; h: number } | null>(null);
   /** แถบเดือน — ความกว้างของแต่ละเดือนต้องเท่ากับผลรวมคอลัมน์ของเดือนนั้น */
   const [monthBand, setMonthBand] = useState<{ ym: string; width: number }[]>([]);
 
@@ -951,7 +1153,7 @@ function Board(p: BoardProps) {
     setMonthBand(bands);
 
     const top = 58, bottom = h - 16, span = Math.max(40, bottom - top);
-    const vals = p.levelByDay.map((x) => x.bal).concat([0]);
+    const vals = p.levelByDay.map((x) => x.bal).concat([0, p.buffer]);
     const max = Math.max(...vals), min = Math.min(...vals);
     const range = max - min || 1;
     const y = (v: number) => top + span * (1 - (v - min) / range);
@@ -967,8 +1169,8 @@ function Board(p: BoardProps) {
     const line = pts.map((pt, i) => `${i ? "L" : "M"}${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`).join(" ");
     const zeroY = y(0);
     const area = `${line} L${pts[pts.length - 1][0].toFixed(1)} ${zeroY.toFixed(1)} L${pts[0][0].toFixed(1)} ${zeroY.toFixed(1)} Z`;
-    setPath({ line, area, zeroY, w, h });
-  }, [p.levelByDay, p.days]);
+    setPath({ line, area, zeroY, bufY: y(p.buffer), w, h });
+  }, [p.levelByDay, p.days, p.buffer]);
 
   useLayoutEffect(() => { draw(); }, [draw]);
   useEffect(() => {
@@ -998,6 +1200,12 @@ function Board(p: BoardProps) {
             <path d={path.area} fill="rgba(37,99,235,.08)" />
             <path d={path.line} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinejoin="round" />
             <text x="6" y={path.zeroY - 5} fontSize="10" fill="#94a3b8">฿0</text>
+            {p.buffer > 0 && (
+              <>
+                <line x1="0" y1={path.bufY} x2={path.w} y2={path.bufY} stroke="#d97706" strokeWidth="1.25" strokeDasharray="6 4" opacity=".8" />
+                <text x="6" y={path.bufY - 5} fontSize="10" fill="#b45309">เงินกันขั้นต่ำ {shortTHB(p.buffer)}</text>
+              </>
+            )}
           </svg>
         )}
 
@@ -1006,7 +1214,8 @@ function Board(p: BoardProps) {
           const dayNotes = p.notesByDay.get(day) ?? [];
           const busy = cards.length > 0 || dayNotes.length > 0;
           const bal = p.balanceByDay.get(day);
-          const flood = (p.levelByDay.find((x) => x.date === day)?.bal ?? 0) < 0;
+          const tone = balanceTone(p.levelByDay.find((x) => x.date === day)?.bal ?? 0, p.buffer);
+          const flood = tone === "neg";
           const dow = parseISO(day).getUTCDay();
           const width = busy ? "w-[210px]" : p.dragIds ? "w-[76px]" : "w-[26px]";
           const movableHere = (p.byDay.get(day) ?? []).filter((e) => e.movable).length;
@@ -1020,7 +1229,7 @@ function Board(p: BoardProps) {
               onDragLeave={() => p.onOver(null)}
               onDrop={(e) => { e.preventDefault(); p.onDrop(day); }}
               className={`group/col relative z-10 shrink-0 flex flex-col border-r border-slate-200 transition-[width,background-color] duration-150 ${width}
-                ${flood ? "bg-red-50/70" : dow === 0 || dow === 6 ? "bg-slate-50/60" : ""}
+                ${flood ? "bg-red-50/70" : tone === "low" ? "bg-amber-50/70" : dow === 0 || dow === 6 ? "bg-slate-50/60" : ""}
                 ${p.overDay === day ? "bg-blue-50 ring-2 ring-inset ring-blue-400" : ""}
                 ${day === p.today ? "shadow-[inset_2px_0_0_#059669]" : ""}`}
             >
@@ -1040,7 +1249,7 @@ function Board(p: BoardProps) {
                   )}
                 </div>
                 {busy && bal !== undefined && (
-                  <div className={`text-[11px] tabular-nums mt-0.5 ${flood ? "text-red-600 font-semibold" : "text-blue-700"}`}>
+                  <div className={`text-[11px] tabular-nums mt-0.5 ${TONE_TEXT[tone]}`}>
                     {shortTHB(bal)}
                   </div>
                 )}
@@ -1092,122 +1301,3 @@ function Board(p: BoardProps) {
   );
 }
 
-function Card({ ev, companies, dragging, checked, movedFrom, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
-  ev: CashflowEvent; dragging: boolean; checked: boolean; movedFrom: string | null;
-  /** null = ไม่โชว์ป้ายบริษัท */
-  companies: CompanyRef[] | null;
-  onDragStart: (ids: string[]) => void; onDragEnd: () => void;
-  onToggleSelect: (id: string) => void; onOpenDetail: (id: string) => void;
-}) {
-  const meta = CASHFLOW_SOURCE[ev.source as CashflowSource];
-  const locked = !ev.movable;
-  const edge = locked ? "border-l-violet-500" : ev.direction === "in" ? "border-l-emerald-500" : "border-l-rose-500";
-  return (
-    <div
-      draggable={!locked}
-      // กดการ์ด = ดูรายละเอียด · กดค้าง Ctrl/⌘/Shift หรือติ๊กช่องมุมซ้าย = เลือกไว้ลากหลายใบ
-      onClick={(e) => {
-        if (!locked && (e.ctrlKey || e.metaKey || e.shiftKey)) { onToggleSelect(ev.id); return; }
-        onOpenDetail(ev.id);
-      }}
-      onDragStart={(e) => {
-        if (locked) { e.preventDefault(); return; }
-        onDragStart([ev.id]);
-        try { e.dataTransfer.setData("text/plain", ev.id); e.dataTransfer.effectAllowed = "move"; } catch { /* บางเบราว์เซอร์ไม่ยอมให้ตั้ง */ }
-      }}
-      onDragEnd={onDragEnd}
-      title={locked
-        ? `${meta.label} — กดดูรายละเอียด · เลื่อนวันไม่ได้`
-        : `กดดูรายละเอียด · ลากไปวันอื่นเพื่อเลื่อน${movedFrom ? ` · เดิมคือ ${formatDayMonthTH(movedFrom)}` : ""}`}
-      className={`group/card relative rounded-lg border border-l-[3px] border-slate-200 bg-white p-1.5 shadow-sm select-none ${edge}
-        ${locked ? "cursor-pointer bg-slate-50" : "cursor-grab active:cursor-grabbing hover:shadow-md"}
-        ${dragging ? "opacity-40" : ""} ${movedFrom ? "border-dashed" : ""}
-        ${checked ? "ring-2 ring-blue-500" : movedFrom ? "ring-2 ring-blue-200" : ""}`}
-    >
-      {!locked && (
-        <input
-          type="checkbox" checked={checked} onChange={() => onToggleSelect(ev.id)}
-          onClick={(e) => e.stopPropagation()}
-          title="เลือกไว้ลากหลายใบพร้อมกัน"
-          className={`absolute -top-1.5 -left-1.5 z-10 w-3.5 h-3.5 cursor-pointer accent-blue-600 transition-opacity
-            ${checked ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"}`}
-        />
-      )}
-      <div className="flex items-center justify-between gap-1.5">
-        <span className={`text-[9.5px] px-1.5 py-px rounded-full whitespace-nowrap ${
-          locked ? "bg-violet-100 text-violet-700"
-            : ev.direction === "in" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
-          {locked ? "🔒 " : ""}{meta.label}
-        </span>
-        <span className={`text-[13px] font-semibold tabular-nums whitespace-nowrap ${
-          ev.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
-          {ev.direction === "in" ? "+" : "−"}{THB(ev.amount)}
-        </span>
-      </div>
-      <p className="text-[11.5px] text-slate-700 mt-0.5 line-clamp-2 leading-snug">{ev.party}</p>
-      <p className="text-[10px] text-slate-400 mt-px flex items-center gap-1 flex-wrap">
-        {companies && companies.length > 0 && <CompanyTag companies={companies} companyId={ev.companyId} />}
-        <span>{ev.ref}{movedFrom && <span className="text-blue-600"> · เลื่อนจาก {formatDayMonthTH(movedFrom)}</span>}</span>
-      </p>
-    </div>
-  );
-}
-
-/** กองการ์ดของร้านเดียวกันในวันเดียวกัน — ลากทั้งกองได้ กดเพื่อกางดูรายใบ */
-function GroupCard({ card, companies, open, dragging, selected, pending, originalDate, onToggle, onDragStart, onDragEnd, onToggleSelect, onOpenDetail }: {
-  card: Extract<BoardCard, { kind: "group" }>;
-  companies: CompanyRef[] | null;
-  open: boolean; dragging: boolean;
-  selected: Set<string>; pending: Record<string, string>;
-  originalDate: (id: string) => string;
-  onToggle: () => void;
-  onDragStart: (ids: string[]) => void; onDragEnd: () => void;
-  onToggleSelect: (id: string) => void; onOpenDetail: (id: string) => void;
-}) {
-  const ids = card.events.map((e) => e.id);
-  const edge = !card.movable ? "border-l-violet-500" : card.direction === "in" ? "border-l-emerald-500" : "border-l-rose-500";
-  return (
-    <div className="space-y-1.5">
-      <div
-        draggable={card.movable}
-        onClick={onToggle}
-        onDragStart={(e) => {
-          if (!card.movable) { e.preventDefault(); return; }
-          onDragStart(ids);
-          try { e.dataTransfer.effectAllowed = "move"; } catch { /* ไม่เป็นไร */ }
-        }}
-        onDragEnd={onDragEnd}
-        title={card.movable ? "ลากทั้งกองไปวันอื่น · กดเพื่อกางดูรายใบ" : "ในกองมีใบที่เลื่อนไม่ได้ปนอยู่"}
-        className={`rounded-lg border border-l-[3px] border-slate-300 bg-slate-50 p-1.5 shadow-sm select-none ${edge}
-          ${card.movable ? "cursor-grab active:cursor-grabbing hover:shadow-md" : "cursor-pointer"}
-          ${dragging ? "opacity-40" : ""}`}
-      >
-        <div className="flex items-center justify-between gap-1.5">
-          <span className="text-[9.5px] px-1.5 py-px rounded-full bg-slate-200 text-slate-600 whitespace-nowrap">
-            🗂 {card.events.length} ใบ
-          </span>
-          <span className={`text-[13px] font-semibold tabular-nums whitespace-nowrap ${
-            card.direction === "in" ? "text-emerald-600" : "text-rose-600"}`}>
-            {card.direction === "in" ? "+" : "−"}{THB(card.total)}
-          </span>
-        </div>
-        <p className="text-[11.5px] text-slate-700 mt-0.5 line-clamp-2 leading-snug">{card.party}</p>
-        <p className="text-[10px] text-slate-400 mt-px flex items-center gap-1">
-          {companies && companies.length > 0 && <CompanyTag companies={companies} companyId={card.companyId} />}
-          <span>{open ? "▲ ซ่อนรายใบ" : "▼ กดดูรายใบ"}</span>
-        </p>
-      </div>
-
-      {open && (
-        <div className="pl-2 space-y-1.5 border-l-2 border-slate-200">
-          {card.events.map((ev) => (
-            <Card key={ev.id} ev={ev} companies={companies} dragging={false} checked={selected.has(ev.id)}
-                  movedFrom={pending[ev.id] ? originalDate(ev.id) : null}
-                  onDragStart={onDragStart} onDragEnd={onDragEnd}
-                  onToggleSelect={onToggleSelect} onOpenDetail={onOpenDetail} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
