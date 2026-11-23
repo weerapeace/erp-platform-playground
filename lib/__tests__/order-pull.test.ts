@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { alertDue, countPullStates, pullAlerts, shopPullHealth, type ShopPullInput } from "@/lib/order-pull-health";
-import { lazMoney, lazOrderToPlatformOrder, lazTime } from "@/lib/lazada-orders";
+import { lazFinanceRows, lazIncomeOf, lazMoney, lazOrderToPlatformOrder, lazTime } from "@/lib/lazada-orders";
 import { lineOrderToPlatformOrder } from "@/lib/line-shopping-orders";
 import { shopeeIncomeOf } from "@/lib/shopee";
 import {
@@ -195,5 +195,35 @@ describe("ยอดเงินแบบ Zort ของ Lazada / TikTok (orderMo
   it("ไม่มีข้อมูล = ไม่เดา", () => {
     expect(orderMoney("lazada", {}, 100)).toMatchObject({ original: null, net: 100 });
     expect(orderMoney(null, null, null).net).toBeNull();
+  });
+});
+
+describe("ค่าธรรมเนียม Lazada ต่อออเดอร์ (lazIncomeOf / lazFinanceRows)", () => {
+  const rows = [
+    { order_no: "111", fee_name: "Item Price Credit", amount: "439.00", paid_status: "Not paid" },
+    { order_no: "111", fee_name: "Commission", amount: "-21.95", paid_status: "Not paid" },
+    { order_no: "111", fee_name: "Payment Fee", amount: "-9.17", paid_status: "Not paid" },
+    { order_no: "111", fee_name: "Promotional Charges Vouchers", amount: "-109.75", paid_status: "Not paid" },
+    { order_no: "999", fee_name: "Commission", amount: "-5", paid_status: "Not paid" },
+  ];
+  it("รวมเฉพาะออเดอร์นี้ · แปลชื่อไทย · เงินเข้าร้าน = ผลรวม · ยังไม่โอน", () => {
+    const inc = lazIncomeOf(rows, "111");
+    expect(inc.rows).toBe(4);
+    expect(inc.escrow).toBe(298.13);
+    expect(inc.paid).toBe(false);
+    expect(inc.lines.map((l) => [l.label, l.amount])).toEqual([["ราคาสินค้า (Lazada โอนให้)", 439], ["ค่าธรรมเนียมชำระเงิน", -9.17], ["ค่าคอมมิชชั่น", -21.95], ["ค่าคูปอง/โปรของร้าน", -109.75]]);
+  });
+  it("ชื่อช่องแบบเอกสารเก่า + โอนแล้ว", () => {
+    const inc = lazIncomeOf([{ "Order no": "5", "Transaction Type": "Commission", Amount: "-2.86", "Paid Status": "Yes" }, { "Order no": "5", "Transaction Type": "Item Price Credit", Amount: "28.00", "Paid Status": "Yes" }], "5");
+    expect(inc).toMatchObject({ escrow: 25.14, paid: true, rows: 2 });
+  });
+  it("ยังไม่ตัดรอบ = ไม่มีรายการ", () => {
+    expect(lazIncomeOf([], "111")).toMatchObject({ escrow: null, rows: 0, lines: [] });
+  });
+  it("อ่านแถวได้หลายรูปแบบคำตอบ", () => {
+    expect(lazFinanceRows({ data: [{ a: 1 }] })).toHaveLength(1);
+    expect(lazFinanceRows({ data: { transactions: [{ a: 1 }, { a: 2 }] } })).toHaveLength(2);
+    expect(lazFinanceRows({ data: { TransactionDOs: { transactionDOs: [{ a: 1 }] } } })).toHaveLength(1);
+    expect(lazFinanceRows({})).toHaveLength(0);
   });
 });

@@ -167,3 +167,10 @@ env บนโฮสต์: `LAZADA_APP_KEY` + `LAZADA_APP_SECRET` · callback `h
 - **ตัวช่วยลงสินค้า**: ขั้น 1 ร้านลงจริงได้ / ดูก่อนส่งได้ (บอกเหตุผล) / ร้านอื่น · ขั้น 2 แท็บต่อร้าน · ขั้น 3 ลงทุกร้านรอบเดียว (ร้านที่ยังไม่ live = บันทึกร่าง) · ทางเข้าใหม่: แท็บแพลตฟอร์มของ Parent SKU ปุ่ม "ลงทุกร้าน" + ติ๊กหลายรุ่นในหน้า Parent SKU (ติ๊กทุกร้านที่มีตัวสร้างให้)
 - **เฟส C (ยังไม่ทำ · แตะร้าน):** เปลี่ยน `LAZADA_CREATE_LIVE = true` หลังพ้นแคมเปญ → ทดสอบ 1 ตัว (ปิดขาย) · ⚠️ ยังไม่เคยส่ง `/product/create` จริง — JSON payload / variation block / ปิดขายหลังสร้าง ต้องยืนยันกับร้าน
   - แบรนด์: คู่มือบอก `brand` จะเลิกใช้ ให้ใช้ `brand_id` (GetBrandByPages) — ถ้า Lazada ไม่รับ "No Brand" ตอนทดสอบ ต้องหา brand_id ของ No Brand ก่อน · ฝากรูป/ดึงกลับใช้ `lazWithRetry` (ตัวสร้างสินค้าไม่ลองซ้ำเอง กันสร้างซ้ำ)
+
+## ค่าธรรมเนียมต่อออเดอร์ (อ่านอย่างเดียว · 2026-11-23)
+- `lazGetOrderTransactions` (lib/lazada.ts) เรียก `/finance/transaction/details/get` · `trans_type=-1` · `start_time`/`end_time` = YYYY-MM-DD (วันสั่ง−1 ถึงวันนี้ เวลาไทย) · `trade_order_id` · ไล่หน้า 500 แถว
+  - Lazada ไม่รับ `trade_order_id` (คำตอบมีคำว่า param/invalid) → ดึงตามช่วงวันแล้วกรองเลขออเดอร์เอง
+- แปลง: `lazIncomeOf` / `lazFinanceRows` / `lazFeeLabel` (lib/lazada-orders.ts · pure + เทสต์) — รับชื่อช่องทั้งแบบใหม่ (`fee_name` `amount` `order_no` `paid_status`) และแบบเอกสารเก่า (`Transaction Type` `Amount` `Order no` `Paid Status`)
+- ใช้ที่ `GET /api/platform-orders/income?id=` → จำใน `raw.lazada_income` 6 ชม. (ยังไม่ตัดรอบ = 1 ชม.) · หน้า/แผงรายละเอียดออเดอร์ › การชำระเงิน
+- ⚠️ ยังไม่เคยทดสอบกับร้านจริง — ถ้าขึ้น "ดึงค่าธรรมเนียมจาก Lazada ไม่ได้: …" ให้ดูข้อความนั้นก่อน (ชื่อพารามิเตอร์/ช่วงวัน)

@@ -91,3 +91,62 @@ export function lazOrderToPlatformOrder(o: Record<string, unknown>, items: Recor
     items: [...by.values()],
   };
 }
+
+// ───────── ค่าธรรมเนียม/รายได้จริงต่อออเดอร์ (หน้ารายละเอียด › การชำระเงิน · 2026-11-23) ─────────
+/** ชื่อรายการเงินของ Lazada → ไทย (ไม่รู้จัก = ชื่อเดิม) */
+const LAZ_FEE_TH: [RegExp, string][] = [
+  [/^item price credit/i, "ราคาสินค้า (Lazada โอนให้)"],
+  [/item price subsidy/i, "Lazada ช่วยออกส่วนลด"],
+  [/^commission/i, "ค่าคอมมิชชั่น"],
+  [/reversal commission/i, "คืนค่าคอมมิชชั่น"],
+  [/^payment fee/i, "ค่าธรรมเนียมชำระเงิน"],
+  [/shipping fee \(paid by customer\)/i, "ค่าส่งที่ผู้ซื้อจ่าย"],
+  [/shipping fee \(charged by lazada\)|automatic shipping fee/i, "ค่าส่ง (Lazada เก็บ)"],
+  [/free shipping/i, "ค่าโปรส่งฟรี"],
+  [/promotional charges? vouchers?|voucher/i, "ค่าคูปอง/โปรของร้าน"],
+  [/lazcoins?/i, "ส่วนลด LazCoins"],
+  [/sponsored|affiliate/i, "ค่าโฆษณา/แอฟฟิลิเอต"],
+  [/refund|reversal item price/i, "คืนเงินผู้ซื้อ"],
+  [/penalt/i, "ค่าปรับ"],
+  [/handling fee|fulfil/i, "ค่าบริการคลัง/จัดส่ง"],
+];
+export const lazFeeLabel = (name: string) => LAZ_FEE_TH.find(([re]) => re.test(name))?.[1] ?? name;
+
+export type LazIncome = {
+  /** รวมเงินที่ Lazada จะโอน/โอนแล้วให้ร้าน (ผลรวมทุกรายการ) */
+  escrow: number | null; buyer_paid: null;
+  lines: { key: string; label: string; amount: number }[];
+  /** โอนเข้าบัญชีแล้วทุกรายการ */
+  paid: boolean; rows: number;
+};
+const pickAny = (o: Record<string, unknown>, ...keys: string[]): unknown => { for (const k of keys) if (o[k] != null && o[k] !== "") return o[k]; return undefined; };
+/** แถวรายการเงินจาก Lazada (ชื่อช่องได้ทั้งแบบใหม่ fee_name/amount/order_no และแบบเก่า "Transaction Type"/"Amount"/"Order no") */
+export function lazFinanceRows(j: Record<string, unknown>): Record<string, unknown>[] {
+  const d = j.data as unknown;
+  if (Array.isArray(d)) return d as Record<string, unknown>[];
+  const o = (d && typeof d === "object" ? d : {}) as Record<string, unknown>;
+  for (const k of ["transactions", "transaction_list", "TransactionDOs", "transactionDOs", "list"]) {
+    const v = o[k];
+    if (Array.isArray(v)) return v as Record<string, unknown>[];
+    if (v && typeof v === "object") { const inner = (v as Record<string, unknown>).transactionDOs; if (Array.isArray(inner)) return inner as Record<string, unknown>[]; }
+  }
+  return [];
+}
+/** รวมรายการเงินของ 1 ออเดอร์ → บรรทัดต่อประเภท (pure · มีเทสต์) */
+export function lazIncomeOf(rows: Record<string, unknown>[], orderId: string): LazIncome {
+  const mine = rows.filter((r) => { const no = str(pickAny(r, "order_no", "orderNo", "Order no", "Order no:", "trade_order_id")); return !no || no === orderId; });
+  const by = new Map<string, number>();
+  let paidAll = mine.length > 0;
+  for (const r of mine) {
+    const name = str(pickAny(r, "fee_name", "transaction_type", "Transaction Type", "feeName")) ?? "อื่น ๆ";
+    const amt = lazMoney(pickAny(r, "amount", "Amount")) ?? 0;
+    by.set(name, (by.get(name) ?? 0) + amt);
+    const ps = String(pickAny(r, "paid_status", "Paid Status") ?? "").toLowerCase();
+    if (!(ps === "yes" || ps === "paid" || ps === "true")) paidAll = false;
+  }
+  const lines = [...by.entries()].filter(([, v]) => Math.abs(v) >= 0.005)
+    .map(([name, v]) => ({ key: name, label: lazFeeLabel(name), amount: Math.round(v * 100) / 100 }))
+    .sort((a, b) => b.amount - a.amount);
+  const total = lines.reduce((a, l) => a + l.amount, 0);
+  return { escrow: mine.length ? Math.round(total * 100) / 100 : null, buyer_paid: null, lines, paid: paidAll, rows: mine.length };
+}

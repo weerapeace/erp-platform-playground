@@ -36,7 +36,7 @@ type Order = Record<string, unknown> & {
   history?: { at: string; action: string; by: string | null; status: string | null; note: string | null }[];
 };
 type Item = PlatformOrderItemRow & { raw?: { variant?: string | null; original_price?: number | null; paid_price?: number | null } | null };
-type Income = { buyer_paid: number | null; escrow: number | null; lines: { key: string; label: string; amount: number }[]; at?: string };
+type Income = { buyer_paid: number | null; escrow: number | null; lines: { key: string; label: string; amount: number }[]; at?: string; paid?: boolean; rows?: number };
 
 const THB = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 }));
 const PAY_TONE: Record<string, string> = { success: "bg-emerald-50 text-emerald-700", warning: "bg-amber-50 text-amber-800", info: "bg-sky-50 text-sky-700", muted: "bg-slate-100 text-slate-500" };
@@ -90,7 +90,7 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
       setIncome({ loading: false, data: j.income as Income | undefined, reason: j.supported === false ? j.reason : undefined, error: j.error ?? undefined });
     } catch { setIncome({ loading: false, error: "โหลดรายได้ไม่สำเร็จ" }); }
   }, [id]);
-  useEffect(() => { if (order && order.platform_code === "shopee" && !String(order.id).startsWith("demo-")) void loadIncome(); }, [order?.id, order?.platform_code, loadIncome]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (order && (order.platform_code === "shopee" || order.platform_code === "lazada") && !String(order.id).startsWith("demo-")) void loadIncome(); }, [order?.id, order?.platform_code, loadIncome]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => { setReloadKey((k) => k + 1); onChanged?.(); };
   const orderNo = String(order?.order_no ?? order?.external_order_id ?? "");
@@ -253,7 +253,21 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
                     <dt className="text-slate-500">ผู้ซื้อจ่าย</dt><dd className="text-right tabular-nums">{THB(money.buyer_paid)}</dd>
                     <dt className="font-semibold text-slate-800">มูลค่าสุทธิของร้าน</dt><dd className="text-right font-semibold tabular-nums text-emerald-700">{THB(money.net)}</dd>
                   </dl>
-                  <p className="text-[11px] text-slate-400">{order.platform_code === "tiktok" ? "ค่าธรรมเนียม TikTok ยังดึงไม่ได้ — ต้องเปิดสิทธิ์การเงิน (Finance) ในแอป TikTok แล้วต่อร้านใหม่" : "ค่าธรรมเนียม Lazada ยังไม่ได้ดึง (เฟสถัดไป)"} · มูลค่าสุทธิ = ก่อนหักค่าธรรมเนียม</p>
+                  {order.platform_code === "lazada" && (
+                    income.loading && !income.data ? <p className="text-xs text-slate-400">กำลังดึงค่าธรรมเนียมจาก Lazada…</p>
+                    : income.data && income.data.lines.length ? (
+                      <div className="border-t border-slate-100 pt-2">
+                        <p className="mb-1 text-xs font-medium text-slate-600">รายการเงินจาก Lazada {income.data.paid ? <span className="ml-1 rounded bg-emerald-50 px-1.5 text-[10px] text-emerald-700">โอนเข้าบัญชีแล้ว</span> : <span className="ml-1 rounded bg-amber-50 px-1.5 text-[10px] text-amber-800">รอรอบโอน</span>}</p>
+                        <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm">
+                          {income.data.lines.map((l) => <div key={l.key} className="contents"><dt className="text-slate-500" title={l.key}>{l.label}</dt><dd className={`text-right tabular-nums ${l.amount < 0 ? "text-rose-600" : ""}`}>{l.amount < 0 ? "−" : ""}{THB(Math.abs(l.amount))}</dd></div>)}
+                          {income.data.escrow != null && <><dt className="font-semibold text-slate-800">เงินเข้าร้าน (หลังหักค่าธรรมเนียม)</dt><dd className="text-right font-semibold tabular-nums text-emerald-700">{THB(income.data.escrow)}</dd></>}
+                        </dl>
+                      </div>
+                    ) : null
+                  )}
+                  {order.platform_code === "lazada" && income.reason && <p className="text-xs text-slate-500">{income.reason}</p>}
+                  {order.platform_code === "lazada" && income.error && <p className="text-xs text-amber-700">ดึงค่าธรรมเนียมจาก Lazada ไม่ได้: {income.error}</p>}
+                  <p className="text-[11px] text-slate-400">{order.platform_code === "tiktok" ? "ค่าธรรมเนียม TikTok ยังดึงไม่ได้ — ต้องเปิดสิทธิ์การเงิน (Finance) ในแอป TikTok แล้วต่อร้านใหม่ · " : ""}มูลค่าสุทธิของร้าน = ก่อนหักค่าธรรมเนียม</p>
                   {vatBase != null && (
                     <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-500">
                       <dt>มูลค่าก่อนภาษี</dt><dd className="text-right tabular-nums">{THB(vatBase)}</dd>

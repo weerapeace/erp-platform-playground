@@ -7,6 +7,7 @@
 // ============================================================
 
 import { lazImageList, lazSkuLabel, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
+import { lazFinanceRows } from "@/lib/lazada-orders";
 
 export const LAZADA_AUTH_BASE = "https://auth.lazada.com/rest";
 
@@ -164,6 +165,31 @@ export async function lazGetOrderItems(gateway: LazGateway, accessToken: string,
   const rows = (j.data as { order_id: string | number; order_items?: Record<string, unknown>[] }[]) ?? [];
   const out: Record<string, Record<string, unknown>[]> = {};
   for (const o of rows) out[String(o.order_id)] = o.order_items ?? [];
+  return out;
+}
+
+/**
+ * รายการเงิน (ค่าธรรมเนียม/เงินโอน) ของ 1 ออเดอร์ — /finance/transaction/details/get (QueryTransactionDetails) · ⚠️ อ่านอย่างเดียว
+ *   ส่ง trade_order_id + ช่วงวันที่ (YYYY-MM-DD) · trans_type -1 = ทุกประเภท · ไล่หน้า 500 แถว
+ *   ถ้า Lazada ไม่รับ trade_order_id (เอกสารบางรุ่นไม่มีช่องนี้) → ดึงตามช่วงวันที่แล้วกรองเลขออเดอร์เอง (lib/lazada-orders lazIncomeOf)
+ *   ค่าธรรมเนียมขึ้นหลัง Lazada ตัดรอบ (มักหลังส่งสำเร็จ) — ยังไม่มี = คืนแถวว่าง
+ */
+export async function lazGetOrderTransactions(gateway: LazGateway, accessToken: string, orderId: string, startDate: string, endDate: string): Promise<Record<string, unknown>[]> {
+
+  const page = async (withOrder: boolean, offset: number) => lazFinanceRows(await lazApiGet(gateway, "/finance/transaction/details/get", accessToken, {
+    trans_type: "-1", start_time: startDate, end_time: endDate, limit: "500", offset: String(offset),
+    ...(withOrder ? { trade_order_id: orderId } : {}),
+  }));
+  let withOrder = true;
+  let first: Record<string, unknown>[];
+  try { first = await page(true, 0); }
+  catch (e) {
+    if (!/param|trade_order|invalid/i.test(`${(e as LazApiError)?.code ?? ""} ${(e as Error)?.message ?? ""}`)) throw e;
+    withOrder = false;
+    first = await page(false, 0);
+  }
+  const out = [...first];
+  for (let off = 500; out.length >= off && off < 5000; off += 500) out.push(...await page(withOrder, off));
   return out;
 }
 
