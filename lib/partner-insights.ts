@@ -109,6 +109,16 @@ export function poReceiveState(lines: readonly PoLineLite[]): "none" | "partial"
   return got >= qty ? "full" : "partial";
 }
 
+/**
+ * สถานะรับของที่โชว์ในหน้าร้าน — ใช้สถานะใบประกอบ (บันทึกรับของรายบรรทัดยังมีน้อย: ข้อมูลจริง 2026-11-23 มีแค่ 16 บรรทัด)
+ *   ร่าง/ยกเลิก = ไม่โชว์ · ใบ "รับแล้ว" = รับครบ · ที่เหลือดูจากบรรทัด (ไม่มีบรรทัด → ใบ "รับบางส่วน" = รับบางส่วน)
+ */
+export function poReceiveShown(status: string | null | undefined, lines: readonly PoLineLite[]): "none" | "partial" | "full" | null {
+  if (status === "draft" || status === "cancelled") return null;
+  if (status === "received") return "full";
+  return poReceiveState(lines) ?? (status === "partial" ? "partial" : null);
+}
+
 /** สกุลเงินชื่อต่างกันแต่เงินเดียวกัน (RMB/YUAN/CNY = หยวน) */
 export const normCur = (c: string | null | undefined): string => {
   const u = String(c || "THB").toUpperCase();

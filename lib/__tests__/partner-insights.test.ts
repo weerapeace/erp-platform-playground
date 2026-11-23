@@ -42,7 +42,7 @@ describe("partner-insights — สรุปต่อคู่ค้า", () => {
   });
 });
 
-import { normCur, poReceiveState, priceChangePct, priceHistoryBySku, sumByCurrency } from "@/lib/partner-insights";
+import { normCur, poReceiveShown, poReceiveState, priceChangePct, priceHistoryBySku, sumByCurrency } from "@/lib/partner-insights";
 
 describe("partner-insights — หน้ารายละเอียดคู่ค้า", () => {
   const L = (po_id: string, sku: string | null, qty: number, rec: number, price: number, currency = "RMB") => ({ po_id, item_sku_id: sku, qty, qty_received: rec, price_est: price, currency });
@@ -51,6 +51,10 @@ describe("partner-insights — หน้ารายละเอียดคู�
     expect(poReceiveState([L("a", "s", 10, 4, 1), L("a", "t", 5, 5, 1)])).toBe("partial");
     expect(poReceiveState([L("a", "s", 10, 10, 1)])).toBe("full");
     expect(poReceiveState([])).toBeNull();
+    expect(poReceiveShown("draft", [L("a", "s", 10, 0, 1)])).toBeNull();
+    expect(poReceiveShown("received", [L("a", "s", 10, 0, 1)])).toBe("full");
+    expect(poReceiveShown("purchase", [L("a", "s", 10, 0, 1)])).toBe("none");
+    expect(poReceiveShown("partial", [])).toBe("partial");
   });
   const pos = [
     { id: "a", po_no: "PO-1", order_date: "2026-03-01", status: "purchase", currency: "YUAN", grand_total: 100 },

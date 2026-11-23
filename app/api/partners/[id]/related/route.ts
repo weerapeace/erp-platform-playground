@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { poReceiveState, priceHistoryBySku, priceChangePct, sumByCurrency, todayTH, type PoLineLite, type PoLite } from "@/lib/partner-insights";
+import { poReceiveShown, priceHistoryBySku, priceChangePct, sumByCurrency, todayTH, type PoLineLite, type PoLite } from "@/lib/partner-insights";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -99,7 +99,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const ls = linesByPo.get(r.id) ?? [];
     return { id: r.id, po_no: r.po_no, order_date: r.order_date, grand_total: r.grand_total, status: r.status, currency: r.currency,
       payment_status: r.payment_status, paid_date: r.paid_date, payment_due_date: r.payment_due_date, china_bill_id: r.china_bill_id,
-      line_count: ls.length, recv: poReceiveState(ls) };
+      line_count: ls.length, recv: poReceiveShown(r.status, ls) };
   });
 
   const yearStart = `${todayTH().slice(0, 4)}-01-01`;
