@@ -77,6 +77,10 @@ describe("summarizeListing · ร้านอื่น", () => {
   });
   it("Lazada inactive = ปิดขาย · สถานะแปลก ๆ = รอตรวจ", () => {
     expect(summarizeListing("lazada", { lazada: { status: "inactive", skus: [] } }).state).toBe("hidden");
+    // รูปปก: ดึงหลัง 2026-11-23 มีช่อง image (null = ร้านไม่มีรูป) · แถวเก่าไม่มีช่อง = ไม่รู้
+    expect(summarizeListing("lazada", { lazada: { status: "Active", image: "https://x/c.jpg", skus: [] } })).toMatchObject({ image: "https://x/c.jpg", imageKnown: true });
+    expect(summarizeListing("lazada", { lazada: { status: "Active", image: null, skus: [] } })).toMatchObject({ image: null, imageKnown: true });
+    expect(summarizeListing("lazada", { lazada: { status: "Active", skus: [] } }).imageKnown).toBe(false);
     expect(summarizeListing("lazada", { lazada: { status: "pending", skus: [{ available: 1 }] } }).state).toBe("review");
   });
 });
@@ -231,6 +235,7 @@ describe("listingShopDetail (พรีวิวหน้าร้าน)", () =>
   });
   it("Lazada ไม่มีรูป · ไม่รู้จักร้าน = ว่าง", () => {
     expect(listingShopDetail("lazada", { lazada: { skus: [{ label: "สี: ชมพู", price: 1790, special_price: 590, seller_sku: "LY22-03", available: 1 }] } })).toEqual({ images: [], variants: [{ label: "สี: ชมพู", sku: "LY22-03", price: 1790, salePrice: 590, stock: 1, image: null }] });
+    expect(listingShopDetail("lazada", { lazada: { image: "https://x/c.jpg", skus: [{ seller_sku: "A", image: "https://x/a.jpg" }, { seller_sku: "B", image: "https://x/c.jpg" }] } }).images).toEqual(["https://x/c.jpg", "https://x/a.jpg"]);
     expect(listingShopDetail("instagram", {})).toEqual({ images: [], variants: [] });
   });
 });

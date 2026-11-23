@@ -6,7 +6,7 @@
 // การเซ็นคำขอ (sha256): sign = HMAC-SHA256( apiPath + concat(sortedParams key+value), app_secret ) → hex ตัวใหญ่
 // ============================================================
 
-import { lazSkuLabel, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
+import { lazImageList, lazSkuLabel, type LazadaAttrDef } from "@/lib/lazada-listing-edit";
 
 export const LAZADA_AUTH_BASE = "https://auth.lazada.com/rest";
 
@@ -363,7 +363,11 @@ export function lazProductToCatalogItem(p: Record<string, unknown>): LazCatalogI
     price: n0(s.price), special_price: n0(s.special_price), quantity: n0(s.quantity), available: n0(s.Available ?? s.available), status: s0(s.Status ?? s.status),
     // ชื่อตัวเลือก (สี/ไซซ์) — สั้น ๆ ไม่บวม · ไม่มี saleProp = ไม่เก็บช่องนี้
     ...(() => { const label = lazSkuLabel(s, p.variation); return label ? { label } : {}; })(),
+    // รูปแรกของตัวเลือก (ลิงก์เดียว ไม่บวม) — พรีวิวหน้าร้าน · ไม่มีรูป = ไม่มีช่องนี้
+    ...(() => { const image = lazImageList(s.Images ?? s.images)[0]; return image ? { image } : {}; })(),
   }));
+  // รูปปกสินค้า (เจ้าของถาม 2026-11-23 "ทำไม Lazada ไม่มีรูป") = รูปแรกของสินค้า → ไม่มี = รูปแรกของตัวเลือก · เก็บลิงก์เดียว
+  const cover = lazImageList(p.images)[0] ?? skus.map((s) => (s as { image?: string }).image).find(Boolean) ?? null;
   const prices = skus.map((s) => s.price).filter((n): n is number => n != null && n > 0);
   const status = s0(p.status);
   return {
@@ -372,6 +376,6 @@ export function lazProductToCatalogItem(p: Record<string, unknown>): LazCatalogI
     skus: [...new Set(skus.map((s) => s.seller_sku).filter((x): x is string => !!x))],
     price: prices.length ? Math.min(...prices) : null,
     status: status ? status.toLowerCase() : null,
-    raw: { lazada: { item_id: id, primary_category: s0(p.primary_category), status, brand: s0(attrs.brand), created_time: s0(p.created_time), updated_time: s0(p.updated_time), skus } },
+    raw: { lazada: { item_id: id, primary_category: s0(p.primary_category), status, brand: s0(attrs.brand), created_time: s0(p.created_time), updated_time: s0(p.updated_time), image: cover, skus } },
   };
 }

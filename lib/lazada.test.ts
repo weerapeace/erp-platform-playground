@@ -151,11 +151,17 @@ describe("lazProductToCatalogItem", () => {
     const it0 = lazProductToCatalogItem(sample)!;
     expect(it0).toMatchObject({ external_product_id: "3456789012", title: sample.attributes.name, skus: ["PIN-6-GD", "PIN-6-SV"], price: 20, status: "active" });
   });
-  it("เก็บสต๊อก/ราคาลดต่อ SKU ใน raw แต่ไม่เก็บ HTML รายละเอียด/รูป", () => {
-    const raw = lazProductToCatalogItem(sample)!.raw.lazada as Record<string, unknown>;
-    expect((raw.skus as Record<string, unknown>[])[0]).toMatchObject({ seller_sku: "PIN-6-GD", sku_id: "111", special_price: 19, available: 38 });
+  it("เก็บสต๊อก/ราคาลดต่อ SKU ใน raw · ไม่เก็บ HTML รายละเอียด · รูปเก็บแค่รูปแรก (ปก + ต่อตัวเลือก)", () => {
+    const raw = lazProductToCatalogItem({ ...sample, images: ["https://x/cover.jpg", "https://x/2.jpg"] })!.raw.lazada as Record<string, unknown>;
+    expect((raw.skus as Record<string, unknown>[])[0]).toMatchObject({ seller_sku: "PIN-6-GD", sku_id: "111", special_price: 19, available: 38, image: "https://x/1.jpg" });
+    expect("image" in (raw.skus as Record<string, unknown>[])[1]).toBe(false);
+    expect(raw.image).toBe("https://x/cover.jpg");
     expect(JSON.stringify(raw)).not.toContain("ยาวมาก");
-    expect(JSON.stringify(raw)).not.toContain("1.jpg");
+    expect(JSON.stringify(raw)).not.toContain("2.jpg");
+  });
+  it("ไม่มีรูปสินค้า = ใช้รูปแรกของตัวเลือก · ไม่มีเลย = null", () => {
+    expect((lazProductToCatalogItem(sample)!.raw.lazada as Record<string, unknown>).image).toBe("https://x/1.jpg");
+    expect((lazProductToCatalogItem({ ...sample, skus: [sample.skus[1]] })!.raw.lazada as Record<string, unknown>).image).toBeNull();
   });
   it("ไม่มี item_id = ข้าม", () => expect(lazProductToCatalogItem({ attributes: { name: "x" } })).toBeNull());
   it("มี saleProp → เก็บชื่อตัวเลือก (label) · ไม่มี = ไม่มีช่อง label", () => {

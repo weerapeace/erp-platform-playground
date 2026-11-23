@@ -145,7 +145,7 @@ function summarizeLine(raw: Obj, fallbackPrice: number | null): ListingShopSumma
   };
 }
 
-/** Lazada: raw.lazada (สถานะร้าน active/inactive/… + สต๊อกต่อ SKU) · ไม่มีรูป */
+/** Lazada: raw.lazada (สถานะร้าน active/inactive/… + สต๊อกต่อ SKU + รูปปก image ตั้งแต่ 2026-11-23 — แถวที่ดึงก่อนหน้านั้นยังไม่มีช่อง image = imageKnown false) */
 function summarizeLazada(raw: Obj, fallbackPrice: number | null): ListingShopSummary {
   const laz = obj(raw.lazada) ?? {};
   const skus = arr(laz.skus).map(obj).filter((v): v is Obj => !!v);
@@ -155,7 +155,7 @@ function summarizeLazada(raw: Obj, fallbackPrice: number | null): ListingShopSum
   const price = minPositive(skus.map((v) => num(v.price))) ?? fallbackPrice;
   const sale = minPositive(skus.map((v) => num(v.special_price)));
   return {
-    image: null, imageKnown: false, stock, display, price,
+    image: str(laz.image), imageKnown: "image" in laz, stock, display, price,
     salePrice: sale != null && (price == null || sale < price) ? sale : null,
     variants: skus.length, category: null,
     state: shopStateOf(display, stock, true),
@@ -234,7 +234,7 @@ export function summarizeListing(platformCode: string, raw: unknown, fallbackPri
 }
 /** ตัวเลือก 1 ตัวบนร้าน (สำหรับพรีวิวหน้าร้าน) */
 export type ListingShopVariant = { label: string; sku: string | null; price: number | null; salePrice: number | null; stock: number | null; image: string | null };
-/** รูป + ตัวเลือกที่ร้านส่งมา (ไว้พรีวิวหน้าร้าน) — ร้านที่ไม่ส่งรูป (Lazada) = images ว่าง */
+/** รูป + ตัวเลือกที่ร้านส่งมา (ไว้พรีวิวหน้าร้าน) — Lazada = รูปปก + รูปแรกของแต่ละตัวเลือก (แถวที่ดึงก่อน 2026-11-23 = ว่าง) */
 export type ListingShopDetail = { images: string[]; variants: ListingShopVariant[] };
 
 /**
@@ -259,7 +259,7 @@ export function listingShopDetail(platformCode: string, raw: unknown): ListingSh
   }
   if (platformCode === "lazada" && obj(r.lazada)) {
     const skus = arr(obj(r.lazada)!.skus).map(obj).filter((v): v is Obj => !!v);
-    return { images: [], variants: skus.map((v) => { const price = num(v.price); return { label: str(v.label) ?? (str(v.seller_sku) ?? ""), sku: str(v.seller_sku), price, salePrice: sale(price, num(v.special_price)), stock: num(v.available) ?? num(v.quantity), image: null }; }) };
+    return { images: uniq([str(obj(r.lazada)!.image), ...skus.map((v) => str(v.image))]), variants: skus.map((v) => { const price = num(v.price); return { label: str(v.label) ?? (str(v.seller_sku) ?? ""), sku: str(v.seller_sku), price, salePrice: sale(price, num(v.special_price)), stock: num(v.available) ?? num(v.quantity), image: str(v.image) }; }) };
   }
   if (platformCode === "tiktok" && obj(r.tiktok)) {
     const tt = obj(r.tiktok)!;
