@@ -6,7 +6,8 @@
 //   ลูกค้า   : พิมพ์ชื่อร้าน → ส่งคำขอ → พนักงานยืนยันในห้องแชต
 //   รายร้าน  : เห็นชื่อร้าน → กดยืนยัน → ผูกทันที
 //   ทุกแบบ: ยังไม่เป็นเพื่อนไลน์บริษัท = ขั้นที่ 1 "เพิ่มเพื่อน" ก่อน (กรอกยังไม่ได้) → เป็นเพื่อนแล้วค่อยยืนยัน (เจ้าของเลือก 2026-11-23)
-//     เช็กเพื่อนด้วย liff.getFriendship (ต้องผูก LINE Login กับบัญชีไลน์บริษัทแล้ว) · เช็กไม่ได้ = ไม่บล็อก (โชว์ปุ่มเพิ่มเพื่อนท้ายหน้า)
+//     เช็กเพื่อนด้วย liff.getFriendship (ต้องผูก LINE Login กับบัญชีไลน์บริษัทแล้ว) · เช็กได้ว่าเป็นเพื่อนแล้ว = ข้ามขั้น 1
+//     เช็กไม่ได้ = ยังโชว์ขั้น 1 แต่กด "เพิ่มเพื่อนแล้ว ไปต่อ" ผ่านได้ (เชื่อคนกด) · เช็กได้ว่ายังไม่เป็นเพื่อน = ไปต่อไม่ได้
 //   แอดมิน   : ล็อกอินบัญชี ERP → ผูกไลน์กับบัญชี (/api/account/line-link) → มีสิทธิ์แอดมิน = เมนูแอดมินขึ้นเอง
 // ============================================================
 import { useEffect, useState, type ReactNode } from "react";
@@ -72,19 +73,28 @@ export function CompanyQrView({ code }: { code: string }) {
 
   // กลับมาจากหน้าเพิ่มเพื่อน → เช็กใหม่เอง (และมีปุ่ม "เพิ่มแล้ว" ให้กดเช็กเอง)
   const [checking, setChecking] = useState(false);
-  const recheckFriend = async () => {
-    if (!liff?.getFriendship) return;
-    setChecking(true);
-    try { const fs = await liff.getFriendship(); setIsFriend(fs.friendFlag); } catch { /* เช็กไม่ได้ = คงค่าเดิม */ }
-    finally { setChecking(false); }
+  const [friendPassed, setFriendPassed] = useState(false);   // เช็กเพื่อนไม่ได้ แล้วคนกดยืนยันว่าเพิ่มแล้ว
+  const [friendMsg, setFriendMsg] = useState("");
+  /** manual = คนกดปุ่ม "เพิ่มเพื่อนแล้ว ไปต่อ" */
+  const recheckFriend = async (manual = false) => {
+    let flag: boolean | null = null;
+    if (liff?.getFriendship) {
+      setChecking(true);
+      try { flag = (await liff.getFriendship()).friendFlag; } catch { flag = null; }
+      finally { setChecking(false); }
+    }
+    setIsFriend(flag);
+    if (!manual) return;
+    if (flag === null) setFriendPassed(true);   // เช็กไม่ได้ = เชื่อคนกด
+    else if (!flag) setFriendMsg("ยังไม่ได้เพิ่มเพื่อน — กดปุ่มเพิ่มเพื่อนด้านบนก่อน แล้วกลับมาหน้านี้");
   };
   useEffect(() => {
-    if (isFriend !== false) return;
+    if (isFriend === true || friendPassed) return;
     const on = () => { if (document.visibilityState === "visible") void recheckFriend(); };
     document.addEventListener("visibilitychange", on); window.addEventListener("focus", on);
     return () => { document.removeEventListener("visibilitychange", on); window.removeEventListener("focus", on); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFriend, liff]);
+  }, [isFriend, liff, friendPassed]);
 
   const submit = async () => {
     if (!idToken) { setErr(liffErr || "กำลังเชื่อมต่อ LINE..."); return; }
@@ -124,7 +134,7 @@ export function CompanyQrView({ code }: { code: string }) {
       <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 shadow-sm p-5">{children}</div>
     </div>
   );
-  const friendBox = isFriend === false && info?.oa_add_url ? (
+  const friendBox = isFriend !== true && info?.oa_add_url ? (
     <a href={info.oa_add_url} className="mt-4 block rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm font-semibold text-emerald-800">
       <Icon name="add" /> เพิ่มเพื่อนไลน์บริษัท (จำเป็น — ไม่งั้นจะไม่เห็นเมนู)
     </a>
@@ -152,7 +162,7 @@ export function CompanyQrView({ code }: { code: string }) {
   );
 
   // ขั้นที่ 1: ต้องเป็นเพื่อนไลน์บริษัทก่อน
-  if (isFriend === false && info.oa_add_url) return wrap(
+  if (isFriend !== true && !friendPassed && info.oa_add_url && (liff || liffErr)) return wrap(
     <div className="space-y-4 text-center">
       <div className="flex items-center justify-center gap-2 text-xs">
         <span className="rounded-full bg-emerald-600 px-2.5 py-1 font-semibold text-white">1 เพิ่มเพื่อน</span>
@@ -165,8 +175,9 @@ export function CompanyQrView({ code }: { code: string }) {
         <p className="mt-1 text-sm text-slate-600">เพิ่มเพื่อนแล้วกลับมาหน้านี้ เพื่อ{TITLE[info.kind].replace(/^ผูกไลน์/, "ผูกไลน์")} · เมนูของคุณจะขึ้นในแชตนี้</p>
       </div>
       <a href={info.oa_add_url} className="block h-12 w-full rounded-xl bg-emerald-600 text-base font-semibold leading-[3rem] text-white">เพิ่มเพื่อน</a>
-      <button type="button" onClick={() => void recheckFriend()} disabled={checking}
+      <button type="button" onClick={() => void recheckFriend(true)} disabled={checking}
         className="h-11 w-full rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 disabled:opacity-50">{checking ? "กำลังเช็ก..." : "เพิ่มเพื่อนแล้ว ไปต่อ"}</button>
+      {friendMsg && <p className="text-sm text-amber-700">{friendMsg}</p>}
     </div>
   );
 
