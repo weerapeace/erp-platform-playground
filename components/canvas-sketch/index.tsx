@@ -23,6 +23,7 @@ import "./thai-fonts.css";   // เติมฟอนต์ไทยให้ fa
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
+import { Icon } from "@/components/icon";
 import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
@@ -121,6 +122,8 @@ export function CanvasSketch({
   const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
   const [lastMerged, setLastMerged] = useState(false); // เซฟล่าสุดมีการรวมงานกับคนอื่นไหม
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
+  // เส้น/ลูกศรที่เลือก → แถบเส้น (หักมุม/ตรง/โค้ง · สี · เส้นประ · ลบ) แบบกระดาน flowchart (เจ้าของขอ 2026-11-23)
+  const [selLine, setSelLine] = useState<{ shape: "elbow" | "straight" | "curve"; color: string; dashed: boolean } | null>(null);
   const [serverCanEdit, setServerCanEdit] = useState(true); // server บอกว่าผู้ใช้มีสิทธิ์แก้ไหม (viewer = false)
   const canEditRef = useRef(true);
 
@@ -791,7 +794,7 @@ export function CanvasSketch({
     }
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", schedule); ro?.disconnect(); };
     // วัดใหม่เมื่อสิ่งที่ทำให้แถบเครื่องมือด้านบน "สูงเปลี่ยน" เปลี่ยน (แถวขนาดอักษรตอนเลือกข้อความ / ป้ายเพื่อนออนไลน์ที่ wrap เป็น 2 บรรทัด)
-  }, [fill, stickyTop, scene, selFont, serverCanEdit, peerList.length]);
+  }, [fill, stickyTop, scene, selFont, selLine, serverCanEdit, peerList.length]);
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
@@ -848,6 +851,31 @@ export function CanvasSketch({
   }, [scene]); // ผูกใหม่หลังกระดานโหลดเสร็จ (ตอน mount แรก wrapRef ยังไม่ render เพราะอยู่สถานะ loading)
 
   // ปรับขนาด font ของ text ที่เลือก (ละเอียดกว่า S/M/L/XL ของ Excalidraw)
+  // เปลี่ยนรูปแบบเส้นที่เลือก — elbow = หักมุมฉาก (วางจุดหักให้เอง ลากชิ้นงานแล้ว Excalidraw จัดเส้นใหม่) · straight = ตรง · curve = โค้ง
+  const LINE_COLORS = ["#475569", "#7c3aed", "#059669", "#2563eb", "#d97706", "#e11d48", "#0891b2"];
+  const patchSelLines = (fn: (e: any) => Record<string, unknown> | null) => {
+    const api = apiRef.current; if (!api) return;
+    const sel = api.getAppState().selectedElementIds || {};
+    const elements = (api.getSceneElements() as any[]).map((e) => {
+      if (!sel[e.id] || (e.type !== "arrow" && e.type !== "line")) return e;
+      const p = fn(e); return p ? { ...e, ...p, version: (Number(e.version) || 0) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) } : e;
+    });
+    // บันทึกเป็นขั้น Ctrl+Z ได้ (CaptureUpdateAction.IMMEDIATELY) — ตัวเสริมโหลดไว้แล้ว import นี้คืนค่าทันที
+    void import("@excalidraw/excalidraw").then((lib: any) => { api.updateScene({ elements, captureUpdate: lib.CaptureUpdateAction?.IMMEDIATELY }); if (editable) queueSave(); });
+  };
+  const setLineShape = (shape: "elbow" | "straight" | "curve") => {
+    patchSelLines((e) => {
+      const pts = (e.points as [number, number][]) ?? [[0, 0], [100, 0]];
+      const [dx, dy] = pts[pts.length - 1] ?? [100, 0];
+      if (shape === "elbow") {
+        if (e.type !== "arrow") return null;   // หักมุมได้เฉพาะลูกศร (ข้อจำกัด Excalidraw)
+        const mx = Math.round(dx / 2);
+        return { elbowed: true, roundness: null, points: [[0, 0], [mx, 0], [mx, dy], [dx, dy]], fixedSegments: null };
+      }
+      return { elbowed: false, roundness: shape === "curve" ? { type: 2 } : null, points: pts.length > 2 && e.elbowed ? [[0, 0], [dx, dy]] : pts };
+    });
+    setSelLine((l) => (l ? { ...l, shape } : l));
+  };
   const setFont = (size: number) => {
     const api = apiRef.current; if (!api) return;
     const ns = Math.min(200, Math.max(8, Math.round(size)));
@@ -1164,6 +1192,26 @@ export function CanvasSketch({
           {t("🖼 วางรูป / ลิงก์ YouTube · Pinterest · TikTok = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image / YouTube · Pinterest · TikTok link = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
         </span>
         )}
+        {editable && serverCanEdit && selLine && (
+          <span className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white px-1 py-0.5 shadow-sm" role="toolbar" aria-label={t("แต่งเส้น", "Line style")}>
+            {([["elbow", t("หักมุม", "Elbow"), "M4 4v8h8"], ["straight", t("ตรง", "Straight"), "M3 13L13 3"], ["curve", t("โค้ง", "Curve"), "M3 13C3 6 10 10 13 3"]] as const).map(([k, l, d]) => (
+              <button key={k} type="button" title={l} aria-pressed={selLine.shape === k} onClick={() => { setLineShape(k); blurActive(); }}
+                className={`flex h-6 w-7 items-center justify-center rounded ${selLine.shape === k ? "bg-violet-100 text-violet-700" : "text-slate-600 hover:bg-slate-100"}`}>
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+              </button>
+            ))}
+            <span className="mx-0.5 h-4 w-px bg-slate-200" />
+            {LINE_COLORS.map((c) => (
+              <button key={c} type="button" title={c} aria-pressed={selLine.color.toLowerCase() === c} onClick={() => { patchSelLines(() => ({ strokeColor: c })); setSelLine((l) => (l ? { ...l, color: c } : l)); blurActive(); }}
+                className={`h-5 w-5 rounded-full border-2 ${selLine.color.toLowerCase() === c ? "border-slate-900" : "border-white"}`} style={{ backgroundColor: c }} />
+            ))}
+            <span className="mx-0.5 h-4 w-px bg-slate-200" />
+            <button type="button" title={t("เส้นประ", "Dashed")} aria-pressed={selLine.dashed} onClick={() => { const dashed = !selLine.dashed; patchSelLines(() => ({ strokeStyle: dashed ? "dashed" : "solid" })); setSelLine((l) => (l ? { ...l, dashed } : l)); blurActive(); }}
+              className={`h-6 rounded px-1.5 text-[11px] ${selLine.dashed ? "bg-violet-100 text-violet-700" : "text-slate-600 hover:bg-slate-100"}`}>- - -</button>
+            <button type="button" title={t("ลบเส้น (Ctrl+Z ย้อนได้)", "Delete line (Ctrl+Z to undo)")} onClick={() => { patchSelLines(() => ({ isDeleted: true })); setSelLine(null); blurActive(); }}
+              className="flex h-6 w-6 items-center justify-center rounded text-slate-500 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:trash" /></button>
+          </span>
+        )}
         {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
             <span className="text-slate-400">{t("ขนาดอักษร", "Font size")}</span>
@@ -1281,6 +1329,13 @@ export function CanvasSketch({
             const sel = appState?.selectedElementIds || {};
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
+            const lns = (elements as any[]).filter((e) => !e.isDeleted && sel[e.id]);
+            const ln = lns.length > 0 && lns.every((e) => e.type === "arrow" || e.type === "line") ? lns[0] : null;
+            setSelLine((cur) => {
+              if (!ln) return cur ? null : cur;
+              const next = { shape: (ln.elbowed ? "elbow" : ln.roundness ? "curve" : "straight") as "elbow" | "straight" | "curve", color: String(ln.strokeColor ?? ""), dashed: ln.strokeStyle === "dashed" };
+              return cur && cur.shape === next.shape && cur.color === next.color && cur.dashed === next.dashed ? cur : next;
+            });
             if (selCbRef.current) { const ids = Object.keys(sel).filter((k) => sel[k]); const sg = ids.join(","); if (sg !== selSigRef.current) { selSigRef.current = sg; selCbRef.current(ids); } }
             if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
             const nSocial = socialTextsOf(elements as any[]).length; // ปุ่ม "แปลงลิงก์" โชว์เมื่อมีลิงก์ค้างเป็นข้อความ

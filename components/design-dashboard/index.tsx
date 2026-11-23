@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
@@ -90,6 +90,13 @@ export function DesignDashboard() {
       .then((j) => { const v = (j?.value?.views ?? {}) as Record<string, unknown>; const clean: Record<string, ViewMode> = {}; for (const [k, m] of Object.entries(v)) if (isViewMode(m)) clean[k] = m; setBrandViews(clean); })
       .catch(() => {});
   }, []);
+  // ⚡ เปิดแคนวาสให้เร็ว: มีแบรนด์ไหนตั้งแคนวาสไว้ / คนนี้ใช้แคนวาสล่าสุด → โหลดตัวกระดาน (Excalidraw ก้อนใหญ่) ไว้ก่อนตอนหน้าว่าง
+  const prefetchCanvas = useCallback(() => { void import("@/components/canvas-sketch"); }, []);
+  useEffect(() => {
+    if (!Object.values(brandViews).includes("canvas") && personalView.current !== "canvas") return;
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    if (w.requestIdleCallback) w.requestIdleCallback(prefetchCanvas); else window.setTimeout(prefetchCanvas, 1500);
+  }, [brandViews, prefetchCanvas]);
   // เปลี่ยนแบรนด์ (หรือเพิ่งโหลดค่าเริ่มต้นของแบรนด์) → ใช้มุมมองของแบรนด์นั้น · ไม่มี = มุมมองส่วนตัว
   const lastBrandForView = useRef<string>("");
   useEffect(() => {
@@ -993,7 +1000,7 @@ export function DesignDashboard() {
                 {/* สลับมุมมองเห็นตลอด — ตัวเลขเขียวบน "ไอเดีย" = ชุดรอคัดจากกลุ่มไลน์ */}
                 <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
                   {VIEW_TABS.map(([key, icon, label, title]) => (
-                    <button key={key} type="button" onClick={() => changeViewMode(key)} aria-pressed={viewMode === key} title={title}
+                    <button key={key} type="button" onClick={() => changeViewMode(key)} aria-pressed={viewMode === key} title={title} onMouseEnter={key === "canvas" ? prefetchCanvas : undefined}
                       className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm transition ${viewMode === key ? (key === "ideas" ? "bg-amber-500 text-white" : "bg-slate-900 text-white") : "text-slate-600 hover:bg-slate-100"}`}>
                       <Icon value={icon} className="text-[15px]" />{label}
                       {key === "ideas" && ideaInbox > 0 && (

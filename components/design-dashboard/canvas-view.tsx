@@ -20,7 +20,7 @@ import { Icon } from "@/components/icon";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { designSheetCardSkeleton, dsCardText } from "@/components/canvas-cards/skeletons";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
-import { layoutZones, diffZoneMoves, zoneFrames, ZONE_KIND, SHEET_KIND, ZONE_W, ZONE_GAP, ZONE_HEAD, ZONE_MIN_H, GAPX, type CanvasEl } from "@/lib/design-brand-canvas";
+import { layoutZones, diffZoneMoves, zoneFrames, sheetCards, ZONE_KIND, SHEET_KIND, ZONE_W, ZONE_GAP, ZONE_HEAD, ZONE_MIN_H, GAPX, GAPY, type CanvasEl } from "@/lib/design-brand-canvas";
 
 const CanvasSketch = dynamicImport(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
@@ -64,15 +64,16 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
 
   const zoneName = (c: Col | undefined, n: number) => `${c?.label ?? "?"} · ${n}`;
 
-  // ---- อ่านกระดาน → (เขียนสถานะ) + ผูกเข้ากรอบ + จัดเข้าช่อง + หัวกรอบ ----
-  const applyBoardState = useCallback((write: boolean) => {
+  // ---- อ่านกระดาน → (เขียนสถานะ) + ผูกเข้ากรอบ + หัวกรอบ · arrange=true (ปุ่ม "จัดหน้า") = จัดการ์ดเข้าช่อง + ความสูงกรอบด้วย ----
+  // ปกติไม่จัดเอง (เจ้าของขอ 2026-11-23 "บางทีไม่อยากให้จัดหน้าให้") — วางตรงไหนอยู่ตรงนั้น
+  const applyBoardState = useCallback((write: boolean, arrange = false) => {
     const c = ref.current; if (!c) return;
     const L = layoutZones(c.getElements() as CanvasEl[]);
     const moves = write && editable && !syncing.current ? diffZoneMoves(L.sheetZone, seen.current) : [];
     for (const [id, st] of L.sheetZone) seen.current.set(id, st);
     for (const m of moves) if (byId.get(m.sheetId)?.status !== m.status) onMoveStatus(m.sheetId, m.status);
     if (!editable) return;
-    const mv = new Map(L.moves.map((m) => [m.id, m]));
+    const mv = new Map(arrange ? L.moves.map((m) => [m.id, m]) : []);
     const ad = new Map(L.adopts.map((a) => [a.id, a.frameId]));
     const fr = new Map(L.frames.map((f) => [f.id, f]));
     c.patchElements((el) => {
@@ -83,7 +84,7 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
       const name = zoneName(colOf.get(f.status), f.cards);
       const p: Record<string, unknown> = {};
       if (el.name !== name) p.name = name;
-      if (f.height != null) p.height = f.height;
+      if (arrange && f.height != null) p.height = f.height;
       return Object.keys(p).length ? p : null;
     });
   }, [editable, byId, onMoveStatus, colOf]);
@@ -92,6 +93,7 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
   const syncBoard = useCallback(async (msg = false) => {
     const c = ref.current; if (!c || syncing.current) return;
     syncing.current = true;
+    let fresh = false;
     try {
       // 1) กรอบสถานะที่ยังไม่มี → ต่อท้ายทางขวา
       let els = c.getElements() as CanvasEl[];
@@ -104,13 +106,27 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
         nextX += ZONE_W + ZONE_GAP;
         return sk;
       });
+      fresh = newFrames.length > 0 && newFrames.length === columns.length;   // กระดานใหม่เอี่ยม → จัดหน้าให้ครั้งแรกครั้งเดียว
       if (newFrames.length && editable) { await c.insert(newFrames, { scene: true }); els = c.getElements() as CanvasEl[]; }
 
       // ตำแหน่งกรอบตามสถานะ (มุมบน + ก้น) ไว้วางการ์ดใหม่/ย้ายการ์ด
       const zoneEls = new Map<string, CanvasEl>();
       for (const e of els) { const d = e.customData as { kind?: string; status?: string } | null; if (e.type === "frame" && !e.isDeleted && d?.kind === ZONE_KIND && d.status && !zoneEls.has(d.status)) zoneEls.set(d.status, e); }
-      const bottom = new Map<string, number>();
-      for (const [st, f] of zoneEls) bottom.set(st, num(f.y) + num(f.height));
+      // ช่องว่างถัดไปในแต่ละกรอบ = ใต้การ์ดใบล่างสุดที่อยู่ในกรอบนั้น · วางแล้วยืดกรอบให้ครอบการ์ดเสมอ (ไม่จัดของเดิม)
+      const nextY = new Map<string, number>();
+      for (const [st, f] of zoneEls) nextY.set(st, num(f.y) + ZONE_HEAD);
+      for (const cd of sheetCards(els)) {
+        const cx = (cd.minX + cd.maxX) / 2, cy = (cd.minY + cd.maxY) / 2;
+        for (const [st, f] of zoneEls) if (cx >= num(f.x) && cx <= num(f.x) + num(f.width) && cy >= num(f.y) && cy <= num(f.y) + num(f.height)) nextY.set(st, Math.max(nextY.get(st)!, cd.maxY + GAPY));
+      }
+      const growTo = new Map<string, number>();   // frameId → ความสูงใหม่
+      const slot = (st: string, h = 300) => {
+        const f = zoneEls.get(st)!, fid = String(f.id), y = nextY.get(st)!;
+        nextY.set(st, y + h + GAPY);
+        const need = y + h + GAPY - num(f.y);
+        if (need > (growTo.get(fid) ?? num(f.height))) growTo.set(fid, need);
+        return { x: num(f.x) + GAPX, y, frameId: fid };
+      };
 
       // 2) การ์ดใบงานที่ไม่อยู่ในแบรนด์/คอลัมน์นี้แล้ว (และอยู่ในกรอบสถานะ) → เอาออก
       const L = layoutZones(els);
@@ -120,14 +136,11 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
       // 3) สถานะเปลี่ยนจากที่อื่น → ย้ายการ์ดไปกรอบที่ถูก (วางที่ก้นกรอบ แล้วให้ snap จัดเอง)
       const wrong = [...L.sheetZone.entries()].filter(([id, st]) => byId.has(id) && byId.get(id)!.status !== st && zoneEls.has(byId.get(id)!.status));
       if (wrong.length && editable) {
-        const target = new Map(wrong.map(([id]) => {
-          const st = byId.get(id)!.status, f = zoneEls.get(st)!;
-          const y = bottom.get(st)! - 10; bottom.set(st, y + 300);
-          return [id, { x: num(f.x) + GAPX, y, frameId: String(f.id) }];
-        }));
+        const target = new Map(wrong.map(([id]) => [id, slot(byId.get(id)!.status)]));
         const minPos = new Map<string, { x: number; y: number }>();
         for (const e of els) { const d = e.customData as { kind?: string; id?: string } | null; if (d?.kind === SHEET_KIND && d.id && target.has(String(d.id))) { const p = minPos.get(String(d.id)); minPos.set(String(d.id), { x: Math.min(p?.x ?? Infinity, num(e.x)), y: Math.min(p?.y ?? Infinity, num(e.y)) }); } }
         c.patchElements((el) => {
+          const gh = growTo.get(String(el.id ?? "")); if (gh != null) return { height: gh };
           const d = el.customData as { kind?: string; id?: string } | null;
           if (d?.kind !== SHEET_KIND || !d.id) return null;
           const tg = target.get(String(d.id)), mp = minPos.get(String(d.id)); if (!tg || !mp) return null;
@@ -140,11 +153,9 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
       const missing = inCols.filter((s) => !onBoard.has(s.id) && zoneEls.has(s.status));
       if (missing.length && editable) {
         const sk: Record<string, unknown>[] = [];
-        missing.forEach((s, i) => {
-          const f = zoneEls.get(s.status)!;
-          const y = bottom.get(s.status)! + 20; bottom.set(s.status, y + 320);
-          sk.push(...cardSk(s, num(f.x) + GAPX, Math.max(y, num(f.y) + ZONE_HEAD)));
-        });
+        missing.forEach((s) => { const at = slot(s.status, s.cover_url ? 290 : 120); sk.push(...cardSk(s, at.x, at.y)); });
+        // ยืดกรอบก่อน แล้วค่อยวางการ์ด (จุดกึ่งกลางการ์ดต้องอยู่ในกรอบ ระบบถึงนับว่าอยู่สถานะนั้น)
+        c.patchElements((el) => { const gh = growTo.get(String(el.id ?? "")); return gh != null && gh > num(el.height) ? { height: gh } : null; });
         await c.insert(sk, { scene: true });
       }
 
@@ -161,7 +172,7 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
     } finally {
       syncing.current = false;
     }
-    applyBoardState(false);
+    applyBoardState(false, fresh);
   }, [columns, editable, byId, inCols, cardSk, colOf, applyBoardState, toast, t]);
 
   // วางโครงใหม่ทั้งกระดาน (ของที่วาดเอง/ของอ้างอิงไม่หาย — ลบเฉพาะการ์ดใบงาน + กรอบสถานะ)
@@ -174,9 +185,10 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
       c.patchElements((el) => ((el.customData as { kind?: string } | null)?.kind === ZONE_KIND ? { isDeleted: true } : null));
       seen.current = new Map();
       await syncBoard();
+      applyBoardState(false, true);
       toast.success(t("วางโครงกระดานใหม่แล้ว (กด Ctrl+Z ย้อนได้)", "Board rebuilt (Ctrl+Z to undo)"));
     } finally { setBusy(false); }
-  }, [syncBoard, toast, t]);
+  }, [syncBoard, applyBoardState, toast, t]);
 
   const onBoardReady = useCallback(async () => {
     for (let i = 0; i < 40 && !ref.current; i++) await new Promise((r) => setTimeout(r, 50));
@@ -203,9 +215,15 @@ export function BrandCanvasView({ brandKey, columns, sheets, editable, onMoveSta
           <Icon value="i:refresh" /> {t("ซิงค์ใบงาน", "Sync jobs")}
         </button>
         {editable && (
+          <button type="button" onClick={() => applyBoardState(false, true)} disabled={busy} title={t("จัดการ์ดในทุกกรอบให้เรียงเป็นแถว 2 คอลัมน์ + ปรับความสูงกรอบพอดี (Ctrl+Z ย้อนได้)", "Line up cards in every frame (2 columns) and fit frame heights (Ctrl+Z to undo)")}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2.5 text-xs font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+            <Icon value="i:layout-grid" /> {t("จัดหน้า", "Arrange")}
+          </button>
+        )}
+        {editable && (
           <button type="button" onClick={() => setAskRebuild(true)} disabled={busy}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-2.5 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-50">
-            <Icon value="i:layout-grid" /> {t("วางโครงใหม่", "Rebuild layout")}
+            <Icon value="i:refresh" /> {t("วางโครงใหม่", "Rebuild layout")}
           </button>
         )}
         <span className="text-[11px] text-slate-400">
