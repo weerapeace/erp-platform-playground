@@ -92,7 +92,7 @@ function applyFilters(q: any, p: ListParams) {
   }
   if (p.status && isPlatformOrderStatus(p.status)) q = q.eq("status", p.status);
   if (p.unpaid) q = q.neq("status", "cancelled").in("platform_status", UNPAID_PS);
-  if (p.urgent) q = q.in("status", OPEN_STATUSES).or("carrier.ilike.*instant*,carrier.ilike.*same*day*,carrier.ilike.*ส่งด่วน*");
+  if (p.urgent) q = q.in("status", OPEN_STATUSES).or("carrier.ilike.*instant*,carrier.ilike.*same*day*,carrier.ilike.*express*delivery*,carrier.ilike.*ส่งด่วน*");
   // ต้องลงมือ = ยังไม่ส่ง/ไม่ยกเลิก และผู้ซื้อจ่ายแล้ว (ตรงกับ needsAction · TikTok ON_HOLD = ผู้ซื้อยังยกเลิกได้ ยังไม่นับ)
   if (p.active) q = q.in("status", OPEN_STATUSES).or(`platform_status.is.null,platform_status.not.in.(${NOT_ACTIVE_PS})`);
   const s = cleanQ(p.q);

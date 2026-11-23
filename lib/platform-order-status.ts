@@ -39,7 +39,7 @@ export type PlatformOrderRow = {
 
 // ---- ตาราง/หน้ารายละเอียดแบบ Zort (เจ้าของเลือก 2026-11-23) — pure · มีเทสต์ ----
 /** ส่งด่วน (Instant / Same day / ส่งด่วน) — ดูจากชื่อขนส่ง */
-export const URGENT_CARRIER_RE = /instant|same.?day|express.?2h|ส่งด่วน|ภายใน.?2.?ชม/i;
+export const URGENT_CARRIER_RE = /instant|same.?day|express.?delivery|express.?2h|ส่งด่วน|ภายใน.?2.?ชม/i;   // Shopee "Express Delivery (SPX/SHP Food)" = ส่งด่วนในวัน · "SPX Express" เฉย ๆ = ส่งธรรมดา
 export const isUrgentCarrier = (carrier: string | null | undefined) => URGENT_CARRIER_RE.test(String(carrier ?? ""));
 export type PaymentState = "paid" | "unpaid" | "cod" | "refund" | "none";
 export const PAYMENT_STATE_META: Record<PaymentState, { label: string; tone: "success" | "warning" | "info" | "muted" }> = {

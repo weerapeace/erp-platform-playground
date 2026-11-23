@@ -164,6 +164,7 @@ describe("ตาราง/หน้ารายละเอียดแบบ Zo
     expect(isUrgentCarrier("Instant Delivery - ส่งทันที (แพ็ก 2 ชั่วโมง)")).toBe(true);
     expect(isUrgentCarrier("Same Day")).toBe(true);
     expect(isUrgentCarrier("SPX Express")).toBe(false);
+    expect(isUrgentCarrier("Express Delivery (SPX)")).toBe(true);
     expect(isUrgentCarrier(null)).toBe(false);
   });
   it("วันที่แบบ วันนี้/เมื่อวาน (เวลาไทย)", () => {
