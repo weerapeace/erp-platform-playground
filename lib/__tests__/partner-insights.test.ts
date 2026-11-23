@@ -41,3 +41,32 @@ describe("partner-insights — สรุปต่อคู่ค้า", () => {
     expect(topUsedTerms(["eom", "days:30", "eom", null, "bad"], 2)).toEqual(["eom", "days:30"]);
   });
 });
+
+import { normCur, poReceiveState, priceChangePct, priceHistoryBySku, sumByCurrency } from "@/lib/partner-insights";
+
+describe("partner-insights — หน้ารายละเอียดคู่ค้า", () => {
+  const L = (po_id: string, sku: string | null, qty: number, rec: number, price: number, currency = "RMB") => ({ po_id, item_sku_id: sku, qty, qty_received: rec, price_est: price, currency });
+  it("สถานะรับของ", () => {
+    expect(poReceiveState([L("a", "s", 10, 0, 1)])).toBe("none");
+    expect(poReceiveState([L("a", "s", 10, 4, 1), L("a", "t", 5, 5, 1)])).toBe("partial");
+    expect(poReceiveState([L("a", "s", 10, 10, 1)])).toBe("full");
+    expect(poReceiveState([])).toBeNull();
+  });
+  const pos = [
+    { id: "a", po_no: "PO-1", order_date: "2026-03-01", status: "purchase", currency: "YUAN", grand_total: 100 },
+    { id: "b", po_no: "PO-2", order_date: "2026-10-01", status: "draft", currency: "RMB", grand_total: 50 },
+    { id: "c", po_no: "PO-3", order_date: "2025-12-01", status: "purchase", currency: "THB", grand_total: 900 },
+    { id: "d", po_no: "PO-4", order_date: "2026-11-01", status: "cancelled", currency: "THB", grand_total: 5 },
+  ];
+  it("ยอดแยกสกุล: หยวนรวมกัน · ไม่นับยกเลิก · กรองปี", () => {
+    expect(normCur("CNY")).toBe("RMB");
+    expect(sumByCurrency(pos, "2026-01-01")).toEqual({ RMB: 150 });
+    expect(sumByCurrency(pos)).toEqual({ RMB: 150, THB: 900 });
+  });
+  it("ประวัติราคา: ใหม่สุดก่อน · ข้ามใบยกเลิก/ราคา 0 · % เปลี่ยน", () => {
+    const h = priceHistoryBySku([L("a", "s", 1, 0, 2), L("b", "s", 1, 0, 2.5), L("d", "s", 1, 0, 9), L("b", "t", 1, 0, 0)], pos);
+    expect(h.get("s")!.map((p) => p.price)).toEqual([2.5, 2]);
+    expect(h.has("t")).toBe(false);
+    expect(priceChangePct(h.get("s")!)).toBe(25);
+  });
+});

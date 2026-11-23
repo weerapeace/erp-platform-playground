@@ -95,3 +95,57 @@ export function topUsedTerms(values: readonly (string | null | undefined)[], n =
   for (const v of values) if (v && parseCreditTerm(v)) cnt.set(v, (cnt.get(v) ?? 0) + 1);
   return [...cnt.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([t]) => t);
 }
+
+// ───────── หน้ารายละเอียดคู่ค้า (แบบ B · เจ้าของเลือก 2026-11-23) ─────────
+export type PoLineLite = { po_id: string; item_sku_id: string | null; qty: number | null; qty_received: number | null; price_est: number | null; currency: string | null };
+export type PoLite = { id: string; po_no: string | null; order_date: string | null; status: string | null; currency: string | null; grand_total: number | null };
+
+/** สถานะรับของของใบสั่งซื้อ จากบรรทัด: ยังไม่รับ / รับบางส่วน / รับครบ · ไม่มีบรรทัด = null */
+export function poReceiveState(lines: readonly PoLineLite[]): "none" | "partial" | "full" | null {
+  let qty = 0, got = 0;
+  for (const l of lines) { qty += Math.max(0, Number(l.qty) || 0); got += Math.max(0, Number(l.qty_received) || 0); }
+  if (qty <= 0) return null;
+  if (got <= 0) return "none";
+  return got >= qty ? "full" : "partial";
+}
+
+/** สกุลเงินชื่อต่างกันแต่เงินเดียวกัน (RMB/YUAN/CNY = หยวน) */
+export const normCur = (c: string | null | undefined): string => {
+  const u = String(c || "THB").toUpperCase();
+  return u === "YUAN" || u === "CNY" ? "RMB" : u;
+};
+
+/** ยอดรวมแยกสกุล (ไม่นับใบยกเลิก) · fromDate = นับเฉพาะใบตั้งแต่วันนี้ (YYYY-MM-DD) */
+export function sumByCurrency(pos: readonly PoLite[], fromDate?: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const p of pos) {
+    if (p.status === "cancelled") continue;
+    if (fromDate && (!p.order_date || p.order_date.slice(0, 10) < fromDate)) continue;
+    const n = Number(p.grand_total) || 0; if (n <= 0) continue;
+    const c = normCur(p.currency); out[c] = Math.round(((out[c] ?? 0) + n) * 100) / 100;
+  }
+  return out;
+}
+
+export type PricePoint = { date: string | null; price: number; currency: string; po_no: string | null; po_id: string };
+
+/** ประวัติราคาต่อสินค้า (จากบรรทัดใบสั่งซื้อที่ไม่ยกเลิก) ใหม่สุดก่อน · ไม่เกิน cap จุดต่อสินค้า */
+export function priceHistoryBySku(lines: readonly PoLineLite[], pos: readonly PoLite[], cap = 12): Map<string, PricePoint[]> {
+  const poMap = new Map(pos.map((p) => [p.id, p]));
+  const out = new Map<string, PricePoint[]>();
+  for (const l of lines) {
+    const po = poMap.get(l.po_id); const price = Number(l.price_est) || 0;
+    if (!l.item_sku_id || !po || po.status === "cancelled" || price <= 0) continue;
+    const arr = out.get(l.item_sku_id) ?? [];
+    arr.push({ date: po.order_date ? po.order_date.slice(0, 10) : null, price, currency: normCur(l.currency || po.currency), po_no: po.po_no, po_id: po.id });
+    out.set(l.item_sku_id, arr);
+  }
+  for (const [k, arr] of out) out.set(k, arr.sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")).slice(0, cap));
+  return out;
+}
+
+/** ราคาเปลี่ยนกี่ % เทียบครั้งก่อน (สกุลเดียวกันเท่านั้น) · ไม่มีครั้งก่อน = null */
+export function priceChangePct(points: readonly PricePoint[]): number | null {
+  if (points.length < 2 || points[0].currency !== points[1].currency || points[1].price <= 0) return null;
+  return Math.round(((points[0].price - points[1].price) / points[1].price) * 1000) / 10;
+}

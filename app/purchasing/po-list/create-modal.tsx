@@ -30,11 +30,15 @@ const newKey = () => `l${Math.random().toString(36).slice(2, 9)}`;
 const emptyLine = (): Line => ({ key: newKey(), item_sku_id: null, item_name: "", qty: "1", uom: "", price: "" });
 const n = (s: string) => { const v = Number(s); return isFinite(v) ? v : 0; };
 
-export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+export function PoCreateModal({ onClose, onCreated, initialSeller }: {
+  onClose: () => void; onCreated: (id: string) => void;
+  /** เปิดจากหน้าร้าน (หน้ารายละเอียดคู่ค้า) → กรอกร้านไว้ให้ */
+  initialSeller?: { id: string; name: string };
+}) {
   const toast = useToast();
   const [suppliers, setSuppliers] = usePartnerSuppliers();
-  const [sellerId, setSellerId] = useState("");
-  const [seller, setSeller] = useState("");
+  const [sellerId, setSellerId] = useState(initialSeller?.id ?? "");
+  const [seller, setSeller] = useState(initialSeller?.name ?? "");
   const [currency, setCurrency] = useState<"THB" | "RMB">("THB");
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [expectedDate, setExpectedDate] = useState("");
@@ -56,6 +60,13 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
     const s = suppliers.find((x) => x.id === id);
     if (s?.cn) setCurrency("RMB");
   }, [suppliers]);
+  // เปิดจากหน้าร้าน: รายชื่อร้านโหลดเสร็จ → เดาสกุลเงินจากร้านนั้น (ครั้งเดียว)
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => {
+    if (seeded || !initialSeller || !suppliers.length) return;
+    setSeeded(true);
+    if (suppliers.find((x) => x.id === initialSeller.id)?.cn) setCurrency("RMB");
+  }, [seeded, initialSeller, suppliers]);
 
   const setLine = (key: string, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));

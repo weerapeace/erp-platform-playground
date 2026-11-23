@@ -12,10 +12,9 @@
 //   บันทึกผ่าน master-v2 กลาง (POST/PATCH) → เคารพ field permission + audit
 // ============================================================
 
-import { useState, useEffect, useMemo, useCallback, Fragment, type ReactNode } from "react";
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import nextDynamic from "next/dynamic";
-import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -29,19 +28,17 @@ import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Spinner } from "@/components/spinner";
-import { Pager } from "@/components/pager";
 import { ConfirmDialog } from "@/components/modal";
 import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { PurchaseLeadTimeInput } from "@/components/purchase-lead-time-input";
-import { formatCreditTerm, formatLeadTime, salesCreditTermOf } from "@/lib/credit-term";
+import { formatCreditTerm, salesCreditTermOf } from "@/lib/credit-term";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { shopNameSimilarity } from "@/lib/partner-match";
 import { checkRow, isChinaPartner, isIncomplete, partnerGaps, sortCheckRows, type PartnerCheckRow } from "@/lib/partner-data-check";
 import { PartnerIncompleteTab } from "./incomplete-tab";
 import { PartnerQuickFix } from "./quick-fix";
+import { PartnerDetail } from "./partner-detail";
 
-// drawer รายละเอียด record ของกลาง (คลิกวัตถุดิบ → เปิด SKU ตัวจริง) — โหลดเฉพาะตอนใช้
-const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 // popup สแกนร้านซ้ำ — โหลดเฉพาะตอนกดใช้
 const RecordHistoryDrawer = nextDynamic(() => import("@/components/activity-feed/record-history-drawer").then((m) => m.RecordHistoryDrawer), { ssr: false });
 const DuplicateScanModal = nextDynamic(() => import("./duplicate-scan").then((m) => m.DuplicateScanModal), { ssr: false });
@@ -493,7 +490,7 @@ export function PartnerManager() {
       {sel && <PartnerDrawer partner={sel} mode={mode} canEdit={canEdit} others={active.filter((p) => p.id !== sel.id)}
         onMode={setMode} onClose={() => setSel(null)} onSaved={afterSave}
         onRemoved={() => { setSel(null); void load(); void loadInc(); }}
-        fix={fix} onNext={nextFix ? () => openFix(nextFix) : undefined} />}
+        fix={fix} onNext={nextFix ? () => openFix(nextFix) : undefined} summary={sum[sel.id]} />}
 
       <DuplicateScanModal open={dupOpen} onClose={() => setDupOpen(false)}
         onOpenPartner={(id) => { const p = all.find((r) => r.id === id); if (p) { setDupOpen(false); openView(p); } }} />
@@ -513,18 +510,11 @@ export function PartnerManager() {
 // ============================================================
 const CURRENCIES = ["THB", "CNY", "USD"];
 
-function KV({ rows }: { rows: [string, ReactNode][] }) {
-  const shown = rows.filter(([, v]) => v != null && v !== "" && v !== "—");
-  if (!shown.length) return <div className="text-[12.5px] text-slate-400 px-3.5 py-2.5 rounded-[10px] bg-slate-50 border border-slate-100">— ไม่มีข้อมูล —</div>;
-  return (
-    <dl className="grid grid-cols-[118px_1fr] gap-y-2 gap-x-3">
-      {shown.map(([k, v], i) => (<Fragment key={i}><dt className="text-[12.5px] text-slate-400">{k}</dt><dd className="m-0 text-[13px] font-medium text-slate-700">{v}</dd></Fragment>))}
-    </dl>
-  );
-}
 
-function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved, onRemoved, fix, onNext }: {
+function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSaved, onRemoved, fix, onNext, summary }: {
   partner: Partner; mode: Mode; canEdit: boolean; others: Partner[];
+  /** สรุปต่อราย (ยอดค้าง/ครบกำหนด/ซื้อขายล่าสุด) จาก /api/partners/summary */
+  summary?: PartnerSummaryRow;
   onMode: (m: Mode) => void; onClose: () => void; onSaved: (p: Partner) => void;
   /** ปิดใช้งานสำเร็จ → หน้าแม่ปิดป๊อป + โหลดรายชื่อใหม่ */
   onRemoved: () => void;
@@ -549,16 +539,15 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
     } catch (e) { toast.error(e instanceof Error ? e.message : "ปิดใช้งานไม่สำเร็จ"); }
     finally { setRemoving(false); }
   };
-  const { width, startResize } = useDrawerResize("partnerDrawerWidth", 560);   // ของกลาง: ลากขอบซ้ายปรับกว้าง + จำค่า
+  const { width, startResize } = useDrawerResize("partnerDrawerWidthB", 1000);   // ของกลาง: ลากขอบซ้ายปรับกว้าง + จำค่า
   const [form, setForm] = useState<Partner>(partner);
-  const [tab, setTab] = useState<"info" | "rel">("info");
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [fixDirty, setFixDirty] = useState(false);   // กล่องเติมช่องที่ขาดมีค่าที่ยังไม่บันทึก
   const [confirmClose, setConfirmClose] = useState(false);
   const editing = mode === "edit" || mode === "create";
 
-  useEffect(() => { setForm(partner); setDirty(false); setTab("info"); }, [partner, mode]);
+  useEffect(() => { setForm(partner); setDirty(false); }, [partner, mode]);
   useEffect(() => { setFixDirty(false); }, [partner.id]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") tryClose(); };
@@ -595,14 +584,6 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
     finally { setSaving(false); }
   };
 
-  const quick = ([
-    (s(form, "mobile") || s(form, "phone")) && ["📞 โทร", `tel:${s(form, "mobile") || s(form, "phone")}`],
-    s(form, "line_id") && ["💬 LINE", ""],
-    s(form, "wechat_id") && ["💚 WeChat", ""],
-    s(form, "email") && ["✉️ อีเมล", `mailto:${s(form, "email")}`],
-    s(form, "website") && ["🌐 เว็บ", ""],
-  ].filter(Boolean)) as [string, string][];
-
   const node = (
     <>
       <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={tryClose} />
@@ -613,8 +594,9 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
           className="group absolute left-0 top-0 h-full w-1.5 cursor-ew-resize z-20 hover:bg-indigo-200/50 active:bg-indigo-300/60">
           <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-10 rounded-r bg-slate-300 group-hover:bg-indigo-400" />
         </div>
-        {/* header */}
-        <div className="px-[22px] pt-5 relative border-b border-slate-100">
+        {!editing && <button onClick={tryClose} aria-label="ปิด" className="absolute top-2 right-3 z-20 w-8 h-8 rounded-[9px] border border-slate-200 bg-white text-slate-500 hover:bg-slate-100">✕</button>}
+        {/* header (โหมดแก้ไข/เพิ่ม · โหมดดู = การ์ดซ้ายของ PartnerDetail) */}
+        {editing && <div className="px-[22px] pt-5 relative border-b border-slate-100">
           <button onClick={tryClose} className="absolute top-4 right-4 w-8 h-8 rounded-[9px] border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100">✕</button>
           <div className="flex gap-3.5 items-start">
             {s(form, "logo_url")
@@ -626,32 +608,24 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
               {mode !== "create" && <div className="mt-2"><Badges p={form} /></div>}
             </div>
           </div>
-          <div className="flex gap-2 mt-3.5 pb-3.5 flex-wrap">
-            {!editing && quick.map(([label, href]) => (
-              <a key={label} href={href || undefined} className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] border border-slate-200 bg-slate-50 text-slate-700 flex items-center hover:border-indigo-300 hover:text-indigo-700 no-underline">{label}</a>
-            ))}
-            {!editing && canEdit && <button onClick={() => setConfirmOff(true)} title="เลิกใช้คู่ค้านี้ (ไม่ลบทิ้ง เอกสารเก่ายังอ้างถึงได้)"
-              className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] border border-red-200 text-red-600 bg-white hover:bg-red-50 ml-auto">🗑 ปิดใช้งาน</button>}
-            {!editing && canEdit && <button onClick={() => onMode("edit")} className="h-[34px] px-3 text-[12.5px] font-semibold rounded-[9px] bg-indigo-50 text-indigo-700">✏️ แก้ไข</button>}
-          </div>
-        </div>
+          <div className="pb-3.5" />
+        </div>}
 
-        {/* tabs (view only) */}
         {!editing && (
-          <div className="flex gap-0.5 px-[22px] border-b border-slate-100">
-            <button onClick={() => setTab("info")} className={`text-[13px] font-semibold px-3 py-2.5 border-b-2 -mb-px ${tab === "info" ? "text-indigo-700 border-indigo-500" : "text-slate-400 border-transparent"}`}>ข้อมูล</button>
-            <button onClick={() => setTab("rel")} className={`text-[13px] font-semibold px-3 py-2.5 border-b-2 -mb-px ${tab === "rel" ? "text-indigo-700 border-indigo-500" : "text-slate-400 border-transparent"}`}>{isSup ? "วัตถุดิบ / PO" : "ออเดอร์ / วางบิล"}</button>
+          <PartnerDetail partner={form} canEdit={canEdit} summary={summary}
+            avatar={s(form, "logo_url")
+              ? <AppLogo src={s(form, "logo_url")} name={nameOf(form)} size={56} className="rounded-[15px] flex-none" />
+              : <div className="w-[56px] h-[56px] rounded-[15px] flex-none flex items-center justify-center font-bold text-[19px] text-white" style={{ background: avColor(s(form, "code") || partner.id || "P") }}>{initials(nameOf(form))}</div>}
+            badges={<Badges p={form} />}
+            topSlot={fix ? <PartnerQuickFix partner={partner} canEdit={canEdit} onSaved={onSaved} onNext={onNext} onDirtyChange={setFixDirty} /> : undefined}
+            onSaved={(p) => { setForm(p); onSaved(p); }}
+            onEditAll={() => onMode("edit")} onDeactivate={() => setConfirmOff(true)} />
+        )}
+        {editing && (
+          <div className="px-[22px] py-4.5 overflow-y-auto flex-1">
+            <div className="max-w-[760px]"><EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} others={others} /></div>
           </div>
         )}
-
-        <div className="px-[22px] py-4.5 overflow-y-auto flex-1">
-          {!editing && fix && tab === "info" && (
-            <PartnerQuickFix partner={partner} canEdit={canEdit} onSaved={onSaved} onNext={onNext} onDirtyChange={setFixDirty} />
-          )}
-          {editing ? <EditForm form={form} set={set} isSup={isSup} showChina={showChina} cur={cur} others={others} />
-            : tab === "info" ? <ViewInfo form={form} isSup={isSup} showChina={showChina} cur={cur} />
-              : <RelData partner={form} />}
-        </div>
 
         {editing && (
           <div className="border-t border-slate-100 px-[22px] py-3 flex items-center gap-2.5">
@@ -663,7 +637,7 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
       </aside>
       <ConfirmDialog open={confirmOff} onClose={() => { if (!removing) setConfirmOff(false); }} onConfirm={() => void deactivate()} loading={removing}
         variant="danger" title="ปิดใช้งานคู่ค้านี้?" confirmText="ปิดใช้งาน" cancelText="ไม่ปิด"
-        message={`"${nameOf(form)}" จะหายจากรายชื่อและตัวเลือกคู่ค้า — เอกสารเก่าที่อ้างถึงยังดูได้ตามเดิม · กู้คืนได้ที่หน้า ผู้จำหน่าย / ลูกค้า (เปิดดูรายการที่ลบ แล้วกด ↩ กู้คืน)`} />
+        message={`"${nameOf(form)}" จะหายจากรายชื่อและตัวเลือกคู่ค้า — เอกสารเก่าที่อ้างถึงยังดูได้ตามเดิม · กู้คืนได้ที่แท็บ "ถังขยะ" ของหน้านี้`} />
       <ConfirmDialog open={confirmClose} onClose={() => setConfirmClose(false)} onConfirm={() => { setConfirmClose(false); onClose(); }}
         title="ออกโดยไม่บันทึก?" message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกหรือไม่?" confirmText="ออกโดยไม่บันทึก" variant="danger" />
     </>
@@ -672,51 +646,6 @@ function PartnerDrawer({ partner, mode, canEdit, others, onMode, onClose, onSave
 }
 
 const Lab = ({ children }: { children: ReactNode }) => <div className="text-[11px] font-bold tracking-wide uppercase text-slate-400 mb-2.5 flex items-center gap-1.5">{children}</div>;
-
-function ViewInfo({ form, isSup, showChina, cur }: { form: Partner; isSup: boolean; showChina: boolean; cur: string }) {
-  const { can } = useAuth();
-  const showLimit = can("cashflow.view");   // วงเงิน = ข้อมูลการเงินอ่อนไหว
-  const fin: [string, ReactNode, string][] = [
-    ...(showLimit ? [["วงเงินเครดิต", money(form.credit_limit, cur) || "ไม่จำกัด", Number(form.credit_limit) > 0 ? "text-amber-600" : "text-slate-400"] as [string, ReactNode, string]] : []),
-    // ผู้จำหน่าย = เทอมที่เราจ่ายเขา (purchase_credit_term) · ลูกค้า = เทอมที่เขาจ่ายเรา (sales_credit_term / ค่าเก่า payment_terms_days)
-    [isSup ? "เทอมการจ่าย" : "เทอมชำระ", formatCreditTerm(isSup ? (s(form, "purchase_credit_term") || null) : salesCreditTermOf(form as { sales_credit_term?: unknown })), "text-slate-800"],
-    ["สกุลเงิน", cur, "text-slate-800"],
-    [isSup ? "ระยะเวลาส่งของ" : "รอบวางบิล", formatLeadTime(s(form, "purchase_lead_time") || null), "text-sky-600"],
-  ];
-  return (
-    <div className="space-y-5">
-      <section><Lab>💰 การเงิน &amp; เครดิต</Lab>
-        <div className="bg-slate-50 border border-slate-100 rounded-[10px] p-3.5 grid grid-cols-2 gap-3">
-          {fin.map(([l, v, c]) => (<div key={l}><div className="text-[11px] text-slate-400">{l}</div><div className={`text-[16px] font-bold mt-0.5 ${c}`}>{v}</div></div>))}
-        </div>
-      </section>
-      <section><Lab>📇 ข้อมูลติดต่อ</Lab>
-        <KV rows={[["เบอร์โทร", s(form, "phone")], ["มือถือ", s(form, "mobile")], ["LINE", s(form, "line_id")], ["WeChat", s(form, "wechat_id")], ["อีเมล", s(form, "email")], ["เว็บไซต์", s(form, "website")]]} />
-      </section>
-      <section><Lab>📍 ที่อยู่</Lab>
-        {(s(form, "address_line") || s(form, "province")) ? (
-          <div className="bg-slate-50 border border-slate-100 rounded-[10px] p-3.5 text-[13px] text-slate-700">
-            {s(form, "address_line")}<br />{[s(form, "sub_district"), s(form, "district"), s(form, "province"), s(form, "postal_code"), s(form, "country")].filter(Boolean).join(" · ")}
-          </div>
-        ) : <KV rows={[]} />}
-      </section>
-      <section><Lab>🧾 ภาษี</Lab><KV rows={[["เลขผู้เสียภาษี", s(form, "tax_id")], ["สาขา", s(form, "tax_branch")]]} /></section>
-      {showChina && (
-        <section><Lab>🇨🇳 ข้อมูลร้านจีน</Lab>
-          <div className="bg-slate-50 border border-slate-100 rounded-[10px] p-3.5">
-            <KV rows={[["ผู้ติดต่อขาย", s(form, "sale_name")], ["WeChat", s(form, "wechat_id")], ["ประเทศร้าน", s(form, "shop_country")],
-              ["ร้าน Taobao", b(form, "is_taobao") ? "✅ ใช่" : "❌ ไม่"], ["ส่งก่อนจ่าย", b(form, "ship_before_pay") ? "✅ ได้" : "❌ ต้องจ่ายก่อน"], ["ออกบิลซื้อ", b(form, "buy_bill") ? "✅ มีบิล" : "❌ ไม่มีบิล"]]} />
-          </div>
-        </section>
-      )}
-      <section><Lab>🏦 ธนาคาร</Lab><KV rows={[["ธนาคาร", s(form, "bank_name_brief")], ["เลขบัญชี", s(form, "account_number")], ["ชื่อบัญชี", s(form, "bank_account_name")]]} /></section>
-      <section><Lab>🏷️ แท็ก &amp; โน้ต</Lab>
-        <div className="flex gap-1.5 flex-wrap">{(Array.isArray(form.tags) ? form.tags as string[] : []).map((t, i) => <span key={i} className="text-[11px] bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5 text-slate-600">{t}</span>)}</div>
-        {s(form, "notes") && <div className="mt-2.5 text-[12.5px] text-slate-600 leading-relaxed bg-amber-50/70 border border-slate-100 rounded-[10px] px-3.5 py-2.5">📌 {s(form, "notes")}</div>}
-      </section>
-    </div>
-  );
-}
 
 const IN = "h-[38px] w-full border border-slate-200 rounded-[9px] px-2.5 text-[13px] focus:outline-2 focus:outline-indigo-500";
 function Fld({ label, k, form, set, span, ph, prefix }: { label: string; k: string; form: Partner; set: (k: string, v: unknown) => void; span?: boolean; ph?: string; prefix?: string }) {
@@ -845,115 +774,6 @@ function EditForm({ form, set, isSup, showChina, cur, others }: { form: Partner;
         <div className="flex flex-col gap-1.5 mt-3"><label className="text-[11.5px] font-semibold text-slate-600">โน้ต</label>
           <textarea value={s(form, "notes")} onChange={(e) => set("notes", e.target.value)} className="w-full border border-slate-200 rounded-[9px] px-2.5 py-2 text-[13px] min-h-[62px] focus:outline-2 focus:outline-indigo-500" /></div>
       </section>
-    </div>
-  );
-}
-
-const fmtDate = (v: unknown) => { const t = v ? String(v) : ""; if (!t) return ""; const d = new Date(t); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }); };
-const STATUS_LABEL: Record<string, string> = { draft: "ร่าง", confirmed: "ยืนยัน", ordered: "สั่งแล้ว", received: "รับแล้ว", closed: "ปิด", cancelled: "ยกเลิก", paid: "จ่ายแล้ว", sent: "ส่งแล้ว" };
-
-function RelSection({ icon, title, count, empty, rows }: { icon: string; title: string; count: number; empty: string; rows: { t: string; s?: string; r?: string }[] }) {
-  return (
-    <section className="mb-5">
-      <Lab>{icon} {title} {count > 0 && <span className="text-slate-300 tabular-nums">({count})</span>}</Lab>
-      {rows.length === 0 ? (
-        <div className="text-[12.5px] text-slate-400 px-3.5 py-2.5 rounded-[10px] bg-slate-50 border border-slate-100">{empty}</div>
-      ) : (
-        <div className="bg-slate-50 border border-slate-100 rounded-[10px] px-3.5">
-          {rows.map((it, i) => (
-            <div key={i} className="flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-0">
-              <div className="w-8 h-8 rounded-lg flex-none flex items-center justify-center text-[14px] bg-white border border-slate-100">{icon}</div>
-              <div className="min-w-0"><div className="text-[13px] font-semibold truncate">{it.t}</div>{it.s && <div className="text-[11.5px] text-slate-400">{it.s}</div>}</div>
-              {it.r && <div className="ml-auto text-[12.5px] font-bold text-slate-600 shrink-0 tabular-nums">{it.r}</div>}
-            </div>
-          ))}
-          {count > rows.length && <div className="text-[11px] text-slate-400 py-2 text-center">แสดง {rows.length} จาก {count}</div>}
-        </div>
-      )}
-    </section>
-  );
-}
-
-type Material = { id: string; sku_id: string | null; sku_code: string; sku_name: string; supplier_sku: string; price: number | null; currency: string; moq: number | null; lead_time_days: number | null; is_default: boolean };
-const MAT_PAGE = 20;
-
-// ตารางวัตถุดิบที่รับซื้อ (MiniTable ของกลาง) + ค้นหา + แบ่งหน้า (Pager ของกลาง) + คลิกดู SKU
-function MaterialsTable({ rows, total, onOpenSku }: { rows: Material[]; total: number; onOpenSku: (skuId: string) => void }) {
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(0);
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    if (!kw) return rows;
-    return rows.filter((r) => [r.sku_code, r.sku_name, r.supplier_sku].join(" ").toLowerCase().includes(kw));
-  }, [rows, q]);
-  useEffect(() => { setPage(0); }, [q]);
-  const shown = filtered.slice(page * MAT_PAGE, page * MAT_PAGE + MAT_PAGE);
-
-  const cols: MiniColumn<Material>[] = [
-    { key: "code", header: "รหัส", width: "1.1fr", sortValue: (r) => r.sku_code, sortLabel: "รหัส",
-      cell: (r) => (<div className="min-w-0"><div className="font-medium text-[12.5px] truncate">{r.sku_code}</div>{r.sku_name && <div className="text-[11px] text-slate-400 truncate">{r.sku_name}</div>}</div>) },
-    // ราคา = ข้อมูลที่มีจริง (~85% ของ supplier_items) · MOQ/lead time/รหัสร้าน แทบไม่มีใครกรอก → ไม่ทำคอลัมน์เปล่า
-    { key: "price", header: "ราคา/หน่วย", align: "right", width: "6.5rem", sortValue: (r) => r.price ?? -1,
-      cell: (r) => r.price != null ? <span className="tabular-nums font-semibold text-[12.5px]">{money(r.price, r.currency)}</span> : <span className="text-slate-300">—</span> },
-    { key: "def", header: "", align: "center", width: "2.8rem",
-      cell: (r) => r.is_default ? <span title="ร้านหลักของวัตถุดิบนี้" className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600">หลัก</span> : null },
-  ];
-
-  return (
-    <section className="mb-5">
-      <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <Lab>📦 วัตถุดิบที่รับซื้อ {total > 0 && <span className="text-slate-300 tabular-nums">({total})</span>}</Lab>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส / ชื่อ / รหัสร้าน…"
-          className="ml-auto h-8 w-[190px] border border-slate-200 rounded-lg px-2.5 text-[12.5px] focus:outline-2 focus:outline-indigo-500" />
-      </div>
-      {rows.length === 0 ? (
-        <div className="text-[12.5px] text-slate-400 px-3.5 py-2.5 rounded-[10px] bg-slate-50 border border-slate-100">ยังไม่มีวัตถุดิบผูกกับร้านนี้</div>
-      ) : (
-        <>
-          <MiniTable<Material> rows={shown} columns={cols} rowKey={(r) => r.id} dense
-            onRowClick={(r) => { if (r.sku_id) onOpenSku(r.sku_id); }}
-            emptyText="ไม่พบวัตถุดิบที่ตรงคำค้น" countUnit="รายการ" />
-          {filtered.length > MAT_PAGE && <div className="mt-2"><Pager page={page} pageSize={MAT_PAGE} total={filtered.length} onPage={setPage} unitLabel="รายการ" /></div>}
-          <p className="text-[11px] text-slate-400 mt-1.5">คลิกแถวเพื่อดูรายละเอียดวัตถุดิบ (SKU){total > rows.length ? ` · โหลดมา ${rows.length} จาก ${total}` : ""}</p>
-        </>
-      )}
-    </section>
-  );
-}
-
-function RelData({ partner }: { partner: Partner }) {
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [skuId, setSkuId] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true; setLoading(true);
-    apiFetch(`/api/partners/${partner.id}/related`).then((r) => r.json()).then((j) => { if (alive) setData(j); }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [partner.id]);
-
-  if (loading) return <div className="py-10 text-center text-slate-400 text-[13px]"><Spinner /> กำลังโหลดรายการที่เกี่ยว…</div>;
-  if (!data) return <div className="py-10 text-center text-slate-400 text-[13px]">โหลดไม่สำเร็จ</div>;
-
-  const counts = (data.counts ?? {}) as Record<string, number>;
-  const st = (v: unknown) => { const k = String(v ?? "").toLowerCase(); return STATUS_LABEL[k] ?? (v ? String(v) : ""); };
-  const arr = (k: string) => (Array.isArray(data[k]) ? data[k] as Record<string, unknown>[] : []);
-
-  return (
-    <div>
-      {data.is_supplier ? (
-        <>
-          <MaterialsTable rows={(data.materials ?? []) as Material[]} total={counts.materials ?? 0} onOpenSku={setSkuId} />
-          <RelSection icon="🛒" title="ใบสั่งซื้อ (PO)" count={counts.purchase_orders ?? 0} empty="ยังไม่มีใบสั่งซื้อ"
-            rows={arr("purchase_orders").map((o) => ({ t: String(o.po_no ?? "PO"), s: [fmtDate(o.order_date), st(o.status)].filter(Boolean).join(" · "), r: money(o.grand_total, "THB") }))} />
-          <RelSection icon="🧾" title="บิลจีน" count={counts.china_bills ?? 0} empty="ยังไม่มีบิลจีน"
-            rows={arr("china_bills").map((c) => ({ t: "บิลจีน", s: [fmtDate(c.created_at), st(c.status)].filter(Boolean).join(" · ") }))} />
-        </>
-      ) : null}
-      {data.is_customer ? (
-        <RelSection icon="📄" title="ใบเสนอราคา" count={counts.offer_sheets ?? 0} empty="ยังไม่มีใบเสนอราคา"
-          rows={arr("offer_sheets").map((o) => ({ t: String(o.title || "ใบเสนอราคา"), s: [fmtDate(o.created_at), st(o.status)].filter(Boolean).join(" · ") }))} />
-      ) : null}
-      {skuId && <MasterRecordDrawer key={skuId} moduleKey="skus-v2" recordId={skuId} onClose={() => setSkuId(null)} />}
     </div>
   );
 }
