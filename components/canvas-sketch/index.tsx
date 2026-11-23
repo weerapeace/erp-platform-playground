@@ -27,7 +27,7 @@ import { Icon } from "@/components/icon";
 import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
-import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles } from "./utils";
+import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials, exportableFiles, bindableEmbed, EMBED_FILL } from "./utils";
 import { parseSocialLink, socialEmbedSize, type SocialLink } from "@/lib/social-embed";
 import { SocialEmbedFrame, fetchSocialInfo } from "./social-embed-frame";
 import { LineTools } from "./line-tools";
@@ -181,7 +181,7 @@ export function CanvasSketch({
         // ล้าง link ออกจากการ์ดเก่า (มี customData.kind) — ไม่ให้ขึ้นไอคอน 🔗 รก (เปิดด้วยดับเบิลคลิกแทน)
         const els = ((sc?.elements as Record<string, unknown>[]) ?? []).map((el) => {
           const d = el?.customData as Record<string, unknown> | undefined;
-          return d?.kind && el.link ? { ...el, link: null } : el;
+          return bindableEmbed(d?.kind && el.link ? { ...el, link: null } : el); // กล่องฝังเก่าที่โปร่ง → พื้นทึบ ลากเส้นมาผูกได้
         });
         if (els.some((e) => !(e as { isDeleted?: boolean }).isDeleted)) hadContentRef.current = true; // โหลดมามีงาน → ห้ามเซฟว่างทับ
         baseRevRef.current = Number(j?.data?.rev) || 0; // จำเวอร์ชันที่โหลดมา
@@ -1039,7 +1039,7 @@ export function CanvasSketch({
           y = Math.max(...hits.map((e) => e.y + (e.height || 0))) + 40;
         }
       }
-      const skels = row.map((r) => ({ type: "rectangle", x: start.x + r.dx, y, width: r.width, height: r.height, strokeColor: "transparent", backgroundColor: "transparent", roundness: { type: 3 }, link: r.link }));
+      const skels = row.map((r) => ({ type: "rectangle", x: start.x + r.dx, y, width: r.width, height: r.height, strokeColor: "transparent", ...EMBED_FILL, roundness: { type: 3 }, link: r.link })); // พื้นทึบ = ลากเส้นไปวางตรงไหนของกล่องก็ผูก
       // Excalidraw ไม่มีตัวสร้างกล่องฝังให้เรียก → สร้างเป็นกล่องธรรมดาแล้วเปลี่ยนชนิด (ค่าพื้นฐานเหมือนกัน)
       const added = (lib.convertToExcalidrawElements(skels) as any[]).map((e) => ({ ...e, type: "embeddable" }));
       const all = (api.getSceneElementsIncludingDeleted() as any[]).map((e) => drop.has(e.id) ? { ...e, isDeleted: true, version: (e.version ?? 0) + 1 } : e);

@@ -36,6 +36,17 @@ export function sceneSig(els: { id?: string; version?: number }[]): string {
   return `${els.length}:${h}`;
 }
 
+// กล่องฝัง (วิดีโอ Pinterest/TikTok/YouTube) ต้องมี "พื้นทึบ" ไม่งั้น Excalidraw ถือว่าโปร่ง (ทะลุได้)
+// → ลากปลายเส้นไปวางกลางกล่องแล้วไม่ผูก ต้องเล็งขอบเป๊ะ ๆ (ขอบมองไม่เห็นเพราะวิดีโอบังอยู่) · พื้นขาวอยู่ใต้วิดีโอ มองไม่เห็น
+export const EMBED_FILL = { backgroundColor: "#ffffff", fillStyle: "solid" } as const;
+const isClearColor = (c: string) => c === "transparent" || /^#[0-9a-f]{6}00$/i.test(c) || /^#[0-9a-f]{3}0$/i.test(c);
+/** กล่องฝังที่ยังโปร่ง → ใส่พื้นทึบ (ไม่แตะ version: ใช้ตอนโหลดกระดาน ก่อน Excalidraw เปิด — ไม่เข้าประวัติย้อนกลับ) · ชิ้นอื่นคืนตัวเดิม */
+export function bindableEmbed<T extends Record<string, unknown>>(el: T): T {
+  if (el?.type !== "embeddable" && el?.type !== "iframe") return el;
+  if (el.fillStyle === "solid" && !isClearColor(String(el.backgroundColor ?? "transparent"))) return el;
+  return { ...el, ...EMBED_FILL };
+}
+
 // รวมชิ้นงาน 2 ฝั่งต่อ id — "การลบชนะ" ก่อน (กันลบแล้วเด้งกลับ) ไม่งั้นเอา version ใหม่กว่า · เสมอกัน = เก็บฝั่ง a (ของเรา)
 export function mergeById(a: any[], b: any[]): any[] {
   const map = new Map<string, any>();

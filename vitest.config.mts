@@ -19,6 +19,8 @@ export default defineConfig({
     include: ["**/__tests__/**/*.test.{ts,tsx}", "**/*.test.{ts,tsx}"],
     exclude: ["node_modules", ".next"],
     globals: false,
+    // เทสต์ที่เรียกตัวผูกเส้นของ Excalidraw ตรง ๆ (canvas-embed-binding) — ให้ Vite แปลงไฟล์ Excalidraw เอง (มัน import JSON แบบที่ Node ไม่รับ)
+    server: { deps: { inline: [/@excalidraw[\/]excalidraw/] } },
     coverage: {
       provider: "v8",
       include: ["lib/**/*.ts"],
