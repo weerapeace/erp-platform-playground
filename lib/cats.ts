@@ -13,9 +13,9 @@ export const CATS_VIEW = "cats.view";
 export const CATS_EDIT = "cats.edit";
 export const CATS_ENTITY_PREFIX = "cats";
 
-export type CatKind = "cats" | "clinics" | "vaccinations" | "treatments" | "weights";
+export type CatKind = "cats" | "clinics" | "vaccinations" | "treatments" | "weights" | "supplies" | "purchases" | "vet_visits" | "expenses";
 
-type FieldType = "text" | "longtext" | "date" | "bool" | "money" | "int" | "kg" | "uuid" | "enum";
+type FieldType = "text" | "longtext" | "date" | "bool" | "money" | "int" | "kg" | "num" | "uuid" | "uuids" | "enum" | "datetime";
 type FieldSpec = { type: FieldType; label: string; required?: boolean; max?: number; options?: readonly string[]; min?: number; maxNum?: number };
 
 export const CAT_KINDS: Record<CatKind, { table: string; label: string; nameField: string; fields: Record<string, FieldSpec>; order: string }> = {
@@ -79,6 +79,68 @@ export const CAT_KINDS: Record<CatKind, { table: string; label: string; nameFiel
       note: { type: "longtext", label: "หมายเหตุ", max: 500 },
     },
   },
+  // ─── รอบ 2: อาหาร / ทราย / สต็อก (กติกาคำนวณ = lib/cats-supplies.ts) ───
+  supplies: {
+    table: "cat_supplies", label: "อาหาร/ทราย", nameField: "brand", order: "sort_order",
+    fields: {
+      type: { type: "enum", label: "ชนิด", required: true, options: ["dry_food", "wet_food", "litter"] },
+      wet_kind: { type: "enum", label: "ชนิดอาหารเปียก", options: ["gravy", "jelly"] },
+      brand: { type: "text", label: "ยี่ห้อ", required: true, max: 80 },
+      flavor: { type: "text", label: "รสชาติ / รุ่น", max: 120 },
+      unit: { type: "enum", label: "หน่วย", options: ["bag", "pouch", "can"] },
+      pack_size: { type: "num", label: "ขนาดถุง", min: 0.01, maxNum: 100000 },
+      pack_size_unit: { type: "enum", label: "หน่วยขนาดถุง", options: ["g", "kg", "L"] },
+      unit_size_g: { type: "num", label: "กรัมต่อชิ้น", min: 0.01, maxNum: 10000 },
+      units_per_pack: { type: "int", label: "ชิ้นต่อแพ็ค", min: 1, maxNum: 500 },
+      price: { type: "money", label: "ราคา" },
+      price_per: { type: "enum", label: "ราคานี้คิดต่อ", options: ["piece", "pack"] },
+      daily_g: { type: "num", label: "กรัมต่อวัน", min: 0, maxNum: 100000 },
+      pack_lasts_days: { type: "num", label: "1 ถุงใช้ได้กี่วัน", min: 0.1, maxNum: 3650 },
+      stock_base_qty: { type: "num", label: "จำนวนคงเหลือ", min: 0, maxNum: 100000 },
+      stock_base_at: { type: "datetime", label: "นับสต็อกเมื่อ" },
+      shop_url: { type: "text", label: "ลิงก์ร้าน", max: 1000 },
+      shop_name: { type: "text", label: "ชื่อร้าน", max: 80 },
+      cat_ids: { type: "uuids", label: "แมวที่กิน" },
+      note: { type: "longtext", label: "หมายเหตุ", max: 1000 },
+      sort_order: { type: "int", label: "ลำดับ", min: 0, maxNum: 9999 },
+    },
+  },
+  purchases: {
+    table: "cat_purchases", label: "ซื้อเข้า", nameField: "qty", order: "date",
+    fields: {
+      supply_id: { type: "uuid", label: "ของที่ซื้อ", required: true },
+      date: { type: "date", label: "วันที่ซื้อ", required: true },
+      qty: { type: "num", label: "จำนวน", required: true, min: 0.01, maxNum: 100000 },
+      packs: { type: "num", label: "จำนวนแพ็ค", min: 0.01, maxNum: 10000 },
+      price_paid: { type: "money", label: "จ่ายไป" },
+      note: { type: "longtext", label: "หมายเหตุ", max: 500 },
+    },
+  },
+  // ─── รอบ 3: หาหมอ / ค่าใช้จ่ายอื่น (สรุป = lib/cats-costs.ts) ───
+  vet_visits: {
+    table: "cat_vet_visits", label: "การหาหมอ", nameField: "diagnosis", order: "date",
+    fields: {
+      cat_id: { type: "uuid", label: "แมว", required: true },
+      date: { type: "date", label: "วันที่", required: true },
+      clinic_id: { type: "uuid", label: "คลินิก" },
+      symptoms: { type: "longtext", label: "อาการ", max: 2000 },
+      diagnosis: { type: "longtext", label: "การวินิจฉัย", max: 2000 },
+      medicines: { type: "longtext", label: "ยาที่ได้", max: 2000 },
+      cost: { type: "money", label: "ค่ารักษา" },
+      receipt_r2_key: { type: "text", label: "รูปใบเสร็จ", max: 300 },
+      note: { type: "longtext", label: "หมายเหตุ", max: 1000 },
+    },
+  },
+  expenses: {
+    table: "cat_expenses", label: "ค่าใช้จ่าย", nameField: "note", order: "date",
+    fields: {
+      cat_id: { type: "uuid", label: "แมว" },
+      category: { type: "enum", label: "หมวด", required: true, options: ["snack", "toy", "grooming", "vet", "other"] },
+      date: { type: "date", label: "วันที่", required: true },
+      amount: { type: "money", label: "จำนวนเงิน", required: true },
+      note: { type: "longtext", label: "รายละเอียด", max: 500 },
+    },
+  },
 };
 
 export const isCatKind = (k: string): k is CatKind => k in CAT_KINDS;
@@ -94,7 +156,22 @@ export type Clinic = Base & { name: string; phone: string | null; address: strin
 export type Vaccination = Base & { cat_id: string; vaccine_name: string; date_given: string; clinic_id: string | null; next_due_date: string | null; cost: number | null; note: string | null };
 export type Treatment = Base & { cat_id: string; type: "deworm" | "flea"; product: string; date_given: string; interval_days: number | null; next_due_date: string | null; cost: number | null; note: string | null };
 export type Weight = Base & { cat_id: string; date: string; weight_kg: number; note: string | null };
-export type CatsData = { cats: Cat[]; clinics: Clinic[]; vaccinations: Vaccination[]; treatments: Treatment[]; weights: Weight[] };
+export type SupplyType = "dry_food" | "wet_food" | "litter";
+export type WetKind = "gravy" | "jelly";
+export type Supply = Base & {
+  type: SupplyType; wet_kind: WetKind | null; brand: string; flavor: string | null; unit: "bag" | "pouch" | "can";
+  pack_size: number | null; pack_size_unit: "g" | "kg" | "L" | null; unit_size_g: number | null; units_per_pack: number | null;
+  price: number | null; price_per: "piece" | "pack"; daily_g: number | null; pack_lasts_days: number | null;
+  stock_base_qty: number; stock_base_at: string; shop_url: string | null; shop_name: string | null; cat_ids: string[] | null; note: string | null; sort_order: number;
+};
+export type Purchase = Base & { supply_id: string; date: string; qty: number; packs: number | null; price_paid: number | null; note: string | null };
+export type VetVisit = Base & { cat_id: string; date: string; clinic_id: string | null; symptoms: string | null; diagnosis: string | null; medicines: string | null; cost: number | null; receipt_r2_key: string | null; note: string | null };
+export type ExpenseCategory = "snack" | "toy" | "grooming" | "vet" | "other";
+export type Expense = Base & { cat_id: string | null; category: ExpenseCategory; date: string; amount: number; note: string | null };
+export type CatsData = { cats: Cat[]; clinics: Clinic[]; vaccinations: Vaccination[]; treatments: Treatment[]; weights: Weight[]; supplies: Supply[]; purchases: Purchase[]; vet_visits: VetVisit[]; expenses: Expense[] };
+export const SUPPLY_TYPE_LABEL: Record<SupplyType, string> = { dry_food: "อาหารเม็ด", wet_food: "อาหารเปียก", litter: "ทรายแมว" };
+export const WET_KIND_LABEL: Record<WetKind, string> = { gravy: "เกรวี่", jelly: "เจลลี่" };
+export const EXPENSE_CATEGORY_LABEL: Record<ExpenseCategory, string> = { snack: "ขนม", toy: "ของเล่น", grooming: "อาบน้ำตัดขน", vet: "ค่าหมอ", other: "อื่นๆ" };
 
 // ─── ตรวจค่า ─────────────────────────────────────────────────────────────
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -137,12 +214,24 @@ export function cleanCatBody(kind: CatKind, body: Record<string, unknown>, parti
         patch[key] = raw;
         break;
       }
+      case "uuids": {
+        if (!Array.isArray(raw)) return { ok: false, error: `${f.label}ไม่ถูกต้อง` };
+        const ids = Array.from(new Set(raw.filter((x): x is string => typeof x === "string" && UUID.test(x)))).slice(0, 50);
+        patch[key] = ids.length ? ids : null;
+        break;
+      }
+      case "datetime": {
+        const t = Date.parse(String(raw));
+        if (!Number.isFinite(t)) return { ok: false, error: `${f.label}ไม่ถูกต้อง` };
+        patch[key] = new Date(t).toISOString();
+        break;
+      }
       case "enum": {
         if (typeof raw !== "string" || !f.options?.includes(raw)) return { ok: false, error: `${f.label}ไม่ถูกต้อง` };
         patch[key] = raw;
         break;
       }
-      case "money": case "int": case "kg": {
+      case "money": case "int": case "kg": case "num": {
         const n = Number(String(raw).replace(/,/g, ""));
         if (!Number.isFinite(n)) return { ok: false, error: `${f.label}ต้องเป็นตัวเลข` };
         if (f.type === "money") {
@@ -152,6 +241,9 @@ export function cleanCatBody(kind: CatKind, body: Record<string, unknown>, parti
           const i = Math.round(n);
           if ((f.min != null && i < f.min) || (f.maxNum != null && i > f.maxNum)) return { ok: false, error: `${f.label}ต้องอยู่ระหว่าง ${f.min ?? 0}–${f.maxNum}` };
           patch[key] = i;
+        } else if (f.type === "num") {
+          if ((f.min != null && n < f.min) || (f.maxNum != null && n > f.maxNum)) return { ok: false, error: `${f.label}ต้องอยู่ระหว่าง ${f.min ?? 0}–${f.maxNum}` };
+          patch[key] = Math.round(n * 100) / 100;
         } else {
           if (n <= 0 || n >= 30) return { ok: false, error: "น้ำหนักต้องมากกว่า 0 และน้อยกว่า 30 กก." };
           patch[key] = Math.round(n * 100) / 100;
@@ -169,6 +261,13 @@ export function cleanCatBody(kind: CatKind, body: Record<string, unknown>, parti
   if (kind === "treatments" && given && patch.interval_days && !("next_due_date" in body && due)) {
     patch.next_due_date = addDaysYmd(given, patch.interval_days as number);
   }
+  // ของใช้: อาหารเปียกต้องบอกว่าเกรวี่หรือเจลลี่ · ชนิดอื่นล้างค่านี้ทิ้ง · ลิงก์ต้องเป็น http(s)
+  if (kind === "supplies") {
+    if (patch.type === "wet_food" && !partial && !patch.wet_kind) return { ok: false, error: "เลือกว่าเป็นเกรวี่หรือเจลลี่" };
+    if (patch.type && patch.type !== "wet_food") patch.wet_kind = null;
+    if (typeof patch.shop_url === "string" && !/^https?:\/\//i.test(patch.shop_url)) return { ok: false, error: "ลิงก์ร้านต้องขึ้นต้นด้วย https://" };
+  }
+  if (kind === "clinics" && typeof patch.map_url === "string" && !/^https?:\/\//i.test(patch.map_url)) return { ok: false, error: "ลิงก์แผนที่ต้องขึ้นต้นด้วย https://" };
   if (partial && !Object.keys(patch).length) return { ok: false, error: "ไม่มีช่องที่ต้องแก้" };
   return { ok: true, patch };
 }
@@ -282,6 +381,10 @@ export function latestWeight(weights: Weight[], catId: string): { kg: number; da
 /** ชื่อแถวสำหรับ audit / แจ้งผล */
 export function recordLabel(kind: CatKind, row: Record<string, unknown>): string {
   if (kind === "weights") return `${row.weight_kg ?? ""} กก. (${row.date ?? ""})`;
+  if (kind === "supplies") return [SUPPLY_TYPE_LABEL[row.type as SupplyType] ?? "", row.brand, row.flavor].filter(Boolean).join(" ");
+  if (kind === "purchases") return `ซื้อเข้า ${row.qty ?? ""} (${row.date ?? ""})`;
+  if (kind === "vet_visits") return `หาหมอ ${row.date ?? ""}${row.diagnosis ? ` · ${String(row.diagnosis).slice(0, 40)}` : ""}`;
+  if (kind === "expenses") return `${EXPENSE_CATEGORY_LABEL[row.category as ExpenseCategory] ?? "ค่าใช้จ่าย"} ${row.amount ?? ""} บาท${row.note ? ` · ${String(row.note).slice(0, 40)}` : ""}`;
   if (kind === "treatments") return `${TREATMENT_LABEL[row.type as "deworm" | "flea"] ?? "ยา"} ${row.product ?? ""}`.trim();
   return String(row[CAT_KINDS[kind].nameField] ?? "");
 }

@@ -40,6 +40,8 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   if (!v.ok) return bad(v.error);
   const patch = { ...v.patch };
   if (!("date_given" in body)) delete patch.date_given;
+  // นับสต็อกใหม่ → จำเวลาที่นับ (ไม่ส่งมา = ตอนนี้) · ซื้อเข้าหลังเวลานี้เท่านั้นที่บวกเพิ่ม (lib/cats-supplies)
+  if (r.kind === "supplies" && "stock_base_qty" in patch && !("stock_base_at" in patch)) patch.stock_base_at = new Date().toISOString();
 
   const now = new Date().toISOString();
   const out: Record<string, unknown> = { ...patch, updated_at: now };

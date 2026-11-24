@@ -15,7 +15,7 @@
 export type LineSlotKey =
   | "production" | "qc"
   | "purchase_request" | "purchase_order" | "goods_receipt" | "purchase_capture"
-  | "creative" | "design_intake" | "design_idea" | "bills" | "transfers" | "webshop";
+  | "creative" | "design_intake" | "design_idea" | "bills" | "transfers" | "webshop" | "cats";
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
@@ -43,6 +43,7 @@ export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   bills:            { key: "bills",            label: "กลุ่มบิลจีน",              icon: "🧾" },
   transfers:        { key: "transfers",        label: "กลุ่มโอนเงิน/เรต",         icon: "💱" },
   webshop:          { key: "webshop",          label: "กลุ่มเว็บร้าน (ออเดอร์ออนไลน์)", icon: "🛍" },
+  cats:             { key: "cats",             label: "กลุ่มแมว (ทะเบียนแมว)",        icon: "🐾" },
 };
 
 /** ระบบ → กลุ่ม + เหตุการณ์ (เรียงตามที่ผู้บริหารเข้าใจง่าย) */
@@ -96,6 +97,13 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
       { key: "webshop_order",  label: "ออเดอร์เว็บใหม่",          slot: "webshop", icon: "🛒" },
       { key: "webshop_slip",   label: "ลูกค้าแนบสลิป รอตรวจเงิน",  slot: "webshop", icon: "💳" },
       { key: "webshop_return", label: "ลูกค้าขอคืน/เปลี่ยนสินค้า", slot: "webshop", icon: "↩️" },
+    ],
+  },
+  {
+    // 🐾 แอปทะเบียนแมว (งานอื่นๆ) — ไม่ตั้งกลุ่ม = ไม่ส่ง (ไม่ตกไปกลุ่มหลักของบริษัท) · ตัวส่ง app/api/cron/cat-reminders
+    key: "cats", label: "แมว (งานอื่นๆ)", icon: "🐾", slots: ["cats"],
+    events: [
+      { key: "cat_reminder", label: "เตือนวัคซีน/ยา/อาหาร-ทรายใกล้หมด (ทุกเช้า 08:00)", slot: "cats", icon: "🐾" },
     ],
   },
   {

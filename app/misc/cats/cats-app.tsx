@@ -2,8 +2,9 @@
 
 /**
  * 🐾 ทะเบียนแมว (แอป "งานอื่นๆ") — ตัวแอปทั้งหน้า
- *   แท็บ: หน้าแรก (ใกล้ถึงกำหนด + แมวรูปใหญ่) · ปฏิทิน · คลินิก · ถังขยะ · กดแมว = หน้าของแมวตัวนั้น (?cat=<id>)
- *   ข้อมูล/เขียน ผ่าน use-cats (API กลาง /api/cats) · กติกาคำนวณ = lib/cats
+ *   แท็บ: หน้าแรก (ใกล้ถึงกำหนด + ของใกล้หมด + แมวรูปใหญ่) · อาหาร/ทราย · ค่าใช้จ่าย · ปฏิทิน · คลินิก · ตั้งค่า (LINE) · ถังขยะ
+ *   กดแมว = หน้าของแมวตัวนั้น (?cat=<id>)
+ *   ข้อมูล/เขียน ผ่าน use-cats (API กลาง /api/cats) · กติกาคำนวณ = lib/cats · lib/cats-supplies · lib/cats-costs · lib/cats-notify
  *   ใช้ร่วมกันในบ้าน: ทุกคนที่มีสิทธิ์ cats.view เห็นชุดเดียวกัน · cats.edit = เพิ่ม/แก้/ลบ
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -15,17 +16,25 @@ import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { SoloInstallSection } from "@/components/install-app";
 import { formatDate, todayBangkok } from "@/lib/date";
-import { ageText, CATS_EDIT, CATS_VIEW, doneAgain, dueItems, dueLabel, latestWeight, SEX_LABEL, TREATMENT_LABEL, type Cat, type CatKind, type Treatment, type Vaccination } from "@/lib/cats";
-import { catPhotoUrl, useCatsData, useCatsWrite } from "./use-cats";
-import { BulkWeighModal, RecordFormModal, type FormTarget } from "./cat-forms";
+import { ageText, CATS_EDIT, CATS_VIEW, doneAgain, dueItems, dueLabel, latestWeight, SEX_LABEL, TREATMENT_LABEL, type Cat, type CatKind, type Supply, type Treatment, type Vaccination } from "@/lib/cats";
+import { asMealPlan, asNotify, fmtQty, stockUnitLabel, supplyStatus } from "@/lib/cats-supplies";
+import { costEntries, monthSummary } from "@/lib/cats-costs";
+import { catPhotoUrl, fmtMoney, useCatsData, useCatsSettingsWrite, useCatsWrite } from "./use-cats";
+import { BulkWeighModal, PurchaseModal, RecordFormModal, StockCountModal, type FormTarget } from "./cat-forms";
 import { CatDetail, CatPhoto, DuePill } from "./cat-detail";
 import { CatsTrash } from "./cats-trash";
+import { FoodTab } from "./food-tab";
+import { CostsTab } from "./costs-tab";
+import { SettingsTab } from "./settings-tab";
 
-type View = "home" | "calendar" | "clinics" | "trash";
+type View = "home" | "food" | "costs" | "calendar" | "clinics" | "settings" | "trash";
 const VIEWS: { k: View; label: string; icon: string }[] = [
   { k: "home", label: "หน้าแรก", icon: "home" },
+  { k: "food", label: "อาหาร/ทราย", icon: "box" },
+  { k: "costs", label: "ค่าใช้จ่าย", icon: "receipt" },
   { k: "calendar", label: "ปฏิทิน", icon: "calendar" },
   { k: "clinics", label: "คลินิก", icon: "building-hospital" },
+  { k: "settings", label: "แจ้งเตือน", icon: "bell" },
   { k: "trash", label: "ถังขยะ", icon: "trash" },
 ];
 const TONE_COLOR = { danger: "#e11d48", warning: "#d97706", ok: "#059669" };
@@ -41,19 +50,22 @@ export function CatsApp() {
   const { can, permsReady, user } = useAuth();
   const canView = can(CATS_VIEW);
   const canEdit = can(CATS_EDIT);
-  const { data, loading, error, reload } = useCatsData();
+  const { data, settings, loading, error, reload } = useCatsData();
   // ถังขยะโหลดชุดของตัวเอง — เขียนจากหน้าอื่น (เช่น กดย้อนกลับในแจ้งผล) แล้วให้ถังขยะโหลดใหม่ด้วย
   const [trashStamp, setTrashStamp] = useState(0);
   const reloadAll = useCallback(async () => { await reload(); setTrashStamp((s) => s + 1); }, [reload]);
   const w = useCatsWrite(reloadAll);
+  const saveSetting = useCatsSettingsWrite(reload);
   const today = todayBangkok();
+  const [buy, setBuy] = useState<Supply | null>(null);
+  const [count, setCount] = useState<{ s: Supply; est: number } | null>(null);
+  const [zoomImg, setZoomImg] = useState<{ url: string; label: string } | null>(null);
 
   const [view, setView] = useState<View>("home");
   const [catId, setCatId] = useState<string | null>(null);
   const [form, setForm] = useState<FormTarget | null>(null);
   const [weighOpen, setWeighOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
-  const [zoom, setZoom] = useState(-1);
   const [confirmCat, setConfirmCat] = useState<Cat | null>(null);
   const [cursor, setCursor] = useState(() => new Date());
 
@@ -78,6 +90,16 @@ export function CatsApp() {
   const cats = useMemo(() => data.cats.filter((c) => c.is_active).sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)), [data.cats]);
   const due = useMemo(() => dueItems(data, today, 30), [data, today]);
   const cat = catId ? data.cats.find((c) => c.id === catId && c.is_active) ?? null : null;
+  const plan = useMemo(() => asMealPlan(settings.meal_plan), [settings.meal_plan]);
+  const notify = useMemo(() => asNotify(settings.notify), [settings.notify]);
+  // ของใกล้หมด (ภายในวันเตือนที่ตั้ง · ค่าเริ่ม 7 วัน) เรียงหมดก่อนขึ้นก่อน
+  const lowStock = useMemo(() => {
+    const active = data.supplies.filter((s) => s.is_active);
+    return active.map((s) => ({ s, st: supplyStatus(s, data.purchases, plan, active, today) }))
+      .filter((x) => x.st.daysLeft != null && x.st.daysLeft <= notify.supply_days)
+      .sort((a, b) => (a.st.daysLeft ?? 0) - (b.st.daysLeft ?? 0));
+  }, [data.supplies, data.purchases, plan, notify.supply_days, today]);
+  const monthTotal = useMemo(() => monthSummary(costEntries(data), today.slice(0, 7), cats.map((c) => c.id)).total, [data, today, cats]);
 
   // ─── การกระทำ ───
   const save = useCallback(async (kind: CatKind, values: Record<string, unknown>, row?: Record<string, unknown> | null) => {
@@ -104,6 +126,16 @@ export function CatsApp() {
   const askDelete = (kind: CatKind, row: Record<string, unknown>, label: string) => {
     if (kind === "cats") { setConfirmCat(row as Cat); return; }
     void w.remove(kind, String(row.id), label);
+  };
+
+  const supplyLabel = (s: Supply) => [s.brand, s.flavor].filter(Boolean).join(" ");
+  const savePurchase = async (values: Record<string, unknown>) => {
+    const s = data.supplies.find((x) => x.id === values.supply_id);
+    return !!(await w.create("purchases", values, `ซื้อเข้า ${s ? supplyLabel(s) : ""} +${fmtQty(Number(values.qty))} ${s ? stockUnitLabel(s) : ""}`));
+  };
+  const saveCount = async (qty: number) => {
+    if (!count) return false;
+    return w.update("supplies", count.s.id, { stock_base_qty: qty, stock_base_at: new Date().toISOString() }, count.s as unknown as Record<string, unknown>);
   };
 
   // ─── ด่านสิทธิ์ ───
@@ -135,11 +167,42 @@ export function CatsApp() {
   if (loading) body = <LoadingState variant="cards" rows={4} />;
   else if (error) body = <ErrorState title="โหลดทะเบียนแมวไม่ได้" hint={error} onRetry={() => void reload()} />;
   else if (cat) body = (
-    <CatDetail cat={cat} data={data} canEdit={canEdit} onBack={() => go({ view: "home" })} onForm={setForm} onDone={markDone} onDelete={askDelete} onZoom={() => setZoom(0)} />
+    <CatDetail cat={cat} data={data} canEdit={canEdit} onBack={() => go({ view: "home" })} onForm={setForm} onDone={markDone} onDelete={askDelete}
+      onZoom={() => cat.photo_r2_key && setZoomImg({ url: catPhotoUrl(cat.photo_r2_key, 2000)!, label: cat.name })} onZoomUrl={(url, label) => setZoomImg({ url, label })} />
   );
   else if (view === "home") body = (
     <div className="space-y-6">
-      <section>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        {[
+          { label: "ใกล้ถึงกำหนด", value: String(due.length), tone: due.some((d) => d.daysLeft <= 0) ? "text-rose-600" : "text-slate-800", go: () => document.getElementById("cats-due")?.scrollIntoView({ behavior: "smooth" }) },
+          { label: "ของใกล้หมด", value: String(lowStock.length), tone: lowStock.some((x) => (x.st.daysLeft ?? 9) <= 1) ? "text-rose-600" : "text-slate-800", go: () => go({ view: "food" }) },
+          { label: "จ่ายเดือนนี้", value: fmtMoney(Math.round(monthTotal)) || "฿0", tone: "text-slate-800", go: () => go({ view: "costs" }) },
+        ].map((m) => (
+          <button key={m.label} type="button" onClick={m.go} className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-slate-300">
+            <div className="text-xs text-slate-500">{m.label}</div>
+            <div className={`text-lg font-bold sm:text-2xl ${m.tone}`}>{m.value}</div>
+          </button>
+        ))}
+      </div>
+      {lowStock.length > 0 && (
+        <section>
+          <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="box" /> ของใกล้หมด <span className="text-xs font-normal text-slate-400">ภายใน {notify.supply_days} วัน</span></h2>
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            {lowStock.map(({ s, st }) => (
+              <div key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+                <button type="button" onClick={() => go({ view: "food" })} className="min-w-0 flex-1 text-left">
+                  <span className="block truncate text-sm font-medium text-slate-800">{supplyLabel(s)}</span>
+                  <span className="text-xs text-slate-500">เหลือ {fmtQty(st.remaining)} {stockUnitLabel(s)}{st.runOut ? ` · หมด ${formatDate(st.runOut)}` : ""}</span>
+                </button>
+                {st.runOut && <DuePill due={st.runOut} today={today} />}
+                {s.shop_url && <a href={s.shop_url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100">สั่งซื้อ</a>}
+                {canEdit && <button type="button" onClick={() => setBuy(s)} className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ซื้อเข้า</button>}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      <section id="cats-due">
         <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="alarm" /> ใกล้ถึงกำหนด <span className="text-xs font-normal text-slate-400">ภายใน 30 วัน</span></h2>
         {due.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-200 bg-white py-6 text-center text-sm text-slate-400">ไม่มีวัคซีนหรือยาที่ใกล้ถึงกำหนด</p>
@@ -244,7 +307,20 @@ export function CatsApp() {
         </div>
       </section>
     );
-  } else body = <CatsTrash key={trashStamp} canEdit={canEdit} onChanged={reload} />;
+  } else if (view === "food") body = (
+    <FoodTab data={data} mealPlanRaw={settings.meal_plan} canEdit={canEdit} onForm={setForm}
+      onPurchase={setBuy} onCount={(s, est) => setCount({ s, est })}
+      onDelete={(s) => void w.remove("supplies", s.id, supplyLabel(s))}
+      onDeletePurchase={(id, label) => void w.remove("purchases", id, label)}
+      onSaveMealPlan={(p, before) => saveSetting("meal_plan", p, before, "บันทึกตารางมื้อแล้ว")} />
+  );
+  else if (view === "costs") body = (
+    <CostsTab data={data} canEdit={canEdit} onForm={setForm} onDeleteExpense={(id, label) => void w.remove("expenses", id, label)} onOpenCat={(id) => go({ cat: id })} />
+  );
+  else if (view === "settings") body = (
+    <SettingsTab data={data} settingsRaw={settings} canEdit={canEdit} isAdmin={user.role === "admin"} onSaveNotify={(v, before) => saveSetting("notify", v, before, "บันทึกการแจ้งเตือนแล้ว")} />
+  );
+  else body = <CatsTrash key={trashStamp} canEdit={canEdit} onChanged={reload} />;
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-16 pt-4 sm:px-6 sm:pt-6">
@@ -256,14 +332,14 @@ export function CatsApp() {
       <BulkWeighModal open={weighOpen} data={data} onClose={() => setWeighOpen(false)} onSave={(items) => w.createMany("weights", items, `บันทึกน้ำหนัก ${items.length} ตัวแล้ว`)} />
       <ConfirmDialog open={!!confirmCat} onClose={() => setConfirmCat(null)} variant="danger" confirmText="ย้ายไปถังขยะ"
         title={`ลบ "${confirmCat?.name ?? ""}" ?`}
-        message="แมวตัวนี้จะไปอยู่ในถังขยะ ประวัติวัคซีน ยา และน้ำหนักยังเก็บไว้ครบ กู้คืนได้จากแท็บถังขยะ"
+        message="แมวตัวนี้จะไปอยู่ในถังขยะ ประวัติวัคซีน ยา น้ำหนัก และหาหมอยังเก็บไว้ครบ กู้คืนได้จากแท็บถังขยะ"
         onConfirm={async () => { const c = confirmCat; setConfirmCat(null); if (c && await w.remove("cats", c.id, c.name)) go({ view: "home" }); }} />
       <ERPModal open={installOpen} onClose={() => setInstallOpen(false)} title="ติดตั้งแอปแมวบนมือถือ" description="กดไอคอนบนหน้าจอแล้วเข้าทะเบียนแมวได้ทันที ไม่เห็นเมนูอื่นของ ERP" size="md">
         <SoloInstallSection open={installOpen} path="/misc/cats" />
       </ERPModal>
-      {cat?.photo_r2_key && (
-        <ImageLightbox images={[{ url: catPhotoUrl(cat.photo_r2_key, 2000)!, label: cat.name }]} index={zoom} onIndex={setZoom} onClose={() => setZoom(-1)} />
-      )}
+      <PurchaseModal supply={buy} onClose={() => setBuy(null)} onSave={savePurchase} />
+      <StockCountModal supply={count?.s ?? null} estimate={count?.est ?? 0} onClose={() => setCount(null)} onSave={saveCount} />
+      {zoomImg && <ImageLightbox images={[zoomImg]} index={0} onIndex={() => undefined} onClose={() => setZoomImg(null)} />}
     </div>
   );
 }

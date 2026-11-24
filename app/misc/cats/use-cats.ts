@@ -9,7 +9,8 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import type { CatKind, CatsData } from "@/lib/cats";
 
-const EMPTY: CatsData = { cats: [], clinics: [], vaccinations: [], treatments: [], weights: [] };
+const EMPTY: CatsData = { cats: [], clinics: [], vaccinations: [], treatments: [], weights: [], supplies: [], purchases: [], vet_visits: [], expenses: [] };
+export type CatsSettings = { meal_plan?: unknown; notify?: unknown };
 
 async function call(url: string, method: string, body?: unknown): Promise<{ data?: unknown; error?: string | null }> {
   const res = await apiFetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -20,6 +21,7 @@ async function call(url: string, method: string, body?: unknown): Promise<{ data
 
 export function useCatsData(trash = false) {
   const [data, setData] = useState<CatsData>(EMPTY);
+  const [settings, setSettings] = useState<CatsSettings>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +30,9 @@ export function useCatsData(trash = false) {
       const res = await apiFetch(`/api/cats${trash ? "?trash=1" : ""}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setData({ ...EMPTY, ...json.data });
+      const { settings: st, ...rest } = json.data ?? {};
+      setData({ ...EMPTY, ...rest });
+      setSettings(st ?? {});
       setError(null);
     } catch (e) {
       setError((e as Error).message || "โหลดข้อมูลไม่ได้");
@@ -38,8 +42,25 @@ export function useCatsData(trash = false) {
   }, [trash]);
 
   useEffect(() => { void reload(); }, [reload]);
-  return { data, loading, error, reload };
+  return { data, settings, loading, error, reload };
 }
+
+/** บันทึกค่าตั้ง (ตารางมื้อ / แจ้งเตือน) · before = ค่าเดิม (ปุ่มย้อนกลับ) */
+export function useCatsSettingsWrite(after: () => void | Promise<void>) {
+  const toast = useToast();
+  return useCallback(async (key: "meal_plan" | "notify", value: unknown, before: unknown, msg = "บันทึกค่าตั้งแล้ว"): Promise<boolean> => {
+    const r = await call("/api/cats/settings", "PUT", { key, value });
+    if (r.error) { toast.error(r.error); return false; }
+    await after();
+    toast.action(msg, "ย้อนกลับ", async () => {
+      const u = await call("/api/cats/settings", "PUT", { key, value: before });
+      if (u.error) toast.error(u.error); else { await after(); toast.info("คืนค่าเดิมแล้ว"); }
+    });
+    return true;
+  }, [toast, after]);
+}
+
+export { call as catsCall };
 
 /** ตัวสั่งเขียน + แจ้งผลพร้อมปุ่มย้อนกลับ (ของกลาง toast) · after = โหลดใหม่หลังเขียน */
 export function useCatsWrite(after: () => void | Promise<void>) {

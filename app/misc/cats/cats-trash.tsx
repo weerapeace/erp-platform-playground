@@ -2,6 +2,7 @@
 
 /**
  * 🐾 ทะเบียนแมว — ถังขยะ: ของที่ลบไว้ (แมว · คลินิก · วัคซีน · ยา · น้ำหนัก) กู้คืน หรือ ลบถาวร
+ *   + ของใช้ · ซื้อเข้า · หาหมอ · ค่าใช้จ่ายอื่น (รอบ 2-3)
  *   ลบถาวร = ยืนยันก่อนเสมอ · ลบแมวถาวร = พิมพ์ชื่อแมวยืนยัน (ประวัติทั้งหมดของตัวนั้นหายด้วย ย้อนไม่ได้)
  */
 import { useMemo, useState } from "react";
@@ -21,11 +22,13 @@ export function CatsTrash({ canEdit, onChanged }: { canEdit: boolean; onChanged:
 
   const items = useMemo(() => {
     const catName = new Map(data.cats.map((c) => [c.id, c.name]));
+    const supplyName = new Map(data.supplies.map((s) => [s.id, [s.brand, s.flavor].filter(Boolean).join(" ")]));
     const out: Item[] = [];
     (Object.keys(CAT_KINDS) as CatKind[]).forEach((kind) => {
       for (const row of data[kind] as unknown as Record<string, unknown>[]) {
         if (row.is_active) continue;
-        out.push({ kind, row, label: recordLabel(kind, row), catName: kind === "cats" || kind === "clinics" ? "" : catName.get(String(row.cat_id)) ?? "" });
+        const owner = kind === "purchases" ? supplyName.get(String(row.supply_id)) ?? "" : row.cat_id ? catName.get(String(row.cat_id)) ?? "" : "";
+        out.push({ kind, row, label: recordLabel(kind, row), catName: kind === "cats" ? "" : owner });
       }
     });
     return out.sort((a, b) => String(b.row.deleted_at ?? "").localeCompare(String(a.row.deleted_at ?? "")));
@@ -45,7 +48,7 @@ export function CatsTrash({ canEdit, onChanged }: { canEdit: boolean; onChanged:
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-slate-800">{it.catName ? `${it.catName} · ` : ""}{it.label}</div>
               <div className="text-xs text-slate-400">
-                {it.row.date_given ? `วันที่ ${formatDate(it.row.date_given)} · ` : ""}ลบเมื่อ {formatDateTime(it.row.deleted_at)}
+                {it.row.date_given || it.row.date ? `วันที่ ${formatDate(it.row.date_given ?? it.row.date)} · ` : ""}ลบเมื่อ {formatDateTime(it.row.deleted_at)}
               </div>
             </div>
             {canEdit && <>
@@ -60,7 +63,8 @@ export function CatsTrash({ canEdit, onChanged }: { canEdit: boolean; onChanged:
         requireTyped={confirm?.kind === "cats" ? String(confirm.row.name) : undefined}
         message={confirm?.kind === "cats"
           ? "ประวัติวัคซีน ยา และน้ำหนักทั้งหมดของแมวตัวนี้จะหายไปด้วย ลบแล้วกู้คืนไม่ได้ — พิมพ์ชื่อแมวเพื่อยืนยัน"
-          : confirm?.kind === "clinics" ? "ประวัติวัคซีนที่เคยระบุคลินิกนี้ยังอยู่ แต่จะไม่มีชื่อคลินิก ลบแล้วกู้คืนไม่ได้" : "ลบแล้วกู้คืนไม่ได้"}
+          : confirm?.kind === "clinics" ? "ประวัติที่เคยระบุคลินิกนี้ยังอยู่ แต่จะไม่มีชื่อคลินิก ลบแล้วกู้คืนไม่ได้"
+          : confirm?.kind === "supplies" ? "ประวัติซื้อเข้าของรายการนี้จะหายไปด้วย (ค่าใช้จ่ายเดือนเก่าจะลดลง) ลบแล้วกู้คืนไม่ได้" : "ลบแล้วกู้คืนไม่ได้"}
         onConfirm={async () => { const c = confirm; setConfirm(null); if (c) await w.destroy(c.kind, String(c.row.id), c.label); }} />
     </section>
   );

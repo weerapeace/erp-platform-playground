@@ -27,6 +27,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }));
   const failed = results.find((r) => r.error);
   if (failed?.error) return NextResponse.json({ data: null, error: friendlyDbError(failed.error.message) }, { status: 500 });
-  const data = Object.fromEntries(KINDS.map((k, i) => [k, results[i].data ?? []]));
+  const data: Record<string, unknown> = Object.fromEntries(KINDS.map((k, i) => [k, results[i].data ?? []]));
+  // ถังขยะ: ต้องรู้ชื่อของใช้ทุกตัวไว้บอกว่าใบซื้อเข้าที่ลบเป็นของอะไร
+  if (trash) {
+    const { data: sup } = await admin.from("cat_supplies").select("*").limit(5000);
+    const seen = new Set(((data.supplies as { id: string }[]) ?? []).map((s) => s.id));
+    data.supplies = [...((data.supplies as unknown[]) ?? []), ...(sup ?? []).filter((s) => !seen.has(s.id))];
+  }
+  const { data: settings } = await admin.from("cat_settings").select("key, value");
+  data.settings = Object.fromEntries((settings ?? []).map((s) => [s.key, s.value]));
   return NextResponse.json({ data, error: null });
 }

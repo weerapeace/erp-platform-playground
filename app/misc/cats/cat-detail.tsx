@@ -13,7 +13,7 @@ import { WeightChart } from "./weight-chart";
 import { catPhotoUrl, fmtMoney } from "./use-cats";
 import type { FormTarget } from "./cat-forms";
 
-type Tab = "info" | "vaccinations" | "treatments" | "weights";
+type Tab = "info" | "vaccinations" | "treatments" | "weights" | "vet";
 const TONE = { danger: "bg-rose-50 text-rose-700 border-rose-200", warning: "bg-amber-50 text-amber-700 border-amber-200", ok: "bg-emerald-50 text-emerald-700 border-emerald-200" };
 
 export function DuePill({ due, today }: { due: string; today: string }) {
@@ -33,7 +33,7 @@ export function CatPhoto({ cat, className = "", w = 800, onClick }: { cat: Cat; 
   );
 }
 
-export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete, onZoom }: {
+export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete, onZoom, onZoomUrl }: {
   cat: Cat;
   data: CatsData;
   canEdit: boolean;
@@ -42,12 +42,15 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
   onDone: (kind: "vaccinations" | "treatments", row: Vaccination | Treatment) => void;
   onDelete: (kind: CatKind, row: Record<string, unknown>, label: string) => void;
   onZoom: () => void;
+  /** เปิดรูปอื่นเต็มจอ (รูปใบเสร็จ) */
+  onZoomUrl: (url: string, label: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>("vaccinations");
   const today = todayBangkok();
   const vacs = useMemo(() => data.vaccinations.filter((v) => v.cat_id === cat.id).sort((a, b) => b.date_given.localeCompare(a.date_given)), [data.vaccinations, cat.id]);
   const treats = useMemo(() => data.treatments.filter((t) => t.cat_id === cat.id).sort((a, b) => b.date_given.localeCompare(a.date_given)), [data.treatments, cat.id]);
   const weights = useMemo(() => data.weights.filter((w) => w.cat_id === cat.id).sort((a, b) => a.date.localeCompare(b.date)), [data.weights, cat.id]);
+  const visits = useMemo(() => data.vet_visits.filter((x) => x.cat_id === cat.id).sort((a, b) => b.date.localeCompare(a.date)), [data.vet_visits, cat.id]);
   const lw = latestWeight(data.weights, cat.id);
   const clinicName = (id: string | null) => data.clinics.find((c) => c.id === id)?.name ?? "";
   const age = ageText(cat.birth_date, today);
@@ -66,6 +69,7 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
     { k: "vaccinations", label: "วัคซีน", n: vacs.length },
     { k: "treatments", label: "ยา", n: treats.length },
     { k: "weights", label: "น้ำหนัก", n: weights.length },
+    { k: "vet", label: "หาหมอ", n: visits.length },
     { k: "info", label: "ข้อมูล" },
   ];
 
@@ -166,6 +170,34 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
                 {latest && t.next_due_date && <DuePill due={t.next_due_date} today={today} />}
                 {latest && t.next_due_date && canEdit && <button type="button" onClick={() => onDone("treatments", t)} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ให้ยาแล้ว</button>}
                 {rowActions("treatments", t, `${TREATMENT_LABEL[t.type]} ${t.product}`)}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {tab === "vet" && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between"><h3 className="font-semibold text-slate-700">ป่วย / ไปหาหมอ</h3>{addBtn("vet_visits", "บันทึกหาหมอ")}</div>
+          {visits.length === 0 && <p className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">ยังไม่มีประวัติการไปหาหมอ</p>}
+          {visits.map((x) => {
+            const receipt = catPhotoUrl(x.receipt_r2_key, 300);
+            return (
+              <div key={x.id} className="flex gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                <div className="min-w-0 flex-1 space-y-0.5 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                    <Icon name="building-hospital" className="text-rose-500" /> {formatDate(x.date)}{x.clinic_id ? ` · ${clinicName(x.clinic_id)}` : ""}{x.cost != null ? ` · ${fmtMoney(x.cost)}` : ""}
+                  </div>
+                  {x.symptoms && <div><span className="text-slate-400">อาการ: </span>{x.symptoms}</div>}
+                  {x.diagnosis && <div className="font-medium text-slate-800"><span className="font-normal text-slate-400">วินิจฉัย: </span>{x.diagnosis}</div>}
+                  {x.medicines && <div><span className="text-slate-400">ยา: </span>{x.medicines}</div>}
+                  {x.note && <div className="text-xs text-slate-500">{x.note}</div>}
+                </div>
+                {receipt && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={receipt} alt="ใบเสร็จ" onClick={() => onZoomUrl(catPhotoUrl(x.receipt_r2_key, 2000)!, `ใบเสร็จ ${formatDate(x.date)}`)} className="h-20 w-16 shrink-0 cursor-zoom-in rounded-md border border-slate-200 object-cover" />
+                )}
+                {rowActions("vet_visits", x, `หาหมอ ${formatDate(x.date)}`)}
               </div>
             );
           })}
