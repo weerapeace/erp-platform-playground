@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { auditChangeMeta, writeAuditFor } from "@/lib/audit";
 import { friendlyDbError } from "@/app/api/master-v2/[entity]/route";
 import { pieceAuditChanges, type BlockPiece } from "@/lib/block-print";
+import { layoutAuditChanges, type BlockLayout } from "@/lib/block-print-layout";
 import { bad, cleanJobBody, EDIT_PERM, ENTITY, TABLE, VIEW_PERM } from "../../_shared";
 
 export const dynamic = "force-dynamic";
@@ -52,13 +53,14 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   const { data, error } = await admin.from(TABLE).update(out).eq("id", id).select("*").single();
   if (error) return bad(friendlyDbError(error.message));
 
-  const { pieces: _p, ...plain } = v.patch;
+  const { pieces: _p, layouts: _l, ...plain } = v.patch;
   const meta = auditChangeMeta(before, plain);
   const pieceChanges = v.patch.pieces ? pieceAuditChanges((before.pieces ?? []) as BlockPiece[], v.patch.pieces) : [];
+  const layoutChanges = v.patch.layouts ? layoutAuditChanges((before.layouts ?? []) as BlockLayout[], v.patch.layouts) : [];
   const action = v.patch.is_active === true && before.is_active === false ? "restore" : v.patch.is_active === false && before.is_active ? "archive" : "update";
   await writeAuditFor(request, admin, {
     action, entityType: ENTITY, entityId: id,
-    metadata: { code: data.code, name: data.name, ...meta, changes: [...(meta.changes ?? []), ...pieceChanges] },
+    metadata: { code: data.code, name: data.name, ...meta, changes: [...(meta.changes ?? []), ...pieceChanges, ...layoutChanges] },
   });
   return NextResponse.json({ data, error: null });
 }

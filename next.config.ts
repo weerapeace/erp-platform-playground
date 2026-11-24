@@ -22,6 +22,7 @@ export const BROWSER_ONLY_LIBS = [
   "@pdfme/generator",
   "@pdfme/common",
   "@excalidraw/excalidraw",
+  "fontkit",   // 🧱 บล็อกพิมพ์ แปลงข้อความเป็นเส้น (lib/block-print-text — โหลดตอนใช้ ฝั่งเบราว์เซอร์เท่านั้น)
 ] as const;
 
 const nextConfig: NextConfig = {

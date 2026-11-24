@@ -6,6 +6,8 @@
  *   ย้อนกลับ/ทำซ้ำ: Ctrl+Z · Ctrl+Shift+Z / Ctrl+Y · บันทึก Ctrl+S · ออกจากหน้าตอนยังไม่บันทึก = ถามก่อน
  *   ส่งออก PDF = lib/block-print-pdf (ตำแหน่ง/เส้นบอกขนาดตัวเดียวกับภาพบนจอ) + จดประวัติการส่งออก
  *   มือถือ: ภาพอยู่บน · รายการชิ้นเป็นปุ่มแนวนอน · แผงขนาดอยู่ล่าง · ปุ่มบันทึก/PDF ติดล่างจอ
+ *   แท็บ "จัดวางในบล็อก" (layout-editor.tsx): ตั้งขนาดบล็อก วางชิ้น/ข้อความ/รูปทรงตามตำแหน่ง — อยู่ในเอกสารเดียวกัน (ย้อนกลับ/บันทึกร่วมกัน)
+ *   SVG: ชิ้นนี้ (แผงขวา) · ทุกชิ้นที่ติ๊ก (zip ด้วย lib/zip ของกลาง)
  *   ขั้นเลือกชิ้น (grouper.tsx): เปิดไฟล์ใหม่ (?step=group) หรือกด "จัดกลุ่มชิ้นใหม่" → รวม/แยกชิ้น → กด "ต่อไป" = ใช้ + บันทึกให้เลย
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,8 +27,12 @@ import {
 import { API, api, LIST_HREF, skippedNote, thaiDate, type Job } from "./shared";
 import { SKIPPED_KEY } from "./list";
 import { BlockPieceGrouper } from "./grouper";
+import { BlockLayoutEditor } from "./layout-editor";
+import { PieceThumb } from "./piece-thumb";
+import { pieceSvg, svgFileName, type BlockLayout } from "@/lib/block-print-layout";
+import { buildZip } from "@/lib/zip";
 
-type Doc = { name: string; unit: BlockUnit; paper: BlockPaper; pieces: BlockPiece[] };
+type Doc = { name: string; unit: BlockUnit; paper: BlockPaper; pieces: BlockPiece[]; layouts: BlockLayout[] };
 const docKey = (d: Doc | null) => (d ? JSON.stringify(d) : "");
 
 export function BlockPrintEditor({ id }: { id: string }) {
@@ -42,6 +48,7 @@ export function BlockPrintEditor({ id }: { id: string }) {
   const [exporting, setExporting] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
   const [step, setStep] = useState<"size" | "group">("size");
+  const [tab, setTab] = useState<"size" | "layout">("size");
   const past = useRef<Doc[]>([]);
   const future = useRef<Doc[]>([]);
 
@@ -49,7 +56,7 @@ export function BlockPrintEditor({ id }: { id: string }) {
     setErr(null);
     try {
       const j = await api<Job>(`${API}/${id}`);
-      const d: Doc = { name: j.name, unit: j.unit, paper: j.paper, pieces: j.pieces ?? [] };
+      const d: Doc = { name: j.name, unit: j.unit, paper: j.paper, pieces: j.pieces ?? [], layouts: j.layouts ?? [] };
       setJob(j); setDoc(d); setSavedKey(docKey(d)); past.current = []; future.current = [];
       setSel(d.pieces[0] ? [d.pieces[0].id] : []);
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
@@ -131,6 +138,25 @@ export function BlockPrintEditor({ id }: { id: string }) {
     setExporting(false);
   };
 
+  /** SVG ขนาดจริงตามที่ตั้ง — ชิ้นเดียว หรือทุกชิ้นที่ติ๊ก (zip) */
+  const svgName = (p: BlockPiece) => svgFileName(job?.code ?? "", p.name);
+  const exportPieceSvg = (p: BlockPiece) => downloadBlob(new Blob([pieceSvg(p)], { type: "image/svg+xml" }), svgName(p));
+  const exportAllSvg = () => {
+    if (!doc || !job) return;
+    const on = doc.pieces.filter((p) => p.on && !p.kind);
+    if (!on.length) { toast.error("ยังไม่ได้ติ๊กชิ้นที่จะส่งออก"); return; }
+    const used = new Map<string, number>();
+    const enc = new TextEncoder();
+    const entries = on.map((p) => {
+      let name = svgName(p);
+      const n = (used.get(name) ?? 0) + 1; used.set(name, n);
+      if (n > 1) name = name.replace(/\.svg$/, ` (${n}).svg`);
+      return { name, data: enc.encode(pieceSvg(p)) };
+    });
+    downloadBlob(new Blob([buildZip(entries) as Uint8Array<ArrayBuffer>], { type: "application/zip" }), `${job.code} ${doc.name} SVG.zip`.replace(/[\\/:*?"<>|]+/g, " "));
+    toast.success(`ส่งออก SVG ${on.length} ชิ้นแล้ว`);
+  };
+
   // คีย์ลัด (ไม่ยุ่งตอนพิมพ์ในช่อง — ให้ช่องย้อนเองได้)
   const keyRef = useRef({ undo, redo, save, step });
   keyRef.current = { undo, redo, save, step };
@@ -179,8 +205,15 @@ export function BlockPrintEditor({ id }: { id: string }) {
             <button type="button" onClick={undo} disabled={!past.current.length} title="ย้อนกลับ (Ctrl+Z)" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30"><Icon name="arrow-back-up" /></button>
             <button type="button" onClick={redo} disabled={!future.current.length} title="ทำซ้ำ (Ctrl+Shift+Z)" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30"><Icon name="arrow-forward-up" /></button>
           </>}
-          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="hidden lg:flex" />
+          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={tab === "size" ? exportPdf : undefined} className="hidden lg:flex" />
         </div>
+      </div>
+
+      <div className="flex gap-1 border-b border-slate-200">
+        {([["size", "ตั้งขนาดชิ้น"], ["layout", `จัดวางในบล็อก${doc.layouts.length ? ` (${doc.layouts.length})` : ""}`]] as const).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setTab(k)}
+            className={`-mb-px h-9 border-b-2 px-3 text-sm ${tab === k ? "border-indigo-600 font-medium text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{l}</button>
+        ))}
       </div>
 
       {notes.length > 0 && (
@@ -191,6 +224,10 @@ export function BlockPrintEditor({ id }: { id: string }) {
         </div>
       )}
 
+      {tab === "layout" ? (
+        <BlockLayoutEditor code={job.code} layouts={doc.layouts} pieces={doc.pieces} unit={unit} paper={doc.paper} canEdit={canEdit}
+          onLayouts={(ls) => apply((d) => ({ ...d, layouts: ls }))} onPaper={(p) => apply((d) => ({ ...d, paper: p }))} onUnit={(u) => apply((d) => ({ ...d, unit: u }))} undo={undo} />
+      ) : (
       <div className="grid gap-3 lg:grid-cols-[250px_minmax(0,1fr)_270px]">
         {/* ซ้าย: ชิ้นที่พบในไฟล์ */}
         <aside className="order-2 min-w-0 rounded-xl border border-slate-200 bg-white lg:order-1">
@@ -265,29 +302,32 @@ export function BlockPrintEditor({ id }: { id: string }) {
                 className="h-9 rounded-lg border border-indigo-200 bg-indigo-50 text-sm text-indigo-700 hover:bg-indigo-100">รวม {sel.length} ชิ้นที่เลือกเป็นชิ้นเดียว</button>}
             </div>}
           </>}
+          {primary && <button type="button" onClick={() => exportPieceSvg(primary)} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"><Icon name="download" /> SVG ชิ้นนี้</button>}
+          <button type="button" onClick={exportAllSvg} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"><Icon name="download" /> SVG ทุกชิ้นที่ติ๊ก (zip)</button>
           <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="hidden flex-col lg:flex" />
         </aside>
       </div>
+      )}
 
       {/* มือถือ: ปุ่มติดล่างจอ */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 lg:hidden">
-        <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="flex" />
+        <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={tab === "size" ? exportPdf : undefined} className="flex" />
       </div>
     </div>
   );
 }
 
 function ActionButtons({ canEdit, dirty, saving, exporting, onSave, onExport, className = "" }: {
-  canEdit: boolean; dirty: boolean; saving: boolean; exporting: boolean; onSave: () => void; onExport: () => void; className?: string;
+  canEdit: boolean; dirty: boolean; saving: boolean; exporting: boolean; onSave: () => void; onExport?: () => void; className?: string;
 }) {
   return (
     <div className={`gap-1.5 ${className}`}>
       {canEdit && <button type="button" onClick={onSave} disabled={!dirty || saving}
         className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
         <Icon name="save" /> {saving ? "กำลังบันทึก…" : dirty ? "บันทึก" : "บันทึกแล้ว"}</button>}
-      <button type="button" onClick={onExport} disabled={exporting}
+      {onExport && <button type="button" onClick={onExport} disabled={exporting}
         className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
-        <Icon name="download" /> {exporting ? "กำลังสร้าง PDF…" : "ส่งออก PDF"}</button>
+        <Icon name="download" /> {exporting ? "กำลังสร้าง PDF…" : "ส่งออก PDF"}</button>}
     </div>
   );
 }
@@ -308,15 +348,6 @@ function SizeInput({ label, mm, unit, disabled, onCommit }: { label: string; mm:
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
         className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm tabular-nums" />
     </label>
-  );
-}
-
-function PieceThumb({ p }: { p: BlockPiece }) {
-  const s = 22 / Math.max(p.ow, p.oh);
-  return (
-    <svg width={24} height={24} viewBox="-1 -1 24 24" className="shrink-0 rounded bg-slate-50">
-      {pieceShapes(p).map((sh, i) => <path key={i} d={opsToSvgPath(sh.d, s, s, (22 - p.ow * s) / 2, (22 - p.oh * s) / 2)} fill="#111" fillRule={sh.fill} />)}
-    </svg>
   );
 }
 

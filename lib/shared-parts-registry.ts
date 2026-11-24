@@ -811,7 +811,7 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "app-changes.md",
   },
   {
-    key: "block-print", label: "บล็อกพิมพ์ (เปิด .ai → เลือก/รวมชิ้น → ตั้งขนาด → PDF มีเส้นบอกขนาด)", code: "BlockPrintList · BlockPrintEditor · BlockPieceGrouper · lib/block-print · lib/block-print-ai · lib/block-print-pdf", category: "feature",
+    key: "block-print", label: "บล็อกพิมพ์ (เปิด .ai → เลือก/รวมชิ้น → ตั้งขนาด → PDF มีเส้นบอกขนาด)", code: "BlockPrintList · BlockPrintEditor · BlockPieceGrouper · BlockLayoutEditor · lib/block-print-layout · lib/block-print-text · lib/block-print · lib/block-print-ai · lib/block-print-pdf", category: "feature",
     source: { path: "components/block-print" },
     what: "เปิดไฟล์ .ai (แบบ PDF Compatible) หรือ .pdf แล้วแยกชิ้นเวกเตอร์ที่เติมสีออกมา ตั้งกว้าง/สูงจริงเป็น ซม./มม. แล้วส่งออก PDF ที่มีแค่ลายสีดำ + เส้นไกด์ + เส้นบอกขนาด ส่งโรงงานทำบล็อก · ภาพบนจอกับ PDF ใช้สูตรวางตำแหน่ง/เส้นบอกขนาดตัวเดียวกัน",
     when: "งานที่ต้องส่งไฟล์ลายขนาดจริงให้โรงงานทำบล็อกปั๊ม/บล็อกพิมพ์ · ที่อื่นที่อยากอ่านเวกเตอร์จากไฟล์ .ai ให้เรียก readAiFile / piecesFromOperatorList ตัวนี้ ไม่เขียนตัวอ่านใหม่",

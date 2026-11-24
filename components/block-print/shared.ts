@@ -3,6 +3,7 @@
  */
 import { apiFetch } from "@/lib/api";
 import type { BlockPaper, BlockPiece, BlockUnit } from "@/lib/block-print";
+import type { BlockLayout } from "@/lib/block-print-layout";
 
 export const LIST_HREF = "/master/block-print";
 export const jobHref = (id: string) => `${LIST_HREF}/${id}`;
@@ -13,7 +14,7 @@ export type JobRow = {
   unit: BlockUnit; paper: BlockPaper; is_active: boolean;
   piece_count: number; piece_on: number; created_at: string; updated_at: string; deleted_at: string | null;
 };
-export type Job = JobRow & { pieces: BlockPiece[] };
+export type Job = JobRow & { pieces: BlockPiece[]; layouts?: BlockLayout[] };
 
 /** เรียก API แล้วคืน data · error → โยนข้อความภาษาคน */
 export async function api<T>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
