@@ -50,6 +50,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/design-library", prefixes: ["design_library."] },
   // หน้าแบรนด์ (เลือกแบรนด์ → หน้าจัดการรวมทุกอย่างของแบรนด์) — ตัวเลขใช้สิทธิ์ดูสินค้าบนแพลตฟอร์ม · ลิงก์ข้างในกรองตามสิทธิ์ของแต่ละหน้า
   { href: "/brand-hub", keys: ["products.platforms.view"] },
+  // 🏪 ศูนย์ร้านออนไลน์ (หน้าแรกแอปช่องทางขาย) — ตัวเลขโชว์ตามสิทธิ์: รายการบนร้าน / ยอดขาย+ออเดอร์ / ปุ่มดึงออเดอร์ / รอแพ็ก (docs/channel-portal.md)
+  { href: "/master/channel-portal", keys: ["products.platforms.view", "platform_orders.view", "platform_orders.manage", "packing.pack"] },
   { href: "/master/promo-covers", keys: ["products.platforms.view", "products.platforms.publish"] },   // เปลี่ยนปกโปรทุกร้าน — ดู / ตั้งชุดโปร+ส่งขึ้นร้าน
   // สตูดิโอแพทเทิร์น (แอปหลัก) — ดู / สร้าง-แก้ / ลบแพทเทิร์น
   { href: "/pattern-studio", prefixes: ["pattern_studio."] },
