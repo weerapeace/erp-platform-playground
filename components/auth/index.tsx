@@ -68,6 +68,7 @@ export type Permission =
   | "configurator.view" | "configurator.edit"
   | "design_library.view" | "design_library.edit" | "design_library.manage"
   | "block_print.view" | "block_print.edit"   // 🧱 บล็อกพิมพ์ (/master/block-print)
+  | "cats.view" | "cats.edit"   // 🐾 ทะเบียนแมว (/misc/cats · แอปงานอื่นๆ)
   | "short_links.create" | "short_links.manage"   // ลิงก์สั้น louismontini.co.th/go/ (lib/short-links)
   | "tasks.view" | "tasks.create" | "tasks.edit" | "tasks.delete"   // แอปจัดการงาน (แผนงานทีม / Creative) — สิทธิ์จริงอ่านจาก DB
   // ↓ คืนจาก commit 6895c54d (ไฟล์นี้เคยถูกทับด้วยฉบับเก่า 2026-07-01) — ใช้จริงในหลายหน้า · สิทธิ์จริงอ่านจาก DB (erp_my_permissions)

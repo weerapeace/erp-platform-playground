@@ -67,6 +67,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/order-ops/gift-cards", sameAs: "/order-ops/instructions" },
   // งานอื่นๆ → รวม PDF — ทำในเบราว์เซอร์ ไม่แตะข้อมูล = ไม่มีสิทธิ์ย่อย (เข้าแอปงานอื่นๆ ได้ก็ใช้ได้ · ซ่อนรายคนที่ "ใครเห็นเมนูไหน")
   { href: "/misc/pdf-merge", keys: [] },
+  // งานอื่นๆ → 🐾 ทะเบียนแมว — ดู / เพิ่ม-แก้-ลบ (ใช้ร่วมกันในบ้าน · docs/cat-registry.md · 2026-11-24)
+  { href: "/misc/cats", prefixes: ["cats."] },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */
