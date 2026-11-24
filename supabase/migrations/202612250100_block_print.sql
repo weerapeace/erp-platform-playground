@@ -21,7 +21,7 @@ create table if not exists public.block_print_jobs (
   pieces            jsonb not null default '[]'::jsonb check (jsonb_typeof(pieces) = 'array'),
   -- นับชิ้นไว้ให้หน้ารายการ (ไม่ต้องดึงเส้นทั้งก้อน)
   piece_count       integer generated always as (jsonb_array_length(pieces)) stored,
-  piece_on          integer generated always as (jsonb_array_length(jsonb_path_query_array(pieces, '$[*] ? (@.on != false)'))) stored,
+  piece_on          integer generated always as (jsonb_array_length(jsonb_path_query_array(pieces, '$[*] ? (!(@.on == false))'))) stored,
   is_active         boolean not null default true,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
