@@ -49,6 +49,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/design/pattern-tickets", prefixes: ["pattern."] },
   // 📚 Design Library — ดู / สร้าง-แก้สูตร + อัปรูปจาก GPT / จัดการแม่แบบ+ตัวเลือก (2026-11-13)
   { href: "/master/design-library", prefixes: ["design_library."] },
+  // 🧱 บล็อกพิมพ์ — ดู+ดาวน์โหลด PDF / เปิดไฟล์ .ai สร้าง-แก้-ลบงาน (2026-11-24)
+  { href: "/master/block-print", prefixes: ["block_print."] },
   // หน้าแบรนด์ (เลือกแบรนด์ → หน้าจัดการรวมทุกอย่างของแบรนด์) — ตัวเลขใช้สิทธิ์ดูสินค้าบนแพลตฟอร์ม · ลิงก์ข้างในกรองตามสิทธิ์ของแต่ละหน้า
   { href: "/brand-hub", keys: ["products.platforms.view"] },
   // 🏪 ศูนย์ร้านออนไลน์ (หน้าแรกแอปช่องทางขาย) — ตัวเลขโชว์ตามสิทธิ์: รายการบนร้าน / ยอดขาย+ออเดอร์ / ปุ่มดึงออเดอร์ / รอแพ็ก (docs/channel-portal.md)

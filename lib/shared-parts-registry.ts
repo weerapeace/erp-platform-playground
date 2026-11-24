@@ -804,6 +804,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "app-changes.md",
   },
   {
+    key: "block-print", label: "บล็อกพิมพ์ (เปิด .ai → ตั้งขนาด → PDF มีเส้นบอกขนาด)", code: "BlockPrintList · BlockPrintEditor · lib/block-print · lib/block-print-ai · lib/block-print-pdf", category: "feature",
+    source: { path: "components/block-print" },
+    what: "เปิดไฟล์ .ai (แบบ PDF Compatible) หรือ .pdf แล้วแยกชิ้นเวกเตอร์ที่เติมสีออกมา ตั้งกว้าง/สูงจริงเป็น ซม./มม. แล้วส่งออก PDF ที่มีแค่ลายสีดำ + เส้นไกด์ + เส้นบอกขนาด ส่งโรงงานทำบล็อก · ภาพบนจอกับ PDF ใช้สูตรวางตำแหน่ง/เส้นบอกขนาดตัวเดียวกัน",
+    when: "งานที่ต้องส่งไฟล์ลายขนาดจริงให้โรงงานทำบล็อกปั๊ม/บล็อกพิมพ์ · ที่อื่นที่อยากอ่านเวกเตอร์จากไฟล์ .ai ให้เรียก readAiFile / piecesFromOperatorList ตัวนี้ ไม่เขียนตัวอ่านใหม่",
+    notWhen: "ชิ้นแพทเทิร์นตัดผ้า/หนังที่มีเผื่อเย็บ ให้ใช้ ShapeEditor / สตูดิโอแพทเทิร์น · พิมพ์แบ่งหน้า A4 ต่อกัน ให้ใช้ pattern-sheet · วาดอิสระไม่มีขนาดจริง ให้ใช้กระดานวาด",
+    doc: "block-print.md",
+  },
+  {
     key: "pattern-3d", label: "ตัวแสดงชิ้นแพทเทิร์นเป็นภาพ 3D", code: "Pattern3D · lib/three-loader", category: "feature",
     source: { path: "components/pattern-3d" },
     what: "วาดชิ้นแพทเทิร์นเป็นแผ่น 3D วางบนโต๊ะ (มีรูเจาะจริง เส้นเย็บ ป้ายชื่อ) หรือวาดกระเป๋าที่ประกอบแล้วจากแม่แบบทรง หรือกระเป๋าที่ประกอบจากชิ้นจริงกับตะเข็บ (mode assembly) หรือภาพจำลองวัสดุทิ้งตัวแบบทดลอง (mode sim · lib/pattern-sim) หมุน ซูม แยกชิ้นดู คลิกเลือกชิ้นได้ ไลบรารี 3D โหลดจาก public/vendor ตอนเปิดครั้งแรก ไม่ทำให้หน้าอื่นหนัก",
