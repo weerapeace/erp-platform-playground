@@ -458,13 +458,26 @@ export async function shopeeGetTrackingNumber(accessToken: string, shopId: strin
 
 // ───────── แก้สินค้าบนร้าน (เฟส 4 · ผู้เรียกต้องถามเจ้าของก่อน + ลงประวัติ) ─────────
 /**
- * v2.product.update_item — แก้เฉพาะช่องที่ส่ง (ช่องที่ไม่ส่งคงเดิม · เอกสาร 2026-11-14) · เฟส 4A ส่งแค่ item_name / description
+ * v2.product.update_item — แก้เฉพาะช่องที่ส่ง (ช่องที่ไม่ส่งคงเดิม · เอกสาร 2026-11-14)
+ * รับ: item_name · description (แบบข้อความ) · description_type + description_info (แบบมีรูป · 2026-11-21) · image · attribute_list (ข้อมูลจำเพาะ · 2026-11-23)
+ * 🐛 2026-11-24: เดิมรับแค่ชื่อ/รายละเอียดข้อความ/รูป — description_info กับ attribute_list ถูกตัดทิ้งเงียบ ๆ
+ *    → แก้รายละเอียดแบบมีรูป / ข้อมูลจำเพาะอย่างเดียว ขึ้น "ไม่มีอะไรให้แก้" · แก้พร้อมชื่อ = ส่วนนั้นไม่ถูกส่ง
  * ⚠️ ห้ามส่ง weight/dimension เฉย ๆ — Shopee เขียนทับทุกตัวเลือก
  */
-export async function shopeeUpdateItem(accessToken: string, shopId: string | number, itemId: string, patch: { item_name?: string; description?: string; image?: { image_id_list: string[]; image_ratio?: string } }): Promise<Record<string, unknown>> {
+export async function shopeeUpdateItem(accessToken: string, shopId: string | number, itemId: string, patch: {
+  item_name?: string; description?: string;
+  description_type?: "extended"; description_info?: { extended_description: { field_list: Record<string, unknown>[] } };
+  image?: { image_id_list: string[]; image_ratio?: string };
+  attribute_list?: Record<string, unknown>[];
+}): Promise<Record<string, unknown>> {
   const body: Record<string, unknown> = { item_id: Number(itemId) };
   if (patch.item_name != null) body.item_name = patch.item_name;
-  if (patch.description != null) body.description = patch.description;
+  if (patch.description_info) {
+    if (!patch.description_info.extended_description.field_list.length) throw new ShopeeApiError("รายละเอียดว่าง — ต้องมีข้อความหรือรูปอย่างน้อย 1 ช่อง", "error_param");
+    body.description_type = "extended";
+    body.description_info = patch.description_info;
+  } else if (patch.description != null) body.description = patch.description;
+  if (patch.attribute_list?.length) body.attribute_list = patch.attribute_list;
   // เฟส 4C: รูปสินค้า = ส่งทั้งชุด (แทนของเดิมทั้งหมด · เรียงตามที่ส่ง · รูปแรก = ปก)
   if (patch.image) {
     if (!patch.image.image_id_list.length) throw new ShopeeApiError("ต้องมีรูปสินค้าอย่างน้อย 1 รูป", "error_param");

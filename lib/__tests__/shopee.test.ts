@@ -157,8 +157,8 @@ describe("Shopee — สินค้า (get_item_list / base_info / model_list 
   test("ตัวเลือก: ชื่อ 'สี: ดำ · ขนาด: L' + รูปของชั้นแรก + สต๊อก (รุ่นใหม่/รุ่นเก่า)", () => {
     const s = shopeeModelsToSlim(MODELS);
     expect(s.tiers).toEqual([{ name: "สี", options: ["ดำ", "น้ำตาล"] }, { name: "ขนาด", options: ["M", "L"] }]);
-    expect(s.models[0]).toEqual({ model_id: "1", sku: "TTM090-01L", label: "สี: ดำ · ขนาด: L", price: 990, original_price: 1590, stock: 7, image: "https://cf.shopee.co.th/file/black", status: null, promo: false });
-    expect(s.models[1]).toMatchObject({ label: "สี: น้ำตาล · ขนาด: M", stock: 3, image: "https://cf.shopee.co.th/file/brown" });
+    expect(s.models[0]).toEqual({ model_id: "1", sku: "TTM090-01L", label: "สี: ดำ · ขนาด: L", price: 990, original_price: 1590, stock: 7, image: "https://cf.shopee.co.th/file/black", status: null, promo: false, tier_index: [0, 1] });
+    expect(s.models[1]).toMatchObject({ label: "สี: น้ำตาล · ขนาด: M", stock: 3, image: "https://cf.shopee.co.th/file/brown", tier_index: [1, 0] });
     expect(shopeeModelsToSlim(null)).toEqual({ tiers: [], models: [] });
   });
   test("สินค้ามีตัวเลือก: skus = รหัสหลักก่อน + รหัสตัวเลือก · ราคา = ราคาตั้งต่ำสุด · status ตัวเล็ก", () => {
@@ -285,5 +285,36 @@ describe("รายงานยอดขาย — นับเฉพาะอ�
     expect(countsAsSale({ status: "new", platform_status: null })).toBe(true);           // ใบจากเมล (จ่ายแล้วถึงมีเมล)
     expect(countsAsSale({ status: "new", platform_status: "READY_TO_SHIP" })).toBe(true);
     expect(countsAsSale({ status: "shipped", platform_status: "COMPLETED" })).toBe(true);
+  });
+});
+
+// ───────── 2026-11-24: update_item ต้องส่งข้อมูลจำเพาะ + รายละเอียดแบบมีรูป (เดิมถูกตัดทิ้ง → "ไม่มีอะไรให้แก้") ─────────
+import { vi } from "vitest";
+import { shopeeUpdateItem, shopeeUpdateTierVariation, shopeeAddModel } from "@/lib/shopee";
+describe("Shopee — ตัวส่ง update_item / ตัวเลือก ส่งครบทุกช่องที่ตั้งใจ", () => {
+  const sent: { url: string; body: Record<string, unknown> }[] = [];
+  beforeEach(() => {
+    sent.length = 0;
+    vi.stubEnv("SHOPEE_PARTNER_ID", "1"); vi.stubEnv("SHOPEE_PARTNER_KEY", "k");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body?: string }) => { sent.push({ url, body: JSON.parse(init.body ?? "{}") }); return new Response(JSON.stringify({ error: "", response: {} }), { status: 200 }); }));
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+  test("ข้อมูลจำเพาะอย่างเดียว = ส่ง attribute_list (ไม่โยน ไม่มีอะไรให้แก้)", async () => {
+    await shopeeUpdateItem("t", 1, "99", { attribute_list: [{ attribute_id: 5, attribute_value_list: [{ value_id: 0, original_value_name: "ไทย" }] }] });
+    expect(sent[0].body).toEqual({ item_id: 99, attribute_list: [{ attribute_id: 5, attribute_value_list: [{ value_id: 0, original_value_name: "ไทย" }] }] });
+  });
+  test("รายละเอียดแบบมีรูป = description_type extended + description_info (ไม่ส่ง description ข้อความ)", async () => {
+    const info = { extended_description: { field_list: [{ field_type: "text", text: "a" }, { field_type: "image", image_info: { image_id: "x" } }] } };
+    await shopeeUpdateItem("t", 1, "99", { item_name: "ชื่อ", description: "ไม่ใช้", description_type: "extended", description_info: info });
+    expect(sent[0].body).toEqual({ item_id: 99, item_name: "ชื่อ", description_type: "extended", description_info: info });
+    await expect(shopeeUpdateItem("t", 1, "99", {})).rejects.toThrow("ไม่มีอะไรให้แก้");
+  });
+  test("ตัวเลือก: update_tier_variation ส่ง model_list · add_model ส่งตัวใหม่", async () => {
+    await shopeeUpdateTierVariation("t", 1, "99", [{ name: "สี", option_list: [{ option: "ดำ" }, { option: "ทอง" }] }], [{ model_id: 11, tier_index: [0] }]);
+    expect(sent[0].url).toContain("/api/v2/product/update_tier_variation");
+    expect(sent[0].body.model_list).toEqual([{ model_id: 11, tier_index: [0] }]);
+    await shopeeAddModel("t", 1, "99", [{ tier_index: [1], original_price: 390, model_sku: "X-02", seller_stock: [{ stock: 0 }] }]);
+    expect(sent[1].url).toContain("/api/v2/product/add_model");
+    expect(sent[1].body).toEqual({ item_id: 99, model_list: [{ tier_index: [1], original_price: 390, model_sku: "X-02", seller_stock: [{ stock: 0 }] }] });
   });
 });
