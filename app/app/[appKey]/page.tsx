@@ -25,6 +25,9 @@ import { appLabelFor, appMenuLabel, appMenuSection } from "@/lib/staff-apps";
 import { Icon } from "@/components/icon";
 import { AccountMenu } from "@/components/account-menu";
 import { appHeaderStyle } from "@/lib/app-header-theme";
+import { ThemeApplier } from "@/components/erp-theme/theme-applier";
+import { useActiveThemes } from "@/components/erp-theme/active-themes";
+import { hasOwnHeader, themeForApp, themeTopbarStyle } from "@/lib/erp-theme-assign";
 import { GlobalSearch } from "@/components/global-search";
 import { getSearchScope } from "@/lib/search-scopes";
 import { useSearchHotkey } from "@/lib/search-hotkey";
@@ -68,6 +71,8 @@ export default function StandaloneApp() {
   const searchScope = getSearchScope(appKey)?.key;
   const { user, ready, can, permsReady } = useAuth();
   const [app, setApp] = useState<AppGroup | null>(null);
+  // ธีมกลาง (เฟส 3): แถบบนตามธีมของแอป — เว้นแอปที่ตั้งสี/รูปแถบบนไว้เอง (คงสีเดิม)
+  const appTheme = themeForApp(useActiveThemes(), appKey);
   const [rawItems, setItems] = useState<MenuItem[]>([]);
   // 🌐 ชื่อเมนู/หัวข้อตามภาษา — EN ที่ตั้งไว้ในแอปนี้ (แอปพนักงาน · lib/staff-apps) · ไม่ได้ตั้ง = ชื่อไทย
   const { lang } = useLang();
@@ -319,8 +324,9 @@ export default function StandaloneApp() {
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope={searchScope} />
       <InstallHereBanner appLabel={app?.label ?? appKey} iconSrc={appIconSrc(app?.icon_url)} autoShow={installAsk} />
+      <ThemeApplier appKey={appKey} />
       <header className={`relative flex-shrink-0 z-20 text-white px-3 sm:px-4 ${pageFull ? "hidden" : ""}`}
-        style={{ ...appHeaderStyle(app ?? {}), paddingTop: "env(safe-area-inset-top)" }}>
+        style={{ ...(appTheme && !hasOwnHeader(app) ? themeTopbarStyle(appTheme) : appHeaderStyle(app ?? {})), paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-2.5 flex items-center gap-2 w-full min-w-0">
           {/* ปุ่มเมนู (จอกว้าง) — ใช้ตอนเมนูเยอะ/มือถือใช้แถบล่าง */}
           {items.length > 0 && (

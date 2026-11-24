@@ -6,6 +6,7 @@ import {
   fixedScale,
   tailwindScaleFor,
   themeVars,
+  DEFAULT_THEME_FONT,
 } from "./lib/erp-theme";
 
 // ─────────────────────────────────────────────────────────
@@ -38,14 +39,14 @@ const config: Config = {
       // วงแหวนโฟกัสเริ่มต้น (คลาส ring เปล่า) — เดิม = blue-500 โปร่ง 50% · ต้องระบุเองเพราะ blue เป็นตัวแปรแล้ว
       ringColor: { DEFAULT: "rgb(var(--tm-primary-500) / 0.5)" },
       fontFamily: {
-        sans: ["Inter", "Noto Sans Thai", "system-ui", "sans-serif"],
+        sans: ["var(--tm-font)"],   // ฟอนต์ตามธีม — ค่าเริ่ม (DEFAULT_THEME_FONT) วางที่ :root ด้านล่าง
       },
     },
   },
   plugins: [
-    // ค่าเริ่มของตัวแปรธีมที่ :root (ธีมของโมดูลจะทับในกล่องครอบ — เฟส 3)
+    // ค่าเริ่มของตัวแปรธีมที่ :root · ธีมของแอปทาทับที่ <html> ผ่าน ThemeApplier (เฟส 3)
     plugin(({ addBase }) => {
-      addBase({ ":root": themeVars() });
+      addBase({ ":root": { ...themeVars(), "--tm-font": DEFAULT_THEME_FONT } });
     }),
   ],
 };

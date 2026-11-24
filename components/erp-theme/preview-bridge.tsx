@@ -18,6 +18,7 @@ export function ThemePreviewBridge() {
       const d = e.data as { type?: string; vars?: Record<string, string> | null } | null;
       if (!d || d.type !== THEME_PREVIEW_MSG) return;
       const root = document.documentElement;
+      root.dataset.themePreview = "1";   // บอก ThemeApplier ว่าหน้านี้อยู่ในพรีวิว อย่าทาทับ
       applied.forEach((k) => root.style.removeProperty(k));
       applied = [];
       if (!d.vars) return;

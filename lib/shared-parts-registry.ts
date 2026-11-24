@@ -657,6 +657,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "ธีมแบรนด์บนแดชบอร์ดออกแบบ (lib/brand-theme — จะรวมเข้ามาเฟส 6) · ธีมเว็บร้าน (lib/website-theme)",
   },
   {
+    key: "erp-theme-applier", label: "ทาธีมของแอปที่เปิดอยู่ (เชลล์/แอปเดี่ยว)", code: "ThemeApplier · useActiveThemes · lib/erp-theme-assign", category: "system",
+    source: { path: "components/erp-theme/theme-applier", names: ["ThemeApplier"] },
+    what: "อ่านธีมที่เผยแพร่ของแอป (→ ธีมบริษัท → ไม่มี = หน้าตาเดิม) จาก /api/themes/active แล้วทาตัวแปร --tm-* ที่ <html> (ป๊อปอัปได้สีเดียวกัน) + โหลดฟอนต์ · จำใน localStorage กันกระพริบ · แถบบนแอปเดี่ยวใช้ themeTopbarStyle เว้นแอปที่ตั้งสีแถบบนเอง (hasOwnHeader) · ตั้งที่ /admin/themes?tab=apps (ตาราง erp_theme_assignments)",
+    when: "เชลล์ใหม่/แอปเดี่ยวแบบใหม่ที่ต้องตามธีม → วาง <ThemeApplier appKey=…/> · หลังบันทึกธีมของแอปเรียก refreshActiveThemes()",
+    notWhen: "พรีวิวในตัวแก้ธีม (ใช้ ThemePreviewBridge — ตัวทาธีมจะไม่ทาทับเมื่อมี data-theme-preview) · เว็บร้าน",
+  },
+  {
     key: "erp-theme-preview", label: "พรีวิวธีม + แผงปรับธีม 9 หมวด", code: "ThemePreview · ThemeEditorPanel", category: "feature",
     source: { path: "components/erp-theme/preview", names: ["ThemePreview"] },
     what: "หน้าตัวอย่าง ERP ที่วาดตามค่าธีมครบ (แถบบน เมนูข้าง แบนเนอร์ การ์ดตัวเลข ตาราง ช่องกรอก ป๊อปอัป มาสคอต แอนิเมชัน) PC/มือถือ/มืด · compact = การ์ดย่อ · แผงปรับ components/erp-theme/editor-panel · พรีวิวหน้าจริงผ่าน iframe + ThemePreviewBridge (app/layout)",

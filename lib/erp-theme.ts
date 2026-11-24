@@ -28,6 +28,9 @@ export const VIOLET_SCALE: ColorScale = {
   500: "#8b5cf6", 600: "#7c3aed", 700: "#6d28d9", 800: "#5b21b6", 900: "#4c1d95", 950: "#2e1065",
 };
 
+/** ฟอนต์เริ่มต้นของระบบ (ตัวแปร --tm-font) — ธีมเปลี่ยนได้ (lib/erp-theme-config FONT_OPTIONS) */
+export const DEFAULT_THEME_FONT = "'Inter','Noto Sans Thai',system-ui,sans-serif";
+
 /** ค่าเริ่มต้นของทุกบทบาท = หน้าตาเดิมของระบบเป๊ะ */
 export const DEFAULT_THEME_SCALES: Record<ThemeRole, ColorScale> = {
   primary: ORANGE_SCALE,

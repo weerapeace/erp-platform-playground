@@ -111,6 +111,13 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
     if (!row.published_config) return fail("ธีมนี้ยังไม่เคยเผยแพร่ ไม่มีฉบับให้ย้อนกลับ", 409);
     patch = { draft_config: row.published_config };
   } else if (action === "trash") {
+    // ธีมที่แอป/บริษัทใช้อยู่ ห้ามลบ (เฟส 3) — ต้องย้ายแอปไปธีมอื่นก่อน
+    const { data: used } = await admin.from("erp_theme_assignments").select("scope").eq("theme_id", id);
+    if (used?.length) {
+      const n = used.filter((u) => u.scope !== "company").length;
+      const who = [used.some((u) => u.scope === "company") ? "ธีมบริษัท" : "", n ? `${n} แอป` : ""].filter(Boolean).join(" และ ");
+      return fail(`ธีมนี้ใช้อยู่กับ${who} — เปลี่ยนเป็นธีมอื่นที่แท็บ "แอปใช้ธีมไหน" ก่อนลบ`, 409);
+    }
     patch = { deleted_at: now };
   } else if (action === "untrash") {
     patch = { deleted_at: null };

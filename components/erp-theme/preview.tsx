@@ -25,19 +25,8 @@ const STATUS: Record<string, [string, string, string]> = {
   draft: ["#f1f5f9", "#475569", "#64748b"], wait: ["#fef3c7", "#92400e", "#d97706"],
   ok: ["#dcfce7", "#166534", "#16a34a"], bad: ["#fee2e2", "#991b1b", "#dc2626"],
 };
+import { ensureThemeFont } from "./active-themes";
 const img = (key: string, w: number) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
-
-let fontLoaded = new Set<string>();
-function useGoogleFont(google: string | null) {
-  useEffect(() => {
-    if (!google || fontLoaded.has(google) || typeof document === "undefined") return;
-    fontLoaded = new Set(fontLoaded).add(google);
-    const l = document.createElement("link");
-    l.rel = "stylesheet";
-    l.href = `https://fonts.googleapis.com/css2?family=${google}&display=swap`;
-    document.head.appendChild(l);
-  }, [google]);
-}
 
 const CSS = `
 @keyframes tmpEnter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
@@ -69,7 +58,7 @@ export function ThemePreview({
   const mob = device === "mobile";
   const c = useMemo(() => (mob ? mobileLiteConfig(config) : config), [config, mob]);
   const font = FONT_OPTIONS.find((f) => f.key === c.typography.font) ?? FONT_OPTIONS[0];
-  useGoogleFont(compact ? null : font.google);
+  useEffect(() => { if (!compact) ensureThemeFont(c.typography.font); }, [compact, c.typography.font]);
   const p = scaleOf(c.colors.primary), a = scaleOf(c.colors.accent);
   const s = SAMPLES[sample];
   const g = c.gradient, sp = g.spots;

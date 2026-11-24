@@ -30,7 +30,7 @@
 }
 
 body {
-  font-family: 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
+  font-family: var(--tm-font);   /* ธีมกลาง (lib/erp-theme-config) · ค่าเริ่ม Inter + Noto Sans Thai วางที่ :root ใน tailwind.config */
   -webkit-font-smoothing: antialiased;
 }
 

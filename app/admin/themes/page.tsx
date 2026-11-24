@@ -19,6 +19,7 @@ import { ImageInput } from "@/components/image-input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { ThemePreview } from "@/components/erp-theme/preview";
 import { paletteFromImageKey } from "@/components/erp-theme/palette-from-image";
+import { ThemeAssignPanel } from "@/components/erp-theme/assign-panel";
 import {
   DEFAULT_THEME_CONFIG, THEME_PRESETS, mergeThemeConfig, normalizeThemeConfig, presetConfig, type ErpThemeConfig,
 } from "@/lib/erp-theme-config";
@@ -27,6 +28,7 @@ type ThemeRow = {
   id: string; name: string; preset_key: string | null; draft_config: unknown; published_config: unknown;
   published_version: number; published_at: string | null; deleted_at: string | null;
   updated_by_name: string | null; updated_at: string; has_unpublished: boolean;
+  usage?: { apps: string[]; company: boolean };
 };
 
 const when = (d: string) => new Date(d).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -38,6 +40,20 @@ export default function ThemesPage() {
   const toast = useToast();
   const router = useRouter();
   const [trash, setTrash] = useState(false);
+  // แท็บ: คลังธีม | แอปใช้ธีมไหน (?tab=apps&app=<key> มาจากปุ่มทางลัดในหน้าตั้งค่าแอป)
+  const [tab, setTabState] = useState<"library" | "apps">("library");
+  const [focusApp, setFocusApp] = useState<string | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("tab") === "apps") setTabState("apps");
+    setFocusApp(sp.get("app"));
+  }, []);
+  const setTab = (t: "library" | "apps") => {
+    setTabState(t);
+    const u = new URL(window.location.href);
+    if (t === "apps") u.searchParams.set("tab", "apps"); else { u.searchParams.delete("tab"); u.searchParams.delete("app"); }
+    window.history.replaceState(null, "", u.toString());
+  };
   const [rows, setRows] = useState<ThemeRow[] | null>(null);
   const [trashCount, setTrashCount] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -104,15 +120,23 @@ export default function ThemesPage() {
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <div className="flex-1 min-w-[200px]">
             <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2"><Icon name="design" /> คลังธีม</h1>
-            <p className="text-sm text-slate-500">สร้างธีม แล้วเลือกให้แต่ละโมดูล (เลือกต่อโมดูลมาในเฟส 3) · แก้ร่างได้โดยคนอื่นยังเห็นธีมเดิมจนกด "เผยแพร่"</p>
+            <p className="text-sm text-slate-500">สร้างธีม แล้วเลือกให้แต่ละแอปที่แท็บ "แอปใช้ธีมไหน" · แก้ร่างได้โดยคนอื่นยังเห็นธีมเดิมจนกด "เผยแพร่"</p>
           </div>
-          {canEdit && !trash && (
+          {canEdit && !trash && tab === "library" && (
             <button type="button" onClick={() => setCreating(true)} className="h-9 px-4 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 inline-flex items-center gap-1.5">
               <Icon name="plus" /> ธีมใหม่
             </button>
           )}
         </div>
 
+        <div className="flex gap-1 mb-4 border-b border-slate-200">
+          {([["library", "คลังธีม"], ["apps", "แอปใช้ธีมไหน"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setTab(k)}
+              className={`h-9 px-3 -mb-px border-b-2 text-sm ${tab === k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{l}</button>
+          ))}
+        </div>
+
+        {tab === "apps" ? <ThemeAssignPanel focusApp={focusApp} /> : (<>
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อธีม…" className="h-9 flex-1 min-w-[180px] rounded-lg border border-slate-200 px-3 text-sm" />
           <button type="button" onClick={() => setTrash((v) => !v)} className={`h-9 px-3 rounded-lg border text-sm inline-flex items-center gap-1.5 ${trash ? "bg-slate-800 text-white border-slate-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
@@ -145,6 +169,13 @@ export default function ThemesPage() {
                         </span>
                       </div>
                       {t.published_version > 0 && t.has_unpublished && <div className="text-[11px] text-amber-700">มีร่างที่ยังไม่เผยแพร่</div>}
+                      {!trash && (
+                        <div className="text-[11px] text-slate-500">
+                          {t.usage?.company || t.usage?.apps.length
+                            ? `ใช้อยู่: ${[t.usage.company ? "ธีมบริษัท" : "", t.usage.apps.length ? `${t.usage.apps.length} แอป` : ""].filter(Boolean).join(" + ")}`
+                            : "ยังไม่มีแอปใช้"}
+                        </div>
+                      )}
                       <div className="text-[11px] text-slate-400">{t.deleted_at ? `ลบเมื่อ ${when(t.deleted_at)}` : `แก้ล่าสุด ${when(t.updated_at)}${t.updated_by_name ? ` · ${t.updated_by_name}` : ""}`}</div>
                       <div className="flex gap-1.5 mt-2">
                         {trash ? (
@@ -167,6 +198,7 @@ export default function ThemesPage() {
               })}
             </div>
           )}
+        </>)}
       </div>
 
       <NewThemeModal open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); router.push(`/admin/themes/${id}`); }} />

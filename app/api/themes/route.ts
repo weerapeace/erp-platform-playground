@@ -9,6 +9,7 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { THEME_COLS, hasUnpublished, themeActor, type ThemeRow } from "@/lib/erp-themes-server";
 import { normalizeThemeConfig, presetConfig } from "@/lib/erp-theme-config";
+import { usageByTheme } from "@/lib/erp-theme-assign";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -21,8 +22,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: "โหลดคลังธีมไม่สำเร็จ", details: error.message }, { status: 500 });
   const rows = (data ?? []) as ThemeRow[];
-  const { count } = trash ? { count: rows.length } : await supabaseAdmin().from("erp_themes").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
-  return NextResponse.json({ data: rows.map((r) => ({ ...r, has_unpublished: hasUnpublished(r) })), trash_count: count ?? 0, error: null });
+  const [{ count }, { data: asg }] = await Promise.all([
+    trash ? Promise.resolve({ count: rows.length }) : supabaseAdmin().from("erp_themes").select("id", { count: "exact", head: true }).not("deleted_at", "is", null),
+    supabaseAdmin().from("erp_theme_assignments").select("scope, theme_id"),
+  ]);
+  const usage = usageByTheme((asg ?? []) as { scope: string; theme_id: string }[]);
+  return NextResponse.json({
+    data: rows.map((r) => ({ ...r, has_unpublished: hasUnpublished(r), usage: usage[r.id] ?? { apps: [], company: false } })),
+    trash_count: count ?? 0, error: null,
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

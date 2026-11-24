@@ -20,6 +20,7 @@ import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { PageChromeBar, useChromeHost, useIsDesktopXl, usePageChromeHas } from "@/components/page-chrome";
 import { AccountMenu } from "@/components/account-menu";
+import { ThemeApplier } from "@/components/erp-theme/theme-applier";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { cachedGetJson } from "@/lib/shell-cache";
@@ -709,6 +710,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   if (embed) {
     return (
       <div className="min-h-screen bg-slate-50" {...wideAttr}>
+        <ThemeApplier appKey={activeApp} />
         <ShellPresentContext.Provider value={true}>
           {blockedAppLabel
             ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
@@ -735,6 +737,8 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       )}
 
       <ChromeHostMark />
+      {/* ธีมกลาง: ทาธีมของแอปที่เปิดอยู่ (lib/erp-theme-assign · เฟส 3) */}
+      <ThemeApplier appKey={activeApp} />
       {/* Mobile topbar — มีของจากหน้า (usePageChrome) = แถบแบบแอป: ☰ · ชื่อหน้า/ค้นหา/ปุ่มของหน้า · ผู้ใช้ */}
       <header data-shell-topbar className="xl:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between gap-1 px-3">
         <button onClick={() => setMobileNavOpen(true)} aria-label="เปิดเมนู"

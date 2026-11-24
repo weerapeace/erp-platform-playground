@@ -550,6 +550,11 @@ export default function MenuManagerPage() {
                     <span className="text-xs text-slate-500">สีแอป</span>
                     <input type="color" value={appForm.theme_color || "#2563eb"} onChange={(e) => setAppForm((f) => ({ ...f, theme_color: e.target.value }))} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" />
                   </div>
+                  {/* ทางลัดธีมกลาง (เฟส 3) — ตั้งธีมของแอปที่หน้าคลังธีม (ข้อมูลชุดเดียวกัน ไม่ทำซ้ำที่นี่) */}
+                  <a href={`/admin/themes?tab=apps&app=${encodeURIComponent(selectedApp.key)}`}
+                    className="h-8 px-3 rounded border border-slate-200 bg-white text-xs text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5">
+                    <Icon name="design" /> ธีมของแอปนี้
+                  </a>
                 </div>
 
                 {/* แถบบนของแอป (App shell header) — 3 โหมด: สีเดียว / ไล่สี / รูป */}
