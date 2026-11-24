@@ -8,6 +8,7 @@
  *   ยอดขาย = มูลค่าสินค้า ชุดเดียวกับแดชบอร์ดช่องทางขาย (ตรงกับ Shopee) · เป้าเก็บที่เดียวกัน (ตั้ง/แก้/ลบ + ย้อนกลับได้ + audit)
  *   กดเจาะลึก: การ์ด → แท็บ · แถวช่องทาง → กรองช่องทางนั้น · แถวสินค้า → ออเดอร์ที่มีสินค้านั้น → หน้าออเดอร์
  * ➕ 2026-11-24 รอบ 2 (แบบ A): แท็บ "ค่าธรรมเนียม" + "กำไร" → app/marketing/dashboard/profit-tabs.tsx (/api/marketing/profit)
+ * ➕ 2026-11-24 รอบ 3 (แบบ A): แท็บ "โฆษณา" → app/marketing/dashboard/ads-tab.tsx (/api/marketing/ads-overview)
  *   แท็บอยู่ใน URL (?tab=) — ลิงก์จากกระดิ่งแจ้งเตือนเปิดแท็บที่เกี่ยวข้องได้
  * ของกลาง: PlaygroundShell · PeriodPicker · CountUp · SimpleBarChart · DataTable (ค้นหา/เรียง/มุมมอง/ส่งออก Excel/ลิ้นชัก)
  *   · ScrollTabs · ERPModal · MoneyInput · HoverImage · PlatformIcon · Icon · LoadingState/ErrorState/EmptyState · useToast
@@ -37,6 +38,7 @@ import { WEEKDAYS_TH, type MarketingAlert, type Pace, type CancelRow, type Campa
 
 const FeesTab = dynamic(() => import("./profit-tabs").then((m) => m.FeesTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บค่าธรรมเนียม…" /> });
 const ProfitTab = dynamic(() => import("./profit-tabs").then((m) => m.ProfitTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บกำไร…" /> });
+const AdsTab = dynamic(() => import("./ads-tab").then((m) => m.AdsTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บโฆษณา…" /> });
 const ShopeeFileView = dynamic(() => import("./shopee-file-view"), { ssr: false, loading: () => <LoadingState label="กำลังโหลดข้อมูลไฟล์ Shopee…" /> });
 
 // ── รูปแบบตัวเลข ──
@@ -53,7 +55,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const localYmd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const thisMonth = (): Period => { const now = new Date(); return { from: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, to: localYmd(now) }; };
 
-type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "fees" | "profit" | "shopee_file";
+type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "fees" | "profit" | "ads" | "shopee_file";
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "ภาพรวม", icon: "chart" },
   { key: "sales", label: "ยอดขาย & ช่องทาง", icon: "store" },
@@ -62,6 +64,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "campaign", label: "แคมเปญวันพิเศษ", icon: "campaign" },
   { key: "fees", label: "ค่าธรรมเนียม", icon: "receipt" },
   { key: "profit", label: "กำไร", icon: "money" },
+  { key: "ads", label: "โฆษณา", icon: "campaign" },
   { key: "shopee_file", label: "ไฟล์ Shopee", icon: "import" },
 ];
 const isTab = (s: string | null): s is Tab => !!s && TABS.some((t) => t.key === s);
@@ -200,6 +203,7 @@ export default function MarketingOverviewPage() {
               {tab === "cancel" && <CancelTab d={d} />}
               {tab === "campaign" && <CampaignTab d={d} pick={setEventDate} />}
               {tab === "fees" && <FeesTab from={period.from} to={period.to} platformId={platformId} brandId={brandId} reloadKey={reloadKey} />}
+              {tab === "ads" && <AdsTab from={period.from} to={period.to} brandId={brandId} brands={d.filters.brands} reloadKey={reloadKey} />}
               {tab === "profit" && <ProfitTab from={period.from} to={period.to} platformId={platformId} brandId={brandId} reloadKey={reloadKey} />}
               {d.notes.length > 0 && (
                 <ul className="mt-6 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">

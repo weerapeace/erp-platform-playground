@@ -246,6 +246,8 @@ export function buildMarketingAlerts(x: {
   fallingA: { name: string; change: number | null }[];
   /** ช่องทางที่ค่าธรรมเนียม 7 วันเกินเกณฑ์ (รอบ 2 · lib/marketing-fees-server recentFeeSpikes) */
   feeSpikes?: { name: string; pct: number; basePct: number; fee: number }[];
+  /** แคมเปญโฆษณาขาดทุนติดกัน ≥ 3 วัน (รอบ 3 · lib/marketing-ads-server recentLosingCampaigns) */
+  losingAds?: { name: string; spend: number; roas: number | null; breakeven: number | null; days: number }[];
 }): MarketingAlert[] {
   const out: MarketingAlert[] = [];
   const p = x.pace;
@@ -266,6 +268,11 @@ export function buildMarketingAlerts(x: {
     const names = x.feeSpikes.map((f) => `${f.name} ${Math.round(f.pct * 1000) / 10}% (ปกติ ${Math.round(f.basePct * 1000) / 10}%)`).join(" · ");
     out.push({ key: "fee_spike", level: "warning", tab: "fees", title: `ค่าธรรมเนียมสูงกว่าปกติ (7 วัน)`,
       body: `${names} ของยอดขาย — เช็กค่าโฆษณา/แอฟฟิลิเอต ค่าส่งที่ร้านออก หรือโปรที่ร่วม` });
+  }
+  if (x.losingAds?.length) {
+    const top = x.losingAds.slice(0, 3).map((a) => `${a.name} (ROAS ${a.roas == null ? "—" : a.roas.toFixed(1)} · คุ้มทุน ${a.breakeven ?? "—"} · ${a.days} วัน)`).join(" · ");
+    out.push({ key: "ads_loss", level: "warning", tab: "ads", title: `แคมเปญโฆษณาขาดทุน ${x.losingAds.length} แคมเปญ`,
+      body: `${top} — จ่ายไป ${baht(x.losingAds.reduce((s, a) => s + a.spend, 0))} ใน 7 วัน · ลองลดงบหรือปรับคำค้น` });
   }
   if (x.fallingA.length) {
     const names = x.fallingA.slice(0, 3).map((f) => `${f.name}${f.change != null ? ` ${Math.round(f.change * 100)}%` : ""}`).join(" · ");

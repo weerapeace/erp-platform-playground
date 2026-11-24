@@ -17,6 +17,7 @@ import { fetchAllPages } from "@/lib/fetch-all";
 import { countsAsSale } from "@/lib/platform-order-status";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { recentFeeSpikes } from "@/lib/marketing-fees-server";
+import { recentLosingCampaigns } from "@/lib/marketing-ads-server";
 import { loadOrderItems, loadPlatformOrders, type SalesOrderLite } from "@/lib/platform-sales-load";
 import { SALES_TARGET_KEY, bkkStartIso, bkkYmd, itemValueByOrder, monthToDate, orderValue, readSalesTarget, shiftYmd, type ItemLite } from "@/lib/platform-dashboard-calc";
 import {
@@ -62,6 +63,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const brands = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? "") }));
     const pfById = new Map(platforms.map((p) => [p.id, p]));
     const platformCode = platformId ? pfById.get(platformId)?.code ?? null : null;
+    // เตือนค่าธรรมเนียมพุ่ง / แคมเปญขาดทุน — เริ่มคิดพร้อมกันตั้งแต่ต้น (ไม่รอส่วนอื่น)
+    const feeSpikesP = recentFeeSpikes(admin, today, { platformId, brandId }).catch(() => []);
+    const losingAdsP = recentLosingCampaigns(admin, today, brandId).catch(() => []);
 
     // ── หน้าต่างเวลาเดียว ครอบทุกอย่างที่ต้องใช้ ──
     const cmp = comparePeriods(from, to);
@@ -213,7 +217,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const abcSummary = (["A", "B", "C"] as const).map((k) => { const rs = products.filter((p) => p.abc === k && p.sales > 0); return { abc: k, count: rs.length, sales: rs.reduce((s, p) => s + p.sales, 0) }; });
 
     // ── ยกเลิก: เหตุผล (Shopee/TikTok เก็บไว้ใน raw) ──
-    const feeSpikesP = recentFeeSpikes(admin, today, { platformId, brandId }).catch(() => []);
     type CRow = { id: string; platform_id: string | null; ordered_at: string | null; r1: string | null; r2: string | null };
     const cancelFrom = [from, shiftYmd(today, -6)].sort()[0];
     const cRows = await fetchAllPages<CRow>((a, b) => {
@@ -248,7 +251,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const avgFrom = shiftYmd(today, -29), avgTo = shiftYmd(today, -2);
     const avgDaily28 = sumVal(between(winSales, avgFrom, avgTo)) / 28;
     const fallingA = significantFalls(products.map((p) => ({ ...p, cur: p.last14, prev: p.prev14 })), sales).map((p) => ({ name: p.code || p.name, change: p.trendChange }));
-    const alerts = buildMarketingAlerts({ feeSpikes: await feeSpikesP, pace, yesterday: sumVal(between(winSales, yesterday, yesterday)), avgDaily28, storeFaultCancels7d: storeFault7d, fallingA });
+    const alerts = buildMarketingAlerts({ feeSpikes: await feeSpikesP, losingAds: await losingAdsP, pace, yesterday: sumVal(between(winSales, yesterday, yesterday)), avgDaily28, storeFaultCancels7d: storeFault7d, fallingA });
 
     // ── หมายเหตุข้อมูล ──
     const notes: string[] = [];

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { metaExchangeCode, metaLongLivedToken, metaGetPages } from "@/lib/meta-graph";
+import { finishMetaAdsConnect } from "@/lib/meta-ads-connect";
 import { baseUrl, metaRedirectUri, parseState, getPlatformId, saveConn, type FbConnMeta } from "../../shared";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!code || !state) return err("ข้อมูลไม่ครบจาก Facebook");
   const brandId = await parseState(state);
   if (!brandId) return err("ลิงก์เชื่อมต่อหมดอายุหรือไม่ถูกต้อง ลองกดเชื่อมต่อใหม่");
+
+  // ➕ 2026-11-24 โหมด "เชื่อม Meta Ads" (แท็บโฆษณาหน้าการตลาด · state = "ads:<brand>") → เก็บบัญชีโฆษณา แล้วพากลับแท็บโฆษณา
+  if (brandId.startsWith("ads:")) {
+    const r = await finishMetaAdsConnect(code, metaRedirectUri(), brandId.slice(4));
+    const back = `${baseUrl()}/marketing/dashboard?tab=ads&`;
+    return NextResponse.redirect(back + (r.ok ? `meta_ads=connected&n=${r.accounts}` : `meta_ads_error=${encodeURIComponent(r.error)}`));
+  }
 
   try {
     const shortTok = await metaExchangeCode(code, metaRedirectUri());

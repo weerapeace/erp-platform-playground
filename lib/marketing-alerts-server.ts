@@ -10,6 +10,7 @@ import { countsAsSale } from "@/lib/platform-order-status";
 import { loadOrderItems, loadPlatformOrders, type SalesOrderLite } from "@/lib/platform-sales-load";
 import { SALES_TARGET_KEY, bkkStartIso, bkkYmd, itemValueByOrder, monthToDate, orderValue, readSalesTarget, shiftYmd } from "@/lib/platform-dashboard-calc";
 import { recentFeeSpikes } from "@/lib/marketing-fees-server";
+import { recentLosingCampaigns } from "@/lib/marketing-ads-server";
 import { CANCEL_GROUPS, abcClassify, buildMarketingAlerts, cancelReasonGroup, paceToTarget, significantFalls, trendOf, type MarketingAlert } from "@/lib/marketing-overview-calc";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -54,5 +55,6 @@ export async function computeMarketingAlerts(admin: Admin, today = bkkYmd(Date.n
     .map((g) => ({ name: g.name, change: g.change }));
 
   const feeSpikes = await recentFeeSpikes(admin, today).catch((e) => { console.warn("[marketing-alerts] fee spikes", e instanceof Error ? e.message : e); return []; });
-  return buildMarketingAlerts({ feeSpikes, pace, yesterday: sumBetween(yesterday, yesterday), avgDaily28: sumBetween(shiftYmd(today, -29), shiftYmd(today, -2)) / 28, storeFaultCancels7d: storeFault7d, fallingA });
+  const losingAds = await recentLosingCampaigns(admin, today).catch(() => []);
+  return buildMarketingAlerts({ feeSpikes, losingAds, pace, yesterday: sumBetween(yesterday, yesterday), avgDaily28: sumBetween(shiftYmd(today, -29), shiftYmd(today, -2)) / 28, storeFaultCancels7d: storeFault7d, fallingA });
 }

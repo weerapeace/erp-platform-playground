@@ -147,6 +147,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
   },
   {
+    id: "marketing-ads", zone: "marketing", kind: "auto", icon: "📣",
+    title: "ผู้เก็บยอดโฆษณา", titleEn: "Ads collector",
+    does: "วันละ 2 รอบดึงยอดโฆษณาจาก Shopee Ads และ Meta Ads (ค่าโฆษณา ยอดขายจากโฆษณา คลิก) รายแคมเปญรายวัน มาไว้ในแท็บโฆษณาของหน้าการตลาด",
+    trigger: `${DAILY} 08:40 + 20:40`, cron: "/api/cron/marketing-ads", everyHours: 12,
+    can: ["อ่านยอดโฆษณาจาก Shopee / Meta", "จดยอดโฆษณาในระบบ"], cannot: ["แก้งบหรือแคมเปญ", "เปิด/ปิดโฆษณา"],
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_ads_daily", href: "/marketing/dashboard?tab=ads",
+    files: ["app/api/cron/marketing-ads/route.ts", "lib/marketing-ads-server.ts", "lib/shopee-ads.ts", "lib/meta-ads.ts"],
+  },
+  {
     id: "platform-fees", zone: "marketing", kind: "auto", icon: "💸",
     title: "ผู้เก็บค่าธรรมเนียมร้าน", titleEn: "Platform fee collector",
     does: "ทุก 30 นาทีถาม Shopee และ Lazada ว่าแต่ละออเดอร์โดนค่าธรรมเนียมเท่าไหร่ และร้านได้เงินจริงเท่าไหร่ แล้วเก็บไว้ให้หน้าค่าธรรมเนียม/กำไรของการตลาด",

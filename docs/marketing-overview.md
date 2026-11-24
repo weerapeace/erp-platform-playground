@@ -81,3 +81,24 @@
 - ใบที่ไม่มียอดเงิน (Lazada จากเมล) ไม่นับใน %
 - TikTok ยังดึงค่าธรรมเนียมไม่ได้ (ต้องเปิดสิทธิ์การเงินในแอป TikTok)
 - ข้อมูล ณ 2026-11-24: มีต้นทุนแค่ ~2% ของยอด 30 วัน · กรอก 20 รุ่นขายดีแรก ≈ ครอบคลุมเพิ่ม ~50%
+
+## รอบ 3 — โฆษณา (2026-11-24)
+
+เจ้าของเลือก: แบบ A (แท็บ "โฆษณา" `?tab=ads`) + ข้อ 1 Shopee Ads อัตโนมัติ · 2 ROAS จุดคุ้มทุนต่อแบรนด์ · 3 เตือนแคมเปญขาดทุน 3 วันติด · 4 ค่าแอฟฟิลิเอต/Boost · 5 รวมไฟล์ที่อัปโหลด · 6 เชื่อม Meta Ads
+
+| ส่วน | ไฟล์ |
+|---|---|
+| แท็บโฆษณา | `app/marketing/dashboard/ads-tab.tsx` |
+| API | `GET/PATCH /api/marketing/ads-overview` (PATCH = จุดคุ้มทุน · products.platforms.edit · audit) · `PATCH /api/marketing/ads/accounts` (ปิด/เปิดดึง · ตัดการเชื่อม Meta) |
+| ตัวดึง | `/api/cron/marketing-ads` วันละ 2 รอบ 08:40/20:40 (`40 1,13 * * *`) · POST = ปุ่ม "ดึงตอนนี้" |
+| Shopee Ads | `lib/shopee-ads.ts` — get_all_cpc_ads_daily_performance · get_product_level_campaign_id_list · get_product_campaign_daily_performance (ชื่อช่องจากเอกสาร Shopee 2026-11-24 · ย้อนได้ 6 เดือน) |
+| Meta Ads | `lib/meta-ads.ts` + `lib/meta-ads-connect.ts` · เริ่มที่ `/api/marketing/ads/meta/start` (สิทธิ์ ads_read) · ใช้ callback เดิม `/api/meta/oauth/callback` (state ขึ้นต้น `ads:`) |
+| ดึง/เก็บ | `lib/marketing-ads-server.ts` — ครั้งแรกย้อน 90 วัน · ต่อไปดึงทับ 7 วันล่าสุด · `recentLosingCampaigns` |
+| สูตร (pure + เทสต์) | `lib/marketing-ads-calc.ts` |
+| ตาราง | `marketing_ads_daily` (ยอดรายวัน ร้าน/แคมเปญ) · `marketing_ads_accounts` (บัญชี + สถานะดึง + token Meta เข้ารหัส) — server เท่านั้น |
+
+- ROAS = ยอดจากโฆษณา ÷ ค่าโฆษณา (ยอดซื้อภายใน 7 วันหลังคลิก ตามแพลตฟอร์ม) · ค่าการตลาด ÷ ยอดขายรวม = (ค่าโฆษณา + ค่าแอฟฟิลิเอต/Boost) ÷ ยอดขายทุกช่องทาง
+- จุดคุ้มทุน: ui_config `marketing_ads_breakeven` = { "*" | brand_id: ROAS } · สถานะ ทำกำไร (≥ ×1.2) / เฉียดทุน / ขาดทุน · ยังไม่ตั้ง = ไม่เตือน
+- เตือนเช้า `ads_loss`: แคมเปญที่ ROAS ต่ำกว่าจุดคุ้มทุนติดกัน ≥ 3 วัน (7 วันล่าสุดถึงเมื่อวาน)
+- ยังไม่ดึง: แคมเปญ Shopee GMV Max (อีกชุด API) · Lazada/TikTok Ads (ใช้ไฟล์ที่อัปโหลด)
+- Meta: token อยู่ได้ ~60 วัน หมดแล้วกด "เชื่อม Meta Ads ใหม่" · แอป Meta โหมดพัฒนาใช้ได้กับคนที่เป็นแอดมินแอป · คนอื่นต้องผ่าน App Review

@@ -51,7 +51,17 @@ export async function loadFeeContext(admin: Admin, f: { fromYmd: string; toYmd: 
 }
 
 /** ช่องทางที่ค่าธรรมเนียม 7 วันล่าสุด สูงกว่าปกติ (30 วันก่อนหน้า) — ใช้ในกล่องเตือน + ตัวเตือนทุกเช้า */
-export async function recentFeeSpikes(admin: Admin, today: string, f: { platformId?: string | null; brandId?: string | null } = {}): Promise<{ platform: string; name: string; pct: number; basePct: number; fee: number }[]> {
+type Spike = { platform: string; name: string; pct: number; basePct: number; fee: number };
+const spikeCache = new Map<string, { at: number; v: Spike[] }>();   // คิดหนัก (ออเดอร์ 37 วัน) — จำไว้ 30 นาทีต่อเครื่อง กันหน้าการตลาดช้า
+export async function recentFeeSpikes(admin: Admin, today: string, f: { platformId?: string | null; brandId?: string | null } = {}): Promise<Spike[]> {
+  const key = `${today}|${f.platformId ?? ""}|${f.brandId ?? ""}`;
+  const hit = spikeCache.get(key);
+  if (hit && Date.now() - hit.at < 30 * 60_000) return hit.v;
+  const v = await computeFeeSpikes(admin, today, f);
+  spikeCache.set(key, { at: Date.now(), v });
+  return v;
+}
+async function computeFeeSpikes(admin: Admin, today: string, f: { platformId?: string | null; brandId?: string | null }): Promise<Spike[]> {
   const { data } = await admin.from("erp_platforms").select("id, code, name_th");
   const rows = (data ?? []) as { id: string; code: string; name_th: string | null }[];
   const codes = new Map(rows.map((r) => [r.id, r.code]));

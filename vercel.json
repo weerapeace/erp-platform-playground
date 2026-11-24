@@ -43,6 +43,10 @@
       "schedule": "11,41 * * * *"
     },
     {
+      "path": "/api/cron/marketing-ads",
+      "schedule": "40 1,13 * * *"
+    },
+    {
       "path": "/api/cron/marketing-alert",
       "schedule": "20 2 * * *"
     },
