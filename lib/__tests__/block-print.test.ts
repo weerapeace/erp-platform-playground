@@ -230,3 +230,25 @@ describe("ส่งชิ้นรวมขึ้นเซิร์ฟเวอ�
     if (r.ok) expect(r.pieces[0].d).toEqual(m.d);
   });
 });
+
+describe("เพิ่มไฟล์เข้างานเดิม", () => {
+  it("ของใหม่ต่อท้ายทางขวา รหัสไม่ชน · ชิ้นรวมเลื่อนเส้นย่อยด้วย", async () => {
+    const { appendOffset, shiftPiece, buildPiece: bp } = await import("@/lib/block-print");
+    const cur = [{ ...piece("p1", 10, 10), ax: 5, ay: 20 }];
+    const inc = [bp([{ ...piece("p1", 2, 2), ax: 100, ay: 50 }, { ...piece("p2", 2, 2), ax: 104, ay: 50 }], "g1", "x")];
+    const o = appendOffset(cur, inc);
+    expect(o).toEqual({ dx: 25 - 100, dy: 20 - 50 });
+    const s = shiftPiece(inc[0], o.dx, o.dy, "f1-");
+    expect(s).toMatchObject({ id: "f1-g1", ax: 25, ay: 20 });
+    expect(s.parts!.map((q) => [q.id, q.ax])).toEqual([["f1-p1", 25], ["f1-p2", 29]]);
+  });
+});
+
+describe("ไฟล์ชิ้นเดียว", () => {
+  it("ชิ้นเดียวพอดีกรอบไฟล์ ไม่ถูกนับเป็นพื้นหลัง", async () => {
+    const { piecesFromRaw } = await import("@/lib/block-print");
+    const r = piecesFromRaw([{ d: [0, 0, 0, 1, 10, 0, 1, 10, 5, 1, 0, 5, 4], fill: "nonzero" }], 10, 5, { strokes: 0, texts: 0, images: 0, whites: 0 });
+    expect(r.pieces[0]).toMatchObject({ on: true, name: "ชิ้น 1" });
+    expect(r.skipped.backgrounds).toBe(0);
+  });
+});

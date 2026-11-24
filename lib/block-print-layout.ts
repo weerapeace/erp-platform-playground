@@ -12,7 +12,7 @@ import {
   type BlockPaper, type BlockPiece, type BlockUnit, type DrawOps, type FillRule,
 } from "@/lib/block-print";
 
-export type ItemKind = "piece" | "text" | "rect" | "ellipse" | "line";
+export type ItemKind = "piece" | "text" | "rect" | "ellipse" | "line" | "vector";
 export type BlockItem = {
   id: string;
   t: ItemKind;
@@ -26,6 +26,7 @@ export type BlockItem = {
   /** ความหนาเส้นขอบ (มม.) 0 = ไม่มี · เส้นตรง = ความหนาเส้น */ stroke: number;
   /** สีเส้นขอบบนจอ */ strokeColor: string;
   /** เส้นตรง: true = จากซ้ายล่างไปขวาบน */ flip?: boolean;
+  /** สัญลักษณ์จากคลัง (t="vector"): เส้นทีละส่วน ขนาด dw×dh + ชื่อ */ parts?: { d: DrawOps; fill: FillRule }[]; label?: string;
 };
 export type BlockLayout = { id: string; name: string; w: number; h: number; items: BlockItem[] };
 
@@ -54,7 +55,7 @@ export const BLOCK_FONTS: BlockFont[] = [
 ];
 export const findBlockFont = (family: string) => BLOCK_FONTS.find((f) => f.family === family) ?? null;
 
-export const KIND_LABEL: Record<ItemKind, string> = { piece: "ชิ้นจากไฟล์", text: "ข้อความ", rect: "สี่เหลี่ยม", ellipse: "วงกลม", line: "เส้นตรง" };
+export const KIND_LABEL: Record<ItemKind, string> = { piece: "ชิ้นจากไฟล์", text: "ข้อความ", rect: "สี่เหลี่ยม", ellipse: "วงกลม", line: "เส้นตรง", vector: "สัญลักษณ์จากคลัง" };
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -105,6 +106,9 @@ export function itemInk(it: BlockItem, pieceById: Map<string, BlockPiece>): InkS
     if (!it.d?.length || !it.dw || !it.dh) return out;
     const d = place(it.d, it.w / it.dw, it.h / it.dh, it.x, it.y);
     out.push({ d, mode: "fill", rule: "nonzero" }); outline(d);
+  } else if (it.t === "vector") {
+    if (!it.parts?.length || !it.dw || !it.dh) return out;
+    for (const p of it.parts) { const d = place(p.d, it.w / it.dw, it.h / it.dh, it.x, it.y); out.push({ d, mode: "fill", rule: p.fill }); outline(d); }
   } else if (it.t === "rect" || it.t === "ellipse") {
     const d = it.t === "rect" ? rectOps(it.x, it.y, it.w, it.h) : ellipseOps(it.x, it.y, it.w, it.h);
     if (it.fill) out.push({ d, mode: "fill", rule: "nonzero" });
@@ -316,7 +320,7 @@ export function layoutSvg(l: BlockLayout, pieceById: Map<string, BlockPiece>): s
 /** SVG ของชิ้นเดียวในบล็อก (ตามขนาดในบล็อก · เผื่อขอบครึ่งความหนาเส้น) */
 export function itemSvg(it: BlockItem, pieceById: Map<string, BlockPiece>): string {
   const pad = (it.t === "line" ? Math.max(it.stroke, MIN_LINE_MM) : it.stroke) / 2;
-  return inkSvg(itemInk({ ...it, x: pad, y: pad }, pieceById), it.w + 2 * pad, it.h + 2 * pad, { title: it.text || KIND_LABEL[it.t] });
+  return inkSvg(itemInk({ ...it, x: pad, y: pad }, pieceById), it.w + 2 * pad, it.h + 2 * pad, { title: it.text || it.label || KIND_LABEL[it.t] });
 }
 export function svgFileName(...parts: string[]): string {
   const clean = parts.join(" ").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
@@ -325,7 +329,7 @@ export function svgFileName(...parts: string[]): string {
 
 // ───────── ตรวจข้อมูลก่อนบันทึก + ประวัติ ─────────
 
-const KINDS = new Set<ItemKind>(["piece", "text", "rect", "ellipse", "line"]);
+const KINDS = new Set<ItemKind>(["piece", "text", "rect", "ellipse", "line", "vector"]);
 export function cleanLayouts(raw: unknown): { ok: true; layouts: BlockLayout[] } | { ok: false; error: string } {
   if (!Array.isArray(raw)) return { ok: false, error: "ข้อมูลบล็อกไม่ถูกต้อง" };
   if (raw.length > LAYOUT_LIMITS.blocks) return { ok: false, error: `บล็อกเยอะเกินไป (เกิน ${LAYOUT_LIMITS.blocks})` };
@@ -375,6 +379,21 @@ export function cleanLayouts(raw: unknown): { ok: true; layouts: BlockLayout[] }
           points += d.length;
           it.d = d; it.dw = dw; it.dh = dh;
         }
+      }
+      if (t === "vector") {
+        const ps = Array.isArray(ri.parts) ? (ri.parts as Record<string, unknown>[]) : [];
+        const dw = Number(ri.dw), dh = Number(ri.dh);
+        if (!ps.length || ps.length > 5000 || !(dw > 0 && dh > 0)) return { ok: false, error: "สัญลักษณ์ในบล็อกไม่ถูกต้อง" };
+        const parts: { d: DrawOps; fill: FillRule }[] = [];
+        for (const p of ps) {
+          const d = Array.isArray(p?.d) ? (p.d as unknown[]).map(Number) : [];
+          if (!d.length || !d.every(Number.isFinite)) return { ok: false, error: "สัญลักษณ์ในบล็อกไม่ถูกต้อง" };
+          try { eachOp(d, () => undefined); } catch { return { ok: false, error: "สัญลักษณ์ในบล็อกไม่ถูกต้อง" }; }
+          points += d.length;
+          parts.push({ d, fill: p.fill === "evenodd" ? "evenodd" : "nonzero" });
+        }
+        it.parts = parts; it.dw = dw; it.dh = dh;
+        it.label = String(ri.label ?? "").slice(0, 80);
       }
       items.push(it);
     }

@@ -41,3 +41,16 @@ export async function readAiFile(file: File): Promise<AiParseResult & { pages: n
     void doc.destroy().catch(() => undefined);
   }
 }
+
+/** ไฟล์ที่เปิด/ลากมาวางได้ทั้งหมด (.ai .pdf .svg) — ใช้ตอนเพิ่มไฟล์เข้างาน/เข้าคลังสัญลักษณ์ */
+export const ART_ACCEPT = ".ai,.pdf,.svg,application/pdf,application/postscript,application/illustrator,image/svg+xml";
+export const isSvgFile = (f: File) => /\.svg$/i.test(f.name) || f.type === "image/svg+xml";
+export const isArtFile = (f: File) => isSvgFile(f) || /\.(ai|pdf)$/i.test(f.name) || f.type === "application/pdf";
+/** เปิดไฟล์ .ai / .pdf / .svg → ชิ้นเวกเตอร์ (ไฟล์ SVG อ่านด้วย lib/block-print-svg) */
+export async function readArtFile(file: File): Promise<AiParseResult & { pages: number }> {
+  if (isSvgFile(file)) {
+    const { readSvgFile } = await import("@/lib/block-print-svg");
+    return readSvgFile(file);
+  }
+  return readAiFile(file);
+}

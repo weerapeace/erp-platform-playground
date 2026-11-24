@@ -3,11 +3,14 @@
  * 🧱 บล็อกพิมพ์ — แท็บ "จัดวางในบล็อก" · เจ้าของเลือกใน widget 2026-11-24 (ข้อเสนอ 1-6 · สีแยกส่วนบนจอ PDF ดำล้วน)
  *   ตั้งขนาดบล็อก → วางชิ้นจากไฟล์ .ai / ข้อความ (เลือกฟอนต์ แปลงเป็นเส้น) / สี่เหลี่ยม / วงกลม / เส้นตรง
  *   ย้าย: ลาก (เลื่อนทีละ 0.1 มม. ดูดขอบ/กึ่งกลางบล็อก) · ลูกศร 0.1 มม. (Shift = 1 มม.) · พิมพ์ X/Y
+ *   ปรับขนาด: จุดจับ 4 มุม (ล็อกสัดส่วน · Shift = ยืดอิสระ) + 4 ด้าน · โชว์ขนาดสดระหว่างลาก
+ *   ซูม: use-zoom.ts (Ctrl+ล้อเมาส์ · ปุ่ม · ถ่างนิ้ว) · กรอบภาพขยายได้อย่างเดียว ไม่หดระหว่างลาก (กันภาพกระตุก)
+ *   ชิ้นจากคลัง: SymbolPickerModal → ชิ้นชนิด vector (เก็บเส้นในบล็อกเลย ไม่ผูกกับชิ้นในงาน)
  *   เลือกหลายชิ้น: Shift+คลิก / ลากกรอบ · จัดแนว · กระจายระยะเท่ากัน · ทำซ้ำเป็นแถว · ลบ (Delete)
  *   ภาพนี้วาดระยะ/เส้นไกด์ชมพูด้วย layoutDims ตัวเดียวกับ PDF · ประวัติย้อนกลับ/บันทึก = ของหน้าทำงาน (editor.tsx)
  *   สูตรทั้งหมด lib/block-print-layout.ts · แปลงข้อความ lib/block-print-text.ts
  */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { downloadBlob } from "@/lib/pdf-merge-engine";
@@ -20,6 +23,9 @@ import {
 } from "@/lib/block-print-layout";
 import { textToOps, uploadFont, uploadedFontNames } from "@/lib/block-print-text";
 import { PieceThumb } from "./piece-thumb";
+import { useCanvasZoom, zoomLabel } from "./use-zoom";
+import { SymbolPickerModal } from "./symbols-ui";
+import type { BlockSymbol } from "@/lib/block-print-symbols";
 
 type Props = {
   code: string;
@@ -35,7 +41,6 @@ type Props = {
 };
 type Box = { x: number; y: number; w: number; h: number };
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
-const ZOOMS = [1, 1.5, 2, 3, 4, 6];
 const svgBlob = (s: string) => new Blob([s], { type: "image/svg+xml" });
 
 export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit, onLayouts, onPaper, onUnit, undo }: Props) {
@@ -43,11 +48,13 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   const [activeId, setActiveId] = useState<string | null>(layouts[0]?.id ?? null);
   const layout = layouts.find((l) => l.id === activeId) ?? layouts[0] ?? null;
   const [sel, setSel] = useState<string[]>([]);
-  const [zoom, setZoom] = useState(1);
   const [showDims, setShowDims] = useState(true);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [pickPiece, setPickPiece] = useState(false);
+  const [pickLib, setPickLib] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, !!layout);
   const [lock, setLock] = useState(true);
   const [exporting, setExporting] = useState(false);
   const pieceById = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
@@ -95,6 +102,15 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
     const c = center(p.w, p.h);
     addItem({ ...baseItem("piece", c.x, c.y, p.w, p.h), pieceId: p.id });
     setPickPiece(false);
+  };
+  const addSymbols = (syms: BlockSymbol[]) => {
+    if (!layout || !syms.length) return;
+    const added: BlockItem[] = syms.map((s, k) => {
+      const w = Number(s.w), h = Number(s.h), c = center(w, h);
+      return { ...baseItem("vector", c.x + k * 2, c.y + k * 2, w, h), parts: s.parts, dw: Number(s.ow), dh: Number(s.oh), label: s.name };
+    });
+    setItems((items) => [...items, ...added]); setSel(added.map((a) => a.id));
+    say(`วาง ${added.length} สัญลักษณ์จากคลังแล้ว`);
   };
   const addText = async () => {
     if (!layout) return;
@@ -196,8 +212,13 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
 
   // ───── ลาก / ลากกรอบเลือก ─────
   const svgRef = useRef<SVGSVGElement>(null);
-  const drag = useRef<{ kind: "move"; sx: number; sy: number; start: Map<string, { x: number; y: number }>; moved: boolean } | { kind: "box"; sx: number; sy: number; add: boolean } | null>(null);
-  const [live, setLive] = useState<Map<string, { x: number; y: number }> | null>(null);
+  type Live = Map<string, { x: number; y: number; w?: number; h?: number }>;
+  const drag = useRef<
+    | { kind: "move"; sx: number; sy: number; start: Map<string, { x: number; y: number }>; moved: boolean }
+    | { kind: "box"; sx: number; sy: number; add: boolean }
+    | { kind: "resize"; sx: number; sy: number; h: number; id: string; o: { x: number; y: number; w: number; h: number }; moved: boolean }
+    | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
   const [mq, setMq] = useState<Box | null>(null);
   const toSvg = (e: RPointerEvent) => {
     const m = svgRef.current?.getScreenCTM();
@@ -207,8 +228,14 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   };
   const onDown = (e: RPointerEvent<SVGSVGElement>) => {
     if (!layout) return;
-    const hit = (e.target as Element).closest("[data-item]");
     const p = toSvg(e);
+    const hd = (e.target as Element).closest("[data-handle]");
+    if (hd && canEdit && one) {
+      drag.current = { kind: "resize", sx: p.x, sy: p.y, h: Number(hd.getAttribute("data-handle")), id: one.id, o: { x: one.x, y: one.y, w: one.w, h: one.h }, moved: false };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    const hit = (e.target as Element).closest("[data-item]");
     if (hit) {
       const id = hit.getAttribute("data-item")!;
       let next = sel;
@@ -229,6 +256,13 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
     const d = drag.current; if (!d || !layout) return;
     const p = toSvg(e);
     if (d.kind === "box") { setMq({ x: Math.min(d.sx, p.x), y: Math.min(d.sy, p.y), w: Math.abs(p.x - d.sx), h: Math.abs(p.y - d.sy) }); return; }
+    if (d.kind === "resize") {
+      const it = layout.items.find((i) => i.id === d.id);
+      if (!it) return;
+      d.moved = true;
+      setLive(new Map([[d.id, resizeBox(d.o, d.h, p.x - d.sx, p.y - d.sy, !e.shiftKey && it.t !== "line")]]));
+      return;
+    }
     let dx = Math.round((p.x - d.sx) * 10) / 10, dy = Math.round((p.y - d.sy) * 10) / 10;
     if (!d.moved && Math.abs(dx) < 0.2 && Math.abs(dy) < 0.2) return;
     d.moved = true;
@@ -250,7 +284,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   const onUp = () => {
     const d = drag.current; drag.current = null;
     if (!d || !layout) return;
-    if (d.kind === "move") {
+    if (d.kind === "move" || d.kind === "resize") {
       const lv = live; setLive(null);
       if (d.moved && lv) setItems((items) => items.map((i) => (lv.has(i.id) ? { ...i, ...lv.get(i.id)! } : i)));
       return;
@@ -264,13 +298,31 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   // ───── ภาพ ─────
   const shown = useMemo(() => (layout ? { ...layout, items: layout.items.map((i) => (live?.has(i.id) ? { ...i, ...live.get(i.id)! } : i)) } : null), [layout, live]);
   const dims = useMemo(() => (shown ? layoutDims(shown, unit) : null), [shown, unit]);
+  // กรอบภาพ: คิดจากบล็อกที่บันทึกแล้ว (ไม่ใช่ระหว่างลาก) และขยายได้อย่างเดียว → ภาพไม่ขยับตามชิ้นที่ลาก (เคยกระตุก)
+  const frameMax = useRef<{ key: string; f: { x0: number; y0: number; x1: number; y1: number } } | null>(null);
   const frame = useMemo(() => {
     if (!layout) return null;
-    const e = dimsExtent(layoutDims({ ...layout, items: [] }, unit));
-    const ex = dims ? dimsExtent(dims) : e;
-    const x0 = Math.min(e.x0, ex.x0) - 3, y0 = Math.min(e.y0, ex.y0) - 3, x1 = Math.max(e.x1, ex.x1) + 3, y1 = Math.max(e.y1, ex.y1) + 3;
-    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
-  }, [layout, dims, unit]);
+    const key = `${layout.id}|${layout.w}|${layout.h}|${unit}`;
+    const e = dimsExtent(layoutDims(layout, unit));
+    for (const i of layout.items) { e.x0 = Math.min(e.x0, i.x); e.y0 = Math.min(e.y0, i.y); e.x1 = Math.max(e.x1, i.x + i.w); e.y1 = Math.max(e.y1, i.y + i.h); }   // ชิ้นที่ล้นขอบต้องยังเห็น
+    const prev = frameMax.current?.key === key ? frameMax.current.f : null;
+    const f = prev ? { x0: Math.min(prev.x0, e.x0), y0: Math.min(prev.y0, e.y0), x1: Math.max(prev.x1, e.x1), y1: Math.max(prev.y1, e.y1) } : e;
+    frameMax.current = { key, f };
+    return { x: f.x0 - 3, y: f.y0 - 3, w: f.x1 - f.x0 + 6, h: f.y1 - f.y0 + 6 };
+  }, [layout, unit]);
+  // มม. ต่อ 1 จุดบนจอ (ไว้ทำจุดจับ/ตัวหนังสือบนจอให้ขนาดคงที่)
+  const svgRefW = useRef(0);
+  const [pxW, setPxW] = useState(0);
+  useLayoutEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const upd = () => { const w = el.getBoundingClientRect().width; if (Math.abs(w - svgRefW.current) > 0.5) { svgRefW.current = w; setPxW(w); } };
+    upd();
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  const mmPerPx = frame && pxW ? frame.w / pxW : 0.1;
 
   if (!layout) {
     return (
@@ -285,7 +337,9 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   const outside = outsideIds(layout);
   const missing = missingPieceIds(layout, pieceById);
   const uLabel = unit === "cm" ? "ซม." : "มม.";
-  const sw = (frame?.w ?? 100) / 400;   // ความหนาเส้นบนจอ (มม. ต่อ ~1px ที่ซูม 100%)
+  const sw = mmPerPx;   // ความหนาเส้นบนจอ = 1 จุดบนจอ
+  const big = Math.max(1, zoom);   // ซูมเข้า → ตัวเลข/เส้นบอกระยะไม่ใหญ่ตาม
+  const liveOne = one ? shown?.items.find((i) => i.id === one.id) ?? one : null;
 
   return (
     <div className="space-y-2">
@@ -314,6 +368,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
           <ToolBtn label="สี่เหลี่ยม" onClick={() => addShape("rect")} />
           <ToolBtn label="วงกลม" onClick={() => addShape("ellipse")} />
           <ToolBtn label="เส้นตรง" onClick={() => addShape("line")} />
+          <ToolBtn label="ชิ้นจากคลัง" onClick={() => setPickLib(true)} strong />
           <div className="relative">
             <ToolBtn label="ชิ้นจากไฟล์ ▾" onClick={() => setPickPiece((v) => !v)} strong />
             {pickPiece && (
@@ -340,9 +395,10 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
         <label className="ml-1 flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={showDims} onChange={(e) => setShowDims(e.target.checked)} /> ระยะ + เส้นไกด์</label>
         <span className="ml-auto flex items-center gap-1 text-xs text-slate-600">
           ซูม
-          <button type="button" aria-label="ซูมออก" onClick={() => setZoom((z) => ZOOMS[Math.max(0, ZOOMS.indexOf(z) - 1)])} className="h-7 w-7 rounded-md border border-slate-200 bg-white">−</button>
-          <span className="w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-          <button type="button" aria-label="ซูมเข้า" onClick={() => setZoom((z) => ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(z) + 1)])} className="h-7 w-7 rounded-md border border-slate-200 bg-white">+</button>
+          <button type="button" aria-label="ซูมออก" onClick={() => zoomStep(-1)} className="h-7 w-7 rounded-md border border-slate-200 bg-white">−</button>
+          <span className="w-10 text-center tabular-nums">{zoomLabel(zoom)}</span>
+          <button type="button" aria-label="ซูมเข้า" onClick={() => zoomStep(1)} className="h-7 w-7 rounded-md border border-slate-200 bg-white">+</button>
+          <button type="button" onClick={() => zoomTo(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2">พอดีจอ</button>
         </span>
       </div>
 
@@ -355,21 +411,22 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_290px]">
         <section className="min-w-0 space-y-1.5">
-          <div className="max-h-[70vh] overflow-auto rounded-xl bg-slate-100 p-2 md:p-3">
+          <div ref={boxRef} className="max-h-[70vh] overflow-auto rounded-xl bg-slate-100 p-2 md:p-3">
             {frame && shown && (
               <svg ref={svgRef} viewBox={`${frame.x} ${frame.y} ${frame.w} ${frame.h}`} className="mx-auto block select-none bg-white"
                 style={{ width: `${zoom * 100}%`, touchAction: zoom > 1 ? "pan-x pan-y" : "none", cursor: "default" }}
                 role="img" aria-label={`บล็อก ${layout.name}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setLive(null); setMq(null); }}>
                 <rect x={0} y={0} width={layout.w} height={layout.h} fill="#f8fafc" />
                 {shown.items.map((it) => <ItemView key={it.id} it={it} pieceById={pieceById} sw={sw} selected={sel.includes(it.id)} />)}
+                {canEdit && liveOne && <ResizeHandles it={liveOne} mmPerPx={mmPerPx} unit={unit} showSize={!!live} />}
                 {showDims && dims && <>
                   {dims.lines.map((l, i) => (
                     <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} pointerEvents="none"
                       stroke={l.kind === "pos" ? POS_COLOR : l.kind === "dim" ? DIM_COLORS.dim : DIM_COLORS.guide}
-                      strokeWidth={l.kind === "dim" ? 0.3 : l.kind === "outline" ? 0.2 : 0.15} />
+                      strokeWidth={(l.kind === "dim" ? 0.3 : l.kind === "outline" ? 0.2 : 0.15) / big} />
                   ))}
                   {dims.texts.map((t, i) => (
-                    <text key={i} x={t.x} y={t.y} fontSize={DIM.text} fontFamily="Courier New, monospace" fill={DIM_COLORS.text} textAnchor="middle" pointerEvents="none"
+                    <text key={i} x={t.x} y={t.y} fontSize={DIM.text / big} fontFamily="Courier New, monospace" fill={DIM_COLORS.text} textAnchor="middle" pointerEvents="none"
                       transform={t.rotate ? `rotate(90 ${t.x} ${t.y})` : undefined}>{t.text}</text>
                   ))}
                 </>}
@@ -379,8 +436,8 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
             )}
           </div>
           <p className="text-xs text-slate-500">
-            <span className="hidden lg:inline">ลากชิ้นเพื่อย้าย (ดูดขอบ/กึ่งกลางบล็อก) · Shift+คลิก หรือลากกรอบที่ว่าง = เลือกหลายชิ้น · ลูกศร = เลื่อน 0.1 มม. (Shift 1 มม.) · Delete = ลบ · Ctrl+Z = ย้อนกลับ</span>
-            <span className="lg:hidden">แตะชิ้นเพื่อเลือก แล้วลากเพื่อย้าย · ซูมเข้าแล้วเลื่อนดูด้วยนิ้ว</span>
+            <span className="hidden lg:inline">ลากชิ้นเพื่อย้าย (ดูดขอบ/กึ่งกลางบล็อก) · ลากจุดมุม = ปรับขนาด (Shift = ยืดอิสระ) · Ctrl+ล้อเมาส์ = ซูม · Shift+คลิก หรือลากกรอบที่ว่าง = เลือกหลายชิ้น · ลูกศร = เลื่อน 0.1 มม. (Shift 1 มม.) · Delete = ลบ · Ctrl+Z = ย้อนกลับ</span>
+            <span className="lg:hidden">แตะชิ้นเพื่อเลือก แล้วลากเพื่อย้าย · ลากจุดมุม = ปรับขนาด · ถ่าง 2 นิ้ว = ซูม</span>
             <span className="ml-1">· สีใช้แยกส่วนบนจอ — PDF/SVG เป็นสีดำล้วน</span>
           </p>
           <div className="min-h-[18px] text-sm text-indigo-700" aria-live="polite">{busy ?? msg}</div>
@@ -480,7 +537,56 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
           )}
         </aside>
       </div>
+      <SymbolPickerModal open={pickLib} onClose={() => setPickLib(false)} onPick={addSymbols} unit={unit} title="วางสัญลักษณ์จากคลังลงบล็อก" />
     </div>
+  );
+}
+
+/** ลากจุดจับ (0-7 ตามเข็มจากมุมซ้ายบน) → กรอบใหม่ · lock = มุมล็อกสัดส่วน */
+const HANDLES: [number, number][] = [[0, 0], [0.5, 0], [1, 0], [1, 0.5], [1, 1], [0.5, 1], [0, 1], [0, 0.5]];
+function resizeBox(o: { x: number; y: number; w: number; h: number }, h: number, dx: number, dy: number, lock: boolean) {
+  const [a, b] = HANDLES[h];
+  const min = 0.2;
+  let x0 = o.x, y0 = o.y, x1 = o.x + o.w, y1 = o.y + o.h;
+  if (a === 0) x0 = Math.min(x1 - min, o.x + dx);
+  if (a === 1) x1 = Math.max(x0 + min, x1 + dx);
+  if (b === 0) y0 = Math.min(y1 - min, o.y + dy);
+  if (b === 1) y1 = Math.max(y0 + min, y1 + dy);
+  let w = x1 - x0, hh = y1 - y0;
+  if (lock && a !== 0.5 && b !== 0.5 && o.w > 0 && o.h > 0) {
+    const k = Math.max(w / o.w, hh / o.h);
+    w = o.w * k; hh = o.h * k;
+    if (a === 0) x0 = x1 - w;
+    if (b === 0) y0 = y1 - hh;
+  }
+  const t = (v: number) => Math.round(v * 100) / 100;
+  return { x: t(x0), y: t(y0), w: t(w), h: t(hh) };
+}
+
+function ResizeHandles({ it, mmPerPx, unit, showSize }: { it: BlockItem; mmPerPx: number; unit: BlockUnit; showSize: boolean }) {
+  const s = 9 * mmPerPx, hit = 22 * mmPerPx, fs = 11 * mmPerPx;   // มองเห็น 9 จุด · กดได้ 22 จุด (นิ้วกดง่าย)
+  const cursors = ["nwse", "ns", "nesw", "ew", "nwse", "ns", "nesw", "ew"];
+  const u = unit === "cm" ? "ซม." : "มม.";
+  const label = `${toUnit(it.w, unit)} × ${toUnit(it.h, unit)} ${u}`;
+  return (
+    <g>
+      {HANDLES.map(([a, b], i) => {
+        if ((it.w === 0 && a === 0.5) || (it.h === 0 && b === 0.5)) return null;
+        const cx = it.x + a * it.w, cy = it.y + b * it.h;
+        return (
+          <g key={i} data-handle={i} style={{ cursor: `${cursors[i]}-resize` }}>
+            <rect x={cx - hit / 2} y={cy - hit / 2} width={hit} height={hit} fill="rgba(255,255,255,0.01)" />
+            <rect x={cx - s / 2} y={cy - s / 2} width={s} height={s} rx={s * 0.15} fill="#fff" stroke="#2563eb" strokeWidth={mmPerPx * 1.5} />
+          </g>
+        );
+      })}
+      {showSize && (
+        <g pointerEvents="none">
+          <rect x={it.x + it.w + s} y={it.y + it.h + s * 0.4} width={label.length * fs * 0.55 + fs} height={fs * 1.6} rx={fs * 0.3} fill="#1e3a8a" />
+          <text x={it.x + it.w + s + fs * 0.5} y={it.y + it.h + s * 0.4 + fs * 1.15} fontSize={fs} fill="#fff" fontFamily="sans-serif">{label}</text>
+        </g>
+      )}
+    </g>
   );
 }
 

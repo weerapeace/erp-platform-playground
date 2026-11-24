@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEven
 import { ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { shortcutKey } from "@/lib/shortcut-key";
+import { useCanvasZoom, ZOOM_LEVELS } from "./use-zoom";
 import {
   GROUP_DEFAULT, GROUP_GAP_MAX, KIND_NAME, applyGrouping, atomsOf, autoGroup, byPosition, groupsFromPieces, opsToSvgPath,
   type BlockPiece, type GroupOpts, type PieceGroup,
@@ -25,12 +26,13 @@ const unionBox = (bs: Box[]): Box => {
 };
 const hits = (a: Box, r: Box) => a.ax <= r.ax + r.ow && a.ax + a.ow >= r.ax && a.ay <= r.ay + r.oh && a.ay + a.oh >= r.ay;
 const sameGroups = (a: PieceGroup[], b: PieceGroup[]) => JSON.stringify(a) === JSON.stringify(b);
-const ZOOMS = [1, 1.5, 2, 3, 4, 6, 8];
 
-export function BlockPieceGrouper({ pieces, onDone, onCancel }: {
+/** ใช้ได้ 2 ที่: หลังเปิดไฟล์ในงาน (ไปหน้าตั้งขนาด) · ใส่ไฟล์เข้าคลังสัญลักษณ์ (ไปตั้งชื่อ + บันทึก) — เปลี่ยนข้อความปุ่ม/ขั้นได้ */
+export function BlockPieceGrouper({ pieces, onDone, onCancel, doneLabel = "ต่อไป: ตั้งขนาด", backLabel = "กลับหน้าตั้งขนาด", nextStep = "ตั้งขนาด" }: {
   pieces: BlockPiece[];
   onDone: (pieces: BlockPiece[]) => void;
   onCancel: () => void;
+  doneLabel?: string; backLabel?: string; nextStep?: string;
 }) {
   // เส้นเดี่ยวทั้งหมด (ชิ้นที่รวมไว้แล้วแตกเป็นเส้นเดิม) — ไม่เปลี่ยนระหว่างอยู่หน้านี้
   const [start] = useState(() => groupsFromPieces(pieces));
@@ -73,19 +75,18 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel }: {
 
   // ซูม: เริ่มที่ขนาดที่ชิ้นทั่วไปใหญ่พอให้คลิกได้ (~28px) · ปุ่ม − / + / พอดีจอ
   const boxRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
+  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef);
   useEffect(() => {
     const cw = boxRef.current?.clientWidth ?? 0;
     const sizes = views.filter((v) => !v.kind).map((v) => Math.max(v.box.ow, v.box.oh)).sort((a, b) => a - b);
     if (!cw || !sizes.length) return;
     const med = sizes[Math.floor(sizes.length / 2)];
     const want = 28 / (med * (cw / vb.w));
-    setZoom(ZOOMS.find((z) => z >= want) ?? ZOOMS[ZOOMS.length - 1]);
+    zoomTo(ZOOM_LEVELS.find((z) => z >= want) ?? ZOOM_LEVELS[ZOOM_LEVELS.length - 1]);
     // ตั้งครั้งเดียวตอนเปิดหน้า
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const fs = Math.max(vb.w, vb.h) / 55 / Math.sqrt(zoom);
-  const zoomStep = (dir: 1 | -1) => setZoom((z) => { const i = ZOOMS.indexOf(z); return ZOOMS[Math.min(ZOOMS.length - 1, Math.max(0, (i < 0 ? 0 : i) + dir))]; });
 
   const commit = (next: PieceGroup[], note = "") => {
     if (sameGroups(next, groups)) return;
@@ -191,15 +192,15 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel }: {
   return (
     <div className="mx-auto max-w-[1400px] space-y-3 p-3 pb-24 md:p-5 lg:pb-5">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => (changed ? setAskCancel(true) : onCancel())} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm text-slate-600 hover:bg-slate-100"><Icon name="back" /> กลับหน้าตั้งขนาด</button>
+        <button type="button" onClick={() => (changed ? setAskCancel(true) : onCancel())} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm text-slate-600 hover:bg-slate-100"><Icon name="back" /> {backLabel}</button>
         <span className="inline-flex items-center gap-1.5 text-xs">
           <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-medium text-indigo-700">1 เลือกชิ้น</span>
           <span className="text-slate-400">›</span>
-          <span className="text-slate-400">2 ตั้งขนาด</span>
+          <span className="text-slate-400">2 {nextStep}</span>
         </span>
         <span className="text-xs text-slate-500">ในไฟล์มี {atoms.length} เส้น → {views.length} ชิ้น · ส่งต่อ {onCount}</span>
         <button type="button" onClick={done} className="ml-auto hidden h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700 lg:inline-flex">
-          ต่อไป: ตั้งขนาด {onCount} ชิ้น&nbsp;→</button>
+          {doneLabel} {onCount} ชิ้น&nbsp;→</button>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -215,12 +216,12 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel }: {
               <button type="button" onClick={() => zoomStep(-1)} aria-label="ซูมออก" className="h-7 w-7 rounded-md border border-slate-200 bg-white hover:bg-slate-50">−</button>
               <span className="w-11 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
               <button type="button" onClick={() => zoomStep(1)} aria-label="ซูมเข้า" className="h-7 w-7 rounded-md border border-slate-200 bg-white hover:bg-slate-50">+</button>
-              <button type="button" onClick={() => setZoom(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">พอดีจอ</button>
+              <button type="button" onClick={() => zoomTo(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">พอดีจอ</button>
               {backdrop.size > 0 && <span className="ml-2 hidden text-slate-500 sm:inline">สีเทาอ่อน = ชิ้นพื้นใหญ่ (เลือกจากรายการด้านขวา)</span>}
             </div>
             <div ref={boxRef} className="max-h-[65vh] overflow-auto rounded bg-white">
               <svg ref={svgRef} viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className={`mx-auto block select-none ${zoom === 1 ? "max-h-[64vh]" : ""}`}
-                style={{ cursor: "crosshair", width: `${zoom * 100}%`, touchAction: zoom > 1 ? "pan-x pan-y" : undefined }}
+                style={{ cursor: "crosshair", width: `${zoom * 100}%`, touchAction: "pan-x pan-y" }}
                 role="img" aria-label="ภาพเส้นทั้งหมดในไฟล์" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setMq(null); }}>
                 {drawOrder.map((v) => {
                   const on = sel.has(v.key), back = backdrop.has(v.key);
@@ -268,7 +269,7 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel }: {
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 lg:hidden">
         <button type="button" onClick={done} className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-indigo-600 text-sm font-medium text-white">
-          ต่อไป: ตั้งขนาด {onCount} ชิ้น&nbsp;→</button>
+          {doneLabel} {onCount} ชิ้น&nbsp;→</button>
       </div>
 
       <ConfirmDialog open={askCancel} onClose={() => setAskCancel(false)} onConfirm={() => { setAskCancel(false); onCancel(); }}

@@ -12,7 +12,9 @@ import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
-import { AI_ACCEPT, readAiFile } from "@/lib/block-print-ai";
+import { ART_ACCEPT, readArtFile } from "@/lib/block-print-ai";
+import Link from "next/link";
+import { SYMBOLS_HREF } from "./symbols-ui";
 import { GROUP_DEFAULT, applyGrouping, autoGroup, piecesForSave } from "@/lib/block-print";
 import { API, api, jobHref, nameFromFile, skippedNote, thaiDate, type Job, type JobRow } from "./shared";
 
@@ -39,7 +41,7 @@ export function BlockPrintList() {
   const openFile = async (file: File) => {
     setBusy(`กำลังอ่านไฟล์ ${file.name}…`);
     try {
-      const res = await readAiFile(file);
+      const res = await readArtFile(file);
       if (!res.pieces.length) {
         const notes = skippedNote(res.skipped);
         throw new Error(`ไม่พบชิ้นเวกเตอร์ที่เติมสีในไฟล์นี้${notes.length ? ` · ${notes[0]}` : ""}`);
@@ -109,6 +111,7 @@ export function BlockPrintList() {
           <h1 className="flex items-center gap-2 text-xl font-semibold text-slate-900"><Icon name="ruler" /> บล็อกพิมพ์</h1>
           <p className="mt-1 text-sm text-slate-500">เปิดไฟล์ .ai → เลือกชิ้นเวกเตอร์ → ตั้งขนาดจริง → ส่งออก PDF (ลาย + เส้นบอกขนาด) ส่งโรงงานทำบล็อก</p>
         </div>
+        <Link href={SYMBOLS_HREF} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon name="library" /> คลังสัญลักษณ์</Link>
         <button type="button" onClick={() => setTrash((t) => !t)}
           className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${trash ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
           <Icon name="trash" /> {trash ? "กลับไปงานทั้งหมด" : "ถังขยะ"}
@@ -116,10 +119,10 @@ export function BlockPrintList() {
         {canEdit && !trash && (
           <button type="button" disabled={!!busy} onClick={() => fileRef.current?.click()}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60">
-            <Icon name="upload" /> {busy ? "กำลังเปิด…" : "เปิดไฟล์ .ai"}
+            <Icon name="upload" /> {busy ? "กำลังเปิด…" : "เปิดไฟล์ .ai / .svg"}
           </button>
         )}
-        <input ref={fileRef} type="file" accept={AI_ACCEPT} className="hidden"
+        <input ref={fileRef} type="file" accept={ART_ACCEPT} className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void openFile(f); }} />
       </div>
 

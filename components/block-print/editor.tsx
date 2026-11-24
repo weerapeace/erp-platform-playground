@@ -8,6 +8,8 @@
  *   มือถือ: ภาพอยู่บน · รายการชิ้นเป็นปุ่มแนวนอน · แผงขนาดอยู่ล่าง · ปุ่มบันทึก/PDF ติดล่างจอ
  *   แท็บ "จัดวางในบล็อก" (layout-editor.tsx): ตั้งขนาดบล็อก วางชิ้น/ข้อความ/รูปทรงตามตำแหน่ง — อยู่ในเอกสารเดียวกัน (ย้อนกลับ/บันทึกร่วมกัน)
  *   SVG: ชิ้นนี้ (แผงขวา) · ทุกชิ้นที่ติ๊ก (zip ด้วย lib/zip ของกลาง)
+ *   เพิ่มไฟล์: ปุ่ม "เพิ่มไฟล์" หรือลากไฟล์ .ai/.pdf/.svg มาวางตรงไหนของหน้าก็ได้ → ชิ้นใหม่ต่อท้าย → หน้าเลือกชิ้น (Ctrl+Z ย้อนได้)
+ *   คลังสัญลักษณ์: "เพิ่มจากคลัง" (SymbolPickerModal) · "บันทึกเข้าคลัง" ชิ้นที่เลือก (SaveSymbolsModal)
  *   ขั้นเลือกชิ้น (grouper.tsx): เปิดไฟล์ใหม่ (?step=group) หรือกด "จัดกลุ่มชิ้นใหม่" → รวม/แยกชิ้น → กด "ต่อไป" = ใช้ + บันทึกให้เลย
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +33,11 @@ import { BlockLayoutEditor } from "./layout-editor";
 import { PieceThumb } from "./piece-thumb";
 import { pieceSvg, svgFileName, type BlockLayout } from "@/lib/block-print-layout";
 import { buildZip } from "@/lib/zip";
+import { ART_ACCEPT, isArtFile, readArtFile } from "@/lib/block-print-ai";
+import { GROUP_DEFAULT, appendOffset, applyGrouping, autoGroup, shiftPiece } from "@/lib/block-print";
+import { pieceFromSymbol, symbolFromPiece, type BlockSymbol, type SymbolInput } from "@/lib/block-print-symbols";
+import { SaveSymbolsModal, SymbolPickerModal } from "./symbols-ui";
+import { uid } from "@/lib/block-print-layout";
 
 type Doc = { name: string; unit: BlockUnit; paper: BlockPaper; pieces: BlockPiece[]; layouts: BlockLayout[] };
 const docKey = (d: Doc | null) => (d ? JSON.stringify(d) : "");
@@ -47,6 +54,11 @@ export function BlockPrintEditor({ id }: { id: string }) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
+  const [pickLib, setPickLib] = useState(false);
+  const [saveItems, setSaveItems] = useState<SymbolInput[] | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [reading, setReading] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<"size" | "group">("size");
   const [tab, setTab] = useState<"size" | "layout">("size");
   const past = useRef<Doc[]>([]);
@@ -126,6 +138,53 @@ export function BlockPrintEditor({ id }: { id: string }) {
     if (n) void save(n, `จัดกลุ่มแล้ว · ${ps.filter((p) => p.on).length} ชิ้นที่ส่งออก`);
   };
 
+  /** เพิ่มไฟล์เข้างานนี้ → ชิ้นใหม่ต่อท้าย (จัดกลุ่มให้ก่อน) → เปิดหน้าเลือกชิ้นให้ตรวจ */
+  const addFiles = async (files: File[]) => {
+    if (!doc || !canEdit || reading) return;
+    const ok = files.filter(isArtFile);
+    if (!ok.length) { toast.error("เพิ่มได้เฉพาะไฟล์ .ai / .pdf / .svg"); return; }
+    let pieces = doc.pieces;
+    const msgs: string[] = [];
+    let added = 0;
+    for (const f of ok) {
+      setReading(`กำลังอ่านไฟล์ ${f.name}…`);
+      try {
+        const res = await readArtFile(f);
+        if (!res.pieces.length) { msgs.push(`${f.name}: ไม่พบชิ้นเวกเตอร์ที่เติมสี${skippedNote(res.skipped)[0] ? ` · ${skippedNote(res.skipped)[0]}` : ""}`); continue; }
+        const grouped = applyGrouping(res.pieces, autoGroup(res.pieces, GROUP_DEFAULT));
+        const o = appendOffset(pieces, grouped);
+        const prefix = `${uid("f")}-`;
+        pieces = [...pieces, ...grouped.map((p) => shiftPiece(p, o.dx, o.dy, prefix))];
+        added += grouped.length;
+        msgs.push(...skippedNote(res.skipped).map((n) => `${f.name}: ${n}`));
+      } catch (e) { msgs.push(`${f.name}: ${e instanceof Error ? e.message : "เปิดไฟล์ไม่ได้"}`); }
+    }
+    setReading(null);
+    setNotes(msgs);
+    if (!added) { toast.error("ไม่ได้เพิ่มชิ้นใหม่ — ดูรายละเอียดในกล่องสีเหลือง"); return; }
+    apply((d) => ({ ...d, pieces }));
+    setTab("size");
+    setStep("group");
+    toast.success(`เพิ่ม ${added} ชิ้นจาก ${ok.length} ไฟล์ — ตรวจรวม/แยกชิ้นแล้วกด "ต่อไป"`);
+  };
+  /** เพิ่มจากคลังสัญลักษณ์ → ชิ้นใหม่ (ขนาดที่ใช้บ่อย) ต่อท้าย */
+  const addFromLibrary = (syms: BlockSymbol[]) => {
+    if (!doc || !syms.length) return;
+    let pieces = doc.pieces;
+    const added: string[] = [];
+    for (const s of syms) {
+      const p = pieceFromSymbol({ name: s.name, parts: s.parts, w: Number(s.w), h: Number(s.h) }, uid("s"), 0, 0);
+      if (!p) continue;
+      const o = appendOffset(pieces, [p]);
+      const q = shiftPiece(p, o.dx, o.dy, "");
+      pieces = [...pieces, q]; added.push(q.id);
+    }
+    if (!added.length) return;
+    apply((d) => ({ ...d, pieces }));
+    setSel(added);
+    toast.action(`เพิ่ม ${added.length} ชิ้นจากคลังแล้ว`, "ย้อนกลับ", () => keyRef.current.undo());
+  };
+
   const exportPdf = async () => {
     if (!doc || !job || exporting) return;
     setExporting(true);
@@ -191,7 +250,21 @@ export function BlockPrintEditor({ id }: { id: string }) {
   const onCount = pieces.filter((p) => p.on).length;
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-3 p-3 pb-24 md:p-5 lg:pb-5">
+    <div className="relative mx-auto max-w-[1400px] space-y-3 p-3 pb-24 md:p-5 lg:pb-5"
+      onDragOver={(e) => { if (!canEdit || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); if (!dropping) setDropping(true); }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+      onDrop={(e) => { if (!canEdit) return; e.preventDefault(); setDropping(false); void addFiles(Array.from(e.dataTransfer.files)); }}>
+      {(dropping || reading) && (
+        <div className="pointer-events-none fixed inset-0 z-40 flex items-center justify-center bg-indigo-600/10 backdrop-blur-[1px]">
+          <div className="rounded-2xl border-2 border-dashed border-indigo-400 bg-white px-8 py-6 text-center shadow-lg">
+            <div className="text-base font-medium text-indigo-700">{reading ?? "วางไฟล์เพื่อเพิ่มชิ้นเข้างานนี้"}</div>
+            {!reading && <div className="mt-1 text-sm text-slate-500">.ai · .pdf · .svg — ชิ้นเดิมกับขนาดที่ตั้งไว้ไม่เปลี่ยน</div>}
+          </div>
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept={ART_ACCEPT} multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; void addFiles(fs); }} />
+      <SymbolPickerModal open={pickLib} onClose={() => setPickLib(false)} onPick={addFromLibrary} unit={doc.unit} title="เพิ่มชิ้นจากคลังสัญลักษณ์" />
+      <SaveSymbolsModal open={!!saveItems} onClose={() => setSaveItems(null)} items={saveItems ?? []} />
       {/* หัวหน้า */}
       <div className="flex flex-wrap items-center gap-2">
         <Link href={LIST_HREF} className="inline-flex h-9 items-center gap-1 rounded-lg px-2 text-sm text-slate-600 hover:bg-slate-100"><Icon name="back" /> งานทั้งหมด</Link>
@@ -236,6 +309,10 @@ export function BlockPrintEditor({ id }: { id: string }) {
             {canEdit && <button type="button" className="text-xs text-indigo-600 hover:underline" onClick={() => setPieces((ps) => { const all = ps.every((p) => p.on); return ps.map((p) => ({ ...p, on: !all })); })}>
               {pieces.every((p) => p.on) ? "เอาออกทั้งหมด" : "ติ๊กทั้งหมด"}</button>}
           </div>
+          {canEdit && <div className="mx-2 mt-2 grid grid-cols-2 gap-1.5">
+            <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50"><Icon name="add" /> เพิ่มไฟล์</button>
+            <button type="button" onClick={() => setPickLib(true)} className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50"><Icon name="library" /> เพิ่มจากคลัง</button>
+          </div>}
           {canEdit && <button type="button" onClick={() => setStep("group")}
             className="mx-2 mt-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-lg border border-dashed border-indigo-300 text-xs text-indigo-700 hover:bg-indigo-50">
             <Icon name="link" /> จัดกลุ่มชิ้นใหม่ (รวม / แยกชิ้น)</button>}
@@ -302,6 +379,8 @@ export function BlockPrintEditor({ id }: { id: string }) {
                 className="h-9 rounded-lg border border-indigo-200 bg-indigo-50 text-sm text-indigo-700 hover:bg-indigo-100">รวม {sel.length} ชิ้นที่เลือกเป็นชิ้นเดียว</button>}
             </div>}
           </>}
+          {primary && canEdit && <button type="button" onClick={() => setSaveItems(pieces.filter((p) => sel.includes(p.id)).map((p) => symbolFromPiece(p)))}
+            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-sm text-indigo-700 hover:bg-indigo-100"><Icon name="bookmark" /> บันทึกเข้าคลัง{sel.length > 1 ? ` (${sel.length} ชิ้น)` : ""}</button>}
           {primary && <button type="button" onClick={() => exportPieceSvg(primary)} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"><Icon name="download" /> SVG ชิ้นนี้</button>}
           <button type="button" onClick={exportAllSvg} className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50"><Icon name="download" /> SVG ทุกชิ้นที่ติ๊ก (zip)</button>
           <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="hidden flex-col lg:flex" />

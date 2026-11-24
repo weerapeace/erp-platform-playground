@@ -226,6 +226,14 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
     raw.push({ d, fill: EO.has(paint) ? "evenodd" : "nonzero" });
   }
 
+  return piecesFromRaw(raw, pageW, pageH, skipped);
+}
+
+/**
+ * เส้นดิบ (หน่วย มม. แกน y ชี้ลง) → ชิ้น: กรอบจริง · เลื่อนมุมซ้ายบนไป 0,0 · เรียงตามตำแหน่ง · ตั้งชื่อ · พื้นหลังเต็มหน้า = ไม่ติ๊ก
+ *   ใช้ร่วม: ไฟล์ .ai/.pdf (piecesFromOperatorList) · ไฟล์ .svg (lib/block-print-svg)
+ */
+export function piecesFromRaw(raw: { d: DrawOps; fill: FillRule }[], pageW: number, pageH: number, skipped: AiSkipped): AiParseResult {
   const pieces: BlockPiece[] = [];
   for (const r of raw) {
     const b = opsBox(r.d);
@@ -242,7 +250,8 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
   pieces.forEach((p, i) => {
     p.id = `p${i + 1}`;
     // พื้นหลังสีเต็มอาร์ตบอร์ด (เจอในไฟล์จริง) → เก็บไว้แต่ไม่ติ๊กส่งออก ไม่นับเป็นลำดับชิ้น
-    if (p.ow >= pageW * 0.9 && p.oh >= pageH * 0.9) { p.on = false; p.name = KIND_NAME.background; p.kind = "background"; skipped.backgrounds!++; return; }
+    // ไฟล์ที่มีชิ้นเดียว (เช่น SVG สัญลักษณ์ตัวเดียวพอดีกรอบ) ไม่นับเป็นพื้นหลัง
+    if (pieces.length > 1 && p.ow >= pageW * 0.9 && p.oh >= pageH * 0.9) { p.on = false; p.name = KIND_NAME.background; p.kind = "background"; skipped.backgrounds!++; return; }
     p.name = `ชิ้น ${++n}`;
   });
   return { pieces, skipped, page: { w: r3(pageW), h: r3(pageH) } };
@@ -392,6 +401,25 @@ export function autoGroup(atoms: BlockPiece[], opts: GroupOpts): PieceGroup[] {
   const groups = new Map<number, BlockPiece[]>();
   live.forEach((a, i) => { const r = find(i); const arr = groups.get(r); if (arr) arr.push(a); else groups.set(r, [a]); });
   return [...[...groups.values()].map((arr) => ({ ids: arr.map((a) => a.id), on: arr.some((a) => a.on) })), ...side];
+}
+
+/**
+ * เลื่อนชิ้น (รวมเส้นย่อย) ไป dx,dy ในพิกัดไฟล์ + เติมคำนำหน้ารหัส — ใช้ตอนเพิ่มไฟล์/สัญลักษณ์เข้างานเดิม
+ *   (ไม่ให้ทับตำแหน่งชิ้นเดิมในหน้าเลือกชิ้น และรหัสไม่ชนกัน)
+ */
+export function shiftPiece(p: BlockPiece, dx: number, dy: number, idPrefix: string): BlockPiece {
+  return {
+    ...p, id: `${idPrefix}${p.id}`, ax: r3(p.ax + dx), ay: r3(p.ay + dy),
+    ...(p.parts ? { parts: p.parts.map((q) => ({ ...q, id: `${idPrefix}${q.id}`, ax: r3(q.ax + dx), ay: r3(q.ay + dy) })) } : {}),
+  };
+}
+/** ตำแหน่งวางของใหม่ต่อท้ายชิ้นเดิม (ขวาสุด + 10 มม. แถวบนสุด) → dx,dy สำหรับ shiftPiece */
+export function appendOffset(current: BlockPiece[], incoming: BlockPiece[]): { dx: number; dy: number } {
+  const cur = current.flatMap(atomsOf), inc = incoming.flatMap(atomsOf);
+  if (!inc.length) return { dx: 0, dy: 0 };
+  const ix = Math.min(...inc.map((a) => a.ax)), iy = Math.min(...inc.map((a) => a.ay));
+  if (!cur.length) return { dx: -ix, dy: -iy };
+  return { dx: Math.max(...cur.map((a) => a.ax + a.ow)) + 10 - ix, dy: Math.min(...cur.map((a) => a.ay)) - iy };
 }
 
 /** ส่งขึ้นเซิร์ฟเวอร์: ชิ้นรวมไม่ต้องส่งเส้นรวม (เซิร์ฟเวอร์สร้างใหม่จาก parts เองใน cleanPieces) — ข้อมูลที่ส่งเล็กลงครึ่งหนึ่ง */

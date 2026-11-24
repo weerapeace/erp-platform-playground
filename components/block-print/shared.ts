@@ -30,7 +30,7 @@ export const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 
 /** ชื่องานตั้งต้นจากชื่อไฟล์ (ตัดนามสกุล) */
-export const nameFromFile = (fileName: string) => fileName.replace(/\.(ai|pdf)$/i, "").trim().slice(0, 120) || "งานบล็อกใหม่";
+export const nameFromFile = (fileName: string) => fileName.replace(/\.(ai|pdf|svg)$/i, "").trim().slice(0, 120) || "งานบล็อกใหม่";
 
 /** ข้อความสรุปสิ่งที่ข้ามตอนเปิดไฟล์ */
 export function skippedNote(s: { strokes: number; texts: number; images: number; whites: number; backgrounds?: number }): string[] {
