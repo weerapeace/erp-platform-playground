@@ -650,6 +650,20 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "ป้ายสถานะ (ร่าง/อนุมัติ/ไม่อนุมัติ) — ห้ามใช้ blue-*/violet-* เพราะจะเปลี่ยนตามธีม · เว็บร้าน (storefront) มีระบบธีมของตัวเอง (lib/website-theme)",
   },
   {
+    key: "erp-theme-config", label: "ค่าตั้งธีม 9 หมวด + ธีมสำเร็จรูป + เช็กสีอ่านยาก", code: "lib/erp-theme-config", category: "system",
+    source: { path: "lib/erp-theme-config" },
+    what: "normalizeThemeConfig (กรองค่าธีมให้ครบ/อยู่ในช่วง) · THEME_PRESETS 8 ชุด · themeIssues + autoFixContrast (เตือน/แก้สีอ่านยาก) · paletteFromPixels (ดูดสีจากรูป) · mobileLiteConfig (โหมดเบามือถือ) · themeCssVars (ตัวแปร CSS ทั้งชุด) · ข้อมูลอยู่ตาราง erp_themes / erp_theme_versions ผ่าน /api/themes",
+    when: "ทุกที่ที่อ่าน/เขียน/วาดธีมกลาง ERP (คลังธีม · ธีมของโมดูลเฟส 3 · ค่าส่วนตัวเฟส 5)",
+    notWhen: "ธีมแบรนด์บนแดชบอร์ดออกแบบ (lib/brand-theme — จะรวมเข้ามาเฟส 6) · ธีมเว็บร้าน (lib/website-theme)",
+  },
+  {
+    key: "erp-theme-preview", label: "พรีวิวธีม + แผงปรับธีม 9 หมวด", code: "ThemePreview · ThemeEditorPanel", category: "feature",
+    source: { path: "components/erp-theme/preview", names: ["ThemePreview"] },
+    what: "หน้าตัวอย่าง ERP ที่วาดตามค่าธีมครบ (แถบบน เมนูข้าง แบนเนอร์ การ์ดตัวเลข ตาราง ช่องกรอก ป๊อปอัป มาสคอต แอนิเมชัน) PC/มือถือ/มืด · compact = การ์ดย่อ · แผงปรับ components/erp-theme/editor-panel · พรีวิวหน้าจริงผ่าน iframe + ThemePreviewBridge (app/layout)",
+    when: "หน้าที่ต้องให้ผู้ใช้เห็นหน้าตาธีมก่อนเลือก (คลังธีม · เลือกธีมให้โมดูล · ตั้งค่าส่วนตัว)",
+    notWhen: "พรีวิวธีมเว็บร้าน (ใช้พรีวิว iframe ของเว็บร้าน) · ธีมแบรนด์ (BrandThemeBuilder)",
+  },
+  {
     key: "step-history", label: "ปุ่มย้อน (Back / ปุ่มเมาส์) ย้อนทีละก้าวในหน้า", code: "useStepHistory", category: "system",
     source: { path: "lib/use-step-history" },
     what: "หน้าที่เดินลึกด้วย state (แฟ้ม → อัลบั้ม → อัลบั้มย่อย · กลุ่ม → แท็ก · แบรนด์ → รุ่น) กด Back ของเบราว์เซอร์/ปุ่มย้อนของเมาส์/มือถือ แล้วถอยทีละชั้น ไม่เด้งออกหน้า · push = จดก้าว · replace = จดหน้าตาตอนนี้ · readStep/patchStep = อ่าน/แก้ก้าวปัจจุบัน (refresh แล้วอยู่ที่เดิม) · ข้ามการปิดลิ้นชักของกลางให้เอง",

@@ -13,6 +13,7 @@ import { SilentBoundary } from "@/components/silent-boundary";
 import { AppLockGate } from "@/components/app-access-gate";
 import { BRAND } from "@/components/brand";
 import { SplitScreenHost } from "@/components/split-screen";
+import { ThemePreviewBridge } from "@/components/erp-theme/preview-bridge";
 
 export const metadata: Metadata = {
   title: {
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider><LanguageProvider><ToastProvider><SplitScreenHost><AppLockGate>{children}</AppLockGate></SplitScreenHost><SilentBoundary name="work-popup"><WorkPopupHostLazy /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
         <DatePickerOnClick />
+        <ThemePreviewBridge />
       </body>
     </html>
   );

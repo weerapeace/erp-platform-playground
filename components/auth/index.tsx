@@ -83,6 +83,8 @@ export type Permission =
   | "admin.users" | "admin.audit_log"
   // 💬 ห้องแชทรวม /chat (lib/chat · docs/chat-inbox.md) — สิทธิ์จริงอ่านจาก DB
   | "chat.view" | "chat.reply" | "chat.assign" | "chat.settings"
+  // 🎨 ธีมกลาง ERP (/admin/themes · lib/erp-theme-config · docs/erp-theme.md)
+  | "theme.view" | "theme.edit" | "theme.publish" | "theme.assign"
   // 🔐 สิทธิ์เว็บไซต์ (lib/website-access): website.access / website.<กลุ่ม>.view|edit / website.shop.<slug>
   | `website.${string}`;
 

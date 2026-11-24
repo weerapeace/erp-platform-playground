@@ -33,6 +33,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/chat", prefixes: ["chat."] },   // ห้องแชทรวม — ดู / ตอบ / มอบหมาย / ตั้งค่า (docs/chat-inbox.md)
   { href: "/admin/app-manager", keys: ["admin.users"] },   // จัดการแอป (ทุกแอป + ถังขยะเมนู) — เหมือน /admin/menu
   { href: "/admin/line", keys: ["admin.users"] },   // จัดการ LINE (ไลน์บริษัท · บอท/กลุ่มแจ้งเตือน · คนที่ผูกไลน์ · ประวัติ)
+  { href: "/admin/themes", prefixes: ["theme."] },   // คลังธีม (ธีมกลาง ERP · lib/erp-theme-config · docs/erp-theme.md)
   { href: "/website", prefixes: ["website."] },
   { href: "/marketing/skus", prefixes: ["marketing.sku."] },
   // ผลิต → จ่ายงานเหมา: ดู/จ่าย/รับคืน ใช้สิทธิ์สินค้า (เหมือน /api/mo/piecework) · ตั้งรายชื่องานเหมากลาง = production.piecework
