@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   canMoveCase,
   cleanOrderNo,
+  engraveTextError,
+  guessEngraveFromNote,
+  invalidEngraveChars,
   isCaseOpen,
   mapLegacyRepairStatus,
   mapLegacyReturnStatus,
@@ -43,6 +46,26 @@ describe("order-ops", () => {
     expect(mapLegacyRepairStatus("").status).toBe("waiting_customer");
     expect(mapLegacyReturnStatus("ส่งคืนแล้ว")).toBe("closed");
     expect(mapLegacyReturnStatus("", true)).toBe("checked");
+  });
+
+  it("ตัวอักษรสลักได้/ไม่ได้", () => {
+    expect(invalidEngraveChars("Pitchs 01", [])).toEqual([]);
+    expect(invalidEngraveChars("Pitchs ❤️ ไทย", ["&"])).toEqual(["❤️", "ไ", "ท", "ย"]);
+    expect(invalidEngraveChars("A&B ♥", ["&", "♥"])).toEqual([]);
+    expect(engraveTextError("", [])).toMatch(/กรุณาใส่/);
+    expect(engraveTextError("a".repeat(21), [])).toMatch(/ยาวเกิน/);
+    expect(engraveTextError("a".repeat(20), [])).toBeNull();
+    expect(engraveTextError("é", [])).toMatch(/ทำไม่ได้/);
+  });
+
+  it("เดาชื่อสลักจากหมายเหตุ", () => {
+    expect(guessEngraveFromNote("สลักชื่อ Thaninnut ฟอยทอง ห่อของขวัญด้วยค่ะ")).toEqual({ text: "Thaninnut", type: "ฟอยทอง", position: null });
+    expect(guessEngraveFromNote("ชื่อ DUKE ตรงกลาง")).toEqual({ text: "DUKE", type: null, position: "ตรงกลาง" });
+    expect(guessEngraveFromNote("ขอการ์ดวันเกิด").text).toBeNull();
+    expect(guessEngraveFromNote(null).text).toBeNull();
+    // หมายเหตุจริงจาก Shopee (2026-11-24)
+    expect(guessEngraveFromNote("ปักชื่อ “ pattarawee ”").text).toBe("pattarawee");
+    expect(guessEngraveFromNote("สีดำ—> Nick❤️ สีน้ำเงิน—> Nice❤️").text).toBe("Nick");
   });
 
   it("ตัวช่วยเลขออเดอร์และเงิน", () => {

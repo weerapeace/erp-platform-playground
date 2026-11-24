@@ -20,18 +20,14 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { ENGRAVE_POSITIONS, ENGRAVE_TYPES, INSTRUCTION_STATUS, splitEngraveChars, ENGRAVE_MAX_CHARS } from "@/lib/order-ops";
+import { INSTRUCTION_STATUS, invalidEngraveChars } from "@/lib/order-ops";
 import {
   Field, HistoryList, OptionsManager, OrderNoField, Pill, SkuField, TrashToggle, TrialBanner, TrialPill,
   fmtDate, inputCls, opsJson, useOpsOptions, type OrderHit,
 } from "../shared";
+import { EngraveSettings, InstructionForm, type Ins } from "../instruction-form";
+import { PlatformOrderPicker } from "@/components/platform-order-picker";
 
-type Ins = {
-  id: string; order_no: string; platform: string | null; customer_name: string | null; sku: string | null;
-  commands: string[]; engrave: boolean; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null;
-  note: string | null; status: "todo" | "done"; done_at: string | null; done_by_name: string | null;
-  print_count: number; is_trial: boolean; platform_order_id: string | null; created_at: string; created_by_name: string | null; deleted_at: string | null;
-};
 type Wait = {
   id: string; order_no: string | null; platform: string | null; customer_name: string | null; sku: string | null; note: string | null;
   informed: boolean; informed_at: string | null; informed_by_name: string | null; is_trial: boolean; created_at: string; deleted_at: string | null;
@@ -104,6 +100,8 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Ins | "new" | null>(null);
   const [optOpen, setOptOpen] = useState(false);
+  const [engraveOpen, setEngraveOpen] = useState(false);
+  const specials = options.filter((o) => o.kind === "engrave_special" && o.is_active).map((o) => o.label);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -172,7 +170,8 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
   const cmdChips = (r: Ins) => (
     <div className="flex flex-wrap gap-1">
       {r.commands.map((c) => <Pill key={c}>{c}</Pill>)}
-      {r.engrave && r.engrave_text && <Pill tone="accent">สลัก: {r.engrave_text} · {r.engrave_type ?? "-"} · {r.engrave_position ?? "-"}</Pill>}
+      {r.engrave && r.engrave_text && <Pill tone="accent">สลัก: {r.engrave_text} · {r.engrave_type ?? "-"} · {r.engrave_position ?? "-"}{r.engrave_font ? ` · ${r.engrave_font}` : ""}</Pill>}
+      {r.engrave && r.engrave_text && invalidEngraveChars(r.engrave_text, specials).length > 0 && <Pill tone="danger">มีตัวที่สลักไม่ได้</Pill>}
       {!r.commands.length && !(r.engrave && r.engrave_text) && <span className="text-xs text-slate-400">-</span>}
       {r.note && <span className="w-full text-xs text-slate-500">หมายเหตุ: {r.note}</span>}
     </div>
@@ -211,6 +210,7 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขออเดอร์ / ชื่อลูกค้า / SKU / ชื่อสลัก" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
         <TrashToggle on={trash} onChange={setTrash} />
         {canManage && <button onClick={() => setOptOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> จัดการคำสั่ง</button>}
+        {canManage && <button onClick={() => setEngraveOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> ตั้งค่าเครื่องสลัก</button>}
         {canEdit && !trash && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"><Icon name="plus" className="h-4 w-4" /> เพิ่มคำสั่ง</button>}
       </div>
 
@@ -267,7 +267,8 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
       {editing && (
         <InstructionForm
           row={editing === "new" ? null : editing}
-          commands={options.filter((o) => o.kind === "instruction_command")}
+          options={options}
+          onManageEngrave={canManage ? () => setEngraveOpen(true) : undefined}
           readOnly={!canEdit || trash}
           canDelete={canDelete && !trash}
           onClose={() => setEditing(null)}
@@ -275,148 +276,8 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
         />
       )}
       <OptionsManager open={optOpen} onClose={() => setOptOpen(false)} kind="instruction_command" options={options} onChanged={reloadOptions} />
+      <EngraveSettings open={engraveOpen} onClose={() => setEngraveOpen(false)} options={options} onChanged={reloadOptions} />
     </>
-  );
-}
-
-/* ───────────── ฟอร์มคำสั่งพิเศษ (สร้าง/แก้) ───────────── */
-
-function InstructionForm({ row, commands, readOnly, canDelete, onClose, onSaved }: {
-  row: Ins | null; commands: { label: string; is_active: boolean }[]; readOnly: boolean; canDelete: boolean; onClose: () => void; onSaved: () => void;
-}) {
-  const toast = useToast();
-  const init = useMemo(() => ({
-    order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "",
-    commands: row?.commands ?? [], engrave: row?.engrave ?? false, engrave_text: row?.engrave_text ?? "",
-    engrave_type: row?.engrave_type ?? "พิมพ์จม", engrave_position: row?.engrave_position ?? "มุมขวา", note: row?.note ?? "",
-    status: row?.status ?? "todo", platform_order_id: row?.platform_order_id ?? null as string | null,
-  }), [row]);
-  const [f, setF] = useState(init);
-  const [items, setItems] = useState<OrderHit["items"]>([]);
-  const [saving, setSaving] = useState(false);
-  const [history, setHistory] = useState<{ id: string; action: string; metadata: Record<string, unknown> | null; created_at: string }[]>([]);
-  const dirty = JSON.stringify(f) !== JSON.stringify(init);
-  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
-
-  useEffect(() => {
-    if (!row) return;
-    opsJson<{ history: typeof history }>(`/api/order-ops?t=instructions&id=${row.id}`).then((r) => setHistory(r.history)).catch(() => {});
-  }, [row]);
-
-  const onFound = (o: OrderHit | null) => {
-    setItems(o?.items ?? []);
-    if (!o) { set("platform_order_id", null); return; }
-    setF((p) => ({
-      ...p, platform_order_id: o.id,
-      platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "",
-      sku: p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : ""),
-    }));
-  };
-  const toggleCmd = (c: string) => set("commands", f.commands.includes(c) ? f.commands.filter((x) => x !== c) : [...f.commands, c]);
-
-  const save = async () => {
-    if (!f.order_no.trim()) { toast.error("กรุณาใส่เลขออเดอร์"); return; }
-    if (f.engrave && !f.engrave_text.trim()) { toast.error("ติ๊กสลักชื่อแล้ว กรุณาใส่ชื่อที่ต้องสลัก"); return; }
-    setSaving(true);
-    try {
-      const body = { ...f, engrave_text: f.engrave ? f.engrave_text : null, engrave_type: f.engrave ? f.engrave_type : null, engrave_position: f.engrave ? f.engrave_position : null };
-      if (row) await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: row.id, patch: body }) });
-      else await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", ...body, is_trial: true }) });
-      toast.success("บันทึกแล้ว"); onSaved();
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setSaving(false); }
-  };
-  const del = async () => {
-    if (!row) return;
-    try {
-      await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "instructions", ids: [row.id] }) });
-      onSaved();
-      toast.undo("ย้ายลงถังขยะแล้ว", async () => { await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "instructions", ids: [row.id], restore: true }) }); onSaved(); });
-    } catch (e) { toast.error((e as Error).message); }
-  };
-
-  const chars = splitEngraveChars(f.engrave_text);
-  const activeCmds = commands.filter((c) => c.is_active || f.commands.includes(c.label)).map((c) => c.label);
-
-  return (
-    <ERPModal
-      open onClose={onClose} title={row ? `คำสั่งพิเศษ — ${row.order_no}` : "เพิ่มคำสั่งพิเศษ"} size="lg" defaultExpanded={false}
-      storageKey="order-ops-instruction-form" hasUnsavedChanges={dirty && !readOnly}
-      footer={readOnly ? undefined : (
-        <div className="flex w-full items-center gap-2">
-          {row && canDelete && <button onClick={del} className="rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50">ลบ</button>}
-          <span className="flex-1" />
-          <button onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">ยกเลิก</button>
-          <button onClick={save} disabled={saving} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
-        </div>
-      )}
-    >
-      <fieldset disabled={readOnly} className="space-y-3">
-        <Field label="เลขออเดอร์ *">
-          <OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} onFound={onFound} autoFocus={!row} />
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="ช่องทาง">
-            <select value={f.platform} onChange={(e) => set("platform", e.target.value)} className={inputCls}>
-              <option value="">-</option>
-              {[...new Set([...PLATFORMS, ...(f.platform ? [f.platform] : [])])].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </Field>
-          <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
-          <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={(v) => set("sku", v)} items={items} /></Field>
-        </div>
-        <Field label="คำสั่ง (เลือกได้หลายข้อ)">
-          <div className="flex flex-wrap gap-1.5">
-            {activeCmds.map((c) => (
-              <button key={c} type="button" onClick={() => toggleCmd(c)} className={`rounded-full border px-3 py-1 text-xs ${f.commands.includes(c) ? "border-sky-400 bg-sky-50 font-medium text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{c}</button>
-            ))}
-          </div>
-        </Field>
-        <div className="rounded-lg border border-slate-200 p-3">
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <input type="checkbox" checked={f.engrave} onChange={(e) => set("engrave", e.target.checked)} /> สลักชื่อ
-          </label>
-          {f.engrave && (
-            <div className="mt-2 space-y-2">
-              <Field label={`ชื่อที่ต้องสลัก (สูงสุด ${ENGRAVE_MAX_CHARS} ตัว)`}>
-                <input value={f.engrave_text} onChange={(e) => set("engrave_text", e.target.value)} placeholder="เช่น Pitchayapa" className={inputCls} />
-              </Field>
-              <div className="flex flex-wrap gap-4">
-                <Field label="รูปแบบ">
-                  <div className="flex gap-1">{ENGRAVE_TYPES.map((t) => <button key={t} type="button" onClick={() => set("engrave_type", t)} className={`rounded-md border px-2.5 py-1 text-xs ${f.engrave_type === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}</div>
-                </Field>
-                <Field label="ตำแหน่ง">
-                  <div className="flex gap-1">{ENGRAVE_POSITIONS.map((t) => <button key={t} type="button" onClick={() => set("engrave_position", t)} className={`rounded-md border px-2.5 py-1 text-xs ${f.engrave_position === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}</div>
-                </Field>
-              </div>
-              {chars.length > 0 && (
-                <div className="overflow-x-auto">
-                  <div className="grid min-w-[420px] grid-cols-10 border border-slate-800 text-center">
-                    {Array.from({ length: chars.length > 10 ? 20 : 10 }, (_, i) => (
-                      <div key={i} className="flex h-12 items-end justify-center border-r border-t border-slate-800 pb-1 text-2xl font-bold [&:nth-child(10n)]:border-r-0 [&:nth-child(-n+10)]:border-t-0">{chars[i] ?? ""}</div>
-                    ))}
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-400">ตัวอย่างช่องในใบสลักชื่อ · กดพิมพ์ได้จากหน้ารายการ</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <Field label="หมายเหตุ"><textarea value={f.note} onChange={(e) => set("note", e.target.value)} rows={2} className={inputCls} /></Field>
-        {row && (
-          <Field label="สถานะ">
-            <div className="flex gap-1">{(["todo", "done"] as const).map((s) => <button key={s} type="button" onClick={() => set("status", s)} className={`rounded-md border px-3 py-1 text-xs ${f.status === s ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{INSTRUCTION_STATUS[s].label}</button>)}</div>
-          </Field>
-        )}
-      </fieldset>
-      {!row && <p className="mt-3 text-[11px] text-amber-700">ช่วงทดลอง: รายการใหม่จะติดป้าย "ทดลอง" และล้างทิ้งได้ทีเดียวตอนเริ่มใช้จริง</p>}
-      {row && (
-        <div className="mt-4 border-t border-slate-100 pt-3">
-          <div className="mb-1 text-xs font-medium text-slate-600">ประวัติ</div>
-          <HistoryList logs={history} />
-        </div>
-      )}
-    </ERPModal>
   );
 }
 
@@ -529,6 +390,7 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
   const init = useMemo(() => ({ order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "", note: row?.note ?? "", informed: row?.informed ?? false, platform_order_id: null as string | null }), [row]);
   const [f, setF] = useState(init);
   const [items, setItems] = useState<OrderHit["items"]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<{ id: string; action: string; metadata: Record<string, unknown> | null; created_at: string }[]>([]);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -567,7 +429,10 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
       )}>
       <fieldset disabled={readOnly} className="space-y-3">
         <Field label="เลขออเดอร์ (ถ้ามี)">
-          <OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "" })); }} />
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1"><OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "", note: p.note || o.note || "" })); }} /></div>
+            <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
+          </div>
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="ช่องทาง">
@@ -582,6 +447,8 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.informed} onChange={(e) => set("informed", e.target.checked)} /> แจ้งลูกค้าแล้ว</label>
       </fieldset>
       {row && <div className="mt-4 border-t border-slate-100 pt-3"><div className="mb-1 text-xs font-medium text-slate-600">ประวัติ</div><HistoryList logs={history} /></div>}
+      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} existingLabel="มีคำสั่งแล้ว"
+        onPick={(o) => setF((p) => ({ ...p, order_no: o.order_no, platform: "", customer_name: "" }))} />
     </ERPModal>
   );
 }

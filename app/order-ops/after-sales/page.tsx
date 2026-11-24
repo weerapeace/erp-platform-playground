@@ -20,6 +20,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ImageAttachKeys } from "@/components/image-attach";
+import { PlatformOrderPicker } from "@/components/platform-order-picker";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { caseStatusInfo, caseStatusList, defaultCaseStatus, nextCaseStatuses, REPAIR_RESOLUTIONS, type CaseKind } from "@/lib/order-ops";
 import {
@@ -251,6 +252,7 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
   }), [row, k]);
   const [f, setF] = useState(init);
   const [items, setItems] = useState<OrderHit["items"]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<{ id: string; action: string; metadata: Record<string, unknown> | null; created_at: string }[]>([]);
   const set = <K extends keyof typeof f>(key: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [key]: v }));
@@ -300,8 +302,13 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
       )}>
       <fieldset disabled={readOnly} className="space-y-3">
         <Field label="เลขออเดอร์ *">
-          <OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} autoFocus={!row}
-            onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, customer_name: p.customer_name || o.customer_name || "", sku: p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : "") })); }} />
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} autoFocus={!row}
+                onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, customer_name: p.customer_name || o.customer_name || "", sku: p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : ""), note: p.note || (o.note ? `ลูกค้าเขียน: ${o.note}` : "") })); }} />
+            </div>
+            <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
+          </div>
         </Field>
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr_6rem]">
           <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
@@ -364,6 +371,8 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
       </fieldset>
       {!row && <p className="mt-3 text-[11px] text-amber-700">ช่วงทดลอง: รายการใหม่จะติดป้าย "ทดลอง" และล้างทิ้งได้ทีเดียวตอนเริ่มใช้จริง</p>}
       {row && <div className="mt-4 border-t border-slate-100 pt-3"><div className="mb-1 text-xs font-medium text-slate-600">ประวัติ</div><HistoryList logs={history} /></div>}
+      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} existingLabel="มีคำสั่งพิเศษ"
+        onPick={(o) => setF((p) => ({ ...p, order_no: o.order_no, customer_name: "", sku: "" }))} />
     </ERPModal>
   );
 }

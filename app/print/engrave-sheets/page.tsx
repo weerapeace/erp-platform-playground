@@ -11,9 +11,9 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
-import { ENGRAVE_POSITION_EN, ENGRAVE_TYPE_EN, splitEngraveChars, type EngravePosition, type EngraveType } from "@/lib/order-ops";
+import { DEFAULT_ENGRAVE_FONT, ENGRAVE_POSITION_EN, ENGRAVE_TYPE_EN, invalidEngraveChars, splitEngraveChars, type EngravePosition, type EngraveType } from "@/lib/order-ops";
 
-type Row = { id: string; order_no: string; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null };
+type Row = { id: string; order_no: string; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null; engrave_font: string | null };
 
 const TYPE_COLOR: Record<string, string> = { "พิมพ์จม": "#2563eb", "ฟอยเงิน": "#6b7280", "ฟอยทอง": "#ca8a04" };
 
@@ -26,9 +26,12 @@ function Sheets() {
   const ids = (sp.get("ids") ?? "").split(",").filter(Boolean);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [specials, setSpecials] = useState<string[]>([]);
 
   useEffect(() => {
     if (!ids.length) { setError("ยังไม่ได้เลือกรายการ"); return; }
+    apiFetch("/api/order-ops?t=options").then((r) => r.json()).then((j: { options?: { kind: string; label: string; is_active: boolean }[] }) =>
+      setSpecials((j.options ?? []).filter((o) => o.kind === "engrave_special" && o.is_active).map((o) => o.label))).catch(() => {});
     apiFetch(`/api/order-ops?t=instructions&ids=${ids.join(",")}&page_size=200`)
       .then((r) => r.json())
       .then((j: { rows?: Row[]; error?: string }) => {
@@ -56,15 +59,17 @@ function Sheets() {
         <button onClick={print} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"><Icon name="printer" /> พิมพ์</button>
       </div>
       <div className="mx-auto max-w-[270mm] bg-white p-3 print:max-w-none print:p-0">
-        {rows.map((r, idx) => <Sheet key={r.id} r={r} first={idx === 0} />)}
+        {rows.map((r, idx) => <Sheet key={r.id} r={r} first={idx === 0} specials={specials} />)}
         {!rows.length && <p className="p-6 text-center text-sm text-slate-500">รายการที่เลือกไม่มีชื่อสลัก</p>}
       </div>
     </div>
   );
 }
 
-function Sheet({ r, first }: { r: Row; first: boolean }) {
+function Sheet({ r, first, specials }: { r: Row; first: boolean; specials: string[] }) {
   const chars = splitEngraveChars(r.engrave_text ?? "");
+  const font = r.engrave_font || DEFAULT_ENGRAVE_FONT;
+  const bad = invalidEngraveChars(r.engrave_text ?? "", specials);
   const type = (r.engrave_type ?? "พิมพ์จม") as EngraveType;
   const pos = (r.engrave_position ?? "มุมขวา") as EngravePosition;
   const rowsOfChars = chars.length > 10 ? [chars.slice(0, 10), chars.slice(10, 20)] : [chars];
@@ -75,8 +80,10 @@ function Sheet({ r, first }: { r: Row; first: boolean }) {
         <span className="text-lg font-extrabold">สลักชื่อ</span>
         <span className="text-lg font-extrabold leading-tight" style={{ color: TYPE_COLOR[type] ?? "#111" }}>{type}<small className="block text-[10px] uppercase tracking-wide">{ENGRAVE_TYPE_EN[type] ?? ""}</small></span>
         <span className="rounded-lg bg-indigo-800 px-3 py-0.5 text-base font-black leading-tight text-white [print-color-adjust:exact]">{pos}<small className="block text-[10px] uppercase tracking-wide">{ENGRAVE_POSITION_EN[pos] ?? ""}</small></span>
+        <span className="text-xs font-bold text-slate-600">ฟอนต์: {font}</span>
         <span className="ml-auto font-mono text-sm font-bold text-slate-700">{r.order_no}</span>
       </div>
+      {bad.length > 0 && <div className="border-b-[1.5px] border-black bg-rose-100 px-3 py-1 text-sm font-bold text-rose-700 [print-color-adjust:exact]">⚠ มีตัวที่เครื่องสลักทำไม่ได้: {bad.join(" ")} — เช็กกับคนรับออเดอร์ก่อนสลัก</div>}
       {rowsOfChars.map((line, li) => (
         <div key={li}>
           <div className="grid border-b-[1.5px] border-black" style={{ gridTemplateColumns: "200px repeat(10, 1fr)" }}>
@@ -84,14 +91,14 @@ function Sheet({ r, first }: { r: Row; first: boolean }) {
             {Array.from({ length: 10 }, (_, i) => <div key={i} className={`${cell} bg-slate-50 text-[13px] font-extrabold`}>{li * 10 + i + 1}</div>)}
           </div>
           <div className="grid border-b-[1.5px] border-black last:border-b-0" style={{ gridTemplateColumns: "200px repeat(10, 1fr)" }}>
-            <div className={`${cell} min-h-[60px] justify-start break-all px-2 text-xl font-extrabold`}>{li === 0 ? r.engrave_text : "-"}</div>
+            <div className={`${cell} min-h-[60px] justify-start break-all px-2 text-xl font-extrabold`} style={{ fontFamily: `"${font}", serif` }}>{li === 0 ? r.engrave_text : "-"}</div>
             {Array.from({ length: 10 }, (_, i) => {
               const ch = line[i] ?? "";
               const lower = ch >= "a" && ch <= "z";
               return (
                 <div key={i} className={`${cell} relative min-h-[60px] items-end pb-1`}>
                   <span className="pointer-events-none absolute left-1 right-1 top-1/2 border-t-2 border-dashed border-slate-500" />
-                  <span className={`relative bg-white px-0.5 font-extrabold leading-none ${lower ? "text-[28px]" : "text-[52px]"}`}>{ch}</span>
+                  <span className={`relative bg-white px-0.5 leading-none ${lower ? "text-[28px]" : "text-[52px]"}`} style={{ fontFamily: `"${font}", serif` }}>{ch}</span>
                 </div>
               );
             })}

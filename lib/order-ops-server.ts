@@ -43,6 +43,8 @@ export type OrderHit = {
   customer_name: string | null;
   ordered_at: string | null;
   status: string | null;
+  /** หมายเหตุที่ลูกค้าเขียนตอนสั่ง (Shopee message_to_seller / buyer_message / note) */
+  note: string | null;
   items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
 };
 
@@ -54,7 +56,7 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
   const ors = variants.flatMap((c) => [`order_no.eq."${c.replace(/"/g, "")}"`, `external_order_id.eq."${c.replace(/"/g, "")}"`]).join(",");
   const { data } = await admin
     .from("platform_orders")
-    .select("id, order_no, external_order_id, customer_name, status, ordered_at, platform_id, source")
+    .select(`id, order_no, external_order_id, customer_name, status, ordered_at, platform_id, source, ${NOTE_COLS}`)
     .or(ors)
     .order("created_at", { ascending: false })
     .limit(5);
@@ -73,6 +75,7 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
     customer_name: (o.customer_name as string) ?? null,
     ordered_at: (o.ordered_at as string) ?? null,
     status: (o.status as string) ?? null,
+    note: noteOf(o),
     items: ((items ?? []) as Row[]).map((i) => ({
       sku: (i.sku_code as string) ?? null,
       name: (i.name as string) ?? null,
@@ -91,6 +94,83 @@ export function pickFields(body: Row, allowed: readonly string[]): Row {
     out[k] = typeof v === "string" ? (v.trim() === "" ? null : v.trim().slice(0, 4000)) : v;
   }
   return out;
+}
+
+/** ช่องหมายเหตุลูกค้าใน raw (ชุดเดียวกับหน้าแพ็กของ app/api/packing) */
+const NOTE_COLS = "buyer_message:raw->>buyer_message, shopee_note:raw->shopee->>message_to_seller, raw_note:raw->>note";
+function noteOf(r: Row): string | null {
+  for (const k of ["buyer_message", "shopee_note", "raw_note"]) {
+    const v = typeof r[k] === "string" ? (r[k] as string).trim() : "";
+    if (v) return v;
+  }
+  return null;
+}
+
+/** ตัวพิเศษที่สลักได้ (ที่เปิดใช้อยู่) */
+export async function loadEngraveSpecials(admin: Admin): Promise<string[]> {
+  const { data } = await admin.from("order_ops_options").select("label").eq("kind", "engrave_special").eq("is_active", true);
+  return ((data ?? []) as Row[]).map((r) => String(r.label));
+}
+
+export type PickerOrder = {
+  id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null;
+  status: string | null; packed: boolean; note: string | null; has_instruction: boolean;
+  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
+};
+
+/**
+ * รายการออเดอร์ให้ตัวเลือกออเดอร์ (ของกลาง) — ออเดอร์ที่มีหมายเหตุขึ้นก่อน แล้วตามด้วยใบล่าสุด
+ * ไม่นับออเดอร์จากเมล (รายงานยอดขาย) · หน้าละ 40 ใบ
+ */
+export async function listPickerOrders(admin: Admin, o: { q: string; days: number; openOnly: boolean; platformId: string | null; notesFirst: boolean; page: number }): Promise<{ orders: PickerOrder[]; hasMore: boolean; noteCount: number }> {
+  const SIZE = 40;
+  const days = Math.min(90, Math.max(1, o.days));
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const cols = `id, order_no, external_order_id, customer_name, status, ordered_at, platform_id, packed_at, ${NOTE_COLS}`;
+  const q = o.q.replace(/[%,()*"\\]/g, " ").trim().slice(0, 60);
+  const base = () => {
+    let b = admin.from("platform_orders").select(cols).gte("ordered_at", since).or("source.is.null,source.neq.email");
+    if (o.openOnly) b = b.is("packed_at", null).in("status", ["new", "confirmed", "packed"]);
+    if (o.platformId && /^[0-9a-f-]{36}$/i.test(o.platformId)) b = b.eq("platform_id", o.platformId);
+    if (q) b = b.or(`order_no.ilike.*${q}*,external_order_id.ilike.*${q}*,customer_name.ilike.*${q}*,raw->>buyer_message.ilike.*${q}*,raw->shopee->>message_to_seller.ilike.*${q}*,raw->>note.ilike.*${q}*`);
+    return b;
+  };
+  // ① ใบที่มีหมายเหตุ (เฉพาะหน้าแรก) ② ใบล่าสุดทั้งหมดตามหน้า
+  const [noted, recent] = await Promise.all([
+    o.notesFirst && o.page === 1
+      ? base().or("raw->>buyer_message.not.is.null,raw->shopee->>message_to_seller.not.is.null,raw->>note.not.is.null").order("ordered_at", { ascending: false }).limit(150)
+      : Promise.resolve({ data: [] as Row[] }),
+    base().order("ordered_at", { ascending: false }).range((o.page - 1) * SIZE, o.page * SIZE),
+  ]);
+  const notedRows = ((noted.data ?? []) as Row[]).filter((r) => noteOf(r));
+  const recentRows = (recent.data ?? []) as Row[];
+  const hasMore = recentRows.length > SIZE;
+  const seen = new Set(notedRows.map((r) => String(r.id)));
+  const rows = [...notedRows, ...recentRows.slice(0, SIZE).filter((r) => !seen.has(String(r.id)))];
+  const ids = rows.map((r) => String(r.id));
+  const platIds = [...new Set(rows.map((r) => r.platform_id).filter(Boolean).map(String))];
+  const [{ data: items }, { data: plats }, { data: ins }] = await Promise.all([
+    ids.length ? admin.from("platform_order_items").select("order_id, sku_code, name, qty, matched_sku_id").in("order_id", ids) : Promise.resolve({ data: [] }),
+    platIds.length ? admin.from("erp_platforms").select("id, code, name_th").in("id", platIds) : Promise.resolve({ data: [] }),
+    ids.length ? admin.from("order_instructions").select("platform_order_id").in("platform_order_id", ids).is("deleted_at", null) : Promise.resolve({ data: [] }),
+  ]);
+  const itemsBy = new Map<string, PickerOrder["items"]>();
+  for (const i of (items ?? []) as Row[]) {
+    const k = String(i.order_id);
+    if (!itemsBy.has(k)) itemsBy.set(k, []);
+    itemsBy.get(k)!.push({ sku: (i.sku_code as string) ?? null, name: (i.name as string) ?? null, qty: Number(i.qty ?? 1) || 1, sku_id: (i.matched_sku_id as string) ?? null });
+  }
+  const platBy = new Map(((plats ?? []) as Row[]).map((p) => [String(p.id), (p.name_th as string) || (p.code as string) || null]));
+  const hasIns = new Set(((ins ?? []) as Row[]).map((r) => String(r.platform_order_id)));
+  return {
+    orders: rows.map((r) => ({
+      id: String(r.id), order_no: String(r.order_no ?? r.external_order_id ?? ""), platform: r.platform_id ? platBy.get(String(r.platform_id)) ?? null : null,
+      customer_name: (r.customer_name as string) ?? null, ordered_at: (r.ordered_at as string) ?? null, status: (r.status as string) ?? null,
+      packed: !!r.packed_at, note: noteOf(r), has_instruction: hasIns.has(String(r.id)), items: itemsBy.get(String(r.id)) ?? [],
+    })),
+    hasMore,
+    noteCount: notedRows.length,
+  };
 }
 
 export const str = (v: unknown): string | null => (v == null || v === "" ? null : String(v));

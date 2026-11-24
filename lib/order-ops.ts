@@ -39,6 +39,56 @@ export function splitEngraveChars(name: string): string[] {
   return Array.from(s).slice(0, ENGRAVE_MAX_CHARS);
 }
 
+/** ฟอนต์เริ่มต้นของเครื่องสลัก (เพิ่มได้ในหน้าตั้งค่า · order_ops_options kind engrave_font) */
+export const DEFAULT_ENGRAVE_FONT = "Times New Roman";
+
+/** ตัวที่เครื่องสลักทำได้เสมอ: อังกฤษ A-Z a-z ตัวเลข 0-9 เว้นวรรค (ล็อกไว้) — ตัวพิเศษอื่นตั้งเพิ่มได้ */
+const ENGRAVE_BASE_RE = /^[A-Za-z0-9 ]$/;
+
+/** ตัวที่สลักไม่ได้ในชื่อนี้ (ไม่ซ้ำ ตามลำดับที่เจอ) — ว่าง = สลักได้ทุกตัว */
+export function invalidEngraveChars(text: string, specials: readonly string[]): string[] {
+  const allow = new Set(specials);
+  const bad: string[] = [];
+  for (const ch of splitEngraveChars(text)) {
+    if (ENGRAVE_BASE_RE.test(ch) || allow.has(ch)) continue;
+    if (!bad.includes(ch)) bad.push(ch);
+  }
+  return bad;
+}
+
+/** ตรวจชื่อสลักก่อนบันทึก — คืนข้อความผิดพลาดภาษาคน หรือ null */
+export function engraveTextError(text: string, specials: readonly string[]): string | null {
+  const s = (text || "").trim();
+  if (!s) return "กรุณาใส่ชื่อที่ต้องสลัก";
+  if (splitEngraveChars(s).join("").length < s.length) return `ชื่อยาวเกิน ${ENGRAVE_MAX_CHARS} ตัว`;
+  const bad = invalidEngraveChars(s, specials);
+  if (bad.length) return `เครื่องสลักทำไม่ได้: ${bad.map((c) => `“${c}”`).join(" ")} — ใช้ได้แค่ A-Z a-z 0-9 และตัวพิเศษที่ตั้งไว้`;
+  return null;
+}
+
+/**
+ * เดาชื่อสลัก/รูปแบบ/ตำแหน่ง จากหมายเหตุที่ลูกค้าเขียน (ให้คนกดรับเอง ไม่บันทึกอัตโนมัติ)
+ * เช่น "สลักชื่อ Thaninnut ฟอยทอง ห่อของขวัญด้วยค่ะ" → { text: "Thaninnut", type: "ฟอยทอง" }
+ */
+export function guessEngraveFromNote(note: string | null | undefined): { text: string | null; type: EngraveType | null; position: EngravePosition | null } {
+  const s = (note || "").trim();
+  if (!s) return { text: null, type: null, position: null };
+  const type: EngraveType | null = /ฟอยทอง|ฟอย\s*ทอง|สีทอง|gold/i.test(s) ? "ฟอยทอง"
+    : /ฟอยเงิน|ฟอย\s*เงิน|สีเงิน|silver/i.test(s) ? "ฟอยเงิน"
+    : /พิมพ์จม|ปั๊มจม|จม|deboss/i.test(s) ? "พิมพ์จม" : null;
+  const position: EngravePosition | null = /ตรงกลาง|กลาง|center/i.test(s) ? "ตรงกลาง" : /มุมขวา|ขวา|right/i.test(s) ? "มุมขวา" : null;
+  const skip = /^(gold|silver|deboss|center|right|left|ok|thank|thanks|please|name)$/i;
+  // ชุดคำอังกฤษ/ตัวเลขติดกัน (มีเว้นวรรค/&/./- คั่นได้) — เลือกชุดที่ตามหลังคำว่า "ชื่อ/สลัก" ก่อน ไม่งั้นเอาชุดยาวสุด
+  const runs = [...s.matchAll(/[A-Za-z0-9][A-Za-z0-9&.\- ]*[A-Za-z0-9]|[A-Za-z]/g)]
+    .map((m) => ({ text: m[0].trim(), at: m.index ?? 0 }))
+    .filter((r) => !skip.test(r.text) && /[A-Za-z]/.test(r.text) && r.text.length <= ENGRAVE_MAX_CHARS);
+  if (!runs.length) return { text: null, type, position };
+  const kw = s.search(/ชื่อ|สลัก|name/i);
+  const after = kw >= 0 ? runs.find((r) => r.at > kw) : undefined;
+  const best = after ?? runs.reduce((a, b) => (b.text.length > a.text.length ? b : a));
+  return { text: best.text, type, position };
+}
+
 /** คำสั่งเริ่มต้น (ตั้งค่าเพิ่ม/แก้/ปิดได้ในหน้า) — ชุดเดียวกับแอปเก่า */
 export const DEFAULT_INSTRUCTION_COMMANDS = [
   "ห่อ",

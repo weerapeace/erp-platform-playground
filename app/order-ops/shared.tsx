@@ -80,7 +80,7 @@ export function TrialBanner({ trialCount, onChanged }: { trialCount: number; onC
 }
 
 export type OrderHit = {
-  id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null; status: string | null;
+  id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null; status: string | null; note: string | null;
   items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
 };
 type Existing = { instructions: { id: string; status: string }[]; cases: { id: string; kind: string; status: string }[] };
@@ -160,7 +160,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
 
-export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic"; label: string; sort_order: number; is_active: boolean };
+export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font"; label: string; sort_order: number; is_active: boolean };
 
 export function useOpsOptions() {
   const [options, setOptions] = useState<OptionRow[]>([]);

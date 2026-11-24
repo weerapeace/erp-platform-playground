@@ -18,20 +18,21 @@ import {
   canMoveCase,
   cleanOrderNo,
   defaultCaseStatus,
+  engraveTextError,
   ENGRAVE_POSITIONS,
   ENGRAVE_TYPES,
   isValidCaseStatus,
   parseMoney,
   type CaseKind,
 } from "@/lib/order-ops";
-import { findPlatformOrder, OPS_ENTITY, OPS_TABLES, pickFields, str, whoAmI, type OpsTableKey } from "@/lib/order-ops-server";
+import { findPlatformOrder, listPickerOrders, loadEngraveSpecials, OPS_ENTITY, OPS_TABLES, pickFields, str, whoAmI, type OpsTableKey } from "@/lib/order-ops-server";
 
 export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 
 const FIELDS: Record<OpsTableKey, readonly string[]> = {
-  instructions: ["order_no", "platform", "customer_name", "sku", "commands", "engrave", "engrave_text", "engrave_type", "engrave_position", "note", "status", "platform_order_id", "is_trial"],
+  instructions: ["order_no", "platform", "customer_name", "sku", "commands", "engrave", "engrave_text", "engrave_type", "engrave_position", "engrave_font", "note", "status", "platform_order_id", "is_trial"],
   waitlist: ["order_no", "platform", "customer_name", "sku", "note", "informed", "platform_order_id", "is_trial"],
   cases: ["kind", "order_no", "customer_name", "sku", "qty", "topic", "detail", "resolution", "status", "replacement_sku", "shipping_charge", "shipping_refund", "bank_info", "shipping_address", "return_date", "images", "note", "platform_order_id", "is_trial"],
 };
@@ -44,6 +45,7 @@ const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
 /** ติ๊กของงานซ่อม/คืน → ช่องเวลา */
 const CASE_FLAGS = { checked: "checked_at", stock_received: "stock_received_at", zort_cancelled: "zort_cancelled_at", packed: "packed_at" } as const;
 
+const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font"];
 const isTable = (t: string | null): t is OpsTableKey => t === "instructions" || t === "waitlist" || t === "cases";
 const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
 const uuidRe = /^[0-9a-f-]{36}$/i;
@@ -93,6 +95,17 @@ export async function GET(request: Request) {
   if (denied) return denied;
   const admin = supabaseAdmin();
   const sp = new URL(request.url).searchParams;
+
+  // ตัวเลือกออเดอร์ (ของกลาง components/platform-order-picker) — ออเดอร์ที่มีหมายเหตุขึ้นก่อน
+  if (sp.get("orders") === "1") {
+    try {
+      const r = await listPickerOrders(admin, {
+        q: sp.get("q") ?? "", days: Number(sp.get("days") ?? 14) || 14, openOnly: sp.get("open") === "1",
+        platformId: sp.get("platform_id"), notesFirst: sp.get("notes_first") !== "0", page: Number(sp.get("page") ?? 1) || 1,
+      });
+      return NextResponse.json(r);
+    } catch { return bad("โหลดรายการออเดอร์ไม่สำเร็จ ลองใหม่อีกครั้ง", 500); }
+  }
 
   const lookup = sp.get("lookup");
   if (lookup !== null) {
@@ -239,7 +252,7 @@ export async function POST(request: Request) {
     if (denied) return denied;
     const kind = String(body.kind ?? "");
     const label = String(body.label ?? "").trim().slice(0, 80);
-    if (!["instruction_command", "repair_topic"].includes(kind) || !label) return bad("กรุณาใส่ชื่อตัวเลือก");
+    if (!OPTION_KINDS.includes(kind) || !label) return bad("กรุณาใส่ชื่อตัวเลือก");
     const { data, error } = await admin.from("order_ops_options").insert({ kind, label, sort_order: Number(body.sort_order ?? 999) || 999 }).select("*").single();
     if (error) return bad(error.code === "23505" ? "มีตัวเลือกชื่อนี้แล้ว" : "เพิ่มไม่สำเร็จ", 400);
     const me = await whoAmI(request, admin);
@@ -257,6 +270,10 @@ export async function POST(request: Request) {
   }
   const err = normalize(t, row, null);
   if (err) return bad(err);
+  if (t === "instructions" && row.engrave === true) {
+    const e2 = engraveTextError(String(row.engrave_text ?? ""), await loadEngraveSpecials(admin));
+    if (e2) return bad(e2);
+  }
   if (t === "instructions" && row.status === "done") row.done_at = new Date().toISOString();
   const me = await whoAmI(request, admin);
   if (t === "instructions" && row.status === "done") row.done_by_name = me.name;
@@ -314,6 +331,7 @@ export async function PATCH(request: Request) {
   const rows = (befores ?? []) as Row[];
   if (!rows.length) return bad("ไม่พบรายการ (อาจถูกลบไปแล้ว)", 404);
 
+  const specials = t === "instructions" && ("engrave_text" in patch || "engrave" in patch) ? await loadEngraveSpecials(admin) : [];
   const results: { id: string; ok: boolean; error?: string }[] = [];
   const audits: Parameters<typeof writeAuditMany>[1] = [];
   for (const before of rows) {
@@ -321,7 +339,11 @@ export async function PATCH(request: Request) {
     // ติ๊กงานซ่อม/คืน → เวลา
     if (t === "cases") for (const [flag, col] of Object.entries(CASE_FLAGS)) if (flag in rawPatch) p[col] = rawPatch[flag] ? (before[col] ?? now) : null;
     if (t === "cases" && "stock_received" in rawPatch) p.stock_received_by_name = rawPatch.stock_received ? me.name : null;
-    const err = normalize(t, p, before);
+    let err = normalize(t, p, before);
+    if (!err && t === "instructions" && ("engrave_text" in p || "engrave" in p)) {
+      const on = "engrave" in p ? p.engrave === true : before.engrave === true;
+      if (on) err = engraveTextError(String(("engrave_text" in p ? p.engrave_text : before.engrave_text) ?? ""), specials);
+    }
     if (err) { results.push({ id: String(before.id), ok: false, error: err }); continue; }
     if (t === "instructions" && "status" in p && p.status !== before.status) { p.done_at = p.status === "done" ? now : null; p.done_by_name = p.status === "done" ? me.name : null; }
     if (t === "waitlist" && "informed" in p && p.informed !== before.informed) { p.informed_at = p.informed ? now : null; p.informed_by_name = p.informed ? me.name : null; }
