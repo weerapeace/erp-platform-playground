@@ -75,3 +75,17 @@ describe("order-ops", () => {
     expect(parseMoney("-5")).toBeNull();
   });
 });
+
+describe("ถอดรหัสท้าย SKU สลัก", () => {
+  it("D/G/N + /1 /2", async () => {
+    const { decodeEngraveSku, engraveSkuMaps } = await import("../order-ops");
+    expect(decodeEngraveSku("WK45-05G/2")).toEqual({ type: "ฟอยทอง", position: "ตรงกลาง", typeCode: "G", posCode: "2" });
+    expect(decodeEngraveSku("TTM130-01D/1")).toMatchObject({ type: "พิมพ์จม", position: "มุมขวา" });
+    expect(decodeEngraveSku("WK41-03N/2")).toMatchObject({ type: "ฟอยเงิน", position: "ตรงกลาง" });
+    expect(decodeEngraveSku("MGN236-01/1")).toBeNull();
+    expect(decodeEngraveSku("TTM130-01")).toBeNull();
+    expect(decodeEngraveSku(null)).toBeNull();
+    const maps = engraveSkuMaps([{ kind: "engrave_sku_type", label: "s", value: "ฟอยเงิน", is_active: true }]);
+    expect(decodeEngraveSku("X-01S/1", maps.types, maps.positions)).toMatchObject({ type: "ฟอยเงิน", position: "มุมขวา" });
+  });
+});

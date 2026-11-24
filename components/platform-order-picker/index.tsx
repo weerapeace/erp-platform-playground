@@ -23,13 +23,15 @@ export type PickedOrder = {
 
 const DAY_OPTIONS = [7, 14, 30, 90];
 
-export function PlatformOrderPicker({ open, onClose, onPick, title = "เลือกออเดอร์", existingLabel = "มีคำสั่งแล้ว" }: {
+export function PlatformOrderPicker({ open, onClose, onPick, title = "เลือกออเดอร์", existingLabel = "มีคำสั่งแล้ว", itemBadge }: {
   open: boolean;
   onClose: () => void;
   onPick: (o: PickedOrder) => void;
   title?: string;
   /** ป้ายบนออเดอร์ที่มีบันทึกอยู่แล้ว (ค่าเริ่ม: มีคำสั่งแล้ว) */
   existingLabel?: string;
+  /** ป้ายเสริมต่อท้ายรหัสสินค้า เช่น ถอดรหัสสลัก "ฟอยทอง · ตรงกลาง" (ไม่มี = null) */
+  itemBadge?: (sku: string | null) => string | null;
 }) {
   const [q, setQ] = useState("");
   const [days, setDays] = useState(14);
@@ -97,7 +99,7 @@ export function PlatformOrderPicker({ open, onClose, onPick, title = "เลื�
                       {o.packed && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">แพ็กแล้ว</span>}
                     </div>
                     <div className="truncate text-xs text-slate-500">
-                      {o.platform ?? "-"} · {o.customer_name ?? "-"} · {o.items.map((i) => `${i.sku ?? "?"} ×${i.qty}`).join(", ") || "ไม่มีรายการสินค้า"}
+                      {o.platform ?? "-"} · {o.customer_name ?? "-"} · {o.items.map((i) => { const b = itemBadge?.(i.sku); return `${i.sku ?? "?"} ×${i.qty}${b ? ` (${b})` : ""}`; }).join(", ") || "ไม่มีรายการสินค้า"}
                       <span className="hidden sm:inline">{o.ordered_at ? ` · ${new Date(o.ordered_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}` : ""}</span>
                     </div>
                     {o.note && <div className="text-xs text-amber-800">“{o.note}”</div>}

@@ -222,7 +222,7 @@ function Body() {
           )}
         />
       )}
-      <Pager page={page} pageSize={50} total={total} onPage={setPage} unitLabel="รายการ" hideWhenSingle />
+      <Pager page={page - 1} pageSize={50} total={total} onPage={(p) => setPage(p + 1)} unitLabel="รายการ" hideWhenSingle />
 
       {editing && (
         <CaseForm kind={kind} row={editing === "new" ? null : editing} topics={options.filter((o) => o.kind === "repair_topic")}

@@ -45,7 +45,7 @@ const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
 /** ติ๊กของงานซ่อม/คืน → ช่องเวลา */
 const CASE_FLAGS = { checked: "checked_at", stock_received: "stock_received_at", zort_cancelled: "zort_cancelled_at", packed: "packed_at" } as const;
 
-const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font"];
+const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos"];
 const isTable = (t: string | null): t is OpsTableKey => t === "instructions" || t === "waitlist" || t === "cases";
 const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
 const uuidRe = /^[0-9a-f-]{36}$/i;
@@ -253,7 +253,7 @@ export async function POST(request: Request) {
     const kind = String(body.kind ?? "");
     const label = String(body.label ?? "").trim().slice(0, 80);
     if (!OPTION_KINDS.includes(kind) || !label) return bad("กรุณาใส่ชื่อตัวเลือก");
-    const { data, error } = await admin.from("order_ops_options").insert({ kind, label, sort_order: Number(body.sort_order ?? 999) || 999 }).select("*").single();
+    const { data, error } = await admin.from("order_ops_options").insert({ kind, label, value: typeof body.value === "string" && body.value.trim() ? body.value.trim().slice(0, 80) : null, sort_order: Number(body.sort_order ?? 999) || 999 }).select("*").single();
     if (error) return bad(error.code === "23505" ? "มีตัวเลือกชื่อนี้แล้ว" : "เพิ่มไม่สำเร็จ", 400);
     const me = await whoAmI(request, admin);
     await writeAudit(admin, { action: "create", entityType: "order_ops_options", entityId: String(data.id), actorId: me.id, actorName: me.name, metadata: { name: label, kind } });
@@ -303,7 +303,7 @@ export async function PATCH(request: Request) {
     const denied = await guardApi(request, "order_ops.manage");
     if (denied) return denied;
     const id = String(body.id ?? "");
-    const patch = pickFields((body.patch ?? {}) as Row, ["label", "sort_order", "is_active"]);
+    const patch = pickFields((body.patch ?? {}) as Row, ["label", "value", "sort_order", "is_active"]);
     if (!uuidRe.test(id) || !Object.keys(patch).length) return bad("ไม่มีอะไรเปลี่ยน");
     const { data: before } = await admin.from("order_ops_options").select("*").eq("id", id).maybeSingle();
     if (!before) return bad("ไม่พบตัวเลือก", 404);

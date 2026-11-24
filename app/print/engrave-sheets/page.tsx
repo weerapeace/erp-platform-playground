@@ -91,14 +91,14 @@ function Sheet({ r, first, specials }: { r: Row; first: boolean; specials: strin
             {Array.from({ length: 10 }, (_, i) => <div key={i} className={`${cell} bg-slate-50 text-[13px] font-extrabold`}>{li * 10 + i + 1}</div>)}
           </div>
           <div className="grid border-b-[1.5px] border-black last:border-b-0" style={{ gridTemplateColumns: "200px repeat(10, 1fr)" }}>
-            <div className={`${cell} min-h-[60px] justify-start break-all px-2 text-xl font-extrabold`} style={{ fontFamily: `"${font}", serif` }}>{li === 0 ? r.engrave_text : "-"}</div>
+            <div className={`${cell} min-h-[60px] justify-center break-all px-2 text-[22px] font-bold`} style={{ fontFamily: `"${font}", serif` }}>{li === 0 ? r.engrave_text : "-"}</div>
             {Array.from({ length: 10 }, (_, i) => {
               const ch = line[i] ?? "";
               const lower = ch >= "a" && ch <= "z";
               return (
                 <div key={i} className={`${cell} relative min-h-[60px] items-end pb-1`}>
                   <span className="pointer-events-none absolute left-1 right-1 top-1/2 border-t-2 border-dashed border-slate-500" />
-                  <span className={`relative bg-white px-0.5 leading-none ${lower ? "text-[28px]" : "text-[52px]"}`} style={{ fontFamily: `"${font}", serif` }}>{ch}</span>
+                  <span className={`relative bg-white px-0.5 font-bold leading-none ${lower ? "text-[28px]" : "text-[52px]"}`} style={{ fontFamily: `"${font}", serif` }}>{ch}</span>
                 </div>
               );
             })}

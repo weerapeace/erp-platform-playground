@@ -17,6 +17,7 @@ import { shortcutKey } from "@/lib/shortcut-key";
 import { useScanGun } from "@/components/scan-input/use-scan-gun";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { Icon } from "@/components/icon";
+import { decodeEngraveSku } from "@/lib/order-ops";
 import { useToast } from "@/components/toast";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { usePageOwnsBottomBar } from "@/lib/app-shell-bar";
@@ -688,6 +689,7 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
                   <p className="truncate text-xs text-slate-500">
                     {(l.info.guessed ? l.info.shop_code ?? l.info.sku_code : l.info.sku_code ?? l.info.shop_code) ?? "-"}{l.info.color ? ` · ${l.info.color}` : ""}
                     {l.info.guessed && <span className="ml-1 text-slate-500" title="ระบบเดาให้ตอนแสดงเท่านั้น ยังไม่ได้บันทึกการจับคู่">→ {l.info.guess_code ? `${l.info.guess_code} ` : ""}({l.info.guessed === "listing" ? "เดาจากสินค้าที่จับคู่ในร้าน" : "เดาจากรหัส"})</span>}
+                    {(() => { const d = decodeEngraveSku(l.info.shop_code ?? l.info.sku_code); return d ? <span className="ml-1 rounded bg-indigo-50 px-1.5 text-indigo-700" title="ถอดจากรหัสท้าย SKU">สลัก {[d.type, d.position].filter(Boolean).join(" · ")}</span> : null; })()}
                     {l.info.level === "parent" && <span className="ml-1 text-amber-700">(รู้แค่รุ่น ไม่รู้สี)</span>}
                     {l.info.level === "none" && <span className="ml-1 text-amber-700">(จับคู่สินค้าไม่ได้ — ติ๊กมือ)</span>}
                   </p>

@@ -89,6 +89,47 @@ export function guessEngraveFromNote(note: string | null | undefined): { text: s
   return { text: best.text, type, position };
 }
 
+/**
+ * รหัสท้าย SKU บอกรูปแบบ/ตำแหน่งสลัก เช่น WK45-05G/2 = ฟอยทอง · ตรงกลาง
+ * ตัวอักษรก่อน "/" = รูปแบบ · ตัวเลขหลัง "/" = ตำแหน่ง
+ * ค่าเริ่มต้นตรวจกับข้อมูลแอปเก่า 70 ออเดอร์ (2026-11-24): D=พิมพ์จม G=ฟอยทอง N=ฟอยเงิน · 1=มุมขวา 2=ตรงกลาง
+ * ตั้งเพิ่ม/แก้ได้ในหน้าตั้งค่าเครื่องสลัก (order_ops_options kind engrave_sku_type / engrave_sku_pos · label=รหัส value=ความหมาย)
+ */
+export const DEFAULT_ENGRAVE_SKU_TYPES: Record<string, EngraveType> = { D: "พิมพ์จม", G: "ฟอยทอง", N: "ฟอยเงิน" };
+export const DEFAULT_ENGRAVE_SKU_POSITIONS: Record<string, EngravePosition> = { "1": "มุมขวา", "2": "ตรงกลาง" };
+
+export type EngraveSkuDecoded = { type: EngraveType | null; position: EngravePosition | null; typeCode: string; posCode: string };
+
+/** ถอดรหัสท้าย SKU → รูปแบบ/ตำแหน่ง (ไม่ใช่ SKU สลัก = null) */
+export function decodeEngraveSku(
+  sku: string | null | undefined,
+  types: Record<string, string> = DEFAULT_ENGRAVE_SKU_TYPES,
+  positions: Record<string, string> = DEFAULT_ENGRAVE_SKU_POSITIONS,
+): EngraveSkuDecoded | null {
+  const m = /([A-Z])\/(\d+)\s*$/i.exec((sku || "").trim());
+  if (!m) return null;
+  const typeCode = m[1].toUpperCase();
+  const posCode = m[2];
+  const t = types[typeCode];
+  const p = positions[posCode];
+  if (!t && !p) return null;
+  return {
+    type: (ENGRAVE_TYPES as readonly string[]).includes(t ?? "") ? (t as EngraveType) : null,
+    position: (ENGRAVE_POSITIONS as readonly string[]).includes(p ?? "") ? (p as EngravePosition) : null,
+    typeCode,
+    posCode,
+  };
+}
+
+/** สร้างตารางรหัสจากตัวเลือกที่ตั้งไว้ (ไม่มีเลย = ใช้ค่าเริ่มต้น) */
+export function engraveSkuMaps(options: { kind: string; label: string; value?: string | null; is_active: boolean }[]): { types: Record<string, string>; positions: Record<string, string> } {
+  const pick = (kind: string) => {
+    const rows = options.filter((o) => o.kind === kind && o.is_active && o.value);
+    return rows.length ? Object.fromEntries(rows.map((o) => [o.label.trim().toUpperCase(), String(o.value)])) : null;
+  };
+  return { types: pick("engrave_sku_type") ?? { ...DEFAULT_ENGRAVE_SKU_TYPES }, positions: pick("engrave_sku_pos") ?? { ...DEFAULT_ENGRAVE_SKU_POSITIONS } };
+}
+
 /** คำสั่งเริ่มต้น (ตั้งค่าเพิ่ม/แก้/ปิดได้ในหน้า) — ชุดเดียวกับแอปเก่า */
 export const DEFAULT_INSTRUCTION_COMMANDS = [
   "ห่อ",

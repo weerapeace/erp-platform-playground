@@ -121,6 +121,8 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
 
   useEffect(() => { const t = setTimeout(() => void load(), q ? 300 : 0); return () => clearTimeout(t); }, [load, bump, q]);
   useEffect(() => { setPage(1); setSelected(new Set()); }, [filter, trash, q]);
+  // กลับมาจากแท็บใบสลัก → โหลดใหม่ ให้จำนวนครั้งที่พิมพ์อัปเดต
+  useEffect(() => { const on = () => void load(); window.addEventListener("focus", on); return () => window.removeEventListener("focus", on); }, [load]);
 
   const sel = rows.filter((r) => selected.has(r.id));
 
@@ -188,7 +190,11 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
     { key: "cmd", header: "คำสั่ง / สลัก", width: "2fr", cell: cmdChips },
     { key: "status", header: "สถานะ", width: "6.5rem", sortValue: (r) => r.status, cell: (r) => (
       <button disabled={!canEdit || trash} onClick={(e) => { e.stopPropagation(); void toggleDone(r); }} title={canEdit ? "กดสลับ เสร็จ / ยังไม่ทำ" : ""}>{statusPill(r)}</button>) },
-    { key: "print", header: "พิมพ์", width: "4rem", align: "center", defaultHidden: isPhone, cell: (r) => r.print_count ? <span className="text-xs text-slate-500">{r.print_count} ครั้ง</span> : <span className="text-xs text-slate-300">-</span> },
+    { key: "print", header: "พิมพ์", width: "6rem", align: "center", cell: (r) => r.engrave && r.engrave_text ? (
+      <div onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => printSheets([r])} disabled={trash} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"><Icon name="printer" className="h-3.5 w-3.5" /> พิมพ์</button>
+        {r.print_count > 0 && <div className="mt-0.5 text-[11px] text-slate-400">พิมพ์แล้ว {r.print_count} ครั้ง</div>}
+      </div>) : <span className="text-xs text-slate-300">-</span> },
     { key: "created", header: "บันทึกเมื่อ", width: "7.5rem", sortValue: (r) => r.created_at, cell: (r) => <span className="text-xs text-slate-500">{fmtDate(r.created_at)}<br />{r.created_by_name ?? ""}</span> },
   ];
 
@@ -254,7 +260,7 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
                 {cmdChips(r)}
                 {!trash && (
                   <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-                    {r.engrave && r.engrave_text && <button onClick={() => printSheets([r])} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs">พิมพ์สลัก</button>}
+                    {r.engrave && r.engrave_text && <button onClick={() => printSheets([r])} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs"><Icon name="printer" className="mr-1 inline h-3.5 w-3.5" />พิมพ์{r.print_count ? ` (${r.print_count})` : ""}</button>}
                     {canEdit && <button onClick={() => toggleDone(r)} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs">{r.status === "done" ? "ยังไม่ทำ" : "เสร็จ"}</button>}
                   </div>
                 )}
@@ -262,7 +268,7 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
             )}
           />
         )}
-      <Pager page={page} pageSize={50} total={total} onPage={setPage} unitLabel="รายการ" hideWhenSingle />
+      <Pager page={page - 1} pageSize={50} total={total} onPage={(p) => setPage(p + 1)} unitLabel="รายการ" hideWhenSingle />
 
       {editing && (
         <InstructionForm

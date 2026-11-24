@@ -131,17 +131,26 @@ export function OrderNoField({ value, onChange, onFound, autoFocus }: {
 }
 
 /** เลือกสินค้าจากรายการในออเดอร์ (ถ้ามี) หรือพิมพ์รหัสเอง */
-export function SkuField({ value, onChange, items }: { value: string; onChange: (v: string) => void; items: OrderHit["items"] }) {
+export function SkuField({ value, onChange, items, decode }: {
+  value: string; onChange: (v: string) => void; items: OrderHit["items"];
+  /** ถอดรหัสท้าย SKU เป็นป้าย เช่น "ฟอยทอง · ตรงกลาง" (ไม่ใช่ SKU สลัก = null) */
+  decode?: (sku: string | null) => string | null;
+}) {
+  const own = decode?.(value) ?? null;
   return (
     <div>
       <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="รหัสสินค้า เช่น TTM061-04" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-sky-500 focus:outline-none" />
+      {own && !items.some((i) => i.sku === value) && <div className="mt-1"><Pill tone="accent">{own}</Pill></div>}
       {items.length > 0 && (
         <div className="mt-1 flex flex-wrap gap-1">
-          {items.map((i, k) => (
-            <button key={k} type="button" onClick={() => onChange(i.sku ?? "")} className={`rounded-full border px-2 py-0.5 font-mono text-[11px] ${value === i.sku ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={i.name ?? ""}>
-              {i.sku ?? "?"} ×{i.qty}
-            </button>
-          ))}
+          {items.map((i, k) => {
+            const d = decode?.(i.sku) ?? null;
+            return (
+              <button key={k} type="button" onClick={() => onChange(i.sku ?? "")} className={`rounded-full border px-2 py-0.5 text-[11px] ${value === i.sku ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={i.name ?? ""}>
+                <span className="font-mono">{i.sku ?? "?"} ×{i.qty}</span>{d && <span className="ml-1 text-indigo-700">· {d}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -160,7 +169,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
 
-export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font"; label: string; sort_order: number; is_active: boolean };
+export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos"; label: string; value?: string | null; sort_order: number; is_active: boolean };
 
 export function useOpsOptions() {
   const [options, setOptions] = useState<OptionRow[]>([]);

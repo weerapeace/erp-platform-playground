@@ -16,7 +16,7 @@ import { Icon } from "@/components/icon";
 import { PlatformOrderPicker, type PickedOrder } from "@/components/platform-order-picker";
 import {
   DEFAULT_ENGRAVE_FONT, ENGRAVE_MAX_CHARS, ENGRAVE_POSITIONS, ENGRAVE_TYPES, INSTRUCTION_STATUS,
-  engraveTextError, guessEngraveFromNote, invalidEngraveChars, splitEngraveChars,
+  decodeEngraveSku, engraveSkuMaps, engraveTextError, guessEngraveFromNote, invalidEngraveChars, splitEngraveChars,
 } from "@/lib/order-ops";
 import { Field, HistoryList, OrderNoField, SkuField, inputCls, opsJson, type OptionRow, type OrderHit } from "./shared";
 
@@ -29,7 +29,7 @@ export type Ins = {
 
 const PLATFORMS = ["Shopee", "Lazada", "TikTok", "LINE", "Facebook", "IG", "เว็บไซต์", "อื่นๆ"];
 type Item = OrderHit["items"][number];
-type Line = { key: string; sku: string; text: string };
+type Line = { key: string; sku: string; text: string; type: string; position: string };
 
 /** ช่องตัวอย่างใบสลัก 10/20 ช่อง — ช่องที่สลักไม่ได้เป็นสีแดง */
 export function EngravePreview({ text, specials, font }: { text: string; specials: string[]; font: string }) {
@@ -41,7 +41,7 @@ export function EngravePreview({ text, specials, font }: { text: string; special
       <div className="grid min-w-[420px] grid-cols-10 border border-slate-800 text-center" style={{ fontFamily: `"${font}", serif` }}>
         {Array.from({ length: chars.length > 10 ? 20 : 10 }, (_, i) => {
           const c = chars[i] ?? "";
-          return <div key={i} className={`flex h-12 items-end justify-center border-r border-t border-slate-800 pb-1 text-2xl [&:nth-child(10n)]:border-r-0 [&:nth-child(-n+10)]:border-t-0 ${bad.has(c) ? "bg-rose-100 text-rose-700" : ""}`}>{c}</div>;
+          return <div key={i} className={`flex h-12 items-end justify-center border-r border-t border-slate-800 pb-1 text-2xl font-bold [&:nth-child(10n)]:border-r-0 [&:nth-child(-n+10)]:border-t-0 ${bad.has(c) ? "bg-rose-100 text-rose-700" : ""}`}>{c}</div>;
         })}
       </div>
     </div>
@@ -79,6 +79,10 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
   const specials = options.filter((o) => o.kind === "engrave_special" && o.is_active).map((o) => o.label);
   const fontOpts = options.filter((o) => o.kind === "engrave_font" && (o.is_active || o.label === row?.engrave_font)).map((o) => o.label);
   const fonts = fontOpts.length ? fontOpts : [DEFAULT_ENGRAVE_FONT];
+  // รหัสท้าย SKU → รูปแบบ/ตำแหน่ง (WK45-05G/2 = ฟอยทอง · ตรงกลาง) · ตั้งได้ในหน้าตั้งค่าเครื่องสลัก
+  const maps = useMemo(() => engraveSkuMaps(options), [options]);
+  const dec = (sku: string | null | undefined) => decodeEngraveSku(sku, maps.types, maps.positions);
+  const decLabel = (sku: string | null) => { const d = dec(sku); return d ? [d.type, d.position].filter(Boolean).join(" · ") || null : null; };
 
   const init = useMemo(() => ({
     order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "",
@@ -107,12 +111,16 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
   const fillFrom = (o: { id: string; platform: string | null; customer_name: string | null; note: string | null; items: Item[] }) => {
     setItems(o.items);
     setBuyerNote(o.note);
-    setF((p) => ({
-      ...p, platform_order_id: o.id,
-      platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "",
-      sku: p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : ""),
-      note: p.note || (o.note ? `ลูกค้าเขียน: ${o.note}` : ""),
-    }));
+    setF((p) => {
+      const sku = p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : "");
+      const d = !p.sku && sku ? dec(sku) : null;
+      return {
+        ...p, platform_order_id: o.id,
+        platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "",
+        sku, note: p.note || (o.note ? `ลูกค้าเขียน: ${o.note}` : ""),
+        ...(d ? { engrave: true, engrave_type: d.type ?? p.engrave_type, engrave_position: d.position ?? p.engrave_position } : {}),
+      };
+    });
     if (!row && o.items.length > 1) setLines([]);
   };
   const onFound = (o: OrderHit | null) => {
@@ -131,32 +139,54 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
     if (multi && lines.length === 1 && guess.text) setLines((ls) => ls.map((l) => ({ ...l, text: guess.text ?? l.text })));
   };
 
+  /** เปลี่ยน SKU → ถ้าเป็น SKU สลัก ตั้งรูปแบบ/ตำแหน่งตามรหัสท้ายให้เอง */
+  const setSku = (v: string) => setF((p) => {
+    const d = dec(v);
+    return { ...p, sku: v, ...(d ? { engrave: true, engrave_type: d.type ?? p.engrave_type, engrave_position: d.position ?? p.engrave_position } : {}) };
+  });
+  const skuDec = !multi ? dec(f.sku) : null;
+  const mismatch = (sku: string, type: string, position: string) => {
+    const d = dec(sku);
+    return !!d && ((!!d.type && d.type !== type) || (!!d.position && d.position !== position));
+  };
   const toggleCmd = (c: string) => set("commands", f.commands.includes(c) ? f.commands.filter((x) => x !== c) : [...f.commands, c]);
   const toggleLine = (it: Item, idx: number) => {
     const key = `${idx}:${it.sku ?? ""}`;
-    setLines((ls) => ls.some((l) => l.key === key) ? ls.filter((l) => l.key !== key) : [...ls, { key, sku: it.sku ?? "", text: ls.length === 0 ? f.engrave_text : "" }]);
+    const d = dec(it.sku);
+    if (d) set("engrave", true);
+    setLines((ls) => ls.some((l) => l.key === key) ? ls.filter((l) => l.key !== key)
+      : [...ls, { key, sku: it.sku ?? "", text: ls.length === 0 ? f.engrave_text : "", type: d?.type ?? f.engrave_type, position: d?.position ?? f.engrave_position }]);
   };
 
-  const save = async () => {
+  /** บันทึก (print = บันทึกแล้วเปิดใบสลัก · เปิดหน้าต่างก่อนรอ กันเบราว์เซอร์บล็อกป๊อป) */
+  const save = async (print = false) => {
     if (!f.order_no.trim()) { toast.error("กรุณาใส่เลขออเดอร์"); return; }
+    if (print && !f.engrave) { toast.error("คำสั่งนี้ไม่ได้ติ๊กสลักชื่อ"); return; }
     if (multi && !lines.length) { toast.error("ออเดอร์นี้มีหลายชิ้น — ติ๊กสินค้าที่ต้องทำคำสั่งก่อน"); return; }
     const texts = multi ? lines.map((l) => l.text) : [f.engrave_text];
     if (f.engrave) {
       for (const t of texts) { const e = engraveTextError(t, specials); if (e) { toast.error(e); return; } }
     }
+    if (print && row && !dirty) { window.open(`/print/engrave-sheets?ids=${row.id}`, "_blank"); return; }
+    const win = print ? window.open("about:blank", "_blank") : null;
     setSaving(true);
     try {
+      const ids: string[] = [];
       const base = {
         ...f, engrave_font: f.engrave ? font : null,
         engrave_text: f.engrave ? f.engrave_text.trim() : null, engrave_type: f.engrave ? f.engrave_type : null, engrave_position: f.engrave ? f.engrave_position : null,
       };
-      if (row) await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: row.id, patch: base }) });
+      if (row) { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: row.id, patch: base }) }); ids.push(row.id); }
       else if (multi) {
-        for (const l of lines) await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", ...base, sku: l.sku, engrave_text: f.engrave ? l.text.trim() : null, is_trial: true }) });
-      } else await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", ...base, is_trial: true }) });
+        for (const l of lines) {
+          const r = await opsJson<{ row: { id: string } }>("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", ...base, sku: l.sku, engrave_text: f.engrave ? l.text.trim() : null, engrave_type: f.engrave ? l.type : null, engrave_position: f.engrave ? l.position : null, is_trial: true }) });
+          ids.push(r.row.id);
+        }
+      } else { const r = await opsJson<{ row: { id: string } }>("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", ...base, is_trial: true }) }); ids.push(r.row.id); }
       toast.success(multi ? `บันทึกแล้ว ${lines.length} คำสั่ง` : "บันทึกแล้ว");
+      if (win) win.location.href = `/print/engrave-sheets?ids=${ids.join(",")}`;
       onSaved();
-    } catch (e) { toast.error((e as Error).message); }
+    } catch (e) { win?.close(); toast.error((e as Error).message); }
     finally { setSaving(false); }
   };
   const del = async () => {
@@ -180,8 +210,9 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
           {row && canDelete && <button onClick={del} className="rounded-lg border border-rose-200 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50">ลบ</button>}
           <span className="flex-1" />
           {hasBad && <span className="hidden text-xs text-rose-600 sm:inline">มีตัวที่สลักไม่ได้</span>}
+          {f.engrave && <button onClick={() => save(true)} disabled={saving || hasBad} title={dirty ? "บันทึกก่อนแล้วเปิดใบสลัก" : "เปิดใบสลักชื่อ"} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"><Icon name="printer" className="h-4 w-4" /> พิมพ์<span className="hidden sm:inline">ใบสลัก</span></button>}
           <button onClick={onClose} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">ยกเลิก</button>
-          <button onClick={save} disabled={saving || hasBad} title={hasBad ? "แก้ชื่อสลักก่อน — มีตัวที่เครื่องสลักทำไม่ได้" : ""} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
+          <button onClick={() => save()} disabled={saving || hasBad} title={hasBad ? "แก้ชื่อสลักก่อน — มีตัวที่เครื่องสลักทำไม่ได้" : ""} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
         </div>
       )}
     >
@@ -200,7 +231,7 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
             </select>
           </Field>
           <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
-          {!multi && <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={(v) => set("sku", v)} items={items} /></Field>}
+          {!multi && <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={setSku} items={items} decode={decLabel} /></Field>}
         </div>
         {multi && (
           <Field label="ออเดอร์นี้มีหลายชิ้น — ติ๊กสินค้าที่ต้องทำคำสั่ง (1 ชิ้น = 1 คำสั่ง)">
@@ -213,11 +244,18 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={!!line} onChange={() => toggleLine(it, idx)} />
                       <span className="font-mono text-xs">{it.sku ?? "?"}</span> <span className="text-slate-500">×{it.qty}</span>
+                      {decLabel(it.sku) && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700">{decLabel(it.sku)}</span>}
                       <span className="truncate text-xs text-slate-400">{it.name ?? ""}</span>
                     </label>
                     {line && f.engrave && (
                       <div className="mt-2 pl-6">
                         <EngraveNameInput value={line.text} onChange={(v) => setLines((ls) => ls.map((l) => l.key === key ? { ...l, text: v } : l))} specials={specials} label={`ชื่อที่ต้องสลักบน ${it.sku ?? "ชิ้นนี้"} (สูงสุด ${ENGRAVE_MAX_CHARS} ตัว)`} />
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {ENGRAVE_TYPES.map((t) => <button key={t} type="button" onClick={() => setLines((ls) => ls.map((l) => l.key === key ? { ...l, type: t } : l))} className={`rounded-md border px-2 py-0.5 text-xs ${line.type === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}
+                          <span className="mx-1 w-px bg-slate-200" />
+                          {ENGRAVE_POSITIONS.map((t) => <button key={t} type="button" onClick={() => setLines((ls) => ls.map((l) => l.key === key ? { ...l, position: t } : l))} className={`rounded-md border px-2 py-0.5 text-xs ${line.position === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}
+                        </div>
+                        {mismatch(line.sku, line.type, line.position) && <p className="mt-1 text-xs text-amber-700"><Icon name="alert-triangle" className="mr-1 inline h-3.5 w-3.5" />ไม่ตรงกับรหัสสินค้า {line.sku} ({decLabel(line.sku)}) — เช็กกับลูกค้าก่อน</p>}
                         <div className="mt-2"><EngravePreview text={line.text} specials={specials} font={font} /></div>
                       </div>
                     )}
@@ -250,20 +288,23 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
           {f.engrave && (
             <div className="mt-2 space-y-2">
               {!multi && <EngraveNameInput value={f.engrave_text} onChange={(v) => set("engrave_text", v)} specials={specials} onManage={onManageEngrave} label={`ชื่อที่ต้องสลัก (อังกฤษ A-Z a-z ตัวเลข 0-9 และตัวพิเศษที่ตั้งไว้ · สูงสุด ${ENGRAVE_MAX_CHARS} ตัว)`} />}
-              {multi && <p className="text-xs text-slate-500">ใส่ชื่อสลักในแต่ละชิ้นที่ติ๊กด้านบน · รูปแบบ/ตำแหน่ง/ฟอนต์ใช้ร่วมกัน{onManageEngrave && <button type="button" onClick={onManageEngrave} className="ml-2 text-sky-700 underline">จัดการตัวพิเศษ/ฟอนต์</button>}</p>}
+              {multi && <p className="text-xs text-slate-500">ใส่ชื่อสลัก + รูปแบบ/ตำแหน่ง ในแต่ละชิ้นที่ติ๊กด้านบน (ตั้งจากรหัสสินค้าให้แล้ว) · ฟอนต์ใช้ร่วมกัน{onManageEngrave && <button type="button" onClick={onManageEngrave} className="ml-2 text-sky-700 underline">จัดการตัวพิเศษ/ฟอนต์</button>}</p>}
               <div className="flex flex-wrap gap-4">
                 <Field label="ฟอนต์">
                   <select value={font} onChange={(e) => set("engrave_font", e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-sm">
                     {fonts.map((x) => <option key={x} value={x}>{x}</option>)}
                   </select>
                 </Field>
-                <Field label="รูปแบบ">
+                {!multi && <Field label="รูปแบบ">
                   <div className="flex gap-1">{ENGRAVE_TYPES.map((t) => <button key={t} type="button" onClick={() => set("engrave_type", t)} className={`rounded-md border px-2.5 py-1 text-xs ${f.engrave_type === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}</div>
-                </Field>
-                <Field label="ตำแหน่ง">
+                </Field>}
+                {!multi && <Field label="ตำแหน่ง">
                   <div className="flex gap-1">{ENGRAVE_POSITIONS.map((t) => <button key={t} type="button" onClick={() => set("engrave_position", t)} className={`rounded-md border px-2.5 py-1 text-xs ${f.engrave_position === t ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 text-slate-600"}`}>{t}</button>)}</div>
-                </Field>
+                </Field>}
               </div>
+              {!multi && skuDec && (mismatch(f.sku, f.engrave_type, f.engrave_position)
+                ? <p className="text-xs text-amber-700"><Icon name="alert-triangle" className="mr-1 inline h-3.5 w-3.5" />ไม่ตรงกับรหัสสินค้า {f.sku} ({decLabel(f.sku)}) — เช็กกับลูกค้าก่อน</p>
+                : <p className="text-xs text-emerald-700"><Icon name="check" className="mr-1 inline h-3.5 w-3.5" />รูปแบบ/ตำแหน่งตั้งจากรหัสสินค้า {f.sku}</p>)}
               {!multi && <EngravePreview text={f.engrave_text} specials={specials} font={font} />}
               {!multi && f.engrave_text.trim() && <p className="text-[11px] text-slate-400">ตัวอย่างใช้ฟอนต์ {font} · ช่องแดง = สลักไม่ได้ · กดพิมพ์ได้จากหน้ารายการ</p>}
             </div>
@@ -283,7 +324,7 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
           <HistoryList logs={history} />
         </div>
       )}
-      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={onPick} />
+      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={onPick} itemBadge={decLabel} />
     </ERPModal>
   );
 }
@@ -299,6 +340,8 @@ export function EngraveSettings({ open, onClose, options, onChanged }: { open: b
         </div>
         <OptionList kind="engrave_special" title="ตัวพิเศษที่สลักได้ (ปุ่มลัดในฟอร์ม)" placeholder="วางตัวพิเศษใหม่ 1 ตัว เช่น ♥" options={options} onChanged={onChanged} single />
         <OptionList kind="engrave_font" title="ฟอนต์ที่เครื่องสลักมี (ตัวบนสุด = ค่าเริ่มต้น)" placeholder="ชื่อฟอนต์ใหม่ เช่น Arial" options={options} onChanged={onChanged} fontPreview />
+        <SkuCodeList kind="engrave_sku_type" title="รหัสท้าย SKU → รูปแบบ (ตัวอักษรก่อน / เช่น WK45-05G/2 → G)" choices={ENGRAVE_TYPES} options={options} onChanged={onChanged} />
+        <SkuCodeList kind="engrave_sku_pos" title="รหัสท้าย SKU → ตำแหน่ง (ตัวเลขหลัง / เช่น WK45-05G/2 → 2)" choices={ENGRAVE_POSITIONS} options={options} onChanged={onChanged} />
         <p className="text-[11px] text-slate-400">ซ่อนแทนลบ — คำสั่งเก่าที่ใช้ตัวนั้นไม่พัง · ทุกการแก้ลงประวัติ</p>
       </div>
     </ERPModal>
@@ -349,6 +392,52 @@ function OptionList({ kind, title, placeholder, options, onChanged, single, font
         ))}
         <li className="flex gap-2 px-3 py-1.5">
           <input value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder={placeholder} className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <button onClick={add} className="rounded-md bg-sky-600 px-3 text-xs font-medium text-white hover:bg-sky-700">เพิ่ม</button>
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+/** ตารางรหัสท้าย SKU → ความหมาย (เพิ่ม · เปลี่ยนความหมาย · ซ่อน/เปิด) */
+function SkuCodeList({ kind, title, choices, options, onChanged }: {
+  kind: "engrave_sku_type" | "engrave_sku_pos"; title: string; choices: readonly string[]; options: OptionRow[]; onChanged: () => void;
+}) {
+  const toast = useToast();
+  const [code, setCode] = useState("");
+  const [val, setVal] = useState<string>(choices[0]);
+  const rows = options.filter((o) => o.kind === kind);
+  const isType = kind === "engrave_sku_type";
+  const add = async () => {
+    const c = code.trim().toUpperCase();
+    if (!(isType ? /^[A-Z]$/ : /^\d{1,2}$/).test(c)) { toast.error(isType ? "รหัสต้องเป็นตัวอักษรอังกฤษ 1 ตัว" : "รหัสต้องเป็นตัวเลข"); return; }
+    try { await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "options", kind, label: c, value: val, sort_order: rows.length + 1 }) }); setCode(""); onChanged(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const patch = async (o: OptionRow, p: Partial<OptionRow>) => {
+    try { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "options", id: o.id, patch: p }) }); onChanged(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-slate-600">{title}</div>
+      <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+        {rows.map((o) => (
+          <li key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+            <span className={`w-8 font-mono font-semibold ${o.is_active ? "" : "text-slate-400 line-through"}`}>{o.label}</span>
+            <span className="text-slate-400">=</span>
+            <select value={o.value ?? ""} onChange={(e) => patch(o, { value: e.target.value })} className="flex-1 rounded-md border border-slate-200 px-2 py-0.5 text-sm">
+              {!choices.includes(o.value ?? "") && <option value={o.value ?? ""}>{o.value || "-"}</option>}
+              {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button onClick={() => patch(o, { is_active: !o.is_active })} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50">{o.is_active ? "ซ่อน" : "เปิดใช้"}</button>
+          </li>
+        ))}
+        <li className="flex gap-2 px-3 py-1.5">
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder={isType ? "รหัส เช่น S" : "รหัส เช่น 3"} className="w-24 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+          <select value={val} onChange={(e) => setVal(e.target.value)} className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm">
+            {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <button onClick={add} className="rounded-md bg-sky-600 px-3 text-xs font-medium text-white hover:bg-sky-700">เพิ่ม</button>
         </li>
       </ul>
