@@ -1,53 +1,53 @@
 import type { Config } from "tailwindcss";
+import plugin from "tailwindcss/plugin";
+import {
+  ORANGE_SCALE,
+  VIOLET_SCALE,
+  fixedScale,
+  tailwindScaleFor,
+  themeVars,
+} from "./lib/erp-theme";
 
+// ─────────────────────────────────────────────────────────
+// ธีมกลาง ERP (lib/erp-theme · docs/erp-theme.md)
+//   blue-* / brand-* = สีหลัก (primary) · violet-* = สีเน้นรอง (accent)
+//   ไม่ใช่สีตายตัวแล้ว — อ่านจากตัวแปร --tm-* (ค่าเริ่ม = ส้ม/ม่วงเดิมเป๊ะ)
+//   → ธีมของโมดูล/ผู้ใช้ เปลี่ยนสีได้โดยไม่ต้องแก้คลาสในหน้า
+//   (เดิม 2026-05-31 เขียนทับ blue เป็นส้มตายตัวเพื่อไม่ต้องไล่แก้หลายร้อยจุด)
+//   status-blue-* / status-violet-* = ชุดล็อกสำหรับสีสถานะ ไม่ตามธีม
+// ─────────────────────────────────────────────────────────
 const config: Config = {
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
+  // สีสถานะชุดล็อกอยู่ใน lib/ (ไม่อยู่ใน content) → สั่งสร้างคลาสไว้เลย
+  safelist: [{ pattern: /^(bg|text|border|ring)-status-(blue|violet)-(50|100|200|300|400|500|600|700|800|900|950)$/ }],
   theme: {
     extend: {
       colors: {
-        // ─────────────────────────────────────────────────────────
-        // BRAND = ORANGE (เปลี่ยนจาก blue เดิม — 2026-05-31)
-        // หมายเหตุ: override "blue" ของ Tailwind ทั้งระบบให้กลายเป็นส้ม
-        //   เพื่อไม่ต้องไล่แก้ 377 จุดในโค้ด
-        //   ถ้าอยากกลับเป็นน้ำเงิน — comment block นี้ออก
-        // ─────────────────────────────────────────────────────────
-        blue: {
-          50:  "#fff7ed",
-          100: "#ffedd5",
-          200: "#fed7aa",
-          300: "#fdba74",
-          400: "#fb923c",
-          500: "#f97316",
-          600: "#ea580c",
-          700: "#c2410c",
-          800: "#9a3412",
-          900: "#7c2d12",
-          950: "#431407",
-        },
-        brand: {
-          50:  "#fff7ed",
-          100: "#ffedd5",
-          200: "#fed7aa",
-          300: "#fdba74",
-          400: "#fb923c",
-          500: "#f97316",
-          600: "#ea580c",
-          700: "#c2410c",
-          800: "#9a3412",
-          900: "#7c2d12",
-          950: "#431407",
+        blue: tailwindScaleFor("primary"),
+        brand: tailwindScaleFor("primary"),
+        violet: tailwindScaleFor("accent"),
+        status: {
+          blue: fixedScale(ORANGE_SCALE), // = หน้าตาป้ายสถานะ "blue" เดิม (ซึ่งเป็นส้มตั้งแต่ 2026-05-31)
+          violet: fixedScale(VIOLET_SCALE),
         },
       },
+      // วงแหวนโฟกัสเริ่มต้น (คลาส ring เปล่า) — เดิม = blue-500 โปร่ง 50% · ต้องระบุเองเพราะ blue เป็นตัวแปรแล้ว
+      ringColor: { DEFAULT: "rgb(var(--tm-primary-500) / 0.5)" },
       fontFamily: {
         sans: ["Inter", "Noto Sans Thai", "system-ui", "sans-serif"],
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // ค่าเริ่มของตัวแปรธีมที่ :root (ธีมของโมดูลจะทับในกล่องครอบ — เฟส 3)
+    plugin(({ addBase }) => {
+      addBase({ ":root": themeVars() });
+    }),
+  ],
 };
 
 export default config;

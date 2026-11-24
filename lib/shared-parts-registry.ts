@@ -643,6 +643,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "รับข้อความที่พิมพ์ (ต้องการตัวอักษรตามภาษา) → ใช้ e.key ตามเดิม",
   },
   {
+    key: "erp-theme", label: "ธีมกลาง ERP (ตัวแปรสีหลัก/สีเน้น)", code: "lib/erp-theme", category: "system",
+    source: { path: "lib/erp-theme" },
+    what: "คลาส blue-* / brand-* (สีหลัก) และ violet-* (สีเน้นรอง) ทั้งระบบอ่านสีจากตัวแปร --tm-* แทนสีตายตัว · ค่าเริ่ม = ส้ม/ม่วงเดิม · themeVars() ได้ชุดตัวแปรไปวางที่กล่องครอบเพื่อเปลี่ยนสีทั้งก้อน · scaleFromHex() สร้าง 11 เฉดจากสีเดียว · status-blue-* / status-violet-* = ชุดล็อกสีสถานะ (ไม่ตามธีม)",
+    when: "หน้าใหม่ใช้คลาส blue-*/violet-* ตามปกติ = ตามธีมเอง · ทำธีมของโมดูล/ผู้ใช้ (เฟสถัดไป) ให้ใช้ themeVars() · สีสถานะ/ป้ายที่มีความหมายตายตัว ใช้ status-blue-*/status-violet-*",
+    notWhen: "ป้ายสถานะ (ร่าง/อนุมัติ/ไม่อนุมัติ) — ห้ามใช้ blue-*/violet-* เพราะจะเปลี่ยนตามธีม · เว็บร้าน (storefront) มีระบบธีมของตัวเอง (lib/website-theme)",
+  },
+  {
     key: "step-history", label: "ปุ่มย้อน (Back / ปุ่มเมาส์) ย้อนทีละก้าวในหน้า", code: "useStepHistory", category: "system",
     source: { path: "lib/use-step-history" },
     what: "หน้าที่เดินลึกด้วย state (แฟ้ม → อัลบั้ม → อัลบั้มย่อย · กลุ่ม → แท็ก · แบรนด์ → รุ่น) กด Back ของเบราว์เซอร์/ปุ่มย้อนของเมาส์/มือถือ แล้วถอยทีละชั้น ไม่เด้งออกหน้า · push = จดก้าว · replace = จดหน้าตาตอนนี้ · readStep/patchStep = อ่าน/แก้ก้าวปัจจุบัน (refresh แล้วอยู่ที่เดิม) · ข้ามการปิดลิ้นชักของกลางให้เอง",

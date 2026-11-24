@@ -26,7 +26,7 @@ const FAM = {
   slate:   { bg: "bg-slate-100",  text: "text-slate-600",   border: "border-slate-200",   ring: "ring-slate-300",   dot: "bg-slate-400" },
   amber:   { bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-200",   ring: "ring-amber-300",   dot: "bg-amber-500" },
   red:     { bg: "bg-red-50",     text: "text-red-700",     border: "border-red-200",     ring: "ring-red-300",     dot: "bg-red-500" },
-  blue:    { bg: "bg-blue-50",    text: "text-blue-700",    border: "border-blue-200",    ring: "ring-blue-300",    dot: "bg-blue-500" },
+  blue:    { bg: "bg-status-blue-50", text: "text-status-blue-700", border: "border-status-blue-200", ring: "ring-status-blue-300", dot: "bg-status-blue-500" }, // ชุดล็อก ไม่ตามธีม (lib/erp-theme)
   purple:  { bg: "bg-purple-50",  text: "text-purple-700",  border: "border-purple-200",  ring: "ring-purple-300",  dot: "bg-purple-500" },
 } as const;
 

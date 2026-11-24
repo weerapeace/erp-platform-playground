@@ -17,9 +17,9 @@ export const STATUS_COLORS: Record<string, StatusColorClasses> = {
   teal:    { cls: "bg-teal-50 text-teal-700 border-teal-200",        dot: "bg-teal-500" },
   cyan:    { cls: "bg-cyan-50 text-cyan-700 border-cyan-200",        dot: "bg-cyan-500" },
   sky:     { cls: "bg-sky-50 text-sky-700 border-sky-200",           dot: "bg-sky-500" },
-  blue:    { cls: "bg-blue-50 text-blue-700 border-blue-200",        dot: "bg-blue-500" },
+  blue:    { cls: "bg-status-blue-50 text-status-blue-700 border-status-blue-200", dot: "bg-status-blue-500" }, // ชุดล็อก ไม่ตามธีม
   indigo:  { cls: "bg-indigo-50 text-indigo-700 border-indigo-200",  dot: "bg-indigo-500" },
-  violet:  { cls: "bg-violet-50 text-violet-700 border-violet-200",  dot: "bg-violet-500" },
+  violet:  { cls: "bg-status-violet-50 text-status-violet-700 border-status-violet-200", dot: "bg-status-violet-500" }, // ชุดล็อก ไม่ตามธีม
   purple:  { cls: "bg-purple-50 text-purple-700 border-purple-200",  dot: "bg-purple-500" },
   fuchsia: { cls: "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200", dot: "bg-fuchsia-500" },
   pink:    { cls: "bg-pink-50 text-pink-700 border-pink-200",        dot: "bg-pink-500" },
