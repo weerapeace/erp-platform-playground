@@ -21,9 +21,9 @@ import { ErrorState, LoadingState, EmptyState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { ThemePreview, type PreviewSample } from "@/components/erp-theme/preview";
 import { ThemeEditorPanel, THEME_CATEGORIES, type ThemeCategory } from "@/components/erp-theme/editor-panel";
-import { THEME_PREVIEW_MSG } from "@/components/erp-theme/preview-bridge";
+import { THEME_PREVIEW_MSG, themePreviewMessage } from "@/components/erp-theme/preview-bridge";
 import {
-  autoFixContrast, mergeThemeConfig, normalizeThemeConfig, themeCssVars, themeIssues, type ErpThemeConfig,
+  autoFixContrast, mergeThemeConfig, normalizeThemeConfig, themeIssues, type ErpThemeConfig,
 } from "@/lib/erp-theme-config";
 
 type Version = { version: number; note: string | null; published_by_name: string | null; published_at: string; config: unknown };
@@ -201,8 +201,8 @@ export default function ThemeEditorPage() {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const sendVars = useCallback(() => {
     if (!shown || !frameRef.current?.contentWindow) return;
-    frameRef.current.contentWindow.postMessage({ type: THEME_PREVIEW_MSG, vars: themeCssVars(shown) }, window.location.origin);
-  }, [shown]);
+    frameRef.current.contentWindow.postMessage(themePreviewMessage(shown, device === "mobile"), window.location.origin);
+  }, [shown, device]);
   useEffect(() => { if (view === "real") sendVars(); }, [view, sendVars]);
   useEffect(() => {
     const onMsg = (e: MessageEvent) => { if (e.origin === window.location.origin && e.data?.type === `${THEME_PREVIEW_MSG}-ready`) sendVars(); };

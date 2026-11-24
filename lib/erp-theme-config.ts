@@ -47,7 +47,7 @@ export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
   colors: { primary: ORANGE_SCALE[500], accent: VIOLET_SCALE[500] },
   background: { image: null, where: "page", opacity: 30, blur: 0, veil: true, darkImage: null },
   gradient: { color2: "#f59e0b", angle: 90, spots: { top: false, button: false, sidebar: false, banner: false, page: false }, animate: false },
-  animation: { enter: false, hover: false, shine: false, countUp: false, mascot: false, mascotImage: null, speed: "normal" },
+  animation: { enter: false, hover: false, shine: false, countUp: true,  mascot: false, mascotImage: null, speed: "normal" },
   typography: { font: "inter-noto", baseSize: 14, headingWeight: 600 },
   shape: { radius: 8, shadow: "soft" },
   density: "normal",
@@ -100,7 +100,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
     },
     animation: {
       enter: bool(a.enter, false), hover: bool(a.hover, false), shine: bool(a.shine, false),
-      countUp: bool(a.countUp, false), mascot: bool(a.mascot, false), mascotImage: key(a.mascotImage),
+      countUp: bool(a.countUp, D.animation.countUp), mascot: bool(a.mascot, false), mascotImage: key(a.mascotImage),
       speed: pick(a.speed, ["slow", "normal", "fast"] as const, "normal"),
     },
     typography: {

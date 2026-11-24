@@ -20,7 +20,7 @@ import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { PageChromeBar, useChromeHost, useIsDesktopXl, usePageChromeHas } from "@/components/page-chrome";
 import { AccountMenu } from "@/components/account-menu";
-import { ThemeApplier } from "@/components/erp-theme/theme-applier";
+import { ThemeApplier, ThemeBanner } from "@/components/erp-theme/theme-applier";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { cachedGetJson } from "@/lib/shell-cache";
@@ -709,13 +709,16 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   // embed mode (เปิดในกรอบแอปเดี่ยว) — โชว์แค่เนื้อหา ไม่มี sidebar/แถบ App (เมนูมาจากเชลล์แอปเดี่ยวแทน)
   if (embed) {
     return (
-      <div className="min-h-screen bg-slate-50" {...wideAttr}>
+      <div className="relative min-h-screen bg-slate-50" {...wideAttr}>
         <ThemeApplier appKey={activeApp} />
-        <ShellPresentContext.Provider value={true}>
-          {blockedAppLabel
-            ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
-            : children}
-        </ShellPresentContext.Provider>
+        <ThemeBanner appKey={activeApp} />
+        <div className="relative" data-tm-page="">
+          <ShellPresentContext.Provider value={true}>
+            {blockedAppLabel
+              ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
+              : children}
+          </ShellPresentContext.Provider>
+        </div>
       </div>
     );
   }
@@ -784,7 +787,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
         transition-[width,transform] duration-200 ease-out
         ${mobileNavOpen ? "translate-x-0" : "-translate-x-full xl:translate-x-0"}
       `} aria-label="เมนูหลัก">
-        <div className="p-4 border-b border-slate-100 flex items-center gap-2">
+        <div data-shell-sidehead="" className="p-4 border-b border-slate-100 flex items-center gap-2">
           <Link href="/" className="flex items-center gap-2.5 text-slate-600 hover:text-slate-900 transition-colors group min-w-0 flex-1">
             <Logo size={28} className="flex-shrink-0 group-hover:scale-105 transition-transform" />
             {navExpanded && <div className="leading-tight min-w-0">
@@ -864,7 +867,9 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       {/* Content */}
       {/* หมายเหตุ: ห้ามใส่ overflow-y-auto ที่ main — root เป็น min-h-screen (เลื่อนที่ body)
           overflow บน main จะกลายเป็น scrollport ปลอมที่ไม่เคยเลื่อน ทำให้ sticky ทุกตัวข้างในตาย */}
-      <main id="main-content" className="flex-1 min-w-0 pt-12 xl:pt-0 pb-16 xl:pb-0 flex flex-col" tabIndex={-1}>
+      <main id="main-content" className="relative flex-1 min-w-0 pt-12 xl:pt-0 pb-16 xl:pb-0 flex flex-col" tabIndex={-1}>
+        {/* ธีมกลาง: แถบตกแต่งบนสุดของทุกหน้า (เนื้อหาลอยทับ · เฟส 4) */}
+        <ThemeBanner appKey={activeApp} />
         {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว · ซ่อนตอน focus mode) */}
         {!focus && appGroups.length > 0 && menuRows && menuRows.length > 0 && (
           <div data-shell-topbar className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 hidden xl:flex items-center gap-1 overflow-x-auto">
@@ -890,7 +895,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
             <a href="/apps" className="ml-auto px-3 py-2.5 text-xs text-slate-400 hover:text-slate-700 whitespace-nowrap">⊞ ทุก App</a>
           </div>
         )}
-        <div className="flex-1" {...wideAttr}>
+        <div className="relative flex-1" data-tm-page="" {...wideAttr}>
           <ShellPresentContext.Provider value={true}>
             {blockedAppLabel
               ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />

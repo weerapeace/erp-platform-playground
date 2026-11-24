@@ -162,3 +162,49 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 
 /* ของกลาง gallery-columns: การ์ด 12 ใบ/แถวขึ้นไป = ซ่อนชื่อ/ป้ายใต้การ์ด (ชี้ค้างดูชื่อจาก title) */
 [data-gallery-compact] .gallery-label { display: none !important; }
+
+/* ================================================================
+   ธีมกลาง เฟส 4 — เอฟเฟกต์ในหน้าจริง (lib/erp-theme-effects · docs/erp-theme.md)
+   ThemeApplier ตั้ง data-tm-* ที่ <html> เฉพาะตอนแอปนั้นมีธีม → ไม่มีธีม = กฎพวกนี้ไม่ทำงาน (หน้าตาเดิม)
+   ================================================================ */
+/* ปุ่มหลัก (คลาส bg-blue-600 ทั้งระบบ) — ไล่สี · ปุ่มลบ/อันตรายใช้สีแดง ไม่โดน */
+html[data-tm-btn="grad"] :is(button, a).bg-blue-600 { background-image: var(--tm-gradient); }
+html[data-tm-btn="grad"] :is(button, a).bg-blue-600:hover { filter: brightness(.93); }
+/* แสงวิ่งบนปุ่มหลัก (ข้ามปุ่มที่วางแบบ absolute/fixed และปุ่มที่กดไม่ได้) */
+html[data-tm-shine] :is(button, a).bg-blue-600:not(.absolute):not(.fixed):not(.sticky):not(:disabled) { position: relative; overflow: hidden; }
+html[data-tm-shine] :is(button, a).bg-blue-600:not(.absolute):not(.fixed):not(.sticky):not(:disabled)::after {
+  content: ""; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; pointer-events: none;
+  background: rgba(255, 255, 255, .38); transform: skewX(-20deg); animation: tmShine calc(2.4s * var(--tm-speed, 1)) infinite;
+}
+@keyframes tmShine { 0% { left: -60%; } 60%, 100% { left: 130%; } }
+/* ไล่สีขยับช้า ๆ (แบนเนอร์/แถบบน) */
+html[data-tm-ganim] .tm-ganim, html[data-tm-ganim][data-tm-topbar] header[data-shell-topbar], html[data-tm-ganim][data-tm-topbar] [data-shell-sidehead] {
+  background-size: 200% 200% !important; animation: tmGrad calc(6s * var(--tm-speed, 1)) ease infinite;
+}
+@keyframes tmGrad { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+/* แถบบน: มือถือ = แถบบนเชลล์ · PC = หัวเมนูข้าง (ช่องโลโก้) */
+html[data-tm-topbar] header[data-shell-topbar], html[data-tm-topbar] [data-shell-sidehead] { background: var(--tm-topbar) !important; border-color: transparent !important; color: #fff; }
+html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.text-slate-900, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
+html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, .15) !important; }
+/* เมนูข้าง: เข้ม / สีธีม */
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] { background: #1e293b !important; border-color: rgba(255, 255, 255, .08) !important; }
+html[data-tm-sidebar="brand"] aside[aria-label="เมนูหลัก"] { background: var(--tm-sidebar-bg) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.text-slate-900, .text-slate-700, .text-slate-600) { color: rgba(255, 255, 255, .88) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .55) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.hover\:bg-slate-50:hover, .hover\:bg-slate-100:hover) { background-color: rgba(255, 255, 255, .08) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.bg-slate-50, .bg-slate-100, .bg-white) { background-color: rgba(255, 255, 255, .07) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.border-slate-100, .border-slate-200) { border-color: rgba(255, 255, 255, .1) !important; }
+html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { background-color: rgba(255, 255, 255, .16) !important; color: #fff !important; }
+/* เมนูที่เลือก = ไล่สี */
+html[data-tm-sidegrad] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { background-image: var(--tm-gradient) !important; color: #fff !important; }
+/* แถวตารางกลาง (DataTable) ชี้แล้วเป็นสีอ่อนของธีม · การ์ดที่ติด .tm-card ยกตัว */
+html[data-tm-hover] [data-erp-table] tbody tr:hover > td { background-color: rgb(var(--tm-primary-50)) !important; }
+html[data-tm-hover] .tm-card { transition: transform .15s, box-shadow .15s; }
+html[data-tm-hover] .tm-card:hover { transform: translateY(-3px); box-shadow: 0 10px 20px -10px rgba(15, 23, 42, .3); }
+/* เข้าหน้า: จางเข้าอย่างเดียว (ไม่ขยับตำแหน่ง — ป๊อปที่ลอยในหน้าไม่เพี้ยน) */
+html[data-tm-enter] [data-tm-page].tm-enter { animation: tmEnter calc(.45s * var(--tm-speed, 1)) ease-out; }
+@keyframes tmEnter { from { opacity: 0; } to { opacity: 1; } }
+/* มาสคอตลอยมุมจอ */
+.tm-mascot { animation: tmFloat calc(3s * var(--tm-speed, 1)) ease-in-out infinite; }
+@keyframes tmFloat { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-7px) rotate(-6deg); } }
+@media print { .tm-mascot, .tm-banner, .tm-page-layer { display: none !important; } }

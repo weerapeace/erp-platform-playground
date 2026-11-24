@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAuth, usePermission, roleLabel, roleColor } from "@/components/auth";
 import { Icon } from "@/components/icon";
+import { setUserMotionOff, useMotionPref } from "@/components/erp-theme/motion-pref";
 import { LangToggle, useT } from "@/components/i18n";
 import { openPipWindow, pipSupported } from "@/components/pip-window";
 import { DEPLOY_PIP_SIZE } from "@/lib/deploy-queue";
@@ -46,6 +47,27 @@ const SWATCHES = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#ea580c", "#e11d4
 const MENU_W = 288;   // กว้างเท่ากันทุกที่ (w-72)
 
 const ROW = "flex w-full items-center gap-1.5 text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100";
+
+/** แอนิเมชันของธีม (แสงวิ่งบนปุ่ม · เข้าหน้า · มาสคอต · ตัวเลขนับขึ้น) — เปิด/ปิด ต่อเครื่อง */
+function ThemeMotionRow() {
+  const t = useT();
+  const pref = useMotionPref();
+  const off = pref !== "on";
+  return (
+    <div className="px-3 py-1.5 flex items-center justify-between gap-2 border-t border-slate-100">
+      <span className="text-xs text-slate-700 flex items-center gap-1.5">
+        <Icon name="design" /> {t("แอนิเมชันของธีม", "Theme animations")}
+        {pref === "system" && <span className="text-[10px] text-slate-400">({t("เครื่องตั้งลดการเคลื่อนไหว", "reduced by device")})</span>}
+      </span>
+      <div className="flex gap-0.5">
+        {([[false, t("เปิด", "On")], [true, t("ปิด", "Off")]] as const).map(([v, l]) => (
+          <button key={String(v)} type="button" disabled={pref === "system"} onClick={() => setUserMotionOff(v)}
+            className={`h-6 px-2 rounded text-[10px] disabled:opacity-50 ${off === v ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** หัวหมวดในเมนู (แถบเทาบาง ๆ) */
 function HoverDelayRow() {
@@ -232,6 +254,8 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
         <span className="text-xs text-slate-700 flex items-center gap-1.5"><Icon value="🌐" /> ภาษา / Language</span>
         <LangToggle />
       </div>
+      {/* แอนิเมชันของธีม (ธีมกลาง เฟส 4 ข้อ 4 · components/erp-theme/motion-pref) — ต่อเครื่อง */}
+      <ThemeMotionRow />
       {/* ชี้รูปแล้วเห็นรูปใหญ่ — หน่วงก่อนโชว์ (ของกลาง HoverImage · lib/hover-delay) · มือถือไม่มีชี้ ซ่อนไว้ */}
       <HoverDelayRow />
       {/* คีย์ลัด — มีประโยชน์เฉพาะจอที่มีคีย์บอร์ด (ซ่อนบนมือถือ) */}

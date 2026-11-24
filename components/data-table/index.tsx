@@ -2058,7 +2058,7 @@ export function DataTable<T extends Record<string, unknown>>({
             />
           )
         ) : (
-          <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+          <table data-erp-table="" className="w-full text-sm" style={{ tableLayout: "fixed" }}>
             <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
               {table.getHeaderGroups().map(headerGroup => (
                 <tr key={headerGroup.id}>
@@ -3480,7 +3480,7 @@ function DetailDrawer({ open, onClose, title, children }: {
 
 function LoadingSkeleton({ columns, rows }: { columns: number; rows: number }) {
   return (
-    <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+    <table data-erp-table="" className="w-full text-sm" style={{ tableLayout: "fixed" }}>
       <thead className="bg-slate-50 border-b border-slate-200">
         <tr>{Array.from({ length: columns }).map((_, i) => (<th key={i} className="px-4 py-2.5"><div className="h-3 w-20 bg-slate-200 rounded animate-pulse" /></th>))}</tr>
       </thead>

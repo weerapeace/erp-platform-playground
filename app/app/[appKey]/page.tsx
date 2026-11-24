@@ -324,7 +324,7 @@ export default function StandaloneApp() {
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope={searchScope} />
       <InstallHereBanner appLabel={app?.label ?? appKey} iconSrc={appIconSrc(app?.icon_url)} autoShow={installAsk} />
-      <ThemeApplier appKey={appKey} />
+      <ThemeApplier appKey={appKey} decor={false} />
       <header className={`relative flex-shrink-0 z-20 text-white px-3 sm:px-4 ${pageFull ? "hidden" : ""}`}
         style={{ ...(appTheme && !hasOwnHeader(app) ? themeTopbarStyle(appTheme) : appHeaderStyle(app ?? {})), paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-2.5 flex items-center gap-2 w-full min-w-0">

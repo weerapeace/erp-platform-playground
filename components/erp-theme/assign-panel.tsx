@@ -14,10 +14,10 @@ import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
-import { normalizeThemeConfig, scaleOf, themeCssVars, type ErpThemeConfig } from "@/lib/erp-theme-config";
+import { normalizeThemeConfig, scaleOf, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { COMPANY_SCOPE, appScope, diffAssignments, hasOwnHeader, type AppHeaderFields } from "@/lib/erp-theme-assign";
 import { refreshActiveThemes } from "./active-themes";
-import { THEME_PREVIEW_MSG } from "./preview-bridge";
+import { THEME_PREVIEW_MSG, themePreviewMessage } from "./preview-bridge";
 
 type App = AppHeaderFields & { key: string; label: string; icon: string | null; default_href: string | null };
 type ThemeOpt = { id: string; name: string; published_version: number; config: unknown };
@@ -191,7 +191,7 @@ export function ThemeAssignPanel({ focusApp }: { focusApp?: string | null }) {
 function AppPreviewModal({ preview, onClose }: { preview: { app: App; cfg: ErpThemeConfig | null } | null; onClose: () => void }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const send = useCallback(() => {
-    ref.current?.contentWindow?.postMessage({ type: THEME_PREVIEW_MSG, vars: preview?.cfg ? themeCssVars(preview.cfg) : null }, window.location.origin);
+    ref.current?.contentWindow?.postMessage(themePreviewMessage(preview?.cfg ?? null), window.location.origin);
   }, [preview]);
   useEffect(() => {
     const onMsg = (e: MessageEvent) => { if (e.origin === window.location.origin && e.data?.type === `${THEME_PREVIEW_MSG}-ready`) send(); };

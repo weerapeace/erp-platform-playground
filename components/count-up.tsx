@@ -21,7 +21,8 @@ export function CountUp({ value, format = (n) => Math.round(n).toLocaleString("t
   const fromRef = useRef(0);
   useEffect(() => {
     const target = Number.isFinite(value) ? value : 0;
-    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    // ไม่นับ: เครื่องตั้งลดการเคลื่อนไหว · ธีมของแอปปิดตัวนับเลข/ผู้ใช้ปิดแอนิเมชัน (data-tm-count="off" — ธีมกลาง เฟส 4)
+    const reduce = typeof window !== "undefined" && (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || document.documentElement.dataset.tmCount === "off");
     if (reduce || duration <= 0) { fromRef.current = target; setShown(target); return; }
     const start = performance.now(); const from = fromRef.current;
     let raf = 0;
