@@ -102,7 +102,8 @@ function OrderTags({ o }: { o: PlatformOrderRow }) {
     <span className="mt-0.5 flex flex-wrap gap-x-2 text-[11px]">
       {urgent && <span className="text-rose-600"><Icon value="i:bolt" className="mr-0.5" />{o.carrier}</span>}
       {opt && <span className="text-rose-600"><Icon value="i:tag" className="mr-0.5" />{opt}</span>}
-      {o.buyer_message && <span className="max-w-[220px] truncate text-amber-700" title={o.buyer_message}><Icon value="i:message-circle" className="mr-0.5" />{o.buyer_message}</span>}
+      {/* 💌 ทางลัดไปหน้าเขียนการ์ด (ข้อความลูกค้าใส่ให้แล้ว) — /order-ops/gift-cards */}
+      {o.buyer_message && <Link href={`/order-ops/gift-cards/edit?order=${o.id}`} onClick={(e) => e.stopPropagation()} className="max-w-[220px] truncate text-amber-700 hover:underline" title={`${o.buyer_message}\n— กดเพื่อเขียนการ์ดจากข้อความนี้`}><Icon value="i:message-circle" className="mr-0.5" />{o.buyer_message}</Link>}
     </span>
   );
 }

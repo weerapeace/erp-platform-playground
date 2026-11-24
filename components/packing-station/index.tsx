@@ -44,9 +44,11 @@ import { TodayPacked, type TodaySession } from "./today-list";
 type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; guessed?: "code" | "listing" | null; guess_code?: string | null; box: string | null; codes: string[]; packaging?: { id: string; code: string; name: string; image_key: string | null; qty: number }[]; pack_set?: { id: string; name: string } | null };
 type ApiOrder = { id: string; order_no: string | null; platform: string | null; platform_code: string | null; customer_name: string | null; status: string; platform_status: string | null; ship_by_at: string | null; tracking_no: string | null; package_no: string | null; carrier: string | null; cod_amount: number; packed_at: string | null; packed_by_name: string | null; buyer_note: string | null };
 type ApiSession = { id: string; status: string; packer_id: string | null; packer_name: string | null; started_at: string };
+/** 💌 การ์ดของขวัญจากหน้า /order-ops/gift-cards (done = พิมพ์หรือเขียนมือแล้ว) */
+type PackGiftCard = { id: string; message: string | null; done: boolean };
 /** คำสั่งพิเศษจากหน้า /order-ops/instructions (ห่อ/การ์ด/สลักชื่อ) */
 type PackInstruction = { id: string; commands: string[]; engrave: boolean; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null; note: string | null; status: string; is_trial: boolean };
-type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; instructions?: PackInstruction[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
+type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; instructions?: PackInstruction[]; gift_cards?: PackGiftCard[]; card_wanted?: boolean; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
 
 type Line = CheckItem & { info: ApiItem; reason: string | null };
 type Step = { key: string; kind: "scan" | "manual" };
@@ -626,6 +628,7 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
       </div>
 
       {(a.data.instructions?.length ?? 0) > 0 && <InstructionAlert list={a.data.instructions ?? []} />}
+      {((a.data.gift_cards?.length ?? 0) > 0 || a.data.card_wanted) && <GiftCardAlert cards={a.data.gift_cards ?? []} orderId={a.data.order.id} />}
 
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-2 sm:grid-cols-2 sm:gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
@@ -744,6 +747,21 @@ function StationStatus({ lastScanAt, record, camStatus, recording, elapsed, awak
 /** สรุปบรรจุภัณฑ์ทั้งออเดอร์ (Set + SKU เสริม × จำนวนชิ้น) — ใช้ทั้งโชว์และเก็บตอนแพ็คเสร็จ (รายงานการใช้) */
 function packagingSummary(lines: Line[]) {
   return summarizePackaging(lines.map((l) => ({ qty: l.qty, packaging: l.info.packaging ?? [] })));
+}
+
+/** 💌 กล่องเตือนการ์ดของขวัญ — ยังไม่มีการ์ด/ยังไม่พิมพ์ = ชมพูเด่น · พร้อมแล้ว = เตือนเบา ๆ ให้ใส่ในกล่อง */
+function GiftCardAlert({ cards, orderId }: { cards: PackGiftCard[]; orderId: string }) {
+  const todo = cards.length === 0 || cards.some((c) => !c.done);
+  return (
+    <div className={`rounded-xl border-2 p-3 ${todo ? "border-pink-400 bg-pink-50" : "border-emerald-300 bg-emerald-50"}`}>
+      <p className={`text-sm font-bold ${todo ? "text-pink-800" : "text-emerald-800"}`}>
+        <Icon value="i:gift-card" className="mr-1 inline h-4 w-4" />
+        {cards.length === 0 ? "ลูกค้าขอการ์ด/ห่อของขวัญ — ยังไม่ได้เขียนการ์ด" : todo ? "มีการ์ดที่ยังไม่พิมพ์ — พิมพ์แล้วใส่กล่อง" : `ใส่การ์ด ${cards.length} ใบในกล่องด้วย`}
+      </p>
+      {cards.map((c, i) => <div key={c.id} className="mt-1 text-sm text-slate-700">ใบที่ {i + 1}: {c.message ?? "(ไม่มีข้อความ)"} <span className={`text-xs ${c.done ? "text-emerald-700" : "text-pink-700"}`}>({c.done ? "พร้อมแล้ว" : "ยังไม่พิมพ์"})</span></div>)}
+      <a href={cards[0] ? `/order-ops/gift-cards/edit?id=${cards[0].id}` : `/order-ops/gift-cards/edit?order=${orderId}`} target="_blank" rel="noreferrer" className="mt-1.5 inline-block text-sm font-medium text-pink-700 underline">{cards.length ? "เปิดการ์ด" : "เขียนการ์ด"} ↗</a>
+    </div>
+  );
 }
 
 /** 🎁 กล่องเตือนคำสั่งพิเศษ (ห่อ/การ์ด/สลักชื่อ) — ยังไม่ทำ = กล่องม่วงเด่น · ทำแล้ว = เตือนเบา ๆ ให้เช็กว่าใส่ครบ */

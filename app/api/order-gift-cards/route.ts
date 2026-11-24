@@ -1,0 +1,418 @@
+/**
+ * 💌 API การ์ดของขวัญจากหมายเหตุออเดอร์ — หน้า /order-ops/gift-cards · กติกา lib/gift-card-design · คู่มือ docs/order-gift-cards.md
+ *
+ * GET  ?view=notes&tab=card|engrave|other|all&q=&days=   ออเดอร์ที่ลูกค้าเขียนหมายเหตุ (ทุกร้านในศูนย์ออเดอร์) + การ์ด + คำสั่งสลัก
+ *      ?view=cards&q=&status=                           การ์ดทั้งหมด (รวมการ์ดไม่ผูกออเดอร์)
+ *      ?view=templates                                  แม่แบบ (ในตัว + ที่ออกแบบเอง) · ?view=fonts ฟอนต์ที่อัปโหลด
+ *      ?id=<การ์ด> · ?order=<platform_order_id>          ข้อมูลหน้าเขียนการ์ด · ?template=<id> แม่แบบ 1 ใบ · ?ids=a,b การ์ดหลายใบ (หน้าพิมพ์)
+ * POST {action:"save_card"} สร้าง/แก้การ์ด · "printed"/"unprint" ติ๊กพิมพ์แล้ว · "written" ติ๊กเขียนมือแล้ว · "revert" ย้อนการบันทึกครั้งก่อน
+ *      "kind" แก้การคัดแยก · "template_save" / "template_copy" แม่แบบ · "ai" ให้ AI เสนอข้อความ 3 แบบ
+ * DELETE {kind:"card"|"template"|"font", ids, restore?} ย้ายลงถังขยะ / กู้คืน (ลบแบบเก็บไว้ก่อน)
+ *
+ * สิทธิ์: order_ops.view ดู · order_ops.edit เขียน/พิมพ์ · order_ops.delete ลบการ์ด · order_ops.manage แม่แบบ+ฟอนต์
+ * ไม่แตะ platform_orders (อ่านอย่างเดียว) · ทุกการเขียนลง audit_logs (changes)
+ */
+import { NextResponse } from "next/server";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
+import { aiChat, featureAccess } from "@/lib/paid-services-server";
+import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
+import { whoAmI } from "@/lib/order-ops-server";
+import {
+  builtinTemplates, buyerNoteOf, classifyNote, cleanDoc, fillTexts, isBuiltinId, roleTexts, suggestMessage, type CardDoc,
+} from "@/lib/gift-card-design";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+type Row = Record<string, unknown>;
+const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const str = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
+const cleanQ = (q: string) => q.replace(/[%,()*"\\]/g, " ").trim().slice(0, 80);
+const CARD_COLS = "id, platform_order_id, order_no, platform, brand_id, customer_note, template_id, message, note, print_count, printed_at, printed_by_name, hand_written_at, hand_written_by_name, created_by_name, updated_by_name, created_at, updated_at, deleted_at";
+const ORDER_COLS = "id, order_no, external_order_id, customer_name, status, platform_status, ordered_at, ship_by_at, platform_id, brand_id, source, packed_at, shopee_note:raw->shopee->>message_to_seller, tt_note:raw->tiktok->>buyer_message, lz_note:raw->lazada->>remarks, lz_gift:raw->lazada->>gift_message, m_note:raw->>note";
+
+function noteOfRow(o: Row): string | null {
+  return buyerNoteOf({ shopee: { message_to_seller: o.shopee_note }, tiktok: { buyer_message: o.tt_note }, lazada: { gift_message: o.lz_gift, remarks: o.lz_note }, note: o.m_note });
+}
+
+async function lookups(admin: ReturnType<typeof supabaseAdmin>, platformIds: string[], brandIds: string[]) {
+  const [{ data: plats }, { data: brands }] = await Promise.all([
+    platformIds.length ? admin.from("erp_platforms").select("id, code, name_th").in("id", platformIds) : Promise.resolve({ data: [] }),
+    brandIds.length ? admin.from("brands").select("id, name").in("id", brandIds) : Promise.resolve({ data: [] }),
+  ]);
+  return {
+    plat: new Map(((plats ?? []) as Row[]).map((p) => [String(p.id), { code: str(p.code), name: str(p.name_th) ?? str(p.code) }])),
+    brand: new Map(((brands ?? []) as Row[]).map((b) => [String(b.id), str(b.name)])),
+  };
+}
+
+function orderInfo(o: Row, lk: Awaited<ReturnType<typeof lookups>>) {
+  const p = o.platform_id ? lk.plat.get(String(o.platform_id)) : null;
+  return {
+    id: String(o.id),
+    order_no: str(o.order_no) ?? str(o.external_order_id),
+    customer_name: str(o.customer_name),
+    status: str(o.status),
+    ordered_at: str(o.ordered_at),
+    ship_by_at: str(o.ship_by_at),
+    packed_at: str(o.packed_at),
+    platform: p?.name ?? (o.source === "manual" ? "สร้างเอง" : o.source === "webshop" ? "เว็บไซต์" : null),
+    platform_code: p?.code ?? str(o.source),
+    brand_id: str(o.brand_id),
+    brand_name: o.brand_id ? lk.brand.get(String(o.brand_id)) ?? null : null,
+    note: noteOfRow(o),
+  };
+}
+
+async function loadTemplates(admin: ReturnType<typeof supabaseAdmin>, withTrash = false) {
+  let q = admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, sort_order, updated_at, updated_by_name, deleted_at").order("sort_order").order("created_at");
+  q = withTrash ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
+  const { data } = await q;
+  return ((data ?? []) as Row[]).map((t) => ({ id: String(t.id), name: String(t.name), brand_id: str(t.brand_id), doc: cleanDoc(t.doc), is_default: t.is_default === true, builtin: false, updated_at: str(t.updated_at), updated_by_name: str(t.updated_by_name), deleted_at: str(t.deleted_at) }));
+}
+
+/** แม่แบบที่จะใช้กับออเดอร์ — แบรนด์ตรง+ตั้งเป็นหลัก → แบรนด์ตรง → หลักทั่วไป → ในตัว "วันเกิด"/"เรียบ" */
+function pickTemplate(list: { id: string; brand_id: string | null; is_default: boolean; doc: CardDoc; name: string }[], brandId: string | null, note: string | null) {
+  const own = list.filter((t) => brandId && t.brand_id === brandId);
+  const t = own.find((x) => x.is_default) ?? own[0] ?? list.find((x) => x.is_default && !x.brand_id) ?? null;
+  if (t) return t;
+  const b = builtinTemplates();
+  return /วันเกิด|birthday|hbd/i.test(note ?? "") ? b.find((x) => x.id.endsWith("bday"))! : b[0];
+}
+
+// ───────────────────────── GET ─────────────────────────
+
+export async function GET(request: Request): Promise<NextResponse> {
+  const denied = await guardApi(request, "order_ops.view"); if (denied) return denied;
+  const admin = supabaseAdmin();
+  const sp = new URL(request.url).searchParams;
+  const view = sp.get("view");
+
+  if (view === "templates") {
+    const trash = sp.get("trash") === "1";
+    const own = await loadTemplates(admin, trash);
+    return NextResponse.json({ templates: trash ? own : [...own, ...builtinTemplates().map((b) => ({ ...b, brand_id: null, is_default: false, builtin: true, updated_at: null, updated_by_name: null, deleted_at: null }))] });
+  }
+  if (view === "fonts") {
+    const { data } = await admin.from("gift_card_fonts").select("id, name, format, size_bytes, created_by_name, created_at").is("deleted_at", null).order("created_at");
+    return NextResponse.json({ fonts: data ?? [] });
+  }
+  const tplId = sp.get("template");
+  if (tplId) {
+    if (isBuiltinId(tplId)) { const b = builtinTemplates().find((x) => x.id === tplId); return b ? NextResponse.json({ template: { ...b, brand_id: null, is_default: false, builtin: true } }) : bad("ไม่พบแม่แบบ", 404); }
+    if (!uuidRe.test(tplId)) return bad("ไม่พบแม่แบบ", 404);
+    const { data } = await admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, deleted_at").eq("id", tplId).maybeSingle();
+    if (!data) return bad("ไม่พบแม่แบบ", 404);
+    return NextResponse.json({ template: { ...(data as Row), doc: cleanDoc((data as Row).doc), builtin: false } });
+  }
+
+  // การ์ดหลายใบ (หน้าพิมพ์)
+  const idsParam = sp.get("ids");
+  if (idsParam) {
+    const ids = idsParam.split(",").filter((x) => uuidRe.test(x)).slice(0, 200);
+    if (!ids.length) return NextResponse.json({ cards: [] });
+    const { data } = await admin.from("order_gift_cards").select(`${CARD_COLS}, doc`).in("id", ids).is("deleted_at", null);
+    const byId = new Map(((data ?? []) as Row[]).map((c) => [String(c.id), { ...c, doc: cleanDoc(c.doc) }]));
+    return NextResponse.json({ cards: ids.map((i) => byId.get(i)).filter(Boolean) });
+  }
+
+  // หน้าเขียนการ์ด: การ์ด 1 ใบ หรือ ออเดอร์ที่ยังไม่มีการ์ด
+  const id = sp.get("id"), orderId = sp.get("order");
+  if (id || orderId) {
+    let card: Row | null = null;
+    if (id) {
+      if (!uuidRe.test(id)) return bad("ไม่พบการ์ด", 404);
+      const { data } = await admin.from("order_gift_cards").select(`${CARD_COLS}, doc, prev_doc`).eq("id", id).maybeSingle();
+      if (!data) return bad("ไม่พบการ์ด", 404);
+      card = { ...(data as Row), doc: cleanDoc((data as Row).doc), has_prev: !!(data as Row).prev_doc };
+      delete card.prev_doc;
+    }
+    const poId = (card?.platform_order_id as string | null) ?? (orderId && uuidRe.test(orderId) ? orderId : null);
+    let order: ReturnType<typeof orderInfo> | null = null;
+    let siblings: Row[] = [];
+    if (poId) {
+      const { data: o } = await admin.from("platform_orders").select(ORDER_COLS).eq("id", poId).maybeSingle();
+      if (o) {
+        const lk = await lookups(admin, o.platform_id ? [String(o.platform_id)] : [], o.brand_id ? [String(o.brand_id)] : []);
+        order = orderInfo(o as Row, lk);
+      }
+      const { data: sib } = await admin.from("order_gift_cards").select("id, message, printed_at, hand_written_at").eq("platform_order_id", poId).is("deleted_at", null).order("created_at");
+      siblings = (sib ?? []) as Row[];
+    } else if (orderId) return bad("ไม่พบออเดอร์", 404);
+    const templates = [...(await loadTemplates(admin)), ...builtinTemplates().map((b) => ({ ...b, brand_id: null, is_default: false, builtin: true }))];
+    const note = (card?.customer_note as string | null) ?? order?.note ?? null;
+    const tpl = pickTemplate(templates, (card?.brand_id as string | null) ?? order?.brand_id ?? null, note);
+    // ยังไม่มีการ์ด = ร่างจากแม่แบบ + ข้อความที่เดาจากหมายเหตุ (ยังไม่บันทึกจนกด "บันทึก")
+    const draft = card ? null : { template_id: tpl.id, doc: fillTexts(tpl.doc, { message: suggestMessage(note) }) };
+    let history: Row[] = [];
+    if (card) {
+      const { data: h } = await admin.from("audit_logs").select("id, action, metadata, created_at").eq("entity_type", "order_gift_cards").eq("entity_id", String(card.id)).order("created_at", { ascending: false }).limit(30);
+      history = (h ?? []) as Row[];
+    }
+    return NextResponse.json({ card, order, note, draft, siblings, templates, history, kind: note ? classifyNote(note) : null });
+  }
+
+  // รายการการ์ดทั้งหมด
+  if (view === "cards") {
+    const trash = sp.get("trash") === "1";
+    let q = admin.from("order_gift_cards").select(CARD_COLS).order("updated_at", { ascending: false }).limit(300);
+    q = trash ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
+    const status = sp.get("status");
+    if (status === "todo") q = q.is("printed_at", null).is("hand_written_at", null);
+    if (status === "done") q = q.or("printed_at.not.is.null,hand_written_at.not.is.null");
+    const qq = cleanQ(sp.get("q") ?? "");
+    if (qq) q = q.or(`order_no.ilike.%${qq}%,message.ilike.%${qq}%,customer_note.ilike.%${qq}%`);
+    const { data, error } = await q;
+    if (error) return bad("โหลดรายการการ์ดไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    const rows = (data ?? []) as Row[];
+    const lk = await lookups(admin, [], [...new Set(rows.map((r) => str(r.brand_id)).filter((x): x is string => !!x))]);
+    return NextResponse.json({ cards: rows.map((r) => ({ ...r, brand_name: r.brand_id ? lk.brand.get(String(r.brand_id)) ?? null : null })) });
+  }
+
+  // ── รายการออเดอร์ที่มีหมายเหตุ (ค่าเริ่ม) ──
+  const days = Math.min(365, Math.max(7, Number(sp.get("days")) || 90));
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data: orders, error } = await admin.from("platform_orders").select(ORDER_COLS)
+    .or("raw->shopee->>message_to_seller.not.is.null,raw->tiktok->>buyer_message.not.is.null,raw->lazada->>remarks.not.is.null,raw->lazada->>gift_message.not.is.null,raw->>note.not.is.null")
+    .or("source.is.null,source.neq.email")
+    .gte("ordered_at", since)
+    .order("ordered_at", { ascending: false })
+    .limit(1500);
+  if (error) return bad("โหลดออเดอร์ไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+  const withNote = ((orders ?? []) as Row[]).filter((o) => noteOfRow(o));
+  const ids = withNote.map((o) => String(o.id));
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
+  const [cardsRes, kindsRes, insRes, lk] = await Promise.all([
+    Promise.all(chunks.map((c) => admin.from("order_gift_cards").select("id, platform_order_id, message, printed_at, hand_written_at, updated_at").in("platform_order_id", c).is("deleted_at", null))),
+    Promise.all(chunks.map((c) => admin.from("order_note_kinds").select("platform_order_id, card, engrave").in("platform_order_id", c))),
+    Promise.all(chunks.map((c) => admin.from("order_instructions").select("id, platform_order_id, status, engrave").in("platform_order_id", c).is("deleted_at", null))),
+    lookups(admin, [...new Set(withNote.map((o) => str(o.platform_id)).filter((x): x is string => !!x))], [...new Set(withNote.map((o) => str(o.brand_id)).filter((x): x is string => !!x))]),
+  ]);
+  const group = <T extends Row>(res: { data: unknown }[]) => {
+    const m = new Map<string, T[]>();
+    for (const r of res) for (const x of (r.data ?? []) as T[]) { const k = String(x.platform_order_id); m.set(k, [...(m.get(k) ?? []), x]); }
+    return m;
+  };
+  const cards = group<Row>(cardsRes), kinds = group<Row>(kindsRes), ins = group<Row>(insRes);
+  let rows = withNote.map((o) => {
+    const info = orderInfo(o, lk);
+    const auto = classifyNote(info.note);
+    const k = kinds.get(info.id)?.[0];
+    const kind = k ? { card: k.card === true, engrave: k.engrave === true } : auto;
+    return { ...info, kind, kind_auto: auto, overridden: !!k, cards: cards.get(info.id) ?? [], instructions: ins.get(info.id) ?? [] };
+  });
+  const counts = {
+    card: rows.filter((r) => r.kind.card).length,
+    card_todo: rows.filter((r) => r.kind.card && !r.cards.some((c) => c.printed_at || c.hand_written_at)).length,
+    engrave: rows.filter((r) => r.kind.engrave).length,
+    other: rows.filter((r) => !r.kind.card && !r.kind.engrave).length,
+    all: rows.length,
+  };
+  const tab = sp.get("tab") ?? "card";
+  if (tab === "card") rows = rows.filter((r) => r.kind.card);
+  else if (tab === "engrave") rows = rows.filter((r) => r.kind.engrave);
+  else if (tab === "other") rows = rows.filter((r) => !r.kind.card && !r.kind.engrave);
+  const qq = cleanQ(sp.get("q") ?? "").toLowerCase();
+  if (qq) rows = rows.filter((r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""}`.toLowerCase().includes(qq));
+  return NextResponse.json({ rows, counts, days });
+}
+
+// ───────────────────────── POST ─────────────────────────
+
+const AI_SYSTEM = `คุณช่วยร้านเขียนข้อความบนการ์ดของขวัญที่ลูกค้าขอ
+- อ่านหมายเหตุลูกค้า + ข้อความร่าง แล้วเสนอข้อความบนการ์ด 3 แบบ สั้น อบอุ่น อ่านง่าย (ไม่เกิน 3 บรรทัด / 120 ตัวอักษร ต่อแบบ)
+- ถ้าลูกค้าเขียนข้อความมาเองชัดเจน ให้แบบแรกคงข้อความเดิม (แก้แค่คำผิด/เว้นวรรค) ห้ามแต่งเพิ่มเนื้อหาที่ลูกค้าไม่ได้ขอ
+- ภาษา: ตามที่ลูกค้าใช้ ถ้าลูกค้าเขียนอังกฤษให้มีอังกฤษ · ถ้าไม่ชัด ให้มีทั้งไทยและอังกฤษ
+- ห้ามใส่ชื่อร้าน ราคา โปรโมชัน หรือข้อมูลส่วนตัวที่ไม่มีในหมายเหตุ
+ตอบ JSON เท่านั้น: {"options":["...","...","..."]}`;
+
+export async function POST(request: Request): Promise<NextResponse> {
+  let body: Row;
+  try { body = await request.json(); } catch { return bad("ข้อมูลไม่ถูกต้อง"); }
+  const action = String(body.action ?? "");
+  const admin = supabaseAdmin();
+
+  if (action === "template_save" || action === "template_copy") {
+    const denied = await guardApi(request, "order_ops.manage"); if (denied) return denied;
+    const me = await whoAmI(request, admin);
+    let doc: CardDoc, name: string, brandId: string | null;
+    if (action === "template_copy") {
+      const from = String(body.from ?? "");
+      const src = isBuiltinId(from) ? builtinTemplates().find((x) => x.id === from)
+        : uuidRe.test(from) ? (await admin.from("gift_card_templates").select("name, doc, brand_id").eq("id", from).maybeSingle()).data as Row | null : null;
+      if (!src) return bad("ไม่พบแม่แบบต้นฉบับ", 404);
+      doc = cleanDoc((src as Row).doc); name = `${String((src as Row).name)} (สำเนา)`.slice(0, 80); brandId = str((src as Row).brand_id);
+    } else {
+      doc = cleanDoc(body.doc);
+      name = String(body.name ?? "").trim().slice(0, 80);
+      if (!name) return bad("ตั้งชื่อแม่แบบก่อน");
+      brandId = body.brand_id && uuidRe.test(String(body.brand_id)) ? String(body.brand_id) : null;
+    }
+    const isDefault = body.is_default === true;
+    const id = action === "template_save" && body.id && uuidRe.test(String(body.id)) ? String(body.id) : null;
+    const patch: Row = { name, brand_id: brandId, doc, is_default: isDefault, updated_by_name: me.name, updated_at: new Date().toISOString() };
+    if (isDefault) {   // หลักได้ใบเดียวต่อแบรนด์ (ไม่มีแบรนด์ = หลักทั่วไป)
+      let q = admin.from("gift_card_templates").update({ is_default: false }).eq("is_default", true).is("deleted_at", null);
+      q = brandId ? q.eq("brand_id", brandId) : q.is("brand_id", null);
+      if (id) q = q.neq("id", id);
+      await q;
+    }
+    if (id) {
+      const { data: before } = await admin.from("gift_card_templates").select("name, brand_id, is_default, doc").eq("id", id).maybeSingle();
+      if (!before) return bad("ไม่พบแม่แบบ", 404);
+      const { error } = await admin.from("gift_card_templates").update(patch).eq("id", id);
+      if (error) return bad("บันทึกแม่แบบไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+      await writeAudit(admin, { action: "update", entityType: "gift_card_templates", entityId: id, actorId: me.id, actorName: me.name, metadata: { name, ...auditChangeMeta(before as Row, patch, { opaque: ["doc"] }) } });
+      return NextResponse.json({ ok: true, id });
+    }
+    const { data, error } = await admin.from("gift_card_templates").insert({ ...patch, created_by: me.id, created_by_name: me.name }).select("id").single();
+    if (error || !data) return bad("บันทึกแม่แบบไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    await writeAudit(admin, { action: "create", entityType: "gift_card_templates", entityId: String(data.id), actorId: me.id, actorName: me.name, metadata: { name, from: action === "template_copy" ? body.from : undefined } });
+    return NextResponse.json({ ok: true, id: data.id });
+  }
+
+  if (action === "ai") {
+    const base = await apiCan(request, "order_ops.edit");
+    if (!(await featureAccess("ai.gift_card", { request }, base))) return bad("คุณยังไม่ได้รับสิทธิ์ใช้ AI เขียนการ์ด — ขอสิทธิ์จากผู้ดูแลระบบ", 403);
+    const note = String(body.note ?? "").slice(0, 800);
+    const message = String(body.message ?? "").slice(0, 600);
+    if (!note.trim() && !message.trim()) return bad("ยังไม่มีหมายเหตุหรือข้อความให้ AI เรียบเรียง");
+    const brandId = body.brand_id && uuidRe.test(String(body.brand_id)) ? String(body.brand_id) : null;
+    const brandCard = await brandProfileBlock(admin, brandId).catch(() => "");
+    const ask = [`หมายเหตุลูกค้า: ${note || "(ไม่มี)"}`, `ข้อความร่างตอนนี้: ${message || "(ว่าง)"}`, brandCard ? `โทนแบรนด์ (ใช้แค่โทนภาษา):\n${brandCard}` : ""].filter(Boolean).join("\n");
+    try {
+      const out = await aiChat("ai.gift_card", AI_SYSTEM, [{ type: "text", text: ask }], 500, undefined, { request });
+      const options = (Array.isArray(out.options) ? out.options : []).map((x) => String(x).trim().slice(0, 300)).filter(Boolean).slice(0, 3);
+      if (!options.length) return bad("AI ตอบไม่ได้ ลองใหม่อีกครั้ง", 502);
+      return NextResponse.json({ options });
+    } catch (e) {
+      return bad(e instanceof Error ? e.message : "AI ตอบไม่ได้ ลองใหม่อีกครั้ง", 502);
+    }
+  }
+
+  const denied = await guardApi(request, "order_ops.edit"); if (denied) return denied;
+  const me = await whoAmI(request, admin);
+  const now = new Date().toISOString();
+
+  if (action === "save_card") {
+    const doc = cleanDoc(body.doc);
+    const message = roleTexts(doc).message || doc.els.filter((e) => e.kind === "text").map((e) => e.text).join(" ").slice(0, 300) || null;
+    const id = body.id && uuidRe.test(String(body.id)) ? String(body.id) : null;
+    const templateId = body.template_id && uuidRe.test(String(body.template_id)) ? String(body.template_id) : null;
+    const note = body.note === undefined ? undefined : str(String(body.note ?? "").trim().slice(0, 1000));
+    if (id) {
+      const { data: before } = await admin.from("order_gift_cards").select("doc, message, note, order_no, deleted_at").eq("id", id).maybeSingle();
+      if (!before || (before as Row).deleted_at) return bad("ไม่พบการ์ด (อาจถูกลบไปแล้ว)", 404);
+      const patch: Row = { doc, prev_doc: (before as Row).doc, message, updated_by_name: me.name, updated_at: now };
+      if (note !== undefined) patch.note = note;
+      if (body.order_no !== undefined) patch.order_no = str(String(body.order_no ?? "").trim().slice(0, 60));
+      if (templateId) patch.template_id = templateId;
+      const { error } = await admin.from("order_gift_cards").update(patch).eq("id", id);
+      if (error) return bad("บันทึกการ์ดไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+      await writeAudit(admin, { action: "update", entityType: "order_gift_cards", entityId: id, actorId: me.id, actorName: me.name, metadata: { order_no: (before as Row).order_no, ...auditChangeMeta(before as Row, { message, ...(note !== undefined ? { note } : {}), ...(patch.order_no !== undefined ? { order_no: patch.order_no } : {}), doc }, { opaque: ["doc"] }) } });
+      return NextResponse.json({ ok: true, id });
+    }
+    // สร้างใหม่ — ผูกออเดอร์ (ถ้ามี) เก็บหมายเหตุลูกค้า ณ ตอนนั้นไว้ด้วย
+    const poId = body.platform_order_id && uuidRe.test(String(body.platform_order_id)) ? String(body.platform_order_id) : null;
+    let ins: Row = { order_no: str(String(body.order_no ?? "").trim().slice(0, 60)) };
+    if (poId) {
+      const { data: o } = await admin.from("platform_orders").select(ORDER_COLS).eq("id", poId).maybeSingle();
+      if (!o) return bad("ไม่พบออเดอร์", 404);
+      const lk = await lookups(admin, o.platform_id ? [String(o.platform_id)] : [], []);
+      const info = orderInfo(o as Row, lk);
+      ins = { platform_order_id: poId, order_no: info.order_no, platform: info.platform, brand_id: info.brand_id, customer_note: info.note };
+    }
+    const { data, error } = await admin.from("order_gift_cards").insert({ ...ins, template_id: templateId, doc, message, note: note ?? null, created_by: me.id, created_by_name: me.name, updated_by_name: me.name }).select("id").single();
+    if (error || !data) return bad("บันทึกการ์ดไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    await writeAudit(admin, { action: "create", entityType: "order_gift_cards", entityId: String(data.id), actorId: me.id, actorName: me.name, metadata: { order_no: ins.order_no, message } });
+    return NextResponse.json({ ok: true, id: data.id });
+  }
+
+  if (action === "revert") {
+    const id = String(body.id ?? "");
+    if (!uuidRe.test(id)) return bad("ไม่พบการ์ด", 404);
+    const { data: c } = await admin.from("order_gift_cards").select("doc, prev_doc, order_no").eq("id", id).maybeSingle();
+    if (!c || !(c as Row).prev_doc) return bad("ไม่มีเวอร์ชันก่อนหน้าให้ย้อน");
+    const doc = cleanDoc((c as Row).prev_doc);
+    const { error } = await admin.from("order_gift_cards").update({ doc, prev_doc: (c as Row).doc, message: roleTexts(doc).message || null, updated_by_name: me.name, updated_at: now }).eq("id", id);
+    if (error) return bad("ย้อนไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    await writeAudit(admin, { action: "revert", entityType: "order_gift_cards", entityId: id, actorId: me.id, actorName: me.name, metadata: { order_no: (c as Row).order_no, changed_detail: ["doc"] } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "printed" || action === "unprint") {
+    const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x) => uuidRe.test(x)).slice(0, 200);
+    if (!ids.length) return bad("ไม่ได้เลือกการ์ด");
+    const { data: before } = await admin.from("order_gift_cards").select("id, order_no, print_count, printed_at").in("id", ids).is("deleted_at", null);
+    const rows = (before ?? []) as Row[];
+    for (const r of rows) {
+      const patch = action === "printed"
+        ? { printed_at: now, printed_by_name: me.name, print_count: Number(r.print_count ?? 0) + 1 }
+        : { printed_at: null, printed_by_name: null };
+      await admin.from("order_gift_cards").update(patch).eq("id", String(r.id));
+    }
+    await writeAuditMany(admin, rows.map((r) => ({ action: action === "printed" ? "print" : "unprint", entityType: "order_gift_cards", entityId: String(r.id), actorId: me.id, actorName: me.name, metadata: { order_no: r.order_no, changes: [{ field: "printed_at", old: r.printed_at ?? null, new: action === "printed" ? now : null }] } })));
+    return NextResponse.json({ ok: true, count: rows.length });
+  }
+
+  if (action === "written") {
+    const id = String(body.id ?? "");
+    if (!uuidRe.test(id)) return bad("ไม่พบการ์ด", 404);
+    const on = body.on === true;
+    const { data: before } = await admin.from("order_gift_cards").select("order_no, hand_written_at").eq("id", id).maybeSingle();
+    if (!before) return bad("ไม่พบการ์ด", 404);
+    const patch = on ? { hand_written_at: now, hand_written_by_name: me.name } : { hand_written_at: null, hand_written_by_name: null };
+    await admin.from("order_gift_cards").update(patch).eq("id", id);
+    await writeAudit(admin, { action: on ? "hand_written" : "hand_written_undo", entityType: "order_gift_cards", entityId: id, actorId: me.id, actorName: me.name, metadata: { order_no: (before as Row).order_no, changes: [{ field: "hand_written_at", old: (before as Row).hand_written_at ?? null, new: patch.hand_written_at }] } });
+    return NextResponse.json({ ok: true });
+  }
+
+  if (action === "kind") {
+    const poId = String(body.order_id ?? "");
+    if (!uuidRe.test(poId)) return bad("ไม่พบออเดอร์", 404);
+    const { data: before } = await admin.from("order_note_kinds").select("card, engrave").eq("platform_order_id", poId).maybeSingle();
+    if (body.reset === true) {
+      await admin.from("order_note_kinds").delete().eq("platform_order_id", poId);
+      await writeAudit(admin, { action: "note_kind_reset", entityType: "order_note_kinds", entityId: poId, actorId: me.id, actorName: me.name, metadata: { before } });
+      return NextResponse.json({ ok: true });
+    }
+    const next = { card: body.card === true, engrave: body.engrave === true };
+    const { error } = await admin.from("order_note_kinds").upsert({ platform_order_id: poId, ...next, updated_by_name: me.name, updated_at: now });
+    if (error) return bad("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    await writeAudit(admin, { action: "note_kind", entityType: "order_note_kinds", entityId: poId, actorId: me.id, actorName: me.name, metadata: { ...auditChangeMeta((before as Row | null) ?? { card: null, engrave: null }, next) } });
+    return NextResponse.json({ ok: true });
+  }
+
+  return bad("ไม่รู้จักคำสั่งนี้");
+}
+
+// ───────────────────────── DELETE (ถังขยะ) ─────────────────────────
+
+const DEL_TABLE = { card: "order_gift_cards", template: "gift_card_templates", font: "gift_card_fonts" } as const;
+
+export async function DELETE(request: Request): Promise<NextResponse> {
+  let body: Row;
+  try { body = await request.json(); } catch { return bad("ข้อมูลไม่ถูกต้อง"); }
+  const kind = String(body.kind ?? "card") as keyof typeof DEL_TABLE;
+  if (!(kind in DEL_TABLE)) return bad("ไม่รู้จักชนิดที่จะลบ");
+  const denied = await guardApi(request, kind === "card" ? "order_ops.delete" : "order_ops.manage"); if (denied) return denied;
+  const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x) => uuidRe.test(x)).slice(0, 200);
+  if (!ids.length) return bad("ไม่ได้เลือกรายการ");
+  const admin = supabaseAdmin();
+  const me = await whoAmI(request, admin);
+  const restore = body.restore === true;
+  const table = DEL_TABLE[kind];
+  const label = kind === "card" ? "order_no" : "name";
+  const { data: rows } = await admin.from(table).select(`id, ${label}, deleted_at`).in("id", ids);
+  const target = ((rows ?? []) as unknown as Row[]).filter((r) => (restore ? r.deleted_at : !r.deleted_at));
+  if (!target.length) return NextResponse.json({ ok: true, count: 0 });
+  const at = restore ? null : new Date().toISOString();
+  const { error } = await admin.from(table).update({ deleted_at: at }).in("id", target.map((r) => String(r.id)));
+  if (error) return bad("ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+  await writeAuditMany(admin, target.map((r) => ({ action: restore ? "restore" : "delete", entityType: table, entityId: String(r.id), actorId: me.id, actorName: me.name, metadata: { [label]: r[label], changes: [{ field: "deleted_at", old: r.deleted_at ?? null, new: at }] } })));
+  return NextResponse.json({ ok: true, count: target.length });
+}

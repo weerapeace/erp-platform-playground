@@ -63,6 +63,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   // 🎁 งานหลังขาย — คำสั่งพิเศษ / ซ่อม-คืนสินค้า (ย้ายจากแอปเก่า 2026-11-24)
   { href: "/order-ops/instructions", prefixes: ["order_ops."] },
   { href: "/order-ops/after-sales", sameAs: "/order-ops/instructions" },
+  // 💌 เขียนการ์ดของขวัญจากหมายเหตุออเดอร์ (2026-11-24) — ใช้สิทธิ์ชุดงานหลังขาย (แม่แบบ/ฟอนต์ = order_ops.manage)
+  { href: "/order-ops/gift-cards", sameAs: "/order-ops/instructions" },
   // งานอื่นๆ → รวม PDF — ทำในเบราว์เซอร์ ไม่แตะข้อมูล = ไม่มีสิทธิ์ย่อย (เข้าแอปงานอื่นๆ ได้ก็ใช้ได้ · ซ่อนรายคนที่ "ใครเห็นเมนูไหน")
   { href: "/misc/pdf-merge", keys: [] },
 ];

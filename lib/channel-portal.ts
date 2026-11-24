@@ -37,6 +37,7 @@ export const PORTAL_GROUPS: PortalGroup[] = [
       { key: "orders", label: "ศูนย์ออเดอร์", hint: "ออเดอร์ทุกร้าน + ใบปะหน้า", href: "/master/platform-orders", icon: "receipt", perm: "platform_orders.view" },
       { key: "pull_status", label: "สถานะดึงออเดอร์", hint: "ร้านไหนดึงล่าสุดเมื่อไหร่", href: "/master/platform-orders/pull-status", icon: "refresh", perm: "platform_orders.view" },
       { key: "packing", label: "แพ็คสินค้า", hint: "สแกน + อัดคลิปตอนแพ็ก", href: "/packing", icon: "package", perm: "packing.pack" },
+      { key: "gift_cards", label: "เขียนการ์ดของขวัญ", hint: "ออเดอร์ที่ลูกค้าฝากข้อความ", href: "/order-ops/gift-cards", icon: "gift", perm: "order_ops.view" },
       { key: "chat", label: "แชทลูกค้า", hint: "รวมแชททุกช่องทาง", href: "/chat", icon: "chat", perm: "chat.view" },
     ],
   },

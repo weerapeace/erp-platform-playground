@@ -24,6 +24,7 @@ import {
   type PlatformOrderItemRow,
 } from "@/lib/platform-order-status";
 import { manualChannelLabel } from "@/lib/order-shipping";
+import { buyerNoteOf } from "@/lib/gift-card-design";
 import { StatusChip } from "./status-chip";
 import { OrderDrawer } from "./order-drawer";
 import { InvoiceModal } from "./invoice-modal";
@@ -180,7 +181,8 @@ export function OrderDetailView({ id, layout = "page", onChanged }: { id: string
             <Box icon="i:user" title="ลูกค้า">
               <KV rows={[
                 ["ชื่อผู้ซื้อ", String(order.customer_name ?? "—")],
-                ["ข้อความถึงร้าน", raw.shopee?.message_to_seller ? <span key="m" className="text-amber-800">{raw.shopee.message_to_seller}</span> : "—"],
+                // ข้อความลูกค้าทุกร้าน (Shopee/TikTok/Lazada/สร้างเอง — lib/gift-card-design buyerNoteOf) + ทางลัดไปหน้าเขียนการ์ด
+                ["ข้อความถึงร้าน", buyerNoteOf(order?.raw) ? <span key="m" className="text-amber-800">{buyerNoteOf(order?.raw)} {order?.id && !String(order.id).startsWith("demo-") && <Link href={`/order-ops/gift-cards/edit?order=${order.id}`} className="ml-1 whitespace-nowrap text-[12px] text-violet-700 hover:underline"><Icon value="i:gift-card" className="mr-0.5" />เขียนการ์ด</Link>}</span> : "—"],
                 ["ใบกำกับภาษี", order.invoice_so_id ? "ออกแล้ว" : order.tax_invoice_request != null ? "ผู้ซื้อขอใบกำกับ" : "—"],
               ]} />
             </Box>

@@ -20,6 +20,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
+import { classifyNote } from "@/lib/gift-card-design";
 import { categorySetMap, cleanSetItems, resolveParentPackaging, type PackagingSet } from "@/lib/packaging";
 import {
   cleanScanCode, packGate, shopCodeGuesses, bestGuess, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES, UNPAID_STATUSES,
@@ -77,7 +78,7 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
   const orderId = String(order.id);
 
   const insNos = [...new Set([str(order.order_no), str(order.external_order_id)].filter((x): x is string => !!x))].map((x) => `"${x.replace(/"/g, "")}"`);
-  const [{ data: itemRows }, { data: platform }, { data: sessRows }, { data: packer }, { data: insRows }] = await Promise.all([
+  const [{ data: itemRows }, { data: platform }, { data: sessRows }, { data: packer }, { data: insRows }, { data: cardRows }] = await Promise.all([
     admin.from("platform_order_items").select("id, sku_code, name, qty, matched_sku_id, matched_parent_sku_id, raw").eq("order_id", orderId),
     order.platform_id ? admin.from("erp_platforms").select("code, name_th").eq("id", String(order.platform_id)).maybeSingle() : Promise.resolve({ data: null }),
     admin.from("packing_sessions").select("id, status, packer_id, packer_name, started_at, finished_at, duration_sec, box_used, problem").eq("order_id", orderId).order("started_at", { ascending: false }).limit(5),
@@ -86,6 +87,8 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
     admin.from("order_instructions").select("id, commands, engrave, engrave_text, engrave_type, engrave_position, note, status, is_trial")
       .or([`platform_order_id.eq.${orderId}`, ...(insNos.length ? [`order_no.in.(${insNos.join(",")})`] : [])].join(","))
       .is("deleted_at", null).limit(10),
+    // 💌 การ์ดของขวัญจากหน้า /order-ops/gift-cards — เตือนให้ใส่การ์ดก่อนปิดกล่อง (ข้อ 4)
+    admin.from("order_gift_cards").select("id, message, printed_at, hand_written_at").eq("platform_order_id", orderId).is("deleted_at", null).limit(10),
   ]);
   const rawItems = (itemRows ?? []) as Row[];
 
@@ -224,6 +227,8 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
       engrave_text: str(r.engrave_text), engrave_type: str(r.engrave_type), engrave_position: str(r.engrave_position),
       note: str(r.note), status: String(r.status ?? "todo"), is_trial: r.is_trial === true,
     })),
+    gift_cards: ((cardRows ?? []) as Row[]).map((r) => ({ id: String(r.id), message: str(r.message), done: !!(r.printed_at || r.hand_written_at) })),
+    card_wanted: classifyNote(buyerNote).card,
     gate: packGate({ status: String(order.status ?? ""), platform_status: str(order.platform_status), packed_at: str(order.packed_at), packed_by_name: packedByName }),
     sessions: sessRows ?? [],
     scanned_code: code,

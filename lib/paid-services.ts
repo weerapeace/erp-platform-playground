@@ -125,6 +125,10 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "ai.order_capture", th: "รับคำสั่งซื้อจากไลน์", en: "Orders from LINE", group: "LINE",
     usedAt: "คำสั่งซื้อจากไลน์ (อ่านรายการ)", provider: "openai", kind: "ai_chat",
     offBehavior: "คำสั่งซื้อยังเข้าระบบ แต่ต้องกรอกรายการเอง", costHint: GPT_COST, files: ["lib/order-capture.ts"] },
+  // ── ออเดอร์ออนไลน์
+  { key: "ai.gift_card", th: "AI เรียบเรียงข้อความการ์ดของขวัญ", en: "AI gift card message", group: "ออเดอร์ออนไลน์",
+    usedAt: "หน้าเขียนการ์ดของขวัญ (/order-ops/gift-cards)", provider: "openai", kind: "ai_chat",
+    offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/order-gift-cards/route.ts"] },
   // ── ผลิต / งานทีม
   { key: "ai.work_log", th: "อ่านใบจดผลงาน", en: "Work log reader", group: "ผลิต / งานทีม",
     usedAt: "ใบจดผลงาน (อ่านลายมือจากรูป)", provider: "openai", kind: "ai_chat",
