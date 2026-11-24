@@ -44,7 +44,9 @@ import { TodayPacked, type TodaySession } from "./today-list";
 type ApiItem = { id: string; name: string; shop_code: string | null; sku_code: string | null; color: string | null; qty: number; image_key: string | null; matched: boolean; level: "sku" | "parent" | "none"; guessed?: "code" | "listing" | null; guess_code?: string | null; box: string | null; codes: string[]; packaging?: { id: string; code: string; name: string; image_key: string | null; qty: number }[]; pack_set?: { id: string; name: string } | null };
 type ApiOrder = { id: string; order_no: string | null; platform: string | null; platform_code: string | null; customer_name: string | null; status: string; platform_status: string | null; ship_by_at: string | null; tracking_no: string | null; package_no: string | null; carrier: string | null; cod_amount: number; packed_at: string | null; packed_by_name: string | null; buyer_note: string | null };
 type ApiSession = { id: string; status: string; packer_id: string | null; packer_name: string | null; started_at: string };
-type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
+/** คำสั่งพิเศษจากหน้า /order-ops/instructions (ห่อ/การ์ด/สลักชื่อ) */
+type PackInstruction = { id: string; commands: string[]; engrave: boolean; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null; note: string | null; status: string; is_trial: boolean };
+type Lookup = { order: ApiOrder; items: ApiItem[]; box: BoxSize | null; missing_box: boolean; notes: { text: string; flags: string[]; parent: string }[]; instructions?: PackInstruction[]; gate: PackGate; scanned_code: string; sessions?: ApiSession[] };
 
 type Line = CheckItem & { info: ApiItem; reason: string | null };
 type Step = { key: string; kind: "scan" | "manual" };
@@ -623,6 +625,8 @@ function OrderPanel({ a, boxes, showPack, onTogglePack, onManual, onMinus, onBox
         </p>
       </div>
 
+      {(a.data.instructions?.length ?? 0) > 0 && <InstructionAlert list={a.data.instructions ?? []} />}
+
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-2 sm:grid-cols-2 sm:gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <p className="text-xs text-slate-500">กล่องที่ใช้ {a.boxUsed && a.boxUsed !== a.data.box?.name ? "(เปลี่ยนเอง)" : "(แนะนำ)"}</p>
@@ -740,4 +744,27 @@ function StationStatus({ lastScanAt, record, camStatus, recording, elapsed, awak
 /** สรุปบรรจุภัณฑ์ทั้งออเดอร์ (Set + SKU เสริม × จำนวนชิ้น) — ใช้ทั้งโชว์และเก็บตอนแพ็คเสร็จ (รายงานการใช้) */
 function packagingSummary(lines: Line[]) {
   return summarizePackaging(lines.map((l) => ({ qty: l.qty, packaging: l.info.packaging ?? [] })));
+}
+
+/** 🎁 กล่องเตือนคำสั่งพิเศษ (ห่อ/การ์ด/สลักชื่อ) — ยังไม่ทำ = กล่องม่วงเด่น · ทำแล้ว = เตือนเบา ๆ ให้เช็กว่าใส่ครบ */
+function InstructionAlert({ list }: { list: PackInstruction[] }) {
+  const todo = list.some((i) => i.status !== "done");
+  return (
+    <div className={`rounded-xl border-2 p-3 ${todo ? "border-fuchsia-400 bg-fuchsia-50" : "border-emerald-300 bg-emerald-50"}`}>
+      <p className={`text-sm font-bold ${todo ? "text-fuchsia-800" : "text-emerald-800"}`}>
+        <Icon name="gift" className="mr-1 inline h-4 w-4" />
+        {todo ? "ออเดอร์นี้มีคำสั่งพิเศษ — ทำก่อนปิดกล่อง" : "คำสั่งพิเศษทำแล้ว — เช็กว่าใส่ครบ"}
+      </p>
+      {list.map((i) => (
+        <div key={i.id} className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm">
+          {i.commands.map((c) => <span key={c} className="rounded-full bg-white px-2.5 py-0.5 font-medium text-slate-800 ring-1 ring-slate-200">{c}</span>)}
+          {i.engrave && i.engrave_text && (
+            <span className="rounded-full bg-indigo-600 px-2.5 py-0.5 font-medium text-white">สลัก: {i.engrave_text} · {i.engrave_type ?? "-"} · {i.engrave_position ?? "-"}</span>
+          )}
+          {i.note && <span className="text-slate-600">— {i.note}</span>}
+          <span className={`text-xs ${i.status === "done" ? "text-emerald-700" : "text-fuchsia-700"}`}>({i.status === "done" ? "เสร็จแล้ว" : "ยังไม่ทำ"}{i.is_trial ? " · ทดลอง" : ""})</span>
+        </div>
+      ))}
+    </div>
+  );
 }

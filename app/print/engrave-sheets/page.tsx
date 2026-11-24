@@ -1,0 +1,103 @@
+"use client";
+
+// ============================================================
+// 🖨 ใบสลักชื่อ — /print/engrave-sheets?ids=<id,id,…>
+// 1 ออเดอร์ = 1 แถบ: หัว (สลักชื่อ · รูปแบบ · ตำแหน่ง · เลขออเดอร์) + ช่องตัวอักษร 10 ช่อง (เกิน 10 ตัว = แถวที่ 2)
+// หน้าตาเหมือนแอปเก่า order-instruction-manager · นับจำนวนครั้งที่พิมพ์ (POST action print)
+// ============================================================
+
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { apiFetch } from "@/lib/api";
+import { LoadingState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
+import { ENGRAVE_POSITION_EN, ENGRAVE_TYPE_EN, splitEngraveChars, type EngravePosition, type EngraveType } from "@/lib/order-ops";
+
+type Row = { id: string; order_no: string; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null };
+
+const TYPE_COLOR: Record<string, string> = { "พิมพ์จม": "#2563eb", "ฟอยเงิน": "#6b7280", "ฟอยทอง": "#ca8a04" };
+
+export default function EngraveSheetsPage() {
+  return <Suspense fallback={<LoadingState />}><Sheets /></Suspense>;
+}
+
+function Sheets() {
+  const sp = useSearchParams();
+  const ids = (sp.get("ids") ?? "").split(",").filter(Boolean);
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ids.length) { setError("ยังไม่ได้เลือกรายการ"); return; }
+    apiFetch(`/api/order-ops?t=instructions&ids=${ids.join(",")}&page_size=200`)
+      .then((r) => r.json())
+      .then((j: { rows?: Row[]; error?: string }) => {
+        if (j.error) throw new Error(j.error);
+        const map = new Map((j.rows ?? []).map((r) => [r.id, r]));
+        setRows(ids.map((id) => map.get(id)).filter((r): r is Row => !!r && !!r.engrave_text));
+      })
+      .catch((e: Error) => setError(e.message || "โหลดไม่สำเร็จ"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
+
+  const print = () => {
+    void apiFetch("/api/order-ops", { method: "POST", body: JSON.stringify({ action: "print", ids: (rows ?? []).map((r) => r.id) }) }).catch(() => {});
+    window.print();
+  };
+
+  if (error) return <div className="p-6 text-sm text-rose-600">{error}</div>;
+  if (!rows) return <LoadingState label="กำลังเตรียมใบสลักชื่อ…" />;
+
+  return (
+    <div className="min-h-screen bg-slate-100 p-4 print:bg-white print:p-0">
+      <style>{"@page{size:auto;margin:6mm} @media print{.no-print{display:none!important}.sheet{break-inside:avoid}}"}</style>
+      <div className="no-print mx-auto mb-3 flex max-w-[270mm] items-center gap-3">
+        <h1 className="flex-1 text-lg font-bold text-slate-800">ใบสลักชื่อ {rows.length} ใบ</h1>
+        <button onClick={print} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"><Icon name="printer" /> พิมพ์</button>
+      </div>
+      <div className="mx-auto max-w-[270mm] bg-white p-3 print:max-w-none print:p-0">
+        {rows.map((r, idx) => <Sheet key={r.id} r={r} first={idx === 0} />)}
+        {!rows.length && <p className="p-6 text-center text-sm text-slate-500">รายการที่เลือกไม่มีชื่อสลัก</p>}
+      </div>
+    </div>
+  );
+}
+
+function Sheet({ r, first }: { r: Row; first: boolean }) {
+  const chars = splitEngraveChars(r.engrave_text ?? "");
+  const type = (r.engrave_type ?? "พิมพ์จม") as EngraveType;
+  const pos = (r.engrave_position ?? "มุมขวา") as EngravePosition;
+  const rowsOfChars = chars.length > 10 ? [chars.slice(0, 10), chars.slice(10, 20)] : [chars];
+  const cell = "flex items-center justify-center border-r-[1.5px] border-black last:border-r-0";
+  return (
+    <div className="sheet border-[2.5px] border-black font-[Arial,sans-serif]" style={first ? undefined : { borderTop: "none" }}>
+      <div className="flex items-center gap-4 border-b-[1.5px] border-black px-3 py-1.5">
+        <span className="text-lg font-extrabold">สลักชื่อ</span>
+        <span className="text-lg font-extrabold leading-tight" style={{ color: TYPE_COLOR[type] ?? "#111" }}>{type}<small className="block text-[10px] uppercase tracking-wide">{ENGRAVE_TYPE_EN[type] ?? ""}</small></span>
+        <span className="rounded-lg bg-indigo-800 px-3 py-0.5 text-base font-black leading-tight text-white [print-color-adjust:exact]">{pos}<small className="block text-[10px] uppercase tracking-wide">{ENGRAVE_POSITION_EN[pos] ?? ""}</small></span>
+        <span className="ml-auto font-mono text-sm font-bold text-slate-700">{r.order_no}</span>
+      </div>
+      {rowsOfChars.map((line, li) => (
+        <div key={li}>
+          <div className="grid border-b-[1.5px] border-black" style={{ gridTemplateColumns: "200px repeat(10, 1fr)" }}>
+            <div className={`${cell} bg-slate-50 py-1 text-xs font-bold`}>{li === 0 ? "ชื่อ" : "ต่อ (11-20)"}</div>
+            {Array.from({ length: 10 }, (_, i) => <div key={i} className={`${cell} bg-slate-50 text-[13px] font-extrabold`}>{li * 10 + i + 1}</div>)}
+          </div>
+          <div className="grid border-b-[1.5px] border-black last:border-b-0" style={{ gridTemplateColumns: "200px repeat(10, 1fr)" }}>
+            <div className={`${cell} min-h-[60px] justify-start break-all px-2 text-xl font-extrabold`}>{li === 0 ? r.engrave_text : "-"}</div>
+            {Array.from({ length: 10 }, (_, i) => {
+              const ch = line[i] ?? "";
+              const lower = ch >= "a" && ch <= "z";
+              return (
+                <div key={i} className={`${cell} relative min-h-[60px] items-end pb-1`}>
+                  <span className="pointer-events-none absolute left-1 right-1 top-1/2 border-t-2 border-dashed border-slate-500" />
+                  <span className={`relative bg-white px-0.5 font-extrabold leading-none ${lower ? "text-[28px]" : "text-[52px]"}`}>{ch}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

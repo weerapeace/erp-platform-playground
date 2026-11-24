@@ -76,11 +76,16 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
   }
   const orderId = String(order.id);
 
-  const [{ data: itemRows }, { data: platform }, { data: sessRows }, { data: packer }] = await Promise.all([
+  const insNos = [...new Set([str(order.order_no), str(order.external_order_id)].filter((x): x is string => !!x))].map((x) => `"${x.replace(/"/g, "")}"`);
+  const [{ data: itemRows }, { data: platform }, { data: sessRows }, { data: packer }, { data: insRows }] = await Promise.all([
     admin.from("platform_order_items").select("id, sku_code, name, qty, matched_sku_id, matched_parent_sku_id, raw").eq("order_id", orderId),
     order.platform_id ? admin.from("erp_platforms").select("code, name_th").eq("id", String(order.platform_id)).maybeSingle() : Promise.resolve({ data: null }),
     admin.from("packing_sessions").select("id, status, packer_id, packer_name, started_at, finished_at, duration_sec, box_used, problem").eq("order_id", orderId).order("started_at", { ascending: false }).limit(5),
     order.packed_by ? admin.from("user_profiles").select("display_name, username").eq("id", String(order.packed_by)).maybeSingle() : Promise.resolve({ data: null }),
+    // 🎁 คำสั่งพิเศษ (ห่อ/การ์ด/สลักชื่อ) จากหน้า /order-ops/instructions — ผูกด้วย id ออเดอร์ หรือเลขออเดอร์
+    admin.from("order_instructions").select("id, commands, engrave, engrave_text, engrave_type, engrave_position, note, status, is_trial")
+      .or([`platform_order_id.eq.${orderId}`, ...(insNos.length ? [`order_no.in.(${insNos.join(",")})`] : [])].join(","))
+      .is("deleted_at", null).limit(10),
   ]);
   const rawItems = (itemRows ?? []) as Row[];
 
@@ -214,6 +219,11 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
     box: box ? { name: box.name, width_cm: box.width_cm, length_cm: box.length_cm, height_cm: box.height_cm } : null,
     missing_box: missingBox,
     notes,
+    instructions: ((insRows ?? []) as Row[]).map((r) => ({
+      id: String(r.id), commands: Array.isArray(r.commands) ? (r.commands as string[]) : [], engrave: r.engrave === true,
+      engrave_text: str(r.engrave_text), engrave_type: str(r.engrave_type), engrave_position: str(r.engrave_position),
+      note: str(r.note), status: String(r.status ?? "todo"), is_trial: r.is_trial === true,
+    })),
     gate: packGate({ status: String(order.status ?? ""), platform_status: str(order.platform_status), packed_at: str(order.packed_at), packed_by_name: packedByName }),
     sessions: sessRows ?? [],
     scanned_code: code,
