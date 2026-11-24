@@ -421,3 +421,13 @@
 - ของกลาง: `lib/listing-option-sync` (pure) + `components/platform-catalog/use-sys-variants` · ข้อมูลสีในระบบ `GET /api/platform-catalog/drift?listing_id=&part=variants` (ตัวประกอบข้อมูลเดียวกับตัวช่วยลงสินค้า + สต๊อก)
 - โหมดเช็กกับระบบ: "ใช้ชื่อตามระบบทั้งหมด" / "ใช้รูปตามระบบทั้งหมด" เติมฟอร์ม · หน้าอัปเดตให้ตรงส่ง "ชื่อตัวเลือก" ของ Shopee ได้แล้ว (รวมกับรูปตัวเลือกในคำสั่งเดียว)
 - ลำดับร้าน: Shopee (2026-11-24) → TikTok → Lazada → LINE
+
+## ตัวช่วยลงสินค้า — แก้ "ขาดหมวด" ได้ในแถว (2026-11-24 · 73ee4a98)
+- เจ้าของถาม "ขาดข้อมูล หมวดหมู่กลางใช่ไหม (อยากกดเลือกได้เลย) ถ้าไม่มีหมวดก็ไปเพิ่มและเลือกจับคู่ให้ได้เลย" → เลือกแบบแก้ในแถว + ข้อเสนอ 1, 2, 3
+- หมวดของร้าน = ร่าง `category_path` → ถ้าว่างใช้ การจับคู่ `platform_category_mappings` ของหมวดกลาง (`parent_skus_v2.platform_category_id`) · ขาดเพราะอะไรตัดสินด้วย `categoryGap` (lib/platform-add-plan): `no_central` / `no_mapping` / `draft_empty`
+- ส่วน "ร้านอื่น — บันทึกร่างไว้ก่อน" → `components/platform-listing/category-fix` (CategoryFix): เลือก/เพิ่มหมวดกลาง (CentralCategoryPicker) · จับคู่หมวดกลางกับร้าน (PlatformCategoryPicker → `save_mapping` = ค่ามาตรฐานทุกสินค้าในหมวดนั้น) + ปุ่ม "แนะนำ/อาจเป็น (ควรตรวจ)" จากตัวเดาฟรีเดิม (`GET /api/platform-category-map/autofill?central_id=&platform_id=`) · ร่างเดิมว่าง = "ใช้หมวดมาตรฐาน"
+- ≥ 2 ตัวไม่มีหมวดกลาง → ปุ่ม "ตั้งหมวดกลางทีเดียว (N)" = BulkCategoryDialog เดิม
+- บันทึกแล้วตรวจใหม่ให้เอง + ร่างที่ว่างหมวด (จับคู่แล้ว) ใส่หมวดมาตรฐานให้ + แจ้งผลมีปุ่ม "ย้อนกลับ" (คืนค่าเดิมจาก `previous` ที่ PATCH คืนมา)
+- PATCH `/api/product-platforms` (`set_platform_category` · `save_mapping` · ร่าง) บันทึกประวัติเก่า→ใหม่ (`auditChangeMeta`) ทุกครั้ง
+- ร้านที่มีหน้าดูก่อนส่ง (แท็บ LINE/TikTok/Shopee/Lazada) ยังเลือกหมวดในแท็บนั้นเฉพาะตัวเหมือนเดิม
+- ข้อมูลตอนทำ: LM ไม่มีหมวดกลาง 955/965 · TikTok จับคู่ไว้ 1/11 หมวดกลาง (เข็มกลัด) · LINE ครบ 11/11
