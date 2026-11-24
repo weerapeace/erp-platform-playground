@@ -21,6 +21,8 @@
  * ลงทุกร้านในครั้งเดียว (เจ้าของอนุมัติ 2026-11-10 เฟส A+B): ร้านที่ลงจริงได้/ดูก่อนส่งได้ มาจากทะเบียนกลาง lib/platform-create-registry
  *   ขั้น 2 = แท็บต่อร้าน (LINE: LineCreatePreviewEditor · Lazada: LazadaCreatePreviewEditor · TikTok: TiktokCreatePreviewEditor — ลงเป็นฉบับร่าง · Shopee: ShopeeCreatePreviewEditor — ปิดขาย + สต๊อก 0) · ขั้น 3 ลงทุกร้านในรอบเดียว + ผลแยกร้าน
  *   Lazada ยังไม่เปิดลงจริง (LAZADA_CREATE_LIVE) → ดูก่อนส่ง + บันทึกร่าง · ร้านใหม่ = เพิ่มแถวในทะเบียน + หน้าดูก่อนส่งของร้านนั้น
+ * ขาดหมวด (ร้านอื่น — บันทึกร่าง): แก้ได้ในแถวเลย ./category-fix (เลือก/เพิ่มหมวดกลาง · จับคู่หมวดกลางกับร้าน + ปุ่มแนะนำฟรี) · ตั้งหมวดกลางทีเดียวหลายตัว
+ *   = BulkCategoryDialog เดิม · บันทึกแล้วตรวจใหม่ให้เอง + "ย้อนกลับ" ในแจ้งผล (เจ้าของเลือก 2026-11-24)
  * กันซ้ำ: ข้ามตัวที่มีบนร้านแล้ว (on_shop / ร่างมีรหัส) · ลงจริงทีละตัว · server ล็อกระหว่างสร้าง · ลงจริง > 20 ต้องพิมพ์ยืนยัน
  * สิทธิ์: บันทึกร่าง = products.platforms.edit · ลงจริง = products.platforms.publish · สร้างงาน = tasks.create
  */
@@ -49,9 +51,10 @@ import type { PushedState } from "@/lib/push-open";
 import { ResultBurst, resultTone } from "@/components/result-burst";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
-  ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, decideAdd, isOnShop, missingList, needsTypedConfirm, parseAfterDisplayPref, summarizePlan,
+  ADD_CONFIRM_WORD, ADD_DECISION_LABEL, ADD_MAX_ITEMS, categoryGap, decideAdd, isCategoryMissingLabel, isOnShop, missingList, needsTypedConfirm, parseAfterDisplayPref, summarizePlan,
   type AddDecision, type AddReadinessRow, type AfterDisplay,
 } from "@/lib/platform-add-plan";
+import { CategoryFix, patchProductPlatforms, type FixSaved } from "./category-fix";
 
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
@@ -63,6 +66,8 @@ const LazadaCreatePreviewEditor = dynamic(() => import("./lazada-create-preview"
 const TiktokCreatePreviewEditor = dynamic(() => import("./tiktok-create-preview").then((m) => m.TiktokCreatePreviewEditor), { ssr: false });
 const ShopeeCreatePreviewEditor = dynamic(() => import("./shopee-create-preview").then((m) => m.ShopeeCreatePreviewEditor), { ssr: false });
 const ShopeeBulkCategoryDialog = dynamic(() => import("./shopee-bulk-category").then((m) => m.ShopeeBulkCategoryDialog), { ssr: false });
+// ตั้งหมวดกลางทีเดียวหลายตัว (ป๊อปเดิมของหน้าลงสินค้าบนแพลตฟอร์ม) — เปิดจากรายการ "ตัวที่ข้อมูลยังไม่ครบ"
+const BulkCategoryDialog = dynamic(() => import("./bulk-category-dialog").then((m) => m.BulkCategoryDialog), { ssr: false });
 
 type Pf = { id: string; code: string; name_th: string; icon_key: string | null; can_publish?: boolean };
 export type AddWizardParent = { id: string; code: string; name: string | null };
@@ -151,6 +156,7 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const [copying, setCopying] = useState<{ done: number; total: number } | null>(null);
   const [pvNonce, setPvNonce] = useState(0);                               // หน้าดูก่อนส่งโหลดใหม่หลังใช้ตารางจับคู่
   const [spBulkCat, setSpBulkCat] = useState(false);                       // Shopee: ป๊อปยืนยันหมวดทีละหลายตัว (เฟส 5C)
+  const [bulkCentral, setBulkCentral] = useState<{ id: string; code: string }[] | null>(null);   // ตั้งหมวดกลางทีเดียวหลายตัว (ร้านอื่น)
 
   // เปิดใหม่ = เริ่มขั้น 1 · ติ๊กร้านที่ส่งมาให้ · ร้านลงจริงได้ + มีสิทธิ์ = ติ๊ก "ลงจริง" ไว้ให้
   useEffect(() => {
@@ -271,16 +277,42 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
   const onsaleCount = plan.filter((x) => x.decision === "publish" && hasDisplayChoice(x.pf.code) && displayOf(x.pf.code) === "onsale").length;
   const needTyped = needsTypedConfirm(summary.publish, onsaleCount);
   const problemParents = useMemo(() => {
-    const m = new Map<string, { row: AddReadinessRow; pfs: { pf: Pf; missing: string[] }[] }>();
+    const m = new Map<string, { row: AddReadinessRow; pfs: { pf: Pf; missing: string[]; row: AddReadinessRow }[] }>();
     for (const x of plan) {
       if (previewPfs.includes(x.pf)) continue;   // ร้านที่มีหน้าดูก่อนส่ง = แก้ในแท็บของร้านนั้น (ไม่อยู่ในรายการนี้)
       if (isOnShop(x.row) || x.row.ready_now) continue;
       const cur = m.get(x.row.id) ?? { row: x.row, pfs: [] };
-      cur.pfs.push({ pf: x.pf, missing: missingList(x.row.missing) });
+      cur.pfs.push({ pf: x.pf, missing: missingList(x.row.missing), row: x.row });
       m.set(x.row.id, cur);
     }
     return [...m.values()];
   }, [plan, previewPfs]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // ตัวที่ยังไม่มีหมวดกลาง (ไม่นับที่กดข้าม) → ปุ่ม "ตั้งหมวดกลางทีเดียว" เมื่อมีตั้งแต่ 2 ตัว (ข้อเสนอ 1)
+  const noCentralRows = problemParents.filter((x) => !skipped.has(x.row.id) && x.pfs.some((s) => categoryGap(s.row) === "no_central")).map((x) => ({ id: x.row.id, code: x.row.code }));
+
+  // แก้หมวดในแถวเสร็จ (ข้อเสนอ 3): ตรวจใหม่ให้เอง → ร่างที่เตรียมไว้ก่อนแต่ยังว่างหมวด (จับคู่แล้ว) ใส่หมวดมาตรฐานให้ → แจ้งผลพร้อม "ย้อนกลับ"
+  const afterFix = async ({ message, undo }: FixSaved) => {
+    const filled: { parentId: string; platformId: string }[] = [];
+    const m = await check();
+    if (m && canEdit) {
+      for (const p of othersPfs) for (const r of m[p.code] ?? []) {
+        if (skipped.has(r.id) || categoryGap(r) !== "draft_empty" || !r.mapped_category) continue;
+        try { await patchProductPlatforms({ parent_sku_id: r.id, platform_id: p.id, category_path: r.mapped_category }); filled.push({ parentId: r.id, platformId: p.id }); }
+        catch { /* ข้าม — ปุ่ม "ใช้หมวดมาตรฐาน" ยังอยู่ในแถว */ }
+      }
+      if (filled.length) await check();
+    }
+    toast.action(filled.length ? `${message} · ใส่หมวดลงร่างที่เตรียมไว้ ${filled.length.toLocaleString()} รายการ` : message, "ย้อนกลับ", () => {
+      void (async () => {
+        try {
+          await undo();
+          for (const f of filled) await patchProductPlatforms({ parent_sku_id: f.parentId, platform_id: f.platformId, category_path: "" });
+          toast.success("ย้อนกลับแล้ว");
+        } catch (e) { toast.error(`ย้อนกลับไม่สำเร็จ: ${(e as Error).message}`); }
+        await check();
+      })();
+    });
+  };
 
   // ขั้น 1: ร้านที่ลงจริงได้ (เด่น) · ร้านที่ดูก่อนส่งได้แต่ยังไม่เปิดลงจริง (เด่น + บอกเหตุผล) · ร้านอื่น (บันทึกร่าง · พับไว้)
   const realPfs = (pfs ?? []).filter((p) => !!liveCreateEndpoint(p.code));
@@ -656,21 +688,33 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
                   {problemParents.length > 0 && (
                     <>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-slate-500">ตัวที่ข้อมูลยังไม่ครบ — แก้เลย หรือส่งงานให้ทีมเติม แล้วกด &quot;ตรวจใหม่&quot;</p>
-                        <div className="flex gap-2">
-                          {canTask && <button type="button" onClick={() => setTaskFor(problemParents.map((x) => ({ id: x.row.id, code: x.row.code, name: x.row.name || x.row.code })))} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานเติมทั้งหมด ({problemParents.length})</button>}
+                        <p className="text-xs text-slate-500">ตัวที่ข้อมูลยังไม่ครบ — {canEdit ? "เลือกหมวดได้ในแถวเลย · " : ""}แก้เลย หรือส่งงานให้ทีมเติม แล้วกด &quot;ตรวจใหม่&quot;</p>
+                        <div className="flex flex-wrap gap-2">
+                          {canEdit && noCentralRows.length >= 2 && (
+                            <button type="button" onClick={() => setBulkCentral(noCentralRows)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-200 px-3 text-xs text-violet-700 hover:bg-violet-50">
+                              <Icon name="folder" />ตั้งหมวดกลางทีเดียว ({noCentralRows.length.toLocaleString()})
+                            </button>
+                          )}
+                          {canTask &&<button type="button" onClick={() => setTaskFor(problemParents.map((x) => ({ id: x.row.id, code: x.row.code, name: x.row.name || x.row.code })))} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50"><Icon name="add" />สร้างงานเติมทั้งหมด ({problemParents.length})</button>}
                           <button type="button" onClick={() => void check()} disabled={checking} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs hover:bg-slate-50 disabled:opacity-50"><Icon name="refresh" />ตรวจใหม่</button>
                         </div>
                       </div>
-                      <div className="max-h-[40vh] divide-y divide-slate-100 overflow-auto rounded-xl border border-slate-200">
+                      {/* ไม่จำกัดความสูงในกล่องนี้ (ป๊อปเลื่อนเองอยู่แล้ว) — ช่องเลือกหมวดในแถวจะได้ไม่ถูกตัด */}
+                      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                         {problemParents.map(({ row, pfs: ps }) => {
                           const sk = skipped.has(row.id);
+                          // ร้านที่ "ขาดหมวด" แก้ได้ในแถว (CategoryFix) — บรรทัดสีแดงเหลือเฉพาะข้ออื่น
+                          const gaps = canEdit && !sk ? ps.filter((s) => categoryGap(s.row)) : [];
                           return (
                             <div key={row.id} className={`flex flex-wrap items-start gap-2 px-3 py-2 text-sm ${sk ? "opacity-50" : ""}`}>
                               <span className="mt-0.5 text-rose-600"><Icon name="warning" /></span>
                               <div className="min-w-0 flex-1">
                                 <div className="truncate">{row.name || row.code} <span className="font-mono text-[11px] text-slate-400">{row.code}</span></div>
-                                {ps.map(({ pf, missing }) => <div key={pf.code} className="text-xs text-rose-700">{pf.name_th}: ขาด {missing.join(" · ")}</div>)}
+                                {ps.map(({ pf, missing }) => {
+                                  const shown = gaps.some((g) => g.pf.code === pf.code) ? missing.filter((x) => !isCategoryMissingLabel(x)) : missing;
+                                  return shown.length > 0 ? <div key={pf.code} className="text-xs text-rose-700">{pf.name_th}: ขาด {shown.join(" · ")}</div> : null;
+                                })}
+                                {gaps.length > 0 && <CategoryFix parentId={row.id} shops={gaps.map((g) => ({ pf: g.pf, row: g.row }))} onSaved={afterFix} />}
                               </div>
                               <div className="flex flex-wrap justify-end gap-1">
                                 {canEdit && <button type="button" onClick={() => setFixFor({ parentId: row.id, platformId: ps[0].pf.id })} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50"><Icon name="edit" />แก้เลย</button>}
@@ -781,6 +825,15 @@ export function AddToPlatformWizard({ open, onClose, onDone, parents, brandId, i
         <ERPModal open onClose={() => setPreviewFor(null)} title="ดูแบบหน้าร้าน LINE (จำลอง)" size="sm">
           <LineStorefrontPreview parentId={previewFor} />
         </ERPModal>
+      )}
+      {bulkCentral && (
+        <BulkCategoryDialog open rows={bulkCentral} platformName={othersPfs.map((p) => p.name_th).join(" · ") || "ร้าน"} onClose={() => setBulkCentral(null)}
+          onDone={(msg) => {
+            const ids = bulkCentral.map((r) => r.id);
+            setBulkCentral(null);
+            // ทุกตัวในรายการนี้ยังไม่มีหมวดกลาง → ย้อนกลับ = ล้างหมวดกลางคืน
+            void afterFix({ message: `${msg} · ตรวจใหม่ให้แล้ว`, undo: async () => { await patchProductPlatforms({ set_platform_category: true, parent_sku_ids: ids, platform_category_id: null }); } });
+          }} />
       )}
       {fixFor && (
         <ProductPlatformManager parentSkuId={fixFor.parentId} initialPlatformId={fixFor.platformId} canEdit={canEdit} canPublish={false}

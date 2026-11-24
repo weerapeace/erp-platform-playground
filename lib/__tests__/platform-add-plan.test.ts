@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideAdd, summarizePlan, needsTypedConfirm, missingList, isOnShop, ADD_TYPED_CONFIRM_OVER, ADD_ONSALE_TYPED_OVER, parseAfterDisplayPref, type AddReadinessRow } from "@/lib/platform-add-plan";
+import { decideAdd, summarizePlan, needsTypedConfirm, missingList, isOnShop, ADD_TYPED_CONFIRM_OVER, ADD_ONSALE_TYPED_OVER, parseAfterDisplayPref, categoryGap, isCategoryMissingLabel, type AddReadinessRow } from "@/lib/platform-add-plan";
 
 const row = (over: Partial<AddReadinessRow> = {}): AddReadinessRow => ({
   id: "p1", code: "BKB20", name: "หัวเข็มขัด", status: "new", ready_now: true, missing: "", warnings: "", on_shop: false, ...over,
@@ -45,5 +45,21 @@ describe("สรุป + คำยืนยัน", () => {
     expect(isOnShop({ status: "new", on_shop: false })).toBe(false);
     expect(isOnShop({ status: "new" })).toBe(false);
     expect(isOnShop({ status: "listed" })).toBe(true);
+  });
+});
+
+describe("categoryGap — ขาดหมวดเพราะอะไร (แก้หมวดในแถว)", () => {
+  const miss = (missing: string, over: Partial<AddReadinessRow> = {}) => row({ ready_now: false, missing, ...over });
+  it("รู้จักข้อความขาดหมวดของทุกร้าน", () => {
+    for (const l of ["หมวดหมู่ปลายทาง", "เลือกหมวดหมู่ปลายทาง", "หมวด Lazada (ยังไม่ได้เลือก — ตั้งหมวดกลางแล้วจับคู่กับ Lazada)", "หมวด Shopee"]) expect(isCategoryMissingLabel(l)).toBe(true);
+    expect(isCategoryMissingLabel("รูปสินค้า ≥ 1 (ภาพปก)")).toBe(false);
+  });
+  it("ยังไม่มีหมวดกลาง (เคส CVRT003)", () => expect(categoryGap(miss("เลือกหมวดหมู่ปลายทาง", { central_category_id: null }))).toBe("no_central"));
+  it("มีหมวดกลาง แต่ยังไม่จับคู่กับร้านนี้", () => expect(categoryGap(miss("หมวดหมู่ปลายทาง · รูปสินค้า ≥ 1", { central_category_id: "c1", mapped_category: "" }))).toBe("no_mapping"));
+  it("จับคู่แล้ว แต่ร่างเดิมยังไม่มีหมวด", () => expect(categoryGap(miss("หมวดหมู่ปลายทาง", { status: "missing", central_category_id: "c1", mapped_category: "63 · กระเป๋า > กระเป๋าถือ" }))).toBe("draft_empty"));
+  it("ไม่ได้ขาดหมวด / พร้อมแล้ว / มีบนร้านแล้ว = null", () => {
+    expect(categoryGap(miss("รูปสินค้า ≥ 1", { central_category_id: null }))).toBeNull();
+    expect(categoryGap(row({ central_category_id: null }))).toBeNull();
+    expect(categoryGap(miss("หมวดหมู่ปลายทาง", { on_shop: true }))).toBeNull();
   });
 });

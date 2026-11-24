@@ -24,6 +24,13 @@ export type AddReadinessRow = {
   warnings: string;
   /** มีรายการบนร้านนี้ที่จับคู่สินค้านี้อยู่แล้ว (platform_catalog_listings) */
   on_shop?: boolean;
+  /** หมวดกลางของสินค้า (ชื่อ / id — null = ยังไม่ตั้ง) */
+  central_category?: string;
+  central_category_id?: string | null;
+  /** หมวดของร้านนี้ที่จับคู่กับหมวดกลางไว้ ("" = ยังไม่จับคู่) */
+  mapped_category?: string;
+  /** หมวดที่จะใช้ลงร้านนี้ (ร่าง ถ้าไม่มี = จากการจับคู่) */
+  platform_category?: string;
 };
 
 export type AddDecision = "publish" | "prepare" | "skip_listed" | "skip_missing" | "skip_user";
@@ -83,3 +90,22 @@ export function parseAfterDisplayPref(raw: unknown): Record<string, AfterDisplay
 
 /** แยกข้อที่ขาด (สตริง " · ") เป็นรายการ */
 export const missingList = (missing: string): string[] => missing.split(" · ").map((s) => s.trim()).filter(Boolean);
+
+/** ข้อที่ขาดข้อนี้เป็นเรื่องหมวดของร้านไหม ("หมวดหมู่ปลายทาง" LINE · "เลือกหมวดหมู่ปลายทาง" ทั่วไป/TikTok · "หมวด Lazada/Shopee") */
+export const isCategoryMissingLabel = (label: string): boolean => /หมวด/.test(label);
+
+/**
+ * ทำไม "ขาดหมวด" (ตัวช่วยลงสินค้า — แก้หมวดได้ในแถวเลย · เจ้าของเลือก 2026-11-24)
+ *   no_central  = สินค้ายังไม่มีหมวดกลาง → เลือก/เพิ่มหมวดกลาง
+ *   no_mapping  = มีหมวดกลางแล้ว แต่หมวดกลางนั้นยังไม่จับคู่กับร้านนี้ → เลือกหมวดของร้าน (บันทึกเป็นค่ามาตรฐานของหมวดกลาง)
+ *   draft_empty = จับคู่ไว้แล้ว แต่ร่างที่เตรียมไว้ก่อนหน้ายังไม่มีหมวด → ใส่หมวดมาตรฐานลงร่าง
+ *   null        = ไม่ได้ขาดหมวด (หรือมีบนร้านแล้ว / พร้อมแล้ว)
+ */
+export type CategoryGap = "no_central" | "no_mapping" | "draft_empty";
+export function categoryGap(r: Pick<AddReadinessRow, "status" | "on_shop" | "ready_now" | "missing" | "central_category_id" | "mapped_category">): CategoryGap | null {
+  if (isOnShop(r) || r.ready_now) return null;
+  if (!missingList(r.missing).some(isCategoryMissingLabel)) return null;
+  if (!r.central_category_id) return "no_central";
+  if (!(r.mapped_category ?? "").trim()) return "no_mapping";
+  return "draft_empty";
+}

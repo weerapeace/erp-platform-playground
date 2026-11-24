@@ -52,11 +52,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const central = String(body.central_category_id ?? "").trim();
     if (!central || !platform_id) return NextResponse.json({ error: "ต้องมี central_category_id + platform_id" }, { status: 400 });
     const admin0 = supabaseAdmin();
+    const nextPath = String(body.platform_category_path ?? "").trim() || null;
+    // ค่าเดิม → ประวัติเก่า→ใหม่ + ส่งกลับให้ปุ่ม "ย้อนกลับ" (ตัวช่วยลงสินค้า)
+    const { data: prevRow } = await admin0.from("platform_category_mappings").select("platform_category_path").eq("central_category_id", central).eq("platform_id", platform_id).maybeSingle();
+    const prevPath = ((prevRow as { platform_category_path?: string | null } | null)?.platform_category_path ?? null) || null;
     const { error } = await admin0.from("platform_category_mappings")
-      .upsert({ central_category_id: central, platform_id, platform_category_path: String(body.platform_category_path ?? "").trim() || null, updated_by: user?.id ?? null, updated_at: new Date().toISOString(), created_by: user?.id ?? null }, { onConflict: "central_category_id,platform_id" });
+      .upsert({ central_category_id: central, platform_id, platform_category_path: nextPath, updated_by: user?.id ?? null, updated_at: new Date().toISOString(), created_by: user?.id ?? null }, { onConflict: "central_category_id,platform_id" });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    await writeAudit(admin0, { action: "update", entityType: "platform_category_mapping", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { central_category_id: central, platform_id } });
-    return NextResponse.json({ ok: true, error: null });
+    await writeAudit(admin0, { action: "update", entityType: "platform_category_mapping", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { central_category_id: central, platform_id, ...auditChangeMeta({ platform_category_path: prevPath }, { platform_category_path: nextPath }) } });
+    return NextResponse.json({ ok: true, previous: prevPath, error: null });
   }
 
   // ตั้ง "หมวดกลางสำหรับลงขาย" ของสินค้า (parent_skus_v2.platform_category_id)
@@ -69,12 +74,19 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     if (ids.length > 500) return NextResponse.json({ error: "ตั้งได้สูงสุด 500 สินค้าต่อครั้ง" }, { status: 400 });
     const central = String(body.platform_category_id ?? "").trim() || null;
     const admin1 = supabaseAdmin();
+    // ค่าเดิมต่อสินค้า → ประวัติเก่า→ใหม่ + ส่งกลับ (previous) ให้ปุ่ม "ย้อนกลับ" คืนค่าเดิมทีละตัวได้
+    const previous: Record<string, string | null> = {};
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: cur } = await admin1.from("parent_skus_v2").select("id, platform_category_id").in("id", ids.slice(i, i + 200));
+      for (const r of (cur ?? []) as { id: string; platform_category_id: string | null }[]) previous[r.id] = r.platform_category_id ?? null;
+    }
     for (let i = 0; i < ids.length; i += 200) {
       const { error } = await admin1.from("parent_skus_v2").update({ platform_category_id: central }).in("id", ids.slice(i, i + 200));
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    await writeAuditMany(admin1, ids.map((pid) => ({ action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_category_id: central, parent_sku_id: pid, bulk: ids.length > 1 } })));
-    return NextResponse.json({ ok: true, updated: ids.length, error: null });
+    await writeAuditMany(admin1, ids.map((pid) => ({ action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { platform_category_id: central, parent_sku_id: pid, bulk: ids.length > 1, ...auditChangeMeta({ platform_category_id: previous[pid] ?? null }, { platform_category_id: central }) } })));
+    return NextResponse.json({ ok: true, updated: ids.length, previous, error: null });
   }
 
   // ซ่อน/เลิกซ่อนร้านนี้ "ทั้งแบรนด์" ในแท็บแพลตฟอร์ม (เช่น Instagram ที่เชื่อมไว้แค่โพสต์) — ui_config ไม่แก้โครงตาราง (lib/listing-hidden-platforms)
@@ -110,10 +122,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("extra" in body && body.extra && typeof body.extra === "object") row.extra = body.extra;
 
   const admin = supabaseAdmin();
+  const sent = FIELDS.filter((f) => f in body);
+  // ค่าเดิมของช่องที่แก้ → ประวัติเก่า→ใหม่ (รายละเอียด/รูปยาว เก็บแค่ว่า "เปลี่ยน")
+  const before = sent.length
+    ? ((await admin.from("platform_listing_drafts").select(sent.join(", ")).eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).maybeSingle()).data as Record<string, unknown> | null)
+    : null;
   const { error } = await admin.from("platform_listing_drafts")
     .upsert({ ...row, created_by: user?.id ?? null }, { onConflict: "parent_sku_id,platform_id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
-  await writeAudit(admin, { action: "update", entityType: "platform_listing_draft", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { parent_sku_id, platform_id, fields: FIELDS.filter((f) => f in body) } });
+  await writeAudit(admin, { action: "update", entityType: "platform_listing_draft", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { parent_sku_id, platform_id, fields: sent, ...auditChangeMeta(before, Object.fromEntries(sent.map((f) => [f, row[f] ?? null])), { opaque: ["description", "image_keys", "description_image_keys"] }) } });
   return NextResponse.json({ ok: true, error: null });
 }

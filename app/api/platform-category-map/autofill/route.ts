@@ -1,5 +1,6 @@
 /**
  * ปุ่ม "ใส่ให้เอง (ไม่เสียเงิน)" ในหน้าจับคู่หมวดหมู่แพลตฟอร์ม — /api/platform-category-map/autofill
+ *   GET  ?central_id=&platform_id= → เดาคู่เดียว { suggestion|null, current, has_options } (ตัวช่วยลงสินค้า — ปุ่ม "แนะนำ")
  *   GET  (products.platforms.view) → เดาหมวดให้ "ช่องที่ยังว่าง" ทุกหมวดกลาง × ทุกร้าน (ไม่ใช้ AI · lib/platform-category-autofill)
  *        { items:[{ central_id, central_name, target:{kind,id,name}, suggestion|null }], stats, noOptions:[ชื่อร้านที่ยังไม่มีรายการหมวด] }
  *   POST (products.platforms.manage_accounts) { mode:"apply"|"undo", items:[{ central_category_id, platform_id? | shop_id?, value }] }
@@ -48,9 +49,37 @@ async function loadAll(admin: Admin) {
   return { cats: (cats ?? []) as { id: string; name: string }[], pfs, mappings: (mappings ?? []) as Mapping[], webShops, opts };
 }
 
+/**
+ * เดาหมวดของ "ร้านเดียว" ให้ "หมวดกลางเดียว" (ตัวช่วยลงสินค้า — ปุ่ม "แนะนำ: …" ในแถวที่ขาดหมวด)
+ * ใช้ตัวเดาเดียวกับปุ่มใส่ให้เอง (suggestFor) แต่โหลดหมวดเฉพาะร้านนั้น · ไม่บันทึกอะไร
+ */
+async function suggestOne(admin: Admin, centralId: string, platformId: string): Promise<NextResponse> {
+  const [{ data: cat }, { data: maps }] = await Promise.all([
+    admin.from("platform_central_categories").select("name").eq("id", centralId).maybeSingle(),
+    admin.from("platform_category_mappings").select("platform_id, platform_category_path").eq("central_category_id", centralId),
+  ]);
+  const name = (cat as { name?: string } | null)?.name;
+  if (!name) return NextResponse.json({ suggestion: null, error: "ไม่พบหมวดกลาง" }, { status: 404 });
+  const rows = (maps ?? []) as { platform_id: string; platform_category_path: string | null }[];
+  const current = rows.find((m) => m.platform_id === platformId && m.platform_category_path)?.platform_category_path ?? null;
+  if (current) return NextResponse.json({ suggestion: null, current, has_options: true, error: null });
+  const otherPaths = rows.filter((m) => m.platform_id !== platformId && m.platform_category_path).map((m) => m.platform_category_path as string);
+  let opts: OptRow[];
+  try {
+    opts = await fetchAllPages<OptRow>((from, to) =>
+      admin.from("platform_category_options").select("platform_id, external_id, name_th, name_en").eq("platform_id", platformId).order("external_id").range(from, to), { strict: true });
+  } catch { return NextResponse.json({ suggestion: null, error: "โหลดรายการหมวดไม่ครบ ลองใหม่อีกครั้ง", retryable: true }, { status: 503 }); }
+  const prepared = prepareOptions(opts.map((o) => ({ value: optValue(o), label: optLabel(o) })));
+  return NextResponse.json({ suggestion: prepared.length ? suggestFor(name, otherPaths, prepared) : null, current: null, has_options: prepared.length > 0, error: null });
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  // ?central_id=&platform_id= = เดาคู่เดียว (ตัวช่วยลงสินค้า) · ไม่ส่ง = เดาทุกช่องที่ว่าง (หน้าจับคู่หมวด)
+  const oneCentral = (request.nextUrl.searchParams.get("central_id") ?? "").trim();
+  const onePf = (request.nextUrl.searchParams.get("platform_id") ?? "").trim();
+  if (oneCentral && onePf) return suggestOne(admin, oneCentral, onePf);
   let data: Awaited<ReturnType<typeof loadAll>>;
   try { data = await loadAll(admin); }
   catch { return NextResponse.json({ error: "โหลดรายการหมวดไม่ครบ ลองกดใหม่อีกครั้ง", retryable: true }, { status: 503 }); }

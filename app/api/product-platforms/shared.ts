@@ -25,6 +25,8 @@ export const hasRealConnector = (p: { capabilities?: Record<string, unknown> | n
 export type ReadinessRow = {
   id: string; code: string; name: string;
   central_category: string; platform_category: string;
+  /** id หมวดกลาง (null = สินค้ายังไม่ตั้ง) + หมวดของร้านนี้ที่จับคู่กับหมวดกลางไว้ ("" = ยังไม่จับคู่) — ตัวช่วยลงสินค้าใช้บอกว่า "ขาดหมวด" เพราะอะไร */
+  central_category_id: string | null; mapped_category: string;
   variant_count: number; image_count: number;
   price_erp: string; price_platform: string;
   status: "listed" | "ready" | "missing" | "new"; status_label: string;
@@ -74,6 +76,7 @@ export function readinessOf(platformCode: string, item: BulkListingItem, default
     name: String(item.parent.name_platform || item.parent.name_th || ""),
     central_category: item.parent.central_category_name ?? "",
     platform_category: String(d?.category_path || item.platformCategory || ""),
+    central_category_id: item.parent.platform_category_id ?? null, mapped_category: item.platformCategory || "",
     variant_count: vs.length, image_count: d ? draftImageCount(platformCode, d) : item.images.length,
     price_erp: range(erpPrices), price_platform: range(erpPrices.map((n) => platformPrice(n, rule))),
     status, status_label: STATUS_LABEL[status],
