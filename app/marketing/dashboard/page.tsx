@@ -7,6 +7,7 @@
  *   แท็บ ภาพรวม · ยอดขาย & ช่องทาง · สินค้า (80/20 + ดาวรุ่ง/ตก) · ยกเลิก · แคมเปญวันพิเศษ · ไฟล์ Shopee (หน้าเดิม ไม่แก้)
  *   ยอดขาย = มูลค่าสินค้า ชุดเดียวกับแดชบอร์ดช่องทางขาย (ตรงกับ Shopee) · เป้าเก็บที่เดียวกัน (ตั้ง/แก้/ลบ + ย้อนกลับได้ + audit)
  *   กดเจาะลึก: การ์ด → แท็บ · แถวช่องทาง → กรองช่องทางนั้น · แถวสินค้า → ออเดอร์ที่มีสินค้านั้น → หน้าออเดอร์
+ * ➕ 2026-11-24 รอบ 2 (แบบ A): แท็บ "ค่าธรรมเนียม" + "กำไร" → app/marketing/dashboard/profit-tabs.tsx (/api/marketing/profit)
  *   แท็บอยู่ใน URL (?tab=) — ลิงก์จากกระดิ่งแจ้งเตือนเปิดแท็บที่เกี่ยวข้องได้
  * ของกลาง: PlaygroundShell · PeriodPicker · CountUp · SimpleBarChart · DataTable (ค้นหา/เรียง/มุมมอง/ส่งออก Excel/ลิ้นชัก)
  *   · ScrollTabs · ERPModal · MoneyInput · HoverImage · PlatformIcon · Icon · LoadingState/ErrorState/EmptyState · useToast
@@ -34,6 +35,8 @@ import { PeriodPicker, type Period } from "@/components/date-input/period-picker
 import { TH_MONTHS } from "@/lib/date-range";
 import { WEEKDAYS_TH, type MarketingAlert, type Pace, type CancelRow, type CampaignResult } from "@/lib/marketing-overview-calc";
 
+const FeesTab = dynamic(() => import("./profit-tabs").then((m) => m.FeesTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บค่าธรรมเนียม…" /> });
+const ProfitTab = dynamic(() => import("./profit-tabs").then((m) => m.ProfitTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บกำไร…" /> });
 const ShopeeFileView = dynamic(() => import("./shopee-file-view"), { ssr: false, loading: () => <LoadingState label="กำลังโหลดข้อมูลไฟล์ Shopee…" /> });
 
 // ── รูปแบบตัวเลข ──
@@ -50,13 +53,15 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const localYmd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const thisMonth = (): Period => { const now = new Date(); return { from: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, to: localYmd(now) }; };
 
-type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "shopee_file";
+type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "fees" | "profit" | "shopee_file";
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "ภาพรวม", icon: "chart" },
   { key: "sales", label: "ยอดขาย & ช่องทาง", icon: "store" },
   { key: "products", label: "สินค้า", icon: "package" },
   { key: "cancel", label: "ยกเลิก", icon: "cancel" },
   { key: "campaign", label: "แคมเปญวันพิเศษ", icon: "campaign" },
+  { key: "fees", label: "ค่าธรรมเนียม", icon: "receipt" },
+  { key: "profit", label: "กำไร", icon: "money" },
   { key: "shopee_file", label: "ไฟล์ Shopee", icon: "import" },
 ];
 const isTab = (s: string | null): s is Tab => !!s && TABS.some((t) => t.key === s);
@@ -112,6 +117,7 @@ export default function MarketingOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [targetOpen, setTargetOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);   // ปุ่มโหลดใหม่ → แท็บค่าธรรมเนียม/กำไรโหลดใหม่ด้วย
 
   // แท็บจาก URL (?tab=) — ลิงก์จากกระดิ่งแจ้งเตือน
   useEffect(() => { const t = new URLSearchParams(window.location.search).get("tab"); if (isTab(t)) setTab(t); }, []);
@@ -163,7 +169,7 @@ export default function MarketingOverviewPage() {
                   <Icon name="target" /> ตั้งเป้า
                 </button>
               )}
-              <button type="button" onClick={() => void load()} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="โหลดใหม่" title="โหลดใหม่">
+              <button type="button" onClick={() => { void load(); setReloadKey((k) => k + 1); }} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="โหลดใหม่" title="โหลดใหม่">
                 <Icon name="refresh" />
               </button>
             </div>
@@ -193,6 +199,8 @@ export default function MarketingOverviewPage() {
               {tab === "products" && <ProductsTab d={d} period={period} platformId={platformId} brandId={brandId} />}
               {tab === "cancel" && <CancelTab d={d} />}
               {tab === "campaign" && <CampaignTab d={d} pick={setEventDate} />}
+              {tab === "fees" && <FeesTab from={period.from} to={period.to} platformId={platformId} brandId={brandId} reloadKey={reloadKey} />}
+              {tab === "profit" && <ProfitTab from={period.from} to={period.to} platformId={platformId} brandId={brandId} reloadKey={reloadKey} />}
               {d.notes.length > 0 && (
                 <ul className="mt-6 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
                   {d.notes.map((n) => <li key={n} className="flex gap-1.5"><Icon name="info" className="mt-0.5 shrink-0" /> {n}</li>)}

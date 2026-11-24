@@ -241,7 +241,8 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
     }),
 
     // ── งานตั้งเวลาที่ดูหลักฐานจากแจ้งเตือน/คลังรูป ──
-    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions", "perf-watch", "platform-readiness", "platform-drift", "platform-cross-daily", "parent-computed-sync", "marketing-alert"], async () => {
+    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions", "perf-watch", "platform-readiness", "platform-drift", "platform-cross-daily", "parent-computed-sync", "marketing-alert", "platform-fees"], async () => {
+      workers["platform-fees"] = cron("platform-fees");
       workers["platform-readiness"] = cron("platform-readiness");
       workers["platform-drift"] = cron("platform-drift");
       workers["parent-computed-sync"] = cron("parent-computed-sync");

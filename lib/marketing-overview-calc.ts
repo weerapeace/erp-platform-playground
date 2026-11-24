@@ -244,6 +244,8 @@ export function buildMarketingAlerts(x: {
   avgDaily28: number;
   storeFaultCancels7d: number;
   fallingA: { name: string; change: number | null }[];
+  /** ช่องทางที่ค่าธรรมเนียม 7 วันเกินเกณฑ์ (รอบ 2 · lib/marketing-fees-server recentFeeSpikes) */
+  feeSpikes?: { name: string; pct: number; fee: number }[];
 }): MarketingAlert[] {
   const out: MarketingAlert[] = [];
   const p = x.pace;
@@ -259,6 +261,11 @@ export function buildMarketingAlerts(x: {
   if (x.storeFaultCancels7d > 0) {
     out.push({ key: "store_cancel", level: x.storeFaultCancels7d >= 3 ? "danger" : "warning", tab: "cancel", title: `ยกเลิกเพราะฝั่งร้าน ${x.storeFaultCancels7d} ใบ (7 วัน)`,
       body: "ร้านไม่ส่ง / ของหมด / ไม่ตอบแชท — กระทบคะแนนร้าน เช็กสต็อกและการแพ็ค" });
+  }
+  if (x.feeSpikes?.length) {
+    const names = x.feeSpikes.map((f) => `${f.name} ${Math.round(f.pct * 1000) / 10}%`).join(" · ");
+    out.push({ key: "fee_spike", level: "warning", tab: "fees", title: `ค่าธรรมเนียมสูงกว่าปกติ (7 วัน)`,
+      body: `${names} ของยอดขาย — เช็กค่าโฆษณา/แอฟฟิลิเอต ค่าส่งที่ร้านออก หรือโปรที่ร่วม` });
   }
   if (x.fallingA.length) {
     const names = x.fallingA.slice(0, 3).map((f) => `${f.name}${f.change != null ? ` ${Math.round(f.change * 100)}%` : ""}`).join(" · ");

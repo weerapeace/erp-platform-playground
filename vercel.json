@@ -39,6 +39,10 @@
       "schedule": "5 1 * * *"
     },
     {
+      "path": "/api/cron/platform-fees",
+      "schedule": "11,41 * * * *"
+    },
+    {
       "path": "/api/cron/marketing-alert",
       "schedule": "20 2 * * *"
     },

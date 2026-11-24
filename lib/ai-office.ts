@@ -147,6 +147,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
   },
   {
+    id: "platform-fees", zone: "marketing", kind: "auto", icon: "💸",
+    title: "ผู้เก็บค่าธรรมเนียมร้าน", titleEn: "Platform fee collector",
+    does: "ทุก 30 นาทีถาม Shopee และ Lazada ว่าแต่ละออเดอร์โดนค่าธรรมเนียมเท่าไหร่ และร้านได้เงินจริงเท่าไหร่ แล้วเก็บไว้ให้หน้าค่าธรรมเนียม/กำไรของการตลาด",
+    trigger: "ทุก 30 นาที", cron: "/api/cron/platform-fees", everyHours: 1,
+    can: ["อ่านรายได้ต่อออเดอร์จากร้าน", "จดค่าธรรมเนียมในออเดอร์ของเรา"], cannot: ["แก้อะไรบนร้าน", "แก้สถานะหรือยอดออเดอร์"],
+    source: "บันทึกรอบล่าสุด", href: "/marketing/dashboard?tab=fees",
+    files: ["app/api/cron/platform-fees/route.ts", "lib/marketing-fees-server.ts", "lib/marketing-profit-calc.ts"],
+  },
+  {
     id: "platform-cross-daily", zone: "sales", kind: "auto", icon: "🧾",
     title: "ผู้สรุปเช็กข้ามร้าน", titleEn: "Cross-shop daily digest",
     does: "ทุกเช้าดูว่ามีรุ่นที่ยังไม่ลงบางร้าน หรือราคาบนร้านไม่ตรงระบบ เพิ่มขึ้นจากเมื่อวานไหม แล้วแจ้งกระดิ่ง",

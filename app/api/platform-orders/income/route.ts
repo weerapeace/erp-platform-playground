@@ -49,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ── Shopee ──
   if (spId && o.platform_id === spId) {
     const cached = o.raw?.shopee_income as (ShopeeIncome & { at?: string }) | undefined;
-    if (cached?.at && !fresh && Date.now() - Date.parse(cached.at) < CACHE_MS) return NextResponse.json({ ok: true, supported: true, income: cached, cached: true });
+    if (cached?.at && !(cached as { error?: string }).error && !fresh && Date.now() - Date.parse(cached.at) < CACHE_MS) return NextResponse.json({ ok: true, supported: true, income: cached, cached: true });
     const tok = await shopeeTokenOrReason(admin, brandId, spId, null);
     if (!tok.ok) return NextResponse.json({ ok: true, supported: false, reason: tok.reason, ...(cached ? { income: cached } : {}) });
     try {
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (lzId && o.platform_id === lzId) {
     const cached = o.raw?.lazada_income as (LazIncome & { at?: string }) | undefined;
     const ttl = cached && cached.rows > 0 ? CACHE_MS : CACHE_EMPTY_MS;
-    if (cached?.at && !fresh && Date.now() - Date.parse(cached.at) < ttl) {
+    if (cached?.at && !(cached as { error?: string }).error && !fresh && Date.now() - Date.parse(cached.at) < ttl) {
       return NextResponse.json({ ok: true, supported: true, income: cached, cached: true, ...(cached.rows ? {} : { reason: NOT_SETTLED }) });
     }
     const tok = await lazTokenOrReason(admin, brandId, lzId, null);
