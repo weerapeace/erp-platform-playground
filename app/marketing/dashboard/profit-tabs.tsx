@@ -141,6 +141,8 @@ export function FeesTab(props: Props) {
           ) : <EmptyState title={r.supported ? "ยังไม่ได้ดึงค่าธรรมเนียมของช่วงนี้" : "ช่องทางนี้ยังดึงค่าธรรมเนียมไม่ได้"} hint={r.supported ? "ตัวดึงทำงานทุก 30 นาที กลับมาดูใหม่ภายหลัง" : "TikTok ต้องเปิดสิทธิ์การเงินในแอป TikTok ก่อน"} />} />
       </div>
 
+      <p className="px-1 text-xs text-slate-400">% = ค่าธรรมเนียม ÷ ยอดขาย (มูลค่าสินค้าหลังส่วนลดร้าน) · Shopee คิดค่าธรรมเนียมจากราคาที่รวมส่วนลดที่ Shopee ออกให้ด้วย % จึงดูสูง · ส่วนลดของร้านเองไม่นับเป็นค่าธรรมเนียม</p>
+
       {d.feeDaily.length > 1 && (
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <h2 className="mb-2 text-sm font-medium text-slate-800">ค่าธรรมเนียมรายวัน (ใบที่ดึงแล้ว)</h2>

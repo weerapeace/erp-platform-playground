@@ -45,12 +45,25 @@ describe("สรุปแยกช่องทาง + เตือนพุ่�
     expect(s.net).toBe(218);
     expect(feeSummary([{ platform: "shopee", value: 500, income: shopeeSample }])[0].estFeeAll).toBeNull();
   });
-  it("เตือนเมื่อเกินเกณฑ์และมีใบพอ", () => {
-    const rows = [
-      { platform: "shopee", orders: 30, covered: 25, sales: 1, salesCovered: 1, fee: 1, byCat: {} as never, net: 0, pct: 0.18, estFeeAll: 0 },
-      { platform: "lazada", orders: 30, covered: 5, sales: 1, salesCovered: 1, fee: 1, byCat: {} as never, net: 0, pct: 0.3, estFeeAll: 0 },
-    ];
-    expect(feeSpikes(rows).map((x) => x.platform)).toEqual(["shopee"]);
+  it("เตือนเมื่อสูงกว่าปกติของช่องทางเอง และมีใบพอทั้งสองช่วง", () => {
+    const row = (platform: string, covered: number, pct: number) => ({ platform, orders: 30, covered, sales: 1, salesCovered: 1, fee: 1, byCat: {} as never, net: 0, pct, estFeeAll: 0 });
+    const recent = [row("shopee", 25, 0.36), row("lazada", 5, 0.4), row("tiktok", 30, 0.2)];
+    const base = [row("shopee", 100, 0.31), row("lazada", 100, 0.2), row("tiktok", 100, 0.19)];
+    expect(feeSpikes(recent, base).map((x) => x.platform)).toEqual(["shopee"]);
+    expect(feeSpikes(recent, [])).toEqual([]);
+  });
+  it("ใบไม่มียอดเงินไม่นับใน %", () => {
+    const [s] = feeSummary([{ platform: "shopee", value: 0, income: shopeeSample }]);
+    expect(s.covered).toBe(0);
+    expect(s.pct).toBeNull();
+  });
+  it("Lazada: ค่าโปร LazCoins / แพ็กเกจพรีเมียม / 360 Boost = ค่าธรรมเนียม", () => {
+    expect(feeCatOf("lazada", "LazCoins Discount Promotion Fee")).toBe("service");
+    expect(feeCatOf("lazada", "LazCoins Discount")).toBeNull();
+    expect(feeCatOf("lazada", "Premium Package")).toBe("service");
+    expect(feeCatOf("lazada", "Product 360 Boost")).toBe("ads");
+    expect(feeCatOf("lazada", "Shipping Fee Subsidy (By Seller)")).toBe("shipping");
+    expect(feeCatOf("lazada", "Seller Virtual Credit - Co-fund Voucher")).toBeNull();
   });
 });
 

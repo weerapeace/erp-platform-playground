@@ -37,12 +37,12 @@ export function feeCatOf(platform: string, key: string): FeeCat | null {
   }
   if (platform === "lazada") {
     const k = key.toLowerCase();
-    if (/^item price|subsidy|refund|reversal item price|voucher|promotional charge|lazcoin/.test(k)) return null;
+    if (/promotion fee|premium package|free shipping|handling fee|fulfil|service/.test(k)) return "service";
+    if (/sponsored|affiliate|product 360 boost|review incentive/.test(k)) return "ads";
+    if (/shipping fee/.test(k)) return "shipping";
+    if (/^item price|item price subsidy|refund|reversal item price|voucher|promotional charge|lazcoin/.test(k)) return null;
     if (/commission/.test(k)) return "commission";
     if (/^payment fee/.test(k)) return "transaction";
-    if (/shipping fee/.test(k) && !/free shipping/.test(k)) return "shipping";
-    if (/free shipping|handling fee|fulfil|service/.test(k)) return "service";
-    if (/sponsored|affiliate/.test(k)) return "ads";
     return "other";
   }
   return null;
@@ -83,7 +83,7 @@ export function feeSummary(rows: readonly FeeOrderRow[], opts: { minCovered?: nu
   for (const r of rows) {
     const g = m.get(r.platform) ?? { platform: r.platform, orders: 0, covered: 0, sales: 0, salesCovered: 0, fee: 0, byCat: emptyCats(), net: 0, pct: null, estFeeAll: null };
     g.orders += 1; g.sales += r.value;
-    if (incomeKnown(r.income)) {
+    if (incomeKnown(r.income) && r.value > 0) {   // ใบที่ไม่มียอดเงิน (เช่น Lazada จากเมล) ไม่นับ — ไม่งั้น % เพี้ยนสูง
       const f = orderFees(r.platform, r.income);
       g.covered += 1; g.salesCovered += r.value; g.fee += f.total; g.net += Number(r.income.escrow) || 0;
       for (const k of Object.keys(f.byCat) as FeeCat[]) g.byCat[k] += f.byCat[k];
@@ -96,10 +96,20 @@ export function feeSummary(rows: readonly FeeOrderRow[], opts: { minCovered?: nu
   }).sort((a, b) => b.sales - a.sales);
 }
 
-/** ช่องทางที่ค่าธรรมเนียมเกินเกณฑ์ (เฉพาะที่มีออเดอร์รู้ค่าธรรมเนียมพอ) — ใช้เตือนทุกเช้า */
-export function feeSpikes(rows: readonly FeePlatformSummary[], opts: { maxPct?: number; minOrders?: number } = {}): { platform: string; pct: number; fee: number }[] {
-  const maxPct = opts.maxPct ?? 0.15, minOrders = opts.minOrders ?? 20;
-  return rows.filter((r) => r.covered >= minOrders && r.pct != null && r.pct > maxPct).map((r) => ({ platform: r.platform, pct: r.pct as number, fee: r.fee }));
+/**
+ * ช่องทางที่ค่าธรรมเนียม "ช่วงล่าสุด" สูงกว่า "ปกติของช่องทางนั้นเอง" เกิน jump (ค่าเริ่ม +3 จุด %) — ใช้เตือนทุกเช้า
+ * เทียบกับตัวเอง ไม่ใช้เกณฑ์ตายตัว (Shopee คิดค่าธรรมเนียมรวมส่วนลดที่ Shopee ออกให้ → % ต่อยอดสินค้าสูงอยู่แล้วราว 30%+)
+ * ต้องมีใบที่รู้ค่าธรรมเนียม ≥ minOrders ทั้งสองช่วง · ยังไม่มีค่าปกติ = ไม่เตือน
+ */
+export function feeSpikes(recent: readonly FeePlatformSummary[], baseline: readonly FeePlatformSummary[], opts: { jump?: number; minOrders?: number } = {}): { platform: string; pct: number; basePct: number; fee: number }[] {
+  const jump = opts.jump ?? 0.03, minOrders = opts.minOrders ?? 20;
+  const out: { platform: string; pct: number; basePct: number; fee: number }[] = [];
+  for (const r of recent) {
+    const b = baseline.find((x) => x.platform === r.platform);
+    if (!b || r.covered < minOrders || b.covered < minOrders || r.pct == null || b.pct == null) continue;
+    if (r.pct > b.pct + jump) out.push({ platform: r.platform, pct: r.pct, basePct: b.pct, fee: r.fee });
+  }
+  return out;
 }
 
 export type ProfitInput = { key: string; parentId: string | null; parentName: string; code: string; name: string; sales: number; qty: number; fee: number; unitCost: number | null };

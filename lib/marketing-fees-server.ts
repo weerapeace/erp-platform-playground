@@ -50,10 +50,14 @@ export async function loadFeeContext(admin: Admin, f: { fromYmd: string; toYmd: 
   return { orders, items, valByOrder, income, codeOf, summary };
 }
 
-/** ช่องทางที่ค่าธรรมเนียม 7 วันล่าสุดเกินเกณฑ์ — ใช้ในกล่องเตือน + ตัวเตือนทุกเช้า */
-export async function recentFeeSpikes(admin: Admin, today: string, f: { platformId?: string | null; brandId?: string | null } = {}): Promise<{ platform: string; name: string; pct: number; fee: number }[]> {
+/** ช่องทางที่ค่าธรรมเนียม 7 วันล่าสุด สูงกว่าปกติ (30 วันก่อนหน้า) — ใช้ในกล่องเตือน + ตัวเตือนทุกเช้า */
+export async function recentFeeSpikes(admin: Admin, today: string, f: { platformId?: string | null; brandId?: string | null } = {}): Promise<{ platform: string; name: string; pct: number; basePct: number; fee: number }[]> {
   const { data } = await admin.from("erp_platforms").select("id, code, name_th");
   const rows = (data ?? []) as { id: string; code: string; name_th: string | null }[];
-  const ctx = await loadFeeContext(admin, { fromYmd: shiftYmd(today, -7), toYmd: shiftYmd(today, -1), ...f }, new Map(rows.map((r) => [r.id, r.code])));
-  return feeSpikes(ctx.summary).map((s) => ({ ...s, name: rows.find((r) => r.code === s.platform)?.name_th ?? s.platform }));
+  const codes = new Map(rows.map((r) => [r.id, r.code]));
+  const [ctx, base] = await Promise.all([
+    loadFeeContext(admin, { fromYmd: shiftYmd(today, -7), toYmd: shiftYmd(today, -1), ...f }, codes),
+    loadFeeContext(admin, { fromYmd: shiftYmd(today, -37), toYmd: shiftYmd(today, -8), ...f }, codes),
+  ]);
+  return feeSpikes(ctx.summary, base.summary).map((s) => ({ ...s, name: rows.find((r) => r.code === s.platform)?.name_th ?? s.platform }));
 }
