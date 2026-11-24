@@ -18,6 +18,7 @@
  *     เช่น Design Dashboard (ปฏิทินกำหนดส่งแทนแถวแบรนด์ · 2026-11-22)
  *   • onDropDay → ลากของมาวางบนช่องวันได้ (หน้าแม่อ่าน e.dataTransfer เอง เช่น ลากใบงานมาเลื่อนกำหนดส่ง)
  *   • actions   → ปุ่มเสริมท้ายแถบเดือน (compact) เช่น ปักหมุด / สรุป
+ *   • listRows  → (compact) ช่องวันเรียงงานเป็นรายการ รูปเล็ก + ชื่อ + แถบสี (สูงสุด N แถว · "+n" กางดู) · กดแถว = onPick · wrapItem = ห่อแถว (ชี้แล้วรูปใหญ่)
  *   • focusWeeks → (compact) โชว์แค่ N สัปดาห์ เริ่มสัปดาห์ของวันที่เลือก/วันนี้ (เช่น ปฏิทินที่ปักหมุดค้างจอ ย่อเหลือ 2 สัปดาห์)
  *
  * ห้ามเขียนตารางปฏิทินเองในหน้าโมดูล — ใช้ตัวนี้
@@ -41,13 +42,17 @@ export type CalDoc = {
   href?: string;
   /** ข้อความตอนชี้ค้าง */
   title?: string;
+  /** (compact listRows) รูปเล็กหน้ารายการ — url เต็ม */
+  image?: string | null;
+  /** (compact listRows) ข้อความในรายการ — ไม่ใส่ = ใช้ no */
+  label?: string | null;
 };
 
 const money = (n: number) => "฿" + (Math.round(n) || 0).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function DocCalendar({
-  docs, cursor, onCursor, onPick, hint, unit = "ใบ", onPickDay, selectedDay, disablePast = false, compact = false, onDropDay, title, actions, focusWeeks,
+  docs, cursor, onCursor, onPick, hint, unit = "ใบ", onPickDay, selectedDay, disablePast = false, compact = false, onDropDay, title, actions, focusWeeks, listRows, wrapItem,
 }: {
   docs: CalDoc[];
   cursor: Date;
@@ -71,8 +76,13 @@ export function DocCalendar({
   actions?: ReactNode;
   /** (compact) โชว์แค่ N สัปดาห์ — เริ่มสัปดาห์ของวันที่เลือก หรือวันนี้ (ถ้าอยู่เดือนที่ดู) ไม่งั้นสัปดาห์แรกของเดือน */
   focusWeeks?: number;
+  /** (compact) โหมดรายการ: ช่องวันเรียงงานลงมาเป็นแถว (รูปเล็ก + ข้อความ + แถบสี) สูงสุด N แถว · เกิน = "+n" กดกางดูครบ · กดแถว = onPick */
+  listRows?: number;
+  /** (compact listRows) ห่อแถวรายการ เช่น ชี้แล้วโชว์รูปใหญ่ (HoverCardWrap ของหน้าแม่) */
+  wrapItem?: (doc: CalDoc, node: ReactNode) => ReactNode;
 }) {
   const [dragDay, setDragDay] = useState<string | null>(null);
+  const [openDay, setOpenDay] = useState<string | null>(null);   // (listRows) วันที่กดกางดูครบ
   const byDay = useMemo(() => {
     const m = new Map<string, CalDoc[]>();
     for (const o of docs) {
@@ -131,16 +141,36 @@ export function DocCalendar({
           const picked = !!selectedDay && k === selectedDay;
           const tip = list.length ? list.map((o) => o.title ?? `${o.no ?? "—"}${o.sub ? ` · ${o.sub}` : ""}`).join("\n") : undefined;
           return (
-            <div key={k} title={tip} {...dropProps(k)}
+            <div key={k} title={listRows ? undefined : tip} {...dropProps(k)}
               {...(onPickDay ? { role: "button", tabIndex: 0, onClick: () => onPickDay(k), onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPickDay(k); } } } : {})}
-              className={`flex h-[30px] min-w-0 items-center gap-1 rounded-md px-1 ${inMonth ? "bg-slate-50" : "opacity-40"} ${k === today ? "ring-1 ring-inset ring-indigo-400" : ""} ${picked ? "!bg-indigo-50 ring-2 ring-inset ring-indigo-600" : ""} ${dragDay === k ? "!bg-emerald-50 ring-2 ring-inset ring-emerald-500" : ""} ${onPickDay ? "cursor-pointer hover:bg-indigo-50" : ""}`}>
+              className={`${listRows ? "flex min-h-[44px] flex-col items-stretch gap-0.5 p-0.5" : "flex h-[30px] items-center gap-1 px-1"} min-w-0 rounded-md ${inMonth ? "bg-slate-50" : "opacity-40"} ${k === today ? "ring-1 ring-inset ring-indigo-400" : ""} ${picked ? "!bg-indigo-50 ring-2 ring-inset ring-indigo-600" : ""} ${dragDay === k ? "!bg-emerald-50 ring-2 ring-inset ring-emerald-500" : ""} ${onPickDay ? "cursor-pointer hover:bg-indigo-50" : ""}`}>
               <span className={`w-4 shrink-0 text-[11px] font-semibold ${k === today ? "text-indigo-700" : "text-slate-500"}`}>{d.getDate()}</span>
+              {listRows ? (<>
+                {(openDay === k ? list : list.slice(0, listRows)).map((o) => {
+                  const row = (
+                    <div role={onPick ? "button" : undefined} tabIndex={onPick ? 0 : undefined}
+                      onClick={(e) => { if (onPick) { e.stopPropagation(); onPick(o.id); } }}
+                      onKeyDown={(e) => { if (onPick && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); e.stopPropagation(); onPick(o.id); } }}
+                      className={`flex min-w-0 items-center gap-1 rounded border-l-[3px] bg-white py-px pl-0.5 pr-1 text-[10px] leading-4 text-slate-700 shadow-sm ${onPick ? "cursor-pointer hover:bg-indigo-50" : ""}`}
+                      style={{ borderLeftColor: o.color ?? "#6366f1" }}>
+                      {o.image ? <img src={o.image} alt="" loading="lazy" className="h-4 w-4 shrink-0 rounded-sm object-cover" /> : <span className="h-4 w-4 shrink-0 rounded-sm bg-slate-100" />}
+                      <span className="min-w-0 truncate">{o.label || o.no || "—"}</span>
+                    </div>
+                  );
+                  return <div key={o.id} className="min-w-0">{wrapItem ? wrapItem(o, row) : row}</div>;
+                })}
+                {list.length > listRows && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setOpenDay((cur) => (cur === k ? null : k)); }}
+                    className="self-start rounded px-1 text-[9px] font-semibold text-slate-500 hover:bg-slate-100">{openDay === k ? "ย่อ" : `+${list.length - listRows} งาน`}</button>
+                )}
+              </>) : (
               <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
                 {list.slice(0, 2).map((o) => (
                   <span key={o.id} className="min-w-0 truncate rounded px-1 text-[9px] font-semibold leading-4 text-white" style={{ backgroundColor: o.color ?? "#6366f1" }}>{o.no ?? "—"}</span>
                 ))}
                 {list.length > 2 && <span className="shrink-0 text-[9px] font-semibold text-slate-500">+{list.length - 2}</span>}
               </div>
+              )}
             </div>
           );
         })}

@@ -9,7 +9,7 @@ import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
-import { SheetHoverSettingsPanel, useSheetHoverPref } from "./sheet-hover";
+import { SheetHoverSettingsPanel, SheetHoverWrap, useSheetHoverPref } from "./sheet-hover";
 import { MenuBar, type MenuDef, type MenuItem } from "@/components/menu-bar";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
@@ -27,7 +27,7 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } fr
 import { NewSheetFromLibraryModal, useCanSheetFromLibrary } from "@/components/design-library/new-sheet-from-library";
 import { LIB_HREF } from "@/components/design-library/shared";
 import { useStickyHeader } from "@/components/sticky-header";
-import { type ListResponse, type StatusResponse, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard } from "./dashboard-helpers";
+import { type ListResponse, type StatusResponse, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, passPhoneFilter, LoadingCard, sheetCoverUrl, deadlineLabel, deadlineTone } from "./dashboard-helpers";
 import { BoardCard, GalleryCard, BOARD_CARD_FIELDS, BOARD_CARD_SCOPE, CARD_IMG_MIN_W, type CardImgSize } from "./dashboard-cards";
 import { useCardLayout, CardLayoutEditor } from "@/components/card-layout";
 import { DeadlineSummaryModal } from "./deadline-summary";
@@ -277,9 +277,25 @@ export function DesignDashboard() {
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_img", value: v }) }).catch(() => {});
   };
   // 📌 ปักหมุดปฏิทินกำหนดส่ง (เจ้าของขอ 2026-11-23): ค้างบนจอตอนเลื่อนลง จะได้ลากการ์ดไปวางวันได้ · จำต่อคน · จอคอมเท่านั้น (ทัชลากการ์ดไม่ได้)
-  //   ค้างแล้วย่อเหลือ 2 สัปดาห์ (ไม่บังบอร์ด) · กด "ทั้งเดือน" ขยายได้
+  //   ค้างแล้วโชว์ทั้งเดือนเป็นค่าเริ่มต้น (เจ้าของสั่ง 2026-11-24) · กด "2 สัปดาห์" ย่อได้ · จำค่าต่อคน
   const [calPinned, setCalPinned] = useState(false);
-  const [calFull, setCalFull] = useState(false);
+  const [calFull, setCalFullState] = useState(true);
+  // รายการในปฏิทินโชว์ "ชื่องาน" หรือ "รหัส" (จำต่อคน)
+  const [calLabel, setCalLabelState] = useState<"name" | "code">("name");
+  const setCalFull = (fn: boolean | ((v: boolean) => boolean)) => setCalFullState((cur) => {
+    const next = typeof fn === "function" ? fn(cur) : fn;
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_cal_full", value: next }) }).catch(() => {});
+    return next;
+  });
+  const toggleCalLabel = () => setCalLabelState((cur) => {
+    const next = cur === "name" ? "code" : "name";
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_cal_label", value: next }) }).catch(() => {});
+    return next;
+  });
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_cal_full").then((r) => r.json()).then((j) => { if (typeof j?.value === "boolean") setCalFullState(j.value); }).catch(() => {});
+    apiFetch("/api/user-prefs?key=design_dashboard_cal_label").then((r) => r.json()).then((j) => { if (j?.value === "code" || j?.value === "name") setCalLabelState(j.value); }).catch(() => {});
+  }, []);
   const [calStuck, setCalStuck] = useState(false);
   const [calH, setCalH] = useState(0);
   const calSentinel = useRef<HTMLDivElement | null>(null);
@@ -292,7 +308,6 @@ export function DesignDashboard() {
   const toggleCalPin = () => {
     const next = !calPinned;
     setCalPinned(next);
-    setCalFull(false);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_cal_pinned", value: next }) }).catch(() => {});
   };
   const [summaryOpen, setSummaryOpen] = useState(false);
@@ -543,10 +558,11 @@ export function DesignDashboard() {
       .sort((a, b) => tone(a.status) - tone(b.status))
       .map((s) => ({
         id: s.id, no: s.code, sub: s.name, date: String(s.deadline).slice(0, 10),
-        color: COLOR[tone(s.status)],
+        color: COLOR[tone(s.status)], image: sheetCoverUrl(s), label: calLabel === "code" ? s.code : s.name,
         title: `${s.code} · ${s.name}${s.brand_name ? ` · ${s.brand_name}` : ""} · ${statusMeta.map[s.status]?.label ?? s.status}`,
       }));
-  }, [scopedSheets, statusMeta]);
+  }, [scopedSheets, statusMeta, calLabel]);
+  const sheetById = useMemo(() => new Map(scopedSheets.map((s) => [s.id, s])), [scopedSheets]);
   const filterCounts = useMemo(() => {
     const c = { all: scopedSheets.length, active: 0, urgent: 0, soon: 0, closed: 0, overdue: 0, due2: 0, await_quote: 0, nodl: 0 };
     for (const s of scopedSheets) for (const f of ["active", "urgent", "soon", "closed", "overdue", "due2", "await_quote", "nodl"] as const) if (passQuick(s, f)) c[f]++;
@@ -970,7 +986,13 @@ export function DesignDashboard() {
             <DocCalendar compact docs={calDocs} cursor={calCursor} onCursor={setCalCursor} unit={t("งาน", "jobs")}
               title={t("ปฏิทินกำหนดส่ง", "Deadlines")}
               focusWeeks={calPinOn && calStuck && !calFull ? 2 : undefined}
+              listRows={3} onPick={openDetail}
+              wrapItem={(doc, node) => { const sh = sheetById.get(doc.id); return sh ? (
+                <SheetHoverWrap sheet={sh} pref={hoverPref} status={statusInfo.get(sh.status)} own={sheetIsOwn(sh)} off={!!draggingSheetId}
+                  deadline={{ label: deadlineLabel(sh, statusMeta), tone: deadlineTone(sh, statusMeta) }}>{node}</SheetHoverWrap>) : node; }}
               actions={<>
+                <button type="button" onClick={toggleCalLabel} title={t("สลับรายการในปฏิทิน: ชื่องาน / รหัส", "Toggle list text: job name / code")}
+                  className="h-6 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">{calLabel === "name" ? t("ชื่อ", "Name") : t("รหัส", "Code")}</button>
                 {calPinOn && calStuck && (
                   <button type="button" onClick={() => setCalFull((v) => !v)} title={calFull ? t("ย่อเหลือ 2 สัปดาห์", "Show 2 weeks") : t("ดูทั้งเดือน", "Show the whole month")}
                     className="h-6 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">{calFull ? t("2 สัปดาห์", "2 weeks") : t("ทั้งเดือน", "Month")}</button>
