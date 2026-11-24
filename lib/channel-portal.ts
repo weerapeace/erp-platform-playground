@@ -70,7 +70,7 @@ export const PORTAL_LINKS: PortalLink[] = PORTAL_GROUPS.flatMap((g) => g.links);
 export const portalLinkByKey = (key: string): PortalLink | undefined => PORTAL_LINKS.find((l) => l.key === key);
 
 /** แถวเมนูของแอปที่ใช้ตัดสินว่าเห็นไหม (ไม่มีกุญแจอะไร — ส่งไปหน้าเว็บได้) */
-export type PortalMenuRow = { id: string; href: string; permission_key: string | null; parent_id: string | null; audience: unknown; app_overrides: unknown };
+export type PortalMenuRow = { id: string; href: string; permission_key: string | null; parent_id: string | null; audience: unknown; app_overrides: unknown; is_active?: boolean | null };
 
 const basePath = (h: string) => h.split("?")[0].replace(/\/+$/, "") || "/";
 
@@ -84,7 +84,7 @@ export function menuRowFor(link: Pick<PortalLink, "href">, rows: readonly Portal
 
 /**
  * คนนี้เห็นทางลัดนี้ไหม (แบบ B)
- * - หน้าเป็นเมนูในแอป "ช่องทางขาย" → กฎแถบเมนูจริง: ซ่อนในแอป · ใครเห็นเมนู (ตำแหน่ง/รายคน) · สิทธิ์ของเมนู
+ * - หน้าเป็นเมนูในแอป "ช่องทางขาย" → เมนูถูกปิด (is_active=false) = ไม่เห็น · แล้วกฎแถบเมนูจริง: ซ่อนในแอป · ใครเห็นเมนู (ตำแหน่ง/รายคน) · สิทธิ์ของเมนู
  * - ไม่เป็นเมนู → สิทธิ์ของหน้าอย่างเดียว
  * - ทุกกรณีต้องมีสิทธิ์ของหน้าเอง (perm ของทางลัด) ด้วย — เมนูไม่มี permission_key ก็ยังกันได้
  * - can = ตัวเช็กสิทธิ์ฝั่งหน้าเว็บ (แอดมินผ่านเสมอ) · ยังไม่รู้ผู้ใช้ = เห็น (กันจอว่างตอนโหลด)
@@ -99,6 +99,8 @@ export function portalLinkVisible(
   if (link.perm && user.role !== "admin" && !can(link.perm)) return false;
   const row = menuRowFor(link, rows);
   if (!row) return true;
+  // เมนูหน้านี้ถูกปิดในแอป (ปิดทั้งระบบ/อยู่ในถังขยะ) = เจ้าของตั้งใจเลิกโชว์ → ทางลัดก็ไม่โชว์
+  if (row.is_active === false) return false;
   const byId = new Map(rows.map((r) => [r.id, r]));
   const perms = new Set<string>();
   if (row.permission_key && can(row.permission_key)) perms.add(row.permission_key);

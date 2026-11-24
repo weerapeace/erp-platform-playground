@@ -47,6 +47,10 @@ describe("portalLinkVisible (แบบ B)", () => {
     const rows = [row({ href: "/master/platform-catalog", app_overrides: { marketplace: { place: "hidden" } } })];
     expect(portalLinkVisible(cross, rows, { id: "a", role: "admin" }, yes)).toBe(false);
   });
+  it("เมนูหน้านั้นถูกปิด = ไม่เห็น (เจ้าของตั้งใจเลิกโชว์)", () => {
+    const listing = portalLinkByKey("listing")!;
+    expect(portalLinkVisible(listing, [row({ href: "/master/platform-listing", is_active: false })], { id: "a", role: "admin" }, yes)).toBe(false);
+  });
   it("ยังไม่รู้ผู้ใช้ = เห็น (กันจอว่างตอนโหลด)", () => expect(portalLinkVisible(cross, [], null, () => false)).toBe(true));
 });
 

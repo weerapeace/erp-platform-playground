@@ -47,7 +47,8 @@ export async function loadChannelPortal(
     seeShops ? loadPullInputs(admin) : Promise.resolve({ shops: [] }),
     admin.from("erp_platforms").select("id, code"),
     admin.from("brands").select("id, name"),
-    admin.from("erp_menu_items").select("id, href, permission_key, parent_id, audience, app_overrides").eq("is_active", true).contains("app_keys", [PORTAL_APP_KEY]),
+    // รวมเมนูที่ปิดอยู่ด้วย — ปิดเมนูหน้าไหน = ทางลัดหน้านั้นใน Portal ก็ซ่อน (lib/channel-portal portalLinkVisible)
+    admin.from("erp_menu_items").select("id, href, permission_key, parent_id, audience, app_overrides, is_active").contains("app_keys", [PORTAL_APP_KEY]),
     can.listings
       ? fetchAllPages<Listing>((from, to) => admin.from("platform_catalog_listings")
         .select("id, platform_id, brand_id, matched_parent_sku_id, match_ignored, status, price, updated_at")
