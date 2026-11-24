@@ -33,7 +33,7 @@ const treeCache = new Map<string, { at: number; fields: TtsAttrField[] }>();
 /** แท็บข้อมูลจำเพาะ: ช่องของหมวด + ชื่อหมวด (ไม่ดึงสินค้าซ้ำ — ใช้หมวดที่หน้าเว็บส่งมา) */
 async function attrFields(request: NextRequest, listingId: string, categoryId: string): Promise<NextResponse> {
   const out = (b: ShopeeAttrFieldsResponse, status = 200) => NextResponse.json(b, { status, headers: NO_STORE });
-  if (!/^d+$/.test(categoryId)) return out({ fields: null, category_name: null, error: "ไม่รู้หมวดของสินค้านี้" }, 400);
+  if (!/^\d+$/.test(categoryId)) return out({ fields: null, category_name: null, error: "ไม่รู้หมวดของสินค้านี้" }, 400);
   const admin = supabaseAdmin();
   const { data: l } = await admin.from("platform_catalog_listings").select("brand_id, platform_id").eq("id", listingId).maybeSingle();
   const row = l as { brand_id: string | null; platform_id: string } | null;
