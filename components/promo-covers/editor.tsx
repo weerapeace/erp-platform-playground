@@ -9,13 +9,16 @@
  *   ปุ่ม "ตรวจก่อน/หลัง แล้วยืนยัน" → ป๊อปยืนยัน (confirm-modal) — การส่งขึ้นร้านจริงเกิดตอนถึงเวลา หรือกด "ทำเดี๋ยวนี้" ในผลรายร้าน
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Icon } from "@/components/icon";
 import { ERPDateTime24 } from "@/components/form";
 import { useToast } from "@/components/toast";
-import { AssetPicker } from "@/components/asset-picker";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
-import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
+import type { SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
+// ป๊อปเลือกรุ่น / คลังรูป เปิดเมื่อกดเท่านั้น → โหลดตอนใช้ (หน้าเบาขึ้น)
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
+const MarketingSkuPickerModal = dynamic(() => import("@/components/marketing-sku-picker-modal").then((m) => m.MarketingSkuPickerModal), { ssr: false });
 import { apiFetch } from "@/lib/api";
 import { ConfirmDialog } from "@/components/modal";
 import { META_NOTE, PLATFORM_LABEL, PLATFORM_NOTE, PROMO_PLATFORMS, REVIEW_PLATFORMS, TICK_MIN, changeBy, thTime, windowTooShort, type PromoPlatform } from "@/lib/promo-cover";
@@ -475,17 +478,17 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm, startEditi
       <input ref={manyFiles} type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void onManyFiles(e.target.files); e.target.value = ""; }} />
       <input ref={frameFile} type="file" accept="image/png" className="hidden" onChange={(e) => { void onFrameFile(e.target.files?.[0]); e.target.value = ""; }} />
 
-      <MarketingSkuPickerModal open={pickOpen} onClose={() => setPickOpen(false)} title="เลือกรุ่นที่จะเปลี่ยนปกโปร"
+      {pickOpen && <MarketingSkuPickerModal open onClose={() => setPickOpen(false)} title="เลือกรุ่นที่จะเปลี่ยนปกโปร"
         load={loadCatalog} takenIds={full.items.map((i) => i.parent_sku_id)}
         taken={{ badge: "อยู่ในชุดแล้ว", short: "อยู่แล้ว", hide: "ซ่อนที่อยู่ในชุดแล้ว", row: "✓ อยู่ในชุดแล้ว" }}
         confirmText={(n) => (n ? `เพิ่ม ${n} รุ่น` : "เลือกรุ่นก่อน")} busyText="กำลังเพิ่ม…"
         onConfirm={async (ids) => !!(await patch({ add_parent_ids: ids }, "add"))}
-        tabPrefKey="promo_cover_pick_tab" colsPrefKey="promo-cover-pick" showFullPageLink={false} workTab />
+        tabPrefKey="promo_cover_pick_tab" colsPrefKey="promo-cover-pick" showFullPageLink={false} workTab />}
       <ConfirmDialog open={discardAsk} onClose={() => setDiscardAsk(false)} title="ทิ้งที่แก้?" confirmText="ทิ้งที่แก้" variant="danger"
         message="คุณมีข้อมูลที่ยังไม่ได้บันทึก (ชื่อ ร้าน หรือเวลา) — ต้องการออกโดยไม่บันทึกหรือไม่? (รุ่นและปกที่เพิ่มไว้บันทึกแล้ว)"
         onConfirm={() => { setDiscardAsk(false); setDraft(draftOf(full)); setEditing(false); }} />
-      <AssetPicker open={!!libFor} onClose={() => setLibFor(null)} title={libFor ? `เลือกปกโปรของ ${libFor.code}` : "เลือกรูป"} typeFilter="image" defaultSearch={album ? undefined : libFor?.code} defaultCollectionId={album?.id}
-        onSelect={(a) => { const it = libFor; setLibFor(null); if (it && a[0]?.r2_key) void setImage(it, a[0].r2_key, "library"); }} />
+      {libFor && <AssetPicker open onClose={() => setLibFor(null)} title={libFor ? `เลือกปกโปรของ ${libFor.code}` : "เลือกรูป"} typeFilter="image" defaultSearch={album ? undefined : libFor?.code} defaultCollectionId={album?.id}
+        onSelect={(a) => { const it = libFor; setLibFor(null); if (it && a[0]?.r2_key) void setImage(it, a[0].r2_key, "library"); }} />}
     </div>
   );
 }
