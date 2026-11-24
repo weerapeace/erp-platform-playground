@@ -12,6 +12,7 @@ import { AUTO_STATUS_META, autoPickLabel } from "@/lib/flow-automation";
 import { flowShapeOf, flowShapeSvg } from "@/lib/flowchart-shapes";
 import { themePalette } from "@/lib/flowchart-themes";
 import { FLOW_STYLE_EDGE, effectiveStyle, flowStyleBoxCss, flowStyleLook, type FlowStyleKey } from "@/lib/flowchart-styles";
+import { bentEdgePath } from "@/lib/flowchart";
 import { DEFAULT_TODO_TAGS, type FlowTodoTag, FLOW_PALETTE, todoProgress, edgeShapeOf, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -105,7 +106,10 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number, boardStyle?: FlowSty
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${fillC}" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${strokeC}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
   const align = n.type === "note" || n.type === "todo" || n.type === "auto" ? "flex-start" : "center";
-  return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}${n.data.font || look?.font ? `font-family:'${n.data.font || look?.font}',${FONT};` : ""}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div></div>`;
+  // สถานะงาน: กรอบประส้ม (กำลังทำ) / เขียว (เสร็จ) รอบกล่อง — ในรูปไม่ขยับ
+  const st = n.data.status;
+  const frame = st ? `<div style="position:absolute;left:-6px;top:-6px;right:-6px;bottom:-6px;border:2px ${st === "doing" ? "dashed #d97706" : "solid #059669"};border-radius:${n.type === "start" ? 999 : 15}px;pointer-events:none"></div><div style="position:absolute;left:4px;top:-18px;background:${st === "doing" ? "#d97706" : "#059669"};color:#fff;border-radius:999px;padding:0 6px;font-size:10px;font-weight:600;line-height:16px;white-space:nowrap">${st === "doing" ? "กำลังทำ" : "เสร็จ"}</div>` : "";
+  return `<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;display:flex;align-items:${align};justify-content:center;padding:${pad};${box}${n.data.font || look?.font ? `font-family:'${n.data.font || look?.font}',${FONT};` : ""}">${shape}<div style="position:relative;width:100%;display:flex;justify-content:center">${text}</div>${frame}</div>`;
 }
 
 /** กระดานทั้งหมด → HTML (ขนาดเท่ากรอบที่ครอบทุกกล่อง + ขอบ 40px) */
@@ -119,10 +123,12 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
     const a = byId.get(e.source), z = byId.get(e.target);
     if (!a || !z) continue;
     const sp = handlePoint(a, e.sourceHandle), tp = handlePoint(z, e.targetHandle ?? "l");
-    const [d, lx, ly] = flowEdgePath(edgeShapeOf(e), {   // แบบลูกศร (หักมุม · ตรง · โค้ง) — สูตรเดียวกับบนจอ
-      sourceX: sp.x - b.x, sourceY: sp.y - b.y, sourcePosition: SIDE[sp.side],
-      targetX: tp.x - b.x, targetY: tp.y - b.y, targetPosition: SIDE[tp.side],
-    });
+    const [d, lx, ly] = e.bend   // เส้นที่ดัดไว้ = ผ่านจุดดัด (สูตรเดียวกับบนจอ)
+      ? bentEdgePath(sp.x - b.x, sp.y - b.y, tp.x - b.x, tp.y - b.y, e.bend, edgeShapeOf(e) === "straight")
+      : flowEdgePath(edgeShapeOf(e), {   // แบบลูกศร (หักมุม · ตรง · โค้ง) — สูตรเดียวกับบนจอ
+        sourceX: sp.x - b.x, sourceY: sp.y - b.y, sourcePosition: SIDE[sp.side],
+        targetX: tp.x - b.x, targetY: tp.y - b.y, targetPosition: SIDE[tp.side],
+      });
     paths.push(`<path d="${d}" fill="none" stroke="${e.color ?? es.color}" stroke-width="${es.width}"${es.dash ? ` stroke-dasharray="${es.dash}"` : ""} marker-end="url(#fc-arrow)"/>`);
     if (e.label) labels.push(`<div style="position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;color:#475569;white-space:nowrap">${esc(e.label)}</div>`);
   }

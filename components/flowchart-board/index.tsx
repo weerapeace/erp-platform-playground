@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import dynamic from "next/dynamic";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, Controls, MarkerType, ConnectionMode, NodeToolbar, Position, SelectionMode,
-  addEdge, applyEdgeChanges, applyNodeChanges, useReactFlow, useStoreApi,
+  addEdge, applyEdgeChanges, applyNodeChanges, reconnectEdge, useReactFlow, useStoreApi,
   type Connection, type Edge, type EdgeChange, type NodeChange, type Node,
 } from "@xyflow/react";
 import { useT } from "@/components/i18n";
@@ -126,7 +126,16 @@ const toRFNodes = (s: FlowScene, selected?: Set<string>): FlowRFNode[] =>
   }));
 const toRFEdges = (s: FlowScene): Edge[] =>
   s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow",
-    markerEnd: e.color ? { ...MARKER, color: e.color } : MARKER, ...(e.shape || e.color ? { data: { ...(e.shape ? { shape: e.shape } : {}), ...(e.color ? { color: e.color } : {}) } } : {}) }));
+    markerEnd: e.color ? { ...MARKER, color: e.color } : MARKER,
+    ...(e.shape || e.color || e.anim || e.bend ? { data: { ...(e.shape ? { shape: e.shape } : {}), ...(e.color ? { color: e.color } : {}), ...(e.anim ? { anim: e.anim } : {}), ...(e.bend ? { bend: e.bend } : {}) } } : {}) }));
+/** แก้ค่าในเส้น (anim / bend) · null = เอาออก */
+const withEdgeData = (e: Edge, patch: Record<string, unknown>): Edge => {
+  const data = { ...(e.data ?? {}) } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(patch)) { if (v === null || v === undefined) delete data[k]; else data[k] = v; }
+  return { ...e, data };
+};
+/** ปิดอนิเมชันทั้งกระดาน — จำต่อเครื่อง (เครื่องช้า / ไม่ชอบของขยับ · 2026-11-24) */
+const ANIM_OFF_KEY = "flowchart-anim-off";
 /** เส้น → สีใหม่ (null = กลับตามสไตล์กระดาน) · หัวลูกศรสีเดียวกัน */
 const withColor = (e: Edge, color: string | null): Edge => {
   const data = { ...(e.data ?? {}) } as Record<string, unknown>;
@@ -751,6 +760,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     setEdgeLabel: (id, label) => setEdges((es) => es.map((e) => (e.id === id ? { ...e, label } : e))),
     setEdgeShape: (ids, shape) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withShape(e, shape) : e))); },
     setEdgeColor: (ids, color) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withColor(e, color) : e))); },
+    setEdgeAnim: (ids, anim) => { const set = new Set(ids); setEdges((es) => es.map((e) => (set.has(e.id) ? withEdgeData(e, { anim }) : e))); },
+    setEdgeBend: (id, bend) => setEdges((es) => es.map((e) => (e.id === id ? withEdgeData(e, { bend }) : e))),
+    setStatus: (ids, status) => { const set = new Set(ids); setNodes((ns) => ns.map((n) => (set.has(n.id) && n.type !== "zone" ? { ...n, data: { ...n.data, status: status ?? undefined } } : n)) as typeof ns); },
     editEdgeLabel: (id) => {
       const cur = String(edges.find((e) => e.id === id)?.label ?? "");
       void askText({ title: t("ป้ายบนเส้น", "Line label"), initial: cur, placeholder: t("เช่น ใช่ / ไม่ใช่ / ถ้าเป็นรูปสินค้า", "e.g. Yes / No / If product image"), confirmText: t("ใช้ป้ายนี้", "Use label") })
@@ -787,7 +799,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       const data: SysEdgeData = { path, color: l.color, dash: l.dash, width: l.width, text: l.text, dot: l.dot, title: l.title, opacity: l.opacity };
       out.push({
         id: sysId(l.id), source: sysId(l.source), target: sysId(l.target), sourceHandle: "r", targetHandle: "l", type: "sys",
-        data: data as unknown as Record<string, unknown>, selectable: false, deletable: false, focusable: false,
+        data: data as unknown as Record<string, unknown>, selectable: false, deletable: false, focusable: false, reconnectable: false,
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: l.color },
       });
     }
@@ -832,6 +844,11 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   ], [locked, hideOwn, nodes]);
   const findHits = useMemo(() => searchBoxes(findItems, findQ), [findItems, findQ]);
   // ── งานค้างทั้งผัง: ทุกข้อที่ยังไม่ติ๊กในกล่องรายการงาน (เจ้าของสั่ง 2026-11-20 ข้อ 3) ──
+  // อนิเมชันกรอบประ/เส้นวิ่ง: ปิดได้ทั้งกระดาน (จำต่อเครื่อง) · เครื่องที่ตั้ง "ลดการเคลื่อนไหว" หยุดเองผ่าน CSS
+  const [animOff, setAnimOff] = useState(false);
+  useEffect(() => { try { setAnimOff(localStorage.getItem(ANIM_OFF_KEY) === "1"); } catch { /* โหมดส่วนตัว */ } }, []);
+  const toggleAnim = () => setAnimOff((v) => { const next = !v; try { localStorage.setItem(ANIM_OFF_KEY, next ? "1" : "0"); } catch { /* จำไม่ได้ก็ไม่เป็นไร */ } return next; });
+  const hasAnim = useMemo(() => nodes.some((n) => (n.data as { status?: string } | undefined)?.status === "doing") || edges.some((e) => (e.data as { anim?: string } | undefined)?.anim === "on"), [nodes, edges]);
   const [todoOpen, setTodoOpen] = useState(false);
   const hasTodoBox = !(locked && hideOwn) && nodes.some((n) => n.type === "todo");
   const pending = useMemo(() => (hasTodoBox ? openTodos(nodes, todoTags ?? DEFAULT_TODO_TAGS) : []), [hasTodoBox, nodes, todoTags]);
@@ -889,7 +906,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
 
   return (
     <FlowBoardCtx.Provider value={actions}>
-      <div ref={boardRef} className={`fc-board flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${readOnly ? "fc-readonly" : ""}`} style={{ height }}>
+      <div ref={boardRef} className={`fc-board flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white ${readOnly ? "fc-readonly" : ""} ${animOff ? "fc-noanim" : ""}`} style={{ height }}>
         {/* แถบเครื่องมือ — โชว์ค้างเสมอ แม้อยู่ในเต็มจอแบบซ่อนแถบ (เจ้าของสั่ง 2026-11-19 ข้อ 5) */}
         <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-200 px-2 py-1">
           {!readOnly && FLOW_KINDS.filter((k) => k !== "shape").map((k) => {
@@ -1023,6 +1040,12 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             </span>
           )}
           <span className="flex-1" />
+          {hasAnim && (
+            <button type="button" className={tb} onClick={toggleAnim} aria-pressed={animOff}
+              title={animOff ? t("เปิดอนิเมชัน (กรอบประวิ่ง · เส้นวิ่ง) — จำในเครื่องนี้", "Turn animation on (running frames · moving lines) — saved on this device") : t("ปิดอนิเมชันทั้งกระดาน — สำหรับเครื่องช้า · จำในเครื่องนี้", "Turn off animation on this board — for slow devices · saved on this device")}>
+              <Icon value={animOff ? "i:player-play" : "i:player-pause"} />
+            </button>
+          )}
           {!readOnly && (
             <>
               <button type="button" className={tb} onClick={undo} disabled={!canUndo} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")}><Icon value="i:arrow-back-up" /></button>
@@ -1085,6 +1108,11 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
           <ReactFlow<BoardNode, Edge>
             nodes={shownNodes} edges={shownEdges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+            edgesReconnectable={!readOnly}
+            onReconnect={(old, conn) => {   // ลากปลายเส้นไปต่อกล่อง/จุดอื่น — ป้าย สี แบบเส้น ตามไปด้วย (เส้นของระบบย้ายไม่ได้)
+              if (readOnly || isSysId(old.id) || !conn.source || !conn.target) return;
+              setEdges((es) => reconnectEdge(old, conn, es, { shouldReplaceId: false }));
+            }}
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
             elevateNodesOnSelect={false}
             onNodeClick={(_, n) => {

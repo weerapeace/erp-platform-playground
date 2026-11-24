@@ -4,7 +4,7 @@
 // สี/ขนาด/ชนิด อ่านจาก lib/flowchart (FLOW_PALETTE / FLOW_KIND_META) — ที่เดียวกับตอนบันทึกเป็นรูป
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, useStore, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, useReactFlow, useStore, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { flowEdgePath } from "./edge-path";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
@@ -23,6 +23,7 @@ import { richToPlain as richPlain } from "@/lib/flowchart-rich";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { DEFAULT_TODO_TAGS, sortTodosByTag, itemHandleId, itemOfHandle, type FlowTodoTag } from "@/lib/flowchart";
+import { bentEdgePath, cleanBend, edgeRuns, isWorkStatus, type FlowEdgeAnim, type FlowEdgeBend, type FlowWorkStatus } from "@/lib/flowchart";
 
 /** ป้ายความด่วน 1 อัน (สีตามชุดสีของกระดาน) */
 function TodoTagChip({ tag, onClick, empty, t }: { tag?: FlowTodoTag; onClick?: (e: React.MouseEvent) => void; empty?: boolean; t: (th: string, en: string) => string }) {
@@ -175,6 +176,12 @@ export type FlowBoardActions = {
   setEdgeColor: (ids: string[], color: string | null) => void;
   /** เปลี่ยนแบบลูกศร (หักมุม · ตรง · โค้ง) */
   setEdgeShape: (ids: string[], shape: FlowEdgeShape) => void;
+  /** เส้นวิ่ง: on / off · null = อัตโนมัติ (วิ่งเมื่อปลายทางกำลังทำ) */
+  setEdgeAnim: (ids: string[], anim: FlowEdgeAnim | null) => void;
+  /** จุดดัดเส้น (ระยะจากกึ่งกลาง) · null = คืนทางเดิม */
+  setEdgeBend: (id: string, bend: FlowEdgeBend | null) => void;
+  /** สถานะงานของกล่อง (กำลังทำ / เสร็จ) · null = ยังไม่เริ่ม · กรอบโซนไม่มีสถานะ */
+  setStatus: (ids: string[], status: FlowWorkStatus | null) => void;
   editEdgeLabel: (id: string) => void;
   removeEdge: (id: string) => void;
   /** กล่อง "ที่เก็บ": เปิดป๊อปผูกกฎที่เก็บจริง (/master/storage-rules) */
@@ -284,7 +291,8 @@ function InlineEditor({ initial, onDone, folder, zone, boxW, boxH }: { initial: 
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
   const PAL = usePal();
   const { updateData } = useBoard();
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes, setStyle, togglePagePeek } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, editPage, openPage, iconScaleOf, stepIconScale, editRule, formatNodes, setShape, recentShapes, setStyle, togglePagePeek, setStatus } = useBoard();
+  const st = single?.data.status;
   const [shapeOpen, setShapeOpen] = useState(false);
   const [pop, setPop] = useState<null | "style" | "fill" | "stroke">(null);
   const togglePop = (p: "style" | "fill" | "stroke") => { setPop((v) => (v === p ? null : p)); setFmt(false); setShapeOpen(false); };
@@ -322,6 +330,20 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
             <input type="range" min={10} max={100} step={5} value={single.data.opacity ?? 55} onChange={(e) => updateData(ids[0], { opacity: Number(e.target.value) })}
               className="nodrag nopan h-1 w-16 cursor-pointer accent-violet-600" aria-label={t("ความเข้มพื้น", "Fill strength")} />
           </label>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
+        </>
+      )}
+      {single?.kind !== "zone" && (
+        <>
+          {/* สถานะงาน (เจ้าของสั่ง 2026-11-24): กดซ้ำ = กลับเป็นยังไม่เริ่ม */}
+          <button type="button" className={`${btn} ${st === "doing" ? "bg-amber-100 text-amber-800" : ""}`} aria-pressed={st === "doing"} onClick={() => setStatus(ids, st === "doing" ? null : "doing")}
+            title={t("กำลังทำ — กรอบเส้นประวิ่งรอบกล่อง · เส้นที่วิ่งเข้ามาขยับด้วย · กดอีกที = ยังไม่เริ่ม", "Doing — running dashed frame · lines into it move · click again to clear")}>
+            <Icon value="i:circle-dashed" />{t("กำลังทำ", "Doing")}
+          </button>
+          <button type="button" className={`${btn} ${st === "done" ? "bg-emerald-100 text-emerald-800" : ""}`} aria-pressed={st === "done"} onClick={() => setStatus(ids, st === "done" ? null : "done")}
+            title={t("เสร็จ — กรอบเขียว · กดอีกที = ยังไม่เริ่ม", "Done — green frame · click again to clear")}>
+            <Icon value="i:circle-check" />{t("เสร็จ", "Done")}
+          </button>
           <span className="mx-1 h-5 w-px bg-slate-200" />
         </>
       )}
@@ -904,9 +926,27 @@ export function FlowNodeView({ id, type, data, selected, width, height }: NodePr
                 }} />
         )}
       </div>
+      {data.status && width && height ? <WorkFrame status={data.status} w={width} h={height} round={kind === "start" ? height / 2 : kind === "note" ? 4 : 10} t={t} /> : null}
       {HANDLE_POS.map(([hid, pos]) => (
         <Handle key={hid} id={hid} type="source" position={pos} className="fc-h" isConnectable={!readOnly} />
       ))}
+    </>
+  );
+}
+
+/** กรอบสถานะงานรอบกล่อง: กำลังทำ = เส้นประส้มวิ่งรอบ (.fc-run) · เสร็จ = เส้นเขียวนิ่ง + ป้ายมุมซ้ายบน */
+function WorkFrame({ status, w, h, round, t }: { status: FlowWorkStatus; w: number; h: number; round: number; t: (th: string, en: string) => string }) {
+  const doing = status === "doing";
+  const c = doing ? "#d97706" : "#059669";
+  return (
+    <>
+      <svg className="pointer-events-none absolute overflow-visible" style={{ left: -6, top: -6 }} width={w + 12} height={h + 12} aria-hidden="true">
+        <rect x={1} y={1} width={w + 10} height={h + 10} rx={round + 5} fill="none" stroke={c} strokeWidth={2}
+          strokeDasharray={doing ? "8 5" : undefined} className={doing ? "fc-run" : undefined} opacity={doing ? 1 : 0.75} />
+      </svg>
+      <span className="pointer-events-none absolute -top-[18px] left-1 inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 text-[10px] font-semibold leading-4 text-white shadow-sm" style={{ background: c }}>
+        <Icon value={doing ? "i:circle-dashed" : "i:circle-check"} />{doing ? t("กำลังทำ", "Doing") : t("เสร็จ", "Done")}
+      </span>
     </>
   );
 }
@@ -924,26 +964,53 @@ export function EdgeShapeIcon({ shape, size = 16 }: { shape: FlowEdgeShape; size
 /** เส้นต่อ (หักมุม / ตรง / โค้ง ตาม data.shape) + ป้าย · เลือกเส้นแล้วมีปุ่มลัด แบบเส้น / ใช่ / ไม่ใช่ / แก้ / ลบ */
 export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleId, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, label, selected, data }: EdgeProps) {
   // ปลายเส้นเป็นข้อในรายการงานที่ติ๊กเสร็จแล้ว → เส้นประจางสีเขียว (เจ้าของสั่ง 2026-11-22)
-  const itemDone = useStore((s) => {
-    const chk = (nid: string, h?: string | null) => { const it = itemOfHandle(h); if (!it) return false; const n = s.nodeLookup.get(nid); return !!(n?.data as FlowNodeData | undefined)?.items?.find((i) => i.id === it)?.done; };
-    return chk(source, sourceHandleId) || chk(target, targetHandleId);
+  // + สถานะงานของกล่อง 2 ปลาย → เส้นวิ่ง (2026-11-24) · คืนเป็นข้อความเพื่อไม่ให้วาดใหม่ทุกครั้งที่กระดานขยับ
+  const ends = useStore((s) => {
+    const nd = (nid: string) => s.nodeLookup.get(nid)?.data as FlowNodeData | undefined;
+    const chk = (nid: string, h?: string | null) => { const it = itemOfHandle(h); if (!it) return false; return !!nd(nid)?.items?.find((i) => i.id === it)?.done; };
+    return `${chk(source, sourceHandleId) || chk(target, targetHandleId) ? 1 : 0}|${nd(source)?.status ?? ""}|${nd(target)?.status ?? ""}`;
   });
-  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape, setEdgeColor, boardStyle } = useBoard();
+  const [doneFlag, fromSt, toSt] = ends.split("|");
+  const itemDone = doneFlag === "1";
+  const { readOnly, t, setEdgeLabel, editEdgeLabel, removeEdge, setEdgeShape, setEdgeColor, setEdgeAnim, setEdgeBend, boardStyle } = useBoard();
+  const rf = useReactFlow();
+  const ed = data as { anim?: FlowEdgeAnim; bend?: FlowEdgeBend } | undefined;
+  const runs = !itemDone && edgeRuns(ed?.anim, isWorkStatus(fromSt) ? fromSt : undefined, isWorkStatus(toSt) ? toSt : undefined);
+  // ลากจุดกลางเส้น = ดัดทาง (ดับเบิลคลิก = คืนทางเดิม) · ย้อนกลับได้ด้วยประวัติกระดาน
+  const startBend = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const mx = (sourceX + targetX) / 2, my = (sourceY + targetY) / 2;
+    const move = (m: PointerEvent) => { const p = rf.screenToFlowPosition({ x: m.clientX, y: m.clientY }); setEdgeBend(id, cleanBend({ x: p.x - mx, y: p.y - my })); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
   const PAL = usePal();
   const [colorOpen, setColorOpen] = useState(false);
   const own = (data as { color?: string } | undefined)?.color;
   const es = FLOW_STYLE_EDGE[boardStyle];
   const shape = edgeShapeOf(data as { shape?: unknown } | undefined);
-  const [path, lx, ly] = flowEdgePath(shape, { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  const [path, lx, ly] = ed?.bend ? bentEdgePath(sourceX, sourceY, targetX, targetY, ed.bend, shape === "straight") : flowEdgePath(shape, { sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const text = typeof label === "string" ? label : "";
+  const tools = selected && !readOnly;
   const chip = "h-6 rounded-md px-1.5 text-[11px] hover:bg-slate-100";
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} interactionWidth={18}
-        style={{ stroke: selected && !own ? "#7c3aed" : itemDone ? "#86efac" : own ?? es.color, strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : es.width, ...(itemDone && !selected ? { strokeDasharray: "5 4" } : es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
-      {(text || (selected && !readOnly)) && (
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} interactionWidth={18} className={runs ? "fc-flow-run" : undefined}
+        style={{ stroke: selected && !own ? "#7c3aed" : itemDone ? "#86efac" : own ?? (runs ? "#d97706" : es.color), strokeWidth: selected ? Math.max(2.5, es.width + 0.5) : runs ? Math.max(2, es.width) : es.width,
+          ...(itemDone && !selected ? { strokeDasharray: "5 4" } : runs ? { strokeDasharray: "7 5" } : es.dash && !selected ? { strokeDasharray: es.dash } : {}) }} />
+      {tools && (
         <EdgeLabelRenderer>
-          <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", ...(selected ? { zIndex: 1100 } : {}) /* เลือกเส้นอยู่ = ปุ่มลัดลอยเหนือกล่อง (เส้นสั้นกล่องเคยบังปุ่ม) */ }}>
+          <div className="nodrag nopan absolute h-3.5 w-3.5 cursor-grab rounded-full border-2 border-violet-600 bg-white shadow active:cursor-grabbing"
+            style={{ transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", zIndex: 1101, touchAction: "none" }}
+            onPointerDown={startBend} onDoubleClick={(e) => { e.stopPropagation(); setEdgeBend(id, null); }}
+            title={t("ลากเพื่อดัดเส้น · ดับเบิลคลิก = คืนทางเดิม", "Drag to bend the line · double-click to reset")} />
+        </EdgeLabelRenderer>
+      )}
+      {(text || tools) && (
+        <EdgeLabelRenderer>
+          {/* เลือกเส้นอยู่ = ป้าย+ปุ่มลัดห้อยใต้จุดดัด (จุดดัดอยู่กลางเส้นพอดี) · ไม่เลือก = ป้ายกลางเส้น */}
+          <div className="nodrag nopan absolute flex flex-col items-center gap-1" style={{ transform: tools ? `translate(-50%, 12px) translate(${lx}px, ${ly}px)` : `translate(-50%, -50%) translate(${lx}px, ${ly}px)`, pointerEvents: "all", ...(selected ? { zIndex: 1100 } : {}) /* เลือกเส้นอยู่ = ปุ่มลัดลอยเหนือกล่อง (เส้นสั้นกล่องเคยบังปุ่ม) */ }}>
             {text && <span className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${selected ? "border-violet-300 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-600"}`}>{text}</span>}
             {selected && !readOnly && (
               <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 text-slate-600 shadow-md">
@@ -970,6 +1037,14 @@ export function FlowEdgeView({ id, source, target, sourceHandleId, targetHandleI
                     </span>
                   )}
                 </span>
+                <span className="mx-0.5 h-4 w-px bg-slate-200" />
+                {/* เส้นวิ่ง: อัตโนมัติ → วิ่ง → ไม่วิ่ง → อัตโนมัติ */}
+                <button type="button" className={`${chip} inline-flex items-center gap-0.5 ${ed?.anim ? "bg-violet-100 text-violet-700" : ""}`}
+                  onClick={() => setEdgeAnim([id], !ed?.anim ? "on" : ed.anim === "on" ? "off" : null)}
+                  title={t("เส้นวิ่ง — อัตโนมัติ = วิ่งเมื่อกล่องปลายทางกำลังทำ · กดเพื่อสลับ วิ่งตลอด / ไม่วิ่ง / อัตโนมัติ", "Moving line — auto = moves when the target box is Doing · click to switch always / never / auto")}>
+                  <Icon value={ed?.anim === "off" ? "i:player-pause" : "i:player-play"} />{ed?.anim === "on" ? t("วิ่ง", "Moving") : ed?.anim === "off" ? t("ไม่วิ่ง", "Still") : t("อัตโนมัติ", "Auto")}
+                </button>
+                {ed?.bend && <button type="button" className={chip} onClick={() => setEdgeBend(id, null)} title={t("คืนทางเดิม (เลิกดัดเส้น)", "Reset the bend")}><Icon value="i:route" /></button>}
                 <span className="mx-0.5 h-4 w-px bg-slate-200" />
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ใช่", "Yes"))}>{t("ใช่", "Yes")}</button>
                 <button type="button" className={chip} onClick={() => setEdgeLabel(id, t("ไม่ใช่", "No"))}>{t("ไม่ใช่", "No")}</button>

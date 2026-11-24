@@ -42,3 +42,12 @@
 .fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-on { background: #7c3aed; }
 .fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-pick { background: #7c3aed; box-shadow: 0 0 0 4px #ddd6fe; }
 .fc-board .react-flow__node .react-flow__handle.fc-item-h.fc-item-h-l { right: auto; left: -5px; }
+/* อนิเมชันสถานะงาน (2026-11-24): กรอบประวิ่งรอบกล่อง "กำลังทำ" + เส้นวิ่งตามทิศลูกศร · ปิดได้ทั้งกระดาน (.fc-noanim) · เครื่องตั้งลดการเคลื่อนไหว = หยุด */
+@keyframes fc-march { to { stroke-dashoffset: -26; } }
+@keyframes fc-flow { to { stroke-dashoffset: -24; } }
+.fc-board .fc-run { animation: fc-march 1s linear infinite; }
+.fc-board .react-flow__edge-path.fc-flow-run { animation: fc-flow .9s linear infinite; }
+.fc-board.fc-noanim .fc-run, .fc-board.fc-noanim .react-flow__edge-path.fc-flow-run { animation: none; }
+@media (prefers-reduced-motion: reduce) { .fc-board .fc-run, .fc-board .react-flow__edge-path.fc-flow-run { animation: none; } }
+/* ปลายเส้นที่ลากย้ายได้ (เลือกเส้นแล้วจับปลาย) */
+.fc-board .react-flow__edgeupdater { cursor: move; }

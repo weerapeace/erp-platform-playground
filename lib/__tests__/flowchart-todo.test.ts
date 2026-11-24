@@ -131,3 +131,41 @@ describe("จุดต่อด้านซ้ายของข้อ (2026-11-
     expect(s.edges[0].sourceHandle).toBe("il:a");
   });
 });
+
+import { bentEdgePath, cleanBend, edgeRuns } from "@/lib/flowchart";
+describe("สถานะงาน + เส้นวิ่ง + ดัดเส้น (2026-11-24)", () => {
+  const base = { kind: "flowchart", nodes: [
+    { id: "a", type: "step", position: { x: 0, y: 0 }, width: 100, height: 40, data: { label: "a", status: "doing" } },
+    { id: "z", type: "zone", position: { x: 0, y: 0 }, width: 300, height: 200, data: { label: "z", status: "doing" } },
+    { id: "b", type: "step", position: { x: 200, y: 0 }, width: 100, height: 40, data: { label: "b", status: "เพี้ยน" } },
+  ] };
+  it("สถานะเก็บได้เฉพาะ doing/done · กรอบโซนไม่มีสถานะ", () => {
+    const s = parseFlowScene({ ...base, edges: [] })!;
+    expect(s.nodes.map((n) => n.data.status)).toEqual(["doing", undefined, undefined]);
+  });
+  it("เส้น: anim + bend บันทึก/โหลดกลับ · ค่าเพี้ยนทิ้ง · (0,0) = ไม่ดัด", () => {
+    const s = parseFlowScene({ ...base, edges: [
+      { id: "e", source: "a", target: "b", sourceHandle: "r", targetHandle: "l", label: "", anim: "off", bend: { x: 12.6, y: -40 } },
+      { id: "f", source: "b", target: "a", sourceHandle: "r", targetHandle: "l", label: "", anim: "เร็ว", bend: { x: 0, y: 0 } },
+    ] })!;
+    expect(s.edges[0]).toMatchObject({ anim: "off", bend: { x: 13, y: -40 } });
+    expect(s.edges[1].anim).toBeUndefined();
+    expect(s.edges[1].bend).toBeUndefined();
+    expect(cleanBend({ x: 99999, y: "1" })).toBeNull();
+    expect(cleanBend({ x: 99999, y: 1 })).toEqual({ x: 5000, y: 1 });
+  });
+  it("วิ่งอัตโนมัติเมื่อปลายทางกำลังทำ / ต้นทางกำลังทำและปลายทางยังไม่เสร็จ · ตั้งเองชนะ", () => {
+    expect(edgeRuns(undefined, undefined, "doing")).toBe(true);
+    expect(edgeRuns(undefined, "doing", undefined)).toBe(true);
+    expect(edgeRuns(undefined, "doing", "done")).toBe(false);
+    expect(edgeRuns(undefined, "done", undefined)).toBe(false);
+    expect(edgeRuns("off", undefined, "doing")).toBe(false);
+    expect(edgeRuns("on", undefined, undefined)).toBe(true);
+  });
+  it("เส้นดัดผ่านจุด P = กึ่งกลาง + bend", () => {
+    const [d, px, py] = bentEdgePath(0, 0, 100, 0, { x: 0, y: 40 }, false);
+    expect([px, py]).toEqual([50, 40]);
+    expect(d).toBe("M0,0 Q50,80 100,0");
+    expect(bentEdgePath(0, 0, 100, 0, { x: 0, y: 40 }, true)[0]).toBe("M0,0 L50,40 L100,0");
+  });
+});

@@ -90,11 +90,18 @@ export function sortTodosByTag(items: FlowTodo[], tags: FlowTodoTag[]): FlowTodo
 /** line/opacity = กรอบโซน: แบบเส้น (ประ · ทึบ · ไม่มี) + ความเข้มพื้น 10-100 */
 /** peek = การ์ด "หน้าใน ERP" แบบมีภาพ: on = โชว์ภาพในการ์ด · img = r2 key ภาพหน้าจอที่ถ่ายไว้ · at = เวลาถ่าย */
 export type FlowPagePeek = { on?: boolean; img?: string; at?: string };
-export type FlowNodeData = { peek?: FlowPagePeek; line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
+/** status = สถานะงานของกล่อง (เจ้าของสั่ง 2026-11-24): doing = กำลังทำ (กรอบประวิ่ง) · done = เสร็จ (กรอบเขียว) · ไม่มี = ยังไม่เริ่ม */
+export type FlowWorkStatus = "doing" | "done";
+export const isWorkStatus = (v: unknown): v is FlowWorkStatus => v === "doing" || v === "done";
+export type FlowNodeData = { status?: FlowWorkStatus; peek?: FlowPagePeek; line?: "dash" | "solid" | "none"; opacity?: number; style?: FlowStyleKey; shape?: string; font?: string; items?: FlowTodo[]; auto?: FlowAuto; label: string; color?: FlowColor; path?: string; exts?: string[]; place?: string; href?: string; app?: string; appName?: string; icon?: string; rule?: string; rich?: string; align?: FlowAlign; fill?: string; stroke?: string };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 /** shape = แบบลูกศร: ไม่มี = หักมุม (แบบเดิม) · "straight" = ตรง · "curve" = โค้ง — เก็บเฉพาะตอนไม่ใช่หักมุม (กระดานเดิมไม่เปลี่ยน) */
 /** color = สีเส้นที่ตั้งเอง #rrggbb (ไม่มี = ตามสไตล์กระดาน · เจ้าของสั่ง 2026-11-22) */
-export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step">; color?: string };
+/** anim = เส้นวิ่ง: on บังคับวิ่ง · off ไม่วิ่ง · ไม่มี = อัตโนมัติ (วิ่งเมื่อปลายทาง "กำลังทำ")
+ *  bend = จุดดัดเส้น เก็บเป็นระยะห่างจากกึ่งกลางระหว่างปลายเส้น 2 ข้าง (ย้ายกล่องแล้วทางดัดตามไปด้วย) · ไม่มี = ทางเดิม (2026-11-24) */
+export type FlowEdgeAnim = "on" | "off";
+export type FlowEdgeBend = { x: number; y: number };
+export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string; shape?: Exclude<FlowEdgeShape, "step">; color?: string; anim?: FlowEdgeAnim; bend?: FlowEdgeBend };
 
 /** แบบลูกศร (หักมุม = แบบเดิม) · svg = ไอคอนเล็ก 16×16 บนปุ่ม */
 export const FLOW_EDGE_SHAPES = ["step", "straight", "curve"] as const;
@@ -215,6 +222,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
       if (d.line === "dash" || d.line === "solid" || d.line === "none") data.line = d.line;
       if (typeof d.opacity === "number" && Number.isFinite(d.opacity)) data.opacity = Math.min(100, Math.max(10, Math.round(d.opacity)));
     }
+    if (o.type !== "zone" && isWorkStatus(d.status)) data.status = d.status;
     if (isFlowStyle(d.style)) data.style = d.style;   // "normal" เก็บได้ (กล่องที่ตั้งปกติเองบนกระดานสไตล์อื่น)
     const rich = sanitizeRich(d.rich);
     if (rich) data.rich = rich;
@@ -231,7 +239,7 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     const id = str(o.id); const source = str(o.source); const target = str(o.target);
     if (!id || eids.has(id) || !(ids.has(source) || isSysId(source)) || !(ids.has(target) || isSysId(target))) continue;   // ปลายเส้น = กล่องในกระดาน หรือกล่องของระบบ (sys:)
     const shape = edgeShapeOf(o);
-    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}), ...(isHexColor(o.color) ? { color: o.color } : {}) });
+    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label), ...(shape !== "step" ? { shape } : {}), ...(isHexColor(o.color) ? { color: o.color } : {}), ...(o.anim === "on" || o.anim === "off" ? { anim: o.anim } : {}), ...(cleanBend(o.bend) ? { bend: cleanBend(o.bend)! } : {}) });
     eids.add(id);
   }
   const out = withPins({ kind: "flowchart", v: 1, nodes, edges }, cleanPins(r.pins));
@@ -240,6 +248,31 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
   const tags = cleanTodoTags(r.todoTags);
   return tags ? { ...withTheme, todoTags: tags } : withTheme;
 }
+/** จุดดัดเส้น: ตัวเลขจริง ปัดเป็นจำนวนเต็ม · ไกลเกิน 5000 = ตัด · (0,0) = ไม่ดัด */
+export function cleanBend(v: unknown): FlowEdgeBend | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.x !== "number" || typeof o.y !== "number" || !Number.isFinite(o.x) || !Number.isFinite(o.y)) return null;
+  const c = (n: number) => Math.max(-5000, Math.min(5000, Math.round(n)));
+  const x = c(o.x), y = c(o.y);
+  return x === 0 && y === 0 ? null : { x, y };
+}
+
+/** เส้นนี้ควรวิ่งไหม: ตั้งเองตามนั้น · อัตโนมัติ = ปลายทางกำลังทำ หรือต้นทางกำลังทำและปลายทางยังไม่เสร็จ */
+export function edgeRuns(anim: FlowEdgeAnim | undefined, from?: FlowWorkStatus, to?: FlowWorkStatus): boolean {
+  if (anim) return anim === "on";
+  return to === "doing" || (from === "doing" && to !== "done");
+}
+
+/** เส้นที่ดัดแล้ว: ผ่านจุด P = กึ่งกลาง + bend · ตรง = หักที่ P · หักมุม/โค้ง = โค้งนุ่มผ่าน P · → [d, x, y ของจุด P] */
+export function bentEdgePath(sx: number, sy: number, tx: number, ty: number, bend: FlowEdgeBend, straight: boolean): [string, number, number] {
+  const mx = (sx + tx) / 2, my = (sy + ty) / 2;
+  const px = mx + bend.x, py = my + bend.y;
+  const r = (n: number) => Math.round(n * 10) / 10;
+  if (straight) return [`M${r(sx)},${r(sy)} L${r(px)},${r(py)} L${r(tx)},${r(ty)}`, px, py];
+  return [`M${r(sx)},${r(sy)} Q${r(2 * px - mx)},${r(2 * py - my)} ${r(tx)},${r(ty)}`, px, py];   // จุดคุม = 2P − กึ่งกลาง → เส้นผ่าน P พอดีที่ครึ่งทาง
+}
+
 /** ชื่อชุดสี (ตรวจค่าจริงที่ lib/flowchart-themes · ไม่รู้จัก = มาตรฐาน) */
 const isThemeName = (v: unknown): v is string => typeof v === "string" && /^[a-z]{2,12}$/.test(v);
 
@@ -339,7 +372,7 @@ export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[], pins?: FlowPin
       height: Math.round(n.height ?? n.measured?.height ?? 0) || undefined,
       data: n.data,
     })),
-    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "", shape: (e.data as { shape?: unknown } | undefined)?.shape, color: (e.data as { color?: unknown } | undefined)?.color })),
+    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "", shape: (e.data as { shape?: unknown } | undefined)?.shape, color: (e.data as { color?: unknown } | undefined)?.color, anim: (e.data as { anim?: unknown } | undefined)?.anim, bend: (e.data as { bend?: unknown } | undefined)?.bend })),
   }) ?? EMPTY_FLOW_SCENE;
 }
 
