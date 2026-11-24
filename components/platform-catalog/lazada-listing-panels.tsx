@@ -46,6 +46,8 @@ export type LazadaListingState = {
   loading: boolean;
   /** เวลาที่ดึงจาก Lazada ล่าสุด */
   fetchedAt: string | null;
+  /** ชื่อหมวดภาษาไทยเต็มเส้นทาง (null = ยังไม่รู้ → โชว์รหัสหมวดแทน) */
+  categoryName: string | null;
   /** โหลดใหม่ (ดึงสด ไม่บันทึก) */
   reload: () => void;
   /** ดึงตัวนี้จาก Lazada + อัปเดตสำเนาในระบบ */
@@ -62,23 +64,24 @@ export function useLazadaListing(listingId: string | null, onSaved?: () => void)
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState<string | null>(null);
   const [n, setN] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const seq = useRef(0);
   const lastId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!listingId) { lastId.current = null; setView(null); setError(null); setFetchedAt(null); return; }
+    if (!listingId) { lastId.current = null; setView(null); setError(null); setFetchedAt(null); setCategoryName(null); return; }
     const my = ++seq.current;
     // สลับไปรายการอื่น = ล้างของเดิมทันที (กันโชว์ข้อมูลตัวก่อน) · โหลดซ้ำตัวเดิม = คงไว้ระหว่างรอ
-    if (lastId.current !== listingId) { lastId.current = listingId; setView(null); setFetchedAt(null); }
+    if (lastId.current !== listingId) { lastId.current = listingId; setView(null); setFetchedAt(null); setCategoryName(null); }
     setLoading(true); setError(null);
     apiFetch(`/api/lazada/listing-detail?listing_id=${encodeURIComponent(listingId)}`)
       .then((r) => r.json().catch(() => ({ view: null, fetched_at: null, error: `HTTP ${r.status}` })) as Promise<LazadaListingDetailResponse>)
       .then((j) => {
         if (my !== seq.current) return;   // สลับรายการระหว่างรอ = ทิ้งคำตอบเก่า
         if (j.error || !j.view) { setError(j.error ?? "ดึงข้อมูลจาก Lazada ไม่สำเร็จ"); setView(null); return; }
-        setView(j.view); setFetchedAt(j.fetched_at);
+        setView(j.view); setFetchedAt(j.fetched_at); setCategoryName(j.category_name ?? null);
       })
       .catch(() => { if (my === seq.current) setError("ดึงข้อมูลจาก Lazada ไม่สำเร็จ — ลองใหม่อีกครั้ง"); })
       .finally(() => { if (my === seq.current) setLoading(false); });
@@ -92,7 +95,7 @@ export function useLazadaListing(listingId: string | null, onSaved?: () => void)
       const r = await apiFetch("/api/lazada/listing-detail", { method: "POST", body: JSON.stringify({ listing_id: listingId }) });
       const j = await r.json().catch(() => ({ view: null, fetched_at: null, error: `HTTP ${r.status}` })) as LazadaListingDetailResponse;
       if (my !== seq.current) return;
-      if (j.view) { setView(j.view); setFetchedAt(j.fetched_at); setError(null); }
+      if (j.view) { setView(j.view); setFetchedAt(j.fetched_at); setError(null); if (j.category_name !== undefined) setCategoryName(j.category_name); }
       if (j.error) toast.error(r.status === 401 ? "ระบบยังไม่ยืนยันการล็อกอิน/สิทธิ์ — รอสักครู่แล้วกดใหม่ (ถ้ายังไม่ได้ ลองรีเฟรชหน้า)" : j.error);
       else { toast.success("ดึงข้อมูลจาก Lazada แล้ว — อัปเดตในระบบแล้ว"); onSaved?.(); }
     } catch (e) { toast.error((e as Error).message); }
@@ -100,7 +103,7 @@ export function useLazadaListing(listingId: string | null, onSaved?: () => void)
   }, [listingId, onSaved, toast]);
 
   const apply = useCallback((v: LazadaListingView) => { ++seq.current; setView(v); setFetchedAt(new Date().toISOString()); setError(null); setLoading(false); }, []);
-  return { listingId, view, error, loading, fetchedAt, reload: () => setN((x) => x + 1), refresh, refreshing, apply };
+  return { listingId, view, error, loading, fetchedAt, categoryName, reload: () => setN((x) => x + 1), refresh, refreshing, apply };
 }
 
 // ───────────────────────── เฟส 2–3: แก้ชื่อ / รายละเอียด / จุดเด่น + ราคา (ปุ่มบันทึกเดียว) ─────────────────────────
@@ -382,7 +385,9 @@ export function LazadaInfoPanel({ state, edit }: { state: LazadaListingState; ed
       ) : <Field label="ชื่อสินค้าบน Lazada" hint={`${nameLen.toLocaleString()} / ${LAZADA_NAME_MAX} ตัวอักษร`}>{v.name || <span className="text-slate-400">(ไม่มีชื่อ)</span>}</Field>}
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="แบรนด์" hint="Lazada ให้เลือกจากรายชื่อแบรนด์ของเขาเท่านั้น (แก้ไม่ได้จากที่นี่)">{v.brand ?? "—"}</Field>
-        <Field label="หมวดบน Lazada" hint="เปลี่ยนหมวด = ต้องกรอกคุณสมบัติใหม่ทั้งชุด (แก้ไม่ได้จากที่นี่)"><span className="font-mono text-slate-500">{v.categoryId ?? "—"}</span></Field>
+        <Field label="หมวดบน Lazada" hint={`${v.categoryId && state.categoryName ? `รหัส ${v.categoryId} · ` : ""}เปลี่ยนหมวด = ต้องกรอกคุณสมบัติใหม่ทั้งชุด (แก้ไม่ได้จากที่นี่)`}>
+          {state.categoryName ?? <span className="font-mono text-slate-500">{v.categoryId ?? "—"}</span>}
+        </Field>
       </div>
       <div>
         <span className="mb-1 block text-xs text-slate-500">จุดเด่นสินค้า (หัวข้อย่อย · มีเฉพาะ Lazada)</span>

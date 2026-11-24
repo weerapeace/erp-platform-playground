@@ -199,7 +199,11 @@ export function lazStatusBadge(status: string | null | undefined): { label: stri
 }
 
 /** คำตอบของ GET/POST /api/lazada/listing-detail */
-export type LazadaListingDetailResponse = { view: LazadaListingView | null; fetched_at: string | null; saved?: boolean; error: string | null };
+export type LazadaListingDetailResponse = {
+  view: LazadaListingView | null; fetched_at: string | null; saved?: boolean; error: string | null;
+  /** ชื่อหมวดภาษาไทยเต็มเส้นทาง (platform_category_options) — null = ไม่รู้จักหมวดนี้ (2026-11-24) */
+  category_name?: string | null;
+};
 
 // ═════════════════════════════ เฟส 2: แก้ชื่อ / รายละเอียด / จุดเด่น + เปิดปิดขาย (แตะร้านจริง) ═════════════════════════════
 //

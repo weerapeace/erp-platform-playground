@@ -173,6 +173,14 @@ export async function loadLazListingLive(admin: SupabaseClient, listingId: strin
   }
 }
 
+/** ชื่อหมวด Lazada ภาษาไทยเต็มเส้นทาง (เช่น "กระเป๋าและกระเป๋าเดินทาง > กระเป๋าผู้หญิง > …") จากรายการหมวดที่ดึงไว้ — ไม่รู้จัก = null */
+export async function lazCategoryName(admin: SupabaseClient, platformId: string, categoryId: string | null): Promise<string | null> {
+  if (!categoryId) return null;
+  const { data } = await admin.from("platform_category_options").select("name_th, name_en").eq("platform_id", platformId).eq("external_id", categoryId).maybeSingle();
+  const c = data as { name_th?: string | null; name_en?: string | null } | null;
+  return c?.name_th || c?.name_en || null;
+}
+
 /**
  * อัปเดตสำเนาย่อในระบบจากข้อมูลเต็มที่เพิ่งดึง — กติกาเดียวกับ upsertCatalogListings (lib/platform-catalog-sync):
  * ตัวแปลงเดียวกับดึงทั้งร้าน (lazProductToCatalogItem) · เจอบนร้าน = ล้างป้าย "ไม่อยู่บนร้านแล้ว" · ไม่แตะคู่ที่จับไว้

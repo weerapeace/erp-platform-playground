@@ -14,7 +14,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { lazadaListingView, type LazadaListingDetailResponse } from "@/lib/lazada-listing-edit";
-import { loadLazListingLive, saveLazSlimCopy } from "../shared";
+import { lazCategoryName, loadLazListingLive, saveLazSlimCopy } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,11 +28,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const listingId = (request.nextUrl.searchParams.get("listing_id") ?? "").trim();
   if (!listingId) return fail("ต้องระบุสินค้า", 400);
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  const live = await loadLazListingLive(supabaseAdmin(), listingId, user?.id ?? null);
+  const admin = supabaseAdmin();
+  const live = await loadLazListingLive(admin, listingId, user?.id ?? null);
   if (!live.ok) return fail(live.error, live.status);
   const view = lazadaListingView(live.item);
   if (!view) return fail("Lazada ส่งข้อมูลสินค้ามาไม่ครบ — ลองใหม่อีกครั้ง", 502);
-  return NextResponse.json({ view, fetched_at: new Date().toISOString(), error: null } satisfies LazadaListingDetailResponse, { headers: NO_STORE });
+  const category_name = await lazCategoryName(admin, live.row.platform_id, view.categoryId);
+  return NextResponse.json({ view, fetched_at: new Date().toISOString(), error: null, category_name } satisfies LazadaListingDetailResponse, { headers: NO_STORE });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -48,7 +50,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const view = lazadaListingView(live.item);
   if (!view) return fail("Lazada ส่งข้อมูลสินค้ามาไม่ครบ — ลองใหม่อีกครั้ง", 502);
   const now = new Date().toISOString();
-  const err = await saveLazSlimCopy(admin, live.row, live.item);
-  if (err) return NextResponse.json({ view, fetched_at: now, saved: false, error: `ดึงจาก Lazada ได้ แต่บันทึกสำเนาในระบบไม่สำเร็จ: ${err}` } satisfies LazadaListingDetailResponse, { status: 500, headers: NO_STORE });
-  return NextResponse.json({ view, fetched_at: now, saved: true, error: null } satisfies LazadaListingDetailResponse, { headers: NO_STORE });
+  const [err, category_name] = await Promise.all([saveLazSlimCopy(admin, live.row, live.item), lazCategoryName(admin, live.row.platform_id, view.categoryId)]);
+  if (err) return NextResponse.json({ view, fetched_at: now, saved: false, error: `ดึงจาก Lazada ได้ แต่บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`, category_name } satisfies LazadaListingDetailResponse, { status: 500, headers: NO_STORE });
+  return NextResponse.json({ view, fetched_at: now, saved: true, error: null, category_name } satisfies LazadaListingDetailResponse, { headers: NO_STORE });
 }
