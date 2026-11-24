@@ -20,7 +20,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { openAiChatRaw, openAiKey, openAiWebSearchRaw, type WebCitation } from "@/lib/ai-caption";
+import { openAiChatRaw, openAiKey, openAiTranscribeRaw, openAiWebSearchRaw, type TranscribeResult, type WebCitation } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
 import {
   accessAllowed, accessDeniedMessage, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
@@ -297,6 +297,16 @@ export async function aiWebSearch(key: string, system: string, prompt: string, m
   return guardedGpt(key, model, ctx, async (useModel) => {
     const r = await openAiWebSearchRaw(system, prompt, maxTokens, useModel);
     return { value: { text: r.text, citations: r.citations }, model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, extraThb: WEB_SEARCH_CALL_THB };
+  });
+}
+
+/** ค่าถอดเสียง Whisper ≈ US$0.006/นาที (~0.22 บาท) */
+export const TRANSCRIBE_THB_PER_MIN = 0.22;
+/** ถอดเสียงผ่านด่านกลาง — คิดค่าใช้จ่ายตามความยาวเสียง (ไม่ใช่ตามคำ) */
+export async function aiTranscribe(key: string, audio: Blob, filename: string, opts: { language?: string; prompt?: string }, ctx?: UseCtx): Promise<TranscribeResult> {
+  return guardedGpt(key, undefined, ctx, async () => {
+    const r = await openAiTranscribeRaw(audio, filename, opts);
+    return { value: r, model: r.model, tokensIn: 0, tokensOut: 0, extraThb: Math.round((r.duration / 60) * TRANSCRIBE_THB_PER_MIN * 10000) / 10000 };
   });
 }
 

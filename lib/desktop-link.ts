@@ -2,7 +2,7 @@
 // คู่มือ: docs/desktop-link.md
 
 /** โปรแกรมที่ยอมให้เชื่อม — เพิ่มโปรแกรมใหม่ที่นี่ที่เดียว */
-export const DESKTOP_APPS: string[] = ["Louis Batch"];
+export const DESKTOP_APPS: string[] = ["Louis Batch", "Louis Subtitle"];
 
 /**
  * ที่อยู่ที่หน้าเว็บส่ง token กลับไปให้โปรแกรม — รับเฉพาะเครื่องตัวเอง (127.0.0.1) ที่ path /erp-linked

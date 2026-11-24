@@ -147,6 +147,10 @@ export const PAID_SERVICES: PaidService[] = [
     files: ["app/api/pattern-projects/ai-coach/route.ts"] },
   { key: "ai.team_split", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
     usedAt: "แผนทีม", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/team-plan/ai-split/route.ts"] },
+  { key: "ai.transcribe", th: "ถอดเสียงคลิปเป็นซับ (Whisper)", en: "Clip transcription (Whisper)", group: "คอนเทนต์ / การตลาด",
+    usedAt: "โปรแกรม Louis Subtitle (ใส่ซับคลิป) — เมื่อเลือกถอดเสียงผ่าน ERP", provider: "openai", kind: "per_call",
+    offBehavior: "โปรแกรมใช้ตัวถอดเสียงในเครื่องแทน (ฟรี ช้ากว่าเล็กน้อย)", costHint: "~0.22 บาท/นาทีของคลิป",
+    files: ["app/api/subtitle/transcribe/route.ts"] },
   // ── การเงิน
   // key ขึ้นต้น cf. คงไว้ (ประวัติการใช้ผูก key นี้) — ผู้ให้บริการเปลี่ยนได้ที่ providerChoices (ค่าเริ่ม GPT · เจ้าของเลือก 2026-11-06 เพราะ Cloudflare ยังไม่ตั้งรหัสบน Vercel)
   { key: "cf.slip_ocr", th: "อ่านสลิปโอนเงิน (AI อ่านรูป)", en: "Transfer slip reader", group: "การเงิน",

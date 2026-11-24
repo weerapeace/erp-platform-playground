@@ -31,6 +31,7 @@ const RAW_RULES: { what: string; re: RegExp; allowed: string[] }[] = [
   { what: "ยิง OpenAI ตรง (api.openai.com)", re: /api\.openai\.com/, allowed: ["lib/ai-caption.ts"] },
   { what: "เรียก openAiChatRaw ตรง — ใช้ aiChat(\"<key>\", …)", re: /\bopenAiChatRaw\(/, allowed: ["lib/ai-caption.ts", "lib/paid-services-server.ts"] },
   { what: "เรียก openAiWebSearchRaw ตรง — ใช้ aiWebSearch(\"<key>\", …)", re: /\bopenAiWebSearchRaw\(/, allowed: ["lib/ai-caption.ts", "lib/paid-services-server.ts"] },
+  { what: "เรียก openAiTranscribeRaw ตรง — ใช้ aiTranscribe(\"<key>\", …)", re: /\bopenAiTranscribeRaw\(/, allowed: ["lib/ai-caption.ts", "lib/paid-services-server.ts"] },
   { what: "เรียก chatJson (ของเดิม) — ใช้ aiChat(\"<key>\", …)", re: /\bchatJson\(/, allowed: [] },
   { what: "เรียก Cloudflare AI ตรง (getAi) — ใช้ getAiFor(\"<key>\")", re: /\bgetAi\(\)/, allowed: ["lib/ai.ts", "lib/paid-services-server.ts"] },
   { what: "ยิง EasySlip ตรง", re: /api\.easyslip\.com/, allowed: ["lib/website-payments-server.ts"] },

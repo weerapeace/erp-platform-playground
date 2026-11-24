@@ -1,6 +1,6 @@
 # เชื่อมโปรแกรมบนเครื่องกับ ERP (`/desktop-link`)
 
-> ให้โปรแกรมบนเครื่อง (ตอนนี้: **Louis Batch**) ใช้บัญชี ERP ของคนที่นั่งเครื่องนั้น เช่น ส่งรูป JPG เข้า SAMPLE Images
+> ให้โปรแกรมบนเครื่อง (ตอนนี้: **Louis Batch** · **Louis Subtitle** — ถอดเสียงผ่าน `/api/subtitle/transcribe`) ใช้บัญชี ERP ของคนที่นั่งเครื่องนั้น เช่น ส่งรูป JPG เข้า SAMPLE Images
 > เพิ่มเมื่อ 2026-11-14 (Louis Batch 1.0.14 · เจ้าของเลือก "เชื่อมผ่านเบราว์เซอร์")
 > โค้ด: หน้า `app/desktop-link/page.tsx` · API `app/api/desktop-link/route.ts` · ตรรกะ + เทสต์ `lib/desktop-link.ts`
 
