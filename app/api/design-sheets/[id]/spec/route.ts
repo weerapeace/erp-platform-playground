@@ -135,3 +135,31 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   });
   return NextResponse.json({ pages: pages.length, pins: pinRows.length, shapes: shapeCount, colors: colorCounts, error: null });
 }
+
+/**
+ * PATCH /api/design-sheets/[id]/spec { colorway_key, bom: { code, sku, name? } | null }
+ * จำว่าสีของรุ่นนี้สร้างสูตร BOM แล้ว (ปุ่ม "สร้าง BOM จากตารางสี" · 2026-11-24) — แก้เฉพาะช่อง bom ของสีนั้น ไม่แตะหน้า/หมุด/ช่องสี
+ */
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { id } = await params;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  let body: { colorway_key?: string; bom?: unknown };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const cwKey = String(body.colorway_key ?? "");
+  if (!cwKey) return NextResponse.json({ error: "ต้องระบุสีของรุ่น" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const { data: row } = await admin.from("design_sheet_spec_colors").select("data").eq("sheet_id", id).maybeSingle();
+  const cur = cleanSpecColors(row?.data);
+  const cw = cur.colorways.find((c) => c.key === cwKey);
+  if (!cw) return NextResponse.json({ error: "ไม่พบสีนี้ในตารางสี (บันทึกรายละเอียดงานก่อน)" }, { status: 404 });
+  const old = cw.bom ?? null;
+  const next = cleanSpecColors({ ...cur, colorways: cur.colorways.map((c) => (c.key === cwKey ? { ...c, bom: body.bom ?? null } : c)) });
+  const { error } = await admin.from("design_sheet_spec_colors").upsert({ sheet_id: id, data: next, updated_by: user?.id ?? null, updated_at: new Date().toISOString() }, { onConflict: "sheet_id" });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  await writeAudit(admin, {
+    action: "update", entityType: "design_sheet", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { spec_colors_bom: cwKey, changes: [{ field: `colorway_bom:${cw.name || cwKey}`, old, new: next.colorways.find((c) => c.key === cwKey)?.bom ?? null }] },
+  });
+  return NextResponse.json({ colors: next, error: null });
+}

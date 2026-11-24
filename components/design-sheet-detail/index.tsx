@@ -96,6 +96,7 @@ const ToQuotationModal = dynamic(() => import("@/app/master/design-sheets/to-quo
 const QuotationCartDrawer = dynamic(() => import("@/app/master/design-sheets/quotation-cart-drawer").then((m) => m.QuotationCartDrawer), { ssr: false });
 const SheetQuotations = dynamic(() => import("./sheet-quotations").then((m) => m.SheetQuotations), { ssr: false });
 const PullCostFromSheetModal = dynamic(() => import("./pull-cost-modal").then((m) => m.PullCostFromSheetModal), { ssr: false });
+const BomFromColorsModal = dynamic(() => import("./bom-from-colors").then((m) => m.BomFromColorsModal), { ssr: false });
 const BomFromCostWizard = dynamic(() => import("./bom-from-cost-wizard").then((m) => m.BomFromCostWizard), { ssr: false });
 const BomToCostWizard = dynamic(() => import("./bom-to-cost-wizard").then((m) => m.BomToCostWizard), { ssr: false });
 const SkuMultiPickerModal = dynamic(() => import("@/components/sku-multi-picker").then((m) => m.SkuMultiPickerModal), { ssr: false });
@@ -1342,7 +1343,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       return null;
     } catch (e) { return e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"); }
   };
-  const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
+  const [bomWizard, setBomWizard] = useState(false);
+  const [bomColorsOpen, setBomColorsOpen] = useState(false);   // 🧬 สร้าง BOM จากตารางสี (เมนูเครื่องมือตีราคา)   // Wizard ดึงตีราคา → สร้างสูตร BOM
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
   const [fabricCalcInit, setFabricCalcInit] = useState<{ mat: string; qty: number } | null>(null);   // เปิดจากผังวางบนผ้าที่หัวกลุ่ม → เลือกวัสดุ/จำนวนไว้ให้
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
@@ -2711,6 +2713,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       onSelect: () => { window.open(`/print/design-sheet/${form.id}/pattern${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`, "_blank", "noopener"); } }] : []),
                     ...(canEdit ? [{ key: "mkbom", icon: "sitemap", label: t("สร้างสูตร BOM", "Create BOM"),
                       title: t("ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)", "Use width/length/qty from costing to create a production BOM (add materials later)"), onSelect: () => setBomWizard(true) }] : []),
+                    ...(canEdit && form?.id ? [{ key: "mkbom-colors", icon: "sitemap", label: t("สร้าง BOM จากตารางสี", "Create BOM from colour table"),
+                      title: t("1 สีของรุ่น = 1 สูตร · วัตถุดิบจากตารางสีในรายละเอียดงาน · จำนวนจากตีราคา", "One colourway = one BOM · materials from the Job details colour table · qty from costing"), onSelect: () => setBomColorsOpen(true) }] : []),
                   ];
                   const manage: MenuItem[] = [
                     { key: "parts-mgr", icon: "puzzle", label: t("จัดการอะไหล่ (ร่าง → ของจริง)", "Manage parts (draft → real)"),
@@ -3301,6 +3305,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       )}
 
       {/* Wizard ดึงตีราคา (แท็บที่กำลังดู) → สร้างสูตร BOM (วัตถุดิบใส่ทีหลัง) */}
+      {form?.id && bomColorsOpen && <BomFromColorsModal open onClose={() => setBomColorsOpen(false)} sheetId={form.id} sheetCode={form.code} />}
       <BomFromCostWizard open={bomWizard} onClose={() => setBomWizard(false)}
         tabLabel={costTabLabel(costParent, generalLabel)}
         lines={curLines.map((r) => ({

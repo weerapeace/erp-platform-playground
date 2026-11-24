@@ -32,6 +32,7 @@ import type { SpecPage, SpecPin, SpecPutPage } from "@/app/api/design-sheets/[id
 import { cleanSpecColors, EMPTY_SPEC_COLORS, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
 import { SpecColorTableEditor } from "./spec-colors";
 import { BomFromCostWizard } from "./bom-from-cost-wizard";
+import { BomFromColorsModal } from "./bom-from-colors";
 import { summarizeSpecPins, specMaterialItems, fmtSpecQty, type SpecMaterialItem } from "@/lib/design-sheet-spec";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
 
@@ -250,6 +251,7 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
   const [sendSel, setSendSel] = useState<Set<number>>(new Set());
   const [sending, setSending] = useState(false);
   const [bomOpen, setBomOpen] = useState(false);
+  const [bomColorsOpen, setBomColorsOpen] = useState(false);   // 🧬 สร้าง BOM จากตารางสี
   const openSend = () => {
     const have = new Set(costSkuIds);
     setSendSel(new Set(materialItems.map((it, i) => (have.has(it.sku_id) ? -1 : i)).filter((i) => i >= 0)));
@@ -499,7 +501,10 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
 
       {/* 🎨 ตารางสี (รอบ 2) — บันทึกพร้อมปุ่มด้านล่าง */}
       <SpecColorTableEditor value={colors} onChange={(c) => { setColors(c); setDirty(true); }} canEdit={canEdit} pinParts={pinParts} imageKeys={imageKeys}
-        partOptions={partOptions} onCreatePart={createPart} onLocatePart={locatePart} />
+        partOptions={partOptions} onCreatePart={createPart} onLocatePart={locatePart} onMakeBom={canEdit ? () => setBomColorsOpen(true) : undefined} />
+      {/* 🧬 สร้าง BOM จากตารางสี (1 สี = 1 สูตร) — ./bom-from-colors · สร้างแล้วติดป้าย "มี BOM" ที่สีนั้น (ไม่ทำให้หน้านี้ค้างบันทึก) */}
+      {bomColorsOpen && <BomFromColorsModal open onClose={() => setBomColorsOpen(false)} sheetId={sheetId} colors={colors}
+        onCreated={(cwKey, bom) => setColors((c) => ({ ...c, colorways: c.colorways.map((x) => (x.key === cwKey ? { ...x, bom } : x)) }))} />}
 
       <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
         <button type="button" onClick={openPrint} title={t("ใบพิมพ์รายละเอียดงาน (รูป+หมุด · สรุปวัตถุดิบ · ตารางสี)", "Print job details (images+pins · materials · colours)")}

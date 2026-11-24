@@ -34,6 +34,14 @@ const SwatchBrowser = dynamic(() => import("@/components/sku-swatch-browser").th
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+/** ป้าย "มี BOM" ของสีของรุ่น — กดเปิดสูตรในหน้า BOM */
+function BomBadge({ bom }: { bom: { code: string; sku: string } }) {
+  return (
+    <a href={`/master/bom?open=${encodeURIComponent(bom.sku)}`} target="_blank" rel="noopener" title={`${bom.code} — เปิดสูตร`}
+      className="mr-1 shrink-0 rounded bg-emerald-50 px-1.5 text-[10px] font-medium leading-5 text-emerald-700 hover:bg-emerald-100">มี BOM</a>
+  );
+}
+
 /** จุดสี 1 ช่อง — ชิ้นจากแผ่นผ้า / รูป / หลายสี / สีเดียว */
 export function SpecColorChip({ cell, size = 28, className = "" }: { cell: SpecColorCell | null | undefined; size?: number; className?: string }) {
   const style: CSSProperties = { width: size, height: size };
@@ -45,7 +53,9 @@ export function SpecColorChip({ cell, size = 28, className = "" }: { cell: SpecC
   return <span className={`inline-block shrink-0 rounded-md border border-slate-300 ${className}`} style={style} title={cell.name ?? cell.hex ?? ""} />;
 }
 
-export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, imageKeys, partOptions = [], onCreatePart, onLocatePart }: {
+export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, imageKeys, partOptions = [], onCreatePart, onLocatePart, onMakeBom }: {
+  /** ปุ่ม "สร้าง BOM จากตารางสี" (./bom-from-colors) — ไม่ส่ง = ไม่โชว์ */
+  onMakeBom?: () => void;
   value: SpecColorTable;
   onChange: (next: SpecColorTable) => void;
   canEdit: boolean;
@@ -138,6 +148,12 @@ export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, image
     <div className="rounded-xl border border-slate-200 p-3 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-medium text-slate-600 inline-flex items-center gap-1.5"><Icon name="design" /> {t("ตารางสี (ส่วนประกอบ × สีของรุ่น)", "Colour table (parts × colourways)")}</span>
+        {onMakeBom && rows.length > 0 && colorways.length > 0 && (
+          <button type="button" onClick={onMakeBom} title={t("1 สีของรุ่น = 1 สูตร · วัตถุดิบจากช่องสี · จำนวนจากตีราคา", "One colourway = one BOM · materials from cells · qty from costing")}
+            className="ml-auto order-last h-7 px-2.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 inline-flex items-center gap-1">
+            <Icon name="sitemap" /> {t("สร้าง BOM จากตารางสี", "Create BOM from colours")}
+          </button>
+        )}
         {canEdit && missingParts.length > 0 && (
           <button type="button" onClick={pullParts} title={missingParts.map((p) => p.name).join(", ")}
             className="h-7 px-2 text-xs border border-violet-200 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100">
@@ -155,9 +171,10 @@ export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, image
               placeholder={t(`สีที่ ${i + 1}`, `Colour ${i + 1}`)} className="w-28 h-7 px-1 text-sm border-0 focus:outline-none focus:ring-0" />
             <button type="button" onClick={() => setDelCw(cw.key)} title={t("ลบสีนี้", "Delete colourway")}
               className="h-7 w-7 inline-flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-md"><Icon name="delete" /></button>
+            {cw.bom && <BomBadge bom={cw.bom} />}
           </span>
         ) : (
-          <span key={cw.key} className="h-7 px-2 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600">{cwLabel(i)}</span>
+          <span key={cw.key} className="h-7 px-2 inline-flex items-center gap-1 text-sm border border-slate-200 rounded-lg text-slate-600">{cwLabel(i)}{cw.bom && <BomBadge bom={cw.bom} />}</span>
         ))}
         {canEdit && (
           <button type="button" onClick={addColorway} className="h-8 px-2.5 text-xs border border-dashed border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1">

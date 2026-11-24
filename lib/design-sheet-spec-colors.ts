@@ -18,7 +18,9 @@ export type SpecColorCell = {
   swatch_id: string | null;
 };
 export type SpecColorRow = { key: string; name: string; code?: string | null };   // code = ส่วนประกอบจากรายการกลาง material_slots (v2)
-export type SpecColorway = { key: string; name: string; cells: Record<string, SpecColorCell> };
+/** bom = สูตร BOM ที่สร้างจากสีนี้ (ปุ่ม "สร้าง BOM จากตารางสี" · 2026-11-24) — ป้าย "มี BOM" ที่หัวคอลัมน์ */
+export type SpecColorBom = { code: string; sku: string; name?: string | null };
+export type SpecColorway = { key: string; name: string; cells: Record<string, SpecColorCell>; bom?: SpecColorBom | null };
 export type SpecColorTable = { rows: SpecColorRow[]; colorways: SpecColorway[] };
 
 export const SPEC_COLOR_SOURCE_LABEL: Record<SpecColorSource, string> = { swatch: "แผงผ้า", sku: "SKU", dict: "ทะเบียนสี", pick: "ดูดสี" };
@@ -71,7 +73,9 @@ export function cleanSpecColors(raw: unknown): SpecColorTable {
     const cells: Record<string, SpecColorCell> = {};
     const rawCells = (c.cells && typeof c.cells === "object" ? c.cells : {}) as Record<string, unknown>;
     for (const r of rows) { const cell = cleanSpecColorCell(rawCells[r.key]); if (cell) cells[r.key] = cell; }
-    colorways.push({ key: k, name: str(c.name, LIMITS.name) ?? "", cells });
+    const b = (c.bom && typeof c.bom === "object" ? c.bom : null) as Record<string, unknown> | null;
+    const bom = b && str(b.code, 80) && str(b.sku, 80) ? { code: str(b.code, 80)!, sku: str(b.sku, 80)!, name: str(b.name, LIMITS.name) ?? null } : null;
+    colorways.push({ key: k, name: str(c.name, LIMITS.name) ?? "", cells, ...(bom ? { bom } : {}) });
   }
   return { rows, colorways };
 }

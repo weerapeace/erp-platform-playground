@@ -37,6 +37,44 @@ const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}
 const verNum = (v: string | null) => { const m = (v ?? "").match(/(\d+)/); return m ? parseInt(m[1], 10) : 1; };
 const fmt = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 
+/**
+ * สร้างสูตร BOM 1 สูตรจากบรรทัด (ใช้ร่วม: Wizard นี้ · สร้าง BOM จากตารางสี ./bom-from-colors)
+ * เวอร์ชันถัดไปของ SKU อัตโนมัติ (BOM-<sku> / _v.N) · รหัสชนกัน (แข่งกัน) ลองเวอร์ชันถัดไปอีกครั้ง · คืนรหัสสูตร
+ */
+export async function createBomFromLines({ sku, lines, note }: { sku: { code: string; name: string | null }; lines: CostSourceLine[]; note: string }): Promise<{ code: string; count: number }> {
+  let n = 1;
+  try {
+    const vj = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(sku.code)}`).then((r) => r.json());
+    const vs = (vj.data ?? []) as { version: string | null }[];
+    if (vs.length) n = Math.max(...vs.map((v) => verNum(v.version))) + 1;
+  } catch { /* โหลดเวอร์ชันไม่ได้ → เริ่ม v1 */ }
+  const bomLines = lines.map((r, i) => ({
+    slot_code: null,
+    component_sku: r.component_sku ?? null,
+    component_name: r.item_name ?? null,
+    qty: r.qty ?? r.pieces ?? 1,
+    uom: r.uom ?? null,
+    waste_percent: r.waste_percent ?? 0,
+    is_optional: false,
+    sequence: i + 1,
+    source: "design_cost",
+    calc_mode: "manual",
+    pieces: r.pieces ?? 1,
+    cut_width: r.width_cm ?? 0,
+    cut_length: r.length_cm ?? 0,
+    face_width_cm: r.face_width_cm ?? 0,
+    material_type: r.group_name ?? null,
+  }));
+  const post = (ver: number) => apiFetch("/api/bom", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ product_sku: sku.code, product_name: sku.name, bom_code: verCode(sku.code, ver), version: `v${ver}`, bom_type: "normal", status: "draft", note, lines: bomLines }),
+  }).then((r) => r.json());
+  let j = await post(n);
+  if (j.error && /มีอยู่แล้ว/.test(String(j.error))) { n += 1; j = await post(n); }
+  if (j.error) throw new Error(j.error);
+  return { code: verCode(sku.code, n), count: bomLines.length };
+}
+
 export function BomFromCostWizard({
   open, onClose, lines, tabLabel, title, notePrefix = "ดึงจากตีราคา",   // หมายเหตุ = ข้อมูลในสูตร → คงภาษาไทยเสมอ (เหมือนเดิม)
 }: {
@@ -66,50 +104,11 @@ export function BomFromCostWizard({
     if (!sku) { toast.error(tr("เลือกสินค้าที่ผลิตก่อน", "Select the product to produce first")); setStep(1); return; }
     setSaving(true);
     try {
-      // เวอร์ชันถัดไปของ SKU นี้ (กันรหัสสูตรซ้ำ)
-      let n = 1;
-      try {
-        const vj = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(sku.code)}`).then((r) => r.json());
-        const vs = (vj.data ?? []) as { version: string | null }[];
-        if (vs.length) n = Math.max(...vs.map((v) => verNum(v.version))) + 1;
-      } catch { /* โหลดเวอร์ชันไม่ได้ → เริ่ม v1 */ }
-
-      const bomLines = chosen.map((r, i) => ({
-        slot_code: null,
-        component_sku: r.component_sku ?? null,    // มีรหัส (จากหมุด) = ใส่เลย · ไม่มี = เติมทีหลัง
-        component_name: r.item_name ?? null,       // ชื่อวัสดุจากตีราคา = ตัวช่วยจำ
-        qty: r.qty ?? r.pieces ?? 1,
-        uom: r.uom ?? null,
-        waste_percent: r.waste_percent ?? 0,
-        is_optional: false,
-        sequence: i + 1,
-        source: "design_cost",
-        calc_mode: "manual",
-        pieces: r.pieces ?? 1,
-        cut_width: r.width_cm ?? 0,
-        cut_length: r.length_cm ?? 0,
-        face_width_cm: r.face_width_cm ?? 0,
-        material_type: r.group_name ?? null,
-      }));
-
-      // ยิงสร้าง — เจอรหัสซ้ำ (แข่งกัน) ลองเพิ่มเวอร์ชันอีกครั้ง
-      const post = (ver: number) => apiFetch("/api/bom", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          product_sku: sku.code, product_name: sku.name,
-          bom_code: verCode(sku.code, ver), version: `v${ver}`,
-          bom_type: "normal", status: "draft",
-          note: `${notePrefix} (${tabLabel})`, lines: bomLines,
-        }),
-      }).then((r) => r.json());
-
-      let j = await post(n);
-      if (j.error && /มีอยู่แล้ว/.test(String(j.error))) { n += 1; j = await post(n); }
-      if (j.error) throw new Error(j.error);
+      const res = await createBomFromLines({ sku: { code: sku.code, name: sku.name ?? null }, lines: chosen, note: `${notePrefix} (${tabLabel})` });
 
       setCreatedSku(sku.code);
       setStep(3);
-      toast.success(tr(`สร้างสูตร BOM ให้ ${sku.code} แล้ว (${bomLines.length} บรรทัด)`, `BOM created for ${sku.code} (${bomLines.length} lines)`));
+      toast.success(tr(`สร้างสูตร BOM ให้ ${sku.code} แล้ว (${res.count} บรรทัด)`, `BOM created for ${sku.code} (${res.count} lines)`));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tr("สร้างสูตรไม่สำเร็จ", "Failed to create BOM"));
     } finally {
