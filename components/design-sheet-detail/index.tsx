@@ -101,6 +101,8 @@ const BomToCostWizard = dynamic(() => import("./bom-to-cost-wizard").then((m) =>
 const SkuMultiPickerModal = dynamic(() => import("@/components/sku-multi-picker").then((m) => m.SkuMultiPickerModal), { ssr: false });
 const WorkflowStatusManager = dynamic(() => import("@/components/workflow-status-manager").then((m) => m.WorkflowStatusManager), { ssr: false });
 const BrandCanvasRefs = dynamic(() => import("./brand-canvas-refs").then((m) => m.BrandCanvasRefs), { ssr: false });
+// 🧩 จัดการอะไหล่ (ตีราคา): ร่าง → ผูกของจริง · ./parts-manager
+const PartsManagerModal = dynamic(() => import("./parts-manager").then((m) => m.PartsManagerModal), { ssr: false });
 const PatternTicketLinks = dynamic(() => import("@/components/pattern-ticket-links").then((m) => m.PatternTicketLinks), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
@@ -513,6 +515,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
   const [copyTab, setCopyTab] = useState<string | null>(null);   // ☑️ คัดลอกจากแท็บอื่นของใบนี้ → เปิดป๊อปเลือกบรรทัด (pull-cost-modal preset)
+  const [partsMgrOpen, setPartsMgrOpen] = useState(false);   // 🧩 ป๊อปจัดการอะไหล่ (ร่าง → ของจริง)
   const [partsOpen, setPartsOpen] = useState(false);         // 🧷 ป๊อปเพิ่มอะไหล่ (ตะกร้า · components/parts-cart-modal)
   // ✏️ ตีราคาดูได้ 2 แบบ: ตาราง ↔ แบบวาด (กระดานชิ้นวัสดุ · แก้แล้วตารางเปลี่ยนตามทันที) — จำแบบที่เลือกไว้ในเครื่อง
   const [costView, setCostViewState] = useState<"table" | "draw">(() => { try { return localStorage.getItem("ds-cost-view") === "draw" ? "draw" : "table"; } catch { return "table"; } });
@@ -1454,6 +1457,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setCostLines(next);
     if (fullEdit) setCostDirty(true); else void saveCost(next);
   }, [costLines, fullEdit, saveCost]);
+  // ปุ่มย้อนกลับ (แจ้งผล 5 วิ) เรียกทีหลัง → ใช้ quickApply ของรอบ render ล่าสุด (ไม่งั้นทับของที่แก้ระหว่างนั้น)
+  const quickApplyRef = useRef(quickApply); quickApplyRef.current = quickApply;
+  const mapRowsByKey = (keys: string[], fn: (r: CostRow) => CostRow) => { const ks = new Set(keys); quickApplyRef.current((rows) => rows.map((r) => (ks.has(r.key) ? fn(r) : r))); };
 
   // อัปโหลดรูปในรายละเอียดงาน (Tiptap) → R2 ผ่านระบบแนบไฟล์กลาง (entity=design_sheet_detail)
   const uploadDetailImage = async (file: File): Promise<string> => {
@@ -2707,6 +2713,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       title: t("ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)", "Use width/length/qty from costing to create a production BOM (add materials later)"), onSelect: () => setBomWizard(true) }] : []),
                   ];
                   const manage: MenuItem[] = [
+                    { key: "parts-mgr", icon: "puzzle", label: t("จัดการอะไหล่ (ร่าง → ของจริง)", "Manage parts (draft → real)"),
+                      title: t("การ์ดวัสดุ/อะไหล่ของแท็บนี้ · ร่างที่ยังไม่ผูก SKU กดผูกของจริงได้ · เพิ่มวัตถุดิบแบบตะกร้า", "Cards of this tab's materials · link drafts to real SKUs · add via cart"), onSelect: () => setPartsMgrOpen(true) },
                     ...(canEdit ? [{ key: "pm", icon: "packages", label: t("จัดการวัสดุตีราคา", "Manage costing materials"), onSelect: openPm }] : []),
                     ...(canEdit && noteCount > 0 ? [{ key: "clear", icon: "notes", label: t("ล้างหมายเหตุทุกบรรทัด", "Clear all notes"), hint: noteCount,
                       title: t("ลบข้อความในช่องหมายเหตุของทุกบรรทัดในแท็บนี้", "Clear the note text on every line in this tab"), onSelect: () => void clearNotes() }] : []),
@@ -3499,6 +3507,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           }} />
       )}
       {/* 🧷 เพิ่มอะไหล่ · ซิป · เทป แบบตะกร้า → ลงตารางตีราคาของแท็บที่ดู */}
+      {/* 🧩 จัดการอะไหล่ (ร่าง → ของจริง) */}
+      {form?.id && partsMgrOpen && (
+        <PartsManagerModal open={partsMgrOpen} onClose={() => setPartsMgrOpen(false)} rows={curLines} canEdit={canEdit}
+          onBind={(keys, c) => mapRowsByKey(keys, (r) => recomputeRow({ ...r, ...costSkuPatch(c, priceGroups, r), unit_price: r.unit_price ?? c.standard_price ?? null }))}
+          onUsePrice={(keys, price) => mapRowsByKey(keys, (r) => recomputeRow({ ...r, unit_price: price }))}
+          onUnbind={(keys) => mapRowsByKey(keys, (r) => recomputeRow({ ...r, item_sku_id: null, item_sku_code: null }))}
+          onRestore={(snap) => { const m = new Map((snap as CostRow[]).map((r) => [r.key, r])); mapRowsByKey(snap.map((r) => r.key), (r) => m.get(r.key) ?? r); }}
+          onOpenCart={() => setPartsOpen(true)} />
+      )}
       {form?.id && partsOpen && (
         <PartsCartModal open={partsOpen} onClose={() => setPartsOpen(false)} items={priceItems} canEdit={canEdit}
           onConfirm={applyPartsCart} onItemsChanged={reloadPriceItems} onManage={() => { managePartsRef.current = true; }} />
