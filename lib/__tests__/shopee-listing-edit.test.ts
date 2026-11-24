@@ -23,7 +23,7 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
     expect(v).toMatchObject({ itemId: "800123", name: "Louis Montini กระเป๋าสตางค์", status: "NORMAL", description: "หนังแท้ 100%", descriptionEditable: true,
       images: ["https://cf.shopee.co.th/file/a", "https://cf.shopee.co.th/file/b"], categoryId: "100637", brand: "Louis Montini", itemSku: "TTM090",
       weight: 0.3, dims: { length: 20, width: 10, height: 5 }, hasModel: true, inPromotion: true, limits: LIMITS });
-    expect(v.models[0]).toEqual({ modelId: "1", sku: "TTM090-01", label: "สี: ดำ", price: 990, originalPrice: 1590, stock: 7, image: null, status: "MODEL_NORMAL", promo: false });
+    expect(v.models[0]).toEqual({ modelId: "1", sku: "TTM090-01", label: "สี: ดำ", price: 990, originalPrice: 1590, stock: 7, image: null, status: "MODEL_NORMAL", promo: false, tierIndex: [] });
     expect(shopeeListingView({ item_name: "x" }, null)).toBeNull();
     expect(v.imageIds).toEqual(["ida", "idb"]);
     expect(v.imageRatio).toBe("1:1");
@@ -39,7 +39,7 @@ describe("Shopee ลิ้นชัก — มุมมองจากของ�
   });
   test("ช่วงความยาวจาก get_item_limit · อ่านไม่ได้ = null", () => {
     expect(shopeeLimitsOf({ response: { item_name_length_limit: { min_limit: 10, max_limit: 120 }, item_description_length_limit: { min_limit: 20, max_limit: 3000 }, item_image_count_limit: { max_limit: 9 } } }))
-      .toEqual({ ...LIMITS, priceMin: null, priceMax: null });
+      .toEqual({ ...LIMITS, priceMin: null, priceMax: null, optionMax: null });
     expect(shopeeLimitsOf({ response: { item_name_length_limit: { min_limit: 10, max_limit: 120 }, price_limit: { min_limit: 10, max_limit: 150000 } } }))
       .toMatchObject({ nameMin: 10, nameMax: 120, priceMin: 10, priceMax: 150000 });
     expect(shopeeLimitsOf({ response: {} })).toBeNull();
@@ -260,14 +260,16 @@ describe("Shopee ลิ้นชัก — รายละเอียดแบ�
 });
 
 describe("Shopee ลิ้นชัก — รูปของแต่ละตัวเลือก (update_tier_variation · 2026-11-22)", () => {
+  const M = (id: string, sku: string, ti: number[], promo = false) => ({ modelId: id, sku, label: null, price: 100, originalPrice: 100, stock: 1, image: null, status: null, promo, tierIndex: ti });
   const V = (imgs: (string | null)[]) => ({
-    status: "NORMAL",
+    status: "NORMAL", limits: null,
     optionTiers: [
       { name: "สี", options: ["ดำ (01)", "ขาว (02)", "ชมพู (03)"].map((n, i) => ({ name: n, imageId: imgs[i] ?? null, imageUrl: null })) },
       { name: "ไซซ์", options: [{ name: "M", imageId: null, imageUrl: null }] },
     ],
+    models: [M("11", "A-01M", [0, 0]), M("12", "A-02M", [1, 0]), M("13", "A-03M", [2, 0])],
   });
-  test("เปลี่ยนรูปบางสี: ส่งทุกชั้นชื่อเดิม · รูปเดิมคงไว้ · ฝากเฉพาะ r2 · แทนเป็น image_id", () => {
+  test("เปลี่ยนรูปบางสี: ส่งทุกชั้นชื่อเดิม · รูปเดิมคงไว้ · ฝากเฉพาะ r2 · แทนเป็น image_id · ส่ง model_list ของ model เดิมเสมอ", () => {
     const p = planShopeeOptionImages(V(["a", "b", "c"]), { "ขาว (02)": "r2:img/w.jpg" });
     expect(p.errors).toEqual([]);
     expect(p.changed).toBe(true);
@@ -275,6 +277,8 @@ describe("Shopee ลิ้นชัก — รูปของแต่ละต�
       { name: "สี", option_list: [{ option: "ดำ (01)", image: { image_ref: "spi:a" } }, { option: "ขาว (02)", image: { image_ref: "r2:img/w.jpg" } }, { option: "ชมพู (03)", image: { image_ref: "spi:c" } }] },
       { name: "ไซซ์", option_list: [{ option: "M" }] },
     ]);
+    expect(p.modelList).toEqual([{ model_id: 11, tier_index: [0, 0] }, { model_id: 12, tier_index: [1, 0] }, { model_id: 13, tier_index: [2, 0] }]);
+    expect(p.addModels).toEqual([]);
     expect(shopeeOptionUploadRefs(p.tierVariation)).toEqual(["r2:img/w.jpg"]);
     const tv = shopeeOptionResolve(p.tierVariation, new Map([["r2:img/w.jpg", "W1"]]))!;
     expect((tv[0].option_list as { image?: { image_id: string } }[]).map((o) => o.image?.image_id)).toEqual(["a", "W1", "c"]);
@@ -284,11 +288,90 @@ describe("Shopee ลิ้นชัก — รูปของแต่ละต�
     expect(planShopeeOptionImages(V(["a", "b", "c"]), { "ดำ (01)": "spi:a" }).changed).toBe(false);
     expect(planShopeeOptionImages(V([null, null, null]), { "ดำ (01)": "r2:x.jpg" }).errors.join()).toContain("ครบทุกตัวเลือก");
     expect(planShopeeOptionImages(V(["a", "b", "c"]), { "แดง": "r2:x.jpg", "ดำ (01)": "r2:y.jpg" }).warnings.join()).toContain("แดง");
-    expect(planShopeeOptionImages({ status: "NORMAL", optionTiers: [] }, { "ดำ": "r2:x.jpg" }).errors.join()).toContain("ไม่มีตัวเลือก");
+    expect(planShopeeOptionImages({ status: "NORMAL", optionTiers: [], models: [], limits: null }, { "ดำ": "r2:x.jpg" }).errors.join()).toContain("ไม่มีตัวเลือก");
   });
   test("อ่านรูปตัวเลือกจากของจริง (get_model_list → slim → มุมมอง)", () => {
     const v = shopeeListingView(BASE, { models: [], tiers: [{ name: "สี", options: ["ดำ", "ขาว"], images: [{ id: "i1", url: "https://u/1" }, null] }] })!;
     expect(v.optionTiers).toEqual([{ name: "สี", options: [{ name: "ดำ", imageId: "i1", imageUrl: "https://u/1" }, { name: "ขาว", imageId: null, imageUrl: null }] }]);
+  });
+});
+
+// ───────── ตัวเลือก รอบ 2026-11-24: แก้ชื่อสี · เพิ่มสีจากระบบ (ชั้นเดียว / สี×ไซซ์) ─────────
+import { planShopeeOptionEdit, shopeeOptionEditLanded } from "@/lib/shopee-listing-edit";
+import { shopeeModelsToSlim } from "@/lib/shopee";
+
+describe("Shopee ตัวเลือก — แก้ชื่อ / เพิ่มสี (2026-11-24)", () => {
+  const M = (id: string, sku: string, ti: number[], promo = false) => ({ modelId: id, sku, label: null, price: 1480, originalPrice: 1480, stock: 1, image: null, status: null, promo, tierIndex: ti });
+  const ONE = {
+    status: "NORMAL", limits: null,
+    optionTiers: [{ name: "สี", options: [{ name: "Pastel Purple (05)", imageId: "p", imageUrl: null }, { name: "Midnight Black (01)", imageId: "k", imageUrl: null }] }],
+    models: [M("1", "PIX23-05", [0], true), M("2", "PIX23-01", [1])],
+  };
+  test("ตัวแปลงเก็บ tier_index ของแต่ละ model", () => {
+    const s = shopeeModelsToSlim({ tier_variation: [{ name: "สี", option_list: [{ option: "ดำ" }, { option: "ขาว" }] }], model: [{ model_id: 9, model_sku: "X-02", tier_index: [1], price_info: [] }] });
+    expect(s.models[0].tier_index).toEqual([1]);
+    expect(shopeeListingView(BASE, s)!.models[0].tierIndex).toEqual([1]);
+  });
+  test("แก้ชื่อ: ชื่อใหม่ในลำดับเดิม + model_list เดิม · เตือนเรื่องโปร · บอกก่อน→หลัง", () => {
+    const p = planShopeeOptionEdit(ONE, { names: { 0: "ม่วง  (05)" } });
+    expect(p.errors).toEqual([]);
+    expect((p.tierVariation[0].option_list as { option: string }[]).map((o) => o.option)).toEqual(["ม่วง (05)", "Midnight Black (01)"]);
+    expect(p.modelList).toEqual([{ model_id: 1, tier_index: [0] }, { model_id: 2, tier_index: [1] }]);
+    expect(p.changes[0]).toEqual({ label: "ชื่อตัวเลือก", before: "Pastel Purple (05)", after: "ม่วง (05)" });
+    expect(p.warnings.join()).toContain("โปรโมชัน");
+  });
+  test("ชื่อ: ห้ามว่าง · ห้ามซ้ำ (ไม่สนตัวพิมพ์/ช่องว่าง) · ห้ามยาวเกิน 20 (หรือตามร้าน)", () => {
+    expect(planShopeeOptionEdit(ONE, { names: { 0: " " } }).errors.join()).toContain("ว่าง");
+    expect(planShopeeOptionEdit(ONE, { names: { 0: "midnight  black (01)" } }).errors.join()).toContain("ซ้ำ");
+    expect(planShopeeOptionEdit(ONE, { names: { 0: "ก".repeat(21) } }).errors.join()).toContain("ยาวเกิน 20");
+    expect(planShopeeOptionEdit({ ...ONE, limits: { nameMin: null, nameMax: null, descMin: null, descMax: null, imagesMax: null, optionMax: 30 } }, { names: { 0: "ก".repeat(21) } }).errors).toEqual([]);
+  });
+  test("เพิ่มสี (ชั้นเดียว): ต่อท้ายชั้นแรก + add_model สต๊อก 0 · ร้านมีรูปตัวเลือก = สีใหม่ต้องมีรูป · รหัสซ้ำ/ไม่มีราคา = ไม่ให้ส่ง", () => {
+    const p = planShopeeOptionEdit(ONE, { add: [{ name: "ทอง (07)", image: "r2:g.jpg", sku: "PIX23-07", price: 1480 }] });
+    expect(p.errors).toEqual([]);
+    expect(p.tierVariation[0].option_list).toEqual([
+      { option: "Pastel Purple (05)", image: { image_ref: "spi:p" } }, { option: "Midnight Black (01)", image: { image_ref: "spi:k" } }, { option: "ทอง (07)", image: { image_ref: "r2:g.jpg" } },
+    ]);
+    expect(p.addModels).toEqual([{ tier_index: [2], original_price: 1480, model_sku: "PIX23-07", seller_stock: [{ stock: 0 }] }]);
+    expect(p.warnings.join()).toContain("สต๊อก 0");
+    expect(planShopeeOptionEdit(ONE, { add: [{ name: "ทอง (07)", image: null, sku: "PIX23-07", price: 1480 }] }).errors.join()).toContain("ครบทุกตัวเลือก");
+    expect(planShopeeOptionEdit(ONE, { add: [{ name: "ทอง (07)", image: "r2:g.jpg", sku: "pix23-01", price: 1480 }] }).errors.join()).toContain("มีบนร้านแล้ว");
+    expect(planShopeeOptionEdit(ONE, { add: [{ name: "ทอง (07)", image: "r2:g.jpg", sku: "PIX23-07", price: null }] }).errors.join()).toContain("ยังไม่มีราคา");
+    expect(planShopeeOptionEdit(ONE, { add: [{ name: "ทอง (07)", image: "r2:g.jpg", sku: "PIX23-07", price: 99.5 }] }).errors.join()).toContain("บาทเต็ม");
+  });
+  test("เพิ่มสี (สี×ไซซ์): 1 model ต่อไซซ์ [สีใหม่, ไซซ์] · ต้องเลือกไซซ์ · เกิน 50 ตัวเลือก = ไม่ให้ส่ง", () => {
+    const TWO = {
+      status: "NORMAL", limits: null,
+      optionTiers: [{ name: "สี", options: [{ name: "ดำ", imageId: null, imageUrl: null }] }, { name: "ไซซ์", options: ["S", "M", "L"].map((n) => ({ name: n, imageId: null, imageUrl: null })) }],
+      models: [M("1", "MCT13-01S", [0, 0]), M("2", "MCT13-01M", [0, 1]), M("3", "MCT13-01L", [0, 2])],
+    };
+    const p = planShopeeOptionEdit(TWO, { add: [{ name: "แดง", image: null, sku: "MCT13-02", price: 390, sizes: [{ index: 0, sku: "MCT13-02S", price: null }, { index: 2, sku: "MCT13-02L", price: 420 }] }] });
+    expect(p.errors).toEqual([]);
+    expect(p.addModels).toEqual([
+      { tier_index: [1, 0], original_price: 390, model_sku: "MCT13-02S", seller_stock: [{ stock: 0 }] },
+      { tier_index: [1, 2], original_price: 420, model_sku: "MCT13-02L", seller_stock: [{ stock: 0 }] },
+    ]);
+    expect((p.tierVariation[1].option_list as { option: string }[]).map((o) => o.option)).toEqual(["S", "M", "L"]);
+    expect(planShopeeOptionEdit(TWO, { add: [{ name: "แดง", image: null, sku: "MCT13-02", price: 390, sizes: [] }] }).errors.join()).toContain("อย่างน้อย 1 ไซซ์");
+    const many = Array.from({ length: 16 }, (_, i) => ({ name: `สี${i}`, image: null, sku: `Z-${i}`, price: 100, sizes: [0, 1, 2].map((k) => ({ index: k, sku: `Z-${i}-${k}`, price: null })) }));
+    expect(planShopeeOptionEdit(TWO, { add: many }).errors.join()).toContain("ไม่เกิน 50");
+  });
+  test("ข้อมูลตัวเลือกเก่า (ไม่รู้ตำแหน่ง) = ให้ดึงใหม่ก่อน · สินค้าไม่มีตัวเลือก = ทำใน Seller Centre", () => {
+    expect(planShopeeOptionEdit({ ...ONE, models: [{ ...ONE.models[0], tierIndex: [] }, ONE.models[1]] }, { names: { 0: "ม่วง (05)" } }).errors.join()).toContain("ดึงตัวนี้จาก Shopee");
+    expect(planShopeeOptionEdit({ ...ONE, optionTiers: [], models: [] }, { add: [{ name: "x", image: null, sku: "x", price: 1 }] }).errors.join()).toContain("Seller Centre");
+  });
+  test("เช็กหลังส่ง: ตัวเลือกเดิมหาย/สลับ · ชื่อไม่เปลี่ยน · สีใหม่ไม่ขึ้น", () => {
+    const want = { names: { 0: "ม่วง (05)" }, add: [{ name: "ทอง (07)", image: "r2:g.jpg", sku: "PIX23-07", price: 1480 }] };
+    const ok = { optionTiers: [{ name: "สี", options: [{ name: "ม่วง (05)", imageId: "p", imageUrl: null }, { name: "Midnight Black (01)", imageId: "k", imageUrl: null }, { name: "ทอง (07)", imageId: "g", imageUrl: null }] }],
+      models: [...ONE.models, M("3", "PIX23-07", [2])] };
+    expect(shopeeOptionEditLanded(ONE, want, ok)).toEqual([]);
+    const bad = { optionTiers: ONE.optionTiers, models: [{ ...ONE.models[0], tierIndex: [1] }] };
+    const probs = shopeeOptionEditLanded(ONE, want, bad).join(" | ");
+    expect(probs).toContain("ตัวเลือกเดิมหาย 1");
+    expect(probs).toContain("สลับตำแหน่ง");
+    expect(probs).toContain("ยังไม่เปลี่ยน");
+    expect(probs).toContain("ทอง (07)");
+    expect(shopeeOptionEditLanded(ONE, want, null)[0]).toContain("ดึงข้อมูลกลับ");
   });
 });
 

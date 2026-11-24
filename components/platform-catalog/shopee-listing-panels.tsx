@@ -29,7 +29,8 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { MoneyInput } from "@/components/money-input";
 import {
   applyShopeeBulkPrice, planShopeeAttrs, planShopeeDisplay, planShopeeEdit, planShopeeImages, planShopeePrices, shopeeAttrValSig, shopeeImageRef, shopeeImagesMax, shopeeIsOpen, shopeePriceChangeText, shopeePriceRowsFromView, shopeeRefsForSend,
-  shopeeRowsWithSysPrices, shopeeStatusBadge, shopeeTextLength, SHOPEE_DESC_MAX_IMAGES,
+  shopeeRowsWithSysPrices, shopeeStatusBadge, shopeeTextLength, SHOPEE_DESC_MAX_IMAGES, planShopeeOptionEdit, SHOPEE_OPTION_NAME_MAX,
+  type ShopeeOptionAdd, type ShopeeOptionEditPlan, type ShopeeOptionWant,
   type ShopeeAttrFieldsResponse, type ShopeeAttrPlan, type ShopeeImagePlan, type ShopeeListingDetailResponse, type ShopeeListingView, type ShopeeModelView, type ShopeePricePlan, type ShopeePriceRow, type ShopeeWriteResponse,
 } from "@/lib/shopee-listing-edit";
 import { ttsAttrDef, ttsAttrFromText, ttsAttrToText, type TtsAttrField, type TtsAttrState } from "@/lib/tiktok-attrs";
@@ -38,6 +39,8 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { LazadaAttrField } from "./lazada-listing-panels";
 import { AttrSuggestButtons, AttrSuggestPanel, applyAttrHits, useAttrSuggest } from "./attr-suggest-box";
 import { CheckBadge, CheckSysBox, SysThumbs, type ListingCheckApi } from "./listing-check";
+import { useSysVariants } from "./use-sys-variants";
+import { sizePricesForNewColor, sizeSkusForNewColor, sysOptionName, sysVariantOfOption, sysVariantsNotOnShop, type SysVariantView } from "@/lib/listing-option-sync";
 
 export type ShopeeListingState = {
   listingId: string | null;
@@ -129,6 +132,14 @@ export type ShopeeEditApi = {
   attrFields: TtsAttrField[] | null;
   attrMeta: { loading: boolean; error: string | null; categoryName: string | null };
   loadAttrFields: () => void;
+  /** ตัวเลือก (2026-11-24 · แบบ A): ชื่อ/รูปที่แก้ (ตำแหน่งในชั้นแรก) + สีจากระบบที่จะเพิ่ม (sku = รหัสสีในระบบ) */
+  optNames: Record<number, string>;
+  setOptName: (index: number, name: string | null) => void;
+  optImages: Record<number, string>;
+  setOptImage: (index: number, ref: string | null) => void;
+  optAdds: ShopeeOptionAdd[];
+  setOptAdds: (next: ShopeeOptionAdd[]) => void;
+  optionPlan: ShopeeOptionEditPlan | null;
   changeCount: number;
   errors: string[];
   dirty: boolean;
@@ -149,9 +160,13 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
   const [attrs, setAttrsState] = useState<TtsAttrState | null>(null);
   const [attrFields, setAttrFields] = useState<TtsAttrField[] | null>(null);
   const [attrMeta, setAttrMeta] = useState<{ loading: boolean; error: string | null; categoryName: string | null; cat: string | null }>({ loading: false, error: null, categoryName: null, cat: null });
+  const [optNames, setOptNames] = useState<Record<number, string>>({});
+  const [optImages, setOptImages] = useState<Record<number, string>>({});
+  const [optAdds, setOptAdds] = useState<ShopeeOptionAdd[]>([]);
   const [asking, setAsking] = useState(false);
   const [saving, setSaving] = useState(false);
   const priceBase = useMemo(() => (v ? shopeePriceRowsFromView(v) : null), [v]);
+  useEffect(() => { setOptNames({}); setOptImages({}); setOptAdds([]); }, [v]);
   // ข้อมูลจากร้านเปลี่ยน (เปิดตัวอื่น / ดึงใหม่ / หลังบันทึก) → เริ่มจากของบนร้าน
   // รูปในรายละเอียดในฟอร์ม = ลิงก์รูปบนร้าน (โชว์ได้ทันที) · ตอนส่งแปลงกลับเป็น "spi:<id>"
   const descBase = useMemo(() => (v ? v.descriptionImages.map((x) => x.url ?? shopeeImageRef(x.id)) : null), [v]);
@@ -191,14 +206,20 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     return refs ? planShopeeImages(v, refs)
       : { changed: true, refs: [], newImages: 0, removed: 0, coverChanged: false, changes: [], errors: ["มีรูปเดิมที่ระบบหารหัสบน Shopee ไม่เจอ — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่"], warnings: [] };
   }, [v, images]);
+  // ตัวเลือก: ชื่อ/รูป/สีใหม่ → แผนเดียว (update_tier_variation + add_model) · ส่งแยกคำสั่งก่อนอย่างอื่น
+  const optWant = useMemo((): ShopeeOptionWant => ({ names: optNames, images: optImages, add: optAdds }), [optNames, optImages, optAdds]);
+  const optionPlan = useMemo(() => (v && v.hasModel && (Object.keys(optNames).length || Object.keys(optImages).length || optAdds.length) ? planShopeeOptionEdit(v, optWant) : null), [v, optWant, optNames, optImages, optAdds]);
   const infoN = plan?.changes.length ?? 0;
   const priceN = pricePlan?.changes.length ?? 0;
   const imgN = imagePlan?.changed ? 1 : 0;
   const attrN = attrPlan?.changes.length ?? 0;
-  const changeCount = infoN + priceN + imgN + attrN;
+  const optN = optionPlan?.changed ? optionPlan.changes.length : 0;
+  const changeCount = infoN + priceN + imgN + attrN + optN;
   const dirty = changeCount > 0;
-  const errors = [...(plan?.errors ?? []), ...(pricePlan?.errors ?? []), ...(imgN ? imagePlan!.errors : []), ...(attrN ? attrPlan!.errors : [])];
-  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); setImagesState(v.images); setDescImagesState(descBase); setAttrsState(v.attrs); } };
+  const errors = [...(optN ? optionPlan!.errors : []), ...(plan?.errors ?? []), ...(pricePlan?.errors ?? []), ...(imgN ? imagePlan!.errors : []), ...(attrN ? attrPlan!.errors : [])];
+  const reset = () => { if (v) { setNameState(v.name); setDescState(v.description); setPricesState(priceBase); setImagesState(v.images); setDescImagesState(descBase); setAttrsState(v.attrs); setOptNames({}); setOptImages({}); setOptAdds([]); } };
+  const setOptName = useCallback((i: number, name: string | null) => setOptNames((m) => { const n = { ...m }; if (name == null || name === v?.optionTiers[0]?.options[i]?.name) delete n[i]; else n[i] = name; return n; }), [v]);
+  const setOptImage = useCallback((i: number, ref: string | null) => setOptImages((m) => { const n = { ...m }; if (!ref) delete n[i]; else n[i] = ref; return n; }), []);
 
   /** ส่งราคาก่อน (มีผลทันที) แล้วค่อยชื่อ/รายละเอียด/รูป (คำสั่งเดียว) · ราคาไม่ผ่านทั้งหมด = หยุด ไม่ส่งต่อ */
   const save = async () => {
@@ -206,6 +227,26 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     setSaving(true);
     try {
       let latest: ShopeeListingView | null = null;
+      // ตัวเลือก (ชื่อ/รูป/เพิ่มสี) ก่อน — คำสั่งแยกของ Shopee · ไม่ผ่าน = หยุด ไม่ส่งต่อ
+      if (optN && optionPlan) {
+        const t0 = v.optionTiers[0]?.options ?? [];
+        const r = await apiFetch("/api/shopee/listing-edit", {
+          method: "POST",
+          body: JSON.stringify({
+            listing_id: state.listingId,
+            options: { before: { names: t0.map((o) => o.name), image_ids: t0.map((o) => o.imageId ?? ""), model_ids: v.models.map((m) => m.modelId) }, names: optNames, images: optImages, add: optAdds },
+          }),
+        });
+        const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as ShopeeWriteResponse;
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        if (!j.ok) {
+          toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
+          if ((r.status === 409 || r.status === 502) && j.view) { state.apply(j.view); setAsking(false); }
+          return;
+        }
+        toast.success(`${j.summary ?? "แก้ตัวเลือกบน Shopee แล้ว"} — บันทึกประวัติแล้ว`);
+        latest = j.view;
+      }
       if (priceN && pricePlan && priceBase) {
         const r = await apiFetch("/api/shopee/listing-prices", {
           method: "POST",
@@ -219,6 +260,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
         if (!j.ok) {
           toast.error(r.status === 401 ? NO_AUTH : (j.error ?? `HTTP ${r.status}`));
           if ((r.status === 409 || r.status === 502) && j.view) { state.apply(j.view); setAsking(false); }
+          else if (latest) state.apply(latest);
           return;
         }
         toast.success(`${j.summary ?? "แก้ราคาบน Shopee แล้ว"} — บันทึกประวัติแล้ว`);
@@ -257,7 +299,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     finally { setSaving(false); }
   };
 
-  const warnings = [...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? []), ...(imgN ? imagePlan!.warnings : []), ...(attrN ? attrPlan!.warnings : [])];
+  const warnings = [...(optN ? optionPlan!.warnings : []), ...(pricePlan?.changes.length ? pricePlan.warnings : []), ...(plan?.warnings ?? []), ...(imgN ? imagePlan!.warnings : []), ...(attrN ? attrPlan!.warnings : [])];
   const dialog = (
     <ConfirmDialog open={asking && dirty} onClose={() => { if (!saving) setAsking(false); }} onConfirm={() => void save()} loading={saving}
       title={`ส่งการแก้ไข ${changeCount} รายการขึ้นร้าน Shopee?`} confirmText="ส่งขึ้น Shopee"
@@ -268,7 +310,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
             {(pricePlan?.changes ?? []).map((c) => (
               <li key={`p-${c.modelId}`}><span className="font-medium text-slate-700">ราคาตั้ง {c.label}:</span> {shopeePriceChangeText(c)}{c.promo ? <span className="text-orange-700"> · ในโปรโมชัน</span> : null}</li>
             ))}
-            {[...(plan?.changes ?? []), ...(imgN ? imagePlan!.changes : []), ...(attrN ? attrPlan!.changes : [])].map((c, i) => (
+            {[...(optN ? optionPlan!.changes : []), ...(plan?.changes ?? []), ...(imgN ? imagePlan!.changes : []), ...(attrN ? attrPlan!.changes : [])].map((c, i) => (
               <li key={`i-${i}`}><span className="font-medium text-slate-700">{c.label}:</span> <span className="text-slate-400 line-through">{c.before}</span> → <span className="text-slate-800">{c.after}</span></li>
             ))}
           </ul>
@@ -283,6 +325,7 @@ export function useShopeeEdit(state: ShopeeListingState, canEdit: boolean, onSav
     images, setImages: setImagesState, imagePlan,
     descImages, setDescImages: setDescImagesState, descImagesDirty,
     attrs, setAttrs: setAttrsState, attrPlan, attrFields, attrMeta: { loading: attrMeta.loading, error: attrMeta.error, categoryName: attrMeta.categoryName }, loadAttrFields,
+    optNames, setOptName, optImages, setOptImage, optAdds, setOptAdds, optionPlan,
     changeCount, errors, dirty, reset, ask: () => setAsking(true), saving, dialog,
   };
 }
@@ -639,25 +682,139 @@ function ShopeeBulkPrice({ edit, selected }: { edit: ShopeeEditApi; selected: Se
   );
 }
 
-/** แท็บตัวเลือก & ราคา — เฟส 4B แก้ "ราคาตั้ง" ต่อตัวเลือกได้ (ราคาที่ลูกค้าจ่ายมาจากโปรโมชัน · สต๊อกบนร้านไว้ดูเทียบ) */
-export function ShopeeOptionsPanel({ state, edit, chk = null }: { state: ShopeeListingState; edit?: ShopeeEditApi | null; chk?: ListingCheckApi | null }) {
+/**
+ * แท็บตัวเลือก & ราคา — ราคาตั้งต่อตัวเลือก (เฟส 4B) · ชื่อ/รูปของสี + เพิ่มสีจากระบบ (2026-11-24 เจ้าของเลือก "แบบ A + 1, 2, 3, 5, 6")
+ * แบบ A: สีที่มีในระบบแต่ยังไม่อยู่บนร้าน ต่อท้ายตารางเดียวกัน (ปุ่ม "+ เพิ่มขึ้น Shopee" · ข้อ 3 เพิ่มทั้งหมด) · ข้อ 1 "ชื่อตามระบบ"
+ * ข้อ 5 สินค้าสี×ไซซ์: สีใหม่เลือกไซซ์ได้ รหัส/ราคาต่อไซซ์ตามแบบแผนของสีเดิม · ข้อ 2 Shopee ปิดทีละสีไม่ได้ (บอกไว้ท้ายแท็บ)
+ * ทุกอย่างยังไม่ส่งจนกด "บันทึกขึ้น Shopee" (ถามก่อน → หลัง) · สต๊อกไม่ส่ง (สีใหม่ขึ้นที่ 0 · BigSeller ยังซิงค์)
+ */
+export function ShopeeOptionsPanel({ state, edit, chk = null, matchedParent = null, matchedCode = null }: {
+  state: ShopeeListingState; edit?: ShopeeEditApi | null; chk?: ListingCheckApi | null; matchedParent?: string | null; matchedCode?: string | null;
+}) {
+  const toast = useToast();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pick, setPick] = useState<{ kind: "opt"; index: number } | { kind: "add"; sku: string } | null>(null);
+  const v0 = state.view;
+  const optEnabled = !!v0?.hasModel && (v0?.optionTiers.length ?? 0) > 0;
+  const sysV = useSysVariants(state.listingId, optEnabled && !!matchedParent);
+  const sysImgs = useSystemImages(matchedParent, { withSkuImages: true });
   const g = gate(state); if (g) return g;
   const v = state.view!;
   const lockedStatus = v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE";
   const canPrice = !!edit?.canEdit && !!edit.prices && !lockedStatus;
+  const canOpt = !!edit?.canEdit && optEnabled && !lockedStatus;
   const rowOf = new Map((edit?.prices ?? []).map((r) => [r.modelId, r]));
   const rows: ShopeeModelView[] = v.hasModel ? v.models
-    : [{ modelId: "0", sku: v.itemSku, label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: v.price, originalPrice: v.originalPrice, stock: v.stock, image: v.images[0] ?? null, status: null, promo: v.inPromotion }];
+    : [{ modelId: "0", sku: v.itemSku, label: "สินค้าเดียว (ไม่มีตัวเลือก)", price: v.price, originalPrice: v.originalPrice, stock: v.stock, image: v.images[0] ?? null, status: null, promo: v.inPromotion, tierIndex: [] }];
   const promoN = rows.filter((m) => m.promo).length;
-  const cols: MiniColumn<ShopeeModelView>[] = [
-    { key: "img", header: "", width: "3rem", cell: (m) => (m.image ? <img src={m.image} alt="" className="h-9 w-9 rounded object-cover" /> : <div className="h-9 w-9 rounded bg-slate-100" />) },
-    { key: "opt", header: "ตัวเลือก", width: "1.6fr", cell: (m) => (
-      <div className="min-w-0">
-        <div className="truncate" title={m.label ?? ""}>{m.label ?? "—"}{m.promo && <span className="ml-1 rounded bg-orange-50 px-1 text-[10px] text-orange-700" title="อยู่ในโปรโมชัน — Shopee มักไม่ให้แก้ราคาตัวนี้">โปร</span>}</div>
-        <div className="truncate font-mono text-[11px] text-slate-400">{m.sku ?? "ไม่มีรหัส"}</div>
+  const tiers = v.optionTiers;
+  const t0 = tiers[0]?.options ?? [];
+  const twoTier = tiers.length > 1;
+  const sysList = sysV.variants ?? [];
+  const nameOf = (i: number) => edit?.optNames[i] ?? t0[i]?.name ?? "";
+  const imgRefOf = (i: number) => edit?.optImages[i] ?? null;
+  const imgSrcOf = (i: number) => { const r = imgRefOf(i); return r ? listingImgSrc(r, 120) : t0[i]?.imageUrl ?? null; };
+  const sysOfOpt = (i: number) => sysVariantOfOption(v.models, i, sysList);
+  const missing = optEnabled ? sysVariantsNotOnShop(v.models.map((m) => m.sku), sysList) : [];
+  const adds = edit?.optAdds ?? [];
+  const addOf = (code: string) => adds.find((a) => a.sku === code) ?? null;
+  const sizeDefaults = (sv: SysVariantView) => {
+    const n = tiers[1]?.options.length ?? 0;
+    const price = sv.price != null ? Math.round(sv.price) : null;
+    return { skus: sizeSkusForNewColor(v.models, sysList, sv.code, n), prices: sizePricesForNewColor(v.models, n, price) };
+  };
+  const defaultAdd = (sv: SysVariantView): ShopeeOptionAdd => {
+    const name = sysOptionName(sv) ?? sv.code;
+    const price = sv.price != null ? Math.round(sv.price) : null;
+    if (!twoTier) return { name, image: sv.image, sku: sv.code, price };
+    const d = sizeDefaults(sv);
+    return { name, image: sv.image, sku: sv.code, price, sizes: tiers[1].options.map((_, k) => ({ index: k, sku: d.skus[k] ?? "", price: d.prices[k] })) };
+  };
+  const setAdds = (next: ShopeeOptionAdd[]) => edit?.setOptAdds(next);
+  const toggleAdd = (sv: SysVariantView) => setAdds(addOf(sv.code) ? adds.filter((a) => a.sku !== sv.code) : [...adds, defaultAdd(sv)]);
+  const patchAdd = (code: string, patch: Partial<ShopeeOptionAdd>) => setAdds(adds.map((a) => (a.sku === code ? { ...a, ...patch } : a)));
+  const toggleSize = (sv: SysVariantView, k: number) => {
+    const a = addOf(sv.code); if (!a) return;
+    const sizes = a.sizes ?? [];
+    if (sizes.some((s) => s.index === k)) patchAdd(sv.code, { sizes: sizes.filter((s) => s.index !== k) });
+    else { const d = sizeDefaults(sv); patchAdd(sv.code, { sizes: [...sizes, { index: k, sku: d.skus[k] ?? "", price: d.prices[k] }].sort((x, y) => x.index - y.index) }); }
+  };
+  const patchSize = (code: string, k: number, patch: { sku?: string; price?: number | null }) => {
+    const a = addOf(code); if (!a) return;
+    patchAdd(code, { sizes: (a.sizes ?? []).map((s) => (s.index === k ? { ...s, ...patch } : s)) });
+  };
+  const notAdded = missing.filter((sv) => !addOf(sv.code));
+  const addAll = () => setAdds([...adds, ...notAdded.map(defaultAdd)]);
+  const useSysNames = () => t0.forEach((_, i) => { const n = sysOptionName(sysOfOpt(i)); if (n && n !== nameOf(i)) edit?.setOptName(i, n); });
+  const useSysImages = () => t0.forEach((_, i) => { const s = sysOfOpt(i); if (s?.image) edit?.setOptImage(i, s.image); });
+  const openPick = (p: NonNullable<typeof pick>) => { sysImgs.load(); setPick(p); };
+  // รูปที่เลือก → ref ที่ส่งได้: รูปจากระบบ "r2:" · รูปบนร้าน → "spi:<image_id>"
+  const refOfPicked = (ref: string): string | null => {
+    if (ref.startsWith("r2:") || ref.startsWith("spi:")) return ref;
+    const i = v.images.indexOf(ref);
+    if (i >= 0 && v.imageIds[i]) return shopeeImageRef(v.imageIds[i]);
+    const o = t0.find((x) => x.imageUrl === ref);
+    return o?.imageId ? shopeeImageRef(o.imageId) : null;
+  };
+  const onPicked = (raw: string) => {
+    const ref = refOfPicked(raw);
+    if (!ref) { toast.error("ใช้รูปนี้ไม่ได้ — เลือกรูปจากระบบ หรืออัปโหลดใหม่"); return; }
+    if (pick?.kind === "opt") edit?.setOptImage(pick.index, ref === (t0[pick.index]?.imageId ? shopeeImageRef(t0[pick.index].imageId!) : "") ? null : ref);
+    else if (pick?.kind === "add") patchAdd(pick.sku, { image: ref });
+    setPick(null);
+  };
+
+  const thumb = (src: string | null) => (src ? <img src={src} alt="" className="h-9 w-9 rounded object-cover" /> : <div className="h-9 w-9 rounded bg-slate-100" />);
+  const optImgCell = (i: number) => {
+    if (!canOpt || i < 0) return thumb(i >= 0 ? imgSrcOf(i) : null);
+    const changed = !!imgRefOf(i);
+    return (
+      <button type="button" onClick={() => openPick({ kind: "opt", index: i })} title="กดเพื่อเปลี่ยนรูปของตัวเลือกนี้"
+        className={`relative block rounded ${changed ? "ring-2 ring-violet-400" : ""}`}>
+        {thumb(imgSrcOf(i))}
+        <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[9px] text-slate-500"><Icon name="edit" /></span>
+      </button>
+    );
+  };
+  const optNameCell = (i: number, sub: ReactNode) => {
+    const orig = t0[i]?.name ?? "";
+    const cur = nameOf(i);
+    const changed = cur !== orig;
+    const sysName = sysOptionName(sysOfOpt(i));
+    return (
+      <div className="min-w-0 space-y-0.5">
+        {canOpt ? (
+          <input value={cur} onChange={(e) => edit!.setOptName(i, e.target.value)} aria-label="ชื่อตัวเลือก"
+            className={`h-8 w-full rounded-md border px-2 text-sm ${changed ? "border-violet-400 bg-violet-50" : "border-slate-200"}`} />
+        ) : <div className="truncate" title={orig}>{orig}</div>}
+        <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-400">
+          {sub}
+          {canOpt && sysName && sysName !== cur && (
+            <button type="button" onClick={() => edit!.setOptName(i, sysName)} title="ใช้ชื่อตามระบบ (ยังไม่ส่งจนกดบันทึก)"
+              className="rounded border border-violet-200 bg-white px-1 text-violet-700 hover:bg-violet-50">ชื่อตามระบบ: {sysName}</button>
+          )}
+          {sysName && sysName === cur && <span className="rounded bg-emerald-50 px-1 text-emerald-700">ตรงระบบ</span>}
+          {changed && <span className="line-through">{orig}</span>}
+          {canOpt && (changed || imgRefOf(i)) && (
+            <button type="button" onClick={() => { edit!.setOptName(i, null); edit!.setOptImage(i, null); }} className="inline-flex items-center gap-0.5 text-slate-500 hover:text-slate-700"><Icon name="history" />ย้อน</button>
+          )}
+        </div>
       </div>
-    ) },
+    );
+  };
+
+  const cols: MiniColumn<ShopeeModelView>[] = [
+    { key: "img", header: "", width: "3rem", cell: (m) => (v.hasModel && !twoTier ? optImgCell(m.tierIndex[0] ?? -1) : thumb(m.image)) },
+    { key: "opt", header: "ตัวเลือก", width: "1.8fr", cell: (m) => {
+      const sub = <><span className="font-mono">{m.sku ?? "ไม่มีรหัส"}</span>{m.promo && <span className="rounded bg-orange-50 px-1 text-[10px] text-orange-700" title="อยู่ในโปรโมชัน — Shopee มักไม่ให้แก้ราคาตัวนี้">โปร</span>}</>;
+      if (v.hasModel && !twoTier && (m.tierIndex[0] ?? -1) >= 0) return optNameCell(m.tierIndex[0], sub);
+      return (
+        <div className="min-w-0">
+          <div className="truncate" title={m.label ?? ""}>{m.label ?? "—"}</div>
+          <div className="flex items-center gap-1 truncate text-[11px] text-slate-400">{sub}</div>
+        </div>
+      );
+    } },
     {
       key: "orig", header: canPrice ? "ราคาตั้ง (แก้ได้)" : "ราคาตั้ง", width: canPrice ? "7.5rem" : "6rem", align: "right", sortValue: (m) => m.originalPrice,
       cell: (m) => {
@@ -678,26 +835,118 @@ export function ShopeeOptionsPanel({ state, edit, chk = null }: { state: ShopeeL
   ];
   // ราคาของระบบ → แถวราคาในฟอร์ม (ตัวช่วยกลาง shopeeRowsWithSysPrices)
   const useSysPrices = () => { if (edit?.prices && chk?.sys) edit.setPrices(shopeeRowsWithSysPrices(v, edit.prices, chk.sys.prices)); };
+  const sysNamesN = t0.filter((_, i) => { const n = sysOptionName(sysOfOpt(i)); return !!n && n !== nameOf(i); }).length;
+
+  const missingRow = (sv: SysVariantView) => {
+    const a = addOf(sv.code);
+    const img = a?.image ?? sv.image;
+    return (
+      <div key={sv.code} className={`flex flex-wrap items-start gap-2 border-t border-violet-100 px-2.5 py-2 ${a ? "bg-violet-50/70" : ""}`}>
+        {a && canOpt ? (
+          <button type="button" onClick={() => openPick({ kind: "add", sku: sv.code })} title="กดเพื่อเลือกรูปของสีนี้" className="relative block rounded">
+            {img ? <img src={listingImgSrc(img, 120)} alt="" className="h-9 w-9 rounded object-cover" /> : <div className="flex h-9 w-9 items-center justify-center rounded border border-dashed border-violet-300 text-violet-400"><Icon name="image" /></div>}
+            <span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[9px] text-slate-500"><Icon name="edit" /></span>
+          </button>
+        ) : (img ? <img src={listingImgSrc(img, 120)} alt="" className="h-9 w-9 rounded border border-dashed border-violet-200 object-cover" /> : <div className="h-9 w-9 rounded border border-dashed border-violet-200 bg-white" />)}
+        <div className="min-w-0 flex-1 space-y-1">
+          {a && canOpt ? (
+            <input value={a.name} onChange={(e) => patchAdd(sv.code, { name: e.target.value })} aria-label="ชื่อสีใหม่"
+              className="h-8 w-full rounded-md border border-violet-300 bg-white px-2 text-sm" />
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 text-sm text-slate-700">{sysOptionName(sv) ?? sv.code}
+              <span className="rounded bg-violet-100 px-1 text-[10px] text-violet-800">ในระบบ</span>
+            </div>
+          )}
+          <div className="text-[11px] text-slate-500"><span className="font-mono">{sv.code}</span> · ในระบบมี {sv.stock == null ? "—" : sv.stock.toLocaleString()} ชิ้น{a ? " · ขึ้นร้านด้วยสต๊อก 0 (BigSeller เติมให้)" : ""}</div>
+          {a && !twoTier && canOpt && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">ราคาตั้ง
+              <MoneyInput value={a.price} onChange={(raw) => patchAdd(sv.code, { price: numOrNull(raw) })} className="h-8 w-28 rounded-md border border-violet-300 bg-white px-2 text-right text-sm" />
+            </label>
+          )}
+          {a && twoTier && canOpt && (
+            <div className="space-y-1 rounded-md border border-violet-200 bg-white p-1.5">
+              <div className="text-[11px] text-slate-500">{tiers[1].name || "ไซซ์"} ที่จะเพิ่ม (ติ๊ก) · รหัส/ราคาต่อไซซ์ตามแบบของสีเดิม แก้ได้</div>
+              {tiers[1].options.map((o, k) => {
+                const s = (a.sizes ?? []).find((x) => x.index === k);
+                return (
+                  <div key={k} className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <label className="flex w-20 items-center gap-1"><input type="checkbox" checked={!!s} onChange={() => toggleSize(sv, k)} />{o.name}</label>
+                    {s && <input value={s.sku} onChange={(e) => patchSize(sv.code, k, { sku: e.target.value })} placeholder="รหัส SKU" aria-label={`รหัส ${o.name}`} className="h-7 w-36 rounded border border-slate-200 px-1.5 font-mono text-[11px]" />}
+                    {s && <MoneyInput value={s.price} onChange={(raw) => patchSize(sv.code, k, { price: numOrNull(raw) })} className="h-7 w-24 rounded border border-slate-200 px-1.5 text-right" />}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {!a && !twoTier && <span className="self-center text-sm text-slate-500">{baht(sv.price)}</span>}
+        {canOpt && (
+          <button type="button" onClick={() => toggleAdd(sv)}
+            className={`h-8 shrink-0 self-center rounded-md px-2.5 text-xs ${a ? "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" : "border border-violet-300 bg-white text-violet-800 hover:bg-violet-50"}`}>
+            {a ? "ไม่เพิ่ม" : <span className="inline-flex items-center gap-1"><Icon name="add" />เพิ่มขึ้น Shopee</span>}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-2">
       {chk?.on && (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">ราคา <CheckBadge chk={chk} k="price" /> · ชื่อตัวเลือก <CheckBadge chk={chk} k="options" /> · รูปตัวเลือก <CheckBadge chk={chk} k="variant_images" /></div>
           <CheckSysBox chk={chk} k="price" onUse={canPrice ? useSysPrices : null} useLabel="ใช้ราคาตามระบบ" />
-          <CheckSysBox chk={chk} k="options" />
-          <CheckSysBox chk={chk} k="variant_images" />
+          <CheckSysBox chk={chk} k="options" onUse={canOpt ? useSysNames : null} useLabel="ใช้ชื่อตามระบบทั้งหมด" />
+          <CheckSysBox chk={chk} k="variant_images" onUse={canOpt ? useSysImages : null} useLabel="ใช้รูปตามระบบทั้งหมด" />
         </div>
       )}
       {canPrice && edit && <ShopeeBulkPrice edit={edit} selected={selected} />}
+      {canOpt && sysNamesN > 1 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+          <span>ชื่อสีบนร้านต่างจากระบบ {sysNamesN.toLocaleString()} ตัว</span>
+          <button type="button" onClick={useSysNames} className="h-7 rounded-md border border-violet-300 bg-white px-2 text-violet-800 hover:bg-violet-50">ใช้ชื่อตามระบบทั้งหมด</button>
+        </div>
+      )}
       {canPrice && promoN > 0 && (
-        <p className="flex items-start gap-1 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs text-orange-800"><Icon name="warning" className="mt-0.5 shrink-0" />{promoN.toLocaleString()} ตัวเลือกอยู่ในโปรโมชัน (ป้าย “โปร”) — Shopee มักไม่ให้แก้ราคาจนกว่าจะนำออกจากโปรโมชันใน Seller Centre · ตัวที่ไม่อยู่ในโปรแก้ได้ตามปกติ</p>
+        <p className="flex items-start gap-1 rounded-lg bg-orange-50 px-2.5 py-1.5 text-xs text-orange-800"><Icon name="warning" className="mt-0.5 shrink-0" />{promoN.toLocaleString()} ตัวเลือกอยู่ในโปรโมชัน (ป้าย “โปร”) — Shopee มักไม่ให้แก้ราคา (และอาจไม่ให้แก้ชื่อ/รูป) จนกว่าจะนำออกจากโปรโมชันใน Seller Centre</p>
+      )}
+      {twoTier && (
+        <div className="rounded-lg border border-slate-200">
+          <div className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600">
+            {tiers[0].name || "ตัวเลือก"} ({t0.length.toLocaleString()}){canOpt ? " — แก้ชื่อ/กดรูปเพื่อเปลี่ยน" : ""} · {tiers[1].name}: {tiers[1].options.map((o) => o.name).join(", ")}
+          </div>
+          {t0.map((_, i) => (
+            <div key={i} className="flex items-start gap-2 border-t border-slate-100 px-2.5 py-1.5 first:border-t-0">
+              {optImgCell(i)}
+              <div className="min-w-0 flex-1">{optNameCell(i, <span>{v.models.filter((m) => m.tierIndex[0] === i).length.toLocaleString()} ตัวเลือก</span>)}</div>
+            </div>
+          ))}
+        </div>
       )}
       <MiniTable rows={rows} columns={cols} rowKey={(m) => m.modelId} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-shopee-options"
         selectable={canPrice && rows.length > 1} selected={selected} onSelectedChange={setSelected} />
+      {optEnabled && !!matchedParent && (missing.length > 0 || sysV.loading || sysV.error) && (
+        <div className="overflow-hidden rounded-lg border border-dashed border-violet-300">
+          <div className="flex flex-wrap items-center gap-2 bg-violet-50 px-2.5 py-1.5 text-xs text-violet-900">
+            <span className="font-medium">มีในระบบ ยังไม่อยู่บนร้าน ({missing.length.toLocaleString()})</span>
+            {sysV.loading && <span className="text-slate-500">กำลังโหลดสีในระบบ…</span>}
+            {sysV.error && <span className="text-rose-600">{sysV.error} <button type="button" onClick={sysV.reload} className="underline">ลองใหม่</button></span>}
+            {canOpt && notAdded.length > 1 && <button type="button" onClick={addAll} className="ml-auto h-7 rounded-md border border-violet-300 bg-white px-2 text-violet-800 hover:bg-violet-50">เพิ่มทั้งหมด ({notAdded.length.toLocaleString()})</button>}
+          </div>
+          {missing.map(missingRow)}
+        </div>
+      )}
       <p className="text-[11px] text-slate-400">
-        {canPrice ? "แก้ราคาตั้งแล้วกด “บันทึกขึ้น Shopee” (ถามยืนยันก่อน · มีผลทันที) · ราคาที่ลูกค้าจ่ายมาจากโปรโมชันของร้าน (แก้ใน Seller Centre)" : "ดูอย่างเดียว"}
-        {" · "}สต๊อกบนร้านไว้ดูเทียบเท่านั้น (BigSeller ยังซิงค์อยู่ ระบบไม่ส่งสต๊อก)
+        {canOpt ? "แก้ชื่อสี · กดรูปเพื่อเปลี่ยน · เพิ่มสีจากระบบ · แก้ราคาตั้ง แล้วกด “บันทึกขึ้น Shopee” (ถามยืนยันก่อน → หลัง · มีประวัติ)" : canPrice ? "แก้ราคาตั้งแล้วกด “บันทึกขึ้น Shopee” (ถามยืนยันก่อน · มีผลทันที)" : "ดูอย่างเดียว"}
+        {" · "}ราคาที่ลูกค้าจ่ายมาจากโปรโมชันของร้าน (แก้ใน Seller Centre) · สต๊อกบนร้านไว้ดูเทียบเท่านั้น (BigSeller ยังซิงค์อยู่ ระบบไม่ส่งสต๊อก)
+        {optEnabled ? " · Shopee ปิดขายทีละสีไม่ได้ (ปิดได้ทั้งสินค้าที่หัวลิ้นชัก)" : ""}
       </p>
+      {canOpt && (
+        <ListingImagePicker open={!!pick} onClose={() => setPick(null)} mode="variant" storageKey="shopee-option-image-picker"
+          title={pick?.kind === "opt" ? `เลือกรูปของ “${nameOf(pick.index)}”` : "เลือกรูปของสีใหม่"}
+          description="เลือก 1 รูป · รูปจากระบบจะฝากกับ Shopee ตอนกดบันทึก · Shopee ต้องมีรูปครบทุกสี"
+          shopImages={v.images} matchedParent={matchedParent} matchedCode={matchedCode} sysImages={sysImgs.images} onPick={onPicked} />
+      )}
     </div>
   );
 }

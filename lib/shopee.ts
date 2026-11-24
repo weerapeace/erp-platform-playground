@@ -252,7 +252,11 @@ export async function shopeeGetModelList(accessToken: string, shopId: string | n
 }
 
 // ───────── แปลงเป็นสำเนาย่อ (raw.shopee) — เก็บเฉพาะที่ใช้ ไม่เก็บคำอธิบายยาว ─────────
-export type ShopeeSlimModel = { model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน (has_promotion) — Shopee ไม่ให้แก้ราคาตัวนี้ */ promo?: boolean };
+export type ShopeeSlimModel = {
+  model_id: string; sku: string | null; label: string | null; price: number | null; original_price: number | null; stock: number | null; image: string | null; status: string | null;
+  /** อยู่ในโปรโมชัน (has_promotion) — Shopee ไม่ให้แก้ราคาตัวนี้ */ promo?: boolean;
+  /** ตำแหน่งตัวเลือกในแต่ละชั้น (get_model_list tier_index) — ต้องส่งกลับใน model_list ตอนแก้ชื่อ/รูป/เพิ่มสี (2026-11-24) */ tier_index?: number[];
+};
 /** images = รูปของแต่ละตัวเลือก (Shopee มีเฉพาะชั้นแรก) — ใช้แก้รูปตัวเลือก (lib/shopee-listing-edit planShopeeOptionImages) */
 export type ShopeeSlimTier = { name: string; options: string[]; images?: ({ id: string; url: string | null } | null)[] };
 export type ShopeeSlim = {
@@ -294,6 +298,7 @@ export function shopeeModelsToSlim(raw: ShopeeModelsRaw | null): { tiers: Shopee
     return {
       model_id: String(m.model_id ?? ""), sku: str(m.model_sku), label, price: pr.price, original_price: pr.original,
       stock: stockOf(m), image: Number.isFinite(idx[0]) ? tierImg(idx[0]) : null, status: str(m.model_status), promo: m.has_promotion === true,
+      ...(idx.length && idx.every((n) => Number.isInteger(n) && n >= 0) ? { tier_index: idx } : {}),
     };
   }).filter((m) => m.model_id);
   return { tiers, models };
@@ -532,12 +537,22 @@ export async function shopeeAddItem(accessToken: string, shopId: string | number
 }
 
 /**
- * v2.product.update_tier_variation — แก้ "รายการตัวเลือก" ของสินค้าที่มีตัวเลือกแล้ว (เจ้าของสั่ง 2026-11-22: เปลี่ยนรูปของแต่ละสี)
- * ส่ง tier_variation ครบทุกชั้น · ชื่อชั้น/ชื่อตัวเลือก/ลำดับเหมือนเดิม เปลี่ยนแค่ image.image_id ของชั้นแรก · ไม่ส่ง model_list (ไม่เปลี่ยนโครงตัวเลือก)
- * ⚠️ ยังไม่ยืนยันจากเอกสารว่าไม่กระทบตัวเลือกเดิม → route ดึงกลับเช็กจำนวนตัวเลือก/ราคา/สต๊อกทุกครั้ง · ลองครั้งแรกกับสินค้าขายน้อย 1 ตัว
+ * v2.product.update_tier_variation — แก้ "รายการตัวเลือก" ของสินค้าที่มีตัวเลือกแล้ว (รูป · ชื่อ · เพิ่มตัวเลือกใหม่ต่อท้าย)
+ * ส่ง tier_variation ครบทุกชั้น + **model_list ของทุกตัวเลือกเดิม (model_id + tier_index)** — คู่มือ Shopee (Developer Guide 219):
+ * "ถ้ายังต้องการเก็บข้อมูลตัวเลือกเดิม ต้องส่ง model_list" (เดิม 2026-11-22 ไม่ได้ส่ง → เสี่ยงตัวเลือกเดิมหลุดคู่ · แก้ 2026-11-24)
+ * ตัวเลือกใหม่ = ใส่ใน option_list แล้วค่อย add_model (คำสั่งนี้ไม่มี model ของตัวใหม่)
+ * route ดึงกลับเช็กตัวเลือกเดิม/ราคาทุกครั้ง
  */
-export async function shopeeUpdateTierVariation(accessToken: string, shopId: string | number, itemId: string, tierVariation: Record<string, unknown>[]): Promise<Record<string, unknown>> {
-  return shopeeFetch("/api/v2/product/update_tier_variation", { accessToken, shopId, body: { item_id: Number(itemId), tier_variation: tierVariation } });
+export async function shopeeUpdateTierVariation(accessToken: string, shopId: string | number, itemId: string, tierVariation: Record<string, unknown>[], modelList: { model_id: number; tier_index: number[] }[]): Promise<Record<string, unknown>> {
+  return shopeeFetch("/api/v2/product/update_tier_variation", { accessToken, shopId, body: { item_id: Number(itemId), tier_variation: tierVariation, model_list: modelList } });
+}
+
+/**
+ * v2.product.add_model — เพิ่ม model ให้ตัวเลือกใหม่ที่เพิ่งใส่ใน tier_variation (2026-11-24 · เพิ่มสีจากระบบ)
+ * model_list[{tier_index, original_price, model_sku ≤100, seller_stock:[{stock}]}] · สต๊อกเริ่ม 0 (BigSeller ยังซิงค์สต๊อก — ระบบไม่ส่งสต๊อก)
+ */
+export async function shopeeAddModel(accessToken: string, shopId: string | number, itemId: string, modelList: { tier_index: number[]; original_price: number; model_sku: string; seller_stock: { stock: number }[] }[]): Promise<Record<string, unknown>> {
+  return shopeeFetch("/api/v2/product/add_model", { accessToken, shopId, body: { item_id: Number(itemId), model_list: modelList } });
 }
 
 /** v2.product.init_tier_variation — ตั้งชั้นตัวเลือก + ตัวเลือก (หลัง add_item ≥5 วิ · standardise_tier_variation) · คืนคำตอบดิบ */

@@ -48,6 +48,7 @@ import { ShopeeEditFooter, ShopeeHeaderStatus, ShopeeImagesPanel, ShopeeInfoPane
 import { CheckSummaryBar, CheckTabBlock, CheckToggleButton, SysThumbs, useListingCheck, type CheckFill } from "./listing-check";
 import { DRIFT_LABEL, plainText } from "@/lib/platform-listing-drift";
 import { shopeeImagesMax, shopeeRowsWithSysPrices } from "@/lib/shopee-listing-edit";
+import { sysOptionName, sysVariantOfOption } from "@/lib/listing-option-sync";
 import type { DriftKey } from "@/lib/platform-listing-drift";
 import type { TtsAttrState } from "@/lib/tiktok-attrs";
 import { applyBulkPrice, planLineEdit, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
@@ -259,6 +260,11 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
     ...(sysV.imageRefs.length ? { images: () => spEdit.setImages(sysV.imageRefs.slice(0, shopeeImagesMax(sp.view!))) } : {}),
     ...(sysV.attrs ? { attrs: () => spEdit.setAttrs({ ...(spEdit.attrs ?? sp.view!.attrs), ...(sysV.attrs as TtsAttrState) }) } : {}),
     ...(spEdit.prices ? { price: () => spEdit.setPrices(shopeeRowsWithSysPrices(sp.view!, spEdit.prices!, sysV.prices)) } : {}),
+    // ชื่อ/รูปตัวเลือกตามระบบ (2026-11-24) — จับตัวเลือกบนร้าน ↔ สีในระบบด้วยรหัส
+    ...(sp.view.optionTiers.length && sysV.variants?.length ? {
+      options: () => sp.view!.optionTiers[0].options.forEach((o, i) => { const n = sysOptionName(sysVariantOfOption(sp.view!.models, i, sysV.variants)); if (n && n !== o.name) spEdit.setOptName(i, n); }),
+      variant_images: () => sp.view!.optionTiers[0].options.forEach((_, i) => { const s = sysVariantOfOption(sp.view!.models, i, sysV.variants); if (s?.image) spEdit.setOptImage(i, s.image); }),
+    } : {}),
   } : isTiktok && ttView && ttEdit.canEdit ? {
     ...(sysV.title ? { title: () => ttEdit.setTitle(sysV.title!) } : {}),
     description: () => { ttEdit.setDescEdit(true); ttEdit.setDescription(sysV.description); },
@@ -574,7 +580,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
                 : isLazada ? (tab === "info" ? <LazadaInfoPanel state={laz} edit={lazEdit} /> : tab === "images" ? <LazadaImagesPanel state={laz} onOpen={setLightbox} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />
                   : <LazadaOptionsPanel state={laz} disp={lazCanEdit ? lazDisp : null} edit={lazEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
                 : isTiktok ? (tab === "info" ? <TiktokInfoPanel state={tt} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : tab === "images" ? <TiktokImagesPanel state={tt} onOpen={setLightbox} edit={ttEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} /> : <TiktokOptionsPanel state={tt} edit={ttEdit} erpRows={variants?.supported && variants.fetched ? rowByKey : null} matchedParent={matchedParent} matchedCode={detail?.matched_code} />)
-                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} chk={chk} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} chk={chk} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} chk={chk} />)
+                : isShopee ? (tab === "info" ? <ShopeeInfoPanel state={sp} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} chk={chk} /> : tab === "images" ? <ShopeeImagesPanel state={sp} onOpen={setLightbox} edit={spEdit} matchedParent={matchedParent} matchedCode={detail?.matched_code} chk={chk} /> : <ShopeeOptionsPanel state={sp} edit={spEdit} chk={chk} matchedParent={matchedParent} matchedCode={detail?.matched_code ?? null} />)
                 : tab === "info" ? infoTab : tab === "images" ? imagesTab : optionsTab}
             </div>
           )}

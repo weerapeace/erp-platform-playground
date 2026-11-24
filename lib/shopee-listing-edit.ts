@@ -17,8 +17,12 @@ import type { TtsAttrField, TtsAttrState, TtsAttrVal } from "@/lib/tiktok-attrs"
 export const SHOPEE_DESC_MAX_IMAGES = 12;
 export const SHOPEE_DESC_MIN_WIDTH = 800;
 
-export type ShopeeLimits = { nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null; priceMin?: number | null; priceMax?: number | null };
-export type ShopeeModelView = { modelId: string; sku: string | null; label: string | null; price: number | null; originalPrice: number | null; stock: number | null; image: string | null; status: string | null; /** อยู่ในโปรโมชัน — แก้ราคาตัวนี้ไม่ได้ */ promo?: boolean };
+export type ShopeeLimits = { nameMin: number | null; nameMax: number | null; descMin: number | null; descMax: number | null; imagesMax: number | null; priceMin?: number | null; priceMax?: number | null; /** ความยาวชื่อตัวเลือก (tier_variation_option_length_limit) */ optionMax?: number | null };
+export type ShopeeModelView = {
+  modelId: string; sku: string | null; label: string | null; price: number | null; originalPrice: number | null; stock: number | null; image: string | null; status: string | null;
+  /** อยู่ในโปรโมชัน — แก้ราคาตัวนี้ไม่ได้ */ promo?: boolean;
+  /** ตำแหน่งตัวเลือกในแต่ละชั้น · ไม่รู้ = [] (สำเนาเก่าก่อน 2026-11-24 — ดึงสดใหม่ก่อนแก้ตัวเลือก) */ tierIndex: number[];
+};
 export type ShopeeListingView = {
   itemId: string;
   name: string;
@@ -84,7 +88,8 @@ export function shopeeLimitsOf(j: Obj | null): ShopeeLimits | null {
   const name = rng("item_name_length_limit"), desc = rng("item_description_length_limit");
   const imgs = obj(r.item_image_count_limit);
   const price = rng("price_limit");
-  const out = { nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMax: num(imgs?.max_limit ?? imgs?.max), priceMin: price.min, priceMax: price.max };
+  const opt = rng("tier_variation_option_length_limit");
+  const out = { nameMin: name.min, nameMax: name.max, descMin: desc.min, descMax: desc.max, imagesMax: num(imgs?.max_limit ?? imgs?.max), priceMin: price.min, priceMax: price.max, optionMax: opt.max };
   return Object.values(out).some((v) => v != null) ? out : null;
 }
 
@@ -111,7 +116,7 @@ export function shopeeListingView(base: Obj, models: { models: ShopeeSlimModel[]
   const p = obj(arr(base.price_info)[0]);
   const s2 = num(obj(obj(base.stock_info_v2)?.summary_info)?.total_available_stock);
   const dim = obj(base.dimension);
-  const ms = (models?.models ?? []).map((m) => ({ modelId: m.model_id, sku: m.sku, label: m.label, price: m.price, originalPrice: m.original_price, stock: m.stock, image: m.image, status: m.status, promo: m.promo === true }));
+  const ms = (models?.models ?? []).map((m) => ({ modelId: m.model_id, sku: m.sku, label: m.label, price: m.price, originalPrice: m.original_price, stock: m.stock, image: m.image, status: m.status, promo: m.promo === true, tierIndex: m.tier_index ?? [] }));
   const img = obj(base.image);
   const imgIds = arr(img?.image_id_list).map((u) => str(u));
   const imgs = arr(img?.image_url_list).map((u, i) => ({ url: str(u), id: imgIds[i] ?? null })).filter((x): x is { url: string; id: string | null } => !!x.url);
@@ -311,43 +316,168 @@ export const shopeeImageRef = (id: string): string => `spi:${id}`;
 export const shopeeImageIdOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("spi:") ? ref.slice(4) || null : null);
 export const shopeeR2KeyOfRef = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) || null : null);
 
-// ───────── รูปของแต่ละตัวเลือก (สี) → v2.product.update_tier_variation (เจ้าของสั่ง 2026-11-22 "ทำเลย") ─────────
-// ส่งทุกชั้นด้วยชื่อ/ลำดับเดิม เปลี่ยนแค่รูปของชั้นแรก · Shopee: ถ้ามีรูปตัวเลือก ต้องมีครบทุกตัวในชั้นแรก
-export type ShopeeOptionImagePlan = {
+// ───────── ตัวเลือก (สี) → v2.product.update_tier_variation (+ add_model) ─────────
+// 2026-11-22 รูปของแต่ละสี · 2026-11-24 (เจ้าของเลือก "ตัวเลือกบนร้าน แบบ A + 1,2,3,5,6"): แก้ชื่อสี · เพิ่มสีจากระบบ (ชั้นเดียว / สี×ไซซ์)
+// กติกา Shopee (Developer Guide 219 "Variant management"):
+//   - ส่ง tier_variation ทุกชั้น + model_list ของทุก model เดิม (model_id + tier_index) → ตัวเลือกเดิม ราคา/สต๊อก/ยอดขาย คงอยู่ (Scenario 7 แก้ชื่อ)
+//   - เพิ่มสี = ใส่ตัวเลือกใหม่ต่อท้ายชั้นแรกในคำสั่งเดียวกัน แล้ว add_model ให้ตัวใหม่ (Scenario 1) · 2 ชั้น = 1 model ต่อไซซ์
+//   - รูปตัวเลือกมีเฉพาะชั้นแรก และต้องมีครบทุกตัวหรือไม่มีเลย · ชื่อตัวเลือก ≤ get_item_limit (ไม่รู้ = 20) · ≤ 50 model ต่อสินค้า
+//   - ปิดขายทีละสีไม่ได้ (update_model.model_status ใช้ได้เฉพาะร้าน CNSC/KRSC) — เจ้าของเลือก "ไม่ทำบน 3 ร้าน" 2026-11-24
+export const SHOPEE_OPTION_NAME_MAX = 20;
+export const SHOPEE_MAX_MODELS = 50;
+export type ShopeeOptionAdd = {
+  /** ชื่อตัวเลือกใหม่ในชั้นแรก เช่น "ทอง (07)" */
+  name: string;
+  /** รูปของสีใหม่ ("r2:<key>" จากระบบ · "spi:<id>") — ร้านที่ใช้รูปตัวเลือก ต้องมี */
+  image: string | null;
+  /** สินค้าชั้นเดียว: รหัส + ราคาตั้ง ของ model ใหม่ */
+  sku: string;
+  price: number | null;
+  /** สินค้า 2 ชั้น (สี×ไซซ์): 1 model ต่อไซซ์ (index ของตัวเลือกในชั้นที่ 2) */
+  sizes?: { index: number; sku: string; price: number | null }[];
+};
+export type ShopeeOptionWant = {
+  /** ชื่อใหม่ของตัวเลือกชั้นแรก (index → ชื่อ) */
+  names?: Record<number, string>;
+  /** รูปใหม่ของตัวเลือกชั้นแรก (index → ref) */
+  images?: Record<number, string>;
+  add?: ShopeeOptionAdd[];
+};
+export type ShopeeOptionEditPlan = {
   changed: boolean;
   /** tier_variation ที่จะส่ง (รูป = image_ref · route ฝาก r2 แล้วแทนเป็น image_id) */
   tierVariation: Record<string, unknown>[];
+  /** model เดิมทั้งหมด (คงคู่ตัวเลือกเดิม) */
+  modelList: { model_id: number; tier_index: number[] }[];
+  /** model ของสีใหม่ (add_model · สต๊อก 0) */
+  addModels: { tier_index: number[]; original_price: number; model_sku: string; seller_stock: { stock: number }[] }[];
   changes: { label: string; before: string; after: string }[];
   errors: string[]; warnings: string[];
 };
-/**
- * want = { ชื่อตัวเลือกชั้นแรก: ref } ("spi:<image_id>" รูปเดิม · "r2:<key>" รูปจากระบบ) · ตัวที่ไม่ส่ง = คงรูปเดิม
- */
-export function planShopeeOptionImages(v: Pick<ShopeeListingView, "optionTiers" | "status">, want: Record<string, string>): ShopeeOptionImagePlan {
-  const out: ShopeeOptionImagePlan = { changed: false, tierVariation: [], changes: [], errors: [], warnings: [] };
+const cleanOpt = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
+/** ชื่อเทียบซ้ำ (ไม่สนช่องว่าง/ตัวพิมพ์) */
+const optKey = (s: string) => cleanOpt(s).toLowerCase();
+export function planShopeeOptionEdit(v: Pick<ShopeeListingView, "optionTiers" | "status" | "models" | "limits">, want: ShopeeOptionWant): ShopeeOptionEditPlan {
+  const out: ShopeeOptionEditPlan = { changed: false, tierVariation: [], modelList: [], addModels: [], changes: [], errors: [], warnings: [] };
   const tiers = v.optionTiers ?? [];
-  if (!tiers.length) { out.errors.push("สินค้านี้ไม่มีตัวเลือก — ไม่มีรูปตัวเลือกให้เปลี่ยน"); return out; }
+  if (!tiers.length) { out.errors.push("สินค้านี้ไม่มีตัวเลือก — เพิ่ม/แก้ตัวเลือกต้องทำใน Seller Centre (เปลี่ยนโครงตัวเลือก)"); return out; }
   if (v.status === "SELLER_DELETE" || v.status === "SHOPEE_DELETE") out.errors.push("สินค้านี้ถูกลบแล้ว");
   const t0 = tiers[0];
-  const names = new Set(t0.options.map((o) => o.name));
-  const unknown = Object.keys(want).filter((k) => !names.has(k));
-  if (unknown.length) out.warnings.push(`ไม่พบตัวเลือกชื่อ ${unknown.slice(0, 3).join(", ")} บนร้าน — ข้ามไป`);
-  const refs = t0.options.map((o) => String(want[o.name] ?? "").trim() || (o.imageId ? shopeeImageRef(o.imageId) : ""));
-  const cur = t0.options.map((o) => (o.imageId ? shopeeImageRef(o.imageId) : ""));
-  const diffIdx = refs.map((r, i) => (r !== cur[i] ? i : -1)).filter((i) => i >= 0);
-  out.changed = diffIdx.length > 0;
+  const max = v.limits?.optionMax ?? SHOPEE_OPTION_NAME_MAX;
+  const adds = (want.add ?? []).map((a) => ({ ...a, name: cleanOpt(a.name), sku: String(a.sku ?? "").trim() }));
+  // ── ชื่อ ──
+  const curNames = t0.options.map((o) => o.name);
+  const finalNames = curNames.map((n, i) => { const w = want.names?.[i]; return w == null ? n : cleanOpt(w); });
+  const renamed = finalNames.map((n, i) => (n !== curNames[i] ? i : -1)).filter((i) => i >= 0);
+  const allNames = [...finalNames, ...adds.map((a) => a.name)];
+  allNames.forEach((n, i) => {
+    if (!n) out.errors.push(i < finalNames.length ? `ชื่อตัวเลือกที่ ${i + 1} ว่าง` : "สีใหม่ต้องมีชื่อ");
+    else if ([...n].length > max) out.errors.push(`ชื่อ “${n}” ยาวเกิน ${max} ตัวอักษร (Shopee)`);
+  });
+  const seen = new Map<string, number>();
+  for (const n of allNames) { if (!n) continue; const k = optKey(n); seen.set(k, (seen.get(k) ?? 0) + 1); }
+  const dups = [...seen].filter(([, c]) => c > 1).map(([k]) => allNames.find((n) => optKey(n) === k));
+  if (dups.length) out.errors.push(`ชื่อตัวเลือกซ้ำกัน: ${dups.slice(0, 3).join(", ")}`);
+  // ── รูป (ชั้นแรก) ──
+  const curRefs = t0.options.map((o) => (o.imageId ? shopeeImageRef(o.imageId) : ""));
+  const finalRefs = curRefs.map((r, i) => String(want.images?.[i] ?? "").trim() || r);
+  const reimg = finalRefs.map((r, i) => (r !== curRefs[i] ? i : -1)).filter((i) => i >= 0);
+  const allRefs = [...finalRefs, ...adds.map((a) => String(a.image ?? "").trim())];
+  if (allRefs.some((r) => r && !shopeeImageIdOfRef(r) && !shopeeR2KeyOfRef(r))) out.errors.push("มีรูปตัวเลือกที่ระบบไม่รู้จัก — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่");
+  if (allRefs.some(Boolean)) {
+    const missing = allNames.filter((_, i) => !allRefs[i]);
+    if (missing.length) out.errors.push(`Shopee ต้องมีรูปครบทุกตัวเลือก — ยังขาด: ${missing.slice(0, 5).join(", ")}`);
+  }
+  out.changed = renamed.length > 0 || reimg.length > 0 || adds.length > 0;
   if (!out.changed) return out;
-  if (refs.some((r) => r && !shopeeImageIdOfRef(r) && !shopeeR2KeyOfRef(r))) out.errors.push("มีรูปตัวเลือกที่ระบบไม่รู้จัก — กดดึงตัวนี้จาก Shopee แล้วแก้ใหม่");
-  const missing = t0.options.filter((_, i) => !refs[i]).map((o) => o.name);
-  if (refs.some(Boolean) && missing.length) out.errors.push(`Shopee ต้องมีรูปครบทุกตัวเลือก — ยังขาด: ${missing.slice(0, 5).join(", ")}`);
+  // ── model เดิม (ต้องรู้ตำแหน่งครบทุกชั้น) ──
+  if (v.models.some((m) => m.tierIndex.length !== tiers.length)) out.errors.push("ข้อมูลตัวเลือกยังไม่ครบ — กด “ดึงตัวนี้จาก Shopee” แล้วลองใหม่");
+  out.modelList = v.models.filter((m) => m.tierIndex.length === tiers.length).map((m) => ({ model_id: Number(m.modelId), tier_index: m.tierIndex }));
+  // ── สีใหม่ → model ใหม่ ──
+  const priceMin = v.limits?.priceMin ?? null, priceMax = v.limits?.priceMax ?? null;
+  const priceErr = (p: number | null, what: string) => {
+    if (p == null || !Number.isFinite(p) || p <= 0) return `${what}: ยังไม่มีราคา`;
+    if (Math.round(p) !== p) return `${what}: Shopee ไทยรับราคาเป็นบาทเต็ม`;
+    if (priceMin != null && p < priceMin) return `${what}: ราคาต่ำกว่าที่ Shopee รับ (${priceMin})`;
+    if (priceMax != null && p > priceMax) return `${what}: ราคาสูงกว่าที่ Shopee รับ (${priceMax})`;
+    return null;
+  };
+  const skus = new Set(v.models.map((m) => (m.sku ?? "").trim().toUpperCase()).filter(Boolean));
+  adds.forEach((a, k) => {
+    const idx = t0.options.length + k;
+    const label = a.name || "สีใหม่";
+    const rows = tiers.length === 1
+      ? [{ tier_index: [idx], sku: a.sku, price: a.price, what: label }]
+      : (a.sizes ?? []).map((s) => ({ tier_index: [idx, s.index], sku: String(s.sku ?? "").trim(), price: s.price ?? a.price, what: `${label} · ${tiers[1].options[s.index]?.name ?? "?"}` }));
+    if (tiers.length > 1) {
+      const sizes = (a.sizes ?? []).map((s) => s.index);
+      if (!sizes.length) out.errors.push(`${label}: ต้องเลือกไซซ์อย่างน้อย 1 ไซซ์`);
+      if (sizes.some((i) => !tiers[1].options[i])) out.errors.push(`${label}: มีไซซ์ที่ไม่อยู่บนร้าน`);
+      if (new Set(sizes).size !== sizes.length) out.errors.push(`${label}: เลือกไซซ์ซ้ำ`);
+    }
+    for (const r of rows) {
+      if (!r.sku) out.errors.push(`${r.what}: ไม่มีรหัส SKU`);
+      else if (r.sku.length > 100) out.errors.push(`${r.what}: รหัส SKU ยาวเกิน 100 ตัวอักษร`);
+      else if (skus.has(r.sku.toUpperCase())) out.errors.push(`${r.what}: รหัส ${r.sku} มีบนร้านแล้ว`);
+      else skus.add(r.sku.toUpperCase());
+      const pe = priceErr(r.price, r.what); if (pe) out.errors.push(pe);
+      out.addModels.push({ tier_index: r.tier_index, original_price: r.price ?? 0, model_sku: r.sku, seller_stock: [{ stock: 0 }] });
+    }
+  });
+  if (v.models.length + out.addModels.length > SHOPEE_MAX_MODELS) out.errors.push(`Shopee รับได้ไม่เกิน ${SHOPEE_MAX_MODELS} ตัวเลือกต่อสินค้า (จะมี ${v.models.length + out.addModels.length})`);
+  // ── คำสั่งที่จะส่ง ──
   out.tierVariation = tiers.map((t, ti) => ({
     name: t.name,
-    option_list: t.options.map((o, oi) => ({ option: o.name, ...(ti === 0 && refs[oi] ? { image: { image_ref: refs[oi] } } : {}) })),
+    option_list: [
+      ...t.options.map((o, oi) => ({ option: ti === 0 ? finalNames[oi] : o.name, ...(ti === 0 && finalRefs[oi] ? { image: { image_ref: finalRefs[oi] } } : {}) })),
+      ...(ti === 0 ? adds.map((a) => ({ option: a.name, ...(a.image ? { image: { image_ref: String(a.image).trim() } } : {}) })) : []),
+    ],
   }));
-  out.changes.push({ label: "รูปตัวเลือก", before: `${cur.filter(Boolean).length} รูป`, after: `เปลี่ยน ${diffIdx.length} รูป (${diffIdx.slice(0, 4).map((i) => t0.options[i].name).join(", ")}${diffIdx.length > 4 ? " …" : ""})` });
-  out.warnings.push("เปลี่ยนเฉพาะรูป — ชื่อตัวเลือก ราคา สต๊อก คงเดิม (ระบบดึงกลับมาเช็กให้หลังส่ง)");
+  for (const i of renamed.slice(0, 8)) out.changes.push({ label: "ชื่อตัวเลือก", before: curNames[i], after: finalNames[i] });
+  if (renamed.length > 8) out.changes.push({ label: "ชื่อตัวเลือก", before: "", after: `และอีก ${renamed.length - 8} ตัว` });
+  if (reimg.length) out.changes.push({ label: "รูปตัวเลือก", before: `${curRefs.filter(Boolean).length} รูป`, after: `เปลี่ยน ${reimg.length} รูป (${reimg.slice(0, 4).map((i) => finalNames[i]).join(", ")}${reimg.length > 4 ? " …" : ""})` });
+  for (const a of adds) out.changes.push({ label: "เพิ่มสี", before: "—", after: `${a.name}${tiers.length > 1 ? ` · ${(a.sizes ?? []).length} ไซซ์` : ""} · สต๊อกเริ่ม 0` });
+  if (adds.length) out.warnings.push("สีใหม่ขึ้นร้านด้วยสต๊อก 0 — BigSeller จะเติมให้ถ้าผูกรหัสไว้ (ระบบไม่ส่งสต๊อก) · เอาออกได้ใน Seller Centre ถ้ายังไม่มีออเดอร์");
+  if (v.models.some((m) => m.promo) && (renamed.length || reimg.length)) out.warnings.push("มีตัวเลือกอยู่ในโปรโมชัน — Shopee อาจไม่ยอมให้แก้ ถ้าไม่ผ่านให้นำออกจากโปรใน Seller Centre ก่อน");
   if (v.status === "REVIEWING") out.warnings.push("สินค้านี้กำลังรอ Shopee ตรวจ — แก้แล้วอาจต้องรอตรวจต่อ");
+  out.warnings.push("ตัวเลือกเดิม ราคา สต๊อก ยอดขาย คงเดิม (ระบบดึงกลับมาเช็กให้หลังส่ง)");
   return out;
+}
+
+/** หลังส่ง: เทียบของบนร้านล่าสุดกับที่ตั้งใจ → ปัญหาที่เจอ (ว่าง = ครบ) */
+export function shopeeOptionEditLanded(prev: Pick<ShopeeListingView, "optionTiers" | "models">, want: ShopeeOptionWant, next: Pick<ShopeeListingView, "optionTiers" | "models"> | null): string[] {
+  if (!next) return ["ดึงข้อมูลกลับจาก Shopee ไม่ได้ — กดดึงตัวนี้จาก Shopee เพื่อเช็ก"];
+  const out: string[] = [];
+  const p0 = prev.optionTiers[0]?.options ?? [], n0 = next.optionTiers[0]?.options ?? [];
+  const byId = new Map(next.models.map((m) => [m.modelId, m]));
+  const lost = prev.models.filter((m) => !byId.has(m.modelId));
+  if (lost.length) out.push(`ตัวเลือกเดิมหาย ${lost.length} ตัว (${lost.slice(0, 3).map((m) => m.sku ?? m.label).join(", ")})`);
+  const moved = prev.models.filter((m) => { const x = byId.get(m.modelId); return !!x && x.tierIndex.length > 0 && m.tierIndex.join(",") !== x.tierIndex.join(","); });
+  if (moved.length) out.push(`ตัวเลือกเดิมสลับตำแหน่ง ${moved.length} ตัว`);
+  for (const [k, name] of Object.entries(want.names ?? {})) { const i = Number(k); if (n0[i] && n0[i].name !== cleanOpt(name)) out.push(`ชื่อ “${p0[i]?.name}” ยังไม่เปลี่ยน`); }
+  for (const [k, ref] of Object.entries(want.images ?? {})) {
+    const i = Number(k); const was = p0[i]?.imageId ? shopeeImageRef(p0[i].imageId!) : "";
+    if (ref && ref !== was && n0[i] && n0[i].imageId === p0[i]?.imageId) out.push(`รูปของ “${n0[i].name}” ยังไม่เปลี่ยน`);
+  }
+  const nextSkus = new Set(next.models.map((m) => (m.sku ?? "").trim().toUpperCase()));
+  for (const a of want.add ?? []) {
+    const codes = a.sizes?.length ? a.sizes.map((s) => s.sku) : [a.sku];
+    const miss = codes.filter((c) => !nextSkus.has(String(c).trim().toUpperCase()));
+    if (miss.length) out.push(`สี “${a.name}” ยังไม่ขึ้นครบ (ขาด ${miss.slice(0, 3).join(", ")})`);
+  }
+  return out;
+}
+
+/** เดิม 2026-11-22: เปลี่ยนเฉพาะรูป — want = { ชื่อตัวเลือกชั้นแรก: ref } · ตัวที่ไม่ส่ง = คงรูปเดิม (ตัวตรวจร้าน↔ระบบใช้ตัวนี้) */
+export type ShopeeOptionImagePlan = ShopeeOptionEditPlan;
+export function planShopeeOptionImages(v: Pick<ShopeeListingView, "optionTiers" | "status" | "models" | "limits">, want: Record<string, string>): ShopeeOptionImagePlan {
+  const t0 = v.optionTiers?.[0]?.options ?? [];
+  const images: Record<number, string> = {};
+  t0.forEach((o, i) => { const r = String(want[o.name] ?? "").trim(); if (r) images[i] = r; });
+  const p = planShopeeOptionEdit(v, { images });
+  const unknown = Object.keys(want).filter((k) => !t0.some((o) => o.name === k));
+  if (unknown.length) p.warnings.unshift(`ไม่พบตัวเลือกชื่อ ${unknown.slice(0, 3).join(", ")} บนร้าน — ข้ามไป`);
+  return p;
 }
 /** รูปตัวเลือกที่ต้องฝากใหม่ ("r2:" เท่านั้น) */
 export function shopeeOptionUploadRefs(tierVariation: Record<string, unknown>[]): string[] {

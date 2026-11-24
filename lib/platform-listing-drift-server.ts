@@ -25,7 +25,8 @@ import { loadShopeeCreate } from "@/app/api/shopee/create-product/load";
 import { loadShopeeListingLive } from "@/app/api/shopee/shared";
 import { loadLazListingLive } from "@/app/api/lazada/shared";
 import { loadTtsListingLive, ttsViewWithReview } from "@/app/api/tiktok-shop/shared";
-import { planShopeeAttrs, planShopeeEdit, planShopeeImages, planShopeeOptionImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
+import { planShopeeAttrs, planShopeeEdit, planShopeeImages, planShopeeOptionEdit, planShopeeOptionImages, planShopeePrices, shopeePriceRowsFromView, type ShopeeListingView } from "@/lib/shopee-listing-edit";
+import { sysOptionName, sysVariantOfOption } from "@/lib/listing-option-sync";
 import {
   foreignDescImages, lazadaEditStateFromView, lazadaListingView, lazadaPriceRowsFromView, lazadaSkuMediaFromView, lazMigrateImageXml, planLazadaEdit, planLazadaPrices, planLazadaSkuMedia,
   type LazadaEditState, type LazadaListingView,
@@ -40,6 +41,8 @@ import { lineApiKey } from "@/lib/line-shopping-server";
 import { lineEditStateFromRaw, planLineEdit, type LineEditState } from "@/lib/line-listing-edit";
 import { pickListingTitle } from "@/lib/listing-title";
 import { loadFieldHistoryValues } from "@/lib/field-history";
+import { loadSkuStock } from "@/lib/sku-stock";
+import type { SysVariantView } from "@/lib/listing-option-sync";
 
 type Admin = SupabaseClient;
 /** ร้านที่ตรวจ/ส่งได้ (เว็บเราใช้ข้อมูลจากระบบอยู่แล้ว ไม่ต้องตรวจ) */
@@ -60,6 +63,8 @@ export type DriftSysView = {
   title: string | null; description: string; imageRefs: string[]; descImageRefs: string[];
   /** ราคาต่อรหัส SKU (ราคาเต็มที่ระบบจะส่ง) */ prices: { code: string; price: number | null }[];
   attrs: AttrValues | null; attrNames: Record<string, string> | null;
+  /** สีในระบบ (รหัส · ค่าตัวเลือก · รูป) — เติมชื่อ/รูปตัวเลือกตามระบบในลิ้นชัก (2026-11-24) */
+  variants: { code: string; values: string[]; image: string | null }[];
 };
 /** "ให้ระบบใช้ค่านี้" — เรื่องที่เขียนลงร่างของร้านได้ (ร่าง = ค่าฝั่งระบบของร้านนี้ ไม่แตะ Parent SKU ที่ใช้ทุกร้าน) */
 export const ADOPT_KEYS: readonly DriftKey[] = ["title", "description", "attrs"];
@@ -154,6 +159,18 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
     return want;
   };
   const optPlan = () => planShopeeOptionImages(v, optWant());
+  // ชื่อตัวเลือก (2026-11-24): ตัวเลือกบนร้าน ↔ สีในระบบ (จับจากรหัส) → ชื่อตามระบบ · ส่งรวมกับรูปตัวเลือกในคำสั่งเดียว
+  const optNamesWant = (): Record<number, string> => {
+    const out: Record<number, string> = {};
+    (tier0?.options ?? []).forEach((o, i) => { const n = sysOptionName(sysVariantOfOption(v.models, i, base.sys.variants)); if (n && n !== o.name) out[i] = n; });
+    return out;
+  };
+  const optImgsByIndex = (): Record<number, string> => {
+    const w = optWant(); const out: Record<number, string> = {};
+    (tier0?.options ?? []).forEach((o, i) => { if (w[o.name]) out[i] = w[o.name]; });
+    return out;
+  };
+  const optNamePlan = () => planShopeeOptionEdit(v, { names: optNamesWant() });
   const priceRows = shopeePriceRowsFromView(v);
   const priceEdit = () => priceRows.map((r) => {
     const m = v.hasModel ? v.models.find((x) => x.modelId === r.modelId) : null;
@@ -166,7 +183,7 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
     cannot: (k) => k === "title" ? errs(titlePlan().errors)
       : k === "images" ? errs(imgPlan().errors)
       : k === "description" ? (!v.descriptionEditable ? "Shopee: สินค้านี้ใช้รายละเอียดแบบมีรูป — แก้ใน Seller Centre" : errs(descPlan().errors))
-      : k === "options" ? OPT_CANNOT.shopee
+      : k === "options" ? (!optNamePlan().changed ? "ชื่อสีที่มีบนร้านตรงระบบแล้ว — ที่ต่างคือสีที่ยังไม่อยู่บนร้าน (เพิ่มได้ในลิ้นชัก แท็บตัวเลือก & ราคา)" : errs(optNamePlan().errors))
       : k === "desc_images" ? null
       : k === "variant_images" ? errs(optPlan().errors)
       : k === "attrs" ? errs(attrPlan().errors)
@@ -193,9 +210,14 @@ function shopeeCtx(base: Omit<Ctx, "shop" | "cannot" | "build">, v: ShopeeListin
       if (keys.includes("attrs") && attrPlan().changed) body.attributes = { before: v.attrs, values: attrWant(), fields: Object.entries(base.sys.attrNames ?? {}).map(([id, name]) => ({ id, name, required: false })) };
       const edit = body.edit as { name: string | null; description: string | null } | undefined;
       if (edit || body.images || body.desc_images || body.attributes) calls.push({ url: "/api/shopee/listing-edit", label: [edit?.name ? "ชื่อ" : "", edit?.description ? "รายละเอียด" : "", body.images ? "รูป" : "", body.desc_images ? "รูปในรายละเอียด" : "", body.attributes ? "ข้อมูลจำเพาะ" : ""].filter(Boolean).join(" + "), body });
-      // รูปตัวเลือก: ต้องส่งแยกคำสั่ง (route ไม่รับรวมกับชื่อ/รูป/รูปในรายละเอียด) · route เช็กตัวเลือก/ราคาหลังส่ง
-      if (keys.includes("variant_images") && tier0 && optPlan().changed) {
-        calls.push({ url: "/api/shopee/listing-edit", label: "รูปตัวเลือก", body: { listing_id: base.listingId, option_images: { before: Object.fromEntries(tier0.options.map((o) => [o.name, o.imageId])), refs: optWant() } } });
+      // ชื่อ + รูปตัวเลือก: คำสั่งแยก (update_tier_variation + model_list) · ชื่อกับรูปไปด้วยกันครั้งเดียว · route เช็กตัวเลือกเดิม/ราคาหลังส่ง
+      const names = keys.includes("options") ? optNamesWant() : {};
+      const images = keys.includes("variant_images") ? optImgsByIndex() : {};
+      if (tier0 && (Object.keys(names).length || Object.keys(images).length) && planShopeeOptionEdit(v, { names, images }).changed) {
+        calls.push({ url: "/api/shopee/listing-edit", label: [Object.keys(names).length ? "ชื่อตัวเลือก" : "", Object.keys(images).length ? "รูปตัวเลือก" : ""].filter(Boolean).join(" + "), body: {
+          listing_id: base.listingId,
+          options: { before: { names: tier0.options.map((o) => o.name), image_ids: tier0.options.map((o) => o.imageId ?? ""), model_ids: v.models.map((m) => m.modelId) }, names, images, add: [] },
+        } });
       }
       return calls;
     },
@@ -616,7 +638,36 @@ function sysViewOf(sys: SystemValues): DriftSysView {
   return {
     title: sys.title ?? null, description: sys.description, imageRefs: sys.imageRefs, descImageRefs: sys.descImageRefs ?? [],
     prices: sys.variants.map((v) => ({ code: v.code, price: v.price })), attrs: sys.attrs ?? null, attrNames: sys.attrNames ?? null,
+    variants: sys.variants.map((v) => ({ code: v.code, values: v.values, image: v.image ?? null })),
   };
+}
+
+/**
+ * สีในระบบของสินค้าที่จับคู่ (แท็บตัวเลือกในลิ้นชัก · 2026-11-24) — ตัวประกอบข้อมูลเดียวกับตัวช่วยลงสินค้าของร้านนั้น
+ * + สต๊อกในระบบ (TikTok/LINE ต้องใส่สต๊อกตอนเพิ่มสี) + เปิดใช้ไหม · ไม่ดึงร้าน ไม่จดอะไร
+ */
+export async function listingSysVariants(admin: Admin, listingId: string, userId: string | null): Promise<{ ok: true; platform_code: string; variants: SysVariantView[] } | DriftFail> {
+  const { data: l } = await admin.from("platform_catalog_listings").select("platform_id, matched_parent_sku_id, status").eq("id", listingId).maybeSingle();
+  const row = l as { platform_id: string; matched_parent_sku_id: string | null; status: string | null } | null;
+  if (!row) return { ok: false, error: "ไม่พบสินค้านี้บนร้าน", status: 404 };
+  if (!row.matched_parent_sku_id) return { ok: false, error: "ยังไม่ได้จับคู่กับสินค้าในระบบ", status: 400 };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  const code = String((pf as { code?: string } | null)?.code ?? "");
+  if (!isDriftPlatform(code)) return { ok: false, error: "ร้านนี้ไม่รองรับ", status: 400 };
+  const [sysR, skuR] = await Promise.all([
+    systemValues(admin, code, row.matched_parent_sku_id, userId),
+    admin.from("skus_v2").select("id, code, is_active").eq("parent_sku_id", row.matched_parent_sku_id),
+  ]);
+  if (!sysR.ok) return { ok: false, error: `อ่านข้อมูลสินค้าในระบบไม่ได้: ${sysR.error}`, status: 400 };
+  const skus = (skuR.data ?? []) as { id: string; code: string; is_active: boolean | null }[];
+  const byCode = new Map(skus.map((s) => [s.code.trim().toUpperCase(), s]));
+  const stock = await loadSkuStock(admin, skus.map((s) => s.id)).catch(() => new Map<string, { onHand: number; reserved: number }>());
+  const variants: SysVariantView[] = sysR.sys.variants.map((v) => {
+    const s = byCode.get(v.code.trim().toUpperCase());
+    const st = s ? stock.get(s.id) : undefined;
+    return { code: v.code, values: v.values, price: v.price ?? null, image: v.image ?? null, stock: st ? Math.max(0, st.onHand - st.reserved) : null, active: s ? s.is_active !== false : true };
+  });
+  return { ok: true, platform_code: code, variants };
 }
 
 // ───────── "ให้ระบบใช้ค่านี้" (เจ้าของเลือก 2026-11-23 ข้อ 1): ค่าบนร้าน → ร่างของร้านนี้ (ไม่แตะ Parent SKU ที่ใช้ทุกร้าน) ─────────

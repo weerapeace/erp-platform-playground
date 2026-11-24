@@ -1747,6 +1747,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "platform-catalog.md",
   },
   {
+    key: "listing-option-sync", label: "ตัวเลือกบนร้าน ↔ สีในระบบ (แท็บตัวเลือกในลิ้นชักสินค้าบนร้าน)", code: "useSysVariants · sysVariantsNotOnShop · sysVariantOfOption · sizeSkusForNewColor", category: "feature",
+    source: { path: "components/platform-catalog/use-sys-variants" },
+    what: "โหลดสีในระบบของสินค้าที่จับคู่ (รหัส · ชื่อตัวเลือกที่ตัวช่วยลงสินค้าจะส่ง · ราคา · รูป · สต๊อก) แล้วหา \"สีที่มีในระบบแต่ยังไม่อยู่บนร้าน\" · ชื่อตามระบบของแต่ละตัวเลือก · รหัส/ราคาต่อไซซ์ของสีใหม่ (สินค้าสี×ไซซ์) — กติกา pure อยู่ lib/listing-option-sync",
+    when: "แท็บตัวเลือก & ราคาของลิ้นชักสินค้าบนร้าน ทุกร้าน (เริ่ม Shopee 2026-11-24 · TikTok/Lazada/LINE ตามมา) — แถว \"มีในระบบ ยังไม่อยู่บนร้าน\" + ปุ่มเพิ่ม · ปุ่ม \"ชื่อตามระบบ\"",
+    notWhen: "ห้ามจับคู่ตัวเลือก↔SKU เองในหน้า (ใช้ skuMatchesSys/sysVariantOfOption) · ห้ามดึงสีในระบบจากตารางเองในหน้า (ใช้ GET /api/platform-catalog/drift?part=variants)",
+    doc: "platform-catalog.md",
+  },
+  {
     key: "attr-suggest-box", label: "แนะนำช่องคุณลักษณะ (จับคำฟรี / AI ช่วยเติม)", code: "useAttrSuggest", category: "feature",
     source: { path: "components/platform-catalog/attr-suggest-box" },
     what: "ปุ่ม \"แนะนำจากชื่อ/รายละเอียด (ฟรี)\" (lib/attr-suggest) + \"ให้ AI ช่วยเติม\" (POST /api/ai/attr-fill · ด่านกลาง aiChat \"ai.attr_fill\" · lib/attr-ai-fill) → กล่องผล (AI ติดป้าย \"AI เดา · ตรวจก่อน\") → ใส่ทั้งหมด (applyAttrHits เติมเฉพาะช่องที่ว่าง)",

@@ -4,6 +4,7 @@
  *
  *  GET ?parent_sku_id=            → ผลตรวจที่จดไว้ของทุกร้านที่ลงสินค้านี้ { rows: StoredDrift[] }   (products.platforms.view)
  *  GET ?listing_id=               → ตรวจสด 1 รายการ (ดึงจากร้าน + ระบบ) แล้วจด { check }            (products.platforms.view)
+ *  GET ?listing_id=&part=variants → สีในระบบ (รหัส · ชื่อตัวเลือก · ราคา · รูป · สต๊อก) { variants } — แท็บตัวเลือกในลิ้นชัก (2026-11-24)
  *  POST { action:"recheck", parent_sku_id } → ตรวจสดทุกร้านที่ลงสินค้านี้ (หลังแก้สินค้า) { rows }     (products.platforms.view)
  *  POST { action:"build", listing_id, keys } → คำสั่งส่งของเรื่องที่ติ๊ก (หน้าเว็บยิงไป API แก้สินค้าบนร้านเดิม) { calls, skipped, items }
  *  POST { action:"mark", listing_id, keys }  → หลังส่งสำเร็จ: จำชุดรูปที่ส่ง + ตรวจใหม่ { check }
@@ -18,7 +19,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { DRIFT_KEYS, type DriftKey } from "@/lib/platform-listing-drift";
-import { adoptShopValue, buildDriftCalls, checkListingDrift, driftListingsOfParent, loadStoredDrift, markDriftSent, undoAdopt } from "@/lib/platform-listing-drift-server";
+import { adoptShopValue, buildDriftCalls, checkListingDrift, driftListingsOfParent, listingSysVariants, loadStoredDrift, markDriftSent, undoAdopt } from "@/lib/platform-listing-drift-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,6 +38,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const listingId = (sp.get("listing_id") ?? "").trim();
   if (!listingId) return json({ error: "ต้องระบุ listing_id หรือ parent_sku_id" }, 400);
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  // สีในระบบ (แท็บตัวเลือกในลิ้นชัก · 2026-11-24) — ไม่ดึงร้าน ไม่จดผลตรวจ
+  if (sp.get("part") === "variants") {
+    const v = await listingSysVariants(admin, listingId, user?.id ?? null);
+    return v.ok ? json({ variants: v.variants, platform_code: v.platform_code, error: null }) : json({ variants: null, platform_code: null, error: v.error }, v.status);
+  }
   const r = await checkListingDrift(admin, listingId, user?.id ?? null);
   return r.ok ? json({ check: r, error: null }) : json({ check: null, error: r.error }, r.status);
 }

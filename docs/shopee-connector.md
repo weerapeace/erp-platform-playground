@@ -234,3 +234,14 @@
 - **แท็บข้อมูลจำเพาะ** (`ShopeeSpecsPanel`): ช่องของหมวด `GET /api/shopee/listing-detail?part=attrs&category_id=` (get_attribute_tree · จำไว้ 6 ชม.) · ช่องกรอกกลาง `LazadaAttrField` · แนะนำจากชื่อ/รายละเอียด (ฟรี) / AI ช่วยเติม (`attr-suggest-box`)
   - ส่ง: `/api/shopee/listing-edit` ช่อง `attributes { before, values, fields }` → `planShopeeAttrs` ส่ง attribute_list **ทั้งชุด** (ของเดิม + ที่แก้) ไปกับ update_item ครั้งเดียวกัน · ช่องบังคับว่าง = ส่งไม่ได้ · เอาค่าออกผ่านระบบไม่ได้ (เตือน) · กันทับ 409 ถ้าช่องบนร้านเปลี่ยนระหว่างนั้น · ประวัติ "จากอะไรเป็นอะไร" ต่อช่อง
   - ตัวแปลง attribute_list ↔ ช่องกรอกกลาง ย้ายมาไว้ `lib/shopee-listing-edit` (`shopeeAttrsOfBase` · `shopeeAttrPayload` · `shopeeAttrStateOf`) — `lib/shopee-create-plan` re-export ใช้ตัวเดียวกัน
+
+## ตัวเลือก: แก้ชื่อสี · รูปสี · เพิ่มสี (2026-11-24 · แก้ร้านจริง · ถามก่อนเสมอ)
+- กฎ `planShopeeOptionEdit` (lib/shopee-listing-edit · เทสต์): ชื่อ ≤ get_item_limit.tier_variation_option_length_limit (ไม่รู้ = 20) · ห้ามว่าง/ซ้ำ · รูปตัวเลือกครบทุกตัวหรือไม่มีเลย (ชั้นแรก) · ≤ 50 model · ราคาเต็มบาท · รหัสห้ามซ้ำบนร้าน
+- 🐛 แก้พร้อมกัน: `update_tier_variation` เดิม (2026-11-22 รูปตัวเลือก) ไม่ส่ง `model_list` → คู่มือ Shopee (Developer Guide 219) บอกว่าต้องส่งถ้าจะเก็บตัวเลือกเดิม → ตอนนี้ส่ง model_id + tier_index ของทุก model เสมอ (ยังไม่มีใครกดส่งรูปตัวเลือกกับร้านจริงก่อนแก้)
+- `POST /api/shopee/listing-edit { options: { before:{names,image_ids,model_ids}, names:{i:ชื่อ}, images:{i:ref}, add:[{name,image,sku,price,sizes?}] } }` — ส่งแยกจากอย่างอื่น:
+  1. กันทับ (ชื่อ/รูป/ชุด model ต้องเหมือนตอนเปิด = ไม่งั้น 409) → ฝากรูป r2 → `update_tier_variation` (ทุกชั้น · ชื่อใหม่ · สีใหม่ต่อท้ายชั้นแรก + model_list ของ model เดิม)
+  2. มีสีใหม่ → `v2.product.add_model` (tier_index [สีใหม่] หรือ [สีใหม่, ไซซ์] · original_price · model_sku · seller_stock 0) — ไม่ผ่าน = ส่ง update_tier_variation กลับชุดเดิม (เอาสีที่ค้างออก) + แจ้ง
+  3. ดึงกลับเช็ก (`shopeeOptionEditLanded`): model เดิมครบ/ตำแหน่งเดิม · ชื่อ/รูปเปลี่ยนจริง · สีใหม่ขึ้นครบ · ราคาเดิม → สำเนาย่อ → audit (`part: options` · changes)
+- `option_images` แบบเดิม (ตัวตรวจร้าน↔ระบบ) แปลงเป็น options ข้างใน · ตัวตรวจส่ง "ชื่อตัวเลือก" + "รูปตัวเลือก" รวมคำสั่งเดียว
+- ⚠️ ยังไม่เคยลองกับร้านจริง: แก้ชื่อ · add_model · สีใหม่แบบสี×ไซซ์ — ลองครั้งแรกกับสินค้าขายน้อย 1 ตัว (เจ้าของเลือก) · Shopee อาจไม่ให้แก้ตัวเลือกที่อยู่ในโปรโมชัน
+- ปิดทีละสี: ทำไม่ได้ (update_model.model_status ใช้ได้เฉพาะร้าน CNSC/KRSC · delete_model ย้อนไม่ได้) — เจ้าของเลือกไม่ทำ
