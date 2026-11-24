@@ -4,7 +4,7 @@
  *   ขนาดจริง 1:1 ตามที่ตั้ง · ตำแหน่ง/เส้นบอกขนาดมาจาก layoutPage + dimGeometry ตัวเดียวกับภาพบนจอ
  *   ใช้ jsPDF ที่มีอยู่แล้วใน public/vendor (ไม่ผ่านขั้น build)
  */
-import { DIM, DIM_COLORS, dimGeometry, eachOp, layoutPage, mapOps, OP, type BlockPaper, type BlockPiece, type BlockUnit } from "@/lib/block-print";
+import { DIM, DIM_COLORS, dimGeometry, eachOp, layoutPage, mapOps, OP, pieceShapes, type BlockPaper, type BlockPiece, type BlockUnit } from "@/lib/block-print";
 
 const JSPDF_SRC = "/vendor/jspdf-2.5.1.umd.min.js";
 
@@ -42,13 +42,16 @@ export async function buildBlockPdf(pieces: BlockPiece[], opts: { paper: BlockPa
   for (const it of lay.items) {
     const p = byId.get(it.id)!;
     const sx = it.w / p.ow, sy = it.h / p.oh;
-    eachOp(mapOps(p.d, (x, y) => [it.x + x * sx, it.y + y * sy]), (op, a) => {
-      if (op === OP.M) doc.moveTo(a[0], a[1]);
-      else if (op === OP.L) doc.lineTo(a[0], a[1]);
-      else if (op === OP.C) doc.curveTo(a[0], a[1], a[2], a[3], a[4], a[5]);
-      else if (op === OP.Z) doc.close();
-    });
-    if (p.fill === "evenodd") doc.fillEvenOdd(); else doc.fill();
+    // ชิ้นรวม = วาดทีละเส้นด้วยวิธีเติมสีของเส้นนั้น (รูในตัวอักษรไม่ถูกถมทับ)
+    for (const s of pieceShapes(p)) {
+      eachOp(mapOps(s.d, (x, y) => [it.x + x * sx, it.y + y * sy]), (op, a) => {
+        if (op === OP.M) doc.moveTo(a[0], a[1]);
+        else if (op === OP.L) doc.lineTo(a[0], a[1]);
+        else if (op === OP.C) doc.curveTo(a[0], a[1], a[2], a[3], a[4], a[5]);
+        else if (op === OP.Z) doc.close();
+      });
+      if (s.fill === "evenodd") doc.fillEvenOdd(); else doc.fill();
+    }
   }
 
   // เส้นไกด์ + เส้นบอกขนาด + ตัวเลข

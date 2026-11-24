@@ -6,6 +6,7 @@
  *   ย้อนกลับ/ทำซ้ำ: Ctrl+Z · Ctrl+Shift+Z / Ctrl+Y · บันทึก Ctrl+S · ออกจากหน้าตอนยังไม่บันทึก = ถามก่อน
  *   ส่งออก PDF = lib/block-print-pdf (ตำแหน่ง/เส้นบอกขนาดตัวเดียวกับภาพบนจอ) + จดประวัติการส่งออก
  *   มือถือ: ภาพอยู่บน · รายการชิ้นเป็นปุ่มแนวนอน · แผงขนาดอยู่ล่าง · ปุ่มบันทึก/PDF ติดล่างจอ
+ *   ขั้นเลือกชิ้น (grouper.tsx): เปิดไฟล์ใหม่ (?step=group) หรือกด "จัดกลุ่มชิ้นใหม่" → รวม/แยกชิ้น → กด "ต่อไป" = ใช้ + บันทึกให้เลย
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -18,11 +19,12 @@ import { downloadBlob } from "@/lib/pdf-merge-engine";
 import { buildBlockPdf } from "@/lib/block-print-pdf";
 import {
   DIM_COLORS, PAPERS, UNITS, dimGeometry, equalHeight, fmtDim, fromUnit, isResized, layoutFree, layoutPage, mergePieces,
-  opsToSvgPath, pdfFileName, resetPieceSize, setPieceSize, toUnit,
+  opsToSvgPath, pdfFileName, pieceShapes, piecesForSave, resetPieceSize, setPieceSize, toUnit,
   type BlockPaper, type BlockPiece, type BlockUnit, type PlacedPiece,
 } from "@/lib/block-print";
 import { API, api, LIST_HREF, skippedNote, thaiDate, type Job } from "./shared";
 import { SKIPPED_KEY } from "./list";
+import { BlockPieceGrouper } from "./grouper";
 
 type Doc = { name: string; unit: BlockUnit; paper: BlockPaper; pieces: BlockPiece[] };
 const docKey = (d: Doc | null) => (d ? JSON.stringify(d) : "");
@@ -39,6 +41,7 @@ export function BlockPrintEditor({ id }: { id: string }) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
+  const [step, setStep] = useState<"size" | "group">("size");
   const past = useRef<Doc[]>([]);
   const future = useRef<Doc[]>([]);
 
@@ -52,6 +55,14 @@ export function BlockPrintEditor({ id }: { id: string }) {
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+  // เปิดไฟล์ใหม่จากหน้ารายการ → เข้าขั้นเลือกชิ้นก่อน (ลบ ?step ออกจากลิงก์ กดรีเฟรชแล้วไม่วนกลับมา)
+  useEffect(() => {
+    const u = new URL(window.location.href);
+    if (u.searchParams.get("step") !== "group") return;
+    setStep("group");
+    u.searchParams.delete("step");
+    window.history.replaceState(null, "", u.pathname + u.search);
+  }, []);
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(SKIPPED_KEY(id));
@@ -72,29 +83,40 @@ export function BlockPrintEditor({ id }: { id: string }) {
     return () => window.removeEventListener("beforeunload", h);
   }, [dirty]);
 
-  /** แก้เอกสาร + จดลงประวัติย้อนกลับ */
-  const apply = (fn: (d: Doc) => Doc) => {
-    if (!doc || !canEdit) return;
+  /** แก้เอกสาร + จดลงประวัติย้อนกลับ · คืนเอกสารใหม่ (null = ไม่เปลี่ยน) */
+  const apply = (fn: (d: Doc) => Doc): Doc | null => {
+    if (!doc || !canEdit) return null;
     const n = fn(doc);
-    if (docKey(n) === docKey(doc)) return;
+    if (docKey(n) === docKey(doc)) return null;
     past.current.push(doc);
     if (past.current.length > 100) past.current.shift();
     future.current = [];
     setDoc(n);
+    return n;
   };
   const undo = () => { const p = past.current.pop(); if (!p || !doc) return; future.current.push(doc); setDoc(p); };
   const redo = () => { const f = future.current.pop(); if (!f || !doc) return; past.current.push(doc); setDoc(f); };
   const setPieces = (fn: (ps: BlockPiece[]) => BlockPiece[]) => apply((d) => ({ ...d, pieces: fn(d.pieces) }));
 
-  const save = async () => {
-    if (!doc || !canEdit || saving) return;
+  const save = async (next?: Doc, okText = "บันทึกแล้ว") => {
+    const d = next ?? doc;
+    if (!d || !canEdit || saving) return;
     setSaving(true);
     try {
-      const j = await api<Job>(`${API}/${id}`, { method: "PATCH", json: doc });
-      setJob(j); setSavedKey(docKey(doc));
-      toast.success("บันทึกแล้ว");
+      const j = await api<Job>(`${API}/${id}`, { method: "PATCH", json: { ...d, pieces: piecesForSave(d.pieces) } });
+      setJob(j); setSavedKey(docKey(d));
+      toast.success(okText);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     setSaving(false);
+  };
+
+  /** จบขั้นเลือกชิ้น → ใช้ชิ้นใหม่ + บันทึกให้เลย (ย้อนกลับได้ด้วยปุ่มย้อน/Ctrl+Z) */
+  const finishGrouping = (ps: BlockPiece[]) => {
+    setStep("size");
+    const n = apply((d) => ({ ...d, pieces: ps }));
+    const first = ps.find((p) => p.on) ?? ps[0];
+    setSel(first ? [first.id] : []);
+    if (n) void save(n, `จัดกลุ่มแล้ว · ${ps.filter((p) => p.on).length} ชิ้นที่ส่งออก`);
   };
 
   const exportPdf = async () => {
@@ -110,10 +132,11 @@ export function BlockPrintEditor({ id }: { id: string }) {
   };
 
   // คีย์ลัด (ไม่ยุ่งตอนพิมพ์ในช่อง — ให้ช่องย้อนเองได้)
-  const keyRef = useRef({ undo, redo, save });
-  keyRef.current = { undo, redo, save };
+  const keyRef = useRef({ undo, redo, save, step });
+  keyRef.current = { undo, redo, save, step };
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      if (keyRef.current.step === "group") return;   // หน้าเลือกชิ้นมีคีย์ลัดของตัวเอง
       if (!(e.ctrlKey || e.metaKey)) return;
       const k = shortcutKey(e).toLowerCase();
       if (k === "s") { e.preventDefault(); void keyRef.current.save(); return; }
@@ -136,6 +159,8 @@ export function BlockPrintEditor({ id }: { id: string }) {
   if (err) return <div className="p-6"><ErrorState title="เปิดงานไม่สำเร็จ" hint={err} onRetry={() => void load()} /></div>;
   if (!doc || !job) return <div className="p-6"><LoadingState label="กำลังเปิดงาน…" /></div>;
 
+  if (step === "group" && canEdit) return <BlockPieceGrouper pieces={doc.pieces} onDone={finishGrouping} onCancel={() => setStep("size")} />;
+
   const unit = doc.unit;
   const onCount = pieces.filter((p) => p.on).length;
 
@@ -154,7 +179,7 @@ export function BlockPrintEditor({ id }: { id: string }) {
             <button type="button" onClick={undo} disabled={!past.current.length} title="ย้อนกลับ (Ctrl+Z)" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30"><Icon name="arrow-back-up" /></button>
             <button type="button" onClick={redo} disabled={!future.current.length} title="ทำซ้ำ (Ctrl+Shift+Z)" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-30"><Icon name="arrow-forward-up" /></button>
           </>}
-          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={save} onExport={exportPdf} className="hidden lg:flex" />
+          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="hidden lg:flex" />
         </div>
       </div>
 
@@ -174,6 +199,9 @@ export function BlockPrintEditor({ id }: { id: string }) {
             {canEdit && <button type="button" className="text-xs text-indigo-600 hover:underline" onClick={() => setPieces((ps) => { const all = ps.every((p) => p.on); return ps.map((p) => ({ ...p, on: !all })); })}>
               {pieces.every((p) => p.on) ? "เอาออกทั้งหมด" : "ติ๊กทั้งหมด"}</button>}
           </div>
+          {canEdit && <button type="button" onClick={() => setStep("group")}
+            className="mx-2 mt-2 inline-flex h-8 w-[calc(100%-1rem)] items-center justify-center gap-1.5 rounded-lg border border-dashed border-indigo-300 text-xs text-indigo-700 hover:bg-indigo-50">
+            <Icon name="link" /> จัดกลุ่มชิ้นใหม่ (รวม / แยกชิ้น)</button>}
           <div className="flex gap-1.5 overflow-x-auto p-2 lg:max-h-[60vh] lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden">
             {pieces.map((p) => {
               const active = sel.includes(p.id);
@@ -237,13 +265,13 @@ export function BlockPrintEditor({ id }: { id: string }) {
                 className="h-9 rounded-lg border border-indigo-200 bg-indigo-50 text-sm text-indigo-700 hover:bg-indigo-100">รวม {sel.length} ชิ้นที่เลือกเป็นชิ้นเดียว</button>}
             </div>}
           </>}
-          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={save} onExport={exportPdf} className="hidden flex-col lg:flex" />
+          <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="hidden flex-col lg:flex" />
         </aside>
       </div>
 
       {/* มือถือ: ปุ่มติดล่างจอ */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white p-2 lg:hidden">
-        <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={save} onExport={exportPdf} className="flex" />
+        <ActionButtons canEdit={canEdit} dirty={dirty} saving={saving} exporting={exporting} onSave={() => void save()} onExport={exportPdf} className="flex" />
       </div>
     </div>
   );
@@ -287,7 +315,7 @@ function PieceThumb({ p }: { p: BlockPiece }) {
   const s = 22 / Math.max(p.ow, p.oh);
   return (
     <svg width={24} height={24} viewBox="-1 -1 24 24" className="shrink-0 rounded bg-slate-50">
-      <path d={opsToSvgPath(p.d, s, s, (22 - p.ow * s) / 2, (22 - p.oh * s) / 2)} fill="#111" fillRule={p.fill} />
+      {pieceShapes(p).map((sh, i) => <path key={i} d={opsToSvgPath(sh.d, s, s, (22 - p.ow * s) / 2, (22 - p.oh * s) / 2)} fill="#111" fillRule={sh.fill} />)}
     </svg>
   );
 }
@@ -313,7 +341,7 @@ function PagePreview({ doc, sel, onPick }: { doc: Doc; sel: string[]; onPick: (i
                 <text key={i} x={t.x} y={t.y} fontSize={3.2} fontFamily="Courier New, monospace" fill={DIM_COLORS.text}
                   textAnchor="middle" transform={t.rotate ? `rotate(90 ${t.x} ${t.y})` : undefined}>{t.text}</text>
               ))}
-              <path d={opsToSvgPath(p.d, it.w / p.ow, it.h / p.oh, it.x, it.y)} fill="#000" fillRule={p.fill} />
+              {pieceShapes(p).map((sh, i) => <path key={i} d={opsToSvgPath(sh.d, it.w / p.ow, it.h / p.oh, it.x, it.y)} fill="#000" fillRule={sh.fill} />)}
               <rect x={it.x} y={it.y} width={it.w} height={it.h} fill="transparent" style={{ cursor: "pointer" }}
                 onClick={(e) => onPick(it.id, e.shiftKey || e.ctrlKey || e.metaKey)} />
               {sel.includes(it.id) && <rect x={it.x - 1} y={it.y - 1} width={it.w + 2} height={it.h + 2} fill="none" stroke="#3b82f6" strokeWidth={0.4} strokeDasharray="1.5 1" pointerEvents="none" />}

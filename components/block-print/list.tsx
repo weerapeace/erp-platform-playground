@@ -1,7 +1,7 @@
 "use client";
 /**
  * 🧱 บล็อกพิมพ์ — หน้ารายการงาน (/master/block-print)
- *   ปุ่ม "เปิดไฟล์ .ai" → อ่านไฟล์ในเบราว์เซอร์ (lib/block-print-ai) → สร้างงาน → ไปหน้าทำงาน
+ *   ปุ่ม "เปิดไฟล์ .ai" → อ่านไฟล์ในเบราว์เซอร์ (lib/block-print-ai) → จัดกลุ่มเส้นอัตโนมัติ (autoGroup) → สร้างงาน → ไปขั้นเลือกชิ้น
  *   ตารางกลาง DataTable · ลบ = ย้ายเข้าถังขยะ (ย้อนกลับได้ทันทีจากแจ้งผล) · ถังขยะ: กู้คืน / ลบถาวร (พิมพ์ชื่อยืนยัน)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { AI_ACCEPT, readAiFile } from "@/lib/block-print-ai";
+import { GROUP_DEFAULT, applyGrouping, autoGroup, piecesForSave } from "@/lib/block-print";
 import { API, api, jobHref, nameFromFile, skippedNote, thaiDate, type Job, type JobRow } from "./shared";
 
 export const SKIPPED_KEY = (id: string) => `block-print-skipped:${id}`;
@@ -44,9 +45,11 @@ export function BlockPrintList() {
         throw new Error(`ไม่พบชิ้นเวกเตอร์ที่เติมสีในไฟล์นี้${notes.length ? ` · ${notes[0]}` : ""}`);
       }
       setBusy("กำลังสร้างงาน…");
-      const job = await api<Job>(API, { json: { name: nameFromFile(file.name), source_file_name: file.name, unit: "cm", paper: "A4", pieces: res.pieces } });
+      // ตัวอักษร/ลายที่ประกอบจากหลายเส้น → รวมให้ก่อน (ทับกัน / ห่างไม่เกิน 1.5 มม.) แล้วให้ตรวจที่ขั้นเลือกชิ้น
+      const pieces = applyGrouping(res.pieces, autoGroup(res.pieces, GROUP_DEFAULT));
+      const job = await api<Job>(API, { json: { name: nameFromFile(file.name), source_file_name: file.name, unit: "cm", paper: "A4", pieces: piecesForSave(pieces) } });
       try { sessionStorage.setItem(SKIPPED_KEY(job.id), JSON.stringify({ ...res.skipped, pages: res.pages })); } catch { /* ไม่มีที่จำ */ }
-      router.push(jobHref(job.id));
+      router.push(`${jobHref(job.id)}?step=group`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ");
       setBusy(null);

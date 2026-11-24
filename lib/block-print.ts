@@ -9,6 +9,8 @@
  *   แต่ลายบล็อก/ตัวอักษร (เช่น g) มีหลายวงในชิ้นเดียว → เก็บแบบเส้น PDF ตรง ๆ ไม่ตกหล่น
  *
  *   ชิ้น (BlockPiece): d = เส้นที่เลื่อนให้มุมซ้ายบนอยู่ที่ 0,0 · ow/oh = ขนาดเดิมในไฟล์ · w/h = ขนาดที่ตั้ง · ax/ay = ตำแหน่งเดิมในไฟล์
+ *   ชิ้นที่รวมจากหลายเส้น (parts) เก็บเส้นเดิมแต่ละเส้นไว้ → "แยกออก" คืนได้ และคงวิธีเติมสีของแต่ละเส้น (รูในตัวอักษรไม่หาย)
+ *   หน้าเลือกชิ้น (จัดกลุ่ม): autoGroup / applyGrouping — รวมเส้นที่ทับกันหรืออยู่ใกล้กันเป็นชิ้นเดียวให้ก่อน แล้วให้ผู้ใช้ปรับเอง
  *   เส้นบอกขนาด (dimGeometry) ใช้ร่วมทั้งภาพตัวอย่างบนจอ (SVG) และตัวเขียน PDF → หน้าจอกับไฟล์ตรงกันเสมอ
  *
  * ใช้ที่: lib/block-print-ai (อ่านไฟล์) · lib/block-print-pdf (เขียน PDF) · components/block-print · คู่มือ docs/block-print.md
@@ -22,15 +24,23 @@ export type BlockUnit = "cm" | "mm";
 export type BlockPaper = "A4" | "A3";
 export type Box = { x: number; y: number; w: number; h: number };
 
+/** เส้นย่อย 1 เส้นในชิ้นที่รวมแล้ว (d เลื่อนให้มุมซ้ายบนของเส้นนี้อยู่ที่ 0,0 · ax/ay = ตำแหน่งเดิมในไฟล์) */
+export type BlockPart = { id: string; name: string; d: DrawOps; fill: FillRule; ow: number; oh: number; ax: number; ay: number };
+/** ชิ้นที่ระบบแยกไว้ต่างหากตอนนำเข้า: พื้นหลังเต็มอาร์ตบอร์ด · เศษเล็ก · เส้นกรอบยาวบาง */
+export type PieceKind = "background" | "dust" | "frame";
+export const KIND_NAME: Record<PieceKind, string> = { background: "พื้นหลัง", dust: "เศษเล็ก", frame: "เส้นกรอบ" };
+
 export type BlockPiece = {
   id: string;
   name: string;
-  d: DrawOps;
+  /** เส้นทั้งชิ้น (ถ้ามี parts = เส้นของทุก part ต่อกัน ใช้คิดกรอบ — ตอนวาดใช้ parts) */ d: DrawOps;
   fill: FillRule;
   /** ขนาดเดิมในไฟล์ (มม.) */ ow: number; oh: number;
   /** ขนาดที่ตั้ง (มม.) */ w: number; h: number;
   /** ตำแหน่งเดิมในไฟล์ (มม.) — ใช้เรียงชิ้น + รวมชิ้น */ ax: number; ay: number;
   /** ติ๊ก = ส่งออก */ on: boolean;
+  /** ชิ้นที่รวมจากหลายเส้น — เก็บเส้นเดิมไว้ให้แยกคืนได้ */ parts?: BlockPart[];
+  kind?: PieceKind;
 };
 
 export const MIN_SIZE_MM = 0.5;
@@ -149,6 +159,13 @@ export function isWhiteFill(args: unknown[]): boolean {
   return nums.every((v) => (max > 1 ? v >= 250 : v >= 0.98));
 }
 
+/** เรียงตามที่วางในไฟล์: แถวบนก่อน แล้วซ้าย → ขวา (แนวตั้งซ้อนกันเกินครึ่งของชิ้นที่เตี้ยกว่า = แถวเดียวกัน เช่น เครื่องหมายคำพูดเล็ก ๆ ข้างตัวอักษร) */
+export function byPosition(a: { ax: number; ay: number; oh: number }, b: { ax: number; ay: number; oh: number }): number {
+  const overlap = Math.min(a.ay + a.oh, b.ay + b.oh) - Math.max(a.ay, b.ay);
+  if (overlap < Math.min(a.oh, b.oh) / 2) return (a.ay + a.oh / 2) - (b.ay + b.oh / 2);
+  return a.ax - b.ax;
+}
+
 export type OperatorList = { fnArray: ArrayLike<number>; argsArray: ArrayLike<unknown> };
 /** backgrounds = ชิ้นที่ใหญ่เกือบเท่าอาร์ตบอร์ด (พื้นหลังสี) — นำเข้าแต่ไม่ติ๊กส่งออก */
 export type AiSkipped = { strokes: number; texts: number; images: number; whites: number; backgrounds?: number };
@@ -219,18 +236,13 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
       ow: r3(b.w), oh: r3(b.h), w: r3(b.w), h: r3(b.h), ax: r3(b.x), ay: r3(b.y),
     });
   }
-  // เรียงตามที่วางในไฟล์: แถวบนก่อน (ห่างกันเกินครึ่งความสูงถือว่าคนละแถว) แล้วซ้าย → ขวา
-  pieces.sort((a, b) => {
-    const rowGap = Math.min(a.oh, b.oh) / 2;
-    if (Math.abs((a.ay + a.oh / 2) - (b.ay + b.oh / 2)) > rowGap) return a.ay - b.ay;
-    return a.ax - b.ax;
-  });
+  pieces.sort(byPosition);
   let n = 0;
   skipped.backgrounds = 0;
   pieces.forEach((p, i) => {
     p.id = `p${i + 1}`;
     // พื้นหลังสีเต็มอาร์ตบอร์ด (เจอในไฟล์จริง) → เก็บไว้แต่ไม่ติ๊กส่งออก ไม่นับเป็นลำดับชิ้น
-    if (p.ow >= pageW * 0.9 && p.oh >= pageH * 0.9) { p.on = false; p.name = "พื้นหลัง"; skipped.backgrounds!++; return; }
+    if (p.ow >= pageW * 0.9 && p.oh >= pageH * 0.9) { p.on = false; p.name = KIND_NAME.background; p.kind = "background"; skipped.backgrounds!++; return; }
     p.name = `ชิ้น ${++n}`;
   });
   return { pieces, skipped, page: { w: r3(pageW), h: r3(pageH) } };
@@ -258,22 +270,170 @@ export function equalHeight(pieces: BlockPiece[], refId: string): BlockPiece[] {
 export const resetPieceSize = (p: BlockPiece): BlockPiece => ({ ...p, w: p.ow, h: p.oh });
 export const isResized = (p: BlockPiece) => Math.abs(p.w - p.ow) > 0.001 || Math.abs(p.h - p.oh) > 0.001;
 
-/** รวมหลายชิ้นเป็นชิ้นเดียว (ใช้รูปทรงเดิมในไฟล์ · ขนาดกลับเป็นขนาดรวมเดิม) — ชิ้นที่รวมอยู่ตำแหน่งของชิ้นแรก */
+/** รวมหลายชิ้นเป็นชิ้นเดียว (ใช้รูปทรงเดิมในไฟล์ · ขนาดกลับเป็นขนาดรวมเดิม) — ชิ้นที่รวมใช้รหัส/ชื่อ/ตำแหน่งในรายการของชิ้นแรก */
 export function mergePieces(pieces: BlockPiece[], ids: string[]): BlockPiece[] {
   const picked = pieces.filter((p) => ids.includes(p.id));
   if (picked.length < 2) return pieces;
-  const abs = picked.flatMap((p) => mapOps(p.d, (x, y) => [r3(x + p.ax), r3(y + p.ay)]));
-  const b = opsBox(abs);
-  if (!b) return pieces;
   const first = picked[0];
-  const merged: BlockPiece = {
-    ...first,
-    d: mapOps(abs, (x, y) => [r3(x - b.x), r3(y - b.y)]),
-    fill: picked.every((p) => p.fill === first.fill) ? first.fill : "nonzero",
-    ow: r3(b.w), oh: r3(b.h), w: r3(b.w), h: r3(b.h), ax: r3(b.x), ay: r3(b.y), on: true,
-  };
+  const merged = buildPiece(picked.flatMap(atomsOf), first.id, first.name);
   const rest = new Set(picked.slice(1).map((p) => p.id));
   return pieces.filter((p) => !rest.has(p.id)).map((p) => (p.id === first.id ? merged : p));
+}
+
+// ───────── จัดกลุ่มชิ้น (หน้าเลือกชิ้น) ─────────
+
+/** เส้นที่ใช้วาดชิ้น (หน่วย มม. เทียบมุมซ้ายบนของชิ้น ขนาดเดิมในไฟล์) — ชิ้นรวมวาดทีละเส้นด้วยวิธีเติมสีของเส้นนั้น */
+export function pieceShapes(p: BlockPiece): { d: DrawOps; fill: FillRule }[] {
+  if (!p.parts?.length) return [{ d: p.d, fill: p.fill }];
+  return p.parts.map((q) => {
+    const dx = q.ax - p.ax, dy = q.ay - p.ay;
+    return { d: dx || dy ? mapOps(q.d, (x, y) => [x + dx, y + dy]) : q.d, fill: q.fill };
+  });
+}
+
+const partAsPiece = (q: BlockPart): BlockPiece => ({ id: q.id, name: q.name, d: q.d, fill: q.fill, ow: q.ow, oh: q.oh, w: q.ow, h: q.oh, ax: q.ax, ay: q.ay, on: true });
+
+/** เส้นย่อยของชิ้น เป็นชิ้นเดี่ยว ๆ (ชิ้นที่ไม่ได้รวม = ตัวมันเอง) — ใช้ตอนแยก/จัดกลุ่มใหม่ */
+export function atomsOf(p: BlockPiece): BlockPiece[] {
+  if (!p.parts?.length) return [p];
+  return p.parts.map((q) => ({ ...partAsPiece(q), on: p.on }));
+}
+
+/** รวมเส้นเดี่ยวหลายเส้นเป็น 1 ชิ้น (ขนาด = ขนาดรวมเดิมในไฟล์) */
+export function buildPiece(atoms: BlockPiece[], id: string, name: string): BlockPiece {
+  const parts: BlockPart[] = atoms.map((a) => ({ id: a.id, name: a.name, d: a.d, fill: a.fill, ow: a.ow, oh: a.oh, ax: a.ax, ay: a.ay }));
+  const x0 = Math.min(...parts.map((q) => q.ax)), y0 = Math.min(...parts.map((q) => q.ay));
+  const x1 = Math.max(...parts.map((q) => q.ax + q.ow)), y1 = Math.max(...parts.map((q) => q.ay + q.oh));
+  const d = parts.flatMap((q) => mapOps(q.d, (x, y) => [r3(x + q.ax - x0), r3(y + q.ay - y0)]));
+  const ow = r3(x1 - x0), oh = r3(y1 - y0);
+  return {
+    id, name, d, fill: parts.every((q) => q.fill === parts[0].fill) ? parts[0].fill : "nonzero",
+    ow, oh, w: ow, h: oh, ax: r3(x0), ay: r3(y0), on: true, parts,
+  };
+}
+
+export const JUNK_DUST_MM = 0.3;
+/** เศษเล็ก (ด้านยาวไม่ถึง 0.3 มม.) · เส้นกรอบ (บางไม่ถึง 0.6 มม. และยาวเกิน 40 เท่าของความหนา) */
+export function junkKind(p: { ow: number; oh: number }): "dust" | "frame" | null {
+  const a = Math.max(p.ow, p.oh), b = Math.min(p.ow, p.oh);
+  if (a < JUNK_DUST_MM) return "dust";
+  if (b < 0.6 && a / Math.max(b, 0.001) > 40) return "frame";
+  return null;
+}
+const isBackground = (p: BlockPiece) => p.kind === "background" || (!p.on && p.name === KIND_NAME.background);
+
+export type GroupOpts = {
+  /** เส้นที่ทับ/ซ้อนกัน = ชิ้นเดียว */ overlap: boolean;
+  /** รวมเส้นที่ห่างกันไม่เกินนี้ (มม.) · null = ไม่รวม */ gap: number | null;
+  /** ซ่อนเศษเล็ก/เส้นกรอบไว้ก่อน */ hideJunk: boolean;
+};
+/** ค่าเริ่มต้น 0.2 มม.: ไฟล์จริงของเจ้าของ (final 2) วางลายห่างกันแค่ 0.25-0.33 มม. แต่เส้นย่อยในลายเดียวกันห่าง ~0.12 มม. — ตั้งมากกว่านี้ลายข้างกันจะรวมกันหมด */
+export const GROUP_DEFAULT: GroupOpts = { overlap: true, gap: 0.2, hideJunk: true };
+export const GROUP_GAP_MAX = 5;
+/** กลุ่ม = รหัสเส้นเดี่ยว (atom) ที่จะเป็นชิ้นเดียวกัน */
+export type PieceGroup = { ids: string[]; on: boolean; kind?: PieceKind };
+
+type BoxLike = { ax: number; ay: number; ow: number; oh: number };
+/** ระยะห่างระหว่างกรอบสองกรอบ (ทับ/ชนกัน = 0) แยกแกน x / y */
+export function boxGap(a: BoxLike, b: BoxLike): { dx: number; dy: number } {
+  return {
+    dx: Math.max(0, Math.max(a.ax, b.ax) - Math.min(a.ax + a.ow, b.ax + b.ow)),
+    dy: Math.max(0, Math.max(a.ay, b.ay) - Math.min(a.ay + a.oh, b.ay + b.oh)),
+  };
+}
+
+/**
+ * จัดกลุ่มเส้นเดี่ยวอัตโนมัติ: ทับกัน / ห่างไม่เกิน gap = ชิ้นเดียว
+ *   พื้นหลัง = แยกไว้ ไม่ติ๊ก · เศษเล็ก/เส้นกรอบ = แยกไว้ ไม่ติ๊ก (ถ้า hideJunk)
+ *   เส้นพื้นใหญ่ที่ทับ/ชนเส้นเล็กตั้งแต่ 3 เส้น (เล็กกว่า 10 เท่า เช่น แถบสายเข็มขัด เส้นคั่น กรอบรอบงาน) = ไม่รวมกับใคร
+ *     กันลายทั้งแถวถูกดูดเป็นชิ้นเดียวผ่านแถบพื้น (เจอในไฟล์จริง final 2)
+ *   กลุ่มติ๊กส่งออกถ้ามีเส้นไหนในกลุ่มติ๊กอยู่
+ */
+export function autoGroup(atoms: BlockPiece[], opts: GroupOpts): PieceGroup[] {
+  const side: PieceGroup[] = [];
+  const live: BlockPiece[] = [];
+  for (const a of atoms) {
+    if (isBackground(a)) { side.push({ ids: [a.id], on: false, kind: "background" }); continue; }
+    const j = opts.hideJunk ? junkKind(a) : null;
+    if (j) { side.push({ ids: [a.id], on: false, kind: j }); continue; }
+    live.push(a);
+  }
+  const lone = new Set<number>();
+  if (live.length > 3) {
+    const area = (b: BoxLike) => Math.max(b.ow * b.oh, 1e-6);
+    for (let i = 0; i < live.length; i++) {
+      const big = area(live[i]);
+      let n = 0;
+      for (let k = 0; k < live.length && n < 3; k++) {
+        if (k === i || area(live[k]) * 10 > big) continue;
+        const { dx, dy } = boxGap(live[i], live[k]);
+        if (dx === 0 && dy === 0) n++;
+      }
+      if (n >= 3) lone.add(i);
+    }
+  }
+  const par = live.map((_, i) => i);
+  const find = (i: number): number => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  const g = opts.gap != null && opts.gap >= 0 ? opts.gap : null;
+  const reach = g ?? 0;
+  const order = live.map((_, i) => i).sort((a, b) => live[a].ax - live[b].ax);
+  for (let x = 0; x < order.length; x++) {
+    const i = order[x];
+    if (lone.has(i)) continue;
+    const A = live[i];
+    for (let y = x + 1; y < order.length; y++) {
+      const k = order[y], B = live[k];
+      if (B.ax > A.ax + A.ow + reach + 1e-9) break;
+      if (lone.has(k)) continue;
+      const { dx, dy } = boxGap(A, B);
+      if ((opts.overlap && dx === 0 && dy === 0) || (g != null && Math.max(dx, dy) <= g + 1e-9)) par[find(i)] = find(k);
+    }
+  }
+  const groups = new Map<number, BlockPiece[]>();
+  live.forEach((a, i) => { const r = find(i); const arr = groups.get(r); if (arr) arr.push(a); else groups.set(r, [a]); });
+  return [...[...groups.values()].map((arr) => ({ ids: arr.map((a) => a.id), on: arr.some((a) => a.on) })), ...side];
+}
+
+/** ส่งขึ้นเซิร์ฟเวอร์: ชิ้นรวมไม่ต้องส่งเส้นรวม (เซิร์ฟเวอร์สร้างใหม่จาก parts เองใน cleanPieces) — ข้อมูลที่ส่งเล็กลงครึ่งหนึ่ง */
+export const piecesForSave = (ps: BlockPiece[]): BlockPiece[] => ps.map((p) => (p.parts?.length ? { ...p, d: [] } : p));
+
+/** กลุ่มตามชิ้นที่มีอยู่ตอนนี้ (เปิดหน้าเลือกชิ้นจากหน้าตั้งขนาด) */
+export function groupsFromPieces(pieces: BlockPiece[]): PieceGroup[] {
+  return pieces.map((p) => ({ ids: atomsOf(p).map((a) => a.id), on: p.on, ...(p.kind ? { kind: p.kind } : {}) }));
+}
+
+/**
+ * แปลงกลุ่มกลับเป็นชิ้น — กลุ่มที่ตรงกับชิ้นเดิมเป๊ะ ใช้ชิ้นเดิม (ขนาด/ชื่อที่ตั้งไว้ไม่หาย)
+ *   กลุ่มใหม่ = ขนาดเดิมในไฟล์ · เรียงตามตำแหน่ง · ชื่ออัตโนมัติ "ชิ้น n" เรียงใหม่ (ชื่อที่ตั้งเองคงไว้)
+ */
+export function applyGrouping(current: BlockPiece[], groups: PieceGroup[]): BlockPiece[] {
+  const atoms = new Map(current.flatMap(atomsOf).map((a) => [a.id, a] as const));
+  const keyOf = (ids: string[]) => [...ids].sort().join("|");
+  const byKey = new Map(current.map((p) => [keyOf(atomsOf(p).map((a) => a.id)), p] as const));
+  const taken = new Set<string>([...current.map((p) => p.id), ...atoms.keys()]);
+  let seq = 0;
+  const newId = () => { let id: string; do id = `g${++seq}`; while (taken.has(id)); taken.add(id); return id; };
+  const out: BlockPiece[] = [];
+  for (const g of groups) {
+    const as = g.ids.map((id) => atoms.get(id)).filter((a): a is BlockPiece => !!a);
+    if (!as.length) continue;
+    const keep = byKey.get(keyOf(as.map((a) => a.id)));
+    const p: BlockPiece = { ...(keep ?? (as.length === 1 ? as[0] : buildPiece(as, newId(), ""))), on: g.on };
+    if (g.kind) p.kind = g.kind; else delete p.kind;
+    out.push(p);
+  }
+  const main = out.filter((p) => !p.kind).sort(byPosition), side = out.filter((p) => p.kind);
+  const autoName = new Set(Object.values(KIND_NAME));
+  main.forEach((p, i) => { if (!p.name || /^ชิ้น \d+$/.test(p.name) || autoName.has(p.name)) p.name = `ชิ้น ${i + 1}`; });
+  for (const p of side) p.name = KIND_NAME[p.kind!];
+  return [...main, ...side];
+}
+
+function validOps(v: unknown): number[] | null {
+  const d = Array.isArray(v) ? (v as unknown[]).map(Number) : [];
+  if (!d.length || !d.every(Number.isFinite)) return null;
+  try { eachOp(d, () => undefined); } catch { return null; }
+  return d;
 }
 
 /** ตรวจ/ทำความสะอาดชิ้นที่รับมาจากหน้าเว็บก่อนเก็บ (กันข้อมูลเพี้ยน) */
@@ -286,10 +446,22 @@ export function cleanPieces(raw: unknown): { ok: true; pieces: BlockPiece[] } | 
   for (const r of raw) {
     const o = (r ?? {}) as Record<string, unknown>;
     const num = (k: string) => Number(o[k]);
-    const d = Array.isArray(o.d) ? (o.d as unknown[]).map(Number) : [];
-    if (!d.length || !d.every(Number.isFinite)) return { ok: false, error: "เส้นของชิ้นไม่ถูกต้อง" };
-    try { eachOp(d, () => undefined); } catch { return { ok: false, error: "เส้นของชิ้นไม่ถูกต้อง" }; }
-    points += d.length;
+    let parts: BlockPart[] | undefined;
+    if (Array.isArray(o.parts) && o.parts.length) {
+      if (o.parts.length > 5000) return { ok: false, error: "เส้นในชิ้นเยอะเกินไป" };
+      parts = [];
+      for (const q of o.parts as Record<string, unknown>[]) {
+        const qd = validOps(q?.d);
+        const qs = ["ow", "oh", "ax", "ay"].map((k) => Number(q?.[k]));
+        if (!qd || !qs.every(Number.isFinite) || qs[0] <= 0 || qs[1] <= 0) return { ok: false, error: "เส้นของชิ้นไม่ถูกต้อง" };
+        points += qd.length;
+        parts.push({ id: String(q.id ?? "").slice(0, 40) || `q${parts.length + 1}`, name: String(q.name ?? "").slice(0, 80), d: qd, fill: q.fill === "evenodd" ? "evenodd" : "nonzero", ow: qs[0], oh: qs[1], ax: qs[2], ay: qs[3] });
+      }
+    }
+    // ชิ้นรวม: สร้างเส้นรวมใหม่จาก parts เอง (ไม่เชื่อค่าที่ส่งมา)
+    const d = parts ? buildPiece(parts.map(partAsPiece), "_", "").d : validOps(o.d);
+    if (!d) return { ok: false, error: "เส้นของชิ้นไม่ถูกต้อง" };
+    if (!parts) points += d.length;
     if (points > MAX_POINTS) return { ok: false, error: "จุดเส้นรวมเยอะเกินไป" };
     const id = String(o.id ?? "").slice(0, 40);
     if (!id || ids.has(id)) return { ok: false, error: "รหัสชิ้นซ้ำหรือว่าง" };
@@ -302,6 +474,8 @@ export function cleanPieces(raw: unknown): { ok: true; pieces: BlockPiece[] } | 
       ow: sizes[0], oh: sizes[1], w: sizes[2], h: sizes[3],
       ax: Number.isFinite(num("ax")) ? num("ax") : 0, ay: Number.isFinite(num("ay")) ? num("ay") : 0,
       on: o.on !== false,
+      ...(parts ? { parts } : {}),
+      ...(o.kind === "background" || o.kind === "dust" || o.kind === "frame" ? { kind: o.kind as PieceKind } : {}),
     });
   }
   return { ok: true, pieces: out };
