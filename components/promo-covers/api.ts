@@ -37,7 +37,9 @@ const json = (method: string, body: unknown): RequestInit => ({ method, headers:
 
 export const listCampaigns = (trash = false) => call<{ campaigns: CampaignListRow[] }>(`/api/promo-covers${trash ? "?trash=1" : ""}`).then((j) => j.campaigns);
 export const createCampaign = (body: Partial<Campaign>) => call<{ campaign: Campaign }>("/api/promo-covers", json("POST", body)).then((j) => j.campaign);
-export const getCampaign = (id: string) => call<Full>(`/api/promo-covers/${id}`);
+/** ใช้ซ้ำ: ก๊อปชุดเป็นร่างใหม่ (รุ่น + ปก + ร้าน · เวลาว่าง) */
+export const reuseCampaign = (id: string) => call<{ campaign: Campaign }>("/api/promo-covers", json("POST", { copy_from: id })).then((j) => j.campaign);
+export const getCampaign =(id: string) => call<Full>(`/api/promo-covers/${id}`);
 export const patchCampaign = (id: string, body: Record<string, unknown>) => call<Full & { back_to_draft?: boolean }>(`/api/promo-covers/${id}`, json("PATCH", body));
 export const deleteCampaign = (id: string) => call<{ ok: true }>(`/api/promo-covers/${id}`, { method: "DELETE" });
 export const previewCampaign = (id: string) => call<Preview>(`/api/promo-covers/${id}/preview`);

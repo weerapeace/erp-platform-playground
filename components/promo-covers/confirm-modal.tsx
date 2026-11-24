@@ -40,7 +40,7 @@ export function ConfirmPromoModal({ open, full, preview: initial, onClose, onDon
     setBusy(true);
     try {
       const r = await confirmCampaign(c.id, { ack: true });
-      toast.success(`ยืนยันแล้ว — ${r.created ?? 0} รายการ${c.starts_at && Date.parse(c.starts_at) > Date.now() ? ` จะส่งตอน ${thTime(c.starts_at)}` : " พร้อมส่ง (กด \"ทำเดี๋ยวนี้\" หรือรอตัวตั้งเวลา ≤ 15 นาที)"}`);
+      toast.success(`ยืนยันแล้ว — ${r.created ?? 0} รายการ${c.starts_at && Date.parse(c.starts_at) > Date.now() ? ` จะส่งตอน ${thTime(c.starts_at)}` : " พร้อมส่ง (กด \"ทำเดี๋ยวนี้\" หรือรอตัวตั้งเวลา ≤ 5 นาที)"}`);
       onDone();
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(false); }

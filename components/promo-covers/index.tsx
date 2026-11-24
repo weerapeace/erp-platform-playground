@@ -13,7 +13,7 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { CAMPAIGN_STATUS, ON_SHOP, thTime } from "@/lib/promo-cover";
-import { createCampaign, deleteCampaign, getCampaign, listCampaigns, patchCampaign, type CampaignListRow, type Full, type Preview } from "./api";
+import { createCampaign, deleteCampaign, getCampaign, listCampaigns, patchCampaign, reuseCampaign, type CampaignListRow, type Full, type Preview } from "./api";
 import { PromoEditor } from "./editor";
 import { PromoResults } from "./results";
 import { ConfirmPromoModal } from "./confirm-modal";
@@ -31,6 +31,8 @@ export function PromoCoversPage() {
   const [confirmPv, setConfirmPv] = useState<Preview | null | undefined>(undefined);
   const [delAsk, setDelAsk] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** ชุดที่เพิ่งกดใช้ซ้ำ → เปิดตัวแก้ให้ตั้งเวลาเลย */
+  const [editNew, setEditNew] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setListErr(null);
@@ -69,6 +71,18 @@ export function PromoCoversPage() {
       await deleteCampaign(id); select(null); await loadList();
       toast.undo(`ย้ายชุด "${name}" ลงถังขยะแล้ว`, async () => { await patchCampaign(id, { restore: true }); await loadList(); select(id); });
     } catch (e) { toast.error((e as Error).message); }
+  };
+  /** ใช้ซ้ำ: ชุดใหม่ (ร่าง) รุ่น + ปก + ร้านเหมือนเดิม → เปิดตัวแก้ให้ตั้งเวลา · ย้อนกลับ = ลบชุดใหม่ลงถังขยะ */
+  const reuse = async () => {
+    if (!full) return;
+    setCreating(true);
+    try {
+      const fromId = full.campaign.id;
+      const c = await reuseCampaign(fromId);
+      setTrash(false); setEditNew(c.id); await loadList(); select(c.id);
+      toast.undo(`ใช้ซ้ำแล้ว — สร้าง "${c.name}" (ร่าง) ตั้งเวลาแล้วกดยืนยันได้เลย`, async () => { await deleteCampaign(c.id); await loadList(); select(fromId); });
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setCreating(false); }
   };
   const restore = async () => {
     if (!full) return;
@@ -141,11 +155,14 @@ export function PromoCoversPage() {
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{full.campaign.name}</span>
                 {canPublish && full.campaign.deleted_at && <button type="button" onClick={() => void restore()} className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-[12px] text-slate-700"><Icon name="back" /> กู้คืน</button>}
                 {canPublish && !full.campaign.deleted_at && (
+                  <button type="button" disabled={creating} onClick={() => void reuse()} title="สร้างชุดใหม่ (ร่าง) ที่มีรุ่น ปกโปร และร้านเหมือนชุดนี้ แล้วตั้งเวลาใหม่" className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon name="repeat" /> {creating ? "กำลังสร้าง…" : "ใช้ซ้ำ"}</button>
+                )}
+                {canPublish && !full.campaign.deleted_at && (
                   <button type="button" onClick={() => setDelAsk(true)} title={onShop ? "ยังมีปกโปรค้างบนร้าน — ย้อนปกเดิมก่อน" : undefined} className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 text-[12px] text-rose-600 hover:bg-rose-50"><Icon name="delete" /> ลบชุด</button>
                 )}
               </div>
               {full.campaign.status !== "draft" && <PromoResults full={full} canRun={canPublish} onReload={reload} />}
-              <PromoEditor full={full} canEdit={canPublish} onChanged={(f) => { setFull(f); void loadList(); }} onAskConfirm={(pv) => setConfirmPv(pv)} />
+              <PromoEditor full={full} canEdit={canPublish} startEditing={editNew === full.campaign.id} onChanged={(f) => { setFull(f); void loadList(); }} onAskConfirm={(pv) => setConfirmPv(pv)} />
             </>
           )}
         </div>

@@ -1,5 +1,5 @@
 /**
- * /api/cron/promo-covers — ตัวตั้งเวลาเปลี่ยนปกโปร (vercel.json ทุก 15 นาที)
+ * /api/cron/promo-covers — ตัวตั้งเวลาเปลี่ยนปกโปร (vercel.json ทุก 5 นาที · ล็อกรอบกันทำซ้อนกับปุ่มกดเอง — withRunLock)
  *   ส่งปกโปรของชุดที่ถึงเวลาเริ่ม (TikTok/Lazada ล่วงหน้าตามที่ตั้ง) · ย้อนปกเดิมของชุดที่ถึงเวลาจบ · แจ้งกระดิ่งรายการที่ล้มเหลว
  *   เช็กซ้ำหลังย้อน: TikTok (หลัง 1 ชม.) / Lazada (หลัง 24 ชม.) ดูบนร้านว่าปกเดิมขึ้นจริง — ค้าง = ย้อนไม่ผ่าน + แจ้งเตือน
  *   ไม่มีงานถึงเวลา = อ่านฐานข้อมูล 1 ครั้งแล้วจบ (ไม่แตะร้าน)
@@ -10,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { isTrustedCron } from "@/lib/cron-auth";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
-import { runPromoCovers, verifyReverts } from "@/lib/promo-cover-server";
+import { runPromoCovers, verifyReverts, withRunLock } from "@/lib/promo-cover-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,9 +27,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const actor = { id: null, name: "ตัวตั้งเวลาเปลี่ยนปกโปร" };
     const started = Date.now();
-    const r = await runPromoCovers(admin, { budgetMs: 230_000, actor });
-    // เช็กซ้ำหลังย้อน (TikTok/Lazada) ด้วยเวลาที่เหลือ
-    const v = await verifyReverts(admin, { budgetMs: Math.max(10_000, 270_000 - (Date.now() - started)), actor });
+    // ล็อกรอบ: รอบก่อน/ปุ่มกดเองยังทำอยู่ = ข้ามรอบนี้ (รอบหน้าอีก 5 นาที) — ไม่ส่งซ้ำ
+    const out = await withRunLock(admin, "cron", async () => {
+      const r = await runPromoCovers(admin, { budgetMs: 200_000, actor });
+      // เช็กซ้ำหลังย้อน (TikTok/Lazada) ด้วยเวลาที่เหลือ (ให้จบก่อนรอบถัดไป 5 นาที)
+      const v = await verifyReverts(admin, { budgetMs: Math.max(10_000, 250_000 - (Date.now() - started)), actor });
+      return { r, v };
+    });
+    if (!out) {
+      await recordWorkerRun(admin, "promo-covers", { ok: true, summary: "ข้ามรอบนี้ — มีรอบอื่น/คนกดเองกำลังส่งอยู่ (ทำต่อรอบหน้า)" });
+      return NextResponse.json({ ok: true, skipped: "locked" });
+    }
+    const { r, v } = out;
     const busy = r.applied + r.reverted + r.failed + r.conflict;
     const main = busy ? `ส่งปกโปร ${r.applied} · ย้อนปกเดิม ${r.reverted} · ไม่ผ่าน ${r.failed} · มีคนเปลี่ยนปกเอง ${r.conflict}${r.remaining ? ` · ค้าง ${r.remaining} (ทำต่อรอบหน้า)` : ""}` : `ไม่มีงานถึงเวลา (${r.campaigns} ชุดที่รอ/กำลังใช้)`;
     const check = v.checked ? ` · เช็กหลังย้อน ${v.checked} (ปกเดิมขึ้นแล้ว ${v.ok} · ร้านยังตรวจ ${v.waiting} · ค้าง ${v.stuck})` : "";

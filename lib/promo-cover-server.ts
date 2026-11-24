@@ -1,7 +1,7 @@
 /**
  * 🖼 เปลี่ยนปกโปรทุกร้าน — ฝั่งเซิร์ฟเวอร์ (ยิงร้านจริง) · กติกา pure = lib/promo-cover.ts
  *
- * ทำงานเป็น "รอบ" (runPromoCovers) — เรียกจากตัวตั้งเวลา /api/cron/promo-covers ทุก 15 นาที และปุ่ม "ทำเดี๋ยวนี้" ในหน้า
+ * ทำงานเป็น "รอบ" (runPromoCovers) — เรียกจากตัวตั้งเวลา /api/cron/promo-covers ทุก 5 นาที และปุ่ม "ทำเดี๋ยวนี้" ในหน้า
  *   1) ชุดโปรที่ถึงเวลาส่ง → เป้าหมายรายร้านที่ยังรอส่ง → applyTarget (ส่งปกโปรเป็นรูปแรก · จดชุดรูปเดิม + สำเนาปกเดิมในคลังรูปเรา)
  *   2) ชุดโปรที่ถึงเวลาย้อน → เป้าหมายที่ปกโปรยังอยู่ → revertTarget (เอารูปแรกเดิมกลับ — ถ้ารูปแรกบนร้านไม่ใช่ปกโปรของเราแล้ว = conflict ไม่ทับ)
  *   3) สถานะชุดโปร (live/ended) + แจ้งเตือนรายการที่ล้มเหลว (กระดิ่ง · ข้อเสนอ 3 · กฎแจ้งเตือน promo_cover.failed)
@@ -565,6 +565,27 @@ export async function revertTarget(admin: Admin, t: TargetRow, actor: Actor, for
 
 // ───────── รอบทำงาน ─────────
 export type RunResult = { applied: number; reverted: number; failed: number; conflict: number; remaining: number; campaigns: number; timedOut: boolean };
+
+/**
+ * 🔒 ล็อกรอบทำงาน — ตัวตั้งเวลา (ทุก 5 นาที) กับปุ่มกดเองห้ามทำพร้อมกัน (กันส่งรุ่นเดียวกันซ้ำ → จดปกโปรเป็น "ปกเดิม" แล้วย้อนผิด)
+ *   เก็บใน ui_config key promo_cover_run_lock · ถือได้ไม่เกิน RUN_LOCK_MS (ตัวที่ค้าง/ล้มกลางทาง หมดอายุเอง)
+ *   จองด้วย UPDATE ที่มีเงื่อนไข "ล็อกหมดอายุแล้ว" ครั้งเดียว (Postgres ทำทีละแถว → ได้ล็อกคนเดียว)
+ *   ได้ล็อก = เรียก fn แล้วปล่อยล็อก · ไม่ได้ = คืน null (มีรอบอื่นทำอยู่)
+ */
+const RUN_LOCK_KEY = "promo_cover_run_lock";
+const RUN_LOCK_MS = 300_000;
+const FREE_AT = "2000-01-01T00:00:00.000Z";
+export async function withRunLock<T>(admin: Admin, holder: string, fn: () => Promise<T>): Promise<T | null> {
+  await admin.from("ui_config").upsert({ key: RUN_LOCK_KEY, value: { holder: null }, updated_at: FREE_AT }, { onConflict: "key", ignoreDuplicates: true });
+  const token = `${holder}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  const nowIso = new Date().toISOString();
+  const { data, error } = await admin.from("ui_config").update({ value: { holder: token, at: nowIso }, updated_at: nowIso })
+    .eq("key", RUN_LOCK_KEY).lt("updated_at", new Date(Date.now() - RUN_LOCK_MS).toISOString()).select("key");
+  if (error) throw new Error(`จองรอบทำงานไม่สำเร็จ: ${error.message}`);
+  if (!data?.length) return null;
+  try { return await fn(); }
+  finally { await admin.from("ui_config").update({ value: { holder: null }, updated_at: FREE_AT }).eq("key", RUN_LOCK_KEY).eq("value->>holder", token); }
+}
 
 /**
  * ทำงานที่ถึงเวลาแล้ว (ส่ง/ย้อน) จนหมดหรือหมดเวลา budgetMs — เรียกซ้ำได้ ไม่ทำซ้ำของที่ทำไปแล้ว

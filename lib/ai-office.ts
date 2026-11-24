@@ -176,8 +176,8 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
   {
     id: "promo-covers", zone: "sales", kind: "auto", icon: "🖼️",
     title: "ผู้เปลี่ยนปกโปรทุกร้าน", titleEn: "Promo cover scheduler",
-    does: "ทุก 15 นาที ดูชุดโปรที่ถึงเวลา แล้วเปลี่ยนรูปปกบนร้าน (Shopee/Lazada/TikTok/LINE/เว็บ) · ถึงเวลาจบก็ย้อนเป็นปกเดิม · ส่งไม่ผ่านแจ้งกระดิ่ง",
-    trigger: "ทุก 15 นาที", cron: "/api/cron/promo-covers", everyHours: 1,
+    does: "ทุก 5 นาที ดูชุดโปรที่ถึงเวลา แล้วเปลี่ยนรูปปกบนร้าน (Shopee/Lazada/TikTok/LINE/เว็บ) · ถึงเวลาจบก็ย้อนเป็นปกเดิม · ส่งไม่ผ่านแจ้งกระดิ่ง",
+    trigger: "ทุก 5 นาที", cron: "/api/cron/promo-covers", everyHours: 1,
     can: ["เปลี่ยนรูปแรกของสินค้าบนร้าน ตามชุดโปรที่คนยืนยันแล้ว", "ย้อนเป็นปกเดิม", "ส่งแจ้งเตือน"], cannot: ["สร้างชุดโปรเอง", "แก้ชื่อ/ราคา/สต๊อกบนร้าน", "ทับปกที่คนเปลี่ยนเองระหว่างโปร"],
     source: "บันทึกรอบล่าสุด + ตาราง promo_cover_targets (ผลรายร้าน)", href: "/master/promo-covers",
     files: ["app/api/cron/promo-covers/route.ts", "lib/promo-cover-server.ts", "lib/promo-cover.ts"],

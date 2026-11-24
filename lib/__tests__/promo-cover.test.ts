@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  changeBy, windowTooShort, reuseName, TICK_MIN,
   applyDueAt, countTargets, coverFromRaw, isApplyDue, isRevertDue, listingOnSale, nextCampaignStatus, restoreCover, sameImageRef, stillInReview, swapCover, checkReverted, isRevertCheckDue, validateCampaign,
   type CampaignTiming,
 } from "@/lib/promo-cover";
@@ -131,5 +132,24 @@ describe("ตรวจค่า + สถานะชุด", () => {
     expect(checkReverted({ ...base, current: "old", reviewing: false, rejected: ["รูปไม่ชัด"] }).verdict).toBe("stuck");
     expect(checkReverted({ ...base, current: "someone", reviewing: false, rejected: [] }).verdict).toBe("changed");
     expect(checkReverted({ ...base, now: Date.parse("2026-11-25T00:00:00Z"), current: "promo", reviewing: true, rejected: [] }).verdict).toBe("stuck");
+  });
+});
+
+describe("ตัวตั้งเวลา + ใช้ซ้ำ (รอบ 3)", () => {
+  it("ปกจะเปลี่ยนช้าสุด = เวลาที่ตั้ง + รอบเช็ก", () => {
+    expect(TICK_MIN).toBe(5);
+    expect(changeBy("2026-11-25T00:00:00.000Z")).toBe("2026-11-25T00:05:00.000Z");
+    expect(changeBy(null)).toBeNull();
+  });
+  it("เตือนช่วงโปรสั้นกว่ารอบเช็ก", () => {
+    expect(windowTooShort("2026-11-24T03:10:00Z", "2026-11-24T03:12:00Z")).toBe(true);
+    expect(windowTooShort("2026-11-24T03:10:00Z", "2026-11-24T03:15:00Z")).toBe(false);
+    expect(windowTooShort(null, "2026-11-24T03:12:00Z", Date.parse("2026-11-24T03:10:00Z"))).toBe(true);
+    expect(windowTooShort("2026-11-24T03:10:00Z", null)).toBe(false);
+  });
+  it("ชื่อชุดใช้ซ้ำนับรอบต่อ", () => {
+    expect(reuseName("โปร 25/11")).toBe("โปร 25/11 (รอบ 2)");
+    expect(reuseName("โปร 25/11 (รอบ 2)")).toBe("โปร 25/11 (รอบ 3)");
+    expect(reuseName("  ")).toBe("ชุดโปร (รอบ 2)");
   });
 });

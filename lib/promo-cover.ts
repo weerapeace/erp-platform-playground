@@ -55,7 +55,7 @@ export const ON_SHOP: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["applie
 /** สถานะที่ต้องแจ้งเตือน (ข้อเสนอ 3) */
 export const ALERT_STATUS: ReadonlySet<TargetStatus> = new Set<TargetStatus>(["failed", "revert_failed", "conflict"]);
 /** ย้อนตอนร้าน (TikTok/Lazada) ยังตรวจปกโปรไม่เสร็จ — บนร้านยังเป็นปกเดิม ถ้าถือว่า "ย้อนแล้ว" ปกโปรจะขึ้นค้างหลังตรวจเสร็จ → รอแล้วลองใหม่ */
-export const STILL_IN_REVIEW = "ร้านยังตรวจปกโปรไม่เสร็จ (บนร้านยังเป็นปกเดิม) — ระบบจะลองย้อนใหม่ทุก 15 นาทีจนร้านตรวจเสร็จ · ถ้าร้านไม่ผ่านปกโปร กด \"ย้อนทับเลย\"";
+export const STILL_IN_REVIEW = "ร้านยังตรวจปกโปรไม่เสร็จ (บนร้านยังเป็นปกเดิม) — ระบบจะลองย้อนใหม่ทุก 5 นาทีจนร้านตรวจเสร็จ · ถ้าร้านไม่ผ่านปกโปร กด \"ย้อนทับเลย\"";
 /** เช็กซ้ำหลังย้อน (ร้านที่ต้องตรวจรูป) — รอกี่ชั่วโมงหลังย้อนค่อยดูบนร้าน · ตรวจนานเกินนี้ = แจ้งเตือน */
 export const REVERT_CHECK_AFTER_H: Partial<Record<PromoPlatform, number>> = { tiktok: 1, lazada: 24 };
 export const REVERT_CHECK_GIVE_UP_H = 72;
@@ -242,3 +242,22 @@ export function thTime(iso: string | null | undefined): string {
 export const framedKeyOf = (campaignId: string, parentId: string, stamp: number) => `promo-covers/${campaignId}/${parentId}-${stamp}.jpg`;
 /** r2 key สำเนาปกเดิม (กันรูปบนร้านหาย) */
 export const backupKeyOf = (campaignId: string, targetId: string) => `promo-covers/${campaignId}/backup/${targetId}.jpg`;
+
+/** ตัวตั้งเวลาเช็กทุกกี่นาที (ต้องตรงกับรอบของ /api/cron/promo-covers ใน vercel.json — แก้ที่นั่นต้องแก้ตรงนี้ด้วย) */
+export const TICK_MIN = 5;
+/** ปกจะเปลี่ยนช้าสุดกี่โมง (เวลาที่ตั้ง + รอบเช็ก) · null = ไม่ได้ตั้ง */
+export function changeBy(iso: string | null | undefined): string | null {
+  const t = ms(iso);
+  return t == null ? null : new Date(t + TICK_MIN * 60_000).toISOString();
+}
+/** ช่วงโปรสั้นกว่ารอบเช็ก → ปกอาจไม่ได้เปลี่ยนเลย (ไม่ตั้งเริ่ม = นับจากตอนนี้) */
+export function windowTooShort(startsAt: string | null | undefined, endsAt: string | null | undefined, now = Date.now()): boolean {
+  const e = ms(endsAt);
+  if (e == null) return false;
+  return e - (ms(startsAt) ?? now) < TICK_MIN * 60_000;
+}
+/** ชื่อชุดใช้ซ้ำ: "โปร 12.12" → "โปร 12.12 (รอบ 2)" · "… (รอบ 2)" → "… (รอบ 3)" */
+export function reuseName(name: string): string {
+  const m = name.trim().match(/^(.*?)\s*\(รอบ\s*(\d+)\)$/);
+  return m ? `${m[1]} (รอบ ${Number(m[2]) + 1})` : `${name.trim() || "ชุดโปร"} (รอบ 2)`;
+}

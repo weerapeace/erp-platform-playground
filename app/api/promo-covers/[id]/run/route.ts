@@ -13,7 +13,9 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { loadCampaignFull, revertTarget, runPromoCovers, type RunResult } from "@/lib/promo-cover-server";
+import { loadCampaignFull, revertTarget, runPromoCovers, withRunLock, type RunResult } from "@/lib/promo-cover-server";
+/** ตัวตั้งเวลา/อีกคนกำลังทำรอบอยู่ (ล็อก withRunLock) — กันส่งรุ่นเดียวกันซ้ำ */
+const BUSY = "ระบบอัตโนมัติกำลังส่ง/ย้อนปกอยู่ (กันส่งซ้ำ) — คำสั่งของคุณบันทึกแล้ว ระบบจะทำต่อเองภายใน 5 นาที หรือกดอีกครั้งในอีกสักครู่";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,11 +45,15 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     if (!ids?.length) return NextResponse.json({ error: "เลือกรายการที่จะย้อนทับก่อน" }, { status: 400 });
     const res: RunResult = { applied: 0, reverted: 0, failed: 0, conflict: 0, remaining: 0, campaigns: 1, timedOut: false };
     const started = Date.now();
-    for (const t of full.targets.filter((x) => ids.includes(x.id) && (x.status === "conflict" || x.status === "revert_failed" || x.status === "review"))) {
-      if (Date.now() - started > BUDGET) { res.timedOut = true; res.remaining++; continue; }
-      const o = await revertTarget(admin, t, actor, true);
-      if (o.status === "reverted") res.reverted++; else res.failed++;
-    }
+    const got = await withRunLock(admin, `force:${id}`, async () => {
+      for (const t of full.targets.filter((x) => ids.includes(x.id) && (x.status === "conflict" || x.status === "revert_failed" || x.status === "review"))) {
+        if (Date.now() - started > BUDGET) { res.timedOut = true; res.remaining++; continue; }
+        const o = await revertTarget(admin, t, actor, true);
+        if (o.status === "reverted") res.reverted++; else res.failed++;
+      }
+      return true;
+    });
+    if (!got) return NextResponse.json({ error: "ระบบอัตโนมัติกำลังส่ง/ย้อนปกอยู่ (กันส่งซ้ำ) — กดอีกครั้งในอีกสักครู่" }, { status: 409 });
     await audit({ kind: "force_revert", targets: ids.length, ...res });
     return NextResponse.json(res, { headers: { "Cache-Control": "no-store" } });
   }
@@ -74,7 +80,8 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
     await audit({ kind: "retry", failed: failed.length, revert_failed: revFailed.length });
   }
   try {
-    const r = await runPromoCovers(admin, { campaignId: id, budgetMs: BUDGET, actor });
+    const r = await withRunLock(admin, `run:${id}`, () => runPromoCovers(admin, { campaignId: id, budgetMs: BUDGET, actor }));
+    if (!r) return NextResponse.json({ error: BUSY }, { status: 409 });
     return NextResponse.json(r, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ error: `ทำงานไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });

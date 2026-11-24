@@ -4,6 +4,8 @@
  *   ร่าง/รอเริ่ม = แก้ได้ทุกอย่าง · กำลังใช้ = แก้ได้แค่ชื่อ/เวลาจบ (จะเปลี่ยนรูป ต้องย้อนปกเดิมก่อน)
  *   ลากไฟล์มาวางได้ (ของกลาง useFileDrop): ทั้งกล่องปกโปร = จับคู่รุ่นจากชื่อไฟล์ · ช่องปกของแต่ละรุ่น = ลงรุ่นนั้นเลย · Ctrl+V วางรูปที่คัดลอกได้
  *   ปกโปรทุกรูปถูกเก็บลงอัลบั้มในคลังรูป ชื่อตามชื่อชุด (lib/promo-cover-album) — แก้ชื่อ/เปิดในคลังรูปได้จากกล่องอัลบั้ม
+ *   รอบ 3: บันทึกแล้วเป็น "อ่านอย่างเดียว" (สรุป) · กด "แก้ไข" = เปิดตัวแก้เต็ม (บันทึก/ยกเลิก) · ชุดใหม่ที่ยังว่าง/เพิ่งกดใช้ซ้ำ = เปิดตัวแก้ให้เลย
+ *     โชว์ "ปกจะเปลี่ยนภายในกี่โมง" (ตัวตั้งเวลาเช็กทุก TICK_MIN นาที) + เตือนช่วงโปรสั้นกว่ารอบเช็ก
  *   ปุ่ม "ตรวจก่อน/หลัง แล้วยืนยัน" → ป๊อปยืนยัน (confirm-modal) — การส่งขึ้นร้านจริงเกิดตอนถึงเวลา หรือกด "ทำเดี๋ยวนี้" ในผลรายร้าน
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +17,8 @@ import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
 import { apiFetch } from "@/lib/api";
-import { META_NOTE, PLATFORM_LABEL, PLATFORM_NOTE, PROMO_PLATFORMS, REVIEW_PLATFORMS, type PromoPlatform } from "@/lib/promo-cover";
+import { ConfirmDialog } from "@/components/modal";
+import { META_NOTE, PLATFORM_LABEL, PLATFORM_NOTE, PROMO_PLATFORMS, REVIEW_PLATFORMS, TICK_MIN, changeBy, thTime, windowTooShort, type PromoPlatform } from "@/lib/promo-cover";
 import { frameBatch, imgUrl, patchCampaign, previewCampaign, uploadPromoImage, type Full, type Item, type Preview } from "./api";
 import { Pill, Thumb, isoToLocal, localToIso } from "./parts";
 
@@ -30,17 +33,26 @@ const section = "rounded-xl border border-slate-200 bg-white p-3 sm:p-4";
 const btn = "inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 const btnSm = "inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[12px] text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 
-export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
+export function PromoEditor({ full, canEdit, onChanged, onAskConfirm, startEditing = false }: {
   full: Full;
   canEdit: boolean;
   onChanged: (f: Full) => void;
   /** บันทึกแล้วเปิดป๊อปยืนยัน */
   onAskConfirm: (preview: Preview | null) => void;
+  /** เปิดมาในโหมดแก้ไขเลย (เช่น เพิ่งกดใช้ซ้ำ) */
+  startEditing?: boolean;
 }) {
   const toast = useToast();
   const c = full.campaign;
   const editable = canEdit && (c.status === "draft" || c.status === "scheduled") && !c.deleted_at;
   const timeEditable = canEdit && c.status !== "ended" && c.status !== "cancelled" && !c.deleted_at;
+  // ชุดใหม่ที่ยังไม่ได้ทำอะไรเลย (ร่าง ไม่มีรุ่น ไม่เคยแก้หัวชุด) → เปิดตัวแก้ให้เลย
+  const fresh = c.status === "draft" && full.items.length === 0 && Math.abs(Date.parse(c.updated_at) - Date.parse(c.created_at)) < 5_000;
+  const [editing, setEditing] = useState(() => timeEditable && (startEditing || fresh));
+  // เปลี่ยนชุด → เริ่มใหม่ · ยืนยันแล้ว/เริ่มใช้/จบ → กลับเป็นอ่านอย่างเดียว (กลับเป็นร่างระหว่างแก้ = แก้ต่อได้)
+  useEffect(() => { setEditing(timeEditable && (startEditing || fresh)); }, [c.id, startEditing]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (c.status !== "draft") setEditing(false); }, [c.status]);
+  const [discardAsk, setDiscardAsk] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftOf(full));
   const saved = useMemo(() => draftOf(full), [full]);
   useEffect(() => { setDraft(draftOf(full)); }, [full.campaign.id, full.campaign.updated_at]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,6 +98,16 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
     if (f) toast.success("บันทึกแล้ว");
     return f;
   };
+  /** บันทึกแล้วกลับเป็นอ่านอย่างเดียว (ไม่มีอะไรเปลี่ยน = ปิดตัวแก้เลย) */
+  const saveAndClose = async () => {
+    if (!dirty) { setEditing(false); return; }
+    const f = await saveDraft();
+    if (f) setEditing(false);
+  };
+  const cancelEdit = () => { if (dirty) setDiscardAsk(true); else setEditing(false); };
+  const startsIso = localToIso(draft.starts);
+  const endsIso = localToIso(draft.ends);
+  const tooShort = windowTooShort(startsIso, endsIso);
 
   // ── รูป ──
   const setImage = (item: Item, key: string | null, source: Item["source"]) => patch({ set_items: [{ id: item.id, promo_key: key, source }] }, `img:${item.id}`);
@@ -196,6 +218,94 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
   const missing = full.items.filter((i) => !i.promo_key).length;
   const hasReview = draft.platforms.some((p) => REVIEW_PLATFORMS.has(p as PromoPlatform));
 
+  // อัลบั้มปกโปรในคลังรูป (ใช้ทั้งโหมดอ่านอย่างเดียวและโหมดแก้)
+  const albumBox = (album || full.items.some((i) => i.promo_key)) ? (
+      <div className={section}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {albumEdit === null ? (
+            <p className="min-w-0 text-sm text-slate-800">
+              <Icon name="image" size={14} className="mr-1 inline text-slate-500" />
+              <span className="font-medium">อัลบั้มปกโปร:</span> {album ? album.name : "ยังไม่ได้สร้าง (สร้างให้ตอนบันทึกปกครั้งถัดไป)"}
+              {album && <span className="text-[12px] text-slate-500"> · {album.count.toLocaleString()} รูป</span>}
+            </p>
+          ) : (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              <input autoFocus value={albumEdit} maxLength={120} onChange={(e) => setAlbumEdit(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void saveAlbumName(); if (e.key === "Escape") setAlbumEdit(null); }}
+                className="h-8 min-w-[12rem] flex-1 rounded-md border border-slate-300 px-2 text-sm" aria-label="ชื่ออัลบั้ม" />
+              <button type="button" className={btnSm} disabled={busy === "album"} onClick={() => void saveAlbumName()}><Icon name="save" /> {busy === "album" ? "กำลังบันทึก…" : "บันทึก"}</button>
+              <button type="button" className={btnSm} onClick={() => setAlbumEdit(null)}>ยกเลิก</button>
+            </div>
+          )}
+          {albumEdit === null && (
+            <div className="flex flex-wrap gap-1.5">
+              {canEdit && !c.deleted_at && <button type="button" className={btnSm} disabled={!!busy} onClick={() => setAlbumEdit(album?.name ?? c.name)}><Icon name="edit" /> {album ? "แก้ชื่อ" : "สร้างอัลบั้ม"}</button>}
+              {album && <a href={`/master/assets?collection=${album.id}`} target="_blank" rel="noopener" className={btnSm}><Icon name="open" /> เปิดในคลังรูป</a>}
+            </div>
+          )}
+        </div>
+        <p className="mt-1 text-[11px] text-slate-500">ปกโปรทุกรูปของชุดนี้ (อัปเอง · จากคลัง · แปะกรอบ) ถูกเก็บในอัลบั้มนี้ให้เอง · ตั้งชื่อตามชื่อชุดโปร (มีอัลบั้มชื่อนี้อยู่แล้ว = ใช้อันเดิม) · เอาปกออก/ลบชุด รูปยังอยู่ในอัลบั้ม</p>
+      </div>
+    ) : null;
+
+  // ── 🔒 อ่านอย่างเดียว (บันทึกแล้ว) — กด "แก้ไข" เพื่อเปิดตัวแก้เต็ม ──
+  const roRow = "grid grid-cols-1 gap-0.5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-3";
+  const roKey = "text-[12px] text-slate-500";
+  const startShow = c.starts_at ? thTime(c.starts_at) : c.status === "draft" ? "ทันทีที่กดยืนยัน" : thTime(c.confirmed_at);
+  const changeAt = changeBy(c.starts_at ?? (c.status === "scheduled" ? c.confirmed_at : null));
+  const roTooShort = (c.status === "draft" || c.status === "scheduled") && windowTooShort(c.starts_at, c.ends_at);
+  if (!editing) {
+    return (
+      <div className="space-y-3">
+        <div className={section}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-[12px] text-slate-500"><Icon name="lock" size={13} /> อ่านอย่างเดียว{timeEditable ? " — กด \"แก้ไข\" เพื่อเปลี่ยน" : ""}</p>
+            <div className="flex flex-wrap gap-2">
+              {timeEditable && <button type="button" className={btn} onClick={() => setEditing(true)}><Icon name="edit" /> แก้ไข</button>}
+              {editable && c.status === "draft" && (
+                <button type="button" className={`${btn} border-sky-400 bg-sky-50 text-sky-700 hover:bg-sky-100`} disabled={!!busy || !full.items.length} onClick={() => onAskConfirm(preview)}>
+                  <Icon name="view" /> ตรวจก่อน/หลัง แล้วยืนยัน
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="space-y-2.5 text-[13px] text-slate-800">
+            <div className={roRow}>
+              <span className={roKey}>รุ่น ({full.items.length})</span>
+              <div className="flex min-w-0 flex-wrap gap-1.5">
+                {full.items.length === 0 ? <span className="text-slate-400">ยังไม่ได้เลือกรุ่น</span> : full.items.map((i) => (
+                  <span key={i.id} className="inline-flex max-w-full items-center gap-1.5 rounded-md bg-slate-100 py-0.5 pl-0.5 pr-2 text-[12px] text-slate-700" title={i.name}>
+                    <Thumb src={imgUrl(i.promo_key ?? i.cover_key, 80)} size={22} accent={!!i.promo_key} />
+                    <span className="truncate">{i.code}</span>
+                    {!i.promo_key && <span className="text-amber-700">ยังไม่มีปก</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className={roRow}>
+              <span className={roKey}>ร้าน</span>
+              <span>{c.platforms.length ? c.platforms.map((p) => { const s2 = pvOf(p as PromoPlatform); return `${PLATFORM_LABEL[p as PromoPlatform] ?? p}${s2 ? ` (ส่งได้ ${s2.ready.toLocaleString()})` : ""}`; }).join(" · ") : <span className="text-rose-600">ยังไม่ได้เลือกร้าน</span>}</span>
+            </div>
+            <div className={roRow}>
+              <span className={roKey}>เริ่ม</span>
+              <span>{startShow}{changeAt && (c.status === "draft" || c.status === "scheduled") ? <span className="text-[12px] text-slate-500"> · ปกจะเปลี่ยนภายใน {thTime(changeAt)}</span> : ""}</span>
+            </div>
+            <div className={roRow}>
+              <span className={roKey}>จบ</span>
+              <span>{c.ends_at ? `${thTime(c.ends_at)}${c.auto_revert ? " · ย้อนเป็นปกเดิมอัตโนมัติ" : " · ไม่ย้อนเอง"}` : "ไม่ได้ตั้ง (ย้อนเองด้วยปุ่ม \"ย้อนปกเดิมเดี๋ยวนี้\")"}</span>
+            </div>
+            {c.platforms.some((p) => REVIEW_PLATFORMS.has(p as PromoPlatform)) && (
+              <div className={roRow}><span className={roKey}>TikTok / Lazada</span><span>ส่งล่วงหน้า {c.early_hours} ชั่วโมง (รอร้านตรวจ)</span></div>
+            )}
+          </div>
+          {roTooShort && <p className="mt-3 text-[12px] text-amber-700">ช่วงโปรสั้นกว่ารอบเช็กเวลา ({TICK_MIN} นาที) — ปกอาจไม่ได้เปลี่ยน · แก้ให้ยาวขึ้น หรือกด &quot;เริ่มเดี๋ยวนี้&quot;</p>}
+          <p className="mt-3 text-[11px] text-slate-400">ระบบเช็กเวลาทุก {TICK_MIN} นาที — ปกเปลี่ยน/ย้อนช้าสุด {TICK_MIN} นาทีหลังเวลาที่ตั้ง</p>
+        </div>
+        {albumBox}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3" {...drop.guard}>
       {/* หัว: ชื่อชุด */}
@@ -287,35 +397,7 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
         )}
       </div>
 
-      {/* อัลบั้มปกโปรในคลังรูป */}
-      {(album || full.items.some((i) => i.promo_key)) && (
-        <div className={section}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {albumEdit === null ? (
-              <p className="min-w-0 text-sm text-slate-800">
-                <Icon name="image" size={14} className="mr-1 inline text-slate-500" />
-                <span className="font-medium">อัลบั้มปกโปร:</span> {album ? album.name : "ยังไม่ได้สร้าง (สร้างให้ตอนบันทึกปกครั้งถัดไป)"}
-                {album && <span className="text-[12px] text-slate-500"> · {album.count.toLocaleString()} รูป</span>}
-              </p>
-            ) : (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                <input autoFocus value={albumEdit} maxLength={120} onChange={(e) => setAlbumEdit(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") void saveAlbumName(); if (e.key === "Escape") setAlbumEdit(null); }}
-                  className="h-8 min-w-[12rem] flex-1 rounded-md border border-slate-300 px-2 text-sm" aria-label="ชื่ออัลบั้ม" />
-                <button type="button" className={btnSm} disabled={busy === "album"} onClick={() => void saveAlbumName()}><Icon name="save" /> {busy === "album" ? "กำลังบันทึก…" : "บันทึก"}</button>
-                <button type="button" className={btnSm} onClick={() => setAlbumEdit(null)}>ยกเลิก</button>
-              </div>
-            )}
-            {albumEdit === null && (
-              <div className="flex flex-wrap gap-1.5">
-                {canEdit && !c.deleted_at && <button type="button" className={btnSm} disabled={!!busy} onClick={() => setAlbumEdit(album?.name ?? c.name)}><Icon name="edit" /> {album ? "แก้ชื่อ" : "สร้างอัลบั้ม"}</button>}
-                {album && <a href={`/master/assets?collection=${album.id}`} target="_blank" rel="noopener" className={btnSm}><Icon name="open" /> เปิดในคลังรูป</a>}
-              </div>
-            )}
-          </div>
-          <p className="mt-1 text-[11px] text-slate-500">ปกโปรทุกรูปของชุดนี้ (อัปเอง · จากคลัง · แปะกรอบ) ถูกเก็บในอัลบั้มนี้ให้เอง · ตั้งชื่อตามชื่อชุดโปร (มีอัลบั้มชื่อนี้อยู่แล้ว = ใช้อันเดิม) · เอาปกออก/ลบชุด รูปยังอยู่ในอัลบั้ม</p>
-        </div>
-      )}
+      {albumBox}
 
       {/* 3 เลือกร้าน */}
       <div className={section}>
@@ -370,9 +452,13 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
             ชั่วโมง <span className="text-[11px] text-slate-500">(ร้านตรวจเสร็จเร็ว ปกโปรอาจขึ้นก่อนเวลาเริ่ม)</span>
           </label>
         )}
+        <p className="mt-3 text-[12px] text-slate-500">ระบบเช็กเวลาทุก {TICK_MIN} นาที{editable ? ` — ปกจะเปลี่ยนภายใน ${startsIso ? thTime(changeBy(startsIso)) : `${TICK_MIN} นาทีหลังกดยืนยัน`}` : ""}{endsIso ? ` · ย้อนปกเดิมภายใน ${thTime(changeBy(endsIso))}` : ""}</p>
+        {tooShort && <p className="mt-1 text-[12px] text-amber-700">ช่วงโปรสั้นกว่ารอบเช็กเวลา ({TICK_MIN} นาที) — ปกอาจไม่ได้เปลี่ยน · ตั้งให้ยาวกว่านี้ หรือกด &quot;เริ่มเดี๋ยวนี้&quot; หลังยืนยัน</p>}
+        {c.status === "scheduled" && editable && <p className="mt-1 text-[12px] text-amber-700">ชุดนี้ยืนยันแล้ว — ถ้าแก้รุ่น/ปก/ร้าน/เวลาเริ่ม ต้องกดตรวจก่อน/หลัง แล้วยืนยันใหม่</p>}
         {timeEditable && (
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className={btn} disabled={!dirty || !!busy} onClick={() => void saveDraft()}><Icon name="save" /> {busy === "save" ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button type="button" className={btn} disabled={!!busy} onClick={() => void saveAndClose()}><Icon name="save" /> {busy === "save" ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button type="button" className={btn} disabled={!!busy} onClick={cancelEdit}>ยกเลิก</button>
             {editable && c.status === "draft" && (
               <button type="button" className={`${btn} border-sky-400 bg-sky-50 text-sky-700 hover:bg-sky-100`} disabled={!!busy || !full.items.length}
                 onClick={async () => { const f = dirty ? await saveDraft() : full; if (f) onAskConfirm(preview); }}>
@@ -382,6 +468,7 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
             {dirty && <span className="self-center text-[12px] text-amber-700">มีที่แก้ยังไม่บันทึก</span>}
           </div>
         )}
+        {timeEditable && <p className="mt-2 text-[11px] text-slate-400">รุ่นและปกโปรบันทึกทันทีที่เพิ่ม/เปลี่ยน · ปุ่มบันทึก = ชื่อ ร้าน และเวลา</p>}
       </div>
 
       <input ref={oneFile} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { void onOneFile(e.target.files?.[0]); e.target.value = ""; }} />
@@ -394,6 +481,9 @@ export function PromoEditor({ full, canEdit, onChanged, onAskConfirm }: {
         confirmText={(n) => (n ? `เพิ่ม ${n} รุ่น` : "เลือกรุ่นก่อน")} busyText="กำลังเพิ่ม…"
         onConfirm={async (ids) => !!(await patch({ add_parent_ids: ids }, "add"))}
         tabPrefKey="promo_cover_pick_tab" colsPrefKey="promo-cover-pick" showFullPageLink={false} workTab />
+      <ConfirmDialog open={discardAsk} onClose={() => setDiscardAsk(false)} title="ทิ้งที่แก้?" confirmText="ทิ้งที่แก้" variant="danger"
+        message="คุณมีข้อมูลที่ยังไม่ได้บันทึก (ชื่อ ร้าน หรือเวลา) — ต้องการออกโดยไม่บันทึกหรือไม่? (รุ่นและปกที่เพิ่มไว้บันทึกแล้ว)"
+        onConfirm={() => { setDiscardAsk(false); setDraft(draftOf(full)); setEditing(false); }} />
       <AssetPicker open={!!libFor} onClose={() => setLibFor(null)} title={libFor ? `เลือกปกโปรของ ${libFor.code}` : "เลือกรูป"} typeFilter="image" defaultSearch={album ? undefined : libFor?.code} defaultCollectionId={album?.id}
         onSelect={(a) => { const it = libFor; setLibFor(null); if (it && a[0]?.r2_key) void setImage(it, a[0].r2_key, "library"); }} />
     </div>

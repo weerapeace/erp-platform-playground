@@ -71,7 +71,7 @@ export function PromoResults({ full, canRun, onReload }: { full: Full; canRun: b
         {canRun && !c.deleted_at && (
           <div className="flex flex-wrap gap-1.5">
             {(c.status === "scheduled" || c.status === "live") && (
-              <button type="button" className={btnSm} disabled={!!busy} onClick={() => confirmRun({ title: "ทำงานที่ถึงเวลาเดี๋ยวนี้", message: "ระบบจะส่ง/ย้อนปกบนร้านจริงเฉพาะรายการที่ถึงเวลาแล้ว (ไม่ต้องรอตัวตั้งเวลา 15 นาที)", confirm: "ทำเดี๋ยวนี้", run: () => doRun("run", "run") })}>
+              <button type="button" className={btnSm} disabled={!!busy} onClick={() => confirmRun({ title: "ทำงานที่ถึงเวลาเดี๋ยวนี้", message: "ระบบจะส่ง/ย้อนปกบนร้านจริงเฉพาะรายการที่ถึงเวลาแล้ว (ไม่ต้องรอตัวตั้งเวลา 5 นาที)", confirm: "ทำเดี๋ยวนี้", run: () => doRun("run", "run") })}>
                 <Icon name="refresh" /> ทำเดี๋ยวนี้
               </button>
             )}
