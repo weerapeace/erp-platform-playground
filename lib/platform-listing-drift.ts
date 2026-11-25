@@ -43,6 +43,8 @@ export type DriftItem = {
   text?: { before: string; after: string };
   /** ตัวเลือก: ตารางรายตัวเลือก รูป · สี · ราคา 2 ฝั่ง (เฉพาะตอนตรวจสด · ไม่จดลงตาราง) */
   table?: VariantTableRow[];
+  /** กด "ข้าม (ถือว่าตรง)" ไว้ — state เป็น same จนกว่าฝั่งใดเปลี่ยน (2026-11-24) */
+  ignored?: boolean;
 };
 export type VariantTableRow = {
   code: string;
@@ -60,6 +62,11 @@ export type SystemValues = {
   description: string; imageRefs: string[]; variants: SysVariant[]; /** ชื่อที่จะส่ง (lib/listing-title) */ title?: string;
   /** ข้อมูลจำเพาะที่ระบบจะส่ง (2026-11-23 · ตอนนี้ Shopee) + ชื่อช่อง · ไม่มี = ไม่เทียบเรื่องนี้ */ attrs?: AttrValues; attrNames?: Record<string, string>;
   /** รูปในรายละเอียด (รูป Description ของ Parent SKU · "r2:<key>") */ descImageRefs?: string[];
+  /**
+   * จำนวน "ชุดรูปหลัก" (รูปในร่าง + แกลเลอรีของสินค้า) ก่อนตัวช่วยลงสินค้าเติมรูปปกตัวสีจนครบที่ร้านรับ (2026-11-24 เจ้าของ "จริง ๆ ตรงกันแล้วมี 8 รูป")
+   * ยังไม่เคยส่งรูป + บนร้านมีเท่าชุดรูปหลัก = ไม่นับว่าไม่ตรง · ไม่รู้ = undefined
+   */
+  imageCoreCount?: number;
 };
 /** image = ลิงก์รูปตัวเลือกบนร้าน */
 export type ShopVariant = { code: string | null; label: string; values?: string[]; price: number | null; special?: number | null; pay?: number | null; image?: string | null };
@@ -78,6 +85,11 @@ export type SysSync = {
   images_sys?: string | null; images_shop?: string | null; images_at?: string | null;
   desc_images_sys?: string | null; desc_images_shop?: string | null;
   vimg_sys?: string | null; vimg_shop?: string | null;
+  /**
+   * "ข้าม (ถือว่าตรง)" ต่อเรื่อง (เจ้าของเลือก 2026-11-24 หน้าอัปเดตให้ตรง ข้อ 1) — sig = ลายเซ็นค่าทั้ง 2 ฝั่งตอนกดข้าม (driftValueSig)
+   * ฝั่งร้านหรือระบบเปลี่ยน = ลายเซ็นไม่ตรง = เตือนใหม่เอง · ลบ = เลิกข้าม
+   */
+  ignore?: Record<string, { sig: string; at: string | null; by?: string | null }>;
 };
 
 // ───────── ตัวช่วย ─────────
@@ -132,6 +144,12 @@ function compareImagesCore(sys: SystemValues, shop: ShopValues, sync: SysSync | 
       summary: sysChanged ? "รูปในระบบเปลี่ยนหลังส่งล่าสุด" : "รูปบนร้านถูกเปลี่ยน",
       note: sysChanged && shopChanged ? "ทั้งรูปในระบบและบนร้านเปลี่ยน" : sysChanged ? "เปลี่ยนรูปที่สินค้าหลังส่งขึ้นร้านครั้งล่าสุด" : "มีคนแก้รูปบนร้านหลังส่งจากระบบ",
     };
+  }
+  // บนร้านมีเท่าชุดรูปหลักของสินค้า — รูปที่เกินมาฝั่งระบบคือรูปปกตัวสีที่ตัวช่วยลงสินค้าเติมให้ครบตอนลงใหม่เท่านั้น
+  const core = sys.imageCoreCount;
+  if (core != null && core > 0 && core < sys.imageRefs.length && shop.imageCount === core) {
+    return { key: "images", state: "unknown", summary: `เท่าชุดรูปหลัก (${core} รูป)`, before, after,
+      note: `บนร้าน ${shop.imageCount} รูป = รูปหลักของสินค้า ${core} รูป · ระบบเติมรูปปกตัวสีให้ครบ ${sys.imageRefs.length} เฉพาะตอนลงใหม่ — ไม่นับว่าไม่ตรง (ถ้าอยากให้ครบ ${sys.imageRefs.length} รูป ติ๊กส่งได้)` };
   }
   if (shop.imageCount !== sys.imageRefs.length) return { key: "images", state: "diff", summary: `รูป: บนร้าน ${shop.imageCount} · ระบบ ${sys.imageRefs.length}`, before, after, note: `ระบบยังไม่เคยส่งรูปขึ้นร้านนี้ (เทียบได้แค่จำนวน) · กดส่ง = แทนรูปบนร้านทั้งชุดด้วย ${sys.imageRefs.length} รูปตามระบบ` };
   return { key: "images", state: "unknown", summary: "ยังไม่เคยส่งรูปจากระบบ", before, after, note: "จำนวนรูปเท่ากัน แต่ยังบอกไม่ได้ว่าเป็นรูปชุดเดียวกัน — กดส่งครั้งแรกแล้วระบบจะจำไว้เทียบรอบหน้า" };
@@ -299,11 +317,36 @@ export function compareAttrs(sys: SystemValues, shop: ShopValues): Omit<DriftIte
 
 export function compareAll(sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): Omit<DriftItem, "sendable" | "cannot">[] {
   const options = compareOptions(sys, shop);
-  return [
+  const items = [
     compareTitle(sys, shop), compareImages(sys, shop, sync), compareDescription(sys, shop), compareDescImages(sys, shop, sync),
     { ...options, table: variantTable(sys, shop) }, compareVariantImages(sys, shop, sync), comparePrice(sys, shop),
     ...(sys.attrs ? [compareAttrs(sys, shop)] : []),
   ];
+  return items.map((it) => applyDriftIgnore(it, sys, shop, sync));
+}
+
+/**
+ * ลายเซ็นค่าทั้ง 2 ฝั่งของเรื่องนี้ (ไว้จำตอนกด "ข้าม" — ค่าใดเปลี่ยน = ลายเซ็นเปลี่ยน = เตือนใหม่)
+ * ข้อความเทียบแบบเดียวกับตัวเทียบ (ตัดช่องว่าง/แท็ก) — แก้แค่การเว้นบรรทัดไม่นับว่าเปลี่ยน
+ */
+export function driftValueSig(key: DriftKey, sys: SystemValues, shop: ShopValues): string {
+  const vs = (xs: readonly { code?: string | null; label?: string; values?: readonly string[]; price?: number | null; special?: number | null; pay?: number | null; image?: string | null }[]) =>
+    xs.map((v) => [normCode(v.code), normVal(v.label ?? ""), (v.values ?? []).map(normVal).join("/"), v.price ?? "", v.special ?? "", v.pay ?? "", v.image ?? ""].join("~"));
+  const tt = (s: string | null | undefined) => String(s ?? "").replace(/\s+/g, " ").trim();
+  const parts: string[] = key === "title" ? [tt(shop.title), tt(sys.title)]
+    : key === "description" ? [normText(shop.description), normText(sys.description)]
+    : key === "images" ? [shop.imageSig, String(shop.imageCount), listSig(sys.imageRefs)]
+    : key === "desc_images" ? [listSig(shop.descImageUrls ?? descImages(shop.description)), listSig(sys.descImageRefs ?? [])]
+    : key === "attrs" ? [JSON.stringify(shop.attrs ?? {}), JSON.stringify(sys.attrs ?? {})]
+    : [listSig(vs(shop.variants)), listSig(vs(sys.variants))];
+  return listSig([key, ...parts]);
+}
+/** กดข้ามไว้ + ค่ายังเหมือนตอนกด → ถือว่าตรง (ป้ายบอกว่าข้ามไว้) */
+function applyDriftIgnore<T extends Omit<DriftItem, "sendable" | "cannot">>(it: T, sys: SystemValues, shop: ShopValues, sync: SysSync | null | undefined): T {
+  const ig = sync?.ignore?.[it.key];
+  if (!ig || (it.state !== "diff" && it.state !== "unknown")) return it;
+  if (ig.sig !== driftValueSig(it.key, sys, shop)) return it;
+  return { ...it, state: "same", ignored: true, summary: "ข้ามไว้ (ถือว่าตรง)", note: `กดข้ามไว้${ig.at ? ` เมื่อ ${ig.at.slice(0, 10)}` : ""} · ถ้าบนร้านหรือในระบบเปลี่ยนอีกจะเตือนใหม่` };
 }
 
 /** เรื่องที่ไม่ตรง (ป้าย) */

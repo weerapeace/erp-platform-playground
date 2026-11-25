@@ -125,7 +125,7 @@ export type LazCreatePreview = {
   description: LazCreateField<string>;
   highlights: LazCreateField<string>;
   brand: LazCreateField<string>;
-  images: { refs: string[]; src: string; custom: boolean };
+  images: { refs: string[]; src: string; custom: boolean; /** จำนวนชุดรูปหลัก (รูปในร่าง + แกลเลอรี) ก่อนเติมรูปปกตัวสี — ตัวตรวจร้าน↔ระบบใช้ (2026-11-24) */ core?: number };
   package: { weight: number | null; l: number | null; w: number | null; h: number | null; src: string };
   dims: LazVariationDim[];
   /** ช่องขายของหมวด (เลือกเป็นชื่อชั้นได้) */
@@ -410,7 +410,7 @@ export function planLazadaCreate(input: {
       description: { value: descHtml, src: descSrc },
       highlights: { value: hiLines, src: hiLines ? "เขียนไว้สำหรับ Lazada" : "ไม่มี (ไม่บังคับ)" },
       brand: { value: LAZADA_NO_BRAND, src: "ร้าน IG บน Lazada ใช้ No Brand" },
-      images: { refs, src: imgSrc, custom: picked.length > 0 },
+      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, LAZADA_CREATE_MAX_IMAGES).length) },
       package: { weight, ...box, src: pkgSrc },
       dims, saleProps, variants,
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],

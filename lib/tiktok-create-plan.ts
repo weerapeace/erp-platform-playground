@@ -78,7 +78,7 @@ export type TtsCreatePreview = {
   category: { id: string | null; label: string | null; src: string };
   description: TtsCreateField<string>;
   brand: { id: string | null; name: string | null; src: string };
-  images: { refs: string[]; src: string; custom: boolean };
+  images: { refs: string[]; src: string; custom: boolean; /** จำนวนชุดรูปหลัก (รูปในร่าง + แกลเลอรี) ก่อนเติมรูปปกตัวสี — ตัวตรวจร้าน↔ระบบใช้ (2026-11-24) */ core?: number };
   package: { weight: number | null; l: number | null; w: number | null; h: number | null; src: string };
   dims: TtsCreateDim[];
   variants: TtsCreateVariantRow[];
@@ -303,7 +303,7 @@ export function planTiktokCreate(input: {
       category: { id: categoryId, label: catPath || null, src: catSrc },
       description: { value: desc.html, src: descSrc },
       brand: { id: input.brand?.id ?? null, name: input.brand?.name ?? null, src: brandSrc },
-      images: { refs, src: imgSrc, custom: picked.length > 0 },
+      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, TTS_MAX_IMAGES).length) },
       package: { weight, ...box, src: pkgSrc },
       dims, variants,
       attrs: { required, loaded: !!(fields ?? input.attrDefs), fields: fields ?? [], values: attrVals },

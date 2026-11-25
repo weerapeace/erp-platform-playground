@@ -268,7 +268,7 @@ export type ShopeeCreatePreview = {
   colorChoices: string[];
   category: { id: string | null; label: string | null; kind: ShopeeCategoryKind | null; src: string; candidates: ShopeeCategoryPick[] };
   brand: { id: number; name: string; src: string };
-  images: { refs: string[]; src: string; custom: boolean; min: number; max: number };
+  images: { refs: string[]; src: string; custom: boolean; min: number; max: number; /** จำนวนชุดรูปหลัก (รูปในร่าง + แกลเลอรี) ก่อนเติมรูปปกตัวสี — ตัวตรวจร้าน↔ระบบใช้ (2026-11-24) */ core?: number };
   weight: { kg: number | null; src: string };
   box: { l: number | null; w: number | null; h: number | null; mandatory: boolean };
   dims: ShopeeCreateDim[];
@@ -535,7 +535,7 @@ export function planShopeeCreate(input: {
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },
-      images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax },
+      images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, imagesMax).length) },
       weight: { kg: weight, src: wSrc },
       box: { ...box, mandatory: boxMandatory },
       dims, variants,

@@ -12,6 +12,9 @@
  *  POST { action:"adopt", listing_id, key }               → "ให้ระบบใช้ค่านี้": ค่าบนร้านตอนนี้ → ร่างของร้านนี้ (ชื่อ/รายละเอียด/ข้อมูลจำเพาะ) { before, after, label, check }
  *  POST { action:"adopt_undo", listing_id, key, before }  → ย้อนกลับค่าเดิมในร่าง { check }
  *     adopt/adopt_undo = products.platforms.edit (แก้ร่างในระบบ · ไม่แตะร้าน · ประวัติ auditDiff) — เจ้าของเลือก 2026-11-23 ข้อ 1
+ *  POST { action:"ignore"|"unignore", listing_id, key }   → "ข้าม (ถือว่าตรง)" / เลิกข้าม (จำใน raw.sys_sync.ignore · ฝั่งใดเปลี่ยน = เตือนใหม่) { check }
+ *  POST { action:"adopt_options", listing_id, codes, central } → ชื่อตัวเลือกบนร้าน → ระบบ (ร่างของร้านนี้ · central = Color Th ของ SKU กลาง ต้องมี products.edit) { before, changed, warnings, check }
+ *  POST { action:"adopt_options_undo", listing_id, before } → ย้อน (products.edit) { check }   — เจ้าของเลือก 2026-11-24 หน้าอัปเดตให้ตรง ข้อ 1, 2, 5
  * ไม่แตะสต๊อก
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,7 +22,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { DRIFT_KEYS, type DriftKey } from "@/lib/platform-listing-drift";
-import { adoptShopValue, buildDriftCalls, checkListingDrift, driftListingsOfParent, listingSysVariants, loadStoredDrift, markDriftSent, undoAdopt } from "@/lib/platform-listing-drift-server";
+import { adoptShopOptions, adoptShopValue, buildDriftCalls, checkListingDrift, driftListingsOfParent, listingSysVariants, loadStoredDrift, markDriftSent, setDriftIgnore, undoAdopt, undoAdoptShopOptions, type OptAdoptBefore } from "@/lib/platform-listing-drift-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -48,11 +51,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  let body: { action?: string; listing_id?: string; parent_sku_id?: string; keys?: unknown; key?: string; before?: unknown };
+  let body: { action?: string; listing_id?: string; parent_sku_id?: string; keys?: unknown; key?: string; before?: unknown; codes?: unknown; central?: unknown };
   try { body = await request.json(); } catch { return json({ error: "invalid JSON" }, 400); }
   const action = String(body.action ?? "");
-  const perm = action === "recheck" ? "products.platforms.view" : action === "adopt" || action === "adopt_undo" ? "products.platforms.edit" : "products.platforms.publish";
+  const EDIT_ACTIONS = ["adopt", "adopt_undo", "ignore", "unignore", "adopt_options", "adopt_options_undo"];
+  const perm = action === "recheck" ? "products.platforms.view" : EDIT_ACTIONS.includes(action) ? "products.platforms.edit" : "products.platforms.publish";
   const denied = await guardApi(request, perm); if (denied) return denied;
+  // แก้ชื่อสีที่ SKU กลาง (ทุกร้านเปลี่ยนตาม) = ต้องมีสิทธิ์แก้สินค้าด้วย
+  const central = body.central === true;
+  if ((action === "adopt_options" && central) || action === "adopt_options_undo") { const d2 = await guardApi(request, "products.edit"); if (d2) return d2; }
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
   const userId = user?.id ?? null;
@@ -76,6 +83,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!r.ok) return json({ error: r.error }, r.status);
     const { check, ...rest } = r;
     return json({ ...rest, check: check.ok ? check : null, error: null });
+  }
+  if (action === "ignore" || action === "unignore") {
+    const key = cleanKeys([body.key])[0];
+    if (!key) return json({ error: "ไม่รู้ว่าเรื่องไหน" }, 400);
+    const r = await setDriftIgnore(admin, listingId, key, action === "ignore", userId);
+    if (!r.ok) return json({ error: r.error }, r.status);
+    return json({ check: r.check.ok ? r.check : null, error: null });
+  }
+  if (action === "adopt_options") {
+    const codes = Array.isArray(body.codes) ? (body.codes as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+    if (!codes.length) return json({ error: "เลือกตัวเลือกก่อน" }, 400);
+    const r = await adoptShopOptions(admin, listingId, codes, central, userId);
+    if (!r.ok) return json({ error: r.error }, r.status);
+    const { check, ...rest } = r;
+    return json({ ...rest, check: check.ok ? check : null, error: null });
+  }
+  if (action === "adopt_options_undo") {
+    const b = (body.before && typeof body.before === "object" ? body.before : null) as OptAdoptBefore | null;
+    if (!b) return json({ error: "ไม่มีค่าเดิมให้ย้อน" }, 400);
+    const r = await undoAdoptShopOptions(admin, listingId, { colors: Array.isArray(b.colors) ? b.colors : [], draft: b.draft ?? null }, userId);
+    if (!r.ok) return json({ error: r.error }, r.status);
+    return json({ check: r.check.ok ? r.check : null, error: null });
   }
   if (action === "build") {
     if (!keys.length) return json({ error: "เลือกเรื่องที่จะส่งก่อน" }, 400);

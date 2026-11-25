@@ -220,3 +220,35 @@ describe("ข้อมูลจำเพาะ (attrs)", () => {
     expect(shopeeRowsWithSysPrices(view, rows, [{ code: "LY22-BK", price: 1190.4 }, { code: "LY22-CR", price: null }]).map((r) => r.price)).toEqual([1190, 990]);
   });
 });
+
+// ───────── 2026-11-24 หน้าอัปเดตให้ตรง: ข้าม (ถือว่าตรง) · ชุดรูปหลัก ─────────
+import { compareAll as compareAll2, compareImages as compareImages2, driftValueSig, type SystemValues as SV2, type ShopValues as SH2 } from "@/lib/platform-listing-drift";
+describe("ข้าม (ถือว่าตรง) + ชุดรูปหลัก (2026-11-24)", () => {
+  const sys: SV2 = { title: "กระเป๋า A", description: "<p>ขนาด 10 x 20 cm. (กว้าง x ยาว)</p>", imageRefs: Array.from({ length: 9 }, (_, i) => `r2:k${i}`), imageCoreCount: 8, variants: [] };
+  const shop: SH2 = { title: "กระเป๋า A", description: "<p>ขนาด 10 x 20 cm.</p>", imageCount: 8, imageSig: "s8", variants: [] };
+  it("รูป: ยังไม่เคยส่ง + บนร้านเท่าชุดรูปหลัก = ไม่นับว่าไม่ตรง (บอกไม่ได้) · ไม่เท่า = ไม่ตรง", () => {
+    const a = compareImages2(sys, shop, null);
+    expect(a.state).toBe("unknown");
+    expect(a.summary).toContain("ชุดรูปหลัก (8");
+    expect(compareImages2(sys, { ...shop, imageCount: 7 }, null).state).toBe("diff");
+    expect(compareImages2({ ...sys, imageCoreCount: undefined }, shop, null).state).toBe("diff");
+  });
+  it("ข้ามไว้ + ค่าเหมือนเดิม = ถือว่าตรง · ฝั่งใดเปลี่ยน = เตือนใหม่", () => {
+    const sig = driftValueSig("description", sys, shop);
+    const sync = { ignore: { description: { sig, at: "2026-11-24T00:00:00Z" } } };
+    const d = compareAll2(sys, shop, sync).find((i) => i.key === "description")!;
+    expect(d.state).toBe("same");
+    expect(d.ignored).toBe(true);
+    expect(d.note).toContain("2026-11-24");
+    const changedShop = compareAll2(sys, { ...shop, description: "<p>ขนาด 12 x 20 cm.</p>" }, sync).find((i) => i.key === "description")!;
+    expect(changedShop.state).toBe("diff");
+    expect(changedShop.ignored).toBeUndefined();
+    const changedSys = compareAll2({ ...sys, description: "<p>ใหม่</p>" }, shop, sync).find((i) => i.key === "description")!;
+    expect(changedSys.state).toBe("diff");
+  });
+  it("ลายเซ็นไม่สนการเว้นบรรทัด/ช่องว่าง แต่สนข้อความ · แต่ละเรื่องลายเซ็นต่างกัน", () => {
+    expect(driftValueSig("description", sys, { ...shop, description: "<p>ขนาด  10 x 20\ncm.</p>" })).toBe(driftValueSig("description", sys, shop));
+    expect(driftValueSig("description", sys, { ...shop, description: "ขนาด 11 x 20 cm." })).not.toBe(driftValueSig("description", sys, shop));
+    expect(driftValueSig("title", sys, shop)).not.toBe(driftValueSig("description", sys, shop));
+  });
+});

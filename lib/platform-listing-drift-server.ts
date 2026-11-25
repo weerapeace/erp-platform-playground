@@ -14,7 +14,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import {
-  attrValSig, compareAll, coreValue, descImages, driftIssues, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
+  attrValSig, compareAll, coreValue, descImages, driftIssues, driftValueSig, listSig, looksHtml, plainText, shopVariantImageSig, sysVariantImageSig,
   type AttrValues, type DriftItem, type DriftKey, type ShopValues, type ShopVariant, type SysSync, type SystemValues,
 } from "@/lib/platform-listing-drift";
 import { auditDiff, writeAudit } from "@/lib/audit";
@@ -113,7 +113,7 @@ async function systemValues(admin: Admin, code: string, parentId: string, userId
     // ข้อมูลจำเพาะ (2026-11-23): ค่าที่ตัวช่วยลงสินค้าจะส่ง (ร่าง + ค่าเริ่มต้นของร้าน + ข้อมูลสินค้า) · ดึงช่องของหมวดไม่ได้ = ไม่เทียบเรื่องนี้
     const attrs = p.attrs.loaded ? Object.fromEntries(Object.entries(p.attrs.values).filter(([, v]) => v.length)) : undefined;
     return { ok: true, descSrc: p.description.src, sys: {
-      description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })),
+      description: p.description.value, imageRefs: p.images.refs, imageCoreCount: p.images.core, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })),
       ...(attrs ? { attrs, attrNames: Object.fromEntries(p.attrs.fields.map((f) => [f.id, f.name])) } : {}),
     } };
   }
@@ -122,13 +122,13 @@ async function systemValues(admin: Admin, code: string, parentId: string, userId
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
     // ราคาลด: เทียบ/ส่งเฉพาะเมื่อระบบมีราคาลด (ล้างราคาลดบน Lazada ผ่านระบบไม่ได้)
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, image: v.image_refs?.[0] ?? v.image_ref, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, imageCoreCount: p.images.core, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.saleProp), price: v.price, image: v.image_refs?.[0] ?? v.image_ref, ...(v.special != null && v.price != null && v.special < v.price ? { special: v.special } : {}) })) } };
   }
   if (code === "tiktok") {
     const r = await loadTiktokCreate(admin, parentId, userId);
     if (!r.ok) return { ok: false, error: r.error };
     const p = r.preview;
-    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })) } };
+    return { ok: true, descSrc: p.description.src, sys: { description: p.description.value, imageRefs: p.images.refs, imageCoreCount: p.images.core, variants: p.variants.map((v) => ({ code: v.code, values: vals(v.attrs), price: v.price, image: v.image_ref })) } };
   }
   return { ok: false, error: "ร้านนี้ยังตรวจไม่ได้" };
 }
@@ -743,6 +743,127 @@ export async function markDriftSent(admin: Admin, listingId: string, keys: Drift
     }
   }
   return checkListingDrift(admin, listingId, userId);
+}
+
+// ───────── "ข้าม (ถือว่าตรง)" (เจ้าของเลือก 2026-11-24 หน้าอัปเดตให้ตรง ข้อ 1) ─────────
+/** on = จำลายเซ็นค่าทั้ง 2 ฝั่งตอนนี้ (ฝั่งใดเปลี่ยน = เตือนใหม่เอง) · off = เลิกข้าม · ไม่แตะร้าน/ระบบ · มีประวัติ */
+export async function setDriftIgnore(admin: Admin, listingId: string, key: DriftKey, on: boolean, userId: string | null): Promise<{ ok: true; check: DriftCheck | DriftFail } | DriftFail> {
+  const r = await loadCtx(admin, listingId, userId);
+  if (!r.ok) return r;
+  const c = r.ctx;
+  const { data } = await admin.from("platform_catalog_listings").select("raw").eq("id", listingId).maybeSingle();
+  const raw = ((data as { raw?: Record<string, unknown> | null } | null)?.raw ?? {}) as Record<string, unknown>;
+  const sync = { ...((raw.sys_sync && typeof raw.sys_sync === "object" ? raw.sys_sync : {}) as SysSync) };
+  const ignore = { ...(sync.ignore ?? {}) };
+  const before = ignore[key] ?? null;
+  if (on) ignore[key] = { sig: driftValueSig(key, c.sys, c.shop), at: new Date().toISOString(), by: userId };
+  else delete ignore[key];
+  sync.ignore = ignore;
+  const { error } = await admin.from("platform_catalog_listings").update({ raw: { ...raw, sys_sync: sync } }).eq("id", listingId);
+  if (error) return { ok: false, error: error.message, status: 500 };
+  await writeAudit(admin, {
+    action: "update", entityType: "platform_catalog", entityId: listingId, actorId: userId, actorName: null,
+    metadata: { source: "drift_ignore", key, platform: c.code, changes: auditDiff({ [`ignore.${key}`]: before ? "ข้ามไว้" : null }, { [`ignore.${key}`]: on ? "ข้ามไว้" : null }) },
+  });
+  return { ok: true, check: await checkListingDrift(admin, listingId, userId) };
+}
+
+// ───────── ชื่อตัวเลือก: "ใช้ของร้าน" (เจ้าของเลือก 2026-11-24 ข้อ 2 + 5) ─────────
+/** ช่องในร่างที่ตัวช่วยลงสินค้าของร้านอ่านชื่อสีแยกร้าน { sku_id: ชื่อ } — ร้านที่ไม่มี = ต้องแก้ที่ SKU กลาง */
+const OPT_NAME_EXTRA: Partial<Record<string, string>> = { shopee: "shopee_option_names", lazada: "lazada_option_names" };
+export type OptAdoptBefore = { colors: { id: string; color_th: string | null }[]; draft: { key: string; names: unknown } | null };
+/** ค่าตัวเลือกชั้นแรกบนร้าน ("สี: Cherry Red (01) · ไซซ์: M" → "Cherry Red (01)") */
+const firstOptionValue = (v: { label: string; values?: string[] }): string => {
+  const x = v.values?.[0]?.trim();
+  if (x) return x;
+  const first = v.label.split(" · ")[0] ?? "";
+  const i = first.indexOf(": ");
+  return (i >= 0 ? first.slice(i + 2) : first).trim();
+};
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * ชื่อตัวเลือกบนร้าน → ระบบ (เฉพาะรหัสที่เลือก)
+ *  central = แก้ "Color Th" ของ SKU กลาง (ทุกร้านเปลี่ยนตาม · ชื่อร้าน "Cherry Red (01)" → Color Th "Cherry Red" เพราะระบบต่อเลขท้ายรหัสให้เอง)
+ *            ชื่อบนร้านไม่มีเลขท้ายรหัส → เก็บชื่อเต็มในร่างของร้านนี้เพิ่ม (Shopee/Lazada)
+ *  ไม่ central = เก็บในร่างของร้านนี้เท่านั้น (Shopee/Lazada · TikTok/LINE ไม่มีช่องแยกร้าน)
+ * คืน before ไว้ย้อนกลับ · ประวัติทุกช่อง (auditDiff)
+ */
+export async function adoptShopOptions(admin: Admin, listingId: string, codes: string[], central: boolean, userId: string | null): Promise<{ ok: true; before: OptAdoptBefore; changed: { code: string; name: string }[]; warnings: string[]; check: DriftCheck | DriftFail } | DriftFail> {
+  const r = await loadCtx(admin, listingId, userId);
+  if (!r.ok) return r;
+  const c = r.ctx;
+  const extraKey = OPT_NAME_EXTRA[c.code] ?? null;
+  if (!central && !extraKey) return { ok: false, error: "ร้านนี้เก็บชื่อตัวเลือกแยกร้านไม่ได้ — ติ๊ก “ใช้ชื่อนี้กับทุกร้าน (แก้ที่ SKU กลาง)”", status: 400 };
+  const up = (s: string | null | undefined) => String(s ?? "").trim().toUpperCase();
+  const { data: skuRows } = await admin.from("skus_v2").select("id, code, color_th").eq("parent_sku_id", c.parentId!);
+  const byCode = new Map(((skuRows ?? []) as { id: string; code: string; color_th: string | null }[]).map((s) => [up(s.code), s]));
+  const colorEdits: { id: string; code: string; before: string | null; after: string }[] = [];
+  const draftNames: Record<string, string> = {};
+  const changed: { code: string; name: string }[] = [];
+  const warnings: string[] = [];
+  for (const code of [...new Set(codes.map(up))]) {
+    const sv = c.shop.variants.find((v) => up(v.code) === code);
+    const sku = byCode.get(code);
+    if (!sv || !sku) { warnings.push(`${code}: ไม่พบบนร้านหรือในระบบ — ข้าม`); continue; }
+    const name = firstOptionValue(sv);
+    if (!name) { warnings.push(`${code}: ชื่อบนร้านว่าง — ข้าม`); continue; }
+    if (central) {
+      const suffix = sku.code.includes("-") ? sku.code.slice(sku.code.lastIndexOf("-") + 1) : null;
+      const m = suffix ? name.match(new RegExp(`^(.*?)\\s*\\(${escRe(suffix)}\\)$`, "i")) : null;
+      const colorTh = (m ? m[1] : name).trim();
+      const gen = suffix ? `${colorTh} (${suffix})` : colorTh;
+      if (colorTh && colorTh !== (sku.color_th ?? "").trim()) colorEdits.push({ id: sku.id, code: sku.code, before: sku.color_th, after: colorTh });
+      if (gen !== name) { if (extraKey) draftNames[sku.id] = name; else warnings.push(`${sku.code}: ชื่อบนร้านไม่มีเลขท้ายรหัส — ในระบบจะเป็น “${gen}”`); }
+    } else draftNames[sku.id] = name;
+    changed.push({ code: sku.code, name });
+  }
+  if (!changed.length) return { ok: false, error: warnings[0] ?? "ไม่มีชื่อให้บันทึก", status: 400 };
+  for (const e of colorEdits) {
+    const { error } = await admin.from("skus_v2").update({ color_th: e.after }).eq("id", e.id);
+    if (error) return { ok: false, error: `แก้ Color Th ของ ${e.code} ไม่สำเร็จ: ${error.message}`, status: 500 };
+    await writeAudit(admin, {
+      action: "update", entityType: "skus_v2", entityId: e.id, actorId: userId, actorName: null,
+      metadata: { source: "drift_adopt_options", listing_id: listingId, platform: c.code, code: e.code, changes: auditDiff({ color_th: e.before ?? null }, { color_th: e.after }) },
+    });
+  }
+  let draft: OptAdoptBefore["draft"] = null;
+  if (extraKey && Object.keys(draftNames).length) {
+    const { data } = await admin.from("platform_listing_drafts").select("extra").eq("parent_sku_id", c.parentId!).eq("platform_id", r.row.platform_id).maybeSingle();
+    const extra = { ...(((data as { extra?: Record<string, unknown> | null } | null)?.extra) ?? {}) };
+    const prev = extra[extraKey] ?? null;
+    extra[extraKey] = { ...((prev && typeof prev === "object" ? prev : {}) as Record<string, string>), ...draftNames };
+    const { error } = await admin.from("platform_listing_drafts").upsert({ parent_sku_id: c.parentId!, platform_id: r.row.platform_id, extra, updated_by: userId, updated_at: new Date().toISOString() }, { onConflict: "parent_sku_id,platform_id" });
+    if (error) return { ok: false, error: `บันทึกชื่อในร่างไม่สำเร็จ: ${error.message}`, status: 500 };
+    await writeAudit(admin, {
+      action: "update", entityType: "platform_listing_draft", entityId: null, actorId: userId, actorName: null,
+      metadata: { parent_sku_id: c.parentId, platform_id: r.row.platform_id, source: "drift_adopt_options", listing_id: listingId, changes: auditDiff({ [`extra.${extraKey}`]: prev }, { [`extra.${extraKey}`]: extra[extraKey] }) },
+    });
+    draft = { key: extraKey, names: prev };
+  }
+  return { ok: true, before: { colors: colorEdits.map((e) => ({ id: e.id, color_th: e.before })), draft }, changed, warnings, check: await checkListingDrift(admin, listingId, userId) };
+}
+/** ย้อน "ใช้ชื่อของร้าน" — คืน Color Th เดิม + ชื่อในร่างเดิม */
+export async function undoAdoptShopOptions(admin: Admin, listingId: string, before: OptAdoptBefore, userId: string | null): Promise<{ ok: true; check: DriftCheck | DriftFail } | DriftFail> {
+  const r = await loadCtx(admin, listingId, userId);
+  if (!r.ok) return r;
+  const c = r.ctx;
+  for (const col of before.colors ?? []) {
+    const { data: cur } = await admin.from("skus_v2").select("id, color_th, parent_sku_id").eq("id", col.id).maybeSingle();
+    const row = cur as { id: string; color_th: string | null; parent_sku_id: string } | null;
+    if (!row || row.parent_sku_id !== c.parentId) continue;
+    await admin.from("skus_v2").update({ color_th: col.color_th }).eq("id", col.id);
+    await writeAudit(admin, { action: "update", entityType: "skus_v2", entityId: col.id, actorId: userId, actorName: null, metadata: { source: "drift_adopt_options_undo", listing_id: listingId, changes: auditDiff({ color_th: row.color_th }, { color_th: col.color_th }) } });
+  }
+  if (before.draft && Object.values(OPT_NAME_EXTRA).includes(before.draft.key)) {
+    const k = before.draft.key;
+    const { data } = await admin.from("platform_listing_drafts").select("extra").eq("parent_sku_id", c.parentId!).eq("platform_id", r.row.platform_id).maybeSingle();
+    const extra = { ...(((data as { extra?: Record<string, unknown> | null } | null)?.extra) ?? {}) };
+    const cur = extra[k] ?? null;
+    if (before.draft.names == null) delete extra[k]; else extra[k] = before.draft.names;
+    await admin.from("platform_listing_drafts").upsert({ parent_sku_id: c.parentId!, platform_id: r.row.platform_id, extra, updated_by: userId, updated_at: new Date().toISOString() }, { onConflict: "parent_sku_id,platform_id" });
+    await writeAudit(admin, { action: "update", entityType: "platform_listing_draft", entityId: null, actorId: userId, actorName: null, metadata: { parent_sku_id: c.parentId, platform_id: r.row.platform_id, source: "drift_adopt_options_undo", changes: auditDiff({ [`extra.${k}`]: cur }, { [`extra.${k}`]: before.draft.names ?? null }) } });
+  }
+  return { ok: true, check: await checkListingDrift(admin, listingId, userId) };
 }
 
 /** รายการบนร้านที่จับคู่สินค้านี้ (ยังอยู่บนร้าน · ร้านที่ตรวจได้) */

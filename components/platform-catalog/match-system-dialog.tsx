@@ -19,6 +19,7 @@ import { useToast } from "@/components/toast";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { PushOpenGearButton, usePushOpen } from "@/components/push-open";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/components/auth";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { DRIFT_KEYS, DRIFT_LABEL, descImages, descLines, lineDiff, looksHtml, type DriftItem, type DriftKey, type VariantTableRow } from "@/lib/platform-listing-drift";
 
@@ -37,6 +38,10 @@ const REVIEW_NOTE: Record<string, string> = {
 /** เรื่องรูป: "บอกไม่ได้" ก็ติ๊กส่งครั้งแรกได้ (ระบบจำชุดที่ส่งไว้เทียบรอบหน้า) */
 const FIRST_SEND: DriftKey[] = ["images", "desc_images", "variant_images"];
 const canTick = (it: DriftItem) => it.sendable && (it.state === "diff" || (FIRST_SEND.includes(it.key) && it.state === "unknown"));
+/** "ใช้ของร้าน" (ลงร่างของร้านนี้ · ย้อนได้) — เรื่องที่ให้ระบบใช้ตามร้านได้ (ตรงกับ ADOPT_KEYS ฝั่งเซิร์ฟเวอร์) */
+const ADOPT_IN_DIALOG: DriftKey[] = ["title", "description", "attrs"];
+/** ร้านที่เก็บชื่อสีแยกร้านในร่างได้ (ไม่มี = "ใช้ของร้าน" ต้องแก้ที่ SKU กลาง) */
+const OPT_DRAFT_SHOPS = ["shopee", "lazada"];
 
 export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClose, onChanged, onSent, footerExtra }: {
   open: boolean;
@@ -53,6 +58,9 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
 }) {
   const toast = useToast();
   const pushOpen = usePushOpen();
+  const { can } = useAuth();
+  const canEdit = can("products.platforms.edit");
+  const canProd = can("products.edit");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [check, setCheck] = useState<Check | null>(null);
@@ -60,6 +68,11 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [sending, setSending] = useState(false);
   const [openRows, setOpenRows] = useState<Set<DriftKey>>(new Set());
+  /** ชื่อตัวเลือก: ตัวจริงของแต่ละรหัส (เจ้าของเลือก 2026-11-24 ข้อ 2) · sys = ส่งชื่อระบบขึ้นร้าน · shop = ระบบใช้ชื่อร้าน */
+  const [optPick, setOptPick] = useState<Record<string, "shop" | "sys">>({});
+  /** ข้อ 5: ใช้ชื่อร้านกับทุกร้าน (แก้ Color Th ของ SKU กลาง) — ค่าเริ่มต้นเปิด (ต้องมีสิทธิ์แก้สินค้า) */
+  const [optCentral, setOptCentral] = useState(true);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   // 🐛 2026-11-21: เดิม apply/load ขึ้นกับ onChanged (หน้าที่เรียกส่งฟังก์ชันใหม่ทุกครั้งที่วาด) → ผลออก → หน้าที่เรียกอัปเดตป้าย → วาดใหม่
   //    → load ตัวใหม่ → useEffect โหลดซ้ำวนไม่จบ (ปุ่มยืนยันจางเพราะ "กำลังโหลด" ตลอด · ติ๊กแล้วถูกรีเซ็ต · ถามร้านซ้ำ ๆ)
@@ -72,6 +85,9 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
     // เรื่องที่มีคำเตือน "ตรวจก่อนส่ง" (เช่น รายละเอียดมาจากร่างที่แก้ไว้) ก็ไม่ติ๊กไว้ให้
     // ข้อมูลจำเพาะ (2026-11-23) ไม่ติ๊กไว้ให้ — ค่าระบบส่วนใหญ่มาจากค่าเริ่มต้นของร้าน อาจทับค่าที่ตั้งบนร้านไว้แล้วโดยตั้งใจ
     setPicked(new Set(c.items.filter((i) => canTick(i) && i.state === "diff" && i.key !== "price" && i.key !== "attrs" && !i.note?.startsWith("ตรวจก่อนส่ง")).map((i) => i.key)));
+    // ชื่อตัวเลือก: เริ่มที่ "ระบบ" ถ้าส่งได้ · ส่งไม่ได้ (Lazada/LINE) = ยังไม่เลือก
+    const opt = c.items.find((i) => i.key === "options");
+    setOptPick(opt?.state === "diff" && opt.sendable ? Object.fromEntries((opt.rows ?? []).map((r) => [r.label, "sys" as const])) : {});
     onChangedRef.current?.(c);
   }, []);
 
@@ -92,16 +108,68 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
 
   const items = check?.items ?? [];
   const diffN = items.filter((i) => i.state === "diff").length;
-  const tickN = picked.size;
+  // ชื่อตัวเลือก: แถวที่เลือก "ของร้าน" = ระบบใช้ชื่อร้าน (ไม่ส่งขึ้นร้าน) · ไม่มีแถว "ของระบบ" = ไม่ส่งเรื่องชื่อตัวเลือก
+  const shopCodes = Object.entries(optPick).filter(([, v]) => v === "shop").map(([k]) => k);
+  const sysCodes = Object.entries(optPick).filter(([, v]) => v === "sys").map(([k]) => k);
+  const sendKeys = [...picked].filter((k) => k !== "options" || sysCodes.length > 0);
+  const tickN = sendKeys.length;
+  const optCentralOn = optCentral && canProd;
+
+  const postDrift = async (body: Record<string, unknown>) => {
+    const r = await apiFetch("/api/platform-catalog/drift", { method: "POST", body: JSON.stringify({ listing_id: listingId, ...body }) });
+    const j = await r.json().catch(() => ({ error: `ระบบตอบผิดพลาด (HTTP ${r.status})` }));
+    if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
+    return j as { check?: Check | null; before?: unknown; changed?: { code: string; name: string }[]; warnings?: string[] };
+  };
+  /** ข้อ 1: ข้าม (ถือว่าตรง) / เลิกข้าม — จำไว้จนกว่าฝั่งร้านหรือระบบเปลี่ยน */
+  const setIgnore = async (key: DriftKey, on: boolean) => {
+    setBusyKey(`ig-${key}`);
+    try {
+      const j = await postDrift({ action: on ? "ignore" : "unignore", key });
+      if (j.check) apply(j.check);
+      if (on) toast.undo(`ข้าม “${DRIFT_LABEL[key]}” ไว้แล้ว — ถ้าบนร้านหรือในระบบเปลี่ยนอีกจะเตือนใหม่`, () => void setIgnore(key, false), { ms: 8000 });
+      else toast.success(`เลิกข้าม “${DRIFT_LABEL[key]}” แล้ว`);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusyKey(null); }
+  };
+  /** ข้อ 4: ใช้ของร้าน (ชื่อ/รายละเอียด/ข้อมูลจำเพาะ → ร่างของร้านนี้ · ย้อนได้) */
+  const adoptKey = async (key: DriftKey) => {
+    setBusyKey(`ad-${key}`);
+    try {
+      const j = await postDrift({ action: "adopt", key });
+      if (j.check) apply(j.check);
+      const before = j.before;
+      toast.undo(`ระบบใช้${DRIFT_LABEL[key]}ของร้านแล้ว (ร่างของร้านนี้ · ร้านอื่นไม่เปลี่ยน)`, () => {
+        void postDrift({ action: "adopt_undo", key, before }).then((u) => { if (u.check) apply(u.check); toast.success("ย้อนกลับแล้ว"); }).catch((e) => toast.error((e as Error).message));
+      }, { ms: 10000 });
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusyKey(null); }
+  };
+  const pickOpt = (codes: string[], v: "shop" | "sys") => {
+    const next = { ...optPick }; for (const c of codes) next[c] = v;
+    setOptPick(next);
+    const anySys = Object.values(next).includes("sys");
+    setPicked((p) => { const n = new Set(p); if (anySys) n.add("options"); else n.delete("options"); return n; });
+  };
 
   const send = async () => {
-    if (!listingId || !tickN || !check) return;
+    if (!listingId || (!tickN && !shopCodes.length) || !check) return;
     // เปิดหน้าให้เช็กหลังส่ง (ของกลาง push-open · ตั้งค่าต่อคน ค่าเริ่มต้นปิด) — ต้องเรียกก่อน await (ยังอยู่ในจังหวะกด)
-    const session = pushOpen.prepare([{ code: check.platform_code }]);
+    const session = pushOpen.prepare(tickN ? [{ code: check.platform_code }] : []);
     let opened = false;
     setSending(true); setSteps(null);
-    const keys = [...picked];
+    const keys = sendKeys;
     try {
+      // ชื่อตัวเลือก "ของร้าน" → ระบบใช้ชื่อร้านก่อน (ไม่แตะร้าน) · แล้วค่อยส่งเรื่องอื่น (ชื่อที่เลือก "ของระบบ" ยังต่างอยู่ = ส่งตามเดิม)
+      if (shopCodes.length) {
+        const j = await postDrift({ action: "adopt_options", codes: shopCodes, central: optCentralOn });
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        const before = j.before;
+        toast.undo(`ระบบใช้ชื่อตัวเลือกของร้านแล้ว ${(j.changed ?? []).length} ชื่อ${optCentralOn ? " (แก้ Color Th ที่ SKU กลาง — ทุกร้านเปลี่ยนตาม)" : " (ร่างของร้านนี้)"}`, () => {
+          void postDrift({ action: "adopt_options_undo", before }).then((u) => { if (u.check) apply(u.check); toast.success("ย้อนชื่อตัวเลือกแล้ว"); }).catch((e) => toast.error((e as Error).message));
+        }, { ms: 12000 });
+        if (!keys.length) { if (j.check) apply(j.check); return; }
+      }
       const b = await apiFetch("/api/platform-catalog/drift", { method: "POST", body: JSON.stringify({ action: "build", listing_id: listingId, keys }) }).then((r) => r.json());
       if (b.error) throw new Error(b.error);
       const calls = (b.calls ?? []) as Call[];
@@ -160,12 +228,14 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
           <button type="button" onClick={onClose} disabled={sending} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ปิด</button>
           {canPublish && <PushOpenGearButton />}
           {/* ปุ่มกดไม่ได้ = บอกเหตุผลเสมอ (ไม่ปล่อยปุ่มจางเฉย ๆ) */}
-          {canPublish && !sending && (loading || !tickN) && (
+          {canPublish && !sending && (loading || (!tickN && !shopCodes.length)) && (
             <span className="text-xs text-slate-500">{loading ? "กำลังดึงข้อมูลล่าสุดจากร้าน…" : diffN ? "ติ๊กเรื่องที่จะส่งก่อน" : "ตรงกับระบบแล้ว ไม่มีอะไรต้องส่ง"}</span>
           )}
-          {canPublish ? (
-            <button type="button" onClick={() => void send()} disabled={!tickN || sending || loading}
-              className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{sending ? "กำลังส่ง…" : `ยืนยันส่งที่ติ๊ก (${tickN})`}</button>
+          {canPublish || (canEdit && shopCodes.length) ? (
+            <button type="button" onClick={() => void send()} disabled={(!tickN && !shopCodes.length) || sending || loading}
+              className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">
+              {sending ? "กำลังส่ง…" : tickN && shopCodes.length ? `ยืนยัน (ส่ง ${tickN} เรื่อง · ใช้ชื่อร้าน ${shopCodes.length})` : shopCodes.length ? `บันทึกชื่อของร้าน (${shopCodes.length})` : `ยืนยันส่งที่ติ๊ก (${tickN})`}
+            </button>
           ) : <span className="text-xs text-slate-500">ไม่มีสิทธิ์ส่งขึ้นร้านจริง — ดูได้อย่างเดียว</span>}
         </div>
       }>
@@ -185,7 +255,8 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
             <div className="flex items-start gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-900"><Icon name="info" /><span>{reviewNote}</span></div>
           )}
           <div className="text-xs text-slate-600">
-            {tickN ? <>จะส่ง: <b className="font-medium text-slate-800">{DRIFT_KEYS.filter((k) => picked.has(k)).map((k) => DRIFT_LABEL[k]).join(" · ")}</b> — เรื่องอื่นบนร้านคงเดิม</> : "ยังไม่ได้ติ๊กเรื่องที่จะส่ง — ติ๊กช่องหน้าเรื่องที่อยากให้ร้านเหมือนระบบ"}
+            {tickN ? <>จะส่ง: <b className="font-medium text-slate-800">{DRIFT_KEYS.filter((k) => sendKeys.includes(k)).map((k) => DRIFT_LABEL[k]).join(" · ")}</b> — เรื่องอื่นบนร้านคงเดิม</> : shopCodes.length ? null : "ยังไม่ได้ติ๊กเรื่องที่จะส่ง — ติ๊กช่องหน้าเรื่องที่อยากให้ร้านเหมือนระบบ"}
+            {shopCodes.length > 0 && <span className="ml-1">{tickN ? "· " : ""}ระบบใช้ชื่อตัวเลือกของร้าน {shopCodes.length} ชื่อ{optCentralOn ? " (แก้ที่ SKU กลาง)" : " (ร่างของร้านนี้)"} — ไม่ส่งขึ้นร้าน</span>}
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full min-w-[34rem] text-left">
@@ -204,13 +275,28 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                       <span className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] ${it.state === "diff" ? "border-amber-200 bg-amber-50 text-amber-800" : it.state === "same" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                         <Icon name={it.state === "diff" ? "warning" : it.state === "same" ? "done" : "info"} />{it.summary}
                       </span>
+                      {/* ข้อ 1 ข้าม (ถือว่าตรง) · ข้อ 4 ใช้ของร้าน (เจ้าของเลือก 2026-11-24) */}
+                      {canEdit && !sending && (it.ignored || it.state === "diff") && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {it.ignored ? (
+                            <button type="button" disabled={!!busyKey} onClick={() => void setIgnore(it.key, false)} className="h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">{busyKey === `ig-${it.key}` ? "กำลังบันทึก…" : "เลิกข้าม"}</button>
+                          ) : (
+                            <button type="button" disabled={!!busyKey} onClick={() => void setIgnore(it.key, true)} title="ถือว่าเรื่องนี้ตรงแล้ว — ระบบจำไว้ ถ้าบนร้านหรือในระบบเปลี่ยนอีกจะเตือนใหม่ (ไม่ส่ง ไม่แก้อะไร)"
+                              className="h-6 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">{busyKey === `ig-${it.key}` ? "กำลังบันทึก…" : "ข้าม (ถือว่าตรง)"}</button>
+                          )}
+                          {it.state === "diff" && ADOPT_IN_DIALOG.includes(it.key) && (it.key !== "attrs" || check.platform_code === "shopee") && (
+                            <button type="button" disabled={!!busyKey} onClick={() => void adoptKey(it.key)} title="บันทึกค่าบนร้านเป็นค่าของระบบ — ลงร่างของร้านนี้เท่านั้น (ร้านอื่น/สินค้าหลักไม่เปลี่ยน) · ย้อนกลับได้"
+                              className="h-6 rounded-md border border-violet-300 bg-white px-1.5 text-[11px] text-violet-800 hover:bg-violet-50 disabled:opacity-50">{busyKey === `ad-${it.key}` ? "กำลังบันทึก…" : "ใช้ของร้าน"}</button>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-2 align-top text-slate-600 break-words">{it.before}</td>
                     <td className="px-2 py-2 align-top break-words">
                       {it.after}
                       {it.note && <div className={`mt-1 text-[11px] ${it.note.startsWith("ตรวจก่อนส่ง") ? "inline-flex items-start gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" : "text-slate-500"}`}>{it.note.startsWith("ตรวจก่อนส่ง") && <Icon name="warning" />}{it.note}</div>}
                       {it.cannot && it.state !== "same" && <div className="mt-1 inline-flex items-start gap-1 text-[11px] text-amber-700"><Icon name="warning" />{it.cannot}</div>}
-                      {it.rows && it.rows.length > 0 && (
+                      {it.rows && it.rows.length > 0 && !(it.key === "options" && it.state === "diff") && (
                         <div className="mt-1">
                           <button type="button" className="text-[11px] text-violet-700 hover:underline" onClick={() => setOpenRows((s) => { const n = new Set(s); if (n.has(it.key)) n.delete(it.key); else n.add(it.key); return n; })}>
                             {openRows.has(it.key) ? "ซ่อนรายตัวเลือก" : `ดูรายตัวเลือก (${it.rows.length})`}
@@ -230,6 +316,14 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
                       ) : null}
                     </td>
                   </tr>
+                  {/* ข้อ 2 + 5: ชื่อตัวเลือก — เลือกตัวจริงทีละแถว (ของร้าน = ระบบใช้ชื่อร้าน · ของระบบ = ส่งขึ้นร้าน) */}
+                  {it.key === "options" && it.state === "diff" && (it.rows?.length ?? 0) > 0 && (
+                    <tr><td /><td colSpan={3} className="px-2 pb-3">
+                      <OptionTruthPicker rows={it.rows!} pick={optPick} onPick={pickOpt} sendable={it.sendable && canPublish}
+                        canShop={canEdit && (OPT_DRAFT_SHOPS.includes(check.platform_code) || canProd)} needCentral={!OPT_DRAFT_SHOPS.includes(check.platform_code)}
+                        central={optCentralOn} canCentral={canProd} onCentral={setOptCentral} shopName={shopName} disabled={sending} />
+                    </td></tr>
+                  )}
                   {(it.state === "diff" || openRows.has(it.key)) && (it.key === "images" || it.key === "desc_images") && it.media && (it.media.before.length > 0 || it.media.after.length > 0) && (
                     <tr><td /><td colSpan={3} className="px-2 pb-3"><ImagesCompare before={it.media.before} after={it.media.after} shopName={shopName} /></td></tr>
                   )}
@@ -271,6 +365,55 @@ export function MatchSystemDialog({ open, listingId, shopName, canPublish, onClo
         </div>
       ) : null}
     </ERPModal>
+  );
+}
+
+// ───────── ชื่อตัวเลือก: เลือกตัวจริงทีละแถว (เจ้าของเลือก 2026-11-24 ข้อ 2 + 5) ─────────
+function OptionTruthPicker({ rows, pick, onPick, sendable, canShop, needCentral, central, canCentral, onCentral, shopName, disabled }: {
+  rows: { label: string; before: string; after: string }[];
+  pick: Record<string, "shop" | "sys">;
+  onPick: (codes: string[], v: "shop" | "sys") => void;
+  /** ส่งชื่อระบบขึ้นร้านได้ไหม (Lazada/LINE ยังไม่ได้) */
+  sendable: boolean;
+  /** เลือก "ของร้าน" ได้ไหม (สิทธิ์ + ร้านมีช่องในร่าง หรือแก้ SKU กลางได้) */
+  canShop: boolean;
+  /** ร้านนี้ไม่มีช่องชื่อแยกร้าน → "ของร้าน" ต้องแก้ที่ SKU กลาง */
+  needCentral: boolean;
+  central: boolean; canCentral: boolean; onCentral: (v: boolean) => void;
+  shopName: string; disabled: boolean;
+}) {
+  const codes = rows.map((r) => r.label);
+  const shopOk = canShop && (!needCentral || central);
+  const nShop = codes.filter((c) => pick[c] === "shop").length, nSys = codes.filter((c) => pick[c] === "sys").length;
+  const btn = (on: boolean, tone: "shop" | "sys") => `min-h-7 w-full rounded-md border px-2 py-1 text-left text-[11px] leading-snug disabled:opacity-40 ${on ? (tone === "sys" ? "border-violet-400 bg-violet-50 text-violet-900" : "border-emerald-400 bg-emerald-50 text-emerald-900") : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+  return (
+    <div className="space-y-1.5 rounded-lg border border-slate-200 p-2 text-xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-slate-600">ตัวจริงคือ:</span>
+        <button type="button" disabled={disabled || !shopOk} onClick={() => onPick(codes, "shop")} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-slate-700 hover:bg-slate-50 disabled:opacity-40">ของร้านทั้งหมด</button>
+        <button type="button" disabled={disabled || !sendable} onClick={() => onPick(codes, "sys")} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-slate-700 hover:bg-slate-50 disabled:opacity-40">ของระบบทั้งหมด</button>
+        <span className="text-[11px] text-slate-500">{nSys ? `ส่งขึ้น ${shopName} ${nSys} ชื่อ` : ""}{nSys && nShop ? " · " : ""}{nShop ? `ระบบใช้ชื่อร้าน ${nShop} ชื่อ` : ""}{!nSys && !nShop ? "ยังไม่ได้เลือก (ไม่ทำอะไร)" : ""}</span>
+      </div>
+      {rows.map((r) => (
+        <div key={r.label} className="grid grid-cols-1 items-center gap-1 sm:grid-cols-[7rem_1fr_1fr]">
+          <span className="font-mono text-[11px] text-slate-500">{r.label}</span>
+          <button type="button" disabled={disabled || !shopOk} onClick={() => onPick([r.label], "shop")} className={btn(pick[r.label] === "shop", "shop")}>
+            {pick[r.label] === "shop" && <Icon name="done" className="mr-0.5" />}ร้าน: {r.before}
+          </button>
+          <button type="button" disabled={disabled || !sendable} onClick={() => onPick([r.label], "sys")} className={btn(pick[r.label] === "sys", "sys")}>
+            {pick[r.label] === "sys" && <Icon name="done" className="mr-0.5" />}ระบบ: {r.after}
+          </button>
+        </div>
+      ))}
+      {canShop && (
+        <label className={`flex items-start gap-1.5 text-[11px] ${canCentral ? "text-slate-700" : "text-slate-400"}`}>
+          <input type="checkbox" checked={central} disabled={disabled || !canCentral} onChange={(e) => onCentral(e.target.checked)} className="mt-0.5" />
+          <span>ใช้ชื่อร้านกับทุกร้าน (แก้ “Color Th” ของ SKU กลาง — ชื่อนี้จะขึ้นในร้านอื่น/เอกสารด้วย){!canCentral ? " · ต้องมีสิทธิ์แก้สินค้า" : ""}{needCentral ? ` · ${shopName} ไม่มีช่องชื่อแยกร้าน ต้องติ๊กข้อนี้ถึงจะเลือก "ร้าน" ได้` : " · ไม่ติ๊ก = จำไว้ในร่างของร้านนี้เท่านั้น"}</span>
+        </label>
+      )}
+      {!sendable && <p className="text-[11px] text-amber-700">ร้านนี้ส่งชื่อตัวเลือกจากระบบไม่ได้ — เลือก “ร้าน” เพื่อให้ระบบตรงกับร้าน หรือกด “ข้าม (ถือว่าตรง)”</p>}
+      <p className="text-[11px] text-slate-400">ของร้าน = ระบบเปลี่ยนตามร้าน (ไม่แตะร้าน · ย้อนได้ที่แจ้งผลมุมจอ) · ของระบบ = ส่งชื่อระบบขึ้นร้านตอนกดยืนยัน</p>
+    </div>
   );
 }
 

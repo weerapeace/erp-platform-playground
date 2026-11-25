@@ -42,6 +42,8 @@ export type ListingCheckApi = {
   canAdopt: boolean;
   adopt: (k: DriftKey) => Promise<void>;
   adopting: DriftKey | null;
+  /** "ข้าม (ถือว่าตรง)" / เลิกข้าม (2026-11-24 · ตัวเดียวกับหน้าอัปเดตให้ตรง) */
+  ignore: (k: DriftKey, on: boolean) => Promise<void>;
 };
 
 type CheckResp = { check: DriftCheck | null; error: string | null };
@@ -96,11 +98,27 @@ export function useListingCheck(listingId: string | null, opts: { available: boo
     finally { setAdopting(null); }
   }, [listingId, adopting, post, toast]);
 
+  const ignore = useCallback(async (k: DriftKey, onOff: boolean) => {
+    if (!listingId || adopting) return;
+    setAdopting(k);
+    try {
+      const j = await post({ action: onOff ? "ignore" : "unignore", key: k });
+      if (j.error) { toast.error(j.error); return; }
+      if (j.check) setCheck({ ...j.check, sys: j.check.sys ?? check?.sys });
+      if (onOff) toast.undo(`ข้าม “${DRIFT_LABEL[k]}” ไว้แล้ว — ถ้าบนร้านหรือในระบบเปลี่ยนอีกจะเตือนใหม่`, async () => {
+        const u = await post({ action: "unignore", key: k });
+        if (u.error) toast.error(u.error); else if (u.check) setCheck(u.check);
+      }, { ms: 8_000 });
+      else toast.success(`เลิกข้าม “${DRIFT_LABEL[k]}” แล้ว`);
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setAdopting(null); }
+  }, [listingId, adopting, post, toast, check]);
+
   return {
     available: opts.available, on: opts.available && on, toggle, loading, error, check, sys: check?.sys ?? null,
     item: (k) => check?.items.find((i) => i.key === k) ?? null,
     reload: load, filled, markFilled: (keys) => setFilled((s) => new Set([...s, ...keys])), clearFilled: () => setFilled(new Set()),
-    canAdopt: opts.canAdopt, adopt, adopting,
+    canAdopt: opts.canAdopt, adopt, adopting, ignore,
   };
 }
 
@@ -156,6 +174,11 @@ export function CheckBadge({ chk, k }: { chk: ListingCheckApi | null | undefined
   const it = chk.item(k);
   if (!it) return chk.loading ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">กำลังเทียบ…</span> : null;
   if (chk.filled.has(k)) return <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] text-violet-700">ใช้ตามระบบแล้ว (ยังไม่ส่ง)</span>;
+  if (it.ignored) return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700" title={it.note ?? undefined}>ข้ามไว้ (ถือว่าตรง)
+      {chk.canAdopt && <button type="button" disabled={!!chk.adopting} onClick={() => void chk.ignore(k, false)} className="underline hover:text-emerald-900 disabled:opacity-50">เลิกข้าม</button>}
+    </span>
+  );
   if (it.state === "same") return <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">ตรงแล้ว</span>;
   if (it.state === "diff") return <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800" title={it.summary}>ไม่ตรง</span>;
   return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500" title={it.note ?? it.summary}>บอกไม่ได้</span>;
@@ -195,6 +218,11 @@ export function CheckSysBox({ chk, k, sys, onUse, useLabel = "ใช้ตาม
           <button type="button" disabled={!!chk.adopting} onClick={() => void chk.adopt(k)}
             title="บันทึกค่าบนร้านนี้เป็นค่าของระบบ — ลงร่างของร้านนี้เท่านั้น (ร้านอื่น/Parent SKU ไม่เปลี่ยน) · ย้อนกลับได้"
             className="h-7 rounded-md border border-violet-300 bg-white px-2.5 text-violet-800 hover:bg-violet-100 disabled:opacity-50">{chk.adopting === k ? "กำลังบันทึก…" : "ให้ระบบใช้ค่านี้"}</button>
+        )}
+        {chk.canAdopt && it.state === "diff" && (
+          <button type="button" disabled={!!chk.adopting} onClick={() => void chk.ignore(k, true)}
+            title="ถือว่าเรื่องนี้ตรงแล้ว — ระบบจำไว้ ถ้าบนร้านหรือในระบบเปลี่ยนอีกจะเตือนใหม่ (ไม่ส่ง ไม่แก้อะไร)"
+            className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50">ข้าม (ถือว่าตรง)</button>
         )}
         {!ADOPTABLE.includes(k) && it.state === "diff" && ADOPT_NO[k] && <span className="self-center text-[11px] text-violet-600">ให้ระบบใช้ตามร้านไม่ได้: {ADOPT_NO[k]}</span>}
       </div>
