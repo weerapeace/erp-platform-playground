@@ -71,6 +71,25 @@ export function ThemeApplier({ appKey, decor = true }: { appKey: string | null |
     return () => clearTimeout(t);
   }, [pathname, fx.attrs]);
 
+  // คลื่นน้ำตอนกดปุ่มหลัก (เอฟเฟกต์ "ripple") — จุดขาวขยายจากจุดที่กด แล้วหายเอง
+  const rippleOn = !!fx.attrs["tm-ripple"];
+  useEffect(() => {
+    if (!rippleOn || !decor) return;
+    const onDown = (e: PointerEvent) => {
+      const b = (e.target as Element | null)?.closest<HTMLElement>("button.bg-blue-600, a.bg-blue-600");
+      if (!b || (b as HTMLButtonElement).disabled) return;
+      const r = b.getBoundingClientRect();
+      const size = Math.max(r.width, r.height) / 2;
+      const dot = document.createElement("span");
+      dot.className = "tm-ripple-dot";
+      Object.assign(dot.style, { left: `${e.clientX - r.left - size / 2}px`, top: `${e.clientY - r.top - size / 2}px`, width: `${size}px`, height: `${size}px` });
+      b.appendChild(dot);
+      setTimeout(() => dot.remove(), 650);
+    };
+    document.addEventListener("pointerdown", onDown, { passive: true });
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [rippleOn, decor]);
+
   if (!decor || !cfg) return null;
   return (
     <>

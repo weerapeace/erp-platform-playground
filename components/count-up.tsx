@@ -35,5 +35,5 @@ export function CountUp({ value, format = (n) => Math.round(n).toLocaleString("t
     raf = requestAnimationFrame(tick);
     return () => { cancelAnimationFrame(raf); fromRef.current = target; };
   }, [value, duration]);
-  return <span className={className} style={{ fontVariantNumeric: "tabular-nums" }}>{format(shown)}</span>;
+  return <span className={className} data-tm-number="" style={{ fontVariantNumeric: "tabular-nums", display: "inline-block" }}>{format(shown)}</span>;
 }

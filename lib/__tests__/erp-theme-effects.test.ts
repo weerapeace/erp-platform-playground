@@ -69,3 +69,44 @@ describe("themeEffects", () => {
     }
   });
 });
+
+describe("เอฟเฟกต์ต่อจุด (รอบ 2)", () => {
+  const fest = mergeThemeConfig(DEFAULT_THEME_CONFIG, {
+    effects: {
+      targets: { button: { fx: ["pulse", "glow"], strength: 3 }, topbar: { fx: ["colorShift"] }, menu: { fx: ["accentBar", "pulse"] }, number: { fx: ["countUp", "glow"] }, bell: { fx: ["shake", "pulse"] } },
+      ripple: true, scaleHover: true, underline: true, iconWiggle: true,
+    },
+  });
+
+  it("แต่ละจุดได้ attr + ตัวแปรแอนิเมชันรวม", () => {
+    const e = themeEffects(fest, pc);
+    expect(e.attrs["tm-fx-button"]).toBe("pulse glow");
+    expect(e.vars["--tm-anim-button"]).toMatch(/^tmPulse .+, tmGlow /);
+    expect(e.vars["--tm-anim-topbar"]).toContain("tmShift");
+    expect(e.vars["--tm-anim-number"]).toContain("tmTextGlow");   // ตัวเลข = เรืองที่ตัวหนังสือ
+    expect(e.attrs["tm-fx-number"]).toBe("glow");                  // นับขึ้นใช้ระบบเดิม (tm-count)
+    expect(e.vars["--tm-anim-bell-icon"]).toContain("tmShake");
+    expect(e.vars["--tm-anim-bell-btn"]).toContain("tmPulse");
+    expect(e.attrs).toMatchObject({ "tm-scale": "1", "tm-ripple": "1", "tm-underline": "1", "tm-wiggle": "1" });
+  });
+
+  it("กระพริบ/เปลี่ยนสีวน ช้ากว่า 1.2 วิเสมอ (ข้อ 34)", () => {
+    const e = themeEffects(mergeThemeConfig(fest, { animation: { speed: "fast" }, effects: { targets: { topbar: { fx: ["colorShift"], strength: 3 } } } }), pc);
+    const sec = Number(/tmShift ([\d.]+)s/.exec(e.vars["--tm-anim-topbar"])![1]);
+    expect(sec).toBeGreaterThanOrEqual(1.2);
+  });
+
+  it("ปิดแอนิเมชัน = เหลือแค่แถบเน้น (ไม่ขยับ) · ไม่มีชี้/กด", () => {
+    const e = themeEffects(fest, { mobile: false, motionOff: true });
+    expect(e.attrs["tm-fx-menu"]).toBe("accentBar");
+    expect(e.attrs["tm-fx-button"]).toBeUndefined();
+    expect(e.attrs["tm-ripple"]).toBeUndefined();
+  });
+
+  it("มือถือ = ตัดเอฟเฟกต์วนตลอด เหลือสั่น/แถบเน้น", () => {
+    const e = themeEffects(fest, { mobile: true, motionOff: false });
+    expect(e.attrs["tm-fx-button"]).toBeUndefined();
+    expect(e.attrs["tm-fx-bell"]).toBe("shake");
+    expect(e.attrs["tm-fx-menu"]).toBe("accentBar");
+  });
+});

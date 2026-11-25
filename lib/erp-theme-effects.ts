@@ -6,7 +6,13 @@
 //   มือถือ = โหมดเบา (mobileLiteConfig) · ปิดแอนิเมชัน (ผู้ใช้/เครื่องตั้งลดการเคลื่อนไหว) = ไม่ตั้ง attr แอนิเมชันเลย
 // เทสต์: lib/__tests__/erp-theme-effects.test.ts
 // ============================================================
-import { effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
+import { SPEED_FACTOR, effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
+import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
+
+/** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
+export const ROUND2_TARGETS: EffectTarget[] = ["button", "topbar", "menu", "number", "bell"];
+const MOTION_FX = new Set<EffectKey>(EFFECTS.filter((e) => e.motion).map((e) => e.key));
+const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`; };
 
 export type ThemeEffectEnv = { mobile: boolean; motionOff: boolean };
 
@@ -63,6 +69,47 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   if (a.hover) attrs["tm-hover"] = "1";
   if (!a.countUp || !motion) attrs["tm-count"] = "off";
 
+  // ── เอฟเฟกต์ต่อจุด (รอบ 2: ปุ่มหลัก · แถบบน · เมนูที่เลือก · ตัวเลขสรุป · กระดิ่ง) ──
+  //   attr data-tm-fx-<จุด>="pulse glow" + ตัวแปร --tm-anim-<จุด> (รายการ animation รวม) · CSS globals "เอฟเฟกต์ต่อจุด"
+  const acc = scaleOf(c.colors.accent);
+  vars["--tm-flow"] = `linear-gradient(90deg, ${p[600]}, ${g.color2}, ${acc[600]}, ${p[600]})`;
+  vars["--tm-c1"] = p[600];
+  vars["--tm-c2"] = acc[600];
+  const speed = SPEED_FACTOR[a.speed];
+  for (const t of ROUND2_TARGETS) {
+    const v = c.effects.targets[t];
+    const list = v.fx.filter((e) => (motion ? true : !MOTION_FX.has(e)) && e !== "countUp" && e !== "shine");
+    if (!list.length) continue;
+    attrs[`tm-fx-${t}`] = list.join(" ");
+    vars[`--tm-ring-${t}`] = rgba(p[500], 0.55);
+    vars[`--tm-spread-${t}`] = `${fxSpread(v.strength)}px`;
+    vars[`--tm-blinkmin-${t}`] = String(blinkMinOpacity(v.strength));
+    const text = t === "number";
+    const anims = (keys: EffectKey[]) => keys.flatMap((e) => {
+      const d = fxDuration(e, v.strength, speed);
+      switch (e) {
+        case "pulse": return [text ? `tmNumPulse ${d}s ease-in-out infinite` : `tmPulse ${d}s ease-out infinite`];
+        case "glow": return [text ? `tmTextGlow ${d}s ease-in-out infinite` : `tmGlow ${d}s ease-in-out infinite`];
+        case "blink": return [`tmBlink ${d}s ease-in-out infinite`];
+        case "colorShift": return [`tmShift ${d}s ease-in-out infinite`];
+        case "flow": return [`tmGrad ${d}s ease infinite`];
+        case "shake": return [`tmShake ${Math.max(2.4, d * 4)}s ease-in-out infinite`];
+        default: return [];
+      }
+    });
+    if (t === "bell") {
+      vars["--tm-anim-bell-btn"] = anims(list.filter((e) => e === "pulse")).join(", ") || "none";
+      vars["--tm-anim-bell-icon"] = anims(list.filter((e) => e === "shake")).join(", ") || "none";
+    } else vars[`--tm-anim-${t}`] = anims(list).join(", ") || "none";
+  }
+  // ชี้/กด
+  if (motion) {
+    if (c.effects.scaleHover) attrs["tm-scale"] = "1";
+    if (c.effects.ripple) attrs["tm-ripple"] = "1";
+    if (c.effects.underline) attrs["tm-underline"] = "1";
+    if (c.effects.iconWiggle) attrs["tm-wiggle"] = "1";
+  }
+
   // พื้นหลังทั้งหน้า
   const pageImg = b.image && b.where === "page" ? b.image : null;
   const page: ThemeLayer | null = pageImg || sp.page ? {
@@ -87,4 +134,7 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
 }
 
 /** ชื่อ attr ทั้งหมดที่ตัวทาธีมอาจตั้ง (ไว้ล้างตอนเปลี่ยนแอป/ไม่มีธีม) */
-export const EFFECT_ATTRS = ["tm-btn", "tm-shine", "tm-topbar", "tm-sidebar", "tm-sidegrad", "tm-enter", "tm-ganim", "tm-hover", "tm-count"] as const;
+export const EFFECT_ATTRS = [
+  "tm-btn", "tm-shine", "tm-topbar", "tm-sidebar", "tm-sidegrad", "tm-enter", "tm-ganim", "tm-hover", "tm-count",
+  "tm-fx-button", "tm-fx-topbar", "tm-fx-menu", "tm-fx-number", "tm-fx-bell", "tm-scale", "tm-ripple", "tm-underline", "tm-wiggle",
+] as const;

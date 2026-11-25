@@ -183,7 +183,7 @@ html[data-tm-ganim] .tm-ganim, html[data-tm-ganim][data-tm-topbar] header[data-s
 }
 @keyframes tmGrad { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 /* แถบบน: มือถือ = แถบบนเชลล์ · PC = หัวเมนูข้าง (ช่องโลโก้) */
-html[data-tm-topbar] header[data-shell-topbar], html[data-tm-topbar] [data-shell-sidehead] { background: var(--tm-topbar) !important; border-color: transparent !important; color: #fff; }
+html[data-tm-topbar] header[data-shell-topbar], html[data-tm-topbar] [data-shell-sidehead] { background: var(--tm-topbar); border-color: transparent !important; color: #fff; }   /* ห้าม !important ที่ background — ไม่งั้นแอนิเมชันไล่สี/เปลี่ยนสีทับไม่ได้ */
 html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.text-slate-900, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
 html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, .15) !important; }
 /* เมนูข้าง: เข้ม / สีธีม */
@@ -208,3 +208,66 @@ html[data-tm-enter] [data-tm-page].tm-enter { animation: tmEnter calc(.45s * var
 .tm-mascot { animation: tmFloat calc(3s * var(--tm-speed, 1)) ease-in-out infinite; }
 @keyframes tmFloat { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-7px) rotate(-6deg); } }
 @media print { .tm-mascot, .tm-banner, .tm-page-layer { display: none !important; } }
+
+/* ================================================================
+   ธีมกลาง — เอฟเฟกต์ต่อจุด รอบ 2 (lib/erp-theme-effects ROUND2_TARGETS · lib/erp-theme-fx)
+   data-tm-fx-<จุด>="pulse glow …" + --tm-anim-<จุด> (รายการ animation รวม) · ไม่มีธีม/ปิดแอนิเมชัน = ไม่มี attr
+   กระพริบ/เปลี่ยนสีวน ช้ากว่า 1.2 วิเสมอ (fxDuration · ข้อ 34)
+   ================================================================ */
+@keyframes tmPulse { 0% { box-shadow: 0 0 0 0 var(--tm-ring); } 100% { box-shadow: 0 0 0 var(--tm-spread) transparent; } }
+@keyframes tmGlow { 0%, 100% { box-shadow: 0 0 2px var(--tm-ring); } 50% { box-shadow: 0 0 var(--tm-spread) var(--tm-ring); } }
+@keyframes tmTextGlow { 0%, 100% { text-shadow: 0 0 0 transparent; } 50% { text-shadow: 0 0 calc(var(--tm-spread) * .8) var(--tm-ring); } }
+@keyframes tmNumPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+@keyframes tmBlink { 0%, 100% { opacity: 1; } 50% { opacity: var(--tm-blinkmin, .5); } }
+@keyframes tmShift { 0%, 100% { background-color: var(--tm-c1); } 50% { background-color: var(--tm-c2); } }
+@keyframes tmShake { 0%, 20%, 100% { transform: rotate(0); } 4% { transform: rotate(-16deg); } 8% { transform: rotate(14deg); } 12% { transform: rotate(-10deg); } 16% { transform: rotate(6deg); } }
+@keyframes tmWig { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg); } 75% { transform: rotate(14deg); } }
+@keyframes tmRipple { from { transform: scale(0); opacity: .55; } to { transform: scale(4); opacity: 0; } }
+@keyframes tmUnderTab { from { border-bottom-color: transparent; } }
+
+/* ปุ่มหลัก */
+html[data-tm-fx-button] :is(button, a).bg-blue-600:not(:disabled) {
+  --tm-ring: var(--tm-ring-button); --tm-spread: var(--tm-spread-button); --tm-blinkmin: var(--tm-blinkmin-button);
+  animation: var(--tm-anim-button);
+}
+html[data-tm-fx-button~="flow"] :is(button, a).bg-blue-600 { background-image: var(--tm-flow) !important; background-size: 300% 100% !important; }
+html[data-tm-fx-button~="colorShift"]:not([data-tm-fx-button~="flow"]) :is(button, a).bg-blue-600 { background-image: none !important; }
+/* แถบบน (มือถือ) + หัวเมนูข้าง (PC) */
+html[data-tm-fx-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) {
+  --tm-ring: var(--tm-ring-topbar); --tm-spread: var(--tm-spread-topbar);
+  animation: var(--tm-anim-topbar); color: #fff;
+}
+html[data-tm-fx-topbar~="flow"] :is(header[data-shell-topbar], [data-shell-sidehead]) { background-image: var(--tm-flow) !important; background-size: 300% 100% !important; border-color: transparent !important; }
+html[data-tm-fx-topbar~="colorShift"]:not([data-tm-fx-topbar~="flow"]) :is(header[data-shell-topbar], [data-shell-sidehead]) { background-image: none !important; background-color: var(--tm-c1); border-color: transparent !important; }
+html[data-tm-fx-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.text-slate-900, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
+/* เมนูที่เลือก (เมนูข้าง) */
+html[data-tm-fx-menu] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 {
+  --tm-ring: var(--tm-ring-menu); --tm-spread: var(--tm-spread-menu); --tm-blinkmin: var(--tm-blinkmin-menu);
+  animation: var(--tm-anim-menu);
+}
+html[data-tm-fx-menu~="accentBar"] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { box-shadow: inset 3px 0 0 rgb(var(--tm-primary-600)); }
+html[data-tm-fx-menu~="flow"] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { background-image: var(--tm-flow) !important; background-size: 300% 100% !important; color: #fff !important; }
+/* ตัวเลขสรุป (ตัวนับเลข CountUp) */
+html[data-tm-fx-number] [data-tm-number] {
+  --tm-ring: var(--tm-ring-number); --tm-spread: var(--tm-spread-number);
+  animation: var(--tm-anim-number);
+}
+/* กระดิ่ง — เล่นเฉพาะตอนมีแจ้งเตือนใหม่ */
+html[data-tm-fx-bell] [data-tm-bell-btn][data-tm-new] { --tm-ring: var(--tm-ring-bell); --tm-spread: var(--tm-spread-bell); animation: var(--tm-anim-bell-btn); border-radius: 9999px; }
+html[data-tm-fx-bell] [data-tm-bell][data-tm-new] { animation: var(--tm-anim-bell-icon); transform-origin: 50% 10%; }
+
+/* ชี้/กด */
+html[data-tm-scale] :is(button, a).bg-blue-600:not(:disabled) { transition: transform .15s ease, filter .15s; }
+html[data-tm-scale] :is(button, a).bg-blue-600:not(:disabled):hover { transform: scale(1.04); }
+html[data-tm-ripple] :is(button, a).bg-blue-600:not(.absolute):not(.fixed):not(.sticky) { position: relative; overflow: hidden; }
+.tm-ripple-dot { position: absolute; border-radius: 9999px; background: rgba(255, 255, 255, .6); pointer-events: none; animation: tmRipple .6s ease-out forwards; }
+/* ขีดเส้นใต้วิ่ง: ลิงก์ตัวหนังสือสีหลัก · แท็บที่เลือก (ขอบล่างสีหลัก) ขีดเส้นค่อย ๆ ขึ้น */
+html[data-tm-underline] a:is(.text-blue-600, .text-blue-700):not([class*="bg-"]) {
+  background-image: linear-gradient(currentColor, currentColor); background-repeat: no-repeat; background-position: 0 100%;
+  background-size: 0 1.5px; transition: background-size .25s ease;
+}
+html[data-tm-underline] a:is(.text-blue-600, .text-blue-700):not([class*="bg-"]):hover { background-size: 100% 1.5px; }
+html[data-tm-underline] .border-b-2.border-blue-600 { animation: tmUnderTab .45s ease-out; }
+/* ไอคอนขยับตอนชี้ (ไอคอนแรกในปุ่ม/ลิงก์) */
+html[data-tm-wiggle] :is(a, button):hover > svg:first-child,
+html[data-tm-wiggle] :is(a, button):hover > span:first-child > svg { animation: tmWig .5s ease-in-out; }

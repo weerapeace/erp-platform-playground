@@ -130,4 +130,12 @@
 
 จุด (EFFECT_TARGETS): ปุ่มหลัก · ป้ายด่วน · การ์ด · แถบบน · เมนูที่เลือก · ตัวเลขสรุป · กระดิ่ง — เอฟเฟกต์ที่แต่ละจุดเลือกได้ดู TARGET_EFFECTS
 มือถือ (mobileLiteConfig): ตัดเอฟเฟกต์วนตลอด (pulse/กระพริบ/เปลี่ยนสี/ไล่สีวิ่ง/เรือง/แสงวิ่ง) + อนุภาค + ขอบวิ่ง · เหลือ ยกตัว แถบเน้น นับขึ้น สั่น
-รอบ 2–4 (ยังไม่ทำ): ทาในหน้าจริง — 2 สี/ปุ่ม/กด · 3 ขอบ/เงา/การ์ด · 4 เข้าหน้า/อนุภาค/ป้ายด่วน
+รอบ 3–4 (ยังไม่ทำ): 3 ขอบ/เงา/การ์ด · 4 เข้าหน้าแบบอื่น/อนุภาค/ป้ายด่วน
+
+## เอฟเฟกต์เพิ่ม — รอบ 2: สี ปุ่ม และการกดในหน้าจริง
+
+- `themeEffects` (lib/erp-theme-effects) เพิ่ม: `data-tm-fx-<จุด>` (button/topbar/menu/number/bell — ROUND2_TARGETS) + `--tm-anim-<จุด>` (รายการ animation รวม) + `--tm-ring/spread/blinkmin-<จุด>` + `--tm-flow` `--tm-c1` `--tm-c2` · ชี้/กด: `data-tm-scale / tm-ripple / tm-underline / tm-wiggle`
+- CSS: `app/globals.css` หัวข้อ "เอฟเฟกต์ต่อจุด รอบ 2" — ปุ่มหลัก = `bg-blue-600` · แถบบน = `header[data-shell-topbar]` + `[data-shell-sidehead]` · เมนูที่เลือก = `.bg-blue-50.text-blue-700` ในเมนูข้าง · ตัวเลข = `[data-tm-number]` (CountUp) · กระดิ่ง = `[data-tm-bell-btn]` / `[data-tm-bell]` + `data-tm-new` (เล่นเฉพาะมีแจ้งเตือนใหม่ · components/notification-bell)
+- คลื่นน้ำ: ThemeApplier ฟัง pointerdown แล้วใส่ `.tm-ripple-dot` ในปุ่มหลัก · ขีดเส้นใต้: ลิงก์ `text-blue-600/700` (ไม่มีพื้น) + แท็บ `border-b-2 border-blue-600` · ไอคอนขยับ: svg ตัวแรกในปุ่ม/ลิงก์
+- ⚠️ ห้ามใส่ `!important` ที่ `background` / `background-position` / `background-color` ของจุดที่มีแอนิเมชัน — แอนิเมชันทับค่า !important ไม่ได้ (เจอแล้วตอนรอบนี้: แถบบนเปลี่ยนสี/ไล่สีวิ่งไม่ขยับ · แก้กฎแถบบนเฟส 4 แล้ว)
+- ปิดแอนิเมชัน = เหลือเฉพาะเอฟเฟกต์นิ่ง (แถบเน้น) · มือถือ = ตัดเอฟเฟกต์วนตลอด (เหลือสั่น/แถบเน้น)
