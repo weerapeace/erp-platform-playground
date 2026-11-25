@@ -4090,16 +4090,29 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             const coerced: Record<string, unknown> = {};
             for (const [k, v] of Object.entries(vals)) {
               const def = effectiveFields.find((f) => f.key === k);
-              coerced[k] = def?.type === "number" ? (v === "" ? null : Number(v)) : v;
+              coerced[k] = def?.type === "number" && typeof v === "string" ? (v === "" ? null : Number(v)) : v;
             }
             setForm((p) => ({ ...p, ...coerced }));
-            // โหมดดูไม่มีปุ่มบันทึก → เขียนลงระบบทันทีทีละช่อง (ไม่งั้นปิดหน้าแล้วหาย)
+            // โหมดดูไม่มีปุ่มบันทึก → เขียนลงระบบทันที (ไม่งั้นปิดหน้าแล้วหาย)
+            //   ข้อความ = ทีละช่องเหมือนแก้ในตาราง · ค่าที่ไม่ใช่ข้อความ (ใส่อะไรได้ = รายการ · ล้างค่า = null) = PATCH ก้อนเดียว
             if (drawerMode === "view" && editingId) {
               void (async () => {
                 let ok = 0; let err0 = "";
-                for (const k of keys) {
+                const complex = keys.filter((k) => typeof vals[k] !== "string");
+                for (const k of keys.filter((x) => typeof vals[x] === "string")) {
                   const e = await onInlineEdit({ id: editingId } as Row, k, String(vals[k] ?? ""));
                   if (e) { if (!err0) err0 = e; } else ok++;
+                }
+                if (complex.length) {
+                  try {
+                    const body = Object.fromEntries(complex.map((k) => [k, coerced[k]]));
+                    const j = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`, {
+                      method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ ...body, actor: user?.name }),
+                    }).then((r) => r.json());
+                    if (j.error) { if (!err0) err0 = String(j.error); }
+                    else { ok += complex.length; setRows((prev) => prev.map((r) => (r.id === editingId ? ({ ...r, ...body } as Row) : r))); }
+                  } catch (e) { if (!err0) err0 = e instanceof Error ? e.message : String(e); }
                 }
                 if (ok) flash(tr(`AI เขียนให้และบันทึกแล้ว ${ok} ช่อง`, `AI wrote and saved ${ok} field(s)`));
                 if (err0) setFormErr(tr(`บันทึกบางช่องไม่สำเร็จ — ${err0}`, `Some fields didn't save — ${err0}`));

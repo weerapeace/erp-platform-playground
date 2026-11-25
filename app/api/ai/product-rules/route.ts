@@ -13,7 +13,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
+import { normalizeExtras } from "@/lib/ai-draft-setup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,6 +27,8 @@ type RuleBody = {
   /** คำตอบแนะนำต่อหัวข้อ { หัวข้อไทย: [ตัวเลือก...] } — ผู้ใช้กดเลือกได้ ไม่ต้องพิมพ์ */
   topic_options?: Record<string, string[]>;
   hint?: string | null; sort_order?: number; is_active?: boolean;
+  /** ค่าตั้งเพิ่มของป๊อป AI 5 ขั้น — จุดเด่นให้ติ๊ก · ช่องกรอกมือที่บังคับ · หัวข้อไม่บังคับ (lib/ai-draft-setup) */
+  extras?: unknown;
 };
 
 // ทำความสะอาดคำตอบแนะนำ: คีย์ = หัวข้อ, ค่า = รายการตัวเลือก (จำกัดกันบวม)
@@ -86,8 +89,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const tagIds = arr(b.tag_ids), keywords = arr(b.name_keywords);
   if (tagIds.length === 0 && keywords.length === 0)
     return NextResponse.json({ error: "ต้องระบุอย่างน้อยหนึ่งเงื่อนไข — เลือกแท็ก หรือใส่คำในชื่อสินค้า" }, { status: 400 });
-  if (!(b.instruction ?? "").trim() && arr(b.required_topics).length === 0 && !(b.hint ?? "").trim())
-    return NextResponse.json({ error: "กฎยังไม่มีผลอะไรเลย — ใส่คำสั่ง หัวข้อที่ต้องมี หรือใบ้อย่างน้อยหนึ่งอย่าง" }, { status: 400 });
+  const extras = normalizeExtras(b.extras);
+  const hasExtras = extras.highlights.length > 0 || extras.manual_required.length > 0;
+  if (!(b.instruction ?? "").trim() && arr(b.required_topics).length === 0 && !(b.hint ?? "").trim() && !hasExtras)
+    return NextResponse.json({ error: "กฎยังไม่มีผลอะไรเลย — ใส่คำสั่ง หัวข้อที่ต้องมี ใบ้ จุดเด่น หรือช่องกรอกมืออย่างน้อยหนึ่งอย่าง" }, { status: 400 });
 
   const row = {
     name,
@@ -99,6 +104,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     required_topics_en: arr(b.required_topics_en),
     topic_options: cleanOptions(b.topic_options),
     hint: (b.hint ?? "").trim() || null,
+    // ไม่ส่ง extras มา (แก้จากแผงกฎแบบเดิม) = คงค่าเดิมไว้ ไม่ล้าง
+    ...(b.extras !== undefined ? { extras } : {}),
     sort_order: Number.isFinite(b.sort_order) ? Number(b.sort_order) : 0,
     is_active: b.is_active !== false,
     updated_at: new Date().toISOString(),
@@ -106,6 +113,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  // ค่าเดิมก่อนแก้ — ไว้จดว่าเปลี่ยนอะไร (audit changes) และให้ป๊อปกด "ย้อนกลับ" ได้
+  const before = b.id
+    ? ((await admin.from("erp_ai_product_rules").select("*").eq("id", b.id).maybeSingle()).data as Record<string, unknown> | null)
+    : null;
   const res = b.id
     ? await admin.from("erp_ai_product_rules").update({ ...row, updated_by: user?.id ?? null }).eq("id", b.id).select("id").maybeSingle()
     : await admin.from("erp_ai_product_rules").insert({ ...row, updated_by: user?.id ?? null }).select("id").maybeSingle();
@@ -114,9 +125,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await writeAudit(admin, {
     action: b.id ? "update" : "create", entityType: "ai_product_rule", entityId: res.data?.id ?? null,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { name, tags: tagIds.length, keywords: keywords.length },
+    metadata: { name, tags: tagIds.length, keywords: keywords.length, changes: auditDiff(before, row as unknown as Record<string, unknown>) },
   });
-  return NextResponse.json({ data: res.data, error: null });
+  return NextResponse.json({ data: res.data, before, error: null });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

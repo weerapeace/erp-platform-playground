@@ -19,6 +19,7 @@ import { CAPTION_MODEL, productDetailModel, imageParts, imagesToDataUrls, loadPr
 import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { parentImageKeys } from "@/lib/product-image-keys";
+import { cleanTemplate, templateInstruction } from "@/lib/ai-draft-setup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,7 +45,30 @@ type Body = {
    * ไม่ส่ง = เขียนทุกกลุ่มเหมือนเดิม
    */
   fields?: string[];
+  /** ชุดแม่แบบ (Theme) ที่เลือกในป๊อป — ลำดับหัวข้อ + รูปแบบ Description (lib/ai-draft-setup) */
+  template?: unknown;
+  /** ข้อมูลที่ผู้ใช้เลือก/กรอกในป๊อป 5 ขั้น (จุดเด่น · ช่อง · ขนาดที่วัด · ใส่อะไรได้ · ตัวอย่างจากรุ่นเก่า) — บรรทัดละเรื่อง */
+  facts?: string[];
+  /** รูปที่ผู้ใช้เอาออกจากชุดที่ให้ AI ดู (R2 key) */
+  skip_keys?: string[];
+  /** อ่านแค่ตัวเลขขนาดจากรูป (ขั้น "ขนาด & กล่อง") — ไม่เขียนข้อความ ถูกกว่าการร่างเต็ม */
+  sizes_only?: boolean;
 };
+
+/**
+ * GET ?parent_id= → { data: { keys, max } } รูปที่ AI จะดู (ลำดับเดียวกับตอนเขียน) — ป๊อปโชว์แถบรูป + ติ๊กเอาออก
+ */
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  if (!(await apiCan(request, "ai.caption")))
+    return NextResponse.json({ error: "คุณยังไม่ได้รับสิทธิ์ใช้ AI (ai.caption)" }, { status: 401 });
+  const parentId = (new URL(request.url).searchParams.get("parent_id") ?? "").trim();
+  if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_id" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const { data: p } = await admin.from("parent_skus_v2").select("cover_image_r2_key").eq("id", parentId).maybeSingle();
+  if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
+  const keys = await parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG * 2);
+  return NextResponse.json({ data: { keys, max: MAX_IMG }, error: null });
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption")))
@@ -62,6 +86,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ALL_FIELDS = ["name", "intro", "desc"];
   const asked = Array.isArray(body.fields) ? body.fields.map((f) => String(f).trim()).filter((f) => ALL_FIELDS.includes(f)) : [];
   const pickFields = asked.length ? [...new Set(asked)] : ALL_FIELDS;
+
+  // ชุดแม่แบบ + ข้อมูลจากป๊อป 5 ขั้น (ทำความสะอาด/จำกัดความยาวกันบวม)
+  const tpl = cleanTemplate(body.template);
+  const tplText = tpl ? templateInstruction(tpl) : "";
+  const popupFacts = (Array.isArray(body.facts) ? body.facts : [])
+    .map((x) => String(x ?? "").trim().slice(0, 400)).filter(Boolean).slice(0, 20)
+    .map((x) => `- ${x}`).join("\n");
 
   const admin = supabaseAdmin();
 
@@ -111,8 +142,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── รูปให้ AI ดู — ไล่ 4 ชั้นจนครบเพดาน (ของจริงแกลเลอรี Parent มักมีแค่ 1 รูป
   //    ถ้าดึงชั้นเดียว AI จะไม่มีวันเห็นรูปสเปคที่เขียนขนาดไว้) ──
   //    ① รูปปก ② แกลเลอรี Parent ③ รูป Description (มักเป็นรูปสเปค/อินโฟกราฟิก) ④ รูปของ SKU ลูก
-  const keys = await parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG);
+  // รูปที่ผู้ใช้ติ๊กเอาออก → ข้าม แล้วเติมรูปถัดไปให้ครบเพดาน
+  const skip = new Set((Array.isArray(body.skip_keys) ? body.skip_keys : []).map((k) => String(k)).slice(0, 40));
+  const keys = (await parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG + skip.size))
+    .filter((k) => !skip.has(k)).slice(0, MAX_IMG);
   const images = keys.length ? await imagesToDataUrls(keys) : [];
+
+  // ── โหมดอ่านขนาดอย่างเดียว (ป๊อปขั้น 3) — กติกาเดียวกับตอนร่าง: เอาเฉพาะตัวเลขที่เขียนอยู่ในรูป ห้ามกะ ──
+  if (body.sizes_only) {
+    if (!images.length) return NextResponse.json({ data: { sizes: null, size_source: "ไม่มีรูปให้อ่าน", image_count: 0 }, error: null });
+    let so: Record<string, unknown>;
+    try {
+      so = await aiChat("ai.product_detail", [
+        "อ่านตัวเลขขนาด/น้ำหนักของสินค้าที่ 'เขียนอยู่ในรูป' เท่านั้น (รูปสเปค อินโฟกราฟิก ป้ายวัด ตารางไซซ์)",
+        "ห้ามกะ/ประมาณจากสายตาเด็ดขาด — ไม่มีตัวเลขเขียนไว้ให้ใส่ null",
+        "แปลงหน่วยเป็น เซนติเมตร (ขนาด) และ กรัม (น้ำหนัก) ก่อนตอบ · size_length_cm = กว้าง/ยาว (ด้านยาว) · size_height_cm = สูง · size_thickness_cm = หนา/ลึก",
+        'ตอบ JSON เท่านั้น: {"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"source":"อ่านมาจากรูปไหน เขียนว่าอะไร"}',
+      ].join("\n"), [{ type: "text", text: `รหัสสินค้า: ${p.code ?? "-"} · มีรูป ${images.length} รูป` }, ...imageParts(images)],
+      300, await productDetailModel(), { request });
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ" }, { status: 502 });
+    }
+    const n2 = (k: string, max: number): number | null => {
+      const v = Number(String(so[k] ?? "").replace(/[^\d.]/g, ""));
+      return Number.isFinite(v) && v > 0 && v <= max ? Math.round(v * 100) / 100 : null;
+    };
+    const sz = { size_length_cm: n2("size_length_cm", 500), size_height_cm: n2("size_height_cm", 500), size_thickness_cm: n2("size_thickness_cm", 500), weight_g: n2("weight_g", 200000) };
+    const any = Object.values(sz).some((v) => v !== null);
+    return NextResponse.json({ data: { sizes: any ? sz : null, size_source: String(so.source ?? "").trim().slice(0, 200) || (any ? "" : "ไม่พบตัวเลขในรูป"), image_count: images.length }, error: null });
+  }
 
   // ── คำสั่ง (prompt) — เจาะจงรายแบรนด์ชนะค่ากลาง ──
   const promptRows = await loadPromptRows();
@@ -209,6 +267,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       "(ยังคงห้าม: แต่งข้อมูลที่มองไม่เห็น · เดาตัวเลขขนาด/น้ำหนัก · ตอบไม่เป็น JSON ตามคีย์ที่กำหนด)",
     ] : []),
     ...(ruleInstruction ? ["", "คำสั่งเพิ่มสำหรับสินค้าประเภทนี้ (ทำร่วมกับคำสั่งเจ้าของร้าน):", ruleInstruction] : []),
+    ...(tplText ? ["", tplText] : []),
     ...(ruleTopics.length ? ["", "หัวข้อที่ต้องมีใน Description เสมอ (ถ้าดูจากรูปไม่ออก ให้ถามใน questions):",
       ...ruleTopics.map((t) => `- ${t}`)] : []),
     // ── คำสั่งรายช่อง = ตัวสุดท้ายจริง ๆ ของ prompt (ตำแหน่งที่โมเดลให้น้ำหนักสูงสุด) ──
@@ -259,7 +318,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // คำตอบที่ผู้ใช้ตอบคำถามของ AI รอบก่อน — เชื่อถือได้เท่าข้อมูลในระบบ
   const answerTxt = (body.answers ?? [])
-    .filter((a) => a && a.q && a.a).slice(0, 8)
+    .filter((a) => a && a.q && a.a).slice(0, 20)
     .map((a) => `- ${String(a.q).slice(0, 200)} → ${String(a.a).slice(0, 300)}`).join("\n");
 
   const brandCard = await brandProfileBlock(admin, brandId, { forProduct: true });
@@ -282,6 +341,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sizeTxt ? `ขนาดที่วัดไว้แล้วในระบบ: ${sizeTxt}` : "ระบบยังไม่มีข้อมูลขนาด — ถ้ารูปไหนมีตัวเลขขนาดเขียนไว้ ให้อ่านมาใส่ใน sizes",
     ruleHints ? `ข้อมูลประจำสินค้าประเภทนี้ (ตั้งไว้ล่วงหน้า เชื่อถือได้): ${ruleHints}` : "",
     extra ? `ข้อมูลเพิ่มเติมจากผู้ใช้ (เชื่อถือได้ ให้ใช้): ${extra}` : "",
+    popupFacts ? `ข้อมูลที่ผู้ใช้เลือก/กรอกในขั้นตอนก่อนหน้า (เชื่อถือได้ ให้ใช้ให้ครบ):\n${popupFacts}` : "",
     answerTxt ? `ผู้ใช้ตอบคำถามที่ถามไปรอบก่อนแล้ว (เชื่อถือได้ ให้ใช้และห้ามถามซ้ำ):\n${answerTxt}` : "",
     images.length ? `มีรูปสินค้าให้ดู ${images.length} รูป` : "ไม่มีรูปให้ดู — เขียนจากข้อมูลข้อความเท่านั้น และเขียนแบบไม่ระบุรายละเอียดที่มองไม่เห็น",
   ].filter(Boolean).join("\n");

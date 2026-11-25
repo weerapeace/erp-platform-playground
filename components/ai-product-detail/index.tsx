@@ -9,9 +9,21 @@
 //   → แถวขนาดจะไม่ติ๊กให้อัตโนมัติเสมอ ต้องกดยืนยันเอง
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
+import { useAuth } from "@/components/auth";
+import { useToast } from "@/components/toast";
+import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
+import { useFormDraft } from "@/components/form/use-form-draft";
+import { DRAFT_PREFIX, decodeDraft } from "@/lib/form-draft";
+import { parseFits, type FitPick } from "@/lib/product-fits";
+import { isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
+import {
+  MANUAL_FIELDS, fitsFromSize, mergeExtras, missingManual, missingTopics, pickParcelBox, templateFor,
+  type FitCatalogRow, type ParcelBox,
+} from "@/lib/ai-draft-setup";
+import { ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, useDraftSetup, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
@@ -25,15 +37,6 @@ const FIELDS: { key: string; label: string; lang: "th" | "en"; long?: boolean }[
   { key: "name_en",             label: "Name En",             lang: "en" },
   { key: "introduction_en",     label: "Introduction En",     lang: "en", long: true },
   { key: "english_description", label: "English Description", lang: "en", long: true },
-];
-
-/** ช่องขนาด — เอามาเฉพาะที่อ่านตัวเลขได้จากในรูป (ไม่ติ๊กให้อัตโนมัติ) */
-const SIZE_FIELDS: { key: string; label: string; unit: string }[] = [
-  { key: "size_length_cm",    label: "Size Length Cm",    unit: "ซม." },
-  { key: "size_height_cm",    label: "Size Height Cm",    unit: "ซม." },
-  { key: "size_thickness_cm", label: "Size Thickness Cm", unit: "ซม." },
-  { key: "weight_g",          label: "Weight G",          unit: "กรัม" },
-  { key: "warranty",          label: "Warranty",          unit: "" },
 ];
 
 type Sizes = Record<string, number | string | null>;
@@ -128,7 +131,7 @@ function ModelPicker() {
  * แท็กมีผลกับ AI 2 ทาง: ① ใช้จับ "กฎตามประเภทสินค้า"  ② ส่งเข้า prompt ให้ AI รู้ว่าสินค้าเป็นของประเภทไหน
  * แสดง 2 ภาษา (ไทย · EN) — แท็กไหนยังไม่มีชื่ออังกฤษ เติมได้ในที่เดียวกัน
  */
-function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () => void }) {
+function TagPicker({ parentId, onChanged, onCount }: { parentId: string; onChanged?: () => void; onCount?: (n: number) => void }) {
   const [all, setAll] = useState<TagRow[] | null>(null);
   const [groups, setGroups] = useState<TagGroupLike[]>([]);
   const [mine, setMine] = useState<Set<string>>(new Set());
@@ -147,6 +150,7 @@ function TagPicker({ parentId, onChanged }: { parentId: string; onChanged?: () =
     } catch { setAll([]); }
   }, [parentId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (all !== null) onCount?.(mine.size); }, [all, mine, onCount]);
 
   const setTag = async (tagId: string, on: boolean) => {
     const j = await apiFetch("/api/product-tags", {
@@ -460,20 +464,37 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
   );
 }
 
+/**
+ * ✨ ป๊อปให้ AI ร่างรายละเอียดสินค้า — แบบแท็บ 5 ขั้น (เจ้าของเลือก 2026-11-25 · Theme แบบ B · รูปแบบ A)
+ *   ① ตั้งต้น: คัดลอกจากรุ่นเก่า (ติ๊กเลือกกลุ่ม) · แท็กประเภทสินค้า (บังคับ) · ชุดแม่แบบ · ช่องที่ให้ AI เขียน
+ *   ② ประเภท & จุดเด่น: หัวข้อที่ต้องตอบตามกฎ (บังคับ) + ⚙ ตั้งค่าหัวข้อในตัว · จุดเด่นแบบติ๊ก (+ AI แนะนำ) · จำนวนช่อง · ใบ้
+ *   ③ ขนาด & กล่อง: AI อ่านตัวเลขจากรูป (แก้ได้) → ใส่อะไรได้ (คิดจากขนาด) → กล่องไปรษณีย์เล็กสุดที่ใส่ได้
+ *   ④ AI ร่าง: ชื่อ/Introduction/Description ไทย+EN ตามแม่แบบ · แก้ได้ · แปลอีกภาษาตาม
+ *   ⑤ กรอกมือ: ประกัน · Custom size · Size/Special description (บังคับตามกฎ)
+ *   ข้ามขั้นได้ แต่มีจุดแดงบอกขั้นที่ขาด · กด AI ร่างไม่ได้จนกว่าขั้น ①② ครบ · จำร่างค้างต่อสินค้า (useFormDraft)
+ *   ค่าที่ได้ลงฟอร์มเฉย ๆ — ต้องกดบันทึกเอง (โหมดดู = บันทึกทันที)
+ */
 export function AiProductDetailModal({
   parentId, brandId, suggestKeyword, current, onApply, onClose,
 }: {
   parentId: string;
-  /** แบรนด์ของสินค้าตัวนี้ — ไว้ตั้งคำสั่ง AI เฉพาะแบรนด์ */
+  /** แบรนด์ของสินค้าตัวนี้ — ไว้ตั้งคำสั่ง AI / แม่แบบเริ่มต้นเฉพาะแบรนด์ */
   brandId?: string | null;
   /** คำที่เดาจากชื่อสินค้าตัวนี้ — เติมให้ตอนสร้างกฎใหม่ (เช่น "กระเป๋าสตางค์") */
   suggestKeyword?: string;
   /** ค่าปัจจุบันในฟอร์ม (ไว้เทียบว่าจะทับของเดิมไหม) */
   current: Record<string, unknown>;
-  onApply: (values: Record<string, string>) => void;
+  /** ค่าที่จะลงฟอร์ม — ข้อความ = string · ใส่อะไรได้ = array · ล้างค่า = null */
+  onApply: (values: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
   const t = useT();
+  const toast = useToast();
+  const { can } = useAuth();
+  const canRule = can("tasks.approve" as Parameters<typeof can>[0]);   // แก้กฎ/แม่แบบ = สิทธิ์เดียวกับหลังบ้าน (product-rules)
+  const canTpl = canRule && can("products.edit");
+  const STEPS = [t("ตั้งต้น", "Start"), t("ประเภท & จุดเด่น", "Type & highlights"), t("ขนาด & กล่อง", "Size & box"), t("AI ร่าง", "AI draft"), t("กรอกมือ", "Manual")];
+  const [step, setStep] = useState(0);
   const [extra, setExtra] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -546,34 +567,252 @@ export function AiProductDetailModal({
     finally { setCfgBusy(false); }
   };
 
-  // คำตอบที่ผู้ใช้พิมพ์ตอบคำถามของ AI (ส่งกลับไปตอนกด t("ตอบแล้วให้คิดใหม่", "Answer & redraft"))
+  // คำตอบหัวข้อบังคับ + คำถามที่ AI ถามกลับ (คีย์ = คำถามฉบับไทย)
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  // เลือกว่าให้ AI เขียนช่องไหนรอบนี้ (แต่ละกลุ่มพ่วงคู่อังกฤษให้เอง) — ค่าเริ่มต้น = ทุกกลุ่ม
   const [pickFields, setPickFields] = useState<string[]>(["name", "intro", "desc"]);
 
-  // ── หัวข้อบังคับจาก "กฎตามประเภทสินค้า" ที่สินค้าตัวนี้เข้าเงื่อนไข ──
-  //    โชว์เป็นช่องให้กรอกก่อนกดให้ AI คิด (AI จะไม่ต้องถามกลับ และไม่เดา)
-  //    โหมด EN ของหน้าจอ → ใช้หัวข้อฉบับอังกฤษถ้ากฎตั้งไว้
-  const [topics, setTopics] = useState<{ th: string; en: string; rule: string; options: string[] }[]>([]);
+  // ── แท็ก + กฎตามประเภทสินค้าที่สินค้านี้เข้า ──
+  const [tagCount, setTagCount] = useState<number | null>(null);
+  const [tagTick, setTagTick] = useState(0);          // คัดลอกแท็กจากรุ่นเก่าแล้ว → โหลดแท็ก/กฎใหม่
+  const [rulesTick, setRulesTick] = useState(0);      // แก้กฎในขั้น 2 แล้ว → โหลดใหม่
+  const [rulesMatched, setRulesMatched] = useState<MatchedRule[]>([]);
+  const [ruleEditOpen, setRuleEditOpen] = useState(false);
   useEffect(() => {
-    (async () => {
-      try {
-        const j = await apiFetch(`/api/ai/product-rules?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json());
-        const matched = (j.matched ?? []) as { name: string; required_topics?: string[]; required_topics_en?: string[]; topic_options?: Record<string, string[]> }[];
-        const out: { th: string; en: string; rule: string; options: string[] }[] = [];
-        for (const r of matched) {
-          const th = r.required_topics ?? []; const en = r.required_topics_en ?? [];
-          th.forEach((topic, i) => {
-            if (topic && !out.some((x) => x.th === topic)) {
-              out.push({ th: topic, en: en[i] ?? "", rule: r.name, options: (r.topic_options ?? {})[topic] ?? [] });
-            }
-          });
-        }
-        setTopics(out);
-      } catch { setTopics([]); }
-    })();
-  }, [parentId]);
+    let off = false;
+    apiFetch(`/api/ai/product-rules?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
+      .then((j) => { if (!off) setRulesMatched((j.matched ?? []) as MatchedRule[]); })
+      .catch(() => { if (!off) setRulesMatched([]); });
+    return () => { off = true; };
+  }, [parentId, rulesTick, tagTick]);
+  const topics = useMemo(() => {
+    const out: { th: string; en: string; rule: string; options: string[] }[] = [];
+    for (const r of rulesMatched) {
+      const en = r.required_topics_en ?? [];
+      (r.required_topics ?? []).forEach((topic, i) => {
+        if (topic && !out.some((x) => x.th === topic)) out.push({ th: topic, en: en[i] ?? "", rule: r.name, options: (r.topic_options ?? {})[topic] ?? [] });
+      });
+    }
+    return out;
+  }, [rulesMatched]);
+  const extras = useMemo(() => mergeExtras(rulesMatched.map((r) => r.extras)), [rulesMatched]);
   const topicLabel = (x: { th: string; en: string }) => (t("th", "en") === "en" && x.en ? x.en : x.th);
+
+  // ── ชุดแม่แบบ ──
+  const { setup, save: saveSetup } = useDraftSetup();
+  const [tplId, setTplId] = useState<string | null>(null);
+  useEffect(() => { if (setup && !tplId) setTplId(templateFor(setup, brandId)?.id ?? null); }, [setup, tplId, brandId]);
+  const tpl = setup?.templates.find((x) => x.id === tplId && !x.archived) ?? null;
+
+  // ── จุดเด่น ──
+  const [hl, setHl] = useState<string[]>([]);
+  const [hlInput, setHlInput] = useState("");
+  const [aiHl, setAiHl] = useState<string[]>([]);
+  const [aiHlBusy, setAiHlBusy] = useState(false);
+  const [aiHlAllowed, setAiHlAllowed] = useState(true);
+  useEffect(() => {
+    apiFetch("/api/ai/desc-highlights?check=1").then((r) => r.json()).then((j) => setAiHlAllowed(j?.data?.allowed !== false)).catch(() => { /* ให้หลังบ้านตัดสินตอนกด */ });
+  }, []);
+  const toggleHl = (h: string) => setHl((p) => (p.includes(h) ? p.filter((x) => x !== h) : [...p, h]));
+  const askAiHl = async () => {
+    setAiHlBusy(true);
+    try {
+      const j = await apiFetch("/api/ai/desc-highlights", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent_id: parentId, shown: [...extras.highlights, ...aiHl], chosen: hl, extra: extra.trim() || undefined }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const items = ((j.data?.items ?? []) as { th?: string }[]).map((x) => String(x.th ?? "").trim()).filter(Boolean);
+      setAiHl((p) => [...new Set([...p, ...items])]);
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("AI แนะนำไม่สำเร็จ", "AI suggestions failed")); }
+    finally { setAiHlBusy(false); }
+  };
+
+  // ── จำนวนช่อง (คลังกลางเดียวกับป๊อปแทรกรายละเอียด: product_highlight_items ชนิด slot) ──
+  const [slotItems, setSlotItems] = useState<SnippetItem[] | null>(null);
+  const [slots, setSlots] = useState<Record<string, number>>({});
+  useEffect(() => {
+    apiFetch("/api/master-v2/product_highlight_items?limit=1000").then((r) => r.json())
+      .then((j) => setSlotItems(((j.data ?? []) as SnippetItem[]).filter((x) => isSlot(x) && x.is_active !== false)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))))
+      .catch(() => setSlotItems([]));
+  }, []);
+
+  // ── รูปที่ AI จะดู ──
+  const [imgKeys, setImgKeys] = useState<string[] | null>(null);
+  const [imgMax, setImgMax] = useState(10);
+  const [skip, setSkip] = useState<string[]>([]);
+  useEffect(() => {
+    apiFetch(`/api/ai/product-detail?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
+      .then((j) => { setImgKeys((j.data?.keys ?? []) as string[]); if (j.data?.max) setImgMax(Number(j.data.max)); })
+      .catch(() => setImgKeys([]));
+  }, [parentId]);
+
+  // ── ขนาด ──
+  const SIZE_INPUTS = [
+    { key: "size_length_cm", label: t("กว้าง/ยาว (ซม.)", "Length (cm)") },
+    { key: "size_height_cm", label: t("สูง (ซม.)", "Height (cm)") },
+    { key: "size_thickness_cm", label: t("หนา (ซม.)", "Depth (cm)") },
+    { key: "weight_g", label: t("น้ำหนัก (กรัม)", "Weight (g)") },
+  ];
+  const curStr = (k: string) => (current[k] === null || current[k] === undefined ? "" : String(current[k]));
+  const [sizes, setSizes] = useState<Record<string, string>>(() => Object.fromEntries(SIZE_INPUTS.map((f) => [f.key, curStr(f.key)])));
+  const [sizeBusy, setSizeBusy] = useState(false);
+  const [sizeMsg, setSizeMsg] = useState("");
+  const readSizes = async () => {
+    setSizeBusy(true); setSizeMsg("");
+    try {
+      const j = await apiFetch("/api/ai/product-detail", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent_id: parentId, sizes_only: true, skip_keys: skip }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const sz = (j.data?.sizes ?? null) as Record<string, number | null> | null;
+      if (!sz) { setSizeMsg(t("ไม่พบตัวเลขขนาดเขียนอยู่ในรูป — กรอกเองได้เลย", "No size numbers in the images — type them in")); return; }
+      setSizes((p) => { const n = { ...p }; for (const f of SIZE_INPUTS) if (sz[f.key] !== null && sz[f.key] !== undefined) n[f.key] = String(sz[f.key]); return n; });
+      setSizeMsg(t(`อ่านจาก: ${j.data?.size_source || "รูปสินค้า"} — ตรวจกับของจริงก่อนใช้`, `Read from: ${j.data?.size_source || "images"} — check against the real product`));
+    } catch (e) { setSizeMsg(e instanceof Error ? e.message : t("อ่านขนาดไม่สำเร็จ", "Could not read sizes")); }
+    finally { setSizeBusy(false); }
+  };
+  const dims = { w: sizes.size_length_cm, h: sizes.size_height_cm, d: sizes.size_thickness_cm };
+
+  // ── ใส่อะไรได้ (คิดจากขนาด) ──
+  const [fitRows, setFitRows] = useState<FitCatalogRow[] | null>(null);
+  const [fitPicks, setFitPicks] = useState<FitPick[]>(() => parseFits(current.fits));
+  const [fitTouched, setFitTouched] = useState(false);
+  useEffect(() => {
+    apiFetch("/api/master-v2/product_fit_items?limit=1000").then((r) => r.json())
+      .then((j) => setFitRows((j.data ?? []) as FitCatalogRow[])).catch(() => setFitRows([]));
+  }, []);
+  const fitSug = useMemo(() => (fitRows ? fitsFromSize(dims, fitRows) : []), [fitRows, dims.w, dims.h, dims.d]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // ยังไม่เคยตั้ง "ใส่อะไรได้" + ยังไม่ได้แตะ → ติ๊กของที่ใส่ได้ตามขนาดให้ก่อน (เจ้าของขอ: ใส่ตามที่วัดจากขนาดก่อน)
+  useEffect(() => {
+    if (fitTouched || parseFits(current.fits).length > 0) return;
+    setFitPicks(fitSug.filter((x) => x.fits).map((x) => ({ id: x.id, size: x.size })));
+  }, [fitSug, fitTouched, current.fits]);
+  const toggleFit = (id: string, size: string | null) => {
+    setFitTouched(true);
+    setFitPicks((p) => (p.some((x) => x.id === id) ? p.filter((x) => x.id !== id) : [...p, { id, size }]));
+  };
+  const fitName = (id: string) => fitRows?.find((x) => x.id === id)?.name ?? id;
+
+  // ── กล่องไปรษณีย์ ──
+  const [boxes, setBoxes] = useState<ParcelBox[] | null>(null);
+  const [parcelId, setParcelId] = useState<string>(curStr("parcel_size_id"));
+  const [parcelManual, setParcelManual] = useState<boolean>(!!curStr("parcel_size_id"));
+  useEffect(() => {
+    apiFetch("/api/master-v2/parcel_sizes?limit=200").then((r) => r.json())
+      .then((j) => setBoxes((j.data ?? []) as ParcelBox[])).catch(() => setBoxes([]));
+  }, []);
+  const autoBox = useMemo(() => (boxes ? pickParcelBox(dims, boxes) : null), [boxes, dims.w, dims.h, dims.d]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!parcelManual && autoBox) setParcelId(autoBox.id); }, [autoBox, parcelManual]);
+  const boxLabel = (b: ParcelBox) => `${b.name}${b.size_text ? ` (${b.size_text})` : ` (${b.width_cm}×${b.length_cm}×${b.height_cm} ซม.)`}`;
+
+  // ── ช่องกรอกมือ ──
+  const [manual, setManual] = useState<Record<string, string>>(() => Object.fromEntries(MANUAL_FIELDS.map((f) => [f.key, curStr(f.key)])));
+
+  // ── คัดลอกจากรุ่นเก่า ──
+  const COPY_GROUPS = [
+    { key: "tags", label: t("แท็ก", "Tags") },
+    { key: "answers", label: t("คำตอบ/จุดเด่น/ช่อง", "Answers/highlights/slots") },
+    { key: "size", label: t("ขนาด/ใส่อะไรได้/กล่อง", "Size/fits/box") },
+    { key: "manual", label: t("ช่องกรอกมือ", "Manual fields") },
+    { key: "text", label: t("ตัวอย่าง Description", "Description example") },
+  ];
+  const [copySrc, setCopySrc] = useState<ParentSkuPickerValue | null>(null);
+  const [copyGroups, setCopyGroups] = useState<string[]>(["tags", "answers", "manual", "text"]);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [refText, setRefText] = useState("");
+  const [refFrom, setRefFrom] = useState("");
+
+  // ── จำร่างค้างไว้ต่อสินค้า (ของกลาง useFormDraft · เก็บในเครื่องนี้ 7 วัน) ──
+  const snapshot = { step, tplId, pickFields, answers, hl, aiHl, slots, extra, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, skip, res, picked, refText, refFrom };
+  const dirty = step > 0 || Object.values(answers).some((v) => v.trim()) || hl.length > 0 || !!extra.trim() || res !== null || Object.keys(slots).length > 0;
+  const draft = useFormDraft({ key: `ai-draft:${parentId}`, values: snapshot as unknown as Record<string, unknown>, dirty, active: true });
+  const restore = (v: Record<string, unknown> | null) => {
+    if (!v) return;
+    const s = v as Partial<typeof snapshot>;
+    if (typeof s.step === "number") setStep(Math.min(4, Math.max(0, s.step)));
+    if (s.tplId) setTplId(s.tplId);
+    if (Array.isArray(s.pickFields) && s.pickFields.length) setPickFields(s.pickFields);
+    if (s.answers) setAnswers(s.answers);
+    if (Array.isArray(s.hl)) setHl(s.hl);
+    if (Array.isArray(s.aiHl)) setAiHl(s.aiHl);
+    if (s.slots) setSlots(s.slots);
+    if (typeof s.extra === "string") setExtra(s.extra);
+    if (s.sizes) setSizes((p) => ({ ...p, ...s.sizes }));
+    if (Array.isArray(s.fitPicks)) setFitPicks(s.fitPicks);
+    if (s.fitTouched) setFitTouched(true);
+    if (typeof s.parcelId === "string") setParcelId(s.parcelId);
+    if (s.parcelManual) setParcelManual(true);
+    if (s.manual) setManual((p) => ({ ...p, ...s.manual }));
+    if (Array.isArray(s.skip)) setSkip(s.skip);
+    if (s.res) setRes(s.res);
+    if (s.picked) setPicked(s.picked);
+    if (typeof s.refText === "string") setRefText(s.refText);
+    if (typeof s.refFrom === "string") setRefFrom(s.refFrom);
+  };
+
+  const doCopy = async () => {
+    if (!copySrc) return;
+    if (copySrc.id === parentId) { toast.warning(t("นี่คือรุ่นที่เปิดอยู่ — เลือกรุ่นอื่น", "This is the open product — pick another")); return; }
+    setCopyBusy(true);
+    const before = { sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, refText, refFrom, answers, hl, slots, tplId };
+    const addedTags: string[] = [];
+    const done: string[] = [];
+    try {
+      const rec = ((await apiFetch(`/api/master-v2/parent-skus/${encodeURIComponent(copySrc.id)}`).then((r) => r.json())).data ?? {}) as Record<string, unknown>;
+      if (copyGroups.includes("tags")) {
+        const [src, mine] = await Promise.all([
+          apiFetch(`/api/product-tags?parent_id=${encodeURIComponent(copySrc.id)}`).then((r) => r.json()),
+          apiFetch(`/api/product-tags?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json()),
+        ]);
+        const have = new Set(((mine.mine ?? []) as string[]).map(String));
+        for (const id of ((src.mine ?? []) as string[]).map(String)) {
+          if (have.has(id)) continue;
+          const j = await apiFetch("/api/product-tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_id: parentId, tag_id: id, on: true }) }).then((r) => r.json());
+          if (!j.error) addedTags.push(id);
+        }
+        setTagTick((x) => x + 1);
+        done.push(t(`แท็ก ${addedTags.length}`, `${addedTags.length} tags`));
+      }
+      if (copyGroups.includes("answers")) {
+        // คำตอบ/จุดเด่น/ช่อง ไม่ได้เก็บในสินค้า — ดึงจากร่างของรุ่นนั้นที่จำไว้ในเครื่องนี้ (ถ้ามี)
+        let d: Record<string, unknown> | null = null;
+        try { d = decodeDraft(localStorage.getItem(`${DRAFT_PREFIX}ai-draft:${copySrc.id}`))?.values ?? null; } catch { d = null; }
+        if (d) {
+          const s = d as Partial<typeof snapshot>;
+          if (s.answers) setAnswers((p) => ({ ...s.answers, ...Object.fromEntries(Object.entries(p).filter(([, v]) => v.trim())) }));
+          if (Array.isArray(s.hl)) setHl((p) => [...new Set([...p, ...(s.hl ?? [])])]);
+          if (s.slots) setSlots((p) => ({ ...s.slots, ...p }));
+          if (s.tplId) setTplId(s.tplId);
+          done.push(t("คำตอบ/จุดเด่น", "answers/highlights"));
+        } else done.push(t("คำตอบ (รุ่นนั้นไม่มีร่างในเครื่องนี้)", "answers (no saved draft for that model here)"));
+      }
+      if (copyGroups.includes("size")) {
+        setSizes((p) => { const n = { ...p }; for (const f of SIZE_INPUTS) if (rec[f.key] !== null && rec[f.key] !== undefined && rec[f.key] !== "") n[f.key] = String(rec[f.key]); return n; });
+        const f = parseFits(rec.fits);
+        if (f.length) { setFitPicks(f); setFitTouched(true); }
+        if (rec.parcel_size_id) { setParcelId(String(rec.parcel_size_id)); setParcelManual(true); }
+        done.push(t("ขนาด", "size"));
+      }
+      if (copyGroups.includes("manual")) {
+        setManual((p) => { const n = { ...p }; for (const m of MANUAL_FIELDS) if (!isBlank(rec[m.key])) n[m.key] = String(rec[m.key]); return n; });
+        done.push(t("ช่องกรอกมือ", "manual fields"));
+      }
+      if (copyGroups.includes("text")) {
+        const txt = String(rec.description ?? "").trim();
+        setRefText(txt); setRefFrom(copySrc.code);
+        done.push(txt ? t("ตัวอย่าง Description", "description example") : t("ตัวอย่าง (รุ่นนั้นยังไม่มี Description)", "example (that model has no description)"));
+      }
+      toast.undo(t(`คัดลอกจาก ${copySrc.code} แล้ว: ${done.join(" · ")}`, `Copied from ${copySrc.code}: ${done.join(" · ")}`), async () => {
+        for (const id of addedTags) await apiFetch("/api/product-tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_id: parentId, tag_id: id, on: false }) }).catch(() => null);
+        setSizes(before.sizes); setFitPicks(before.fitPicks); setFitTouched(before.fitTouched); setParcelId(before.parcelId); setParcelManual(before.parcelManual);
+        setManual(before.manual); setRefText(before.refText); setRefFrom(before.refFrom); setAnswers(before.answers); setHl(before.hl); setSlots(before.slots); setTplId(before.tplId);
+        setTagTick((x) => x + 1);
+      }, { ms: 8000 });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+    finally { setCopyBusy(false); }
+  };
 
   // ── แก้ข้อความในผลลัพธ์ได้เลย + ให้อีกภาษาแปลตามอัตโนมัติ (ไทย↔EN) ──
   //    คู่ช่อง: ชื่อสินค้า · Introduction · Description  · หยุดพิมพ์ 1.2 วินาทีแล้วค่อยยิงแปล (ไม่ยิงทุกตัวอักษร)
@@ -625,12 +864,30 @@ export function AiProductDetailModal({
     finally { setSyncing(null); }
   };
 
+  // ── ขั้นไหนยังขาดข้อบังคับ (จุดแดง) ──
+  const missTopics = missingTopics(topics, answers, extras.optional_topics);
+  const missManual = missingManual(extras.manual_required, manual);
+  const stepMissing = [tagCount === 0, missTopics.length > 0, false, false, missManual.length > 0];
+  const canDraft = !stepMissing[0] && !stepMissing[1];
+
+  /** ข้อมูลจากทุกขั้นที่ส่งให้ AI (บรรทัดละเรื่อง) */
+  const facts = (): string[] => {
+    const out: string[] = [];
+    if (hl.length) out.push(`จุดเด่นที่ผู้ใช้เลือก (ต้องใส่ทุกข้อ): ${hl.join(", ")}`);
+    const slotPicks = (slotItems ?? []).filter((x) => (slots[x.id] ?? 0) > 0);
+    if (slotPicks.length) out.push(`ช่องใส่ของ: ${slotPicks.map((x) => slotText(x, slots[x.id], "th") ?? `${x.name} ${slots[x.id]} ช่อง`).join(", ")}`);
+    const sz = SIZE_INPUTS.filter((f) => Number(sizes[f.key]) > 0).map((f) => `${f.label} ${sizes[f.key]}`);
+    if (sz.length) out.push(`ขนาดที่ยืนยันแล้ว (ใช้ตัวเลขนี้): ${sz.join(" · ")}`);
+    if (fitPicks.length) out.push(`ใส่ได้: ${fitPicks.map((x) => `${fitName(x.id)}${x.size ? ` (${x.size})` : ""}`).join(", ")}`);
+    if (!isBlank(manual.warranty)) out.push(`ประกัน: ${manual.warranty}`);
+    if (!isBlank(manual.custom_size)) out.push(`สั่งขนาดพิเศษ: ${manual.custom_size}`);
+    if (refText) out.push(`ตัวอย่าง Description จากรุ่น ${refFrom} (เขียนแนวเดียวกัน ห้ามลอกข้อมูลที่ไม่ตรงกับสินค้านี้): ${refText.slice(0, 300)}`);
+    return out;
+  };
+
   const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
     setLoading(true); setErr(null);
-    // คำตอบหัวข้อบังคับ ส่งไปทุกครั้ง (ไม่ต้องรอ AI ถาม) · คำตอบคำถามของ AI ส่งเมื่อกด "ตอบแล้วให้คิดใหม่"
-    const topicQa = topics
-      .map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() }))
-      .filter((x) => x.a);
+    const topicQa = topics.map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() })).filter((x) => x.a);
     const qa = [
       ...topicQa,
       ...(opts?.withAnswers
@@ -641,74 +898,117 @@ export function AiProductDetailModal({
     try {
       const r = await apiFetch("/api/ai/product-detail", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined, fields: pickFields }),
+        body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined, fields: pickFields, template: tpl ?? undefined, facts: facts(), skip_keys: skip }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || j?.error) throw new Error(j?.error || `เรียก AI ไม่สำเร็จ (${r.status})`);
       const data = (j.data ?? {}) as Result;
       setRes(data);
-      // ค่าเริ่มต้น: ติ๊กเฉพาะช่องข้อความที่ "ของเดิมยังว่าง" — ช่องที่มีข้อความอยู่แล้วไม่ติ๊กให้ (กันทับงานที่เขียนเอง)
-      //   ช่องขนาดไม่ติ๊กให้เลย ต้องกดยืนยันเอง (ตัวเลขผิดกระทบค่าส่ง/ลูกค้าได้ของไม่ตรง)
+      // ติ๊กเฉพาะช่องที่ของเดิมยังว่าง (กันทับงานที่เขียนเอง)
       const init: Record<string, boolean> = {};
       for (const f of FIELDS) init[f.key] = !!String(data[f.key] ?? "").trim() && isBlank(current[f.key]);
       setPicked(init);
+      // AI เจอประกันในรูป + ช่องประกันยังว่าง → เติมให้ในขั้นกรอกมือ (ยังแก้ได้)
+      const w = String(data.sizes?.warranty ?? "").trim();
+      if (w) setManual((p) => (isBlank(p.warranty) ? { ...p, warranty: w } : p));
     } catch (e) { setErr(e instanceof Error ? e.message : t("เรียก AI ไม่สำเร็จ", "Could not reach AI")); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentId, extra, current, answers, topics, pickFields]);
+  }, [parentId, extra, current, answers, topics, pickFields, tpl, skip, hl, slots, sizes, fitPicks, manual, refText]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
-  const sizeRows = res?.sizes
-    ? SIZE_FIELDS.filter((f) => { const v = res.sizes?.[f.key]; return v !== null && v !== undefined && String(v).trim() !== ""; })
-    : [];
-  // ช่องไทยมีข้อความ แต่คู่อังกฤษว่าง → บอกให้รู้ (ไม่ใช่หายเงียบ) ปกติระบบแปลให้เองแล้ว
   const missingEn = res
     ? CFG_FIELDS.filter((f) => String(res[f.field] ?? "").trim() && !String(res[f.field === "name_th" ? "name_en" : f.field === "introduction" ? "introduction_en" : "english_description"] ?? "").trim())
     : [];
-  const pickedCount = [...rows, ...sizeRows].filter((f) => picked[f.key]).length;
-  const willOverwrite = [...rows, ...sizeRows].filter((f) => picked[f.key] && !isBlank(current[f.key])).length;
+  const willOverwrite = rows.filter((f) => picked[f.key] && !isBlank(current[f.key])).length;
 
+  /** ค่าที่จะลงฟอร์ม — เฉพาะที่ติ๊ก/เปลี่ยนจริง */
+  const output = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const f of rows) if (picked[f.key]) out[f.key] = String(res?.[f.key] ?? "").trim();
+    for (const f of SIZE_INPUTS) if (sizes[f.key].trim() !== curStr(f.key)) out[f.key] = sizes[f.key].trim();
+    if (JSON.stringify(fitPicks) !== JSON.stringify(parseFits(current.fits))) out.fits = fitPicks.length ? fitPicks : null;
+    if (parcelId !== curStr("parcel_size_id")) out.parcel_size_id = parcelId || null;
+    for (const m of MANUAL_FIELDS) if ((manual[m.key] ?? "").trim() !== curStr(m.key)) out[m.key] = (manual[m.key] ?? "").trim() || null;
+    return out;
+  };
+  const outCount = Object.keys(output()).length;
   const apply = () => {
-    if (!res) return;
-    const out: Record<string, string> = {};
-    for (const f of rows) if (picked[f.key]) out[f.key] = String(res[f.key] ?? "").trim();
-    for (const f of sizeRows) if (picked[f.key]) out[f.key] = String(res.sizes?.[f.key] ?? "").trim();
+    if (missManual.length) { setStep(4); toast.warning(t("กรอกช่องที่บังคับในขั้นกรอกมือให้ครบก่อน", "Fill the required manual fields first")); return; }
+    const out = output();
+    if (!Object.keys(out).length) { toast.info(t("ยังไม่มีอะไรเปลี่ยน", "Nothing changed yet")); return; }
     onApply(out);
+    draft.discard();
     onClose();
   };
 
+  const goNext = () => {
+    if (step === 2) {
+      if (!canDraft) { setStep(stepMissing[0] ? 0 : 1); toast.warning(t("ยังขาดข้อมูลที่จำเป็น (จุดแดง) — กรอกให้ครบก่อนให้ AI ร่าง", "Required info missing (red dot) — complete it before drafting")); return; }
+      setStep(3); void run(); return;
+    }
+    setStep((s) => Math.min(4, s + 1));
+  };
+  const nextLabel = step === 2 ? t("✨ ให้ AI ร่าง", "✨ Let AI draft") : step === 4 ? t(`ใส่ลงฟอร์ม (${outCount})`, `Put into form (${outCount})`) : t("ถัดไป", "Next");
+
+  const chip = (on: boolean) => `h-7 px-2.5 text-[12px] rounded-full border ${on ? "bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`;
+  const label = "block text-[12.5px] font-medium text-slate-600 mb-1";
+
   return (
-    <ERPModal open onClose={onClose} size="lg" title={t("✨ ให้ AI คิดรายละเอียดสินค้า", "✨ Let AI draft the product details")}
-      description={t("AI ดูรูปสินค้า (สูงสุด 10 รูป) + ข้อมูลที่กรอกไว้ → เขียนชื่อสินค้า / Introduction / Description ทั้งไทยและอังกฤษ · ขนาดจะเอามาให้เฉพาะที่มีตัวเลขเขียนอยู่ในรูป", "AI looks at the product images (up to 10) + what you filled in → writes name / introduction / description in both Thai and English · sizes are only used when numbers are written in the image")}
+    <ERPModal open onClose={onClose} size="xl" title={t("✨ ให้ AI ร่างรายละเอียดสินค้า", "✨ Let AI draft the product details")}
+      description={t("ทำทีละขั้น ข้ามได้ · จุดแดง = ยังขาดข้อมูลที่จำเป็น · ร่างค้างไว้จะจำให้อัตโนมัติ", "Step by step, skippable · red dot = required info missing · drafts are remembered")}
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
-          <span className="text-[11.5px] text-slate-400">
-            {res
-              ? `AI ดูรูป ${res.image_count ?? 0} รูป · เลือกไว้ ${pickedCount} ช่อง${(res.rules_used?.length ?? 0) > 0 ? ` · ใช้กฎ: ${res.rules_used?.join(", ")}` : ""}`
+          <span className="text-[11.5px] text-slate-400 w-full sm:w-auto">
+            {res ? `AI ดูรูป ${res.image_count ?? 0} รูป${(res.rules_used?.length ?? 0) > 0 ? ` · ใช้กฎ: ${res.rules_used?.join(", ")}` : ""}${tpl ? ` · แม่แบบ: ${tpl.name}` : ""}`
               : t("ค่าที่ได้จะลงในฟอร์ม ต้องกดบันทึกเองอีกที", "Results go into the form — you still press Save")}
           </span>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-            <button onClick={() => void run()} disabled={loading}
-              className="h-9 px-4 text-sm font-medium border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 rounded-lg hover:bg-fuchsia-100 disabled:opacity-50 inline-flex items-center gap-2">
-              {loading && <Spinner />}{loading ? t("AI กำลังคิด…", "AI is thinking…") : res ? t("ให้คิดใหม่", "Redraft") : t("✨ ให้ AI คิด", "✨ Let AI draft")}
-            </button>
-            {res && (
-              <button onClick={apply} disabled={pickedCount === 0}
-                className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">
-                ใช้ค่าที่เลือก ({pickedCount})
+          <div className="flex gap-2 ml-auto">
+            <button onClick={onClose} className="h-9 px-3 sm:px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+            {step > 0 && <button onClick={() => setStep((s) => s - 1)} className="h-9 px-3 sm:px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ย้อน", "Back")}</button>}
+            {step === 3 && res && (
+              <button onClick={() => void run()} disabled={loading} className="h-9 px-3 sm:px-4 text-sm font-medium border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 rounded-lg hover:bg-fuchsia-100 disabled:opacity-50">
+                {t("ให้คิดใหม่", "Redraft")}
               </button>
             )}
+            {step === 3 && !res && !loading && (
+              <button onClick={() => (canDraft ? void run() : goNext())} className="h-9 px-3 sm:px-4 text-sm font-medium border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 rounded-lg hover:bg-fuchsia-100">
+                {t("✨ ให้ AI ร่าง", "✨ Let AI draft")}
+              </button>
+            )}
+            <button onClick={step === 4 ? apply : goNext} disabled={loading}
+              className={`h-9 px-3 sm:px-4 text-sm font-medium rounded-lg disabled:opacity-50 inline-flex items-center gap-2 ${step === 2 ? "border border-fuchsia-300 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
+              {loading && step === 3 && <Spinner />}{nextLabel}
+            </button>
           </div>
         </div>
       }>
       <div className="space-y-3">
-        {/* ⚙ ตั้งคำสั่ง AI — แก้ได้ในป๊อปนี้เลย ไม่ต้องออกไปหน้าตั้งค่า */}
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-[12.5px] text-slate-500">{t("คำสั่งที่ AI ใช้เขียน (ตั้งได้ทั้งค่ากลางและเฉพาะแบรนด์)", "The prompt AI writes with (global or per brand)")}</span>
-          <button type="button" onClick={() => setCfgOpen(true)}
-            className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
-            {t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}
+        {/* ร่างค้างจากครั้งก่อน */}
+        {draft.pending && (
+          <div className="flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12.5px] text-amber-800">
+            <span className="flex-1 min-w-0">{t(`มีร่างค้างไว้เมื่อ ${new Date(draft.pending.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })} — ทำต่อจากเดิมไหม?`, `You have a saved draft from ${new Date(draft.pending.at).toLocaleString()} — continue?`)}</span>
+            <button type="button" onClick={() => restore(draft.take())} className="h-7 px-2.5 text-[12px] font-medium rounded-lg bg-amber-600 text-white">{t("ทำต่อ", "Continue")}</button>
+            <button type="button" onClick={() => draft.discard()} className="h-7 px-2.5 text-[12px] rounded-lg border border-amber-300 bg-white">{t("เริ่มใหม่", "Start over")}</button>
+          </div>
+        )}
+
+        {/* แท็บขั้นตอน — กดข้ามได้ · จุดแดง = ขาดข้อบังคับ · มือถือโชว์ชื่อเฉพาะขั้นที่อยู่ */}
+        <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-0.5">
+          {STEPS.map((name, i) => {
+            const on = step === i;
+            const ok = i < step && !stepMissing[i];
+            return (
+              <button key={i} type="button" onClick={() => setStep(i)}
+                className={`shrink-0 h-8 px-2.5 text-[12px] rounded-lg border inline-flex items-center gap-1 ${on ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : ok ? "border-slate-200 text-emerald-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                <span>{ok ? "✓" : `${i + 1}.`}</span>
+                <span className={on ? "" : "hidden sm:inline"}>{name}</span>
+                {stepMissing[i] && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title={t("ยังขาดข้อมูลที่จำเป็น", "Required info missing")} />}
+              </button>
+            );
+          })}
+          <button type="button" onClick={() => setCfgOpen(true)} className="shrink-0 ml-auto h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
+            {t("⚙ คำสั่ง AI", "⚙ AI prompt")}
           </button>
         </div>
 
@@ -828,106 +1128,267 @@ export function AiProductDetailModal({
           </ERPModal>
         )}
 
-        {/* เลือกว่ารอบนี้ให้ AI เขียนช่องไหน — กลุ่มที่เลือกได้คู่อังกฤษด้วย · ช่องที่ไม่เลือกของเดิมไม่ถูกแตะ */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[12.5px] font-medium text-slate-600">{t("ให้ AI เขียนช่อง", "Let AI write")}</span>
-          {([["name", t("ชื่อสินค้า", "Product name")], ["intro", "Introduction"], ["desc", "Description"]] as const).map(([k, label]) => {
-            const on = pickFields.includes(k);
-            return (
-              <button key={k} type="button"
-                onClick={() => setPickFields((p) => (p.includes(k) ? (p.length > 1 ? p.filter((x) => x !== k) : p) : [...p, k]))}
-                title={on ? t("กดเพื่อไม่เขียนช่องนี้", "Click to skip this field") : t("กดเพื่อให้เขียนช่องนี้", "Click to include this field")}
-                className={`h-7 px-2.5 text-[12px] rounded-full border ${on
-                  ? "bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 font-medium" : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
-                {on ? "✓ " : ""}{label}
-              </button>
-            );
-          })}
-          <span className="text-[11.5px] text-slate-400">{t("(กลุ่มที่เลือก ได้ฝั่งอังกฤษด้วย)", "(each group includes its English pair)")}</span>
-        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          {/* รูปที่ AI จะดู — ข้างซ้ายทุกขั้น (มือถือ = แถบเลื่อนด้านบน) */}
+          <div className="sm:w-[168px] shrink-0">
+            <ImageStrip keys={imgKeys} max={imgMax} skip={skip} onToggleSkip={(k) => setSkip((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))} />
+          </div>
 
-        {/* เลือกแท็กประเภทสินค้าได้ตรงนี้เลย (2 ภาษา) — แท็กมีผลกับกฎ AI + เป็นบริบทตอนเขียน */}
-        <TagPicker parentId={parentId} />
+          <div className="flex-1 min-w-0 space-y-3">
+            {/* ① ตั้งต้น */}
+            {step === 0 && (
+              <>
+                <div>
+                  <span className={label}>{t("คัดลอกจากรุ่นเก่า (ไม่บังคับ)", "Copy from an older model (optional)")}</span>
+                  <div className="flex gap-2 items-start flex-wrap sm:flex-nowrap">
+                    <div className="flex-1 min-w-[200px]"><ParentSkuPicker value={copySrc} onChange={setCopySrc} disableCreate placeholder={t("ค้นรหัส/ชื่อรุ่น…", "Search code/name…")} /></div>
+                    <button type="button" onClick={() => void doCopy()} disabled={!copySrc || copyBusy || copyGroups.length === 0}
+                      className="h-9 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40 inline-flex items-center gap-1.5">
+                      {copyBusy && <Spinner />}{t("⧉ คัดลอก", "⧉ Copy")}
+                    </button>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11.5px] text-slate-400">{t("เอามาบ้าง:", "Bring over:")}</span>
+                    {COPY_GROUPS.map((g) => {
+                      const on = copyGroups.includes(g.key);
+                      return <button key={g.key} type="button" onClick={() => setCopyGroups((p) => (on ? p.filter((x) => x !== g.key) : [...p, g.key]))} className={chip(on)}>{on ? "✓ " : ""}{g.label}</button>;
+                    })}
+                  </div>
+                  {refText && (
+                    <p className="mt-1 text-[11.5px] text-slate-500">
+                      {t(`ใช้ Description ของ ${refFrom} เป็นตัวอย่างการเขียน`, `Using ${refFrom}'s description as a writing example`)} ·{" "}
+                      <button type="button" onClick={() => { setRefText(""); setRefFrom(""); }} className="text-rose-500 underline">{t("เอาออก", "Remove")}</button>
+                    </p>
+                  )}
+                </div>
 
-        {/* หัวข้อบังคับจากกฎที่สินค้านี้เข้า — กรอกตรงนี้ AI จะใช้เลย ไม่ต้องเดาและไม่ต้องถามกลับ */}
-        {topics.length > 0 && (
-          <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-3">
-            <p className="text-[12.5px] font-semibold text-violet-800 mb-0.5">
-              📝 {t("ข้อมูลที่ต้องมีใน Description", "Details the description must include")}
-              <span className="ml-1.5 text-[11px] font-normal text-violet-600">({t("จากกฎ", "from rule")}: {[...new Set(topics.map((x) => x.rule))].join(", ")})</span>
-            </p>
-            <p className="text-[11.5px] text-violet-700 mb-2">
-              {t("กรอกเท่าที่รู้ — ช่องที่เว้นไว้ AI จะถามกลับให้ทีหลัง (ไม่เดาเอง)", "Fill in what you know — AI will ask about blanks instead of guessing")}
-            </p>
-            <div className="space-y-1.5">
-              {topics.map((x) => {
-                const cur = answers[x.th] ?? "";
-                return (
-                  <div key={x.th}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12.5px] text-slate-600 w-[42%] shrink-0">{topicLabel(x)}</span>
-                      <input value={cur} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))}
-                        placeholder={t("พิมพ์คำตอบ…", "Type the answer…")}
-                        className="flex-1 h-8 px-2.5 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300" />
-                    </div>
-                    {/* คำตอบแนะนำที่ผู้ดูแลตั้งไว้ — กดเลือกได้เลย (กดซ้ำ = ยกเลิก) ยังพิมพ์เองได้ */}
-                    {x.options.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1 ml-[42%] pl-2">
-                        {x.options.map((op) => {
-                          const on = cur.trim() === op;
+                <div className="rounded-lg border border-slate-200 p-2.5">
+                  <TagPicker key={tagTick} parentId={parentId} onChanged={() => setRulesTick((x) => x + 1)} onCount={setTagCount} />
+                  {tagCount === 0 && <p className="mt-1 text-[11.5px] text-rose-600">{t("● จำเป็น: ติดแท็กประเภทสินค้าอย่างน้อย 1 แท็ก — AI จะรู้ว่าเป็นสินค้าอะไรและเข้ากฎที่ตั้งไว้", "● Required: add at least one product-type tag")}</p>}
+                  {rulesMatched.length > 0 && (
+                    <p className="mt-1.5 text-[12px] text-emerald-700">
+                      ✓ {t(`เข้ากฎ "${rulesMatched.map((r) => r.name).join(", ")}" → มีหัวข้อที่ต้องตอบ ${topics.length} ข้อในขั้นถัดไป`, `Matches rule "${rulesMatched.map((r) => r.name).join(", ")}" → ${topics.length} questions next`)}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <span className={label}>{t("Theme = ชุดแม่แบบ (ลำดับหัวข้อ + รูปแบบ Description)", "Theme = template (heading order + description format)")}</span>
+                  {setup
+                    ? <TemplatePicker setup={setup} save={saveSetup} value={tplId} onChange={setTplId} brandId={brandId} canEdit={canTpl} />
+                    : <p className="text-[12px] text-slate-400"><Spinner /> {t("กำลังโหลดแม่แบบ…", "Loading templates…")}</p>}
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12.5px] font-medium text-slate-600">{t("ให้ AI เขียน", "Let AI write")}</span>
+                  {([["name", t("ชื่อสินค้า", "Product name")], ["intro", "Introduction"], ["desc", "Description"]] as const).map(([k, lb]) => {
+                    const on = pickFields.includes(k);
+                    return (
+                      <button key={k} type="button" onClick={() => setPickFields((p) => (p.includes(k) ? (p.length > 1 ? p.filter((x) => x !== k) : p) : [...p, k]))} className={chip(on)}>
+                        {on ? "✓ " : ""}{lb}
+                      </button>
+                    );
+                  })}
+                  <span className="text-[11.5px] text-slate-400">{t("(ได้คู่ภาษาอังกฤษด้วย)", "(includes English)")}</span>
+                </div>
+              </>
+            )}
+
+            {/* ② ประเภท & จุดเด่น */}
+            {step === 1 && (
+              <>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12.5px] font-semibold text-slate-700 flex-1 min-w-0">
+                    {t("หัวข้อที่ต้องตอบ", "Questions to answer")}
+                    {rulesMatched.length > 0 && <span className="ml-1.5 text-[11.5px] font-normal text-slate-400">({t("จากกฎ", "from rule")}: {rulesMatched.map((r) => r.name).join(", ")})</span>}
+                  </span>
+                  {canRule && rulesMatched.length > 0 && !ruleEditOpen && (
+                    <button type="button" onClick={() => setRuleEditOpen(true)} className="h-7 px-2.5 text-[12px] rounded-lg border border-violet-200 text-violet-700 bg-white hover:bg-violet-50">
+                      {t("⚙ ตั้งค่าหัวข้อ", "⚙ Edit questions")}
+                    </button>
+                  )}
+                </div>
+                {ruleEditOpen ? (
+                  <RuleQuickEditor rules={rulesMatched} onSaved={() => setRulesTick((x) => x + 1)} onClose={() => setRuleEditOpen(false)} />
+                ) : topics.length === 0 ? (
+                  <p className="text-[12px] text-slate-400">
+                    {rulesMatched.length === 0
+                      ? t("สินค้านี้ยังไม่เข้ากฎประเภทสินค้าใด — ติดแท็กในขั้นแรก หรือสร้างกฎที่ ⚙ คำสั่ง AI → กฎตามประเภทสินค้า", "No product-type rule matches — tag it in step 1 or create a rule under ⚙ AI prompt")
+                      : t("กฎนี้ยังไม่มีหัวข้อที่ต้องตอบ", "This rule has no questions yet")}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {topics.map((x) => {
+                      const cur = answers[x.th] ?? "";
+                      const req = !extras.optional_topics.includes(x.th);
+                      const miss = req && isBlank(cur);
+                      return (
+                        <div key={x.th} className={`rounded-lg border p-2 ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
+                          <p className="text-[12px] text-slate-600 mb-1">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}</p>
+                          {x.options.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {x.options.map((op) => {
+                                const on = cur.trim() === op;
+                                return <button key={op} type="button" onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))}
+                                  className={`h-6 px-2 text-[11.5px] rounded-full border ${on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{op}</button>;
+                              })}
+                            </div>
+                          )}
+                          <input value={cur} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))} placeholder={t("หรือพิมพ์คำตอบ…", "or type an answer…")}
+                            className="w-full h-8 px-2 text-[12.5px] border border-slate-200 rounded-md bg-white" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div>
+                  <span className={label}>{t("จุดเด่น (ติ๊กเลือก)", "Highlights (tick)")}</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...new Set([...extras.highlights, ...aiHl, ...hl])].map((h) => (
+                      <button key={h} type="button" onClick={() => toggleHl(h)} className={chip(hl.includes(h))}>
+                        {hl.includes(h) ? "✓ " : ""}{aiHl.includes(h) && !extras.highlights.includes(h) ? "✨ " : ""}{h}
+                      </button>
+                    ))}
+                    {aiHlAllowed && (
+                      <button type="button" onClick={() => void askAiHl()} disabled={aiHlBusy} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50 inline-flex items-center gap-1">
+                        {aiHlBusy && <Spinner />}{t("✨ AI ดูรูปแล้วแนะนำ", "✨ AI suggests from images")}
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <input value={hlInput} onChange={(e) => setHlInput(e.target.value)} placeholder={t("พิมพ์จุดเด่นเอง แล้วกด Enter", "Type a highlight and press Enter")}
+                      onKeyDown={(e) => { if (e.key === "Enter" && hlInput.trim()) { e.preventDefault(); setHl((p) => [...new Set([...p, hlInput.trim()])]); setHlInput(""); } }}
+                      className="flex-1 h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
+                  </div>
+                </div>
+
+                <div>
+                  <span className={label}>{t("จำนวนช่อง", "Compartments")}</span>
+                  {slotItems === null ? <p className="text-[12px] text-slate-400"><Spinner /></p>
+                    : slotItems.length === 0 ? <p className="text-[12px] text-slate-400">{t("ยังไม่มีชนิดช่องในคลังกลาง (ตั้งได้ที่ป๊อปแทรกรายละเอียด)", "No compartment types yet")}</p>
+                    : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {slotItems.map((s) => {
+                          const n = slots[s.id] ?? 0;
+                          const set = (v: number) => setSlots((p) => { const c = { ...p }; if (v > 0) c[s.id] = v; else delete c[s.id]; return c; });
                           return (
-                            <button key={op} type="button"
-                              onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))}
-                              className={`h-6 px-2 text-[11.5px] rounded-full border transition ${on
-                                ? "bg-violet-600 border-violet-600 text-white"
-                                : "bg-white border-violet-200 text-violet-700 hover:bg-violet-50"}`}>
-                              {op}
-                            </button>
+                            <div key={s.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${n > 0 ? "border-fuchsia-200 bg-fuchsia-50/40" : "border-slate-200"}`}>
+                              <span className="flex-1 min-w-0 truncate text-[12.5px] text-slate-700">{t(s.name, s.name_en || s.name)}</span>
+                              <button type="button" onClick={() => set(Math.max(0, n - 1))} className="w-6 h-6 rounded border border-slate-200 text-slate-500" aria-label={t("ลด", "Less")}>−</button>
+                              <span className="w-5 text-center text-[12.5px] tabular-nums">{n}</span>
+                              <button type="button" onClick={() => set(Math.min(20, n + 1))} className="w-6 h-6 rounded border border-slate-200 text-slate-500" aria-label={t("เพิ่ม", "More")}>＋</button>
+                            </div>
                           );
                         })}
                       </div>
                     )}
+                </div>
+
+                <div>
+                  <span className={label}>{t("บอกใบ้เพิ่ม (ไม่บังคับ)", "Extra hints (optional)")}</span>
+                  <input value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={500}
+                    placeholder={t("เช่น เหมาะกับนักศึกษา ใส่ไปทำงานได้", "e.g. good for students and work")}
+                    className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" />
+                </div>
+              </>
+            )}
+
+            {/* ③ ขนาด & กล่อง */}
+            {step === 2 && (
+              <>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-[12.5px] font-medium text-slate-600 flex-1">{t("ขนาดสินค้า", "Product size")}</span>
+                    <button type="button" onClick={() => void readSizes()} disabled={sizeBusy || !imgKeys?.length}
+                      className="h-7 px-2.5 text-[12px] rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-40 inline-flex items-center gap-1">
+                      {sizeBusy && <Spinner />}{t("✨ ให้ AI อ่านขนาดจากรูป", "✨ AI reads sizes from images")}
+                    </button>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {SIZE_INPUTS.map((f) => (
+                      <label key={f.key} className="block">
+                        <span className="text-[11.5px] text-slate-500">{f.label}</span>
+                        <input value={sizes[f.key]} inputMode="decimal" onChange={(e) => setSizes((p) => ({ ...p, [f.key]: e.target.value.replace(/[^\d.]/g, "") }))}
+                          className={`w-full h-9 px-2.5 text-[13px] border rounded-lg tabular-nums ${sizes[f.key] !== curStr(f.key) ? "border-sky-300 bg-sky-50/40" : "border-slate-200"}`} />
+                      </label>
+                    ))}
+                  </div>
+                  {sizeMsg && <p className="mt-1 text-[11.5px] text-slate-500">{sizeMsg}</p>}
+                  <p className="mt-0.5 text-[11px] text-slate-400">{t("AI อ่านเฉพาะตัวเลขที่เขียนอยู่ในรูป ไม่กะจากสายตา · ช่องสีฟ้า = เปลี่ยนจากเดิม", "AI only reads numbers written in images · blue = changed")}</p>
+                </div>
 
-        <div>
-          <label className="block text-[12.5px] font-medium text-slate-600 mb-1">{t("บอกใบ้เพิ่ม (ไม่บังคับ)", "Extra hints (optional)")}</label>
-          <input value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={500}
-            placeholder={t("เช่น หนัง PU กันน้ำ · ใส่โน้ตบุ๊ก 15 นิ้วได้ · เหมาะกับนักเรียน", "e.g. waterproof PU leather · fits a 15\" laptop · good for students")}
-            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300" />
-          <p className="mt-1 text-[11.5px] text-slate-400">
-            AI เขียนจากสิ่งที่เห็นในรูปเท่านั้น — อะไรที่มองไม่เห็น (วัสดุจริง กันน้ำ ขนาดจุของ) พิมพ์บอกตรงนี้ AI จะเอาไปใช้ ·
-            ถ้ามีรูปสเปคที่เขียนขนาดไว้ AI จะอ่านตัวเลขมาให้เลือกด้วย
-          </p>
-        </div>
+                <div>
+                  <span className={label}>{t("ใส่อะไรได้บ้าง (คิดจากขนาดด้านบน · ติ๊กแก้ได้)", "What fits (from the size above · editable)")}</span>
+                  {fitRows === null ? <p className="text-[12px] text-slate-400"><Spinner /></p> : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {fitSug.length === 0 && fitPicks.length === 0 && <span className="text-[12px] text-slate-400">{t("กรอกขนาดให้ครบ 3 ด้านก่อน ระบบจะคิดให้ว่าใส่อะไรได้", "Enter all 3 dimensions first")}</span>}
+                      {fitSug.map((x) => {
+                        const on = fitPicks.some((p) => p.id === x.id);
+                        return (
+                          <button key={x.id} type="button" onClick={() => toggleFit(x.id, x.size)} title={x.fits ? "" : t("ตามขนาดน่าจะใส่ไม่ได้", "Probably too big")}
+                            className={`${chip(on)} ${!x.fits && !on ? "line-through text-slate-400" : ""}`}>
+                            {on ? "✓ " : ""}{x.name}{x.size ? ` ${x.size}` : ""}
+                          </button>
+                        );
+                      })}
+                      {fitPicks.filter((p) => !fitSug.some((x) => x.id === p.id)).map((p) => (
+                        <button key={p.id} type="button" onClick={() => toggleFit(p.id, p.size ?? null)} className={chip(true)}>✓ {fitName(p.id)}{p.size ? ` ${p.size}` : ""}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-        {err && <div className="px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-[13px] text-rose-700">{err}</div>}
+                <div>
+                  <span className={label}>{t("กล่องไปรษณีย์", "Parcel box")}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select value={parcelId} onChange={(e) => { setParcelId(e.target.value); setParcelManual(true); }} disabled={boxes === null}
+                      className="flex-1 min-w-[200px] h-9 px-2 text-[13px] border border-slate-200 rounded-lg bg-white">
+                      <option value="">{t("— ไม่ระบุ —", "— none —")}</option>
+                      {(boxes ?? []).filter((b) => b.is_active !== false).map((b) => <option key={b.id} value={b.id}>{boxLabel(b)}</option>)}
+                    </select>
+                    {parcelManual && autoBox && autoBox.id !== parcelId && (
+                      <button type="button" onClick={() => { setParcelManual(false); setParcelId(autoBox.id); }} className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 hover:bg-slate-50">
+                        {t(`ใช้กล่องที่แนะนำ: ${autoBox.name}`, `Use suggested: ${autoBox.name}`)}
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    {autoBox ? t(`กล่องเล็กสุดที่ใส่ได้ตามขนาด: ${boxLabel(autoBox)}`, `Smallest box that fits: ${boxLabel(autoBox)}`)
+                      : Number(dims.w) > 0 && Number(dims.h) > 0 && Number(dims.d) > 0 ? t("ไม่มีกล่องที่ใหญ่พอ — เลือกเองได้", "No box is big enough — pick one")
+                      : t("กรอกขนาดครบ 3 ด้าน ระบบจะเลือกกล่องให้", "Enter 3 dimensions to auto-pick a box")}
+                  </p>
+                </div>
+              </>
+            )}
 
-        {!res && !loading && !err && (
-          <p className="py-8 text-center text-sm text-slate-400">{t("กด “✨ ให้ AI คิด” แล้วรอสักครู่ (ประมาณ 10-20 วินาที)", "Press “✨ Let AI draft” and wait ~10-20 seconds")}</p>
-        )}
-        {loading && <p className="py-8 text-center text-sm text-slate-400"><Spinner />{t("AI กำลังดูรูปและเขียนข้อความ…", "AI is reading the images and writing…")}</p>}
-
-        {res && rows.length === 0 && (
-          <p className="py-8 text-center text-sm text-slate-400">{t("AI ไม่ได้ส่งข้อความกลับมา — ลองกด “ให้คิดใหม่” อีกครั้ง", "AI returned nothing — press “Redraft” to try again")}</p>
-        )}
-
-        {rows.length > 0 && (
-          <>
+            {/* ④ AI ร่าง */}
+            {step === 3 && (
+              <>
+                {err && <div className="px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-[13px] text-rose-700">{err}</div>}
+                {!res && !loading && !err && (
+                  <p className="py-8 text-center text-sm text-slate-400">
+                    {canDraft
+                      ? t(`กด “✨ ให้ AI ร่าง” แล้วรอ ~10-20 วินาที${tpl ? ` · เขียนตามแม่แบบ "${tpl.name}"` : ""}`, `Press “✨ Let AI draft” and wait ~10-20 s${tpl ? ` · template "${tpl.name}"` : ""}`)
+                      : t("ยังขาดข้อมูลที่จำเป็นในขั้นที่มีจุดแดง — กรอกให้ครบก่อน", "Fill the steps with a red dot first")}
+                  </p>
+                )}
+                {loading && <p className="py-8 text-center text-sm text-slate-400"><Spinner />{t("AI กำลังดูรูปและเขียนข้อความ…", "AI is reading the images and writing…")}</p>}
+                {res && rows.length === 0 && !loading && (
+                  <p className="py-8 text-center text-sm text-slate-400">{t("AI ไม่ได้ส่งข้อความกลับมา — ลองกด “ให้คิดใหม่” อีกครั้ง", "AI returned nothing — press “Redraft” to try again")}</p>
+                )}
+                {rows.length > 0 && !loading && (
+                  <>
             {missingEn.length > 0 && (
               <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-[12.5px] text-slate-600">
                 ℹ️ {t(`AI ไม่ได้ส่งฉบับอังกฤษของ ${missingEn.map((f) => f.label).join(", ")} มา`,
                      `AI returned no English version of ${missingEn.map((f) => f.label).join(", ")}`)} —
-                {t(" ใช้ค่าที่เลือกแล้วกดปุ่มแปลในฟอร์มได้ หรือกด “ให้คิดใหม่”", " apply what you have then use the translate button, or press “Redraft”")}
+                {t(" กดปุ่ม ⇄ แปล ใต้ช่องไทยได้ หรือกด “ให้คิดใหม่”", " use the ⇄ translate button under the Thai field, or press “Redraft”")}
               </div>
             )}
             {willOverwrite > 0 && (
               <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12.5px] text-amber-800">
-                ⚠️ มี {willOverwrite} ช่องที่ติ๊กไว้และ<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> — กด “ใช้ค่าที่เลือก” จะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)
+                ⚠️ มี {willOverwrite} ช่องที่ติ๊กไว้และ<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> — กด “ใส่ลงฟอร์ม” ในขั้นสุดท้ายจะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)
               </div>
             )}
             <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
@@ -976,42 +1437,6 @@ export function AiProductDetailModal({
                 );
               })}
             </div>
-
-            {/* ขนาดที่อ่านได้จากตัวเลขในรูป — ไม่ติ๊กให้อัตโนมัติ ต้องยืนยันเอง */}
-            {sizeRows.length > 0 && (
-              <div className="rounded-lg border border-sky-200 overflow-hidden">
-                <div className="px-3 py-2 bg-sky-50 border-b border-sky-200">
-                  <p className="text-[12.5px] font-semibold text-sky-800">{t("📏 ขนาดที่ AI อ่านได้จากตัวเลขในรูป", "📏 Sizes AI read from numbers in the image")}</p>
-                  <p className="text-[11.5px] text-sky-700 mt-0.5">
-                    {res?.size_source || t("AI อ่านตัวเลขจากรูปสเปค", "AI reads numbers from the spec image")} · <b>{t("เทียบกับสินค้าจริงก่อนติ๊ก", "Check against the real product before ticking")}</b> — ระบบไม่ติ๊กให้อัตโนมัติเพราะตัวเลขผิดจะกระทบค่าส่ง
-                  </p>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {sizeRows.map((f) => {
-                    const now = String(current[f.key] ?? "").trim();
-                    const next = String(res?.sizes?.[f.key] ?? "").trim();
-                    const same = now !== "" && Number(now) === Number(next);
-                    return (
-                      <label key={f.key} className="flex gap-3 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/70">
-                        <input type="checkbox" checked={!!picked[f.key]}
-                          onChange={(e) => setPicked((p) => ({ ...p, [f.key]: e.target.checked }))}
-                          className="h-4 w-4 accent-sky-600 shrink-0" />
-                        <span className="text-[12.5px] font-medium text-slate-600 w-[150px] shrink-0">{f.label}</span>
-                        <span className="text-[12.5px] text-slate-400 tabular-nums">{isBlank(now) ? t("— ว่าง", "— empty") : now}</span>
-                        <span className="text-slate-300">→</span>
-                        <span className="text-[13px] font-semibold text-sky-700 tabular-nums">{next} {f.unit}</span>
-                        {same && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600">{t("ตรงกับของเดิม", "same as current")}</span>}
-                        {!same && !isBlank(now) && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">{t("ไม่ตรงของเดิม", "differs from current")}</span>}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {res && !res.sizes && (
-              <p className="text-[11.5px] text-slate-400">{t("📏 ไม่พบตัวเลขขนาดเขียนอยู่ในรูป — ช่องขนาดจึงไม่ถูกแตะ (AI ไม่กะขนาดจากสายตา)", "📏 No size numbers found in the image — size fields untouched (AI never eyeballs sizes)")}</p>
-            )}
-
             {/* ❓ AI ถามกลับ — ตอบแล้วให้คิดใหม่ ข้อความจะแม่นขึ้น */}
             {(res?.questions?.length ?? 0) > 0 && (
               <div className="rounded-lg border border-violet-200 overflow-hidden">
@@ -1053,12 +1478,41 @@ export function AiProductDetailModal({
                 </ul>
               </div>
             )}
+                  </>
+                )}
+              </>
+            )}
 
-            <p className="text-[11.5px] text-slate-400">
-              ไม่ถูกใจผลลัพธ์? กด <b>{t("⚙ ตั้งค่าคำสั่ง AI", "⚙ AI prompt settings")}</b> ด้านบน แก้คำสั่ง แล้วกด “ให้คิดใหม่”
-            </p>
-          </>
-        )}
+            {/* ⑤ กรอกมือ */}
+            {step === 4 && (
+              <>
+                <p className="text-[12px] text-slate-500">{t("ช่องที่ AI ไม่เดา — กรอกเองตามจริง · * = บังคับตามกฎของประเภทสินค้านี้", "Fields AI never guesses — fill them in · * = required by this product type's rule")}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {MANUAL_FIELDS.map((f) => {
+                    const req = extras.manual_required.includes(f.key);
+                    const miss = req && isBlank(manual[f.key]);
+                    return (
+                      <label key={f.key} className="block">
+                        <span className={`text-[12.5px] ${miss ? "text-rose-600" : "text-slate-600"}`}>{t(f.label, f.en)}{req && <span className="text-rose-500"> *</span>}</span>
+                        {f.kind === "ref" && f.entity
+                          ? <RefSelect entity={f.entity} value={manual[f.key] ?? ""} onChange={(v) => setManual((p) => ({ ...p, [f.key]: v }))} />
+                          : <input value={manual[f.key] ?? ""} onChange={(e) => setManual((p) => ({ ...p, [f.key]: e.target.value }))}
+                              placeholder={f.key === "warranty" ? t("เช่น 1 ปี ตะเข็บหลุด", "e.g. 1 year seams") : t("เช่น สั่งขนาดพิเศษได้ แจ้งทางแชต", "e.g. custom sizes on request")}
+                              className={`w-full h-9 px-2.5 text-[13px] border rounded-lg ${miss ? "border-rose-300" : "border-slate-200"}`} />}
+                      </label>
+                    );
+                  })}
+                </div>
+                {/* สรุปสิ่งที่จะลงฟอร์ม */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-[12px] text-slate-600">
+                  <b className="font-semibold">{t("จะลงฟอร์ม", "Will go into the form")}:</b>{" "}
+                  {outCount === 0 ? t("ยังไม่มีอะไรเปลี่ยน", "nothing changed yet") : Object.keys(output()).map((k) => FIELDS.find((f) => f.key === k)?.label ?? SIZE_INPUTS.find((f) => f.key === k)?.label ?? MANUAL_FIELDS.find((f) => f.key === k)?.label ?? (k === "fits" ? t("ใส่อะไรได้", "What fits") : k === "parcel_size_id" ? t("กล่องไปรษณีย์", "Parcel box") : k)).join(" · ")}
+                  {willOverwrite > 0 && <span className="block mt-0.5 text-amber-700">⚠️ {t(`${willOverwrite} ช่องข้อความจะเขียนทับของเดิม`, `${willOverwrite} text field(s) will overwrite existing text`)}</span>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </ERPModal>
   );

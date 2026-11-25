@@ -1,0 +1,183 @@
+// ============================================================
+// ai-draft-setup — แกนกลาง (pure · เทสต์ได้) ของป๊อป "✨ ให้ AI ร่างรายละเอียดสินค้า" แบบ 5 ขั้น
+//   (เจ้าของเลือก 2026-11-25: Theme = ชุดแม่แบบ · รูปข้างซ้ายทุกขั้น · ตั้งค่าหัวข้อในขั้น 2)
+//
+//   ① ชุดแม่แบบ (Theme) = ลำดับหัวข้อ + รูปแบบ Description · เก็บที่ ui_config key "ai_desc_templates"
+//      ตั้งค่าเริ่มต้นต่อแบรนด์ได้ (brand_default) · ใช้ทั้งหน้าเว็บ (เลือก) และหลังบ้าน (เขียนคำสั่ง AI)
+//   ② ค่าตั้งเพิ่มของ "กฎตามประเภทสินค้า" (erp_ai_product_rules.extras)
+//      highlights = รายการจุดเด่นให้ติ๊ก · manual_required = ช่องกรอกมือที่บังคับ · optional_topics = หัวข้อที่ไม่บังคับ
+//   ③ เลือกกล่องไปรษณีย์เล็กสุดที่ใส่ได้ (parcel_sizes)
+//   ④ ใส่อะไรได้บ้าง — คิดจากขนาดสินค้า (product_fit_items + lib/fit-check)
+// ============================================================
+
+import { fitInto, fitTargetOf } from "@/lib/fit-check";
+import { fitSizeOptions, parseSizeDims } from "@/lib/product-fits";
+
+// ── ① ชุดแม่แบบ ─────────────────────────────────────────────
+export const DRAFT_SETUP_KEY = "ai_desc_templates";
+
+export type DescTemplate = {
+  id: string;
+  name: string;
+  /** หัวข้อ Description เรียงตามลำดับ (AI ต้องเรียงตามนี้ · หัวข้อที่ไม่มีข้อมูลให้ตัดทิ้ง) */
+  headings: string[];
+  /** รูปแบบการเขียน เช่น "ใช้ • นำหน้าแต่ละข้อ · หัวข้อตัวหนา" */
+  format: string;
+  /** ลบแบบเก็บไว้ก่อน (ถังขยะ) — ไม่โชว์ให้เลือก แต่กู้คืนได้ */
+  archived?: boolean;
+};
+export type DraftSetup = { templates: DescTemplate[]; brand_default: Record<string, string> };
+
+export const DEFAULT_TEMPLATES: DescTemplate[] = [
+  { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ขนาด", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'" },
+  { id: "short", name: "สั้น ขายไว", headings: ["จุดเด่น 3 ข้อ", "ขนาด", "ประกัน"], format: "สั้นที่สุด บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' ไม่เกิน 6 บรรทัด" },
+  { id: "story", name: "เล่าเรื่อง", headings: ["ย่อหน้าเปิด", "จุดเด่น", "สเปค"], format: "เปิดด้วยย่อหน้าสั้น 1-2 ประโยค แล้วตามด้วยรายการ '- '" },
+];
+
+const str = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
+const strList = (v: unknown, maxItems = 20, maxLen = 120): string[] =>
+  (Array.isArray(v) ? v : []).map((x) => str(x, maxLen)).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).slice(0, maxItems);
+
+/** ตรวจ/ทำความสะอาดแม่แบบ 1 ตัว (ใช้ทั้งตอนอ่าน ui_config และตอนหลังบ้านรับจากป๊อป) */
+export function cleanTemplate(raw: unknown): DescTemplate | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const name = str(r.name, 80);
+  const headings = strList(r.headings, 15, 80);
+  if (!name || headings.length === 0) return null;
+  return { id: str(r.id, 60) || name, name, headings, format: str(r.format, 400), ...(r.archived === true ? { archived: true } : {}) };
+}
+
+export function normalizeSetup(raw: unknown): DraftSetup {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const list = (Array.isArray(r.templates) ? r.templates : []).map(cleanTemplate).filter((t): t is DescTemplate => !!t);
+  const seen = new Set<string>();
+  const templates = (list.length ? list : DEFAULT_TEMPLATES).filter((t) => (seen.has(t.id) ? false : (seen.add(t.id), true)));
+  const bd = (r.brand_default && typeof r.brand_default === "object" ? r.brand_default : {}) as Record<string, unknown>;
+  const brand_default: Record<string, string> = {};
+  for (const [k, v] of Object.entries(bd)) if (k && typeof v === "string" && templates.some((t) => t.id === v)) brand_default[k] = v;
+  return { templates, brand_default };
+}
+
+/** แม่แบบที่ใช้ได้ (ไม่อยู่ถังขยะ) */
+export const liveTemplates = (s: DraftSetup) => s.templates.filter((t) => !t.archived);
+
+/** แม่แบบเริ่มต้นของแบรนด์ (ไม่ตั้ง = ตัวแรกที่ใช้ได้) */
+export function templateFor(s: DraftSetup, brandId: string | null | undefined): DescTemplate | null {
+  const live = liveTemplates(s);
+  const byBrand = brandId ? live.find((t) => t.id === s.brand_default[brandId]) : undefined;
+  return byBrand ?? live[0] ?? null;
+}
+
+/** คำสั่งให้ AI จากแม่แบบ (หลังบ้านเอาไปต่อท้าย prompt) */
+export function templateInstruction(t: DescTemplate): string {
+  return [
+    `ชุดแม่แบบ "${t.name}" — Description ต้องเรียงหัวข้อตามลำดับนี้เท่านั้น (หัวข้อที่ไม่มีข้อมูลให้ตัดทิ้ง ห้ามแต่ง):`,
+    ...t.headings.map((h, i) => `${i + 1}. ${h}`),
+    t.format ? `รูปแบบการเขียน: ${t.format}` : "",
+    "English Description ต้องเรียงหัวข้อแบบเดียวกัน (แปลชื่อหัวข้อเป็นอังกฤษ)",
+  ].filter(Boolean).join("\n");
+}
+
+// ── ② ค่าตั้งเพิ่มของกฎ ─────────────────────────────────────
+/** ช่องที่กรอกเองในขั้นสุดท้าย (AI ไม่เดา) — ref = เลือกจากรายการ master */
+export const MANUAL_FIELDS: { key: string; label: string; en: string; kind: "text" | "ref"; entity?: string }[] = [
+  { key: "warranty", label: "ประกัน", en: "Warranty", kind: "text" },
+  { key: "custom_size", label: "Custom size", en: "Custom size", kind: "text" },
+  { key: "size_description_id", label: "Size description", en: "Size description", kind: "ref", entity: "size_descriptions" },
+  { key: "special_description_id", label: "Special description", en: "Special description", kind: "ref", entity: "special_descriptions" },
+];
+const MANUAL_KEYS = MANUAL_FIELDS.map((f) => f.key);
+
+export type RuleExtras = { highlights: string[]; manual_required: string[]; optional_topics: string[] };
+
+export function normalizeExtras(raw: unknown): RuleExtras {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    highlights: strList(r.highlights, 30, 120),
+    manual_required: strList(r.manual_required, 10, 60).filter((k) => MANUAL_KEYS.includes(k)),
+    optional_topics: strList(r.optional_topics, 30, 200),
+  };
+}
+
+/** รวมค่าตั้งของหลายกฎที่สินค้าเข้า (ไม่ซ้ำ) */
+export function mergeExtras(list: unknown[]): RuleExtras {
+  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [] };
+  for (const x of list.map(normalizeExtras)) {
+    for (const k of ["highlights", "manual_required", "optional_topics"] as const)
+      for (const v of x[k]) if (!out[k].includes(v)) out[k].push(v);
+  }
+  return out;
+}
+
+const blank = (v: unknown) => { const s = String(v ?? "").trim(); return !s || s === "-" || s === "—"; };
+
+/** หัวข้อบังคับที่ยังไม่ตอบ (หัวข้อใน optional = ไม่บังคับ) */
+export function missingTopics(topics: { th: string }[], answers: Record<string, string>, optional: string[] = []): string[] {
+  return topics.filter((t) => !optional.includes(t.th) && blank(answers[t.th])).map((t) => t.th);
+}
+
+/** ช่องกรอกมือที่บังคับแต่ยังว่าง */
+export function missingManual(required: string[], values: Record<string, unknown>): string[] {
+  return required.filter((k) => blank(values[k]));
+}
+
+// ── ③ กล่องไปรษณีย์ ─────────────────────────────────────────
+export type ParcelBox = { id: string; name: string; width_cm: unknown; length_cm: unknown; height_cm: unknown; size_text?: string | null; is_active?: boolean | null };
+const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+
+/**
+ * กล่องเล็กสุด (ปริมาตรน้อยสุด) ที่ใส่สินค้าได้ — หมุนสินค้าได้ (เทียบด้านยาวสุดกับยาวสุด)
+ * ขนาดสินค้าไม่ครบ 3 ด้าน = null (ยังเลือกให้ไม่ได้)
+ */
+export function pickParcelBox(dims: { w: unknown; h: unknown; d: unknown }, boxes: ParcelBox[]): ParcelBox | null {
+  const p = [num(dims.w), num(dims.h), num(dims.d)];
+  if (p.some((x) => !x)) return null;
+  p.sort((a, b) => b - a);
+  let best: ParcelBox | null = null; let bestVol = Infinity;
+  for (const b of boxes) {
+    if (b.is_active === false) continue;
+    const s = [num(b.width_cm), num(b.length_cm), num(b.height_cm)];
+    if (s.some((x) => !x)) continue;
+    s.sort((a, c) => c - a);
+    if (p[0] > s[0] || p[1] > s[1] || p[2] > s[2]) continue;
+    const vol = s[0] * s[1] * s[2];
+    if (vol < bestVol) { bestVol = vol; best = b; }
+  }
+  return best;
+}
+
+// ── ④ ใส่อะไรได้บ้าง (จากขนาด) ─────────────────────────────
+export type FitCatalogRow = {
+  id: string; name: string; name_en?: string | null; sizes?: string | null; size_dims?: unknown;
+  width_cm?: unknown; height_cm?: unknown; depth_cm?: unknown; is_soft?: unknown; is_active?: unknown; kind?: unknown; squeeze_pct?: unknown;
+};
+export type FitSuggestion = { id: string; name: string; size: string | null; fits: boolean };
+
+/**
+ * ของในคลัง "ใส่อะไรได้" ชิ้นไหนใส่สินค้านี้ได้ — ใช้ขนาดด้านนอกของสินค้าเป็นค่าประมาณช่องด้านใน
+ *   ของที่มีหลายขนาด (size_dims) → เลือกขนาดใหญ่สุดที่ใส่ได้ · ใส่ไม่ได้สักขนาด = fits:false (ขนาดเล็กสุด)
+ *   ของที่ยังไม่มีขนาด = ไม่อยู่ในรายการ (คิดให้ไม่ได้)
+ */
+export function fitsFromSize(dims: { w: unknown; h: unknown; d: unknown }, rows: FitCatalogRow[]): FitSuggestion[] {
+  const comp = { w: num(dims.w), h: num(dims.h), d: num(dims.d) };
+  if (!comp.w || !comp.h || !comp.d) return [];
+  const out: FitSuggestion[] = [];
+  for (const r of rows) {
+    if (r.is_active === false) continue;
+    const sizeMap = parseSizeDims(r.size_dims);
+    const sizes = fitSizeOptions(r).filter((s) => sizeMap[s]);
+    if (sizes.length) {
+      const ok = sizes.filter((s) => {
+        const t = fitTargetOf({ ...r, width_cm: sizeMap[s].w, height_cm: sizeMap[s].h, depth_cm: sizeMap[s].d });
+        return !!t && !!fitInto(t, comp);
+      });
+      out.push({ id: r.id, name: r.name, size: ok.length ? ok[ok.length - 1] : sizes[0], fits: ok.length > 0 });
+      continue;
+    }
+    const t = fitTargetOf(r);
+    if (!t) continue;
+    out.push({ id: r.id, name: r.name, size: null, fits: !!fitInto(t, comp) });
+  }
+  return out;
+}
