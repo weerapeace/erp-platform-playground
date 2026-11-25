@@ -1105,7 +1105,8 @@ export function DesignDashboard() {
                 {/* สลับมุมมองเห็นตลอด — ตัวเลขเขียวบน "ไอเดีย" = ชุดรอคัดจากกลุ่มไลน์ */}
                 <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมอง", "View")}>
                   {VIEW_TABS.map(([key, icon, label, title]) => (
-                    <button key={key} type="button" onClick={() => changeViewMode(key)} aria-pressed={viewMode === key} title={title} onMouseEnter={key === "canvas" ? prefetchCanvas : undefined}
+                    <span key={key} className="group/vt relative inline-flex">
+                    <button type="button" onClick={() => changeViewMode(key)} aria-pressed={viewMode === key} title={title} onMouseEnter={key === "canvas" ? prefetchCanvas : undefined}
                       className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm transition ${viewMode === key ? (key === "ideas" ? "bg-amber-500 text-white" : "bg-slate-900 text-white") : "text-slate-600 hover:bg-slate-100"}`}>
                       <Icon value={icon} className="text-[15px]" />{label}
                       {key === "ideas" && ideaInbox > 0 && (
@@ -1113,6 +1114,16 @@ export function DesignDashboard() {
                           className={`min-w-[18px] rounded-full px-1 text-center text-[11px] font-semibold leading-[18px] tabular-nums ${viewMode === key ? "bg-white text-amber-600" : "bg-emerald-500 text-white"}`}>{ideaInbox}</span>
                       )}
                     </button>
+                    {/* ⭐ ดาว = มุมมองเริ่มต้นของแบรนด์/กลุ่มที่เลือก (ทั้งทีม · เจ้าของขอ 2026-11-25) — ติดดาวแล้วโชว์ตลอด · ยังไม่ติด = ชี้แล้วโผล่ · กดซ้ำ = เอาดาวออก */}
+                    {canEdit && (
+                      <button type="button" onClick={() => saveBrandView(selectedBrandKey, brandViews[selectedBrandKey] === key ? null : key)}
+                        aria-pressed={brandViews[selectedBrandKey] === key}
+                        title={brandViews[selectedBrandKey] === key ? t(`มุมมองเริ่มต้นของ ${scopeLabel} — กดเพื่อเอาดาวออก`, `Default view for ${scopeLabel} — click to unstar`) : t(`ติดดาว: เปิด ${scopeLabel} มาเป็น "${label}" (ทั้งทีม)`, `Star: open ${scopeLabel} in "${label}" (whole team)`)}
+                        className={`absolute -right-1 -top-1.5 z-[1] flex h-4 w-4 items-center justify-center rounded-full bg-white text-[11px] leading-none shadow-sm ring-1 ring-slate-200 transition ${brandViews[selectedBrandKey] === key ? "text-amber-500" : "text-slate-300 opacity-0 hover:text-amber-400 group-hover/vt:opacity-100"}`}>
+                        {brandViews[selectedBrandKey] === key ? "★" : "☆"}
+                      </button>
+                    )}
+                    </span>
                   ))}
                 </div>
                 {/* แถบเมนู (ของกลาง components/menu-bar): ชี้แล้วเมนูโผล่ — ตัวกรอง · ทำงาน · มุมมอง · ตั้งค่า (เจ้าของขอ 2026-11-07 ให้แถบไม่รก) */}
