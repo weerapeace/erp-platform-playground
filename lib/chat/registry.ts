@@ -7,6 +7,9 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { lineBot, loadLineConfig } from "@/lib/line-send";
 import { lineMarkRead, lineQuotaCached, sendLineChat } from "./line-server";
+import { shopeeChatAdapter } from "./shopee-chat";
+import { lazadaChatAdapter } from "./lazada-chat";
+import { tiktokChatAdapter } from "./tiktok-chat";
 import type { ConvServerRow } from "./store";
 import type { ChatChannel, ChatSendRequest, ChatSendResult } from "./types";
 
@@ -47,6 +50,10 @@ const lineAdapter: ChatChannelAdapter = {
 /** ช่องทางที่ต่อแล้ว — ช่องทางที่ไม่มีในนี้ = ยังส่งจาก ERP ไม่ได้ */
 export const CHAT_ADAPTERS: Partial<Record<ChatChannel, ChatChannelAdapter>> = {
   line: lineAdapter,
+  // ร้านค้าออนไลน์ (เฟส 2) — ฝั่งรับ = lib/chat/shop-sync (ดึงเอง) + webhook TikTok
+  shopee: shopeeChatAdapter,
+  lazada: lazadaChatAdapter,
+  tiktok: tiktokChatAdapter,
 };
 
 export const chatAdapter = (ch: ChatChannel): ChatChannelAdapter | null => CHAT_ADAPTERS[ch] ?? null;

@@ -2,7 +2,8 @@
  * /api/chat/settings — ค่าตั้งห้องแชท (ui_config chat_settings · lib/chat/settings)
  *   GET              ข้อความสำเร็จรูป (ทุกคนที่มี chat.view) + บอท LINE ทุกตัว/สถานะ (เฉพาะ chat.settings)
  *   GET ?check=<bot> ดูว่า webhook ของ OA ตอนนี้ชี้ไปไหน — อ่านอย่างเดียว ไม่เปลี่ยนอะไรที่ LINE · chat.settings
- *   PUT { line_bots?, quick_replies? }  บันทึก · chat.settings · audit "chat.settings"
+ *   PUT { line_bots?, quick_replies?, shops?, notify? }  บันทึก · chat.settings · audit "chat.settings"
+ *   shop_status = ร้าน Shopee/Lazada/TikTok ที่เชื่อมไว้ + เปิดรับแชทไหม + ดึงล่าสุดเป็นยังไง (ทุกคนที่ chat.view เห็น — ไม่มีรหัสลับ)
  * เพิ่ม/ลบบอท + ใส่ token/Channel secret = ศูนย์ LINE เดิม (components/line-console) — หน้านี้แค่เลือกว่าบอทไหนรับแชท + แบรนด์
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -13,6 +14,9 @@ import { isLineBotKey, lineBot, lineBots, loadLineConfig, MAIN_BOT } from "@/lib
 import { cleanChatSettings } from "@/lib/chat/rules";
 import { loadChatSettings, saveChatSettings } from "@/lib/chat/settings";
 import { lineWebhookEndpoint } from "@/lib/chat/line-server";
+import { listShopChatStatus } from "@/lib/chat/shop-sync";
+import { CHAT_CHANNEL_INFO } from "@/lib/chat/rules";
+import { CHAT_CHANNELS } from "@/lib/chat/types";
 
 export const dynamic = "force-dynamic";
 
@@ -55,26 +59,33 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       groups: b.isMain ? Object.values(cfg.groups ?? {}).filter(Boolean).length : 0,
     }));
   }
+  const shop_status = await listShopChatStatus(admin).catch(() => []);
   return NextResponse.json({
-    settings: canManage ? settings : { line_bots: {}, quick_replies: settings.quick_replies },
-    bots, can_manage: canManage, error: null,
+    settings: canManage ? settings : { line_bots: {}, quick_replies: settings.quick_replies, shops: settings.shops, notify: settings.notify },
+    bots, shop_status, can_manage: canManage, error: null,
   }, { headers: NO_STORE });
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "chat.settings"); if (denied) return denied;
-  const body = (await request.json().catch(() => ({}))) as { line_bots?: unknown; quick_replies?: unknown };
+  const body = (await request.json().catch(() => ({}))) as { line_bots?: unknown; quick_replies?: unknown; shops?: unknown; notify?: unknown };
   const admin = supabaseAdmin();
   const cur = await loadChatSettings(admin);
   const next = cleanChatSettings({
     line_bots: body.line_bots !== undefined ? body.line_bots : cur.line_bots,
     quick_replies: body.quick_replies !== undefined ? body.quick_replies : cur.quick_replies,
+    shops: body.shops !== undefined ? body.shops : cur.shops,
+    notify: body.notify !== undefined ? body.notify : cur.notify,
   });
   const err = await saveChatSettings(admin, next);
   if (err) return NextResponse.json({ error: err }, { status: 500 });
 
   const onList = (s: typeof cur) => Object.entries(s.line_bots).filter(([, v]) => v.enabled).map(([k, v]) => `${k}${v.brand_id ? `:${v.brand_id}` : ""}`).sort().join(", ");
+  const shopList = (x: typeof cur) => Object.entries(x.shops).filter(([, v]) => v.enabled).map(([k]) => k).sort().join(", ");
+  const muted = (x: typeof cur) => CHAT_CHANNELS.filter((c) => x.notify[c] === false).map((c) => CHAT_CHANNEL_INFO[c].label).join(", ");
   const changes = [
+    ...(shopList(cur) !== shopList(next) ? [{ field: "shops", label: "ร้านที่รับแชท", old: shopList(cur) || "—", new: shopList(next) || "—" }] : []),
+    ...(muted(cur) !== muted(next) ? [{ field: "notify", label: "ช่องทางที่ปิดกระดิ่ง", old: muted(cur) || "—", new: muted(next) || "—" }] : []),
     ...(onList(cur) !== onList(next) ? [{ field: "line_bots", label: "บอทที่รับแชท", old: onList(cur) || "—", new: onList(next) || "—" }] : []),
     ...(JSON.stringify(cur.quick_replies) !== JSON.stringify(next.quick_replies) ? [{ field: "quick_replies", label: "ข้อความสำเร็จรูป", old: `${cur.quick_replies.length} ข้อความ`, new: `${next.quick_replies.length} ข้อความ` }] : []),
   ];

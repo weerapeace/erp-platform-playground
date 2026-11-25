@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { lineStickerUrl } from "@/lib/chat/rules";
+import { CHAT_CHANNEL_INFO, stickerImageUrl } from "@/lib/chat/rules";
 import type { ChatAttachment, ChatMessage } from "@/lib/chat/types";
 import { ChannelIcon, CustomerAvatar, customerLabel, timeShort, type ChatDetail } from "./shared";
 import { Composer } from "./composer";
@@ -22,8 +22,16 @@ function Attachment({ a, onImage }: { a: ChatAttachment; onImage: (key: string) 
       </button>
     );
   }
+  if (a.kind === "order") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700">
+        <Icon value="i:receipt" /> ออเดอร์ <span className="font-mono font-medium">{a.order_no}</span>
+        {a.status && <span className="rounded bg-amber-50 px-1.5 text-amber-800">{a.status}</span>}
+      </span>
+    );
+  }
   if (a.kind === "sticker") {
-    const url = lineStickerUrl(a.sticker_id ?? null);
+    const url = stickerImageUrl(a);
     // eslint-disable-next-line @next/next/no-img-element
     return url ? <img src={url} alt="สติกเกอร์" loading="lazy" className="h-24 w-24 object-contain" /> : <span className="text-xs text-slate-500">[สติกเกอร์]</span>;
   }
@@ -96,6 +104,7 @@ export function ChatThread({ detail, quickReplies, canReply, onBack, onTogglePan
   const lastId = detail.messages[detail.messages.length - 1]?.id ?? "";
   const images = useMemo(() => detail.messages.flatMap((m) => m.attachments.filter((a): a is Extract<ChatAttachment, { kind: "image" }> => a.kind === "image").map((a) => a.key)), [detail.messages]);
   const [lb, setLb] = useState(-1);
+  const latestOrder = detail.orders?.[0] ?? null;
 
   // ข้อความใหม่ (หรือเปิดห้องใหม่) → เลื่อนลงล่างสุด
   useEffect(() => {
@@ -112,8 +121,15 @@ export function ChatThread({ detail, quickReplies, canReply, onBack, onTogglePan
         <CustomerAvatar name={c.customer_name} src={c.customer_avatar} size={32} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-slate-800">{customerLabel(c)}</div>
-          <div className="flex items-center gap-1 text-[11px] text-slate-500"><ChannelIcon channel={c.channel} size={12} /> {c.brand_name ?? "ยังไม่ระบุแบรนด์"}</div>
+          <div className="flex items-center gap-1 text-[11px] text-slate-500"><ChannelIcon channel={c.channel} size={12} /> {CHAT_CHANNEL_INFO[c.channel]?.label} · {c.brand_name ?? "ยังไม่ระบุแบรนด์"}</div>
         </div>
+        {/* ออเดอร์ล่าสุดของลูกค้า (ร้านค้าออนไลน์) — กดดูทั้งหมดที่แผงขวา */}
+        {latestOrder && (
+          <button type="button" onClick={onTogglePanel} title="ออเดอร์ของลูกค้า"
+            className="hidden max-w-[45%] shrink-0 items-center gap-1 truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-100 sm:inline-flex xl:pointer-events-none">
+            <Icon value="i:receipt" /> <span className="truncate">ออเดอร์ล่าสุด {latestOrder.order_no}{latestOrder.platform_status || latestOrder.status ? ` · ${latestOrder.platform_status || latestOrder.status}` : ""}</span>
+          </button>
+        )}
         <button type="button" onClick={onTogglePanel} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 xl:hidden" title="ข้อมูลลูกค้า">
           <Icon value="i:layout-sidebar-right" />
         </button>

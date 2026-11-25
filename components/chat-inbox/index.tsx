@@ -4,7 +4,9 @@
  *   มือถือ: ทีละช่อง (รายการ → ห้อง · ข้อมูลลูกค้าเปิดทับ) · จอกลาง: ข้อมูลลูกค้าเปิดทับ · จอใหญ่ (xl): 3 ช่องพร้อมกัน
  *   ?brand=<id> = เฉพาะแบรนด์ (ลิงก์จากหน้าแบรนด์) · ?c=<id> = เปิดห้องนั้น (ลิงก์จากกระดิ่ง/ศูนย์แจ้งเตือน)
  *   โหลดใหม่เอง: รายการทุก 20 วิ · ห้องที่เปิดทุก 10 วิ (เฉพาะตอนหน้าเปิดอยู่)
- * ของกลาง: BrandFilterChip/useBrandParam · ERPSelect · ERPInput · ToggleSwitch · state-views · useAuth · lib/chat/*
+ *   ร้านค้าออนไลน์ (Shopee/Lazada/TikTok): หน้าเปิดอยู่ = ขอให้ระบบดึงแชทใหม่ทุก 30 วิ (POST /api/chat/sync · ร้านเดียวกันไม่ดึงถี่ไม่ว่ากี่คนเปิด)
+ *   แท็บช่องทาง (ตัวเลข = ห้องที่ลูกค้ายังรอ) · แถบสถานะร้าน (รับแชทอยู่ / รอสิทธิ์ / ติดปัญหา) — กดเปิดตั้งค่า
+ * ของกลาง: BrandFilterChip/useBrandParam · ScrollTabs · ERPSelect · ERPInput · ToggleSwitch · state-views · useAuth · lib/chat/*
  * คู่มือ: docs/chat-inbox.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,19 +15,21 @@ import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { ToggleSwitch } from "@/components/toggle-switch";
+import { ScrollTabs } from "@/components/scroll-tabs";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { BrandFilterChip, useBrandParam } from "@/components/brand-hub/brand-filter";
 import type { BrandSelectOption } from "@/components/brand-select";
 import { CHAT_CHANNEL_INFO, quickRepliesFor } from "@/lib/chat/rules";
-import { CHAT_CHANNELS, type ChatConversation, type ChatMessage, type ChatSettings } from "@/lib/chat/types";
+import { CHAT_CHANNELS, type ChatChannel, type ChatConversation, type ChatMessage, type ChatSettings, type ShopChatStatus } from "@/lib/chat/types";
 import { ConversationList } from "./conversation-list";
 import { ChatThread } from "./thread";
 import { CustomerPanel } from "./customer-panel";
 import { ChatSettingsModal } from "./settings-modal";
-import type { ChatDetail } from "./shared";
+import { ShopStateBadge, type ChatDetail } from "./shared";
 
 const LIST_POLL_MS = 20_000;
 const DETAIL_POLL_MS = 10_000;
+const SHOP_SYNC_MS = 30_000;
 
 const visible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
@@ -52,6 +56,8 @@ export function ChatInbox() {
   const [brands, setBrands] = useState<BrandSelectOption[]>([]);
   const [settings, setSettings] = useState<ChatSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shopStatus, setShopStatus] = useState<ShopChatStatus[]>([]);
+  const [byChannel, setByChannel] = useState<Record<string, number>>({});
 
   const [channel, setChannel] = useState("");
   const [status, setStatus] = useState<"open" | "done" | "all">("open");
@@ -86,10 +92,18 @@ export function ChatInbox() {
       .then((j: { data?: { id: string; name: string; is_customer_job?: boolean | null }[] }) =>
         setBrands((j.data ?? []).filter((b) => !b.is_customer_job).map((b) => ({ id: b.id, name: b.name }))))
       .catch(() => { /* ไม่มีชื่อแบรนด์ก็ยังใช้ได้ */ });
-    apiFetch("/api/chat/settings").then((r) => r.json())
-      .then((j: { settings?: ChatSettings }) => { if (j.settings) setSettings(j.settings); })
-      .catch(() => { /* ไม่มีข้อความสำเร็จรูปก็ยังตอบได้ */ });
   }, []);
+
+  // ค่าตั้ง (ข้อความสำเร็จรูป) + สถานะร้านค้าออนไลน์ที่รับแชท
+  const loadSettings = useCallback(async () => {
+    try {
+      const r = await apiFetch("/api/chat/settings");
+      const j = (await r.json()) as { settings?: ChatSettings; shop_status?: ShopChatStatus[] };
+      if (j.settings) setSettings(j.settings);
+      setShopStatus(j.shop_status ?? []);
+    } catch { /* ไม่มีข้อความสำเร็จรูปก็ยังตอบได้ */ }
+  }, []);
+  useEffect(() => { void loadSettings(); }, [loadSettings]);
 
   const listUrl = useMemo(() => {
     const p = new URLSearchParams();
@@ -106,9 +120,9 @@ export function ChatInbox() {
     if (!quiet) setListLoading(true);
     try {
       const r = await apiFetch(listUrl);
-      const j = (await r.json()) as { data?: ChatConversation[]; waiting?: number; error?: string | null };
+      const j = (await r.json()) as { data?: ChatConversation[]; waiting?: number; by_channel?: Record<string, number>; error?: string | null };
       if (!r.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setRows(j.data ?? []); setWaiting(j.waiting ?? 0); setListError(null);
+      setRows(j.data ?? []); setWaiting(j.waiting ?? 0); setByChannel(j.by_channel ?? {}); setListError(null);
     } catch (e) { setListError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
     finally { if (!quiet) setListLoading(false); }
   }, [listUrl]);
@@ -151,6 +165,23 @@ export function ChatInbox() {
   }, [selectedId, loadDetail]);
   usePoll(() => { if (selectedId) void loadDetail(selectedId, true); }, DETAIL_POLL_MS, !!selectedId);
 
+  // ร้านค้าออนไลน์ที่เปิดรับแชท → ขอให้ระบบดึงแชทใหม่ระหว่างที่หน้านี้เปิดอยู่ (ได้ข้อความใหม่ = โหลดรายการ/ห้องทันที)
+  const shopsOn = shopStatus.some((x) => x.enabled);
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
+  const syncShops = useCallback(async () => {
+    try {
+      const r = await apiFetch("/api/chat/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const j = (await r.json().catch(() => ({}))) as { saved?: number };
+      if ((j.saved ?? 0) > 0) {
+        void loadList(true);
+        if (selectedRef.current) void loadDetail(selectedRef.current, true);
+      }
+    } catch { /* รอบหน้าลองใหม่ */ }
+  }, [loadList, loadDetail]);
+  useEffect(() => { if (shopsOn) void syncShops(); }, [shopsOn]);   // eslint-disable-line react-hooks/exhaustive-deps
+  usePoll(() => void syncShops(), SHOP_SYNC_MS, shopsOn);
+
   const loadOlder = async () => {
     if (!detail || !detail.messages.length) return;
     setLoadingOlder(true);
@@ -174,10 +205,14 @@ export function ChatInbox() {
     try { const u = new URL(window.location.href); u.searchParams.delete("c"); window.history.replaceState(window.history.state, "", u.toString()); } catch { /* ไม่เป็นไร */ }
   };
 
+  // แท็บช่องทาง: LINE เสมอ + ช่องทางที่มีร้านเปิดรับ / มีห้องรออยู่ / กำลังเลือก
+  const channelTabs = useMemo(() => CHAT_CHANNELS.filter((c) =>
+    c === "line" || c === channel || (byChannel[c] ?? 0) > 0 || shopStatus.some((x) => x.channel === c && x.enabled)), [channel, byChannel, shopStatus]);
+
   const quickReplies = useMemo(() => quickRepliesFor(settings?.quick_replies ?? [], detail?.conversation.brand_id ?? null), [settings, detail?.conversation.brand_id]);
 
   const emptyHint = unanswered ? "ไม่มีห้องที่ยังไม่ตอบ เยี่ยมมาก" : qDebounced ? "ไม่พบห้องที่ตรงกับคำค้น ลองคำอื่น" :
-    "ยังไม่มีแชทเข้ามา — ต่อ LINE OA ของร้านที่ปุ่มตั้งค่า (เฟือง) แล้วชี้ webhook มาที่ ERP";
+    shopsOn ? "ยังไม่มีแชทเข้ามา — ระบบดึงแชทจากร้านค้าทุก 30 วินาที" : "ยังไม่มีแชทเข้ามา — เปิดรับแชท LINE OA / Shopee / Lazada / TikTok ที่ปุ่มตั้งค่า (เฟือง)";
 
   return (
     <div className="flex h-[calc(100dvh-3.5rem)] min-h-[520px] md:h-[100dvh]">
@@ -192,12 +227,28 @@ export function ChatInbox() {
           </div>
           <BrandFilterChip brandId={brandId} brands={brands} onClear={clearBrand} />
           <ERPInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อลูกค้า / ข้อความ…" />
-          <div className="grid grid-cols-2 gap-2">
-            <ERPSelect value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="ทุกช่องทาง"
-              options={[{ value: "", label: "ทุกช่องทาง" }, ...CHAT_CHANNELS.map((c) => ({ value: c, label: CHAT_CHANNEL_INFO[c].label }))]} />
-            <ERPSelect value={status} onChange={(e) => setStatus(e.target.value as "open" | "done" | "all")}
-              options={[{ value: "open", label: "ยังเปิดอยู่" }, { value: "done", label: "จบแล้ว" }, { value: "all", label: "ทั้งหมด" }]} />
-          </div>
+          <ScrollTabs activeKey={channel || "all"} className="pb-0.5">
+            {(["", ...channelTabs] as (ChatChannel | "")[]).map((c) => {
+              const on = channel === c;
+              const n = c ? (byChannel[c] ?? 0) : waiting;
+              return (
+                <button key={c || "all"} type="button" data-tab-key={c || "all"} onClick={() => setChannel(c)}
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs ${on ? "border-indigo-300 bg-indigo-50 text-indigo-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  {c ? CHAT_CHANNEL_INFO[c].label : "ทั้งหมด"}
+                  {n > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-semibold text-amber-800">{n}</span>}
+                </button>
+              );
+            })}
+          </ScrollTabs>
+          {shopsOn && (
+            <div className="flex flex-wrap gap-1">
+              {shopStatus.filter((x) => x.enabled).map((x) => (
+                <ShopStateBadge key={x.key} s={x} onClick={canSettings ? () => setSettingsOpen(true) : undefined} />
+              ))}
+            </div>
+          )}
+          <ERPSelect value={status} onChange={(e) => setStatus(e.target.value as "open" | "done" | "all")}
+            options={[{ value: "open", label: "ยังเปิดอยู่" }, { value: "done", label: "จบแล้ว" }, { value: "all", label: "ทั้งหมด" }]} />
           <div className="flex flex-wrap gap-x-4 gap-y-1">
             <ToggleSwitch on={unanswered} onChange={setUnanswered} label="ยังไม่ตอบเท่านั้น" size="sm" />
             <ToggleSwitch on={mine} onChange={setMine} label="ของฉัน" size="sm" />
@@ -240,7 +291,7 @@ export function ChatInbox() {
       )}
 
       {settingsOpen && (
-        <ChatSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} brands={brands} onSaved={(s) => setSettings(s)} />
+        <ChatSettingsModal open={settingsOpen} onClose={() => { setSettingsOpen(false); void loadSettings(); }} brands={brands} onSaved={(s) => { setSettings(s); void loadSettings(); }} />
       )}
     </div>
   );

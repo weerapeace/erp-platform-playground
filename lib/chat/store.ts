@@ -6,7 +6,8 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { bellAllowed } from "@/lib/bell-switch";
 import { usersWithPerms } from "@/lib/perm-holders";
-import { chatPreview, inboundPatch, outboundPatch, type ConvState } from "./rules";
+import { CHAT_CHANNEL_INFO, chatNotifyOn, chatPreview, inboundPatch, outboundPatch, pulledOutboundPatch, type ConvState } from "./rules";
+import { loadChatSettings } from "./settings";
 import type { ChatAttachment, ChatConversation, ChatInbound, ChatSendResult } from "./types";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -33,8 +34,9 @@ export type CustomerProfile = { name: string | null; avatar: string | null };
  */
 export async function ingestInbound(
   admin: Admin, ev: ChatInbound,
-  opts: { brandId: string | null; getProfile?: () => Promise<CustomerProfile | null> },
+  opts: { brandId: string | null; getProfile?: () => Promise<CustomerProfile | null>; notify?: boolean },
 ): Promise<{ conversationId: string | null; inserted: boolean }> {
+  const out = ev.direction === "out";
   const key = { channel: ev.channel, account_ref: ev.accountRef, external_id: ev.externalConvId };
   const findConv = async () => {
     const { data } = await admin.from("chat_conversations").select(CONV_SERVER_COLS)
@@ -49,7 +51,11 @@ export async function ingestInbound(
   const meta = (conv?.meta ?? {}) as Record<string, unknown>;
   const profileAt = Date.parse(String(meta.profile_at ?? ""));
   let profile: CustomerProfile | null = null;
-  if (opts.getProfile && (isNew || !Number.isFinite(profileAt) || Date.now() - profileAt > PROFILE_REFRESH_MS)) {
+  const stale = isNew || !Number.isFinite(profileAt) || Date.now() - profileAt > PROFILE_REFRESH_MS;
+  if (ev.profile && (ev.profile.name || ev.profile.avatar)) {
+    // ร้านค้าออนไลน์: ชื่อ/รูปมากับรายการห้องแล้ว — อัปเดตเมื่อเปลี่ยน
+    if (isNew || ev.profile.name !== conv?.customer_name || ev.profile.avatar !== conv?.customer_avatar) profile = ev.profile;
+  } else if (opts.getProfile && stale) {
     profile = await opts.getProfile().catch(() => null);
   }
 
@@ -57,7 +63,7 @@ export async function ingestInbound(
     const { data, error } = await admin.from("chat_conversations").insert({
       ...key, brand_id: opts.brandId, status: "open",
       customer_name: profile?.name ?? null, customer_avatar: profile?.avatar ?? null,
-      meta: profile ? { profile_at: new Date().toISOString() } : {},
+      meta: { ...(ev.convMeta ?? {}), ...(profile ? { profile_at: new Date().toISOString() } : {}) },
     }).select(CONV_SERVER_COLS).maybeSingle();
     conv = (data as unknown as ConvServerRow | null) ?? (error ? await findConv() : null);   // ชนกันพร้อมกัน → อ่านแถวที่อีกคำขอสร้าง
     if (!conv) return { conversationId: null, inserted: false };
@@ -65,15 +71,26 @@ export async function ingestInbound(
 
   const preview = chatPreview(ev.text, ev.attachments);
   const { data: ins } = await admin.from("chat_messages").upsert({
-    conversation_id: conv.id, direction: "in", sender_type: ev.kind === "message" ? "customer" : "system",
+    conversation_id: conv.id, direction: out ? "out" : "in",
+    sender_type: out ? "staff" : ev.kind === "message" ? "customer" : "system",
     text: ev.text, attachments: ev.attachments, external_message_id: ev.externalMessageId,
-    sent_at: ev.sentAt, send_status: "received",
+    sent_at: ev.sentAt, send_status: out ? "sent" : "received",
+    ...(out ? { sent_by_name: `ตอบจากแอป ${CHAT_CHANNEL_INFO[ev.channel].label}`, send_via: "app" } : {}),
   }, { onConflict: "conversation_id,external_message_id", ignoreDuplicates: true }).select("id");
-  if (!ins || ins.length === 0) return { conversationId: conv.id, inserted: false };   // ซ้ำ
+  if (!ins || ins.length === 0) {   // ซ้ำ (ข้อความที่เราส่งจาก ERP ก็กลับมาตอนดึง — มีอยู่แล้ว ไม่ทำอะไร)
+    if (ev.convMeta && Object.entries(ev.convMeta).some(([k, v]) => meta[k] !== v)) {
+      await admin.from("chat_conversations").update({ meta: { ...meta, ...ev.convMeta } }).eq("id", conv.id);
+    }
+    return { conversationId: conv.id, inserted: false };
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (ev.convMeta) patch.meta = { ...meta, ...ev.convMeta };
   let notify = false;
-  if (ev.kind === "message") {
+  if (out) {
+    const p = pulledOutboundPatch(conv as ConvState, ev.sentAt, preview);
+    if (p) Object.assign(patch, p);
+  } else if (ev.kind === "message") {
     const r = inboundPatch(conv as ConvState, ev.sentAt, preview, ev.channel);
     Object.assign(patch, r.patch);
     notify = r.notify;
@@ -90,19 +107,20 @@ export async function ingestInbound(
   }
   await admin.from("chat_conversations").update(patch).eq("id", conv.id);
 
-  if (notify) await notifyWaiting(admin, { ...conv, customer_name: (patch.customer_name as string) ?? conv.customer_name }, preview).catch(() => {});
+  if (notify && opts.notify !== false) await notifyWaiting(admin, { ...conv, customer_name: (patch.customer_name as string) ?? conv.customer_name }, preview).catch(() => {});
   return { conversationId: conv.id, inserted: true };
 }
 
-/** ลูกค้าเริ่มรอคำตอบ → กระดิ่ง 1 ครั้ง ถึงคนรับผิดชอบห้อง (ยังไม่มี = ทุกคนที่ตอบแชทได้) */
+/** ลูกค้าเริ่มรอคำตอบ → กระดิ่ง 1 ครั้ง ถึงคนรับผิดชอบห้อง (ยังไม่มี = ทุกคนที่ตอบแชทได้) · ช่องทางที่ปิดแจ้งเตือนในค่าตั้ง = ไม่เด้ง */
 export async function notifyWaiting(admin: Admin, conv: Pick<ChatConversation, "id" | "assigned_to" | "customer_name" | "channel">, preview: string): Promise<void> {
   if (!(await bellAllowed(admin, CHAT_BELL_EVENT))) return;
+  if (!chatNotifyOn(await loadChatSettings(admin), conv.channel)) return;
   const to = conv.assigned_to ? [conv.assigned_to] : await usersWithPerms(admin, ["chat.reply"]);
   if (to.length === 0) return;
   const who = conv.customer_name?.trim() || "ลูกค้า";
   await admin.from("erp_notifications").insert(to.slice(0, 50).map((uid) => ({
     user_id: uid, event_type: CHAT_BELL_EVENT,
-    title: `แชทใหม่จาก ${who}`.slice(0, 120), body: preview.slice(0, 200) || null,
+    title: `แชทใหม่จาก ${who} (${CHAT_CHANNEL_INFO[conv.channel]?.label ?? conv.channel})`.slice(0, 120), body: preview.slice(0, 200) || null,
     link_url: `/chat?c=${conv.id}`, entity_type: "chat_conversation", entity_id: conv.id, priority: "normal",
   })));
 }

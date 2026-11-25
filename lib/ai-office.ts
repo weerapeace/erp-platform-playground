@@ -200,6 +200,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     source: "บันทึกรอบล่าสุด + สถานะต่อร้าน ui_config catalog_refresh:<ร้าน>:<แบรนด์>", href: "/master/platform-catalog",
     files: ["app/api/cron/catalog-refresh/route.ts", "app/api/platform-catalog/refresh-changed.ts", "lib/catalog-refresh-plan.ts"],
   },
+  {
+    id: "chat-sync", zone: "sales", kind: "auto", icon: "💬",
+    title: "ผู้ดึงแชทร้านค้าออนไลน์", titleEn: "Shop chat puller",
+    does: "ทุก 3 นาที ดึงแชทลูกค้าจาก Shopee / Lazada / TikTok ร้านที่เปิดรับไว้ เข้าหน้าแชทลูกค้า แล้วเด้งกระดิ่งเมื่อลูกค้าเริ่มรอ (ตอนมีคนเปิดหน้าแชท หน้าเว็บดึงเองทุก ~30 วิ)",
+    trigger: "ทุก 3 นาที", cron: "/api/cron/chat-sync", everyHours: 1,
+    can: ["อ่านแชทของร้านที่ติ๊ก รับแชท ในตั้งค่าห้องแชท", "บันทึกข้อความเข้าหน้าแชท + เด้งกระดิ่ง"], cannot: ["ตอบลูกค้าเอง", "แก้ออเดอร์/สินค้าบนร้าน", "ดึงร้านที่ไม่ได้เปิดรับ"],
+    source: "บันทึกรอบล่าสุด + สถานะต่อร้าน ui_config chat_sync:<ช่องทาง>:<แบรนด์>", href: "/chat",
+    files: ["app/api/cron/chat-sync/route.ts", "lib/chat/shop-sync.ts"],
+  },
 
   // ── จัดซื้อ & คลัง ──
   {

@@ -1,6 +1,7 @@
 "use client";
 /**
- * ห้องแชทรวม — ช่องขวา: ลูกค้า · แบรนด์ · มอบหมาย (UserPicker กลาง) · จบห้อง/เปิดกลับ · สต็อกสินค้าที่คุย · ออเดอร์ (เฟส 3)
+ * ห้องแชทรวม — ช่องขวา: ลูกค้า · แบรนด์ · มอบหมาย (UserPicker กลาง) · จบห้อง/เปิดกลับ · สต็อกสินค้าที่คุย
+ *   · ออเดอร์ของลูกค้า (ร้านค้าออนไลน์ · lib/chat/orders — ดูอย่างเดียว)
  * ของกลาง: UserPicker · Icon · useToast
  */
 import { useState } from "react";
@@ -100,9 +101,30 @@ export function CustomerPanel({ detail, canAssign, canReply = false, onChanged, 
           </ul>}
       </section>
 
-      <section className="space-y-1 p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">ออเดอร์ล่าสุด</h3>
-        <p className="text-xs text-slate-400">ยังไม่รู้ว่าลูกค้าคนนี้คือใครในระบบออเดอร์ — การผูกแชทกับออเดอร์อยู่ในเฟส 3</p>
+      <section className="space-y-2 p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">ออเดอร์ของลูกค้า</h3>
+        {(detail.orders ?? []).length === 0
+          ? <p className="text-xs text-slate-400">
+            {c.channel === "line" ? "LINE ยังผูกแชทกับออเดอร์ไม่ได้ (เฟส 3)"
+              : c.channel === "shopee" ? "ยังไม่พบออเดอร์ของลูกค้าคนนี้ในร้านนี้ (ดูจากชื่อผู้ใช้ Shopee + ออเดอร์ที่แนบในแชท)"
+                : "Lazada / TikTok ปิดบังชื่อผู้ซื้อ — จะเห็นเฉพาะออเดอร์ที่ลูกค้าแนบในแชท"}
+          </p>
+          : <ul className="space-y-1.5">
+            {(detail.orders ?? []).map((o) => (
+              <li key={o.id} className="rounded-md border border-slate-100 px-2 py-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono font-medium text-slate-800">{o.order_no}</span>
+                  {o.total != null && <span className="shrink-0 text-slate-700">฿{o.total.toLocaleString("th-TH")}</span>}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+                  {(o.platform_status || o.status) && <span className="rounded bg-slate-100 px-1.5 text-slate-700">{o.platform_status || o.status}</span>}
+                  {o.ordered_at && <span>{timeShort(o.ordered_at)}</span>}
+                  {o.tracking_no && <span className="truncate">พัสดุ {o.tracking_no}</span>}
+                  {o.via === "message" && <span className="text-indigo-600">แนบในแชท</span>}
+                </div>
+              </li>
+            ))}
+          </ul>}
       </section>
     </div>
   );

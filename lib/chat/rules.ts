@@ -6,7 +6,7 @@
  *   - ตัวกรองรายการห้อง · ค่าตั้ง · ข้อความสำเร็จรูป (ใช้ตัวแทนค่าตัวแปรกลาง renderCaption)
  */
 import { renderCaption, type CaptionVars } from "@/lib/caption-template";
-import { CHAT_CHANNELS, type ChatAttachment, type ChatChannel, type ChatQuickReply, type ChatSettings, type ChatStatus } from "./types";
+import { CHAT_CHANNELS, isShopChatChannel, type ChatAttachment, type ChatChannel, type ChatQuickReply, type ChatSettings, type ChatStatus, type ShopChatChannel } from "./types";
 
 export type ChatChannelInfo = {
   label: string;
@@ -86,6 +86,7 @@ export function chatPreview(text: string | null | undefined, attachments: ChatAt
     case "audio": return "[ข้อความเสียง]";
     case "file": return `[ไฟล์] ${a.label ?? ""}`.trim().slice(0, 80);
     case "location": return `[ตำแหน่ง] ${a.label ?? ""}`.trim().slice(0, 80);
+    case "order": return `[ออเดอร์] ${a.order_no}`.slice(0, 80);
   }
 }
 
@@ -99,6 +100,12 @@ export function chatTextError(channel: ChatChannel, text: string): string | null
 /** รูปสติกเกอร์ LINE (CDN สาธารณะของ LINE) */
 export function lineStickerUrl(stickerId: string | null | undefined): string | null {
   return stickerId && /^\d{1,20}$/.test(stickerId) ? `https://stickershop.line-scdn.net/stickershop/v1/sticker/${stickerId}/android/sticker.png` : null;
+}
+
+/** รูปสติกเกอร์ที่จะโชว์: LINE = จากรหัส · ร้านค้าออนไลน์ = ลิงก์ https ที่แพลตฟอร์มให้มา */
+export function stickerImageUrl(a: { sticker_id?: string | null; url?: string | null }): string | null {
+  if (typeof a.url === "string" && /^https:\/\/[^\s"'<>]+$/.test(a.url) && a.url.length <= 1000) return a.url;
+  return lineStickerUrl(a.sticker_id ?? null);
 }
 
 // ---------------------------------------------------------------- สถานะห้องเมื่อมีข้อความเข้า/ออก
@@ -141,6 +148,22 @@ export function inboundPatch(prev: ConvState | null, at: string, preview: string
 export function outboundPatch(at: string, preview: string): ConvPatch {
   return { last_message_at: at, last_preview: preview, last_direction: "out", waiting_since: null, unread_count: 0 };
 }
+
+/**
+ * (ร้านค้าออนไลน์) ข้อความที่ร้านตอบเองนอก ERP (แอป Shopee / Seller Centre / BigSeller) ที่ดึงมาได้
+ * ใหม่กว่าข้อความล่าสุดในห้อง = ห้องเป็น "ตอบแล้ว" · เก่ากว่า (ดึงย้อนหลัง) = ไม่เปลี่ยนสถานะห้อง
+ */
+export function pulledOutboundPatch(prev: Pick<ConvState, "last_message_at"> | null, at: string, preview: string): ConvPatch | null {
+  const newer = !prev?.last_message_at || Date.parse(at) >= Date.parse(prev.last_message_at);
+  return newer ? outboundPatch(at, preview) : null;
+}
+
+/** ข้อความที่ดึงมาเก่ากว่านี้ไม่เด้งกระดิ่ง (เช่น ตอนเปิดรับร้านครั้งแรก ดึงย้อนหลังมาหลายวัน) */
+export const PULL_NOTIFY_MAX_AGE_MS = 30 * 60_000;
+export const isFreshForNotify = (sentAt: string, now = Date.now()) => {
+  const t = Date.parse(sentAt);
+  return Number.isFinite(t) && now - t <= PULL_NOTIFY_MAX_AGE_MS;
+};
 
 /** ห้องนี้ยังไม่มีใครตอบไหม */
 export const isUnanswered = (c: { status: ChatStatus; waiting_since: string | null }) => c.status === "open" && !!c.waiting_since;
@@ -191,8 +214,20 @@ export function parseChatFilter(sp: URLSearchParams): ChatListFilter {
 // ---------------------------------------------------------------- ค่าตั้ง + ข้อความสำเร็จรูป
 
 export const CHAT_SETTINGS_KEY = "chat_settings";
-export const EMPTY_CHAT_SETTINGS: ChatSettings = { line_bots: {}, quick_replies: [] };
+export const EMPTY_CHAT_SETTINGS: ChatSettings = { line_bots: {}, quick_replies: [], shops: {}, notify: {} };
 const BOT_KEY_RE = /^[a-z0-9_]{2,24}$/;
+
+/** กุญแจร้านในค่าตั้ง = "<ช่องทาง>:<brand_id>" */
+export const shopChatKey = (channel: ShopChatChannel, brandId: string) => `${channel}:${brandId}`;
+export function parseShopChatKey(key: string): { channel: ShopChatChannel; brandId: string } | null {
+  const i = key.indexOf(":");
+  if (i < 0) return null;
+  const channel = key.slice(0, i), brandId = key.slice(i + 1);
+  return isShopChatChannel(channel) && isUuid(brandId) ? { channel, brandId } : null;
+}
+
+/** ช่องทางนี้เด้งกระดิ่งไหม (ไม่ได้ตั้ง = เด้ง) */
+export const chatNotifyOn = (s: Pick<ChatSettings, "notify">, channel: ChatChannel) => s.notify?.[channel] !== false;
 
 /** ทำความสะอาดค่าตั้งที่อ่าน/รับมา (ค่าแปลกตัดทิ้ง) */
 export function cleanChatSettings(raw: unknown): ChatSettings {
@@ -217,7 +252,16 @@ export function cleanChatSettings(raw: unknown): ChatSettings {
     seen.add(id);
     quick_replies.push({ id, label, body, brand_id: isUuid(o.brand_id) ? o.brand_id : null });
   }
-  return { line_bots, quick_replies };
+  const shops: ChatSettings["shops"] = {};
+  const sh = (r.shops && typeof r.shops === "object" ? r.shops : {}) as Record<string, unknown>;
+  for (const [k, v] of Object.entries(sh).slice(0, 100)) {
+    if (!parseShopChatKey(k) || !v || typeof v !== "object") continue;
+    shops[k] = { enabled: (v as Record<string, unknown>).enabled === true };
+  }
+  const notify: ChatSettings["notify"] = {};
+  const nf = (r.notify && typeof r.notify === "object" ? r.notify : {}) as Record<string, unknown>;
+  for (const c of CHAT_CHANNELS) if (nf[c] === false) notify[c] = false;   // เก็บเฉพาะช่องทางที่ปิด (ค่าเริ่ม = เปิด)
+  return { line_bots, quick_replies, shops, notify };
 }
 
 /** ข้อความสำเร็จรูปที่ใช้กับแบรนด์นี้ได้ (ของแบรนด์ก่อน แล้วค่ากลาง) */

@@ -2,6 +2,7 @@
  * GET /api/chat/conversations — รายการห้องแชท (หน้า /chat ช่องซ้าย)
  *   ?channel= · ?brand= · ?status=open|done|all (ค่าเริ่ม open) · ?unanswered=1 · ?mine=1 · ?q= · ?limit=
  *   สิทธิ์ chat.view · ไม่ส่งโทเคนลับ · ไม่แคช (ข้อมูลลูกค้า)
+ *   by_channel = จำนวนห้องที่ลูกค้ายังรอ แยกช่องทาง (ตัวเลขบนแท็บช่องทาง · ตามแบรนด์ที่กรอง)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -30,10 +31,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (f.mine) q = me ? q.eq("assigned_to", me) : q.eq("id", "00000000-0000-0000-0000-000000000000");
   if (f.q) q = q.or(`customer_name.ilike.%${f.q}%,last_preview.ilike.%${f.q}%`);
 
-  const [{ data, error }, waiting] = await Promise.all([q, countWaiting(admin, f.brand).catch(() => 0)]);
+  let wq = admin.from("chat_conversations").select("channel").eq("status", "open").not("waiting_since", "is", null).limit(2000);
+  if (f.brand) wq = wq.eq("brand_id", f.brand);
+  const [{ data, error }, waiting, { data: wrows }] = await Promise.all([q, countWaiting(admin, f.brand).catch(() => 0), wq]);
+  const by_channel: Record<string, number> = {};
+  for (const r of (wrows ?? []) as { channel: string }[]) by_channel[r.channel] = (by_channel[r.channel] ?? 0) + 1;
   if (error) return NextResponse.json({ data: [], waiting: 0, error: "โหลดรายการแชทไม่สำเร็จ กรุณาลองใหม่" }, { status: 500, headers: NO_STORE });
   return NextResponse.json({
     data: ((data ?? []) as unknown as Record<string, unknown>[]).map(toPublicConv),
-    waiting, error: null,
+    waiting, by_channel, error: null,
   }, { headers: NO_STORE });
 }

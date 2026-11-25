@@ -1,6 +1,7 @@
 /**
  * /api/chat/conversations/[id] — ห้องแชท 1 ห้อง
- *   GET   ข้อความ (ล่าสุด 80 · ?before=<sent_at> = เก่ากว่านั้น) + ข้อมูลส่ง (ตอบฟรีได้อีกกี่วิ · โควตา) + สต็อกสินค้าที่คุย · สิทธิ์ chat.view
+ *   GET   ข้อความ (ล่าสุด 80 · ?before=<sent_at> = เก่ากว่านั้น) + ข้อมูลส่ง (ตอบฟรีได้อีกกี่วิ · โควตา) + สต็อกสินค้าที่คุย
+ *         + ออเดอร์ของลูกค้า (ร้านค้าออนไลน์ · lib/chat/orders) · สิทธิ์ chat.view
  *   PATCH { action:"read" }                     เปิดอ่านแล้ว (ล้างตัวนับ + บอกแพลตฟอร์มว่าอ่านแล้ว) · chat.view
  *         { action:"assign", user_id|null }     มอบหมายคนรับผิดชอบ · chat.assign · audit
  *         { action:"status", status:"open"|"done" }  จบห้อง / เปิดกลับ · chat.assign · audit
@@ -13,6 +14,9 @@ import { isUuid, lineCanReplyFree, lineFreeSecondsLeft } from "@/lib/chat/rules"
 import { CONV_SERVER_COLS, MSG_COLS, toPublicConv, type ConvServerRow } from "@/lib/chat/store";
 import { chatAdapter } from "@/lib/chat/registry";
 import { productsInThread } from "@/lib/chat/products";
+import { ordersForConversation } from "@/lib/chat/orders";
+import { syncStateKey, type PullState } from "@/lib/chat/shop-sync";
+import { isShopChatChannel } from "@/lib/chat/types";
 import type { ChatAttachment, ChatMessage } from "@/lib/chat/types";
 
 export const dynamic = "force-dynamic";
@@ -45,25 +49,35 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (before) return NextResponse.json({ messages, has_more, error: null }, { headers: NO_STORE });
 
   const adapter = chatAdapter(conv.channel);
-  const [quota, products] = await Promise.all([
+  const lists = messages.map((m) => m.attachments as ChatAttachment[]);
+  const [quota, products, orders, shopState] = await Promise.all([
     adapter?.quota ? adapter.quota(admin, conv).catch(() => null) : Promise.resolve(null),
-    productsInThread(admin, messages.map((m) => m.attachments as ChatAttachment[])).catch(() => []),
+    productsInThread(admin, lists).catch(() => []),
+    ordersForConversation(admin, conv, lists).catch(() => []),
+    // ร้านค้าออนไลน์: ผลดึงล่าสุดของร้านนี้ (ร้านยังไม่ได้สิทธิ์แชท = ไม่ให้พิมพ์ตอบ บอกเหตุผลแทน)
+    isShopChatChannel(conv.channel)
+      ? admin.from("ui_config").select("value").eq("key", syncStateKey({ channel: conv.channel, brandId: conv.account_ref })).maybeSingle()
+        .then(({ data }) => ((data as { value?: PullState } | null)?.value ?? null), () => null)
+      : Promise.resolve(null),
   ]);
   const isLine = conv.channel === "line";
   const free = isLine && lineCanReplyFree(conv.reply_token_at, !!conv.reply_token);
+  const noPerm = shopState?.state === "no_permission";
   return NextResponse.json({
     conversation: toPublicConv(conv as unknown as Record<string, unknown>),
     messages, has_more,
     send: {
-      can_send: !!adapter,
+      can_send: !!adapter && !noPerm,
       supports: adapter?.supports ?? { image: false, product: false },
+      // ส่งไม่ได้เพราะอะไร (ร้านยังไม่ได้สิทธิ์แชท ฯลฯ) — โชว์แทนกล่องตอบ
+      hint: !adapter ? "ช่องทางนี้ยังส่งจาก ERP ไม่ได้ — ตอบในแอปของแพลตฟอร์มไปก่อน" : noPerm ? (shopState?.note ?? "ร้านนี้ยังไม่ได้สิทธิ์แชท — ตอบในแอปของแพลตฟอร์มไปก่อน") : null,
       // LINE: ตอบฟรีได้อีกกี่วินาที (0 = ส่งแล้วนับโควตา)
       free_seconds: isLine ? lineFreeSecondsLeft(conv.reply_token_at, !!conv.reply_token) : null,
       counts_quota: isLine ? !free : false,
       quota,
       blocked: (conv.meta as Record<string, unknown> | null)?.blocked === true,
     },
-    products,
+    products, orders,
     error: null,
   }, { headers: NO_STORE });
 }
@@ -80,7 +94,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (!conv) return NextResponse.json({ error: "ไม่พบห้องแชทนี้" }, { status: 404 });
     if (conv.unread_count > 0) await admin.from("chat_conversations").update({ unread_count: 0 }).eq("id", id);
     const adapter = chatAdapter(conv.channel);
-    if (adapter?.markRead && conv.read_token) await adapter.markRead(admin, conv).catch(() => {});
+    // LINE ต้องมีโทเคนอ่านแล้วจาก webhook · ร้านค้าออนไลน์ = มีข้อความยังไม่อ่าน (ตัวต่อใช้รหัสข้อความล่าสุดใน meta)
+    if (adapter?.markRead && (conv.read_token || (conv.channel !== "line" && conv.unread_count > 0))) await adapter.markRead(admin, conv).catch(() => {});
     return NextResponse.json({ ok: true, error: null });
   }
 

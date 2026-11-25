@@ -209,6 +209,43 @@ export async function ttsUploadImage(accessToken: string, bytes: ArrayBuffer, fi
   return { uri, url: str(j.data?.url), width: numOrNull(j.data?.width), height: numOrNull(j.data?.height) };
 }
 
+/** สิทธิ์แชทลูกค้า (Customer Service API) — ต้องยื่นขอใน Partner Center (แนบคลิปหน้าแชท) */
+export const TTS_CS_SCOPE = "seller.customer_service";
+
+/** ฝากรูปสำหรับส่งในแชทลูกค้า (Customer Service 202309 · ช่อง data · ≤10MB) → url/กว้าง/สูง */
+export async function ttsCsUploadImage(accessToken: string, shopCipher: string, bytes: Uint8Array, fileName: string, contentType: string): Promise<{ url: string; width: number; height: number }> {
+  const path = "/customer_service/202309/images/upload";
+  const query: Record<string, string> = { app_key: APP_KEY(), timestamp: String(Math.floor(Date.now() / 1000)), shop_cipher: shopCipher };
+  query.sign = await ttsSign(path, query, "", APP_SECRET());
+  const fd = new FormData();
+  fd.append("data", new Blob([bytes as BlobPart], { type: contentType }), fileName);
+  const res = await fetch(`${TTS_API_BASE}${path}?${new URLSearchParams(query).toString()}`, {
+    method: "POST", cache: "no-store", headers: { "x-tts-access-token": accessToken }, body: fd,
+  });
+  const j = await res.json().catch(() => null) as { code?: number; message?: string; request_id?: string; data?: Record<string, unknown> } | null;
+  if (!j) throw new TtsApiError(`TikTok ตอบกลับไม่ถูกต้อง (HTTP ${res.status})`, String(res.status));
+  if (j.code !== 0) throw new TtsApiError(j.message || "ฝากรูปกับ TikTok ไม่สำเร็จ", String(j.code ?? res.status), j.request_id ?? null, TTS_CS_SCOPE);
+  const url = str(j.data?.url);
+  if (!url) throw new TtsApiError("TikTok ไม่ส่งลิงก์รูปกลับมา", "no_url", j.request_id ?? null);
+  return { url, width: numOrNull(j.data?.width) ?? 0, height: numOrNull(j.data?.height) ?? 0 };
+}
+
+/**
+ * ตรวจลายเซ็น webhook ของ TikTok Shop — หัว Authorization = hex(HMAC-SHA256(app_secret, app_key + เนื้อหาดิบ))
+ * (คู่มือทางการบอกแค่ว่าอยู่ในหัว Authorization · สูตรตรงกันใน SDK โอเพนซอร์ส 3 ตัว — docs/chat-inbox.md)
+ */
+export async function ttsVerifyWebhook(rawBody: string, authHeader: string | null): Promise<boolean> {
+  const got = (authHeader ?? "").trim().toLowerCase();
+  if (!got || !APP_KEY() || !APP_SECRET()) return false;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(APP_SECRET()), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(APP_KEY() + rawBody)));
+  const hex = Array.from(sig, (b) => b.toString(16).padStart(2, "0")).join("");
+  if (hex.length !== got.length) return false;
+  let diff = 0;
+  for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}
+
 /**
  * สร้างสินค้าใหม่ (Create Product 202309) — เฟส D ใช้ save_mode=AS_DRAFT เสมอ (ไปอยู่ฉบับร่างใน Seller Center ยังไม่ขึ้นขาย)
  * body ประกอบที่ lib/tiktok-create-plan (รูปต้องเป็น uri ที่ฝากแล้ว) → { product_id, skus[{ id, seller_sku }], warnings[] }

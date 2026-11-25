@@ -118,7 +118,8 @@ export function shopeeErrorText(e: unknown): string {
 
 // ───────── เรียก API ─────────
 /** form = multipart (ฝากรูป media_space) — ส่งแทน body · ไม่ตั้ง Content-Type เอง (ให้ fetch ใส่ boundary) */
-type ShopeeCall = { method?: "GET" | "POST"; query?: Record<string, string | number>; body?: Record<string, unknown>; form?: FormData; accessToken?: string; shopId?: string | number };
+/** rawBody = JSON ที่ประกอบเอง (ใช้เมื่อมีเลข 64 บิต เช่น conversation_id ของแชท — JSON.stringify ทำเลขเพี้ยน) */
+type ShopeeCall = { method?: "GET" | "POST"; query?: Record<string, string | number>; body?: Record<string, unknown>; rawBody?: string; form?: FormData; accessToken?: string; shopId?: string | number };
 
 /** เรียก Shopee 1 ครั้ง (เซ็นให้เอง) · คำตอบมี error ไม่ว่าง หรือ HTTP ไม่ 2xx = โยน ShopeeApiError */
 export async function shopeeFetch(path: string, opts: ShopeeCall = {}): Promise<Record<string, unknown>> {
@@ -130,11 +131,11 @@ export async function shopeeFetch(path: string, opts: ShopeeCall = {}): Promise<
   const q = new URLSearchParams({ partner_id: pid, timestamp: String(ts), sign });
   if (shopLevel) { q.set("access_token", opts.accessToken!); q.set("shop_id", String(opts.shopId)); }
   for (const [k, v] of Object.entries(opts.query ?? {})) q.set(k, String(v));
-  const method = opts.method ?? (opts.body || opts.form ? "POST" : "GET");
+  const method = opts.method ?? (opts.body || opts.rawBody || opts.form ? "POST" : "GET");
   const res = await fetch(`${shopeeHost()}${path}?${q.toString()}`, {
     method, cache: "no-store",
-    headers: opts.body ? { "Content-Type": "application/json" } : undefined,
-    body: opts.form ?? (opts.body ? JSON.stringify(opts.body) : undefined),
+    headers: opts.body || opts.rawBody ? { "Content-Type": "application/json" } : undefined,
+    body: opts.form ?? opts.rawBody ?? (opts.body ? JSON.stringify(opts.body) : undefined),
   });
   const text = await res.text();
   let j: Record<string, unknown> = {};

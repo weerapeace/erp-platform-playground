@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CHAT_CHANNEL_INFO, LINE_REPLY_TOKEN_MS, chatPreview, chatTextError, cleanChatSettings, inboundPatch, isUnanswered,
+  chatNotifyOn, parseShopChatKey, pulledOutboundPatch, isFreshForNotify, stickerImageUrl,
   lineCanReplyFree, lineFreeSecondsLeft, lineStickerUrl, outboundPatch, parseChatFilter, quickRepliesFor, renderQuickReply,
   replyUntilFor, replyWindowState, waitingText, type ConvState,
 } from "@/lib/chat/rules";
@@ -132,7 +133,33 @@ describe("ค่าตั้ง + ข้อความสำเร็จรู�
     });
     expect(s.line_bots).toEqual({ lm_oa: { enabled: true, brand_id: B }, ig: { enabled: false, brand_id: null } });
     expect(s.quick_replies.map((q) => q.id)).toEqual(["a", "a_"]);
-    expect(cleanChatSettings(null)).toEqual({ line_bots: {}, quick_replies: [] });
+    expect(cleanChatSettings(null)).toEqual({ line_bots: {}, quick_replies: [], shops: {}, notify: {} });
+  });
+  it("ร้านค้าออนไลน์ + กระดิ่งแยกช่องทาง: เก็บเฉพาะกุญแจที่ถูกรูปแบบ · กระดิ่งเก็บแค่ช่องที่ปิด", () => {
+    const s = cleanChatSettings({
+      shops: { [`shopee:${B}`]: { enabled: true }, [`tiktok:${B}`]: { enabled: "yes" }, "shopee:not-uuid": { enabled: true }, [`line:${B}`]: { enabled: true } },
+      notify: { lazada: false, shopee: true, bogus: false },
+    });
+    expect(s.shops).toEqual({ [`shopee:${B}`]: { enabled: true }, [`tiktok:${B}`]: { enabled: false } });
+    expect(s.notify).toEqual({ lazada: false });
+    expect(chatNotifyOn(s, "lazada")).toBe(false);
+    expect(chatNotifyOn(s, "shopee")).toBe(true);
+    expect(parseShopChatKey(`lazada:${B}`)).toEqual({ channel: "lazada", brandId: B });
+    expect(parseShopChatKey("lazada")).toBeNull();
+  });
+  it("ข้อความที่ร้านตอบเองนอก ERP: ใหม่กว่า = ตอบแล้ว · เก่ากว่า = ไม่แตะ", () => {
+    expect(pulledOutboundPatch({ last_message_at: "2026-11-25T10:00:00Z" }, "2026-11-25T10:05:00Z", "ได้ค่ะ")).toMatchObject({ waiting_since: null, last_direction: "out" });
+    expect(pulledOutboundPatch({ last_message_at: "2026-11-25T10:00:00Z" }, "2026-11-25T09:00:00Z", "เก่า")).toBeNull();
+  });
+  it("ดึงย้อนหลังไม่เด้งกระดิ่ง (เก่ากว่า 30 นาที)", () => {
+    const now = Date.parse("2026-11-25T10:00:00Z");
+    expect(isFreshForNotify("2026-11-25T09:50:00Z", now)).toBe(true);
+    expect(isFreshForNotify("2026-11-25T09:00:00Z", now)).toBe(false);
+  });
+  it("ป้ายออเดอร์/สติกเกอร์ร้านค้า", () => {
+    expect(chatPreview("", [{ kind: "order", order_no: "251124ABCD" }])).toBe("[ออเดอร์] 251124ABCD");
+    expect(stickerImageUrl({ url: "https://cf.shopee.co.th/file/abc" })).toBe("https://cf.shopee.co.th/file/abc");
+    expect(stickerImageUrl({ url: "javascript:alert(1)", sticker_id: "52002734" })).toContain("stickershop.line-scdn.net");
   });
   it("ของแบรนด์ขึ้นก่อนค่ากลาง · ของแบรนด์อื่นไม่โผล่", () => {
     const list = [

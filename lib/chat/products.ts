@@ -45,7 +45,7 @@ export async function resolveProductCard(admin: Admin, ref: { skuId?: unknown; p
     sku_id: sku ? String(sku.id) : null,
     parent_id: parent ? String(parent.id) : null,
     image_key: s(sku?.cover_image_r2_key) || s(parent?.cover_image_r2_key) || null,
-    price: null, url: null,
+    price: null, url: null, listing_id: null,
   };
 
   const pfCode = LISTING_PLATFORM[channel];
@@ -53,7 +53,7 @@ export async function resolveProductCard(admin: Admin, ref: { skuId?: unknown; p
   if (pfCode && parent && brand) {
     try {
       const [l] = await loadProductShopLinks(admin, { id: String(parent.id), code: s(parent.code), brand_id: isUuid(parent.brand_id) ? (parent.brand_id as string) : null }, { codes: [pfCode], preferBrandId: brand, strictBrand: true });
-      if (l?.url) { card.url = l.url; card.price = l.price; }
+      if (l?.url) { card.url = l.url; card.price = l.price; card.listing_id = l.external_id ?? null; }
     } catch { /* ไม่มีราคา/ลิงก์ก็ยังส่งการ์ดได้ */ }
   }
   return card;

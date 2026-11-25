@@ -95,7 +95,7 @@ export function Composer({ detail, quickReplies, onSent }: { detail: ChatDetail;
   };
 
   const hint = useMemo(() => {
-    if (!s.can_send) return { tone: "slate", text: `${info.label} ยังตอบจาก ERP ไม่ได้ — ตอบในแอปของแพลตฟอร์มไปก่อน` };
+    if (!s.can_send) return { tone: "slate", text: s.hint || `${info.label} ยังตอบจาก ERP ไม่ได้ — ตอบในแอปของแพลตฟอร์มไปก่อน` };
     if (s.blocked) return { tone: "rose", text: "ลูกค้าบล็อก OA อยู่ — ส่งไม่ถึงจนกว่าลูกค้าจะเลิกบล็อก" };
     if (!isLine) return null;
     if (freeLeft > 0) return { tone: "emerald", text: `ตอบฟรีได้อีก ${freeLeft} วินาที (ลูกค้าเพิ่งทัก)` };

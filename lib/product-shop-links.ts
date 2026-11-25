@@ -17,7 +17,8 @@ const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
 /** ร้านที่โชว์ในการ์ดสินค้า (เรียงตามนี้) */
 export const SHOP_LINK_PLATFORMS = ["shopee", "lazada", "tiktok", "line_shopping", "website"] as const;
-export type ShopLink = { platform: string; url: string | null; price: number | null };
+/** external_id = รหัสสินค้าบนร้าน (เช่น Shopee item_id) — ห้องแชทใช้ส่งการ์ดสินค้าแบบของแพลตฟอร์ม */
+export type ShopLink = { platform: string; url: string | null; price: number | null; external_id?: string | null };
 
 /** ลิงก์ของ Parent SKU บนแต่ละร้าน · codes = ร้านที่อยากได้ (ค่าเริ่มต้น SHOP_LINK_PLATFORMS) · ร้านที่ไม่มี = url null */
 export async function loadProductShopLinks(admin: Admin, parent: { id: string; code: string; brand_id: string | null }, opts: { codes?: readonly string[]; preferBrandId?: string | null; /** true = เฉพาะร้านของแบรนด์นั้น (ห้องแชท: ลูกค้าคุยในร้านไหน ส่งลิงก์ร้านนั้น) */ strictBrand?: boolean } = {}): Promise<ShopLink[]> {
@@ -59,7 +60,7 @@ export async function loadProductShopLinks(admin: Admin, parent: { id: string; c
     }
     if (!url) continue;
     const p = Number(l.price);
-    out.set(code, { platform: code, url, price: Number.isFinite(p) && p > 0 ? p : null });
+    out.set(code, { platform: code, url, price: Number.isFinite(p) && p > 0 ? p : null, external_id: s(l.external_product_id) || null });
   }
   return [...out.values()];
 }

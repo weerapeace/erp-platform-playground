@@ -10,8 +10,10 @@ export type ChatChannel = (typeof CHAT_CHANNELS)[number];
 /** สิ่งที่แนบมากับข้อความ — รูปเก็บเป็นกุญแจ R2 (ไม่เก็บลิงก์ของแพลตฟอร์มที่หมดอายุ) */
 export type ChatAttachment =
   | { kind: "image"; key: string }
-  | { kind: "product"; code: string; name: string; sku_id?: string | null; parent_id?: string | null; image_key?: string | null; price?: number | null; url?: string | null }
-  | { kind: "sticker"; package_id?: string | null; sticker_id?: string | null }
+  | { kind: "product"; code: string; name: string; sku_id?: string | null; parent_id?: string | null; image_key?: string | null; price?: number | null; url?: string | null; /** รหัสสินค้าบนร้านของช่องทางนั้น (Shopee item_id …) */ listing_id?: string | null }
+  | { kind: "sticker"; package_id?: string | null; sticker_id?: string | null; url?: string | null }
+  /** ออเดอร์ที่ลูกค้า/ร้านแนบในแชท (Shopee / Lazada / TikTok) — order_no = เลขออเดอร์บนแพลตฟอร์ม */
+  | { kind: "order"; order_no: string; status?: string | null }
   | { kind: "video" | "audio" | "file" | "location"; label?: string | null };
 
 export type ChatDirection = "in" | "out";
@@ -72,6 +74,15 @@ export type ChatInbound = {
   /** (LINE) โทเคนตอบฟรี / โทเคนทำเครื่องหมายอ่านแล้ว */
   replyToken?: string | null;
   readToken?: string | null;
+  /**
+   * (ร้านค้าออนไลน์ที่ดึงเอง) ข้อความที่ร้านตอบเองในแอป/Seller Centre/BigSeller = "out" — บันทึกให้เห็นในห้อง + นับว่าตอบแล้ว
+   * ไม่ใส่ = ข้อความจากลูกค้า
+   */
+  direction?: "in" | "out";
+  /** ชื่อ/รูปลูกค้าที่ได้มาพร้อมรายการห้อง (ไม่ต้องถามแพลตฟอร์มเพิ่ม) */
+  profile?: { name: string | null; avatar: string | null } | null;
+  /** ค่าประจำห้องที่ตัวต่อช่องทางต้องใช้ตอนส่ง (เช่น Shopee buyer id) — รวมเข้า meta ของห้อง */
+  convMeta?: Record<string, unknown>;
 };
 
 /** สิ่งที่พนักงานสั่งส่ง */
@@ -92,4 +103,23 @@ export type ChatSettings = {
   /** บอท LINE ตัวไหนรับแชทลูกค้าเข้าห้องแชท + เป็นของแบรนด์ไหน (key = คีย์บอทใน line_config) */
   line_bots: Record<string, { enabled: boolean; brand_id: string | null }>;
   quick_replies: ChatQuickReply[];
+  /**
+   * ร้านค้าออนไลน์ที่รับแชทเข้าห้อง (key = "<ช่องทาง>:<brand_id>" เช่น "shopee:bd33…") — ร้านต้องเชื่อมต่อที่หน้าบัญชีแพลตฟอร์มก่อน
+   * ไม่มีในนี้ = ยังไม่รับ (ต้องติ๊กเอง — เปิดแล้วระบบเริ่มดึงแชท + แจ้งเตือน)
+   */
+  shops: Record<string, { enabled: boolean }>;
+  /** แจ้งเตือนกระดิ่งแยกช่องทาง — false = ไม่เด้งกระดิ่ง (ห้องยังเข้าตามปกติ) · ไม่มีค่า = แจ้ง */
+  notify: Partial<Record<ChatChannel, boolean>>;
+};
+
+/** ช่องทางร้านค้าออนไลน์ที่ระบบดึงแชทเอง (เรียงตามที่โชว์) */
+export const SHOP_CHAT_CHANNELS = ["shopee", "lazada", "tiktok"] as const;
+export type ShopChatChannel = (typeof SHOP_CHAT_CHANNELS)[number];
+export const isShopChatChannel = (v: unknown): v is ShopChatChannel => typeof v === "string" && (SHOP_CHAT_CHANNELS as readonly string[]).includes(v);
+
+/** สถานะการรับแชทของร้าน 1 ร้าน (หน้าตั้งค่า + ป้ายในหน้าแชท) */
+export type ShopChatState = "ready" | "off" | "no_permission" | "not_connected" | "expired" | "error";
+export type ShopChatStatus = {
+  key: string; channel: ShopChatChannel; brand_id: string; brand_name: string | null; shop_name: string | null;
+  enabled: boolean; state: ShopChatState; note: string | null; last_ok_at: string | null;
 };
