@@ -235,7 +235,17 @@ export type MatchedRule = {
   instruction: string; required_topics: string[]; required_topics_en?: string[]; topic_options?: Record<string, string[]>;
   hint: string | null; is_active?: boolean; sort_order?: number; extras?: unknown;
 };
-type TopicRow = { th: string; en: string; options: string; required: boolean };
+type TopicRow = { th: string; en: string; options: string; optionsEn: string; required: boolean };
+const splitC = (s: string) => s.split(",").map((x) => x.trim());
+
+/** แปลหลายข้อความไทย → อังกฤษครั้งเดียว (/api/ai/translate แบบชุด) · แปลไม่ได้ = คืนค่าว่าง */
+async function translateToEn(texts: string[]): Promise<string[]> {
+  if (!texts.length) return [];
+  const j = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, to: "en", kind: "labels", place: "product" }) }).then((r) => r.json());
+  const list = (j?.data?.translated_list ?? []) as unknown[];
+  return texts.map((_, i) => String(list[i] ?? "").trim());
+}
 
 export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlights = [], onSaved, onClose }: {
   rules: MatchedRule[];
@@ -263,7 +273,7 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
     const d = await ai.run({ name: rule.id ? rule.name : (ruleName.trim() || rule.name), slots: slotItems });
     if (!d) return;
     const done: string[] = [];
-    if (rows.length === 0 && d.topics.length) { setRows(d.topics.map((x) => ({ th: x.th, en: x.en, options: x.options.join(", "), required: true }))); done.push(t("หัวข้อ", "questions")); }
+    if (rows.length === 0 && d.topics.length) { setRows(d.topics.map((x) => ({ th: x.th, en: x.en, options: x.options.join(", "), optionsEn: "", required: true }))); done.push(t("หัวข้อ", "questions")); }
     if (!highlights.trim() && d.highlights.length) { setHighlights(d.highlights.join(", ")); done.push(t("จุดเด่น", "highlights")); }
     if (slotIds.length === 0 && d.slot_ids.length) { setSlotIds(d.slot_ids); done.push(t("ชนิดช่อง", "compartments")); }
     if (manual.length === 0 && d.manual_required.length) { setManual(d.manual_required); done.push(t("ช่องกรอกมือ", "manual fields")); }
@@ -272,6 +282,9 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
   };
   const [rows, setRows] = useState<TopicRow[]>([]);
   const [highlights, setHighlights] = useState("");
+  const [highlightsEnState, setHighlightsEn] = useState("");
+  const highlightsEn = highlightsEnState;   // คั่นลูกน้ำ เรียงตรงกับไทย
+  const [transBusy, setTransBusy] = useState(false);
   const [manual, setManual] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -280,9 +293,10 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
     const ex = normalizeExtras(rule.extras);
     setSlotIds(ex.slot_ids);
     setRows((rule.required_topics ?? []).map((th, i) => ({
-      th, en: (rule.required_topics_en ?? [])[i] ?? "", options: ((rule.topic_options ?? {})[th] ?? []).join(", "), required: !ex.optional_topics.includes(th),
+      th, en: (rule.required_topics_en ?? [])[i] ?? "", options: ((rule.topic_options ?? {})[th] ?? []).join(", "), optionsEn: (ex.topic_options_en[th] ?? []).join(", "), required: !ex.optional_topics.includes(th),
     })));
     setHighlights(ex.highlights.join(", "));
+    setHighlightsEn(ex.highlights.map((h) => ex.highlights_en[h] ?? "").join(", "));
     setManual(ex.manual_required);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ruleId, newRule?.name]);
@@ -307,12 +321,22 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
 
   const save = async () => {
     if (!rule) return;
-    const clean = rows.map((x) => ({ ...x, th: x.th.trim(), en: x.en.trim() })).filter((x) => x.th);
+    // แปลช่อง EN ที่ยังว่างให้อัตโนมัติก่อนบันทึก (แปลไม่ได้ก็บันทึกต่อได้)
+    const tr = await translateAll(true);
+    const rowsNow = tr?.rows ?? rows;
+    const highlightsEn = tr?.hEn ?? highlightsEnState;
+    const clean = rowsNow.map((x) => ({ ...x, th: x.th.trim(), en: x.en.trim() })).filter((x) => x.th);
     const extras: RuleExtras = {
       highlights: highlights.split(",").map((x) => x.trim()).filter(Boolean),
       manual_required: manual,
       optional_topics: clean.filter((x) => !x.required).map((x) => x.th),
       slot_ids: slotIds,
+      topic_options_en: Object.fromEntries(clean.map((x) => [x.th, splitC(x.optionsEn)]).filter(([, v]) => (v as string[]).some(Boolean))),
+      highlights_en: (() => {
+        const th = highlights.split(",").map((x) => x.trim()).filter(Boolean);
+        const en = splitC(highlightsEn);
+        return Object.fromEntries(th.map((h, i) => [h, en[i] ?? ""]).filter(([, v]) => v));
+      })(),
     };
     const prevBody = rule.id ? payloadOf(rule, normalizeExtras(rule.extras)) : null;
     setBusy(true);
@@ -334,6 +358,37 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
     finally { setBusy(false); }
   };
 
+  /** แปลช่อง EN ที่ยังว่าง (หัวข้อ · คำตอบ · จุดเด่น) — silent = ตอนกดบันทึก (แปลให้อัตโนมัติ ไม่เด้งแจ้ง) */
+  const translateAll = async (silent = false): Promise<{ rows: TopicRow[]; hEn: string } | null> => {
+    const jobs: { text: string; put: (v: string) => void }[] = [];
+    const next = rows.map((x) => ({ ...x }));
+    next.forEach((x) => {
+      if (x.th.trim() && !x.en.trim()) jobs.push({ text: x.th.trim(), put: (v) => { x.en = v; } });
+      const th = splitC(x.options).filter(Boolean);
+      if (th.length) {
+        const en = splitC(x.optionsEn);
+        th.forEach((o, k) => { if (!(en[k] ?? "").trim()) jobs.push({ text: o, put: (v) => { const cur = splitC(x.optionsEn); while (cur.length < th.length) cur.push(""); cur[k] = v; x.optionsEn = cur.slice(0, th.length).join(", "); } }); });
+      }
+    });
+    const hTh = highlights.split(",").map((x) => x.trim()).filter(Boolean);
+    const hEn = splitC(highlightsEn);
+    while (hEn.length < hTh.length) hEn.push("");
+    hTh.forEach((h, k) => { if (!(hEn[k] ?? "").trim()) jobs.push({ text: h, put: (v) => { hEn[k] = v; } }); });
+    if (!jobs.length) { if (!silent) toast.info(t("ช่อง EN กรอกครบแล้ว", "English is already filled")); return { rows: next, hEn: hEn.slice(0, hTh.length).join(", ") }; }
+    setTransBusy(true);
+    try {
+      const out = await translateToEn(jobs.map((j) => j.text));
+      let n = 0;
+      jobs.forEach((j, i) => { if (out[i]) { j.put(out[i].replace(/,/g, " ")); n++; } });
+      const joined = hEn.slice(0, hTh.length).join(", ");
+      setRows(next);
+      setHighlightsEn(joined);
+      if (!silent) toast.success(t(`แปลแล้ว ${n} ช่อง — ตรวจแล้วกดบันทึก`, `Translated ${n} fields — review then save`));
+      return { rows: next, hEn: joined };
+    } catch (e) { if (!silent) toast.error(e instanceof Error ? e.message : t("แปลไม่สำเร็จ", "Translate failed")); return null; }
+    finally { setTransBusy(false); }
+  };
+
   const move = (i: number, d: -1 | 1) => setRows((p) => { const n = [...p]; const j = i + d; if (j < 0 || j >= n.length) return p; [n[i], n[j]] = [n[j], n[i]]; return n; });
   const upd = (i: number, patch: Partial<TopicRow>) => setRows((p) => p.map((x, k) => (k === i ? { ...x, ...patch } : x)));
 
@@ -350,6 +405,9 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
           </select>
         ) : <b className="text-[12px] text-violet-800">“{rule.name}”</b>}
         <span className="text-[11px] text-violet-600 flex-1 min-w-0">{t("มีผลกับสินค้าทุกตัวในประเภทนี้ · ลงประวัติ · ย้อนได้", "Affects every product of this type · logged · undoable")}</span>
+        <button type="button" onClick={() => void translateAll(false)} disabled={transBusy} className="h-7 px-2.5 text-[12px] rounded-lg border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 disabled:opacity-50 inline-flex items-center gap-1" title={t("แปลหัวข้อ คำตอบ และจุดเด่น เฉพาะช่อง EN ที่ยังว่าง", "Translate questions, answers and highlights where English is empty")}>
+          {transBusy && <Spinner />}{t("⇄ แปลเป็น EN ทั้งหมด", "⇄ Translate all to EN")}
+        </button>
         <button type="button" onClick={() => void askAi()} disabled={ai.busy} className={AI_BTN} title={t("เติมเฉพาะช่องที่ยังว่าง · รุ่นถูก ~0.02 บาท/ครั้ง", "Fills empty fields only · cheap model")}>
           {ai.busy && <Spinner />}{t("✨ ให้ AI ช่วยคิด", "✨ AI helps")}
         </button>
@@ -368,17 +426,23 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
               <label className="text-[11.5px] text-slate-600 inline-flex items-center gap-1"><input type="checkbox" checked={x.required} onChange={(e) => upd(i, { required: e.target.checked })} className="accent-violet-600" />{t("บังคับ", "Required")}</label>
               <button type="button" onClick={() => setRows((p) => p.filter((_, k) => k !== i))} className="h-7 px-1.5 text-[12px] text-rose-500 hover:bg-rose-50 rounded" aria-label={t("ลบหัวข้อ", "Delete heading")}>✕</button>
             </div>
-            <input value={x.options} onChange={(e) => upd(i, { options: e.target.value })} placeholder={t("คำตอบให้เลือก คั่นด้วยลูกน้ำ เช่น ซิป, แม่เหล็ก, ไม่มี", "Answer choices, comma-separated")}
-              className="mt-1 w-full h-7 px-2 text-[12px] border border-slate-200 rounded" />
+            <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-1">
+              <input value={x.options} onChange={(e) => upd(i, { options: e.target.value })} placeholder={t("คำตอบให้เลือก คั่นด้วยลูกน้ำ เช่น ซิป, แม่เหล็ก, ไม่มี", "Answer choices, comma-separated")}
+                className="w-full h-7 px-2 text-[12px] border border-slate-200 rounded" />
+              <input value={x.optionsEn} onChange={(e) => upd(i, { optionsEn: e.target.value })} placeholder={t("คำตอบ EN (เรียงตรงกับไทย)", "Answers in English (same order)")}
+                className="w-full h-7 px-2 text-[12px] border border-slate-200 rounded bg-sky-50/40" />
+            </div>
           </div>
         ))}
-        <button type="button" onClick={() => setRows((p) => [...p, { th: "", en: "", options: "", required: true }])} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-slate-300 text-slate-600 bg-white hover:bg-slate-50">＋ {t("เพิ่มหัวข้อ", "Add heading")}</button>
+        <button type="button" onClick={() => setRows((p) => [...p, { th: "", en: "", options: "", optionsEn: "", required: true }])} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-slate-300 text-slate-600 bg-white hover:bg-slate-50">＋ {t("เพิ่มหัวข้อ", "Add heading")}</button>
       </div>
 
       <div>
         <p className="text-[11.5px] text-slate-600 mb-1">{t("รายการจุดเด่นให้ติ๊ก (คั่นด้วยลูกน้ำ)", "Highlight choices (comma-separated)")}</p>
         <input value={highlights} onChange={(e) => setHighlights(e.target.value)} placeholder={t("เช่น ผ้าแคนวาสหนา, ก้นตั้งได้, ปักชื่อได้", "e.g. thick canvas, stands upright")}
           className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded bg-white" />
+        <input value={highlightsEn} onChange={(e) => setHighlightsEn(e.target.value)} placeholder={t("จุดเด่น EN คั่นลูกน้ำ เรียงตรงกับไทย (กด ⇄ แปล ได้)", "Highlights in English, same order")}
+          className="mt-1 w-full h-8 px-2 text-[12px] border border-slate-200 rounded bg-sky-50/40" />
         {(() => {
           const cur = highlights.split(",").map((x) => x.trim()).filter(Boolean);
           const add = (h: string) => { if (h && !cur.includes(h)) setHighlights([...cur, h].join(", ")); };

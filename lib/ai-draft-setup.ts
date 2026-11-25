@@ -37,8 +37,8 @@ export type DraftSetup = {
 export const DEFAULT_WARRANTY_OPTIONS = ["1 เดือน", "2 ปี", "ไม่มีรับประกัน", "1 ปี", "6 เดือน", "7 วัน", "3 ปี", "3 เดือน"];
 
 export const DEFAULT_TEMPLATES: DescTemplate[] = [
-  { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ขนาด", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'" },
-  { id: "short", name: "สั้น ขายไว", headings: ["จุดเด่น 3 ข้อ", "ขนาด", "ประกัน"], format: "สั้นที่สุด บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' ไม่เกิน 6 บรรทัด" },
+  { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'" },
+  { id: "short", name: "สั้น ขายไว", headings: ["จุดเด่น 3 ข้อ", "ประกัน"], format: "สั้นที่สุด บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' ไม่เกิน 6 บรรทัด" },
   { id: "story", name: "เล่าเรื่อง", headings: ["ย่อหน้าเปิด", "จุดเด่น", "สเปค"], format: "เปิดด้วยย่อหน้าสั้น 1-2 ประโยค แล้วตามด้วยรายการ '- '" },
 ];
 
@@ -102,6 +102,27 @@ export type RuleExtras = {
   highlights: string[]; manual_required: string[]; optional_topics: string[];
   /** ชนิดช่องที่โชว์ในขั้น 2 (id ของ product_highlight_items ชนิด slot) · ว่าง = โชว์ทุกชนิด */
   slot_ids: string[];
+  /** คำตอบภาษาอังกฤษต่อหัวข้อ { หัวข้อไทย: [ตัวเลือก EN เรียงตรงกับไทย] } */
+  topic_options_en: Record<string, string[]>;
+  /** จุดเด่นภาษาอังกฤษ { จุดเด่นไทย: EN } */
+  highlights_en: Record<string, string>;
+};
+
+const strMap = (v: unknown, maxKeys = 40): Record<string, string> => {
+  const out: Record<string, string> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, maxKeys)) { const kk = k.trim().slice(0, 200); const vv = str(x, 200); if (kk && vv) out[kk] = vv; }
+  return out;
+};
+const listMap = (v: unknown, maxKeys = 30): Record<string, string[]> => {
+  const out: Record<string, string[]> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, maxKeys)) {
+    const kk = k.trim().slice(0, 200);
+    const list = (Array.isArray(x) ? x : []).map((y) => String(y ?? "").trim().slice(0, 60)).slice(0, 30);
+    if (kk && list.some(Boolean)) out[kk] = list;
+  }
+  return out;
 };
 
 export function normalizeExtras(raw: unknown): RuleExtras {
@@ -111,15 +132,19 @@ export function normalizeExtras(raw: unknown): RuleExtras {
     manual_required: strList(r.manual_required, 10, 60).filter((k) => MANUAL_KEYS.includes(k)),
     optional_topics: strList(r.optional_topics, 30, 200),
     slot_ids: strList(r.slot_ids, 60, 60),
+    topic_options_en: listMap(r.topic_options_en),
+    highlights_en: strMap(r.highlights_en, 60),
   };
 }
 
 /** รวมค่าตั้งของหลายกฎที่สินค้าเข้า (ไม่ซ้ำ) */
 export function mergeExtras(list: unknown[]): RuleExtras {
-  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [], slot_ids: [] };
+  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [], slot_ids: [], topic_options_en: {}, highlights_en: {} };
   for (const x of list.map(normalizeExtras)) {
     for (const k of ["highlights", "manual_required", "optional_topics", "slot_ids"] as const)
       for (const v of x[k]) if (!out[k].includes(v)) out[k].push(v);
+    out.topic_options_en = { ...x.topic_options_en, ...out.topic_options_en };
+    out.highlights_en = { ...x.highlights_en, ...out.highlights_en };
   }
   return out;
 }
@@ -246,3 +271,19 @@ export function fillEmpty<T extends Record<string, unknown>>(cur: T, ai: Partial
   }
   return { next, filled };
 }
+
+// ── ⑥ กติกาการเขียนของป๊อป 5 ขั้น (เจ้าของ 2026-11-25) ──────────────────────
+/** คำตอบแบบปฏิเสธ (ไม่มี / ไม่ได้ / ไม่กันน้ำ / no …) — ไม่ต้องเขียนลงรายละเอียด */
+export function isNegativeAnswer(a: unknown): boolean {
+  const s = String(a ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return /^(ไม่|ไม่มี|ไม่ได้|ไม่รองรับ|ไม่ใช่|ไม่มีครับ|ไม่มีค่ะ|no|none|not\b|n\/a|-)/.test(s) || /^(ถอด|ปรับ|พับ|ซัก|ใช้)?ไม่ได้$/.test(s) || /ไม่ได้$/.test(s);
+}
+
+/** กติกาที่หลังบ้านใส่ให้ทุกครั้งที่เขียนจากป๊อป 5 ขั้น */
+export const POPUP_WRITING_RULES = [
+  "กติกาการเขียนจากป๊อป (สำคัญ):",
+  "- คำตอบที่เป็นการปฏิเสธ (ไม่มี / ไม่ได้ / ไม่กันน้ำ / ไม่รองรับ ฯลฯ) ห้ามเขียนลง Description และ English Description — ตัดบรรทัดนั้นทิ้งทั้งบรรทัด (เช่น ห้ามเขียน 'RFID: ไม่มี')",
+  "- จุดเด่นที่ผู้ใช้เลือก ให้เรียบเรียงเป็นประโยคขายที่สละสลวย อ่านลื่น เชื่อมกันเป็นธรรมชาติ ห้ามไล่คำต่อกันด้วยช่องว่าง",
+  "- ห้ามใส่ขนาด/น้ำหนักของตัวสินค้า (กว้าง ยาว สูง หนา กรัม) ใน Description — มีช่องขนาดแยกแล้ว (ขนาดช่องใส่ของ และ 'ใส่อะไรได้' ใส่ได้)",
+].join("\n");

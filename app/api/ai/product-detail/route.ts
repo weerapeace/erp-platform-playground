@@ -19,7 +19,7 @@ import { CAPTION_MODEL, productDetailModel, imageParts, imagesToDataUrls, loadPr
 import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { parentImageKeyGroups, parentImageKeys } from "@/lib/product-image-keys";
-import { cleanTemplate, templateInstruction } from "@/lib/ai-draft-setup";
+import { POPUP_WRITING_RULES, cleanTemplate, templateInstruction } from "@/lib/ai-draft-setup";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -268,6 +268,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ] : []),
     ...(ruleInstruction ? ["", "คำสั่งเพิ่มสำหรับสินค้าประเภทนี้ (ทำร่วมกับคำสั่งเจ้าของร้าน):", ruleInstruction] : []),
     ...(tplText ? ["", tplText] : []),
+    ...(tpl || popupFacts ? ["", POPUP_WRITING_RULES] : []),
     ...(ruleTopics.length ? ["", "หัวข้อที่ต้องมีใน Description เสมอ (ถ้าดูจากรูปไม่ออก ให้ถามใน questions):",
       ...ruleTopics.map((t) => `- ${t}`)] : []),
     // ── คำสั่งรายช่อง = ตัวสุดท้ายจริง ๆ ของ prompt (ตำแหน่งที่โมเดลให้น้ำหนักสูงสุด) ──

@@ -9,7 +9,7 @@
 //   → แถวขนาดจะไม่ติ๊กให้อัตโนมัติเสมอ ต้องกดยืนยันเอง
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
 import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
@@ -20,7 +20,7 @@ import { DRAFT_PREFIX, decodeDraft } from "@/lib/form-draft";
 import { parseFits, type FitPick } from "@/lib/product-fits";
 import { isPhrase, isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
 import {
-  MANUAL_FIELDS, fitsFromSize, highlightChoices, mergeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
+  MANUAL_FIELDS, fitsFromSize, highlightChoices, isNegativeAnswer, mergeExtras, normalizeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
   type FitCatalogRow, type ParcelBox,
 } from "@/lib/ai-draft-setup";
 import { CreateTagModal, EditTagModal, ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
@@ -28,6 +28,17 @@ import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
 import { Spinner } from "@/components/spinner";
+
+/** ช่องข้อความสูงตามเนื้อหา — ผลจาก AI อ่านได้ทั้งก้อน ไม่ต้องเลื่อนในช่อง (เจ้าของขอ 2026-11-25) */
+function AutoTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  }, [props.value]);
+  return <textarea ref={ref} {...props} style={{ ...props.style, overflow: "hidden", resize: "none" }} />;
+}
 
 /** ช่องข้อความที่ AI เขียนให้ — เรียงตามที่เห็นในฟอร์ม */
 const FIELDS: { key: string; label: string; lang: "th" | "en"; long?: boolean }[] = [
@@ -620,11 +631,12 @@ export function AiProductDetailModal({
     return () => { off = true; };
   }, [parentId, rulesTick, tagTick]);
   const topics = useMemo(() => {
-    const out: { th: string; en: string; rule: string; options: string[] }[] = [];
+    const out: { th: string; en: string; rule: string; options: string[]; optionsEn: string[] }[] = [];
     for (const r of rulesMatched) {
+      const exEn = normalizeExtras(r.extras).topic_options_en;
       const en = r.required_topics_en ?? [];
       (r.required_topics ?? []).forEach((topic, i) => {
-        if (topic && !out.some((x) => x.th === topic)) out.push({ th: topic, en: en[i] ?? "", rule: r.name, options: (r.topic_options ?? {})[topic] ?? [] });
+        if (topic && !out.some((x) => x.th === topic)) out.push({ th: topic, en: en[i] ?? "", rule: r.name, options: (r.topic_options ?? {})[topic] ?? [], optionsEn: exEn[topic] ?? [] });
       });
     }
     return out;
@@ -642,6 +654,7 @@ export function AiProductDetailModal({
   const [hl, setHl] = useState<string[]>([]);
   const [hlInput, setHlInput] = useState("");
   const [aiHl, setAiHl] = useState<string[]>([]);
+  const [aiHlEn, setAiHlEn] = useState<Record<string, string>>({});
   const [aiHlBusy, setAiHlBusy] = useState(false);
   const [aiHlAllowed, setAiHlAllowed] = useState(true);
   useEffect(() => {
@@ -656,8 +669,9 @@ export function AiProductDetailModal({
         body: JSON.stringify({ parent_id: parentId, shown: [...extras.highlights, ...aiHl], chosen: hl, extra: extra.trim() || undefined }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      const items = ((j.data?.items ?? []) as { th?: string }[]).map((x) => String(x.th ?? "").trim()).filter(Boolean);
-      setAiHl((p) => [...new Set([...p, ...items])]);
+      const raw = ((j.data?.items ?? []) as { th?: string; en?: string }[]).map((x) => ({ th: String(x.th ?? "").trim(), en: String(x.en ?? "").trim() })).filter((x) => x.th);
+      setAiHl((p) => [...new Set([...p, ...raw.map((x) => x.th)])]);
+      setAiHlEn((p) => ({ ...p, ...Object.fromEntries(raw.filter((x) => x.en).map((x) => [x.th, x.en])) }));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("AI แนะนำไม่สำเร็จ", "AI suggestions failed")); }
     finally { setAiHlBusy(false); }
   };
@@ -931,7 +945,8 @@ export function AiProductDetailModal({
 
   const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
     setLoading(true); setErr(null);
-    const topicQa = topics.map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() })).filter((x) => x.a);
+    const topicQa = topics.map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() })).filter((x) => x.a)
+      .map((x) => (isNegativeAnswer(x.a) ? { ...x, a: `${x.a} (คำตอบปฏิเสธ — ห้ามเขียนลงรายละเอียด)` } : x));
     const qa = [
       ...topicQa,
       ...(opts?.withAnswers
@@ -1283,10 +1298,11 @@ export function AiProductDetailModal({
                           <p className="text-[12px] text-slate-600 mb-1">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}</p>
                           {x.options.length > 0 && (
                             <div className="flex flex-wrap gap-1 mb-1">
-                              {x.options.map((op) => {
+                              {x.options.map((op, oi) => {
                                 const on = cur.trim() === op;
-                                return <button key={op} type="button" onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))}
-                                  className={`h-6 px-2 text-[11.5px] rounded-full border ${on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{op}</button>;
+                                const shown = t("th", "en") === "en" && x.optionsEn[oi] ? x.optionsEn[oi] : op;
+                                return <button key={op} type="button" onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))} title={x.optionsEn[oi] && shown === op ? x.optionsEn[oi] : undefined}
+                                  className={`h-6 px-2 text-[11.5px] rounded-full border ${on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-violet-200 text-violet-700 hover:bg-violet-50"}`}>{shown}</button>;
                               })}
                             </div>
                           )}
@@ -1303,12 +1319,23 @@ export function AiProductDetailModal({
                     {t("จุดเด่น (ติ๊กเลือก)", "Highlights (tick)")}
                     <span className="ml-1.5 text-[11px] font-normal text-slate-400">{hlChoices.fromType ? t("· ชุดของประเภทนี้", "· this type's set") : t("· จากคลังกลาง (ตั้งชุดของประเภทได้ที่ ⚙)", "· from the shared library (set per type via ⚙)")}</span>
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[...new Set([...hlChoices.list, ...aiHl, ...hl])].map((h) => (
-                      <button key={h} type="button" onClick={() => toggleHl(h)} className={chip(hl.includes(h))}>
-                        {hl.includes(h) ? "✓ " : ""}{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{h}
-                      </button>
-                    ))}
+                  {/* checklist ไทย + EN ใต้แต่ละข้อ (EN จากกฎ / คลังกลาง / AI แนะนำ) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5">
+                    {[...new Set([...hlChoices.list, ...aiHl, ...hl])].map((h) => {
+                      const en = extras.highlights_en[h] || phraseItems.find((x) => x.name === h)?.name_en || aiHlEn[h] || "";
+                      const on = hl.includes(h);
+                      return (
+                        <label key={h} className="flex items-start gap-2 py-1 cursor-pointer">
+                          <input type="checkbox" checked={on} onChange={() => toggleHl(h)} className="mt-0.5 h-4 w-4 accent-fuchsia-600 shrink-0" />
+                          <span className="min-w-0">
+                            <span className={`block text-[12.5px] ${on ? "text-slate-800 font-medium" : "text-slate-600"}`}>{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{h}</span>
+                            {en && <span className="block text-[11px] text-slate-400">{en}</span>}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {aiHlAllowed && (
                       <button type="button" onClick={() => void askAiHl()} disabled={aiHlBusy} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-fuchsia-300 text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50 inline-flex items-center gap-1">
                         {aiHlBusy && <Spinner />}{t("✨ AI ดูรูปแล้วแนะนำ", "✨ AI suggests from images")}
@@ -1461,12 +1488,17 @@ export function AiProductDetailModal({
                 ⚠️ มี {willOverwrite} ช่องที่ติ๊กไว้และ<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> — กด “ใส่ลงฟอร์ม” ในขั้นสุดท้ายจะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)
               </div>
             )}
-            <div className="rounded-lg border border-slate-200 divide-y divide-slate-100">
-              {rows.map((f) => {
+            {/* ไทย | English ข้างกัน (เจ้าของเลือกแบบ A) · มือถือ = ไทยบน อังกฤษล่าง */}
+            <div className="rounded-lg border border-slate-200 overflow-hidden grid grid-cols-1 sm:grid-cols-2 gap-px bg-slate-100">
+              {([["name_th", "name_en"], ["introduction", "introduction_en"], ["description", "english_description"]] as const)
+                .filter(([a, b]) => rows.some((r) => r.key === a || r.key === b))
+                .flatMap(([a, b]) => [rows.find((r) => r.key === a) ?? { key: `_${a}`, label: "", lang: "th" as const }, rows.find((r) => r.key === b) ?? { key: `_${b}`, label: "", lang: "en" as const }])
+                .map((f) => {
+                if (f.key.startsWith("_")) return <div key={f.key} className="bg-white" />;
                 const now = String(current[f.key] ?? "").trim();
                 const next = String(res?.[f.key] ?? "").trim();
                 return (
-                  <label key={f.key} className="flex gap-3 px-3 py-2.5 items-start cursor-pointer hover:bg-slate-50/70">
+                  <label key={f.key} className="flex gap-3 px-3 py-2.5 items-start cursor-pointer bg-white hover:bg-slate-50/70">
                     <input type="checkbox" checked={!!picked[f.key]}
                       onChange={(e) => setPicked((p) => ({ ...p, [f.key]: e.target.checked }))}
                       className="mt-1 h-4 w-4 accent-indigo-600 shrink-0" />
@@ -1481,10 +1513,10 @@ export function AiProductDetailModal({
                           : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">{t("จะทับของเดิม", "will overwrite")}</span>}
                       </div>
                       {!isBlank(now) && (
-                        <p className="text-[11.5px] text-slate-400 line-through whitespace-pre-wrap break-words mb-1 max-h-16 overflow-y-auto">{now}</p>
+                        <p className="text-[11.5px] text-slate-400 line-through whitespace-pre-wrap break-words mb-1">{now}</p>
                       )}
                       {/* แก้ข้อความได้ตรงนี้เลย · แก้ฝั่งหนึ่งแล้วอีกฝั่ง (ไทย↔EN) จะแปลตามให้อัตโนมัติ */}
-                      <textarea value={next} rows={f.long ? 5 : 2}
+                      <AutoTextarea value={next} rows={f.long ? 3 : 1}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => editField(f.key, e.target.value)}
                         onBlur={() => flushSync(f.key)}

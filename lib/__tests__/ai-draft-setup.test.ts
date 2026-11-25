@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_TEMPLATES, DEFAULT_WARRANTY_OPTIONS, cleanTemplate, fillEmpty, sanitizeTagSetup, topicsToText, highlightChoices, visibleSlots, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
+  DEFAULT_TEMPLATES, DEFAULT_WARRANTY_OPTIONS, POPUP_WRITING_RULES, cleanTemplate, isNegativeAnswer, fillEmpty, sanitizeTagSetup, topicsToText, highlightChoices, visibleSlots, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
   normalizeExtras, normalizeSetup, pickParcelBox, templateFor, templateInstruction,
 } from "@/lib/ai-draft-setup";
 
@@ -119,5 +119,23 @@ describe("AI ช่วยตั้งค่าประเภท", () => {
     const { next, filled } = fillEmpty({ name_en: "Mine", topics: "", hl: [] as string[] }, { name_en: "AI", topics: "x", hl: ["a"] });
     expect(next).toEqual({ name_en: "Mine", topics: "x", hl: ["a"] });
     expect(filled).toEqual(["topics", "hl"]);
+  });
+});
+
+describe("รอบ 6: อังกฤษ + กติกาการเขียน", () => {
+  it("คำตอบ/จุดเด่นภาษาอังกฤษเก็บในกฎ และรวมหลายกฎได้", () => {
+    const x = normalizeExtras({ topic_options_en: { "กันน้ำได้ไหม?": ["Waterproof", ""] }, highlights_en: { "หนังแท้": "Genuine leather", "": "x" } });
+    expect(x.topic_options_en["กันน้ำได้ไหม?"]).toEqual(["Waterproof", ""]);
+    expect(x.highlights_en).toEqual({ "หนังแท้": "Genuine leather" });
+    const m = mergeExtras([{ highlights_en: { a: "A" } }, { highlights_en: { b: "B" } }]);
+    expect(m.highlights_en).toEqual({ a: "A", b: "B" });
+  });
+  it("คำตอบปฏิเสธ", () => {
+    for (const a of ["ไม่มี", "ไม่กันน้ำ", "ถอดไม่ได้", "No", "none"]) expect(isNegativeAnswer(a)).toBe(true);
+    for (const a of ["มี", "กันน้ำ", "ถอดได้", "หนังแท้", ""]) expect(isNegativeAnswer(a)).toBe(false);
+  });
+  it("แม่แบบเริ่มต้นไม่มีหัวข้อขนาด + กติกาห้ามใส่ขนาด", () => {
+    expect(DEFAULT_TEMPLATES.some((t) => t.headings.includes("ขนาด"))).toBe(false);
+    expect(POPUP_WRITING_RULES).toContain("ห้ามใส่ขนาด");
   });
 });
