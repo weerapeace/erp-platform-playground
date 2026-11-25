@@ -3,6 +3,8 @@
  *   GET  ?parent_id=            → { tags: [{id,name,name_en,group_id}], mine: [tag_id...], groups: [{id,name,parent_group_id}] }
  *   POST { parent_id, tag_id, on }         → ติด (on=true) / ปลด (on=false)
  *   POST { tag_id, name_en }               → แก้ชื่ออังกฤษของแท็ก
+ *   POST { create: { name, name_en?, group_id? } } → สร้างแท็กใหม่ (ชื่อซ้ำ = คืนตัวเดิม) · ป๊อป AI ร่าง ขั้นตั้งต้น
+ *   POST { tag_id, archive: true|false }    → เก็บเข้าถังขยะ / กู้คืน (is_active) — ใช้ตอนกด "ย้อนกลับ" หลังสร้าง
  *
  * ทำไมไม่ใช้ /api/admin/schema/m2m-links: ตัวนั้นต้องมีสิทธิ์ระดับแอดมินโครงสร้างตาราง
  * (admin.schema.view / delete_field) ซึ่งแรงเกินไปสำหรับ "คนที่แก้สินค้าได้ควรติดแท็กได้"
@@ -43,13 +45,39 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit")))
     return NextResponse.json({ error: "ต้องมีสิทธิ์แก้สินค้า (products.edit)" }, { status: 401 });
-  let b: { parent_id?: string; tag_id?: string; on?: boolean; name_en?: string | null };
+  let b: { parent_id?: string; tag_id?: string; on?: boolean; name_en?: string | null; archive?: boolean; create?: { name?: string; name_en?: string | null; group_id?: string | null } };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
-  const tagId = (b.tag_id ?? "").trim();
-  if (!tagId) return NextResponse.json({ error: "ต้องระบุ tag_id" }, { status: 400 });
 
   const admin = supabaseAdmin();
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+
+  // โหมดสร้างแท็กใหม่ — ชื่อซ้ำกับแท็กที่ใช้อยู่ = คืนตัวเดิม (กันแท็กซ้ำ) · ซ้ำกับตัวในถังขยะ = กู้คืนตัวนั้น
+  if (b.create) {
+    const name = String(b.create.name ?? "").trim().slice(0, 80);
+    if (!name) return NextResponse.json({ error: "ใส่ชื่อแท็กก่อน" }, { status: 400 });
+    const nameEn = String(b.create.name_en ?? "").trim().slice(0, 80) || null;
+    const groupId = String(b.create.group_id ?? "").trim() || null;
+    const { data: same } = await admin.from("product_families").select("id, name, name_en, group_id, is_active").ilike("name", name).limit(1).maybeSingle();
+    if (same) {
+      if (!same.is_active) await admin.from("product_families").update({ is_active: true, updated_at: new Date().toISOString() }).eq("id", same.id);
+      return NextResponse.json({ data: { id: same.id, name: same.name, name_en: same.name_en, group_id: same.group_id }, existed: true, error: null });
+    }
+    const { data, error } = await admin.from("product_families").insert({ name, name_en: nameEn, group_id: groupId, is_active: true }).select("id, name, name_en, group_id").single();
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin, { action: "create", entityType: "product_families", entityId: data.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name, name_en: nameEn, group_id: groupId, from: "ai_draft" } });
+    return NextResponse.json({ data, existed: false, error: null });
+  }
+
+  const tagId = (b.tag_id ?? "").trim();
+  if (!tagId) return NextResponse.json({ error: "ต้องระบุ tag_id" }, { status: 400 });
+
+  // โหมดเก็บเข้าถังขยะ/กู้คืน (ไม่ลบจริง — สินค้าที่ติดแท็กนี้ไม่พัง)
+  if (b.archive !== undefined) {
+    const { error } = await admin.from("product_families").update({ is_active: !b.archive, updated_at: new Date().toISOString() }).eq("id", tagId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin, { action: b.archive ? "archive" : "restore", entityType: "product_families", entityId: tagId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: [{ field: "is_active", old: !!b.archive, new: !b.archive }] } });
+    return NextResponse.json({ success: true, error: null });
+  }
 
   // โหมดแก้ชื่ออังกฤษของแท็ก (ไม่ต้องมี parent_id)
   if (b.name_en !== undefined) {

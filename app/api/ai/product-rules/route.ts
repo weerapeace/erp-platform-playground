@@ -90,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (tagIds.length === 0 && keywords.length === 0)
     return NextResponse.json({ error: "ต้องระบุอย่างน้อยหนึ่งเงื่อนไข — เลือกแท็ก หรือใส่คำในชื่อสินค้า" }, { status: 400 });
   const extras = normalizeExtras(b.extras);
-  const hasExtras = extras.highlights.length > 0 || extras.manual_required.length > 0;
+  const hasExtras = extras.highlights.length > 0 || extras.manual_required.length > 0 || extras.slot_ids.length > 0;
   if (!(b.instruction ?? "").trim() && arr(b.required_topics).length === 0 && !(b.hint ?? "").trim() && !hasExtras)
     return NextResponse.json({ error: "กฎยังไม่มีผลอะไรเลย — ใส่คำสั่ง หัวข้อที่ต้องมี ใบ้ จุดเด่น หรือช่องกรอกมืออย่างน้อยหนึ่งอย่าง" }, { status: 400 });
 

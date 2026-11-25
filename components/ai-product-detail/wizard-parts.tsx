@@ -6,6 +6,8 @@
 //   TemplatePicker   — ชุดแม่แบบ (Theme) = ลำดับหัวข้อ + รูปแบบ Description · ตั้งค่าเริ่มต่อแบรนด์ · เพิ่ม/แก้/ลบ (ถังขยะ) + ย้อนกลับ
 //   RuleQuickEditor  — "⚙ ตั้งค่าหัวข้อ" ในขั้น 2: แก้กฎของประเภทสินค้านี้ได้ทันที (หัวข้อ · คำตอบให้เลือก · บังคับ ·
 //                      รายการจุดเด่น · ช่องกรอกมือที่บังคับ) · ทุกการแก้ลง audit + ปุ่มย้อนกลับ
+//   CreateTagModal   — ค้นแท็กไม่เจอ → สร้างแท็กใหม่ (ชื่อไทย/อังกฤษ/กลุ่ม) + สร้างกฎประเภทไปด้วย · ย้อนกลับได้
+//   WarrantySelect   — ประกันแบบ dropdown (รายการตั้งได้) + "อื่น ๆ (พิมพ์เอง)"
 //   แกน pure = lib/ai-draft-setup
 // ============================================================
 
@@ -13,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { ERPModal } from "@/components/modal";
 import { Spinner } from "@/components/spinner";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -21,19 +24,31 @@ import {
   type DescTemplate, type DraftSetup, type RuleExtras,
 } from "@/lib/ai-draft-setup";
 
+export type ImageGroupKey = "parent" | "desc" | "sku";
+const GROUP_LABEL: Record<ImageGroupKey, [string, string]> = { parent: ["รูป Parent SKU", "Parent SKU images"], desc: ["รูป Description", "Description images"], sku: ["รูป SKU ลูก", "Child SKU images"] };
+
 // ── รูปที่ AI จะดู ─────────────────────────────────────────
-export function ImageStrip({ keys, max, skip, onToggleSkip }: {
-  keys: string[] | null; max: number; skip: string[]; onToggleSkip: (key: string) => void;
+export function ImageStrip({ keys, groups, max, skip, onToggleSkip }: {
+  keys: string[] | null; groups?: Record<string, ImageGroupKey>; max: number; skip: string[]; onToggleSkip: (key: string) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(-1);
   if (keys === null) return <div className="p-3 text-[12px] text-slate-400"><Spinner /> {t("กำลังโหลดรูป…", "Loading images…")}</div>;
   if (keys.length === 0) return <div className="p-3 text-[12px] text-slate-400">{t("สินค้านี้ยังไม่มีรูป — AI จะเขียนจากข้อมูลอย่างเดียว", "No images yet — AI writes from data only")}</div>;
   const used = keys.filter((k) => !skip.includes(k)).slice(0, max);
+  // แบ่งกลุ่ม Parent SKU → รูป Description → SKU ลูก (เจ้าของเลือกแบบ A 2026-11-25) · ไม่มีข้อมูลกลุ่ม = กลุ่มเดียว
+  const order: ImageGroupKey[] = ["parent", "desc", "sku"];
+  const sections = groups
+    ? order.map((g) => ({ g, list: keys.filter((k) => (groups[k] ?? "parent") === g) })).filter((x) => x.list.length)
+    : [{ g: "parent" as ImageGroupKey, list: keys }];
   return (
-    <div>
-      <div className="flex sm:grid sm:grid-cols-3 gap-1.5 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0">
-        {keys.map((k, i) => {
+    <div className="flex sm:block gap-3 overflow-x-auto sm:overflow-visible">
+      {sections.map(({ g, list }) => (
+      <div key={g} className="shrink-0 sm:shrink sm:mb-2">
+      {groups && <p className="text-[11px] font-medium text-slate-500 mb-1">{t(...GROUP_LABEL[g])} ({list.length})</p>}
+      <div className="flex sm:grid sm:grid-cols-3 gap-1.5">
+        {list.map((k) => {
+          const i = keys.indexOf(k);
           const off = skip.includes(k);
           const inSet = used.includes(k);
           return (
@@ -51,7 +66,9 @@ export function ImageStrip({ keys, max, skip, onToggleSkip }: {
           );
         })}
       </div>
-      <p className="mt-1 text-[11px] text-slate-400">
+      </div>
+      ))}
+      <p className="mt-1 text-[11px] text-slate-400 shrink-0 w-32 sm:w-auto">
         {t(`AI ดู ${used.length} รูป (สูงสุด ${max}) · กดรูปเพื่อขยาย · เอาติ๊กออก = ข้ามรูปนั้น`, `AI views ${used.length} images (max ${max}) · click to enlarge · untick to skip`)}
       </p>
       <ImageLightbox images={keys.map((k) => ({ url: r2ImageUrl(k, 2000) ?? "", thumbUrl: r2ImageUrl(k, 200) }))}
@@ -121,7 +138,7 @@ export function TemplatePicker({ setup, save, value, onChange, brandId, canEdit 
     if (archived && live.length <= 1) { toast.warning(t("ต้องเหลือแม่แบบอย่างน้อย 1 ตัว", "Keep at least one template")); return; }
     const bd = { ...setup.brand_default };
     if (archived) for (const k of Object.keys(bd)) if (bd[k] === tp.id) delete bd[k];
-    await commit({ templates: setup.templates.map((x) => (x.id === tp.id ? { ...x, archived } : x)), brand_default: bd },
+    await commit({ ...setup, templates: setup.templates.map((x) => (x.id === tp.id ? { ...x, archived } : x)), brand_default: bd },
       archived ? t(`ย้าย "${tp.name}" ไปถังขยะแล้ว`, `"${tp.name}" moved to trash`) : t(`กู้ "${tp.name}" คืนแล้ว`, `"${tp.name}" restored`));
     if (archived && value === tp.id) onChange(live.find((x) => x.id !== tp.id)?.id ?? "");
   };
@@ -200,11 +217,26 @@ export type MatchedRule = {
 };
 type TopicRow = { th: string; en: string; options: string; required: boolean };
 
-export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRule[]; onSaved: () => void; onClose: () => void }) {
+export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlights = [], onSaved, onClose }: {
+  rules: MatchedRule[];
+  /** สร้างกฎใหม่จากแท็กที่ติดอยู่ (สินค้ายังไม่เข้ากฎใด) */
+  newRule?: { name: string; tag_ids: string[] } | null;
+  /** ชนิดช่องทั้งหมด (คลังกลาง) — ติ๊กว่าประเภทนี้โชว์ชนิดไหน */
+  slotItems?: { id: string; name: string }[];
+  /** คลังประโยคกลาง — กดเพิ่มเป็นจุดเด่นของประเภทนี้ได้เร็ว ๆ */
+  centralHighlights?: string[];
+  onSaved: () => void; onClose: () => void;
+}) {
   const t = useT();
   const toast = useToast();
+  const draftRule: MatchedRule | null = newRule
+    ? { id: "", name: newRule.name, tag_ids: newRule.tag_ids, name_keywords: [], brand_id: null, instruction: "", required_topics: [], hint: null, extras: {} }
+    : null;
   const [ruleId, setRuleId] = useState(rules[0]?.id ?? "");
-  const rule = rules.find((r) => r.id === ruleId) ?? null;
+  const rule = draftRule ?? rules.find((r) => r.id === ruleId) ?? null;
+  const [ruleName, setRuleName] = useState(newRule?.name ?? "");
+  const [slotIds, setSlotIds] = useState<string[]>([]);
+  const [hlNew, setHlNew] = useState("");
   const [rows, setRows] = useState<TopicRow[]>([]);
   const [highlights, setHighlights] = useState("");
   const [manual, setManual] = useState<string[]>([]);
@@ -213,17 +245,19 @@ export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRul
   useEffect(() => {
     if (!rule) return;
     const ex = normalizeExtras(rule.extras);
+    setSlotIds(ex.slot_ids);
     setRows((rule.required_topics ?? []).map((th, i) => ({
       th, en: (rule.required_topics_en ?? [])[i] ?? "", options: ((rule.topic_options ?? {})[th] ?? []).join(", "), required: !ex.optional_topics.includes(th),
     })));
     setHighlights(ex.highlights.join(", "));
     setManual(ex.manual_required);
-  }, [rule]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ruleId, newRule?.name]);
 
   const payloadOf = (r: MatchedRule, extras: RuleExtras | unknown, topics?: TopicRow[]) => {
     const list = topics ?? null;
     return {
-      id: r.id, name: r.name, tag_ids: r.tag_ids ?? [], name_keywords: r.name_keywords ?? [], brand_id: r.brand_id ?? null,
+      ...(r.id ? { id: r.id } : {}), name: r.id ? r.name : (ruleName.trim() || r.name), tag_ids: r.tag_ids ?? [], name_keywords: r.name_keywords ?? [], brand_id: r.brand_id ?? null,
       instruction: r.instruction ?? "", hint: r.hint ?? "", is_active: r.is_active !== false, sort_order: r.sort_order ?? 0,
       required_topics: list ? list.map((x) => x.th) : r.required_topics ?? [],
       required_topics_en: list ? list.map((x) => x.en) : r.required_topics_en ?? [],
@@ -245,15 +279,23 @@ export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRul
       highlights: highlights.split(",").map((x) => x.trim()).filter(Boolean),
       manual_required: manual,
       optional_topics: clean.filter((x) => !x.required).map((x) => x.th),
+      slot_ids: slotIds,
     };
-    const prevBody = payloadOf(rule, normalizeExtras(rule.extras));
+    const prevBody = rule.id ? payloadOf(rule, normalizeExtras(rule.extras)) : null;
     setBusy(true);
     try {
-      await post(payloadOf(rule, extras, clean));
+      const j = await apiFetch("/api/ai/product-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payloadOf(rule, extras, clean)) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const newId = rule.id ? "" : String(j.data?.id ?? "");
       onSaved();
       onClose();
-      toast.undo(t(`บันทึกกฎ "${rule.name}" แล้ว`, `Rule "${rule.name}" saved`), async () => {
-        try { await post(prevBody); onSaved(); } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); }
+      const nm = rule.id ? rule.name : (ruleName.trim() || rule.name);
+      toast.undo(rule.id ? t(`บันทึกกฎ "${nm}" แล้ว`, `Rule "${nm}" saved`) : t(`สร้างกฎ "${nm}" แล้ว`, `Rule "${nm}" created`), async () => {
+        try {
+          if (prevBody) await post(prevBody);
+          else if (newId) await apiFetch(`/api/ai/product-rules?id=${encodeURIComponent(newId)}`, { method: "DELETE" });
+          onSaved();
+        } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); }
       });
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); }
@@ -266,8 +308,10 @@ export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRul
   return (
     <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[12px] text-violet-800 font-medium">{t("แก้กฎ", "Edit rule")}</span>
-        {rules.length > 1 ? (
+        <span className="text-[12px] text-violet-800 font-medium">{newRule ? t("สร้างกฎประเภท", "New type rule") : t("แก้กฎ", "Edit rule")}</span>
+        {newRule ? (
+          <input value={ruleName} onChange={(e) => setRuleName(e.target.value)} className="h-7 px-2 text-[12px] border border-slate-200 rounded bg-white w-44" />
+        ) : rules.length > 1 ? (
           <select value={ruleId} onChange={(e) => setRuleId(e.target.value)} className="h-7 px-2 text-[12px] border border-slate-200 rounded bg-white">
             {rules.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
@@ -299,7 +343,33 @@ export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRul
         <p className="text-[11.5px] text-slate-600 mb-1">{t("รายการจุดเด่นให้ติ๊ก (คั่นด้วยลูกน้ำ)", "Highlight choices (comma-separated)")}</p>
         <input value={highlights} onChange={(e) => setHighlights(e.target.value)} placeholder={t("เช่น ผ้าแคนวาสหนา, ก้นตั้งได้, ปักชื่อได้", "e.g. thick canvas, stands upright")}
           className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded bg-white" />
+        {(() => {
+          const cur = highlights.split(",").map((x) => x.trim()).filter(Boolean);
+          const add = (h: string) => { if (h && !cur.includes(h)) setHighlights([...cur, h].join(", ")); };
+          const left = centralHighlights.filter((h) => !cur.includes(h));
+          return (
+            <div className="mt-1 flex flex-wrap gap-1 items-center">
+              {left.length > 0 && <span className="text-[11px] text-slate-400">{t("กดเพิ่มจากคลังกลาง:", "Add from library:")}</span>}
+              {left.slice(0, 30).map((h) => <button key={h} type="button" onClick={() => add(h)} className="h-6 px-2 text-[11px] rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">＋ {h}</button>)}
+              <input value={hlNew} onChange={(e) => setHlNew(e.target.value)} placeholder={t("พิมพ์ใหม่ + Enter", "Type + Enter")}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(hlNew.trim()); setHlNew(""); } }}
+                className="h-6 px-2 text-[11px] border border-slate-200 rounded-full bg-white w-32" />
+            </div>
+          );
+        })()}
       </div>
+      {slotItems.length > 0 && (
+        <div>
+          <p className="text-[11.5px] text-slate-600 mb-1">{t("ชนิดช่องที่โชว์ในขั้นนี้ (ไม่ติ๊กเลย = โชว์ทุกชนิด)", "Compartment types to show (none = all)")}</p>
+          <div className="flex gap-1.5 flex-wrap">
+            {slotItems.map((x) => {
+              const on = slotIds.includes(x.id);
+              return <button key={x.id} type="button" onClick={() => setSlotIds((p) => (on ? p.filter((k) => k !== x.id) : [...p, x.id]))}
+                className={`h-7 px-2.5 text-[12px] rounded-full border ${on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{x.name}</button>;
+            })}
+          </div>
+        </div>
+      )}
       <div>
         <p className="text-[11.5px] text-slate-600 mb-1">{t("ช่องที่ต้องกรอกเองในขั้นสุดท้าย (บังคับ)", "Fields that must be filled in the last step")}</p>
         <div className="flex gap-1.5 flex-wrap">
@@ -315,7 +385,7 @@ export function RuleQuickEditor({ rules, onSaved, onClose }: { rules: MatchedRul
         </div>
       </div>
       <div className="flex gap-2">
-        <button type="button" onClick={() => void save()} disabled={busy} className="h-8 px-3 text-[12.5px] font-medium bg-violet-600 text-white rounded-lg disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกกฎ", "Save rule")}</button>
+        <button type="button" onClick={() => void save()} disabled={busy} className="h-8 px-3 text-[12.5px] font-medium bg-violet-600 text-white rounded-lg disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : newRule ? t("สร้างกฎ", "Create rule") : t("บันทึกกฎ", "Save rule")}</button>
         <button type="button" onClick={onClose} className="h-8 px-3 text-[12.5px] border border-slate-200 rounded-lg bg-white hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
       </div>
     </div>
@@ -338,5 +408,160 @@ export function RefSelect({ entity, value, onChange }: { entity: string; value: 
       <option value="">{opts === null ? t("กำลังโหลด…", "Loading…") : t("— ไม่ระบุ —", "— none —")}</option>
       {sorted.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
     </select>
+  );
+}
+
+/** ประกันแบบ dropdown — รายการตั้งได้ (ui_config ai_desc_templates.warranty_options) · ค่าที่ไม่อยู่ในรายการ = "อื่น ๆ" พิมพ์เอง */
+export function WarrantySelect({ value, onChange, setup, save, canEdit, invalid }: {
+  value: string; onChange: (v: string) => void; setup: DraftSetup | null; save: (s: DraftSetup) => Promise<void>; canEdit: boolean; invalid?: boolean;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const opts = setup?.warranty_options ?? [];
+  const isOther = !!value && !opts.includes(value);
+  const [other, setOther] = useState(isOther);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState("");
+  const sel = other || isOther ? "__other" : value;
+  const saveList = async () => {
+    if (!setup) return;
+    const list = [...new Set(text.split("\n").map((x) => x.trim()).filter(Boolean))];
+    if (!list.length) { toast.warning(t("ใส่อย่างน้อย 1 รายการ", "Enter at least one option")); return; }
+    const prev = setup;
+    try {
+      await save({ ...setup, warranty_options: list });
+      setEditing(false);
+      toast.undo(t("บันทึกรายการประกันแล้ว", "Warranty options saved"), async () => { try { await save(prev); } catch { /* ignore */ } });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
+  };
+  if (editing) {
+    return (
+      <div className="space-y-1">
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} className="w-full px-2 py-1.5 text-[12.5px] border border-slate-200 rounded-lg" />
+        <div className="flex gap-1.5">
+          <button type="button" onClick={() => void saveList()} className="h-7 px-2.5 text-[12px] rounded-lg bg-slate-700 text-white">{t("บันทึกรายการ", "Save list")}</button>
+          <button type="button" onClick={() => setEditing(false)} className="h-7 px-2.5 text-[12px] rounded-lg border border-slate-200">{t("ยกเลิก", "Cancel")}</button>
+        </div>
+        <p className="text-[11px] text-slate-400">{t("บรรทัดละ 1 ตัวเลือก · ใช้กับสินค้าทุกตัว", "One option per line · used for all products")}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-1.5">
+        <select value={sel} onChange={(e) => { if (e.target.value === "__other") { setOther(true); onChange(""); } else { setOther(false); onChange(e.target.value); } }}
+          className={`flex-1 h-9 px-2 text-[13px] border rounded-lg bg-white ${invalid ? "border-rose-300" : "border-slate-200"}`}>
+          <option value="">{t("— เลือกประกัน —", "— choose —")}</option>
+          {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+          <option value="__other">{t("อื่น ๆ (พิมพ์เอง)", "Other (type)")}</option>
+        </select>
+        {canEdit && <button type="button" onClick={() => { setText(opts.join("\n")); setEditing(true); }} title={t("แก้รายการตัวเลือก", "Edit options")} className="h-9 px-2 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">{t("แก้รายการ", "Edit")}</button>}
+      </div>
+      {(other || isOther) && (
+        <input value={value} onChange={(e) => onChange(e.target.value)} autoFocus placeholder={t("เช่น 3 เดือน ตะเข็บหลุด", "e.g. 3 months seams")}
+          className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" />
+      )}
+    </div>
+  );
+}
+
+/**
+ * สร้างแท็กประเภทสินค้าใหม่จากในป๊อป (ค้นไม่เจอ) — ชื่อไทย/อังกฤษ/กลุ่ม + ติดให้สินค้านี้ทันที
+ * + ติ๊ก "สร้างกฎประเภทนี้ไปด้วย" ใส่หัวข้อที่ต้องตอบ/จุดเด่นได้เลย (ตั้งต่อละเอียดในขั้น 2)
+ * ย้อนกลับ = ปลดแท็ก + เก็บแท็กเข้าถังขยะ + ลบกฎที่เพิ่งสร้าง
+ */
+export function CreateTagModal({ parentId, initialName, groups, canRule, onDone, onClose }: {
+  parentId: string; initialName: string; groups: { id: string; name: string }[]; canRule: boolean;
+  onDone: () => void; onClose: () => void;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const [name, setName] = useState(initialName);
+  const [nameEn, setNameEn] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [withRule, setWithRule] = useState(canRule);
+  const [topics, setTopics] = useState("");
+  const [hls, setHls] = useState("");
+  const [busy, setBusy] = useState(false);
+  const post = async (url: string, body: unknown) => {
+    const j = await apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+    if (j.error) throw new Error(j.error);
+    return j;
+  };
+  const save = async () => {
+    if (!name.trim()) { toast.warning(t("ใส่ชื่อแท็กก่อน", "Enter a tag name")); return; }
+    // หัวข้อ: บรรทัดละข้อ "หัวข้อ: ตัวเลือก1, ตัวเลือก2"
+    const rows = topics.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const i = l.indexOf(":");
+      return i > 0 ? { th: l.slice(0, i).trim(), opts: l.slice(i + 1).split(",").map((x) => x.trim()).filter(Boolean) } : { th: l, opts: [] as string[] };
+    }).filter((x) => x.th);
+    const highlights = hls.split(",").map((x) => x.trim()).filter(Boolean);
+    if (withRule && !rows.length && !highlights.length) { toast.warning(t("ใส่หัวข้อหรือจุดเด่นอย่างน้อย 1 อย่าง หรือเอาติ๊ก “สร้างกฎ” ออก", "Add a question or highlight, or untick “create rule”")); return; }
+    setBusy(true);
+    let tagId = ""; let existed = false; let ruleId = "";
+    try {
+      const c = await post("/api/product-tags", { create: { name: name.trim(), name_en: nameEn.trim() || null, group_id: groupId || null } });
+      tagId = String(c.data.id); existed = !!c.existed;
+      await post("/api/product-tags", { parent_id: parentId, tag_id: tagId, on: true });
+      if (withRule) {
+        const r = await post("/api/ai/product-rules", {
+          name: name.trim(), tag_ids: [tagId], name_keywords: [], brand_id: null, instruction: "", hint: "",
+          required_topics: rows.map((x) => x.th), required_topics_en: [],
+          topic_options: Object.fromEntries(rows.filter((x) => x.opts.length).map((x) => [x.th, x.opts])),
+          extras: { highlights, manual_required: [], optional_topics: [], slot_ids: [] },
+        });
+        ruleId = String(r.data?.id ?? "");
+      }
+      onDone();
+      onClose();
+      toast.undo(existed ? t(`ติดแท็ก "${name}" (มีอยู่แล้ว) แล้ว`, `Tagged "${name}" (already existed)`) : t(`สร้างแท็ก "${name}" แล้ว`, `Tag "${name}" created`), async () => {
+        try {
+          await post("/api/product-tags", { parent_id: parentId, tag_id: tagId, on: false });
+          if (!existed) await post("/api/product-tags", { tag_id: tagId, archive: true });
+          if (ruleId) await apiFetch(`/api/ai/product-rules?id=${encodeURIComponent(ruleId)}`, { method: "DELETE" });
+          onDone();
+        } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); }
+      }, { ms: 8000 });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("สร้างแท็กไม่สำเร็จ", "Could not create tag"));
+      if (tagId) onDone();
+    } finally { setBusy(false); }
+  };
+  const dirty = name !== initialName || !!nameEn || !!topics || !!hls;
+  return (
+    <ERPModal open onClose={onClose} size="md" hasUnsavedChanges={dirty} title={t("สร้างแท็กประเภทสินค้า", "New product-type tag")}
+      footer={<div className="flex justify-end gap-2 w-full">
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+        <button onClick={() => void save()} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{t("สร้างแล้วติดแท็ก", "Create & tag")}</button>
+      </div>}>
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่อไทย", "Thai name")} *</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" /></label>
+          <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่ออังกฤษ", "English name")}</span>
+            <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} placeholder="Neck pouch" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" /></label>
+        </div>
+        <label className="block"><span className="text-[12px] text-slate-600">{t("อยู่ในกลุ่ม", "Group")}</span>
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="w-full h-9 px-2 text-[13px] border border-slate-200 rounded-lg bg-white">
+            <option value="">{t("— ไม่ระบุกลุ่ม —", "— no group —")}</option>
+            {groups.slice().sort((a, b) => a.name.localeCompare(b.name, "th")).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select></label>
+        {canRule && (
+          <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2.5 space-y-2">
+            <label className="flex items-center gap-2 text-[12.5px] text-violet-800 font-medium">
+              <input type="checkbox" checked={withRule} onChange={(e) => setWithRule(e.target.checked)} className="accent-violet-600" />
+              {t("สร้างกฎประเภทนี้ไปด้วย (ข้อมูลที่จำเป็น)", "Also create this type's rule (required info)")}
+            </label>
+            {withRule && (<>
+              <label className="block"><span className="text-[11.5px] text-slate-600">{t("หัวข้อที่ต้องตอบ — บรรทัดละข้อ “หัวข้อ: ตัวเลือก1, ตัวเลือก2”", "Questions — one per line “question: choice1, choice2”")}</span>
+                <textarea value={topics} onChange={(e) => setTopics(e.target.value)} rows={3} placeholder={"สายคล้องถอดได้ไหม: ได้, ไม่ได้\nจำนวนช่องใส่บัตร: 1, 2, 3"} className="w-full px-2.5 py-1.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" /></label>
+              <label className="block"><span className="text-[11.5px] text-slate-600">{t("จุดเด่นให้เลือก (คั่นด้วยลูกน้ำ)", "Highlight choices (comma-separated)")}</span>
+                <input value={hls} onChange={(e) => setHls(e.target.value)} placeholder={t("เช่น หนังแท้, สายปรับยาวได้, สลักชื่อได้", "e.g. genuine leather, adjustable strap")} className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" /></label>
+              <p className="text-[11px] text-violet-600">{t("ชนิดช่องที่โชว์ · ช่องกรอกมือที่บังคับ → ตั้งต่อได้ที่ปุ่ม “ตั้งค่าประเภทนี้” ในขั้น 2", "Compartment types · required manual fields → set later in step 2")}</p>
+            </>)}
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }

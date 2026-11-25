@@ -18,7 +18,7 @@ import { writeAudit } from "@/lib/audit";
 import { CAPTION_MODEL, productDetailModel, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY, PRODUCT_FIELD_KEYS, productFieldPromptKey } from "@/lib/ai-caption";
 import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
-import { parentImageKeys } from "@/lib/product-image-keys";
+import { parentImageKeyGroups, parentImageKeys } from "@/lib/product-image-keys";
 import { cleanTemplate, templateInstruction } from "@/lib/ai-draft-setup";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,7 @@ type Body = {
 };
 
 /**
- * GET ?parent_id= → { data: { keys, max } } รูปที่ AI จะดู (ลำดับเดียวกับตอนเขียน) — ป๊อปโชว์แถบรูป + ติ๊กเอาออก
+ * GET ?parent_id= → { data: { keys, groups, max } } รูปที่ AI จะดู (ลำดับเดียวกับตอนเขียน) แบ่งกลุ่ม Parent / Description / SKU ลูก — ป๊อปโชว์แถบรูป + ติ๊กเอาออก
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "ai.caption")))
@@ -66,8 +66,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data: p } = await admin.from("parent_skus_v2").select("cover_image_r2_key").eq("id", parentId).maybeSingle();
   if (!p) return NextResponse.json({ error: "ไม่พบสินค้า" }, { status: 404 });
-  const keys = await parentImageKeys(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG * 2);
-  return NextResponse.json({ data: { keys, max: MAX_IMG }, error: null });
+  const list = await parentImageKeyGroups(admin, parentId, (p.cover_image_r2_key as string | null) ?? null, MAX_IMG * 3);
+  return NextResponse.json({ data: { keys: list.map((x) => x.key), groups: Object.fromEntries(list.map((x) => [x.key, x.group])), max: MAX_IMG }, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

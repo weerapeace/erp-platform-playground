@@ -26,7 +26,15 @@ export type DescTemplate = {
   /** ลบแบบเก็บไว้ก่อน (ถังขยะ) — ไม่โชว์ให้เลือก แต่กู้คืนได้ */
   archived?: boolean;
 };
-export type DraftSetup = { templates: DescTemplate[]; brand_default: Record<string, string> };
+export type DraftSetup = {
+  templates: DescTemplate[];
+  brand_default: Record<string, string>;
+  /** ตัวเลือกประกันใน dropdown ขั้นกรอกมือ (ตั้งได้ · ยังไม่ตั้ง = ค่าที่ใช้จริงในระบบ) */
+  warranty_options: string[];
+};
+
+/** ค่าประกันที่ใช้จริงในระบบ (นับจาก parent_skus_v2 · 2026-11-25) เรียงจากใช้บ่อย */
+export const DEFAULT_WARRANTY_OPTIONS = ["1 เดือน", "2 ปี", "ไม่มีรับประกัน", "1 ปี", "6 เดือน", "7 วัน", "3 ปี", "3 เดือน"];
 
 export const DEFAULT_TEMPLATES: DescTemplate[] = [
   { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ขนาด", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'" },
@@ -56,7 +64,8 @@ export function normalizeSetup(raw: unknown): DraftSetup {
   const bd = (r.brand_default && typeof r.brand_default === "object" ? r.brand_default : {}) as Record<string, unknown>;
   const brand_default: Record<string, string> = {};
   for (const [k, v] of Object.entries(bd)) if (k && typeof v === "string" && templates.some((t) => t.id === v)) brand_default[k] = v;
-  return { templates, brand_default };
+  const wo = strList(r.warranty_options, 30, 80);
+  return { templates, brand_default, warranty_options: wo.length ? wo : DEFAULT_WARRANTY_OPTIONS };
 }
 
 /** แม่แบบที่ใช้ได้ (ไม่อยู่ถังขยะ) */
@@ -89,7 +98,11 @@ export const MANUAL_FIELDS: { key: string; label: string; en: string; kind: "tex
 ];
 const MANUAL_KEYS = MANUAL_FIELDS.map((f) => f.key);
 
-export type RuleExtras = { highlights: string[]; manual_required: string[]; optional_topics: string[] };
+export type RuleExtras = {
+  highlights: string[]; manual_required: string[]; optional_topics: string[];
+  /** ชนิดช่องที่โชว์ในขั้น 2 (id ของ product_highlight_items ชนิด slot) · ว่าง = โชว์ทุกชนิด */
+  slot_ids: string[];
+};
 
 export function normalizeExtras(raw: unknown): RuleExtras {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -97,17 +110,29 @@ export function normalizeExtras(raw: unknown): RuleExtras {
     highlights: strList(r.highlights, 30, 120),
     manual_required: strList(r.manual_required, 10, 60).filter((k) => MANUAL_KEYS.includes(k)),
     optional_topics: strList(r.optional_topics, 30, 200),
+    slot_ids: strList(r.slot_ids, 60, 60),
   };
 }
 
 /** รวมค่าตั้งของหลายกฎที่สินค้าเข้า (ไม่ซ้ำ) */
 export function mergeExtras(list: unknown[]): RuleExtras {
-  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [] };
+  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [], slot_ids: [] };
   for (const x of list.map(normalizeExtras)) {
-    for (const k of ["highlights", "manual_required", "optional_topics"] as const)
+    for (const k of ["highlights", "manual_required", "optional_topics", "slot_ids"] as const)
       for (const v of x[k]) if (!out[k].includes(v)) out[k].push(v);
   }
   return out;
+}
+
+/** จุดเด่นให้เลือก: ชุดของประเภทสินค้า · ประเภทยังไม่ได้ตั้ง = คลังประโยคกลาง (เจ้าของเลือก 2026-11-25) */
+export function highlightChoices(extras: Pick<RuleExtras, "highlights">, central: string[]): { list: string[]; fromType: boolean } {
+  return extras.highlights.length ? { list: extras.highlights, fromType: true } : { list: [...new Set(central.map((x) => x.trim()).filter(Boolean))], fromType: false };
+}
+
+/** ชนิดช่องที่โชว์: เฉพาะที่ประเภทตั้งไว้ (+ ที่ใส่จำนวนไว้แล้ว ไม่ให้หาย) · ไม่ได้ตั้ง/กดดูทั้งหมด = ทุกชนิด */
+export function visibleSlots<T extends { id: string }>(items: T[], slotIds: string[], counts: Record<string, number>, showAll: boolean): T[] {
+  if (showAll || slotIds.length === 0) return items;
+  return items.filter((x) => slotIds.includes(x.id) || (counts[x.id] ?? 0) > 0);
 }
 
 const blank = (v: unknown) => { const s = String(v ?? "").trim(); return !s || s === "-" || s === "—"; };

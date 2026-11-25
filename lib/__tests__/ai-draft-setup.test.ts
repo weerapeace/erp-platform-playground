@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_TEMPLATES, cleanTemplate, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
+  DEFAULT_TEMPLATES, DEFAULT_WARRANTY_OPTIONS, cleanTemplate, highlightChoices, visibleSlots, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
   normalizeExtras, normalizeSetup, pickParcelBox, templateFor, templateInstruction,
 } from "@/lib/ai-draft-setup";
 
@@ -81,5 +81,25 @@ describe("ใส่อะไรได้จากขนาด", () => {
   });
   it("ขนาดสินค้าไม่ครบ = ไม่คิด", () => {
     expect(fitsFromSize({ w: 38, h: 0, d: 12 }, [{ id: "a", name: "a", width_cm: 1, height_cm: 1, depth_cm: 1 }])).toEqual([]);
+  });
+});
+
+describe("รอบ 3: ประกัน · จุดเด่น · ชนิดช่อง", () => {
+  it("ตัวเลือกประกัน: ยังไม่ตั้ง = ค่าที่ใช้จริง · ตั้งแล้วใช้ของที่ตั้ง", () => {
+    expect(normalizeSetup(null).warranty_options).toEqual(DEFAULT_WARRANTY_OPTIONS);
+    expect(normalizeSetup({ warranty_options: ["1 ปี", "1 ปี", " "] }).warranty_options).toEqual(["1 ปี"]);
+  });
+  it("จุดเด่น: ประเภทตั้งไว้ใช้ของประเภท · ไม่ตั้งใช้คลังกลาง", () => {
+    expect(highlightChoices({ highlights: ["หนังแท้"] }, ["กันน้ำ"])).toEqual({ list: ["หนังแท้"], fromType: true });
+    expect(highlightChoices({ highlights: [] }, ["กันน้ำ", "กันน้ำ", ""])).toEqual({ list: ["กันน้ำ"], fromType: false });
+  });
+  it("ชนิดช่อง: กรองตามประเภท แต่ช่องที่ใส่จำนวนแล้วไม่หาย · ดูทั้งหมด/ไม่ตั้ง = ทุกชนิด", () => {
+    const items = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(visibleSlots(items, ["a"], { c: 2 }, false).map((x) => x.id)).toEqual(["a", "c"]);
+    expect(visibleSlots(items, ["a"], {}, true)).toHaveLength(3);
+    expect(visibleSlots(items, [], {}, false)).toHaveLength(3);
+  });
+  it("รวมชนิดช่องจากหลายกฎ", () => {
+    expect(mergeExtras([{ slot_ids: ["a"] }, { slot_ids: ["a", "b"] }]).slot_ids).toEqual(["a", "b"]);
   });
 });
