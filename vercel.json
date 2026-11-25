@@ -51,6 +51,10 @@
       "schedule": "40 1,13 * * *"
     },
     {
+      "path": "/api/cron/marketing-traffic",
+      "schedule": "5 17 * * *"
+    },
+    {
       "path": "/api/cron/marketing-alert",
       "schedule": "20 2 * * *"
     },

@@ -147,6 +147,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
   },
   {
+    id: "marketing-traffic", zone: "marketing", kind: "auto", icon: "👀",
+    title: "ผู้นับคนดูสินค้า", titleEn: "Product views counter",
+    does: "ทุกเที่ยงคืนจดยอดคนดู กดถูกใจ ดาว และรีวิวของสินค้าทุกตัวบน Shopee แล้วลบกับเมื่อวานเป็นยอดรายวัน ให้แท็บคนเข้าร้านและเตือนดาวตก/คนดูพุ่ง",
+    trigger: `${DAILY} 00:05`, cron: "/api/cron/marketing-traffic", everyHours: 24,
+    can: ["อ่านยอดคนดู/ดาว/รีวิวจากร้าน", "จดยอดในระบบ"], cannot: ["แก้สินค้าบนร้าน", "ตอบรีวิว"],
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_item_stats", href: "/marketing/dashboard?tab=traffic",
+    files: ["app/api/cron/marketing-traffic/route.ts", "lib/marketing-traffic-server.ts", "lib/marketing-traffic-calc.ts"],
+  },
+  {
     id: "marketing-ads", zone: "marketing", kind: "auto", icon: "📣",
     title: "ผู้เก็บยอดโฆษณา", titleEn: "Ads collector",
     does: "วันละ 2 รอบดึงยอดโฆษณาจาก Shopee Ads และ Meta Ads (ค่าโฆษณา ยอดขายจากโฆษณา คลิก) รายแคมเปญรายวัน มาไว้ในแท็บโฆษณาของหน้าการตลาด",

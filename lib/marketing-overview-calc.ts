@@ -248,6 +248,9 @@ export function buildMarketingAlerts(x: {
   feeSpikes?: { name: string; pct: number; basePct: number; fee: number }[];
   /** แคมเปญโฆษณาขาดทุนติดกัน ≥ 3 วัน (รอบ 3 · lib/marketing-ads-server recentLosingCampaigns) */
   losingAds?: { name: string; spend: number; roas: number | null; breakeven: number | null; days: number }[];
+  /** ดาวรีวิวตกจากวันก่อน / คนดูพุ่ง (รอบ 4 · lib/marketing-traffic-server recentTrafficAlerts) */
+  ratingDrops?: { name: string; rating: number; prev: number | null }[];
+  viewSpikes?: { name: string; views: number; avg: number }[];
 }): MarketingAlert[] {
   const out: MarketingAlert[] = [];
   const p = x.pace;
@@ -273,6 +276,14 @@ export function buildMarketingAlerts(x: {
     const top = x.losingAds.slice(0, 3).map((a) => `${a.name} (ROAS ${a.roas == null ? "—" : a.roas.toFixed(1)} · คุ้มทุน ${a.breakeven ?? "—"} · ${a.days} วัน)`).join(" · ");
     out.push({ key: "ads_loss", level: "warning", tab: "ads", title: `แคมเปญโฆษณาขาดทุน ${x.losingAds.length} แคมเปญ`,
       body: `${top} — จ่ายไป ${baht(x.losingAds.reduce((s, a) => s + a.spend, 0))} ใน 7 วัน · ลองลดงบหรือปรับคำค้น` });
+  }
+  if (x.ratingDrops?.length) {
+    const top = x.ratingDrops.slice(0, 3).map((r) => `${r.name} ${r.prev != null ? `${r.prev.toFixed(2)}→` : ""}${r.rating.toFixed(2)}`).join(" · ");
+    out.push({ key: "rating_drop", level: "warning", tab: "traffic", title: `ดาวรีวิวตก ${x.ratingDrops.length} สินค้า`, body: `${top} — เปิดอ่านรีวิวล่าสุด แล้วตอบ/แก้ปัญหา` });
+  }
+  if (x.viewSpikes?.length) {
+    const top = x.viewSpikes.slice(0, 3).map((v) => `${v.name} ${Math.round(v.views)} คน (ปกติ ${Math.round(v.avg)})`).join(" · ");
+    out.push({ key: "view_spike", level: "info", tab: "traffic", title: `คนดูพุ่ง ${x.viewSpikes.length} สินค้า`, body: `${top} — เช็กสต็อกและเร่งโฆษณาให้ทัน` });
   }
   if (x.fallingA.length) {
     const names = x.fallingA.slice(0, 3).map((f) => `${f.name}${f.change != null ? ` ${Math.round(f.change * 100)}%` : ""}`).join(" · ");

@@ -18,6 +18,7 @@ import { countsAsSale } from "@/lib/platform-order-status";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { recentFeeSpikes } from "@/lib/marketing-fees-server";
 import { recentLosingCampaigns } from "@/lib/marketing-ads-server";
+import { recentTrafficAlerts } from "@/lib/marketing-traffic-server";
 import { loadOrderItems, loadPlatformOrders, type SalesOrderLite } from "@/lib/platform-sales-load";
 import { SALES_TARGET_KEY, bkkStartIso, bkkYmd, itemValueByOrder, monthToDate, orderValue, readSalesTarget, shiftYmd, type ItemLite } from "@/lib/platform-dashboard-calc";
 import {
@@ -66,6 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // เตือนค่าธรรมเนียมพุ่ง / แคมเปญขาดทุน — เริ่มคิดพร้อมกันตั้งแต่ต้น (ไม่รอส่วนอื่น)
     const feeSpikesP = recentFeeSpikes(admin, today, { platformId, brandId }).catch(() => []);
     const losingAdsP = recentLosingCampaigns(admin, today, brandId).catch(() => []);
+    const trafficP = recentTrafficAlerts(admin, today, brandId).catch(() => ({ ratingDrops: [], viewSpikes: [] }));
 
     // ── หน้าต่างเวลาเดียว ครอบทุกอย่างที่ต้องใช้ ──
     const cmp = comparePeriods(from, to);
@@ -251,7 +253,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const avgFrom = shiftYmd(today, -29), avgTo = shiftYmd(today, -2);
     const avgDaily28 = sumVal(between(winSales, avgFrom, avgTo)) / 28;
     const fallingA = significantFalls(products.map((p) => ({ ...p, cur: p.last14, prev: p.prev14 })), sales).map((p) => ({ name: p.code || p.name, change: p.trendChange }));
-    const alerts = buildMarketingAlerts({ feeSpikes: await feeSpikesP, losingAds: await losingAdsP, pace, yesterday: sumVal(between(winSales, yesterday, yesterday)), avgDaily28, storeFaultCancels7d: storeFault7d, fallingA });
+    const traffic = await trafficP;
+    const alerts = buildMarketingAlerts({ feeSpikes: await feeSpikesP, losingAds: await losingAdsP, ratingDrops: traffic.ratingDrops, viewSpikes: traffic.viewSpikes, pace, yesterday: sumVal(between(winSales, yesterday, yesterday)), avgDaily28, storeFaultCancels7d: storeFault7d, fallingA });
 
     // ── หมายเหตุข้อมูล ──
     const notes: string[] = [];
