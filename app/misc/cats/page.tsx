@@ -11,7 +11,7 @@ import { CatsApp } from "./cats-app";
 export default function CatsPage() {
   return (
     <PlaygroundShell>
-      <div className="min-h-full bg-slate-50">
+      <div className="cats-theme min-h-full">
         <CatsApp />
       </div>
     </PlaygroundShell>

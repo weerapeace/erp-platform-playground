@@ -10,6 +10,7 @@ import { Icon } from "@/components/icon";
 import { formatDate, todayBangkok } from "@/lib/date";
 import { sinceText, weightAlert } from "@/lib/cats-extras";
 import { WeightAlertBadge } from "./extras-ui";
+import { CartoonCat, pawBurst } from "./cats-cute";
 import { ageText, dueLabel, daysBetween, isLatestRecord, latestWeight, SEX_LABEL, TREATMENT_LABEL, type Cat, type CatKind, type CatsData, type Treatment, type Vaccination } from "@/lib/cats";
 import { WeightChart } from "./weight-chart";
 import { catPhotoUrl, fmtMoney } from "./use-cats";
@@ -29,9 +30,7 @@ export function CatPhoto({ cat, className = "", w = 800, onClick }: { cat: Cat; 
     // eslint-disable-next-line @next/next/no-img-element
     <img src={url} alt={cat.name} onClick={onClick} className={`object-cover ${onClick ? "cursor-zoom-in" : ""} ${className}`} loading="lazy" />
   ) : (
-    <div className={`flex items-center justify-center bg-gradient-to-br from-amber-50 to-orange-100 text-orange-300 ${className}`}>
-      <Icon name="cat" size="45%" />
-    </div>
+    <CartoonCat color={cat.color} seed={cat.id} title={cat.name} className={className} />
   );
 }
 
@@ -95,7 +94,7 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
   return (
     <div className="space-y-4">
       <button type="button" onClick={onBack} className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <Icon name="arrow-left" /> แมวทั้งหมด
+        <Icon name="arrow-left" /> น้องแมวทั้งหมด
       </button>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white md:grid md:grid-cols-[minmax(0,380px)_1fr]">
@@ -155,7 +154,7 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
                   <div className="text-xs text-slate-500">ฉีด {formatDate(v.date_given)}{v.clinic_id ? ` · ${clinicName(v.clinic_id)}` : ""}{v.cost != null ? ` · ${fmtMoney(v.cost)}` : ""}{v.next_due_date ? ` · นัด ${formatDate(v.next_due_date)}` : ""}</div>
                 </div>
                 {latest && v.next_due_date && <DuePill due={v.next_due_date} today={today} />}
-                {latest && v.next_due_date && canEdit && <button type="button" onClick={() => onDone("vaccinations", v)} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ฉีดแล้ว</button>}
+                {latest && v.next_due_date && canEdit && <button type="button" onClick={(e) => { pawBurst(e); onDone("vaccinations", v); }} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ฉีดแล้ว</button>}
                 {rowActions("vaccinations", v, v.vaccine_name)}
               </div>
             );
@@ -177,7 +176,7 @@ export function CatDetail({ cat, data, canEdit, onBack, onForm, onDone, onDelete
                   <div className="text-xs text-slate-500">ให้ {formatDate(t.date_given)}{t.interval_days ? ` · ทุก ${t.interval_days} วัน` : ""}{t.cost != null ? ` · ${fmtMoney(t.cost)}` : ""}{t.next_due_date ? ` · ครั้งถัดไป ${formatDate(t.next_due_date)}` : ""}</div>
                 </div>
                 {latest && t.next_due_date && <DuePill due={t.next_due_date} today={today} />}
-                {latest && t.next_due_date && canEdit && <button type="button" onClick={() => onDone("treatments", t)} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ให้ยาแล้ว</button>}
+                {latest && t.next_due_date && canEdit && <button type="button" onClick={(e) => { pawBurst(e); onDone("treatments", t); }} className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ให้ยาแล้ว</button>}
                 {rowActions("treatments", t, `${TREATMENT_LABEL[t.type]} ${t.product}`)}
               </div>
             );

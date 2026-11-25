@@ -8,7 +8,8 @@
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog } from "@/components/modal";
-import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
+import { ErrorState, LoadingState } from "@/components/state-views";
+import { CuteEmpty } from "./cats-cute";
 import { formatDate, formatDateTime } from "@/lib/date";
 import { CAT_KINDS, recordLabel, type CatKind } from "@/lib/cats";
 import { useCatsData, useCatsWrite } from "./use-cats";
@@ -36,7 +37,7 @@ export function CatsTrash({ canEdit, onChanged }: { canEdit: boolean; onChanged:
 
   if (loading) return <LoadingState rows={4} />;
   if (error) return <ErrorState title="โหลดถังขยะไม่ได้" hint={error} onRetry={() => void reload()} />;
-  if (!items.length) return <EmptyState icon={<Icon name="trash" />} title="ถังขยะว่าง" hint="ของที่ลบจะมาอยู่ที่นี่ก่อน กู้คืนได้ทุกเมื่อ" />;
+  if (!items.length) return <CuteEmpty title="ถังขยะว่าง" hint="ของที่ลบจะมาอยู่ที่นี่ก่อน กู้คืนได้ทุกเมื่อ" />;
 
   return (
     <section className="space-y-2">

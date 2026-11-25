@@ -22,6 +22,8 @@ import { asMealPlan, asNotify, fmtQty, stockUnitLabel, supplyStatus } from "@/li
 import { costEntries, monthSummary } from "@/lib/cats-costs";
 import { anniversaries, nextAnniversary, weightAlert, type SetupStepKey } from "@/lib/cats-extras";
 import { AnniversaryList, PriceHistoryModal, SetupGuide, ShoppingListModal, WeightAlertBadge } from "./extras-ui";
+import { CatLogo, CuteEmpty, pawBurst } from "./cats-cute";
+import "./cats-theme.css";
 import { catPhotoUrl, fmtMoney, useCatsData, useCatsSettingsWrite, useCatsWrite } from "./use-cats";
 import { BulkWeighModal, PurchaseModal, RecordFormModal, StockCountModal, type FormTarget, type PurchaseTarget } from "./cat-forms";
 import { CatDetail, CatPhoto, DuePill } from "./cat-detail";
@@ -162,21 +164,26 @@ export function CatsApp() {
   if (!canView) return <EmptyState icon={<Icon name="paw" />} title="ยังไม่มีสิทธิ์ดูทะเบียนแมว" hint="ขอให้แอดมินเปิดสิทธิ์ “ดูทะเบียนแมว” ให้ที่ ตั้งค่าแอป → สิทธิ์ตามเมนู" />;
 
   const header = (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <h1 className="mr-auto flex items-center gap-2 text-xl font-bold sm:text-2xl text-slate-800"><Icon name="paw" className="text-orange-500" /> ทะเบียนแมว</h1>
+    <div className="mb-4 flex items-center gap-2">
+      <div className="mr-auto flex min-w-0 flex-1 items-center gap-2.5">
+        <span className="cat-logo"><CatLogo /></span>
+        <div className="min-w-0">
+          <h1 className="truncate text-lg font-bold leading-tight text-slate-800 sm:text-2xl">ทะเบียนแมว</h1>
+          <p className="truncate text-xs text-slate-500 sm:text-sm">{cats.length ? `บ้านเรามีน้อง ${cats.length} ตัว · ${cats.map((c) => c.name).join(" ")}` : "เริ่มจากเพิ่มน้องตัวแรกกัน"}</p>
+        </div>
+      </div>
       <button type="button" onClick={() => setInstallOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"><Icon name="device-mobile" /> <span className="hidden sm:inline">ติดตั้งบนมือถือ</span></button>
       {canEdit && <button type="button" onClick={() => setWeighOpen(true)} disabled={!cats.length} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"><Icon name="scale" /> <span className="hidden sm:inline">ชั่งทุกตัว</span></button>}
-      {canEdit && <button type="button" onClick={() => setForm({ kind: "cats" })} className="inline-flex items-center gap-1 rounded-lg bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"><Icon name="plus" /> เพิ่มแมว</button>}
+      {canEdit && <button type="button" onClick={() => setForm({ kind: "cats" })} aria-label="เพิ่มน้องแมว" className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-orange-500 px-2.5 py-1.5 sm:px-3 text-sm font-medium text-white hover:bg-orange-600"><Icon name="plus" /> <span className="hidden whitespace-nowrap sm:inline">เพิ่มน้อง</span></button>}
     </div>
   );
 
   const tabs = (
-    <div className="sticky top-0 z-10 -mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
+    <div className="cat-tabs sticky top-0 z-10 -mx-4 mb-4 flex gap-1.5 overflow-x-auto px-4 py-2 backdrop-blur [scrollbar-width:none] sm:-mx-6 sm:px-6">
       {VIEWS.map((t) => (
-        <button key={t.k} type="button" onClick={() => go({ view: t.k })}
-          className={`inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm ${view === t.k && !cat ? "border-orange-500 font-medium text-orange-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+        <button key={t.k} type="button" onClick={() => go({ view: t.k })} aria-current={view === t.k && !cat ? "page" : undefined} className="cat-tab">
           <Icon name={t.icon} /> {t.label}
-          {t.k === "home" && due.some((d) => d.daysLeft <= 7) && <span className="h-2 w-2 rounded-full bg-rose-500" aria-label="มีเรื่องใกล้ถึงกำหนด" />}
+          {t.k === "home" && due.some((d) => d.daysLeft <= 7) && <span className="h-2 w-2 rounded-full bg-rose-400 ring-2 ring-white" aria-label="มีเรื่องใกล้ถึงกำหนด" />}
         </button>
       ))}
     </div>
@@ -194,13 +201,14 @@ export function CatsApp() {
       {canEdit && <SetupGuide data={data} settings={settings} onStep={onSetupStep} />}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
-          { label: "ใกล้ถึงกำหนด", value: String(due.length), tone: due.some((d) => d.daysLeft <= 0) ? "text-rose-600" : "text-slate-800", go: () => document.getElementById("cats-due")?.scrollIntoView({ behavior: "smooth" }) },
-          { label: "ของใกล้หมด", value: String(lowStock.length), tone: lowStock.some((x) => (x.st.daysLeft ?? 9) <= 1) ? "text-rose-600" : "text-slate-800", go: () => go({ view: "food" }) },
-          { label: "จ่ายเดือนนี้", value: fmtMoney(Math.round(monthTotal)) || "฿0", tone: "text-slate-800", go: () => go({ view: "costs" }) },
+          { label: "ใกล้ถึงกำหนด", icon: "alarm", chip: "bg-rose-50 text-rose-500", value: String(due.length), tone: due.some((d) => d.daysLeft <= 0) ? "text-rose-600" : "text-slate-800", go: () => document.getElementById("cats-due")?.scrollIntoView({ behavior: "smooth" }) },
+          { label: "ของใกล้หมด", icon: "shopping-cart", chip: "bg-amber-50 text-amber-600", value: String(lowStock.length), tone: lowStock.some((x) => (x.st.daysLeft ?? 9) <= 1) ? "text-rose-600" : "text-slate-800", go: () => go({ view: "food" }) },
+          { label: "จ่ายเดือนนี้", icon: "wallet", chip: "bg-emerald-50 text-emerald-600", value: fmtMoney(Math.round(monthTotal)) || "฿0", tone: "text-slate-800", go: () => go({ view: "costs" }) },
         ].map((m) => (
           <button key={m.label} type="button" onClick={m.go} className="rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-slate-300">
+            <span className={`cat-chip mb-1.5 ${m.chip}`}><Icon name={m.icon} /></span>
             <div className="text-xs text-slate-500">{m.label}</div>
-            <div className={`text-lg font-bold sm:text-2xl ${m.tone}`}>{m.value}</div>
+            <div className={`cat-title text-lg font-bold sm:text-2xl ${m.tone}`}>{m.value}</div>
           </button>
         ))}
       </div>
@@ -227,7 +235,7 @@ export function CatsApp() {
       <section id="cats-due">
         <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="alarm" /> ใกล้ถึงกำหนด <span className="text-xs font-normal text-slate-400">ภายใน 30 วัน</span></h2>
         {due.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-slate-200 bg-white py-6 text-center text-sm text-slate-400">ไม่มีวัคซีนหรือยาที่ใกล้ถึงกำหนด</p>
+          <CuteEmpty compact title="สบายใจได้ ไม่มีนัดใกล้ ๆ" hint="ไม่มีวัคซีนหรือยาที่ต้องให้ภายใน 30 วัน" />
         ) : (
           <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
             {due.map((d) => {
@@ -242,7 +250,7 @@ export function CatsApp() {
                     </span>
                   </button>
                   <span className="hidden sm:inline"><DuePill due={d.due} today={today} /></span>
-                  {canEdit && <button type="button" onClick={() => doneFromDue(d.kind, d.recordId)} className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">{d.kind === "vaccinations" ? "ฉีดแล้ว" : "ให้ยาแล้ว"}</button>}
+                  {canEdit && <button type="button" onClick={(e) => { pawBurst(e); doneFromDue(d.kind, d.recordId); }} className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">{d.kind === "vaccinations" ? "ฉีดแล้ว" : "ให้ยาแล้ว"}</button>}
                 </div>
               );
             })}
@@ -251,9 +259,9 @@ export function CatsApp() {
       </section>
 
       <section>
-        <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="cat" /> แมวของเรา <span className="text-xs font-normal text-slate-400">{cats.length} ตัว</span></h2>
+        <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="cat" /> น้องแมวของเรา <span className="text-xs font-normal text-slate-400">{cats.length} ตัว</span></h2>
         {cats.length === 0 ? (
-          <EmptyState icon={<Icon name="cat" />} title="ยังไม่มีแมวในทะเบียน" hint="เริ่มจากเพิ่มแมวตัวแรก ใส่รูป ชื่อ วันเกิด" onCreate={canEdit ? () => setForm({ kind: "cats" }) : undefined} createLabel="เพิ่มแมว" />
+          <CuteEmpty title="ยังไม่มีน้องแมวในทะเบียน" hint="เพิ่มน้องตัวแรก ใส่รูป ชื่อ วันเกิด" actionLabel="＋ เพิ่มน้องแมว" onAction={canEdit ? () => setForm({ kind: "cats" }) : undefined} />
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {cats.map((c) => {
@@ -262,16 +270,16 @@ export function CatsApp() {
               const age = ageText(c.birth_date, today);
               const wa = weightAlert(data.weights, c.id, today);
               return (
-                <button key={c.id} type="button" onClick={() => go({ cat: c.id })} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition hover:shadow-md">
-                  <div className="relative">
-                    <CatPhoto cat={c} w={600} className="aspect-square w-full transition group-hover:scale-[1.02]" />
+                <button key={c.id} type="button" onClick={() => go({ cat: c.id })} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition hover:-translate-y-0.5 hover:shadow-md">
+                  <div className="cat-card-photo relative">
+                    <CatPhoto cat={c} w={600} className="aspect-square w-full transition group-hover:scale-[1.03]" />
                     {wa && <WeightAlertBadge alert={wa} className="absolute bottom-2 left-2" />}
                     {worst && worst.daysLeft <= 7 && (
                       <span className={`absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${dueLabel(worst.daysLeft).tone === "danger" ? "bg-rose-600" : "bg-amber-500"}`}>{dueLabel(worst.daysLeft).text}</span>
                     )}
                   </div>
-                  <div className="p-3">
-                    <div className="text-lg font-bold text-slate-800">{c.name}</div>
+                  <div className="px-3 pb-3 pt-2 text-center">
+                    <div className="cat-title text-lg font-bold text-slate-800 sm:text-xl">{c.name}</div>
                     <div className="truncate text-xs text-slate-500">{[c.sex ? SEX_LABEL[c.sex] : "", age, lw ? `${lw.kg.toFixed(1)} กก.` : ""].filter(Boolean).join(" · ") || "—"}</div>
                   </div>
                 </button>
@@ -318,7 +326,7 @@ export function CatsApp() {
           <h2 className="font-semibold text-slate-700">คลินิก / โรงพยาบาลสัตว์</h2>
           {canEdit && <button type="button" onClick={() => setForm({ kind: "clinics" })} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"><Icon name="plus" /> เพิ่มคลินิก</button>}
         </div>
-        {clinics.length === 0 && <EmptyState icon={<Icon name="building-hospital" />} title="ยังไม่มีคลินิก" hint="เพิ่มคลินิกประจำและคลินิกฉุกเฉิน 24 ชม. ไว้กดโทรได้ทันที" onCreate={canEdit ? () => setForm({ kind: "clinics" }) : undefined} createLabel="เพิ่มคลินิก" />}
+        {clinics.length === 0 && <CuteEmpty title="ยังไม่มีคลินิก" hint="เพิ่มคลินิกประจำและคลินิกฉุกเฉิน 24 ชม. ไว้กดโทรได้ทันทีตอนน้องป่วย" actionLabel="＋ เพิ่มคลินิก" onAction={canEdit ? () => setForm({ kind: "clinics" }) : undefined} />}
         <div className="grid gap-3 sm:grid-cols-2">
           {clinics.map((c) => (
             <div key={c.id} className="rounded-xl border border-slate-200 bg-white p-4">

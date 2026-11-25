@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Mali:wght@500;600;700&display=swap');
+
+/*
+ * 🐾 ทะเบียนแมว — หน้าตา "น่ารัก" แบบ A ส้มพีช (เจ้าของเลือก 2026-11-25)
+ *   ไฟล์เดียวคุมสี/มุม/เงา/ฟอนต์ของแอปแมวทั้งแอป — ครอบด้วย .cats-theme (ไม่กระทบหน้าอื่นของ ERP)
+ *   ส่วนที่ 1 = สีกลางของแอป (เปลี่ยนตรงนี้ที่เดียว ทั้งแอปเปลี่ยนตาม)
+ *   ส่วนที่ 2 = ปรับคลาสเดิม (กล่องขาว/ขอบเทา/ปุ่มฟ้า) ให้เป็นโทนอุ่น โดยไม่ต้องไล่แก้ทุกไฟล์
+ *   ส่วนที่ 3 = ชิ้นน่ารักเฉพาะ (หัวข้อฟอนต์กลม · แท็บแคปซูล · การ์ดแมว · ปุ่มยุบเด้ง · รอยเท้าเด้งตอนกด)
+ *   ป๊อปอัป (ERPModal) อยู่นอกกรอบนี้ → หน้าตาเหมือนส่วนกลางของ ERP
+ */
+
+/* ── 1. สีกลาง ───────────────────────────────────────────── */
+.cats-theme {
+  --cat-bg: #fff8f0;
+  --cat-card: #ffffff;
+  --cat-line: #f3e3d3;
+  --cat-line-strong: #ead2bc;
+  --cat-ink: #4a3b33;
+  --cat-ink-2: #6b5a4f;
+  --cat-mut: #8f7d72;
+  --cat-pri: #ff8a5c;
+  --cat-pri-hover: #f5753f;
+  --cat-soft: #ffe9dc;
+  --cat-soft-ink: #c2552d;
+  --cat-pink: #fff0f3;
+  --cat-pink-line: #ffd3dd;
+  --cat-radius: 22px;
+  --cat-shadow: 0 6px 18px -10px rgba(120, 80, 40, .28);
+  --cat-title-font: 'Mali', var(--tm-font, system-ui), sans-serif;
+  background-color: var(--cat-bg);
+  color: var(--cat-ink);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='%23c2552d' fill-opacity='.055'%3E%3Cellipse cx='26' cy='34' rx='8' ry='7'/%3E%3Ccircle cx='16' cy='23' r='3.4'/%3E%3Ccircle cx='23' cy='17' r='3.4'/%3E%3Ccircle cx='31' cy='17' r='3.4'/%3E%3Ccircle cx='38' cy='23' r='3.4'/%3E%3Cellipse cx='88' cy='94' rx='8' ry='7'/%3E%3Ccircle cx='78' cy='83' r='3.4'/%3E%3Ccircle cx='85' cy='77' r='3.4'/%3E%3Ccircle cx='93' cy='77' r='3.4'/%3E%3Ccircle cx='100' cy='83' r='3.4'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* ── 2. ปรับคลาสเดิมให้เป็นโทนอุ่น ─────────────────────────── */
+.cats-theme .bg-white.border.rounded-xl,
+.cats-theme .bg-white.border.rounded-2xl {
+  border-radius: var(--cat-radius);
+  border-width: 1.5px;
+  border-color: var(--cat-line);
+  box-shadow: var(--cat-shadow);
+}
+.cats-theme .border-slate-200,
+.cats-theme .border-slate-100 { border-color: var(--cat-line); }
+.cats-theme .border-slate-300 { border-color: var(--cat-line-strong); }
+.cats-theme .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--cat-line); border-top-style: dashed; border-top-width: 1.5px; }
+.cats-theme .text-slate-800 { color: var(--cat-ink); }
+.cats-theme .text-slate-700 { color: var(--cat-ink-2); }
+.cats-theme .text-slate-600 { color: var(--cat-ink-2); }
+.cats-theme .text-slate-500 { color: var(--cat-mut); }
+.cats-theme .bg-slate-50 { background-color: var(--cat-bg); }
+.cats-theme .hover\:bg-slate-50:hover { background-color: var(--cat-soft); }
+/* ปุ่มหลักของแอป (เดิมฟ้า/ส้ม) → ส้มพีชทรงแคปซูล */
+.cats-theme .bg-sky-600,
+.cats-theme .bg-orange-500 { background-color: var(--cat-pri); border-radius: 999px; box-shadow: 0 3px 0 rgba(0, 0, 0, .12); }
+.cats-theme .bg-sky-600:hover,
+.cats-theme .bg-orange-500:hover { background-color: var(--cat-pri-hover); }
+/* ปุ่มเล็กในรายการ (ซื้อเข้า/สั่งซื้อ/ให้ยาแล้ว) → แคปซูล */
+.cats-theme button.rounded-lg.text-xs,
+.cats-theme a.rounded-lg.text-xs { border-radius: 999px; }
+/* ปุ่มขอบเส้นทั่วไป → แคปซูล */
+.cats-theme button.rounded-lg.border.px-3,
+.cats-theme a.rounded-lg.border.px-3 { border-radius: 999px; }
+
+/* ── 3. ชิ้นน่ารักเฉพาะ ─────────────────────────────────────── */
+.cats-theme h1, .cats-theme h2, .cats-theme h3, .cats-theme .cat-title { font-family: var(--cat-title-font); }
+.cats-theme .cat-logo { width: 46px; height: 46px; border-radius: 16px; background: var(--cat-soft); display: grid; place-items: center; flex: none; }
+@media (max-width: 639px) { .cats-theme .cat-logo { width: 38px; height: 38px; border-radius: 13px; } .cats-theme .cat-logo svg { width: 24px; height: 24px; } }
+
+.cats-theme .cat-tabs { background-color: color-mix(in srgb, var(--cat-bg) 94%, transparent); }
+.cats-theme .cat-tab { white-space: nowrap; border-radius: 999px; padding: 6px 14px; font-size: 14px; background: var(--cat-card); border: 1.5px solid var(--cat-line); color: var(--cat-mut); display: inline-flex; gap: 6px; align-items: center; }
+.cats-theme .cat-tab:hover { color: var(--cat-ink); border-color: var(--cat-line-strong); }
+.cats-theme .cat-tab[aria-current="page"] { background: var(--cat-pri); border-color: var(--cat-pri); color: #fff; font-weight: 600; }
+
+.cats-theme .cat-chip { width: 34px; height: 34px; border-radius: 12px; display: grid; place-items: center; }
+
+.cats-theme .cat-card-photo { margin: 8px 8px 0; border-radius: calc(var(--cat-radius) - 7px); overflow: hidden; }
+.cats-theme .cat-speech { font-size: 12px; color: var(--cat-mut); }
+.cats-theme .cat-bday { background: var(--cat-pink); border-color: var(--cat-pink-line); }
+
+/* ปุ่มยุบเด้งตอนกด (ทุกปุ่มในแอปแมว) */
+.cats-theme button:not(:disabled):active,
+.cats-theme a.rounded-lg:active { transform: translateY(1.5px) scale(.97); }
+.cats-theme button { transition: transform .08s ease, background-color .15s ease; }
+
+/* รอยเท้าเด้งตอนกด "ฉีดแล้ว / ให้ยาแล้ว" (สร้างโดย pawBurst ใน cats-cute.tsx · ต่อท้าย body) */
+.cat-paw-burst { position: fixed; z-index: 9999; pointer-events: none; width: 18px; height: 18px; margin: -9px 0 0 -9px; color: #ff8a5c; animation: cat-paw-fly .75s ease-out forwards; }
+@keyframes cat-paw-fly {
+  0% { transform: translate(0, 0) scale(.4) rotate(0deg); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(1.1) rotate(var(--rot)); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cat-paw-burst { display: none; }
+  .cats-theme button:active { transform: none; }
+}

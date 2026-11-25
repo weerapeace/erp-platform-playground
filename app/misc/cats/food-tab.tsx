@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { StepInput } from "@/components/step-input";
-import { EmptyState } from "@/components/state-views";
+import { CuteEmpty } from "./cats-cute";
 import { formatDate, todayBangkok } from "@/lib/date";
 import { SUPPLY_TYPE_LABEL, WET_KIND_LABEL, type CatsData, type Supply, type SupplyType } from "@/lib/cats";
 import { asMealPlan, fmtQty, mealDaily, stockUnitLabel, supplyStatus, wetKindSummary, type MealPlan } from "@/lib/cats-supplies";
@@ -127,7 +127,7 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
           {supplies.length > 0 && <button type="button" onClick={onShopping} className="ml-auto mr-2 inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-3 py-1.5 text-sm font-medium text-orange-700 hover:bg-orange-100"><Icon name="shopping-cart" /> รายการต้องซื้อ</button>}
           {canEdit && <button type="button" onClick={() => onForm({ kind: "supplies" })} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"><Icon name="plus" /> เพิ่มอาหาร/ทราย</button>}
         </div>
-        {!supplies.length && <EmptyState icon={<Icon name="box" />} title="ยังไม่มีอาหารหรือทราย" hint="เพิ่มอาหารเม็ด อาหารเปียก (เกรวี่/เจลลี่) และทราย พร้อมราคาและลิงก์ร้าน แล้วระบบจะบอกว่าเหลือกี่วัน" onCreate={canEdit ? () => onForm({ kind: "supplies" }) : undefined} createLabel="เพิ่มอาหาร/ทราย" />}
+        {!supplies.length && <CuteEmpty title="ชามข้าวน้องยังว่างอยู่" hint="เพิ่มอาหารเม็ด อาหารเปียก (เกรวี่/เจลลี่) และทราย พร้อมราคาและลิงก์ร้าน แล้วระบบจะบอกว่าเหลือกี่วัน" actionLabel="＋ เพิ่มอาหาร/ทราย" onAction={canEdit ? () => onForm({ kind: "supplies" }) : undefined} />}
         {TYPES.map((t) => {
           const list = supplies.filter((s) => s.type === t);
           if (!list.length) return null;

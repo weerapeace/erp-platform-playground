@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
 import { MonthNav } from "@/components/month-nav";
 import { SimpleBarChart } from "@/components/bar-chart";
-import { EmptyState } from "@/components/state-views";
+import { CuteEmpty } from "./cats-cute";
 import { formatDate, todayBangkok } from "@/lib/date";
 import { COST_CATEGORY_LABEL, costEntries, monthlyTotals, monthSummary, shortMonthTh } from "@/lib/cats-costs";
 import type { CatsData } from "@/lib/cats";
@@ -55,7 +55,7 @@ export function CostsTab({ data, canEdit, onForm, onDeleteExpense, onOpenCat }: 
       </div>
 
       {sum.entries.length === 0 ? (
-        <EmptyState icon={<Icon name="receipt" />} title={`ยังไม่มีค่าใช้จ่ายเดือน ${shortMonthTh(ym)}`} hint="ค่าใช้จ่ายมาจาก ซื้อเข้า · วัคซีน · ยา · หาหมอ อัตโนมัติ หรือกด “จดค่าใช้จ่าย” สำหรับขนม ของเล่น อาบน้ำตัดขน" />
+        <CuteEmpty title={`ยังไม่มีค่าใช้จ่ายเดือน ${shortMonthTh(ym)}`} hint="ค่าใช้จ่ายมาจาก ซื้อเข้า · วัคซีน · ยา · หาหมอ อัตโนมัติ หรือกด “จดค่าใช้จ่าย” สำหรับขนม ของเล่น อาบน้ำตัดขน" />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           <section className="rounded-xl border border-slate-200 bg-white p-4">

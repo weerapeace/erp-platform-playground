@@ -21,6 +21,7 @@ import {
   type Anniversary, type SetupStepKey, type WeightAlert,
 } from "@/lib/cats-extras";
 import { fmtMoney } from "./use-cats";
+import { setupSpeech } from "./cats-cute";
 
 // ─── ตัวช่วยเริ่มต้น ───────────────────────────────────────────────────────
 const HIDE_KEY = "cats.setup.hidden";
@@ -43,7 +44,7 @@ export function SetupGuide({ data, settings, onStep }: { data: CatsData; setting
       <div className="mb-3 flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h2 className="flex items-center gap-2 font-semibold text-slate-800"><Icon name="wand" className="text-orange-500" /> เริ่มใช้ทะเบียนแมว</h2>
-          <p className="text-xs text-slate-500">ทำครบ 5 ขั้น ระบบจะบอกวันหมดของ ค่าใช้จ่าย และเตือนใน LINE ให้เอง · ทำแล้ว {doneCount}/{steps.length}</p>
+          <p className="text-xs text-slate-500">{setupSpeech(steps.length - doneCount)} · ทำแล้ว {doneCount}/{steps.length}</p>
         </div>
         <button type="button" onClick={() => { setHidden(true); try { localStorage.setItem(HIDE_KEY, "1"); } catch { /* ไม่มีที่เก็บ */ } }} className="shrink-0 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-white">ซ่อน</button>
       </div>
@@ -52,13 +53,13 @@ export function SetupGuide({ data, settings, onStep }: { data: CatsData; setting
         {steps.map((s, i) => (
           <li key={s.key}>
             <button type="button" onClick={() => onStep(s.key)}
-              className={`flex h-full w-full items-start gap-2 rounded-xl border p-2.5 text-left transition sm:flex-col ${s.done ? "border-emerald-200 bg-white" : s === next ? "border-orange-400 bg-white shadow-sm" : "border-slate-200 bg-white/70 hover:bg-white"}`}>
+              className={`flex h-full w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition sm:flex-col sm:items-start sm:py-2.5 ${s.done ? "border-emerald-200 bg-white" : s === next ? "border-orange-400 bg-white shadow-sm" : "border-slate-200 bg-white/70 hover:bg-white"}`}>
               <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${s.done ? "bg-emerald-500 text-white" : s === next ? "bg-orange-500 text-white" : "bg-slate-200 text-slate-600"}`}>
                 {s.done ? <Icon name="check" /> : i + 1}
               </span>
               <span className="min-w-0">
                 <span className={`block text-sm font-medium ${s.done ? "text-slate-500 line-through decoration-emerald-400" : "text-slate-800"}`}>{s.title}</span>
-                <span className="block text-[11px] text-slate-500">{s.hint}</span>
+                <span className="hidden text-[11px] text-slate-500 sm:block">{s.hint}</span>
               </span>
             </button>
           </li>
@@ -215,11 +216,11 @@ export function AnniversaryList({ items, onOpen }: { items: Anniversary[]; onOpe
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       {items.map((a) => (
-        <button key={a.key} type="button" onClick={() => onOpen(a.catId)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${a.daysLeft === 0 ? "border-pink-300 bg-pink-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+        <button key={a.key} type="button" onClick={() => onOpen(a.catId)} className={`cat-bday flex items-center gap-3 rounded-2xl border p-3 text-left ${a.daysLeft === 0 ? "ring-2 ring-pink-200" : ""}`}>
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg ${a.kind === "birthday" ? "bg-pink-100 text-pink-600" : "bg-sky-100 text-sky-600"}`}><Icon name={a.kind === "birthday" ? "cake" : "home"} /></span>
           <span className="min-w-0">
-            <span className="block text-sm font-medium text-slate-800">{anniversaryText(a)}</span>
-            <span className="text-xs text-slate-500">{formatDate(a.date)}</span>
+            <span className="cat-title block text-sm font-semibold text-slate-800 sm:text-base">{anniversaryText(a)}</span>
+            <span className="text-xs text-slate-500">{formatDate(a.date)} · {a.kind === "birthday" ? "เตรียมขนมไว้เลย" : "ขอบคุณที่มาอยู่ด้วยกันนะ"}</span>
           </span>
         </button>
       ))}
