@@ -191,7 +191,7 @@ export function splitSkus<T extends Pick<LazCreateSku, "code" | "is_active" | "s
  */
 export function planLazadaCreate(input: {
   parent: LazCreateParent; skus: LazCreateSku[]; draft: LazCreateDraft;
-  mappedCategory: string | null; galleryKeys: string[]; attrDefs: LazadaAttrDef[] | null; onShop: string | null;
+  mappedCategory: string | null; galleryKeys: string[]; /** จำนวนรูปหลัก (ปก + แกลเลอรี) ที่อยู่หน้า galleryKeys — ไม่นับปกตัวสี/รูปตัวขายที่ต่อท้าย (ตัวตรวจร้าน↔ระบบใช้ · 2026-11-24) */ galleryCoreCount?: number; attrDefs: LazadaAttrDef[] | null; onShop: string | null;
   /** ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ui_config) · null/ไม่ส่ง = ค่าเริ่มต้นของระบบ */
   attrRules?: AttrDefaultRule[] | null;
 }): { preview: LazCreatePreview; payload: Record<string, unknown> } {
@@ -410,7 +410,7 @@ export function planLazadaCreate(input: {
       description: { value: descHtml, src: descSrc },
       highlights: { value: hiLines, src: hiLines ? "เขียนไว้สำหรับ Lazada" : "ไม่มี (ไม่บังคับ)" },
       brand: { value: LAZADA_NO_BRAND, src: "ร้าน IG บน Lazada ใช้ No Brand" },
-      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, LAZADA_CREATE_MAX_IMAGES).length) },
+      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryCoreCount != null ? input.galleryKeys.slice(0, input.galleryCoreCount) : input.galleryKeys, draftKeysRaw, LAZADA_CREATE_MAX_IMAGES).length) },
       package: { weight, ...box, src: pkgSrc },
       dims, saleProps, variants,
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],

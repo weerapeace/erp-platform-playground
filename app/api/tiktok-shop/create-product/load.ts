@@ -121,7 +121,7 @@ export async function loadTiktokCreate(admin: SupabaseClient, parentId: string, 
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
     draft, mappedCategory: it.platformCategory || null,
-    galleryKeys: it.images.map((x) => x.key), attrDefs, attrFields, rules, brand, brandNote, warehouseId,
+    galleryKeys: it.images.map((x) => x.key), galleryCoreCount: it.images.filter((x) => !/^(สี |SKU )/.test(x.source)).length, attrDefs, attrFields, rules, brand, brandNote, warehouseId,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null,
   });
   if (preview.on_shop) blockers.push(`มีบน TikTok แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);

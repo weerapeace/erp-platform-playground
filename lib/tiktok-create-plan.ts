@@ -135,7 +135,7 @@ export function ttsAttrDefsOf(raw: Record<string, unknown>[]): TtsAttrDef[] {
  */
 export function planTiktokCreate(input: {
   parent: TtsCreateParent; skus: TtsCreateSku[]; draft: TtsCreateDraft;
-  mappedCategory: string | null; galleryKeys: string[]; attrDefs: TtsAttrDef[] | null;
+  mappedCategory: string | null; galleryKeys: string[]; /** จำนวนรูปหลัก (ปก + แกลเลอรี) ที่อยู่หน้า galleryKeys — ไม่นับปกตัวสี/รูปตัวขายที่ต่อท้าย (ตัวตรวจร้าน↔ระบบใช้ · 2026-11-24) */ galleryCoreCount?: number; attrDefs: TtsAttrDef[] | null;
   /** ช่องคุณลักษณะเต็ม (มีตัวเลือก) + กติกาของหมวด — ttsCategoryMeta · ไม่ส่ง = ใช้ attrDefs (นับช่องบังคับอย่างเดียว) */
   attrFields?: TtsAttrField[] | null; rules?: TtsCategoryRules | null;
   brand: { id: string; name: string } | null; brandNote?: string | null; onShop: string | null;
@@ -303,7 +303,7 @@ export function planTiktokCreate(input: {
       category: { id: categoryId, label: catPath || null, src: catSrc },
       description: { value: desc.html, src: descSrc },
       brand: { id: input.brand?.id ?? null, name: input.brand?.name ?? null, src: brandSrc },
-      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, TTS_MAX_IMAGES).length) },
+      images: { refs, src: imgSrc, custom: picked.length > 0, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryCoreCount != null ? input.galleryKeys.slice(0, input.galleryCoreCount) : input.galleryKeys, draftKeysRaw, TTS_MAX_IMAGES).length) },
       package: { weight, ...box, src: pkgSrc },
       dims, variants,
       attrs: { required, loaded: !!(fields ?? input.attrDefs), fields: fields ?? [], values: attrVals },

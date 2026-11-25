@@ -297,7 +297,7 @@ export type ShopeeCreatePreview = {
 export function planShopeeCreate(input: {
   parent: ShopeeCreateParent; skus: ShopeeCreateSku[]; draft: ShopeeCreateDraft;
   category: ShopeeCategoryPick | null; candidates: ShopeeCategoryPick[];
-  galleryKeys: string[]; attrFields: TtsAttrField[] | null; limits: ShopeeCreateLimits | null;
+  galleryKeys: string[]; /** จำนวนรูปหลัก (ปก + แกลเลอรี) ที่อยู่หน้า galleryKeys — ไม่นับปกตัวสี/รูปตัวขายที่ต่อท้าย (ตัวตรวจร้าน↔ระบบใช้ · 2026-11-24) */ galleryCoreCount?: number; attrFields: TtsAttrField[] | null; limits: ShopeeCreateLimits | null;
   template: ShopeeTemplate | null; onShop: string | null;
   /** ค่าเริ่มต้นช่องคุณลักษณะของร้าน (ui_config) · null/ไม่ส่ง = ค่าเริ่มต้นของระบบ DEFAULT_ATTR_RULES */
   attrRules?: AttrDefaultRule[] | null;
@@ -535,7 +535,7 @@ export function planShopeeCreate(input: {
       colorChoices: [...new Set(act.flatMap((s) => [str(s.color_platform_th), str(s.color_th)]).filter(Boolean))],
       category: { id: categoryId, label: cat?.label ?? null, kind: cat?.kind ?? null, src: catSrc, candidates: input.candidates },
       brand: { ...brand, src: brandSrc },
-      images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryKeys, draftKeysRaw, imagesMax).length) },
+      images: { refs, src: imgSrc, custom: picked.length > 0, min: imagesMin, max: imagesMax, core: picked.length ? refs.length : Math.min(refs.length, listingDefaultImages(input.galleryCoreCount != null ? input.galleryKeys.slice(0, input.galleryCoreCount) : input.galleryKeys, draftKeysRaw, imagesMax).length) },
       weight: { kg: weight, src: wSrc },
       box: { ...box, mandatory: boxMandatory },
       dims, variants,

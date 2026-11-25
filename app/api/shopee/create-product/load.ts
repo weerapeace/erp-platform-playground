@@ -210,7 +210,7 @@ export async function loadShopeeCreate(admin: SupabaseClient, parentId: string, 
       cover_image_r2_key: (s.cover_image_r2_key as string) ?? null, attribute_values: (s.attribute_values as Record<string, unknown>) ?? null,
       is_active: s.is_active !== false, sale_ok: s.sale_ok == null ? null : s.sale_ok !== false,
     })),
-    draft, category, candidates, galleryKeys: it.images.map((x) => x.key), attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template, channels,
+    draft, category, candidates, galleryKeys: it.images.map((x) => x.key), galleryCoreCount: it.images.filter((x) => !/^(สี |SKU )/.test(x.source)).length, attrFields, limits: shopeeCreateLimitsOf(limitsRaw), template, channels,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules, lazadaDescImages, imageWidths,
   });
   if (preview.on_shop) blockers.push(`มีบน Shopee แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);

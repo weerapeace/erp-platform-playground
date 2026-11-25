@@ -101,7 +101,7 @@ export async function loadLazadaCreate(admin: SupabaseClient, parentId: string, 
       gallery_keys: gallery[str(s.id)] ?? [],
     })),
     draft, mappedCategory: it.platformCategory || null,
-    galleryKeys: it.images.map((x) => x.key), attrDefs,
+    galleryKeys: it.images.map((x) => x.key), galleryCoreCount: it.images.filter((x) => !/^(สี |SKU )/.test(x.source)).length, attrDefs,
     onShop: exOnShop ? str(exOnShop.external_product_id) : null, attrRules,
   });
   if (preview.on_shop) blockers.push(`มีบน Lazada แล้ว (#${preview.on_shop}) — ไม่สร้างซ้ำ`);
