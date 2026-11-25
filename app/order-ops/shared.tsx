@@ -13,6 +13,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
+import { SkuPicker } from "@/components/pickers";
 import { COMMAND_BOX_LABEL, commandBoxOf, guessCommandBox, isCommandBox, type CommandBox } from "@/lib/order-ops";
 
 export type Tone = "neutral" | "accent" | "warning" | "success" | "danger";
@@ -170,7 +171,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
 
-export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice"; label: string; value?: string | null; sort_order: number; is_active: boolean };
+export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice" | "command_phrase" | "special_wrap"; label: string; value?: string | null; sort_order: number; is_active: boolean; extra?: { sku_id?: string; sku_code?: string | null; template_group?: string } | null };
 
 export function useOpsOptions() {
   const [options, setOptions] = useState<OptionRow[]>([]);
@@ -188,6 +189,12 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
   const toast = useToast();
   const [label, setLabel] = useState("");
   const [choiceFor, setChoiceFor] = useState<string | null>(null);
+  const [phraseFor, setPhraseFor] = useState<string | null>(null);
+  const [tplGroups, setTplGroups] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open || kind !== "instruction_command") return;
+    opsJson<{ templates: { group?: string | null }[] }>("/api/order-gift-cards?view=templates").then((r) => setTplGroups([...new Set(r.templates.map((t) => (t.group ?? "").trim()).filter(Boolean))])).catch(() => {});
+  }, [open, kind]);
   const rows = options.filter((o) => o.kind === kind);
   const title = kind === "instruction_command" ? "จัดการคำสั่ง" : "จัดการหัวข้อซ่อม";
 
@@ -228,6 +235,11 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
                     <option value="">กล่อง: เดาจากชื่อ ({COMMAND_BOX_LABEL[guessCommandBox(o.label)]})</option>
                     {(Object.keys(COMMAND_BOX_LABEL) as CommandBox[]).map((b) => <option key={b} value={b}>กล่อง: {COMMAND_BOX_LABEL[b]}</option>)}
                   </select>
+                  {commandBoxOf(o.label, o.value) === "phrase" && <button onClick={() => setPhraseFor(o.label)} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-slate-50">ข้อความลัด ({options.filter((x) => x.kind === "command_phrase" && x.value === o.label).length})</button>}
+                  {commandBoxOf(o.label, o.value) === "card" && (
+                    <input defaultValue={o.extra?.template_group ?? ""} list="cmd-tpl-groups" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.extra?.template_group ?? "")) void patch(o, { extra: { ...(o.extra ?? {}), template_group: v } } as Partial<OptionRow>); }}
+                      placeholder="กลุ่มแม่แบบ (ว่าง = เดา)" title="การ์ดของคำสั่งนี้เปิดกลุ่มแม่แบบไหนก่อน" className="h-7 w-36 rounded border border-slate-200 px-1.5 text-xs" />
+                  )}
                   {commandBoxOf(o.label, o.value) === "choice" && <button onClick={() => setChoiceFor(o.label)} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-slate-50">ตัวเลือก ({options.filter((x) => x.kind === "command_choice" && String(x.value ?? "").split("|")[0] === o.label).length})</button>}
                 </>
               )}
@@ -242,35 +254,47 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
         <p className="text-[11px] text-slate-400">ซ่อนแล้วจะไม่โผล่ให้เลือกในรายการใหม่ แต่รายการเก่าที่เลือกไว้ยังอยู่ครบ</p>
       </div>
       {choiceFor && <CommandChoiceManager command={choiceFor} options={options} onChanged={onChanged} onClose={() => setChoiceFor(null)} />}
+      {phraseFor && <CommandChoiceManager command={phraseFor} options={options} onChanged={onChanged} onClose={() => setPhraseFor(null)} phrase />}
+      <datalist id="cmd-tpl-groups">{tplGroups.map((g) => <option key={g} value={g} />)}</datalist>
     </ERPModal>
   );
 }
 
 /** ตัวเลือกของคำสั่ง 1 ข้อ (เช่น ห่อ › กระดาษ / ริบบิ้น) — เพิ่ม · แก้ชื่อ · ซ่อน/เปิด (ไม่ลบจริง) · kind command_choice value "<คำสั่ง>|<กลุ่ม>" */
-function CommandChoiceManager({ command, options, onChanged, onClose }: { command: string; options: OptionRow[]; onChanged: () => void; onClose: () => void }) {
+function CommandChoiceManager({ command, options, onChanged, onClose, phrase = false }: { command: string; options: OptionRow[]; onChanged: () => void; onClose: () => void; /** ข้อความลัด (kind command_phrase) แทนตัวเลือก */ phrase?: boolean }) {
   const toast = useToast();
   const [group, setGroup] = useState("");
   const [label, setLabel] = useState("");
-  const rows = options.filter((o) => o.kind === "command_choice" && String(o.value ?? "").split("|")[0] === command);
-  const groupOf = (o: OptionRow) => String(o.value ?? "").split("|")[1] || "แบบ";
+  const [linkFor, setLinkFor] = useState<string | null>(null);
+  const kindKey = phrase ? "command_phrase" : "command_choice";
+  const rows = options.filter((o) => o.kind === kindKey && String(o.value ?? "").split("|")[0] === command);
+  const groupOf = (o: OptionRow) => (phrase ? "ข้อความลัด" : String(o.value ?? "").split("|")[1] || "แบบ");
   const groups = [...new Set(rows.map(groupOf))];
   const add = async () => {
     if (!label.trim()) return;
-    const g = group.trim() || groups[0] || "";
-    try { await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "options", kind: "command_choice", label, value: g && g !== "แบบ" ? `${command}|${g}` : command, sort_order: rows.length + 1 }) }); setLabel(""); onChanged(); }
+    const g = phrase ? "" : group.trim() || groups[0] || "";
+    try { await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "options", kind: kindKey, label, value: g && g !== "แบบ" ? `${command}|${g}` : command, sort_order: rows.length + 1 }) }); setLabel(""); onChanged(); }
     catch (e) { toast.error((e as Error).message); }
+  };
+  const link = async (o: OptionRow, v: { id: string; code?: string | null } | null) => {
+    const before = o.extra ?? {};
+    try {
+      await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "options", id: o.id, patch: { extra: v ? { ...before, sku_id: v.id, sku_code: v.code ?? "" } : {} } }) });
+      setLinkFor(null); onChanged();
+      toast.undo(v ? `ผูก "${o.label}" กับ ${v.code ?? "SKU"} แล้ว` : "เอา SKU ออกแล้ว", async () => { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "options", id: o.id, patch: { extra: before } }) }); onChanged(); });
+    } catch (e) { toast.error((e as Error).message); }
   };
   const patch = async (o: OptionRow, p: Partial<OptionRow>) => {
     try { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "options", id: o.id, patch: p }) }); onChanged(); }
     catch (e) { toast.error((e as Error).message); }
   };
   return (
-    <ERPModal open onClose={onClose} title={`ตัวเลือกของคำสั่ง "${command}"`} size="sm" defaultExpanded={false} storageKey="order-ops-command-choices" zIndex={70}>
+    <ERPModal open onClose={onClose} title={phrase ? `ข้อความลัดของคำสั่ง "${command}"` : `ตัวเลือกของคำสั่ง "${command}"`} size="sm" defaultExpanded={false} storageKey="order-ops-command-choices" zIndex={70}>
       <div className="space-y-2">
         <div className="flex gap-2">
-          <input value={group} onChange={(e) => setGroup(e.target.value)} list="cmd-choice-groups" placeholder={groups[0] ? `กลุ่ม (เช่น ${groups[0]})` : "กลุ่ม (เช่น กระดาษ) ว่างได้"} className={`${inputCls} w-36`} />
+          {!phrase && <input value={group} onChange={(e) => setGroup(e.target.value)} list="cmd-choice-groups" placeholder={groups[0] ? `กลุ่ม (เช่น ${groups[0]})` : "กลุ่ม (เช่น กระดาษ) ว่างได้"} className={`${inputCls} w-36`} />}
           <datalist id="cmd-choice-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder="ตัวเลือกใหม่ เช่น ลายดอก" className={inputCls} />
+          <input value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder={phrase ? "เช่น ตัดสายให้สั้นลง {n} {u}" : "ตัวเลือกใหม่ เช่น ลายดอก"} className={inputCls} />
           <button onClick={add} className="shrink-0 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700">เพิ่ม</button>
         </div>
         {groups.map((g) => (
@@ -280,6 +304,9 @@ function CommandChoiceManager({ command, options, onChanged, onClose }: { comman
               {rows.filter((o) => groupOf(o) === g).map((o) => (
                 <li key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
                   <span className={`flex-1 ${o.is_active ? "" : "text-slate-400 line-through"}`}>{o.label}</span>
+                  {!phrase && (o.extra?.sku_id
+                    ? <span className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 text-[11px] text-emerald-700" title="คงเหลือดึงจากสต๊อกกลางของ SKU นี้">{o.extra.sku_code ?? "SKU"}<button onClick={() => void link(o, null)} className="text-emerald-800" aria-label="เอา SKU ออก">×</button></span>
+                    : <button onClick={() => setLinkFor(o.id)} className="rounded border border-slate-200 px-1.5 py-0.5 text-[11px] text-sky-700 hover:bg-slate-50" title="ผูกกับ SKU วัสดุ เพื่อโชว์คงเหลือ">ผูก SKU</button>)}
                   <button title="แก้ชื่อ" onClick={() => { const v = window.prompt("แก้ชื่อตัวเลือก", o.label); if (v && v.trim() && v.trim() !== o.label) void patch(o, { label: v.trim() }); }} className="text-slate-400 hover:text-slate-700"><Icon name="edit" className="h-4 w-4" /></button>
                   <button onClick={() => void patch(o, { is_active: !o.is_active })} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50">{o.is_active ? "ซ่อน" : "เปิดใช้"}</button>
                 </li>
@@ -287,7 +314,16 @@ function CommandChoiceManager({ command, options, onChanged, onClose }: { comman
             </ul>
           </div>
         ))}
-        {!rows.length && <p className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">ยังไม่มีตัวเลือก</p>}
+        {!rows.length && <p className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">ยังไม่มี{phrase ? "ข้อความลัด" : "ตัวเลือก"}</p>}
+        {phrase && <p className="text-[11px] text-slate-400">{"{n}"} = ช่องใส่ตัวเลข · {"{u}"} = เลือกหน่วย นิ้ว/ซม. · ซ่อน = ไม่โผล่ในป๊อป (รายการเก่าไม่หาย)</p>}
+        {!phrase && <p className="text-[11px] text-slate-400">ผูก SKU วัสดุ (เช่น กระดาษห่อ) → ป๊อปโชว์คงเหลือจากสต๊อกกลาง เหลือไม่เกิน 5 = เตือนใกล้หมด</p>}
+        {linkFor && (
+          <div className="rounded-lg border border-sky-200 bg-sky-50 p-2">
+            <div className="mb-1 text-xs text-sky-800">เลือก SKU วัสดุของ &quot;{rows.find((x) => x.id === linkFor)?.label}&quot;</div>
+            <SkuPicker value={null} onChange={(v) => { const o = rows.find((x) => x.id === linkFor); if (o && v) void link(o, v); }} placeholder="ค้นรหัส/ชื่อ SKU วัสดุ..." />
+            <button onClick={() => setLinkFor(null)} className="mt-1 text-xs text-slate-500 underline">ยกเลิก</button>
+          </div>
+        )}
       </div>
     </ERPModal>
   );

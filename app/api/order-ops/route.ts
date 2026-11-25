@@ -27,6 +27,8 @@ import {
   type CaseKind,
 } from "@/lib/order-ops";
 import { printSummaryOf } from "@/lib/print-log-server";
+import { loadSkuStock } from "@/lib/sku-stock";
+import { bestGuess, shopCodeGuesses } from "@/lib/packing";
 import { findPlatformOrder, listPickerOrders, loadEngraveSpecials, OPS_ENTITY, OPS_TABLES, pickFields, str, whoAmI, type OpsTableKey } from "@/lib/order-ops-server";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +102,20 @@ export async function GET(request: Request) {
   if (denied) return denied;
   const admin = supabaseAdmin();
   const sp = new URL(request.url).searchParams;
+
+  // ข้อมูลประกอบป๊อปคำสั่งพิเศษ (เจ้าของเลือก 2026-11-25 รอบ 2): ห่อพิเศษของออเดอร์ · SKU รุ่นเดียวกัน (เปลี่ยนสินค้า) · คงเหลือวัสดุ
+  if (sp.get("t") === "ins_context") return NextResponse.json(await insContext(admin, sp.get("order"), sp.get("sku")));
+  // รุ่นสินค้าตามรหัส (หน้าตั้งค่า › ห่อพิเศษ)
+  if (sp.get("t") === "parents") {
+    const codes = (sp.get("codes") ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 50);
+    const { data } = codes.length ? await admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key, pack_set_id, pack_note").in("code", codes) : { data: [] };
+    return NextResponse.json({ parents: ((data ?? []) as Row[]).map((r) => ({ id: String(r.id), code: str(r.code), name: str(r.name_th), image_key: str(r.cover_image_r2_key), has_set: !!r.pack_set_id, has_note: !!str(r.pack_note) })) });
+  }
+  if (sp.get("t") === "stock") {
+    const ids = (sp.get("ids") ?? "").split(",").filter((x) => uuidRe.test(x)).slice(0, 100);
+    const m = ids.length ? await loadSkuStock(admin, ids) : new Map();
+    return NextResponse.json({ stock: Object.fromEntries([...m.entries()].map(([k, v]) => [k, v.onHand])) });
+  }
 
   // ตัวเลือกออเดอร์ (ของกลาง components/platform-order-picker) — ออเดอร์ที่มีหมายเหตุขึ้นก่อน
   if (sp.get("orders") === "1") {
@@ -349,7 +365,8 @@ export async function PATCH(request: Request) {
     const denied = await guardApi(request, "order_ops.manage");
     if (denied) return denied;
     const id = String(body.id ?? "");
-    const patch = pickFields((body.patch ?? {}) as Row, ["label", "value", "sort_order", "is_active"]);
+    const patch = pickFields((body.patch ?? {}) as Row, ["label", "value", "sort_order", "is_active", "extra"]);
+    if ("extra" in patch) patch.extra = cleanOptionExtra(patch.extra);
     if (!uuidRe.test(id) || !Object.keys(patch).length) return bad("ไม่มีอะไรเปลี่ยน");
     const { data: before } = await admin.from("order_ops_options").select("*").eq("id", id).maybeSingle();
     if (!before) return bad("ไม่พบตัวเลือก", 404);
@@ -451,4 +468,82 @@ export async function DELETE(request: Request) {
   const action = hard ? "hard_delete" : restore ? "restore" : "delete";
   await writeAuditMany(admin, ((data ?? []) as Row[]).map((r) => ({ action, entityType: OPS_ENTITY[t], entityId: String(r.id), actorId: me.id, actorName: me.name, metadata: { code: r.order_no ?? null, soft: !hard } })));
   return NextResponse.json({ ok: true, count: data?.length ?? 0 });
+}
+
+/** extra ของตัวเลือก: sku_id/sku_code (วัสดุห่อ) · template_group (การ์ด) — อย่างอื่นตัดทิ้ง */
+function cleanOptionExtra(v: unknown): Row {
+  const r = (v && typeof v === "object" ? v : {}) as Row;
+  const out: Row = {};
+  if (typeof r.sku_id === "string" && uuidRe.test(r.sku_id)) { out.sku_id = r.sku_id; out.sku_code = str(r.sku_code)?.slice(0, 60) ?? null; }
+  if (typeof r.template_group === "string" && r.template_group.trim()) out.template_group = r.template_group.trim().slice(0, 60);
+  return out;
+}
+
+/**
+ * ป๊อปคำสั่งพิเศษ: ห่อพิเศษ (สินค้ารหัสขึ้นต้นตามที่ตั้งไว้ เช่น GIFT01 → รุ่น + Set บรรจุภัณฑ์กลาง + วิธีห่อ + คงเหลือวัสดุ)
+ *   + SKU ในรุ่นเดียวกับ sku (เปลี่ยนสินค้า) — รหัสร้านที่มีของต่อท้ายหารุ่นด้วยตัวเดาเดียวกับหน้าแพ็ก (lib/packing bestGuess)
+ */
+async function insContext(admin: ReturnType<typeof supabaseAdmin>, orderId: string | null, sku: string | null) {
+  const out: { special: Row[]; siblings: Row[]; from: Row | null } = { special: [], siblings: [], from: null };
+  // ── ห่อพิเศษ ──
+  if (orderId && uuidRe.test(orderId)) {
+    const [{ data: items }, { data: codes }] = await Promise.all([
+      admin.from("platform_order_items").select("sku_code, qty, matched_sku_id, matched_parent_sku_id").eq("order_id", orderId),
+      admin.from("order_ops_options").select("label").eq("kind", "special_wrap").eq("is_active", true),
+    ]);
+    const keys = ((codes ?? []) as Row[]).map((c) => String(c.label).trim().toUpperCase()).filter(Boolean);
+    const hits = ((items ?? []) as Row[]).filter((i) => { const c = String(i.sku_code ?? "").toUpperCase(); return keys.some((k) => c.startsWith(k)); });
+    if (hits.length) {
+      const keyCodes = [...new Set(hits.map((i) => keys.find((k) => String(i.sku_code ?? "").toUpperCase().startsWith(k))!))];
+      const { data: parents } = await admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key, pack_set_id, pack_extra, pack_note, pack_flags").in("code", keyCodes);
+      const setIds = [...new Set(((parents ?? []) as Row[]).map((p) => str(p.pack_set_id)).filter((x): x is string => !!x))];
+      const { data: sets } = setIds.length ? await admin.from("packaging_sets").select("id, name, items").in("id", setIds) : { data: [] };
+      const setMap = new Map(((sets ?? []) as Row[]).map((x) => [String(x.id), x]));
+      const skuIds = new Set<string>();
+      for (const p of (parents ?? []) as Row[]) {
+        for (const it of ((setMap.get(String(p.pack_set_id))?.items ?? []) as Row[])) skuIds.add(String(it.sku_id));
+        for (const it of ((p.pack_extra ?? []) as Row[])) skuIds.add(String(it.sku_id));
+      }
+      const ids = [...skuIds].filter((x) => uuidRe.test(x));
+      const [{ data: skuRows }, stock] = await Promise.all([
+        ids.length ? admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key").in("id", ids) : Promise.resolve({ data: [] }),
+        ids.length ? loadSkuStock(admin, ids) : Promise.resolve(new Map()),
+      ]);
+      const info = new Map(((skuRows ?? []) as Row[]).map((r) => [String(r.id), r]));
+      const mat = (list: Row[]) => list.map((it) => { const r = info.get(String(it.sku_id)); return { sku_id: String(it.sku_id), code: str(r?.code), name: str(r?.name_th), image_key: str(r?.cover_image_r2_key), qty: Number(it.qty) || 1, on_hand: stock.get(String(it.sku_id))?.onHand ?? null }; });
+      out.special = ((parents ?? []) as Row[]).map((p) => {
+        const set = setMap.get(String(p.pack_set_id));
+        return {
+          parent_id: String(p.id), code: str(p.code), name: str(p.name_th), image_key: str(p.cover_image_r2_key),
+          items: hits.filter((i) => String(i.sku_code ?? "").toUpperCase().startsWith(String(p.code).toUpperCase())).map((i) => ({ sku_code: str(i.sku_code), qty: Number(i.qty) || 1 })),
+          set_name: str(set?.name), materials: [...mat(((set?.items ?? []) as Row[])), ...mat(((p.pack_extra ?? []) as Row[]))],
+          how_to: str(p.pack_note), flags: Array.isArray(p.pack_flags) ? p.pack_flags : [],
+        };
+      });
+    }
+  }
+  // ── SKU รุ่นเดียวกัน (เปลี่ยนสินค้า) ──
+  const code = (sku ?? "").trim();
+  if (code) {
+
+    const guesses = shopCodeGuesses(code).slice(0, 30);
+    const { data: gs } = guesses.length ? await admin.from("skus_v2").select("id, code, parent_sku_id").in("code", guesses) : { data: [] };
+    const byCode = new Map(((gs ?? []) as Row[]).map((r) => [String(r.code).toUpperCase(), r]));
+    const hit = bestGuess(code, (c) => byCode.has(c));
+    let parentId = hit ? str(byCode.get(hit)?.parent_sku_id) : null;
+    if (!parentId) {
+      const { data: gp } = guesses.length ? await admin.from("parent_skus_v2").select("id, code").in("code", guesses) : { data: [] };
+      const pm = new Map(((gp ?? []) as Row[]).map((r) => [String(r.code).toUpperCase(), String(r.id)]));
+      const ph = bestGuess(code, (c) => pm.has(c));
+      parentId = ph ? pm.get(ph) ?? null : null;
+    }
+    if (parentId) {
+      const { data: sibs } = await admin.from("skus_v2").select("id, code, name_th, color_th, color, cover_image_r2_key").eq("parent_sku_id", parentId).eq("is_active", true).order("code").limit(40);
+      const list = (sibs ?? []) as Row[];
+      const stock = list.length ? await loadSkuStock(admin, list.map((r) => String(r.id))) : new Map();
+      out.siblings = list.map((r) => ({ id: String(r.id), code: str(r.code), name: str(r.name_th), color: str(r.color_th) ?? str(r.color), image_key: str(r.cover_image_r2_key), on_hand: stock.get(String(r.id))?.onHand ?? null }));
+      out.from = hit ? { code: hit } : null;
+    }
+  }
+  return out;
 }

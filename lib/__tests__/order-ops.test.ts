@@ -5,6 +5,9 @@ import {
   cleanCommandDetails,
   commandBoxOf,
   commandSummary,
+  commandHint,
+  fillPhrase,
+  specialWrapCodes,
   engraveOfOrder,
   cleanOrderNo,
   engraveTextError,
@@ -155,5 +158,22 @@ describe("กล่องตั้งค่าต่อคำสั่ง (2026-
     expect(commandSummary("ห่อ", { choice: { กระดาษ: "คราฟท์", ริบบิ้น: "แดง" } })).toBe("ห่อ: คราฟท์ · แดง");
     expect(commandSummary("เปลี่ยนสินค้า", { sku_code: "WK41-03" })).toBe("เปลี่ยนสินค้า → WK41-03");
     expect(commandSummary("อื่นๆ", null)).toBe("อื่นๆ");
+  });
+});
+
+describe("คำสั่งพิเศษ รอบ 2: ข้อความลัด + ห่อพิเศษ", () => {
+  it("ข้อความลัดเติมตัวเลข/หน่วย · ยังไม่กรอก = x", () => {
+    expect(fillPhrase("ตัดสายให้สั้นลง {n} {u}", { n: "2", u: "ซม." })).toBe("ตัดสายให้สั้นลง 2 ซม.");
+    expect(fillPhrase("ตัดให้ได้รูกลาง {n} นิ้ว", {})).toBe("ตัดให้ได้รูกลาง x นิ้ว");
+    expect(fillPhrase("ตัดสายให้สั้นลง {n} {u}", { n: "1.5", u: "อะไร" })).toBe("ตัดสายให้สั้นลง 1.5 นิ้ว");
+  });
+  it("เดาชนิดกล่อง: แก้ไซส์ = ข้อความลัด · ตัดชื่อออก = ไม่มีกล่อง + คำอธิบาย", () => {
+    expect(commandBoxOf("แก้ไซส์เข็มขัด")).toBe("phrase");
+    expect(commandBoxOf("ตัดชื่อออก")).toBe("none");
+    expect(commandHint("ตัดชื่อออก")).toContain("ใบปะหน้า");
+  });
+  it("ห่อพิเศษจับจากรหัสขึ้นต้น (รวมรหัสที่มีของต่อท้าย)", () => {
+    expect(specialWrapCodes(["GIFT01-05.2", "WK41-01", "gift01"], ["GIFT01"])).toEqual(["GIFT01-05.2", "gift01"]);
+    expect(specialWrapCodes(["WK41-01"], ["GIFT01"])).toEqual([]);
   });
 });

@@ -30,6 +30,7 @@ import { EngraveSettings, InstructionForm, type Ins, type InsPrefill } from "../
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
 import Link from "next/link";
 import { ScrollTabs } from "@/components/scroll-tabs";
+import { SpecialWrapSettings } from "../command-boxes";
 import { GIFT_INBOX_TABS, GiftCardsList, GiftInbox, GiftTemplates, InstructionTrash, type GiftCounts, type GiftInboxKind, type GiftInboxTab } from "../gift-panels";
 
 type Wait = {
@@ -150,6 +151,7 @@ function Body() {
                 <button type="button" onClick={() => setTrashOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:trash" /> ถังขยะคำสั่ง</button>
               </div>
             </section>
+            <SpecialWrapSettings options={hubOptions} onChanged={reloadOptions} />
             <GiftTemplates />
           </div>
         ) : <AccessDenied message="ตั้งค่าต้องมีสิทธิ์ order_ops.manage" />}

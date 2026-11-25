@@ -17,12 +17,11 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { PlatformOrderPicker, type PickedOrder } from "@/components/platform-order-picker";
-import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { PrintHistoryBadge } from "@/components/print-history";
-import Link from "next/link";
+import { CardBox, ChoiceBox, PhraseBox, SpecialWrapPanel, SwapBox, saveCards, useCardDrafts } from "./command-boxes";
 import {
   DEFAULT_ENGRAVE_FONT, ENGRAVE_MAX_CHARS, ENGRAVE_POSITIONS, ENGRAVE_TYPES, INSTRUCTION_STATUS,
-  choiceGroups, commandBoxOf, type CommandDetail,
+  commandBoxOf, commandHint, type CommandDetail,
   decodeEngraveSku, engraveSkuMaps, engraveTextError, guessEngraveFromNote, invalidEngraveChars, splitEngraveChars,
 } from "@/lib/order-ops";
 import { Field, HistoryList, OrderNoField, SkuField, inputCls, opsJson, type OptionRow, type OrderHit } from "./shared";
@@ -120,6 +119,7 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
   const font = f.engrave_font || fonts[0];
   const multi = !row && items.length > 1;
   const dirty = prefilled || JSON.stringify(f) !== JSON.stringify(init) || lines.length > 0;
+  const cardDrafts = useCardDrafts();
   const setDetail = (cmd: string, patch: Partial<CommandDetail>) => setF((p) => ({ ...p, command_details: { ...p.command_details, [cmd]: { ...(p.command_details[cmd] ?? {}), ...patch } } }));
 
   useEffect(() => {
@@ -192,9 +192,13 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
     setSaving(true);
     try {
       const ids: string[] = [];
+      // การ์ด: บันทึกคำสั่ง = สร้าง/อัปเดตการ์ดของออเดอร์ (ข้อ 3) → จำ card_id ไว้ในคำสั่ง
+      const cardIds = await saveCards(cardDrafts.current, f.commands.filter((c) => commandBoxOf(c, commands.find((o) => o.label === c)?.value) === "card"), f.platform_order_id, f.order_no);
+      const details = Object.fromEntries(Object.entries(f.command_details).filter(([k]) => f.commands.includes(k)).map(([k, v]) => [k, cardIds[k] ? { ...v, card_id: cardIds[k] } : v]));
+      for (const [k, id] of Object.entries(cardIds)) if (!details[k]) details[k] = { card_id: id };
       const base = {
         ...f, engrave_font: f.engrave ? font : null,
-        command_details: Object.fromEntries(Object.entries(f.command_details).filter(([k]) => f.commands.includes(k))),
+        command_details: details,
         chat_note: f.via_chat ? f.chat_note : null,
         engrave_text: f.engrave ? f.engrave_text.trim() : null, engrave_type: f.engrave ? f.engrave_type : null, engrave_position: f.engrave ? f.engrave_position : null,
       };
@@ -256,6 +260,7 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
           <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
           {!multi && <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={setSku} items={items} decode={decLabel} /></Field>}
         </div>
+        <SpecialWrapPanel orderId={f.platform_order_id} />
         {multi && (
           <Field label="ออเดอร์นี้มีหลายชิ้น — ติ๊กสินค้าที่ต้องทำคำสั่ง (1 ชิ้น = 1 คำสั่ง)">
             <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -295,46 +300,23 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
             ))}
           </div>
         </Field>
-        {f.commands.map((c) => {
-          const box = commandBoxOf(c, commands.find((o) => o.label === c)?.value);
-          if (box === "none") return null;
+        {(() => { const cardCmds = f.commands.filter((c) => commandBoxOf(c, commands.find((o) => o.label === c)?.value) === "card"); return f.commands.map((c) => {
+          const opt = commands.find((o) => o.label === c);
+          const box = commandBoxOf(c, opt?.value);
+          const hint = commandHint(c);
+          if (box === "none") return hint ? <p key={c} className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs text-slate-600"><b className="font-medium text-slate-700">{c}</b> — {hint}</p> : null;
           const d = f.command_details[c] ?? {};
           return (
             <div key={c} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
               <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700"><Icon name={box === "swap" ? "exchange" : box === "card" || box === "choice" ? "gift" : "edit"} className="h-4 w-4" /> {c}</div>
-              {box === "choice" && (() => {
-                const groups = choiceGroups(options, c, d.choice ?? {});
-                return groups.length ? (
-                  <div className="flex flex-wrap gap-3">
-                    {groups.map((g) => (
-                      <Field key={g.group} label={g.group}>
-                        <div className="flex flex-wrap gap-1">
-                          {g.items.map((it) => <button key={it} type="button" onClick={() => setDetail(c, { choice: { ...(d.choice ?? {}), [g.group]: d.choice?.[g.group] === it ? "" : it } })} className={`rounded-md border px-2.5 py-1 text-xs ${d.choice?.[g.group] === it ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}>{it}</button>)}
-                        </div>
-                      </Field>
-                    ))}
-                  </div>
-                ) : <p className="text-xs text-slate-500">ยังไม่มีตัวเลือกของคำสั่งนี้ — หัวหน้าเพิ่มได้ที่ &quot;จัดการคำสั่ง&quot; › ตัวเลือก · พิมพ์รายละเอียดด้านล่างได้</p>;
-              })()}
-              {box === "swap" && (
-                <div className="space-y-1">
-                  <div className="text-xs text-slate-500">จาก <span className="font-mono">{f.sku || "-"}</span> → เปลี่ยนเป็น</div>
-                  <SkuPicker value={d.sku_id ? ({ id: d.sku_id, code: d.sku_code ?? "", name: d.sku_code ?? "" } as SkuPickerValue) : null} onChange={(v) => setDetail(c, { sku_id: v?.id ?? "", sku_code: v?.code ?? "" })} placeholder="เลือก SKU ใหม่..." />
-                </div>
-              )}
-              {box === "card" && (
-                <div className="space-y-1.5">
-                  <textarea value={d.message ?? ""} onChange={(e) => setDetail(c, { message: e.target.value })} rows={2} placeholder="ข้อความบนการ์ด (ว่างได้ ไปเขียนในตัวเขียนการ์ดทีหลัง)" className={inputCls} />
-                  {f.platform_order_id
-                    ? <Link href={`/order-ops/gift-cards/edit?order=${f.platform_order_id}`} target="_blank" className="inline-flex items-center gap-1 text-xs text-sky-700 hover:underline"><Icon name="open" className="h-3.5 w-3.5" /> เปิดตัวเขียนการ์ด (เลือกแม่แบบ/พิมพ์)</Link>
-                    : <span className="text-xs text-slate-400">เลือกออเดอร์ก่อน แล้วเปิดตัวเขียนการ์ดได้</span>}
-                  {row?.print_state?.card && <p className="text-xs text-slate-600">การ์ดของออเดอร์นี้: พิมพ์/เขียนแล้ว {row.print_state.card.printed}/{row.print_state.card.total} ใบ{row.print_state.card.last ? ` · ล่าสุด ${new Date(row.print_state.card.last).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}` : ""}{row.print_state.card.by ? ` · ${row.print_state.card.by}` : ""}</p>}
-                </div>
-              )}
-              {(box === "text" || box === "choice") && <input value={d.text ?? ""} onChange={(e) => setDetail(c, { text: e.target.value })} placeholder={box === "text" ? "รายละเอียดคำสั่ง เช่น ตัดสายให้สั้นลง 2 ซม." : "รายละเอียดเพิ่ม (ว่างได้)"} className={`${inputCls} ${box === "choice" ? "mt-2" : ""}`} />}
+              {box === "choice" && <ChoiceBox command={c} options={options} detail={d} onChange={(pp) => setDetail(c, pp)} />}
+              {box === "swap" && <SwapBox fromSku={f.sku} detail={d} onChange={(pp) => setDetail(c, pp)} />}
+              {box === "phrase" && <PhraseBox command={c} options={options} detail={d} onChange={(pp) => setDetail(c, pp)} />}
+              {box === "card" && <CardBox command={c} option={opt} orderId={f.platform_order_id} index={cardCmds.indexOf(c)} detail={d} onChange={(pp) => setDetail(c, pp)} draftRef={cardDrafts} />}
+              {(box === "text" || box === "choice") && <input value={d.text ?? ""} onChange={(e) => setDetail(c, { text: e.target.value })} placeholder={box === "text" ? "รายละเอียดคำสั่ง" : "รายละเอียดเพิ่ม (ว่างได้)"} className={`${inputCls} ${box === "choice" ? "mt-2" : ""}`} />}
             </div>
           );
-        })}
+        }); })()}
 
         {guess.text && !readOnly && (f.engrave_text.trim() !== guess.text) && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">

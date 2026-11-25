@@ -201,19 +201,53 @@ export const DEFAULT_INSTRUCTION_COMMANDS = [
  *   card = ข้อความการ์ด + ไปตัวเขียนการ์ด · swap = เปลี่ยนสินค้า (SkuPicker กลาง) · text = ช่องข้อความ · none = ไม่มีกล่อง
  * ค่าที่กรอกเก็บที่ order_instructions.command_details { "<คำสั่ง>": CommandDetail }
  */
-export type CommandBox = "choice" | "card" | "swap" | "text" | "none";
-export const COMMAND_BOX_LABEL: Record<CommandBox, string> = { choice: "เลือกจากรายการ", card: "การ์ด (ข้อความ + แม่แบบ)", swap: "เปลี่ยนสินค้า (เลือก SKU)", text: "ช่องข้อความ", none: "ไม่มีกล่อง" };
+export type CommandBox = "choice" | "card" | "swap" | "phrase" | "text" | "none";
+export const COMMAND_BOX_LABEL: Record<CommandBox, string> = { choice: "เลือกจากรายการ", card: "การ์ด (ข้อความ + แม่แบบ)", swap: "เปลี่ยนสินค้า (เลือก SKU)", phrase: "ข้อความลัด (ใส่ตัวเลข)", text: "ช่องข้อความ", none: "ไม่มีกล่อง" };
 export const isCommandBox = (v: unknown): v is CommandBox => typeof v === "string" && v in COMMAND_BOX_LABEL;
 export function guessCommandBox(label: string): CommandBox {
   const s = label.trim();
+  if (/ตัดชื่อ/.test(s)) return "none";
   if (/เปลี่ยนสินค้า|เปลี่ยนรุ่น|เปลี่ยนสี/.test(s)) return "swap";
+  if (/แก้ไซส์|แก้ไซซ์|ตัดสาย/.test(s)) return "phrase";
   if (/ห่อ|การ์ดแทรก|สติ[กิ๊]?เกอร์/.test(s)) return "choice";
   if (/การ์ด/.test(s)) return "card";
   return "text";
 }
 export const commandBoxOf = (label: string, value?: string | null): CommandBox => (isCommandBox(value) ? value : guessCommandBox(label));
+/** คำอธิบายสั้นใต้ชื่อคำสั่ง (คำสั่งที่ไม่ต้องกรอกอะไร) */
+export function commandHint(label: string): string | null {
+  if (/ตัดชื่อ/.test(label)) return "ตัดรายการสินค้าบนใบปะหน้า ไม่ให้โชว์ว่าซื้ออะไร — ไม่ต้องกรอก · เด้งเตือนตอนแพ็ก";
+  return null;
+}
 
-export type CommandDetail = { choice?: Record<string, string>; text?: string; sku_id?: string; sku_code?: string; message?: string };
+/* ข้อความลัด (kind command_phrase) — "{n}" = ช่องตัวเลข · "{u}" = เลือกหน่วย (นิ้ว/ซม.) */
+export const PHRASE_UNITS = ["นิ้ว", "ซม."] as const;
+export type PhraseValues = { n?: string; u?: string };
+export const phraseNeeds = (tpl: string) => ({ n: tpl.includes("{n}"), u: tpl.includes("{u}") });
+/** แม่แบบ + ค่าที่กรอก → ข้อความจริง เช่น "ตัดสายให้สั้นลง 2 นิ้ว" (ยังไม่กรอก = เว้น "x") */
+export function fillPhrase(tpl: string, v: PhraseValues): string {
+  const n = String(v.n ?? "").trim().replace(/[^\d.,/]/g, "").slice(0, 8);
+  const u = (PHRASE_UNITS as readonly string[]).includes(String(v.u)) ? String(v.u) : PHRASE_UNITS[0];
+  return tpl.replace(/\{n\}/g, n || "x").replace(/\{u\}/g, u).replace(/\s+/g, " ").trim();
+}
+/** ข้อความลัดของคำสั่ง (เปิดใช้ + ที่เลือกไว้) */
+export function phrasesOf(options: { kind: string; label: string; value?: string | null; is_active: boolean }[], command: string): string[] {
+  return options.filter((o) => o.kind === "command_phrase" && (o.value ?? "").trim() === command && o.is_active).map((o) => o.label);
+}
+
+/** ห่อพิเศษ: ออเดอร์มีสินค้าที่รหัสขึ้นต้นด้วยรหัสที่ตั้งไว้ (kind special_wrap เช่น GIFT01) → คืนรหัสที่ตรง */
+export function specialWrapCodes(itemCodes: (string | null | undefined)[], wrapCodes: string[]): string[] {
+  const keys = wrapCodes.map((c) => c.trim().toUpperCase()).filter(Boolean);
+  const out = new Set<string>();
+  for (const raw of itemCodes) {
+    const c = String(raw ?? "").trim().toUpperCase();
+    const k = keys.find((x) => c === x || c.startsWith(`${x}-`) || c.startsWith(x));
+    if (k) out.add(String(raw).trim());
+  }
+  return [...out];
+}
+
+export type CommandDetail = { choice?: Record<string, string>; text?: string; sku_id?: string; sku_code?: string; message?: string; card_id?: string; template_id?: string };
 
 /** ตัวเลือกของคำสั่ง แยกกลุ่ม (ห่อ › กระดาษ / ริบบิ้น) — กลุ่มว่าง = "แบบ" */
 export function choiceGroups(options: { kind: string; label: string; value?: string | null; is_active: boolean }[], command: string, keep: Record<string, string> = {}): { group: string; items: string[] }[] {
@@ -243,7 +277,7 @@ export function cleanCommandDetails(raw: unknown, commands: string[]): Record<st
       for (const [k, v] of Object.entries(d.choice as Record<string, unknown>).slice(0, 6)) { const s = str300(v); if (s) ch[k.slice(0, 40)] = s; }
       if (Object.keys(ch).length) x.choice = ch;
     }
-    for (const k of ["text", "sku_id", "sku_code", "message"] as const) { const s = str300(d[k]); if (s) x[k] = s; }
+    for (const k of ["text", "sku_id", "sku_code", "message", "card_id", "template_id"] as const) { const s = str300(d[k]); if (s) x[k] = s; }
     if (Object.keys(x).length) out[c] = x;
   }
   return out;

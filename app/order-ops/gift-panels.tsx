@@ -42,6 +42,8 @@ type NoteRow = {
   engrave: { sources: EngraveSource[]; items: { sku_code: string | null; name: string | null; qty: number; parent_code: string | null; mode: EngraveMode | null; decoded: { type: string | null; position: string | null } | null }[]; needs_name: boolean };
   parents: { id: string; code: string | null; mode: EngraveMode | null }[];
   chat_ready: boolean;
+  /** ห่อพิเศษ (สินค้ารหัสขึ้นต้นตามที่ตั้ง เช่น GIFT01) */
+  special_wrap?: string[];
   /** สถานะงาน: none = ยังไม่สร้างคำสั่ง · todo = คำสั่งยังไม่ทำ · done = เสร็จ */
   work: "none" | "todo" | "done"; closed: boolean;
   print: { state: "none" | "todo" | "done"; engrave_total: number; engrave_printed: number; engrave_last: string | null; card_total: number; card_printed: number };
@@ -124,7 +126,8 @@ function WorkCell({ r, compact = false }: { r: NoteRow; compact?: boolean }) {
     <div className="flex flex-col items-start gap-1">
       <div className="flex flex-wrap gap-1">
         {r.kind.chat && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">แจ้งทางแชท</span>}
-        {r.kind.card && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">การ์ด / ห่อ</span>}
+        {!!r.special_wrap?.length && <span className="rounded-full bg-pink-100 px-2 py-0.5 text-[11px] font-medium text-pink-800" title={r.special_wrap.join(", ")}>ห่อพิเศษ {r.special_wrap[0]}</span>}
+        {r.kind.card && !(r.special_wrap?.length && !r.note) && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">การ์ด / ห่อ</span>}
         {engIns.map((i) => <span key={i.id} className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">สลัก: {i.engrave_text}{i.engrave_type ? ` · ${i.engrave_type}` : ""}</span>)}
         {r.instructions.flatMap((i) => i.commands.map((c) => <span key={`${i.id}${c}`} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-700">{commandSummary(c, i.command_details?.[c])}</span>))}
       </div>

@@ -19,7 +19,7 @@ import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
 import { aiChat, featureAccess } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { whoAmI } from "@/lib/order-ops-server";
-import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, ENGRAVE_NO_WARN_STATUSES, isEngraveMode, type EngraveMode } from "@/lib/order-ops";
+import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, ENGRAVE_NO_WARN_STATUSES, isEngraveMode, specialWrapCodes, type EngraveMode } from "@/lib/order-ops";
 import { chatAdapter } from "@/lib/chat/registry";
 import { printSummaryOf } from "@/lib/print-log-server";
 import { CHAT_CHANNELS, type ChatChannel } from "@/lib/chat/types";
@@ -205,8 +205,10 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
       .order("ordered_at", { ascending: false })
       .limit(1500),
     admin.from("parent_skus_v2").select("id, engrave_mode").in("engrave_mode", ["optional", "required"]),
-    admin.from("order_ops_options").select("kind, label, value, is_active").in("kind", ["engrave_sku_type", "engrave_sku_pos"]),
+    admin.from("order_ops_options").select("kind, label, value, is_active").in("kind", ["engrave_sku_type", "engrave_sku_pos", "special_wrap"]),
   ]);
+  // ห่อพิเศษ (สินค้ารหัสขึ้นต้น เช่น GIFT01 · ตั้งได้ที่ ตั้งค่า › ห่อพิเศษ) — ออเดอร์ที่ซื้อเข้ารายการแม้ไม่มีหมายเหตุ
+  const wrapCodes = ((optRes.data ?? []) as Row[]).filter((o) => o.kind === "special_wrap" && o.is_active !== false).map((o) => String(o.label).trim()).filter(Boolean);
   if (notesRes.error) return bad("โหลดออเดอร์ไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
   const maps = engraveSkuMaps(((optRes.data ?? []) as Row[]).map((o) => ({ kind: String(o.kind), label: String(o.label), value: str(o.value), is_active: o.is_active !== false })));
   const modes: Record<string, EngraveMode> = {};
@@ -217,7 +219,7 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
   const requiredSkuIds = requiredIds.length
     ? ((await admin.from("skus_v2").select("id").in("parent_sku_id", requiredIds).limit(2000)).data ?? []).map((r) => String((r as Row).id))
     : [];
-  const itemOr = ["sku_code.imatch.[A-Za-z]/[0-9]+$"];
+  const itemOr = ["sku_code.imatch.[A-Za-z]/[0-9]+$", ...wrapCodes.filter((c) => /^[\w-]+$/.test(c)).map((c) => `sku_code.ilike.${c}*`)];
   for (const c of chunkOf(requiredIds, 100)) itemOr.push(`matched_parent_sku_id.in.(${c.join(",")})`);
   for (const c of chunkOf(requiredSkuIds, 100)) itemOr.push(`matched_sku_id.in.(${c.join(",")})`);
   const { data: engHits, error: hitErr } = await admin.from("platform_order_items").select("order_id, platform_orders!inner(ordered_at)")
@@ -289,19 +291,20 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     const parents = [...new Map(eg.items.filter((i) => i.parent_id).map((i) => [i.parent_id as string, { id: i.parent_id as string, code: i.parent_code, mode: i.mode }])).values()];
     const insList = ins.get(info.id) ?? [];
     const cardList = cards.get(info.id) ?? [];
+    const wraps = specialWrapCodes(its.map((i) => i.sku_code), wrapCodes);
     return {
-      ...info, kind: { ...kind, chat: insList.some((x) => x.via_chat === true) }, kind_auto: kindAuto, overridden: !!k, cards: cardList, instructions: insList,
+      ...info, special_wrap: wraps, kind: { ...kind, card: kind.card || wraps.length > 0, chat: insList.some((x) => x.via_chat === true) }, kind_auto: kindAuto, overridden: !!k, cards: cardList, instructions: insList,
       engrave: { sources: eg.sources, items: eg.items.filter((i) => i.engrave), needs_name: kind.engrave && eg.needsName && !insList.some((x) => x.engrave === true && str(x.engrave_text)) },
       parents,
       chat_ready: !!(info.platform_code && (CHAT_CHANNELS as readonly string[]).includes(info.platform_code) && chatAdapter(info.platform_code as ChatChannel)),
       ...workOf(insList, cardList, info.status),
     };
-  }).filter((r) => r.note || r.kind.engrave || r.instructions.length);
+  }).filter((r) => r.note || r.kind.engrave || r.instructions.length || r.special_wrap.length);
   // คำสั่งที่ไม่ผูกออเดอร์ในศูนย์ (พิมพ์เลขเอง/จากแชท) = แถวของตัวเอง
   const orphans = ((periodIns ?? []) as Row[]).filter((x) => !x.platform_order_id || !allOrders.some((o) => String(o.id) === String(x.platform_order_id)));
   rows = [...rows, ...orphans.map((x) => ({
     id: `ins:${x.id}`, order_no: str(x.order_no), customer_name: str(x.customer_name), status: null, ordered_at: str(x.created_at), ship_by_at: null, packed_at: null,
-    platform: str(x.platform), platform_code: null, brand_id: null, brand_name: null, note: null,
+    platform: str(x.platform), platform_code: null, brand_id: null, brand_name: null, note: null, special_wrap: [] as string[],
     kind: { card: false, engrave: x.engrave === true, chat: x.via_chat === true }, kind_auto: { card: false, engrave: x.engrave === true }, overridden: false,
     cards: [] as Row[], instructions: [x],
     engrave: { sources: [] as string[], items: [] as Row[], needs_name: false }, parents: [] as Row[], chat_ready: false,
