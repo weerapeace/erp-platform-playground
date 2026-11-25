@@ -106,6 +106,13 @@ export function shopeeMessageOf(m: Obj, conv: { id: string; shopId: string }): P
       text = names.length ? `[สินค้า] ${names.slice(0, 3).join(", ")}` : "[สินค้า]"; break;
     }
     case "voucher": text = "[คูปองส่วนลด]"; break;
+    case "variation_card": {
+      // ลูกค้าถามเรื่องตัวเลือกสินค้า (สี/ไซซ์) — ชื่อช่องยังไม่ยืนยัน หยิบชื่อที่เจอ
+      const name = str(c.item_name) || str(c.name) || str(c.product_name) || str(c.title);
+      const opt = str(c.model_name) || str(c.variation_name) || str(c.option_name);
+      text = `[ถามตัวเลือกสินค้า]${name ? ` ${name}` : ""}${opt ? ` · ${opt}` : ""}${str(c.text) ? `\n${str(c.text)}` : ""}`;
+      break;
+    }
     case "notification": text = str(c.notification_for_receiver) || str(c.notification_for_sender) || "[แจ้งเตือนจาก Shopee]"; break;
     default: text = str(c.text) || `[ข้อความชนิด ${type || "ไม่ทราบ"} — เปิดดูในแอป Shopee]`;
   }

@@ -23,6 +23,8 @@ type Obj = Record<string, unknown>;
 
 const BACKFILL_MS = 3 * 86_400_000;
 const MAX_CONVS_PER_RUN = 25;
+/** ชนิดข้อความที่ shop-parse แปลงได้ดีแล้ว (นอกนี้ = จดชื่อช่องไว้ใน diag) */
+const KNOWN_TYPES = new Set(["text", "image", "sticker", "video", "order", "item", "item_list", "voucher", "notification", "bundle_message"]);
 const resp = (j: Obj): Obj => (j.response && typeof j.response === "object" ? (j.response as Obj) : {});
 
 async function tokenFor(admin: Admin, brandId: string) {
@@ -97,7 +99,9 @@ export const pullShopeeChats: ShopPuller = async (admin, shop, cursor, ctx) => {
 
   // 2) ข้อความของแต่ละห้อง (เก่า → ใหม่) · เวลาไม่พอ = ห้องที่เหลือรอบหน้า (cursor ขยับเท่าห้องที่ทำครบ)
   const keep = { events: [] as ChatInbound[], cursor: { ...cursor, diag } };
-  const todo = changed.slice(0, MAX_CONVS_PER_RUN).reverse();
+  // เก่าสุด 25 ห้องก่อน (changed เรียงใหม่→เก่า) — ตัวชี้ขยับถึงห้องที่ทำแล้วเท่านั้น ห้องที่ใหม่กว่าได้รอบหน้า (ไม่ตกหล่น)
+  // เดิมเอาใหม่สุด 25 ห้อง แล้วตัวชี้ข้ามห้องที่เก่ากว่าไปเลย (เจอ 2026-11-25: ดึงครั้งแรกตกหล่น ~15 ห้อง)
+  const todo = changed.slice(-MAX_CONVS_PER_RUN).reverse();
   const events: ChatInbound[] = [];
   let doneMs = sinceMs;
   let allDone = true;
@@ -114,6 +118,12 @@ export const pullShopeeChats: ShopPuller = async (admin, shop, cursor, ctx) => {
     if (msgs.length === 0 && !diag.msg_keys) diag.msg_resp_empty = true;
     if (msgs[0] && !diag.msg_keys) { diag.msg_keys = Object.keys(msgs[0]).slice(0, 40); diag.msg_ts_raw = String(msgs[0].created_timestamp ?? ""); }
     for (const m of msgs) {
+      // ชนิดข้อความที่ยังไม่รู้จักดี → จดชื่อช่องของ content ไว้ (ไม่เก็บเนื้อหา) เพื่อทำให้แสดงผลดีขึ้นรอบหน้า
+      const mt = String(m.message_type ?? "");
+      if (!KNOWN_TYPES.has(mt)) {
+        const kt = (diag.content_keys ?? {}) as Record<string, string[]>;
+        if (!kt[mt] && Object.keys(kt).length < 10) { kt[mt] = Object.keys((m.content ?? {}) as Obj).slice(0, 20); diag.content_keys = kt; }
+      }
       const p = shopeeMessageOf(m, { id: c.id, shopId: t.shopId });
       if (!p || p.skip || Date.parse(p.sentAt) < sinceMs - 60_000) continue;   // เก่ากว่าที่ดึงแล้ว (เผื่อ 1 นาที — ซ้ำได้ ระบบกันซ้ำด้วยรหัสข้อความ)
       const imageKey = p.remoteImage ? await storeRemoteImage("shopee", p.remoteImage) : null;
