@@ -80,7 +80,11 @@ export type LazadaSkuView = {
   url: string | null;
   /** ค่าของชั้นตัวเลือกที่มีรูป (ชั้นแรก เช่น สี "Black") — ตัวเลือกสีเดียวกันควรใช้รูปชุดเดียวกัน */
   groupValue: string | null;
+  /** ค่าตัวเลือกทุกชั้น ({ color_family: "Black", size: "M" }) — แท็บตัวเลือก (lib/lazada-option-edit) · ไม่มี = สินค้าไม่มีตัวเลือก */
+  saleProp?: Record<string, string>;
 };
+/** ชั้นตัวเลือกของสินค้า (Variation1–4 จาก /product/item/get) */
+export type LazVariation = { key: string; name: string; label: string; hasImage: boolean; customize: boolean; options: string[] };
 export type LazadaListingView = {
   itemId: string;
   name: string;
@@ -104,7 +108,25 @@ export type LazadaListingView = {
   imageVariation: { name: string; label: string; isSize: boolean } | null;
   /** เฟส B: ค่าคุณสมบัติทุกช่องของสินค้า (attributes ของ Lazada เป็นข้อความ · หลายค่าคั่น ",") ไม่รวม HTML/รูป */
   attributes: Record<string, string>;
+  /** ชั้นตัวเลือกตามลำดับ Variation1… (แท็บตัวเลือก — แก้ชื่อ/เพิ่มสี) */
+  variations?: LazVariation[];
 };
+
+const boolOf = (v: unknown) => v === true || String(v ?? "").toLowerCase() === "true";
+/** variation ของสินค้า → ชั้นตัวเลือกเรียงตาม Variation1..4 (options เป็น array หรือ { option: [] }) */
+export function lazVariationsOf(variation: unknown): LazVariation[] {
+  const vars = obj(variation);
+  if (!vars) return [];
+  return Object.entries(vars)
+    .map(([key, v]) => ({ key, o: obj(v) }))
+    .filter((x): x is { key: string; o: Obj } => !!x.o && !!str(x.o.name))
+    .sort((a, b) => a.key.localeCompare(b.key, "en", { numeric: true, sensitivity: "base" }))
+    .map(({ key, o }) => {
+      const raw = Array.isArray(o.options) ? o.options : obj(o.options)?.option;
+      const options = (Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map((x) => str(x)).filter((x): x is string => !!x);
+      return { key, name: str(o.name)!, label: str(o.label) ?? str(o.name)!, hasImage: boolOf(o.hasImage ?? o.has_image), customize: boolOf(o.customize), options };
+    });
+}
 
 /** วันที่ราคาลด — Lazada ส่งทั้งข้อความวันที่ และเลขมิลลิวินาที → ข้อความสั้น "YYYY-MM-DD HH:mm" (เวลาไทย) */
 export function lazDateText(v: unknown): string | null {
@@ -154,6 +176,7 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
       weight: num(s.package_weight), length: num(s.package_length), width: num(s.package_width), height: num(s.package_height),
       url: str(s.Url ?? s.url),
       groupValue: v1Name ? str(obj(s.saleProp ?? s.sale_prop)?.[v1Name]) : null,
+      saleProp: Object.fromEntries(Object.entries(obj(s.saleProp ?? s.sale_prop) ?? {}).map(([k, x]) => [k, str(x) ?? ""]).filter(([, x]) => !!x)),
     };
   });
   return {
@@ -172,6 +195,7 @@ export function lazadaListingView(item: unknown): LazadaListingView | null {
     promoLong: lazImageList(a.promotion_long_image)[0] ?? null,
     imageVariation,
     attributes: lazAttrValues(a),
+    variations: lazVariationsOf(p.variation),
   };
 }
 

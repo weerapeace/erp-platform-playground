@@ -35,6 +35,8 @@ import {
   type LazadaEditChange, type LazadaEditPlan, type LazadaEditState, type LazadaListingDetailResponse, type LazadaListingView, type LazadaPricePlan, type LazadaPriceRow, type LazadaSkuView, type LazadaWriteResponse,
 } from "@/lib/lazada-listing-edit";
 import { systemImageRef } from "@/lib/line-listing-edit";
+import { lazOptionGroups, lazOptionSignature, lazOptNameKey, planLazadaOptions, type LazOptAdd, type LazOptForm, type LazOptGroup, type LazOptPlan } from "@/lib/lazada-option-edit";
+import { LazadaOptionEditor } from "./lazada-option-editor";
 
 // กล่องข้อความจัดรูปแบบหนัก (tiptap) — โหลดเมื่อกด "แก้รายละเอียด" เท่านั้น
 const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false, loading: () => <div className="h-40 rounded-lg bg-slate-50" /> });
@@ -129,6 +131,12 @@ export type LazadaEditApi = {
   setPrice: (skuId: string, patch: Partial<LazadaPriceRow>) => void;
   setPrices: (rows: LazadaPriceRow[]) => void;
   pricePlan: LazadaPricePlan | null;
+  /** แท็บตัวเลือก: แก้ชื่อตัวเลือก + เพิ่มสีจากระบบ (lib/lazada-option-edit · ./lazada-option-editor) */
+  optGroups: LazOptGroup[];
+  optForm: LazOptForm | null;
+  optPlan: LazOptPlan | null;
+  setOptName: (group: string, value: string, name: string) => void;
+  setOptAdds: (adds: LazOptAdd[], colorGroup: string | null) => void;
   /** รวมทั้งข้อมูล + ราคา */
   changes: LazadaEditChange[];
   errors: string[];
@@ -164,25 +172,43 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
   useEffect(() => { setPricesState(priceBase ? priceBase.map((r) => ({ ...r })) : null); }, [priceBase]);
   const plan = useMemo(() => (base && form ? planLazadaEdit(base, form) : null), [base, form]);
   const pricePlan = useMemo(() => (priceBase && prices ? planLazadaPrices(priceBase, prices) : null), [priceBase, prices]);
+  // แท็บตัวเลือก: ชื่อตัวเลือก + สีใหม่ (ส่งก่อนส่วนอื่น · /api/lazada/listing-options)
+  const optGroups = useMemo(() => (state.view ? lazOptionGroups(state.view) : []), [state.view]);
+  const [optForm, setOptForm] = useState<LazOptForm | null>(null);
+  useEffect(() => { setOptForm(state.view ? { names: {}, adds: [], colorGroup: null } : null); }, [state.view]);
+  const optPlan = useMemo(() => (state.view && optForm ? planLazadaOptions(state.view, optGroups, optForm) : null), [state.view, optGroups, optForm]);
+  const optDirty = !!optPlan?.changed;
   const infoDirty = (!!plan && plan.changes.length > 0) || (!!skuPlan && skuPlan.changes.length > 0) || (!!attrPlan && attrPlan.changes.length > 0);   // ข้อมูล + รูป + กล่อง + คุณสมบัติ ส่งทาง listing-edit
   const priceDirty = !!pricePlan && pricePlan.changes.length > 0;
-  const dirty = infoDirty || priceDirty;
-  const changes = [...(plan?.changes ?? []), ...(skuPlan?.changes ?? []), ...(attrPlan?.changes ?? []), ...(pricePlan?.changes ?? [])];
-  const errors = [...(plan?.errors ?? []), ...(skuPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(pricePlan?.errors ?? [])];
-  const warnings = [...(plan?.warnings ?? []), ...(skuPlan?.warnings ?? []), ...(attrPlan && attrPlan.changes.length ? attrPlan.warnings : []), ...(pricePlan?.warnings ?? [])];
+  const dirty = infoDirty || priceDirty || optDirty;
+  const changes = [...(optDirty ? optPlan!.changes : []), ...(plan?.changes ?? []), ...(skuPlan?.changes ?? []), ...(attrPlan?.changes ?? []), ...(pricePlan?.changes ?? [])];
+  const errors = [...(optDirty ? optPlan!.errors : []), ...(plan?.errors ?? []), ...(skuPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(pricePlan?.errors ?? [])];
+  const warnings = [...(optDirty ? optPlan!.warnings : []), ...(plan?.warnings ?? []), ...(skuPlan?.warnings ?? []), ...(attrPlan && attrPlan.changes.length ? attrPlan.warnings : []), ...(pricePlan?.warnings ?? [])];
 
   const post = async (url: string, payload: unknown) => {
     const r = await apiFetch(url, { method: "POST", body: JSON.stringify(payload) });
     const j = await r.json().catch(() => ({ ok: false, view: null, error: `HTTP ${r.status}` })) as LazadaWriteResponse;
     return { r, j };
   };
-  // ส่งทีละส่วน: ข้อมูล (listing-edit) → ราคา (listing-prices) · ส่วนแรกพลาด = ไม่ส่งต่อ
+  // ส่งทีละส่วน: ตัวเลือก (listing-options) → ข้อมูล (listing-edit) → ราคา (listing-prices) · ส่วนแรกพลาด = ไม่ส่งต่อ
   const save = async () => {
     if (!state.listingId || !base || !form || !priceBase || !prices) return;
     setSaving(true);
     const done: string[] = [];
     let saved = false;
+    let optView: LazadaListingView | null = null;
     try {
+      if (optDirty && optForm && state.view) {
+        const { r, j } = await post("/api/lazada/listing-options", { listing_id: state.listingId, before_sig: lazOptionSignature(state.view), names: optForm.names, adds: optForm.adds, color_group: optForm.colorGroup });
+        if (!j.ok) {
+          toast.error(r.status === 401 ? "ไม่มีสิทธิ์ส่งขึ้นร้าน หรือระบบยังไม่ยืนยันการล็อกอิน — รอสักครู่แล้วลองใหม่" : `ตัวเลือก: ${j.error ?? `HTTP ${r.status}`}${infoDirty || priceDirty ? " (ยังไม่ได้ส่งส่วนอื่น)" : ""}`);
+          if (j.view) { setAsking(false); state.apply(j.view); }
+          return;
+        }
+        saved = true; done.push(j.summary || "ตัวเลือก");
+        (j.warnings ?? []).forEach((w) => toast.warning(w));
+        optView = j.view;
+      }
       if (infoDirty) {
         const { r, j } = await post("/api/lazada/listing-edit", { listing_id: state.listingId, before: base, edit: form, sku_before: skuBase, sku_edit: skuMedia, ...(attrPlan && attrPlan.changes.length ? { attrs_before: attrBase, attrs_edit: attrs } : {}) });
         if (!j.ok) {
@@ -206,6 +232,7 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
         else if (saved) state.reload();
         if (!j.ok && r.status !== 207) { if (r.status === 409) setAsking(false); if (!saved) return; }
       }
+      if (optView && !infoDirty && !priceDirty) state.apply(optView);
       if (done.length) toast.success(`ส่งขึ้น Lazada แล้ว: ${done.join(" · ")} — บันทึกประวัติแล้ว`);
       setAsking(false);
     } catch (e) { toast.error(`ส่งขึ้น Lazada ไม่สำเร็จ: ${(e as Error).message}`); }
@@ -231,13 +258,15 @@ export function useLazadaEdit(state: LazadaListingState, canEdit: boolean, onSav
     canEdit, form, base, plan, prices, pricePlan, skuMedia, skuPlan, changes, errors, dirty, descEdit, setDescEdit, saving, dialog,
     setSkuMedia: (skuId, patch) => setSkuMediaState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
     setSkuMediaRows: (rows) => setSkuMediaState(rows),
-    attrs, attrPlan,
+    attrs, attrPlan, optGroups, optForm, optPlan,
+    setOptName: (group, value, name) => setOptForm((o) => (o ? { ...o, names: { ...o.names, [lazOptNameKey(group, value)]: name } } : o)),
+    setOptAdds: (adds, colorGroup) => setOptForm((o) => (o ? { ...o, adds, colorGroup } : o)),
     setAttr: (name, value) => setAttrs((a) => (a ? { ...a, [name]: value } : a)),
     setImages: (next) => setForm((f) => (f ? { ...f, images: next } : f)),
     setField: (k, v) => setForm((f) => (f ? { ...f, [k]: v } : f)),
     setPrice: (skuId, patch) => setPricesState((rows) => (rows ? rows.map((r) => (r.skuId === skuId ? { ...r, ...patch } : r)) : rows)),
     setPrices: (rows) => setPricesState(rows),
-    reset: () => { if (base) setForm({ ...base }); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); if (skuBase) setSkuMediaState(skuBase.map((r) => ({ ...r, images: [...r.images] }))); if (attrBase) setAttrs({ ...attrBase }); setDescEdit(false); },
+    reset: () => { if (base) setForm({ ...base }); if (priceBase) setPricesState(priceBase.map((r) => ({ ...r }))); if (skuBase) setSkuMediaState(skuBase.map((r) => ({ ...r, images: [...r.images] }))); if (attrBase) setAttrs({ ...attrBase }); if (state.view) setOptForm({ names: {}, adds: [], colorGroup: null }); setDescEdit(false); },
     ask: () => setAsking(true),
   };
 }
@@ -641,6 +670,7 @@ export function LazadaOptionsPanel({ state, disp, edit, matchedParent, matchedCo
           {edit!.pricePlan.errors.length > 6 && <li>… และอีก {edit!.pricePlan.errors.length - 6}</li>}
         </ul>
       )}
+      {edit && <LazadaOptionEditor v={v} edit={edit} listingId={state.listingId} matchedParent={matchedParent ?? null} matchedCode={matchedCode ?? null} />}
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
         <span>{v.skus.length.toLocaleString()} ตัวเลือก{off ? ` · ปิดขาย ${off.toLocaleString()}` : ""}{priceChanged ? ` · แก้ราคาแล้ว ${priceChanged} ตัว (ยังไม่ส่ง)` : ""}</span>
         <span className="ml-auto">{canPrice ? "ช่องที่แก้มีกรอบม่วง · " : "ราคาดูอย่างเดียว · "}สต๊อกดูอย่างเดียว (BigSeller ยังซิงค์สต๊อก Lazada อยู่)</span>
