@@ -31,3 +31,18 @@ describe("parent-health (ต้องแก้ N อย่าง)", () => {
     expect(parentHealthChecks({ ...OK, skuCount: 0, hasBom: false }).map((i) => i.key)).toEqual(["no_sku"]);
   });
 });
+
+describe("หมวด: นับหมวดกลางด้วย", () => {
+  const base = { hasCover: true, hasDescription: true, hasWeight: true, skuCount: 1, skuNoPrice: 0, hasBom: true, hasBuyPrice: false, notListedOn: [] as string[] };
+  it("มีแค่หมวดกลาง = ไม่เตือนหมวด", () => {
+    expect(parentHealthChecks({ ...base, hasCategory: false, hasPlatformCategory: true }).map((x) => x.key)).not.toContain("no_category");
+  });
+  it("ว่างทั้งคู่ = เตือนแดงข้อเดียว พาไปช่องหมวดกลาง", () => {
+    const out = parentHealthChecks({ ...base, hasCategory: false, hasPlatformCategory: false });
+    expect(out.find((x) => x.key === "no_category")?.field).toBe("platform_category_id");
+    expect(out.map((x) => x.key)).not.toContain("no_platform_category");
+  });
+  it("มีแค่หมวดเก่า = เตือนเหลืองให้เลือกหมวดกลาง", () => {
+    expect(parentHealthChecks({ ...base, hasCategory: true, hasPlatformCategory: false }).map((x) => x.key)).toEqual(["no_platform_category"]);
+  });
+});

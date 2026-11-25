@@ -26,12 +26,14 @@ export type ParentHealthFacts = {
 export function parentHealthChecks(f: ParentHealthFacts): HealthItem[] {
   const out: HealthItem[] = [];
   if (!f.hasCover) out.push({ key: "no_cover", level: "required", label: "ยังไม่มีรูปปก (ใส่ที่ช่องรูปด้านซ้าย)" });
-  if (!f.hasCategory) out.push({ key: "no_category", level: "required", label: "ยังไม่เลือกหมวดหมู่สินค้า", field: "category_id" });
+  // หมวด: ช่องหมวดเก่า (category_id) ถูกซ่อนจากฟอร์มแล้ว → มีหมวดอย่างใดอย่างหนึ่งก็ผ่าน · ว่างทั้งคู่ = พาไปช่องหมวดกลาง (เจ้าของเลือก 2026-11-25)
+  const noCategory = !f.hasCategory && !f.hasPlatformCategory;
+  if (noCategory) out.push({ key: "no_category", level: "required", label: "ยังไม่เลือกหมวดหมู่สินค้า (หมวดกลางสำหรับลงขาย)", field: "platform_category_id" });
   if (f.skuCount === 0) out.push({ key: "no_sku", level: "required", label: "ยังไม่มี SKU ลูก (สี/ไซซ์)" });
   if (f.skuNoPrice > 0) out.push({ key: "sku_no_price", level: "required", label: `SKU ยังไม่มีราคากลาง ${f.skuNoPrice} ตัว`, tab: "prices" });
   if (!f.hasDescription) out.push({ key: "no_description", level: "suggest", label: "ยังไม่มีรายละเอียดสินค้า (Description)", field: "description" });
   if (!f.hasWeight) out.push({ key: "no_weight", level: "suggest", label: "ยังไม่ใส่น้ำหนัก (ใช้คิดค่าส่ง)", field: "weight_g" });
-  if (!f.hasPlatformCategory) out.push({ key: "no_platform_category", level: "suggest", label: "ยังไม่เลือกหมวดกลางสำหรับลงขาย", tab: "platforms" });
+  if (!f.hasPlatformCategory && !noCategory) out.push({ key: "no_platform_category", level: "suggest", label: "ยังไม่เลือกหมวดกลางสำหรับลงขาย", tab: "platforms" });
   if (f.skuCount > 0 && !f.hasBom && !f.hasBuyPrice) out.push({ key: "no_cost", level: "suggest", label: "ยังไม่มีต้นทุน (ไม่มีสูตรผลิตและราคาซื้อ)", tab: "prices" });
   if (f.notListedOn.length > 0) out.push({ key: "not_listed", level: "suggest", label: `ยังไม่ลงขายที่ ${f.notListedOn.join(", ")}`, tab: "platforms" });
   return out;
