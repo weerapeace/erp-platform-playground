@@ -14,8 +14,9 @@ import { StepInput } from "@/components/step-input";
 import { ImageInput } from "@/components/image-input";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { addDaysYmd, todayBangkok } from "@/lib/date";
-import { CAT_KINDS, EXPENSE_CATEGORY_LABEL, INTERVAL_PRESETS, SUPPLY_TYPE_LABEL, TREATMENT_LABEL, WET_KIND_LABEL, type CatKind, type CatsData, type ExpenseCategory, type Supply, type SupplyType, type WetKind } from "@/lib/cats";
+import { CAT_KINDS, EXPENSE_CATEGORY_LABEL, INTERVAL_PRESETS, SUPPLY_TYPE_LABEL, TREATMENT_LABEL, WET_KIND_LABEL, type CatKind, type CatsData, type ExpenseCategory, type Purchase, type Supply, type SupplyType, type WetKind } from "@/lib/cats";
 import { fmtQty, stockUnitLabel, suggestPricePaid } from "@/lib/cats-supplies";
+import { knownShops, priceCheck } from "@/lib/cats-extras";
 
 type Row = Record<string, unknown>;
 export type FormTarget = { kind: CatKind; row?: Row | null; preset?: Row };
@@ -52,13 +53,13 @@ function Seg<T extends string>({ value, options, onChange }: { value: T | null; 
 function blank(kind: CatKind, preset: Row = {}): Row {
   const today = todayBangkok();
   const base: Record<CatKind, Row> = {
-    cats: { name: "", photo_r2_key: null, sex: null, birth_date: "", breed: "", color: "", neutered: false, microchip: "", note: "" },
+    cats: { name: "", photo_r2_key: null, sex: null, birth_date: "", adopted_date: "", breed: "", color: "", neutered: false, microchip: "", note: "" },
     clinics: { name: "", phone: "", address: "", map_url: "", is_24h: false, note: "" },
     vaccinations: { cat_id: "", vaccine_name: "", date_given: today, clinic_id: "", next_due_date: addDaysYmd(today, 365), cost: null, note: "" },
     treatments: { cat_id: "", type: "flea", product: "", date_given: today, interval_days: 30, next_due_date: addDaysYmd(today, 30), cost: null, note: "" },
     weights: { cat_id: "", date: today, weight_kg: null, note: "" },
     supplies: { type: "dry_food", wet_kind: null, brand: "", flavor: "", unit: "bag", pack_size: null, pack_size_unit: "g", unit_size_g: null, units_per_pack: null, price: null, price_per: "pack", daily_g: null, pack_lasts_days: null, stock_base_qty: 0, shop_url: "", shop_name: "", cat_ids: null, note: "" },
-    purchases: { supply_id: "", date: today, qty: null, packs: null, price_paid: null, note: "" },
+    purchases: { supply_id: "", date: today, qty: null, packs: null, price_paid: null, shop_name: "", note: "" },
     vet_visits: { cat_id: "", date: today, clinic_id: "", symptoms: "", diagnosis: "", medicines: "", cost: null, receipt_r2_key: null, note: "" },
     expenses: { cat_id: "", category: "snack", date: today, amount: null, note: "" },
   };
@@ -155,6 +156,7 @@ export function RecordFormModal({ target, data, onClose, onSave }: {
           <Field label="ชื่อ"><input className={inputCls} value={s("name")} onChange={(e) => set("name", e.target.value)} placeholder="มะลิ" autoFocus /></Field>
           <Field label="เพศ"><Seg value={(v.sex as string) || null} onChange={(x) => set("sex", x)} options={[{ v: "female", label: "เมีย" }, { v: "male", label: "ผู้" }, { v: null, label: "ไม่ระบุ" }]} /></Field>
           <Field label="วันเกิด"><DateInput value={s("birth_date")} onChange={(x) => set("birth_date", x)} quick={false} /></Field>
+          <Field label="วันรับเลี้ยง" hint="ขึ้นปฏิทินทุกปี + แจ้ง LINE วันนั้น"><DateInput value={s("adopted_date")} onChange={(x) => set("adopted_date", x)} quick={false} /></Field>
           <Field label="สายพันธุ์"><input className={inputCls} value={s("breed")} onChange={(e) => set("breed", e.target.value)} placeholder="สก็อตติชโฟลด์" /></Field>
           <Field label="สี"><input className={inputCls} value={s("color")} onChange={(e) => set("color", e.target.value)} placeholder="ครีม" /></Field>
           <Field label="เลขไมโครชิป"><input className={inputCls} value={s("microchip")} onChange={(e) => set("microchip", e.target.value)} inputMode="numeric" /></Field>
@@ -362,15 +364,20 @@ function FooterButtons({ err, saving, label, onClose, onSave }: { err: string | 
 }
 
 /**
- * ซื้อเข้า — บวกสต็อกเอง + นับเป็นค่าใช้จ่าย
+ * ซื้อเข้า — บวกสต็อกเอง + นับเป็นค่าใช้จ่าย · แก้ใบเดิมได้ (target.row)
  *   อาหารเปียก: กรอกกี่แพ็ค → คิดเป็นชิ้นให้ (แก้ได้) · ราคาที่จ่ายเติมให้จากราคาที่ตั้ง (แก้ได้)
+ *   ซื้อจากร้าน: ใส่ร้านประจำให้ก่อน · เลือกร้านที่เคยใช้ได้ · เตือนถ้าแพงกว่าครั้งก่อน ≥ 10% + บอกร้านที่เคยถูกสุด (lib/cats-extras)
  */
-export function PurchaseModal({ supply, onClose, onSave }: { supply: Supply | null; onClose: () => void; onSave: (values: Row) => Promise<boolean> }) {
+export type PurchaseTarget = { supply: Supply; row?: Purchase | null };
+export function PurchaseModal({ target, data, onClose, onSave }: { target: PurchaseTarget | null; data: CatsData; onClose: () => void; onSave: (values: Row, row?: Purchase | null) => Promise<boolean> }) {
+  const supply = target?.supply ?? null;
+  const row = target?.row ?? null;
   const [date, setDate] = useState(todayBangkok());
   const [packs, setPacks] = useState<number | null>(1);
   const [qty, setQty] = useState<number | null>(null);
   const [paid, setPaid] = useState<number | null>(null);
   const [paidTouched, setPaidTouched] = useState(false);
+  const [shop, setShop] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -379,33 +386,57 @@ export function PurchaseModal({ supply, onClose, onSave }: { supply: Supply | nu
 
   useEffect(() => {
     if (!supply) return;
+    if (row) {
+      setDate(row.date); setPacks(row.packs != null ? Number(row.packs) : null); setQty(Number(row.qty)); setPaid(row.price_paid != null ? Number(row.price_paid) : null);
+      setPaidTouched(true); setShop(row.shop_name ?? ""); setNote(row.note ?? ""); setErr(null);
+      return;
+    }
     const q = supply.type === "wet_food" ? perPack : 1;
-    setDate(todayBangkok()); setPacks(1); setQty(q); setPaid(suggestPricePaid(supply, q)); setPaidTouched(false); setNote(""); setErr(null);
-  }, [supply, perPack]);
+    setDate(todayBangkok()); setPacks(1); setQty(q); setPaid(suggestPricePaid(supply, q)); setPaidTouched(false); setShop(supply.shop_name ?? ""); setNote(""); setErr(null);
+  }, [supply, row, perPack]);
+  const shops = useMemo(() => (supply ? knownShops(supply, data.supplies, data.purchases) : []), [supply, data.supplies, data.purchases]);
+  const check = useMemo(() => (supply && qty && paid ? priceCheck(supply, data.purchases, Number(qty), Number(paid), row?.id) : null), [supply, data.purchases, qty, paid, row?.id]);
   if (!supply) return null;
   const unit = stockUnitLabel(supply);
+  const packWord = wet ? "แพ็ค" : "ถุง";
+  const nowPerPack = qty && paid ? (Number(paid) / Number(qty)) * (wet ? perPack : 1) : null;
   const changeQty = (q: number | null) => { setQty(q); if (!paidTouched) setPaid(q ? suggestPricePaid(supply, q) : null); setErr(null); };
   const submit = async () => {
     if (!(Number(qty) > 0)) { setErr("กรอกจำนวน"); return; }
     if (!date) { setErr("เลือกวันที่ซื้อ"); return; }
     setSaving(true);
-    const ok = await onSave({ supply_id: supply.id, date, qty, packs: wet ? packs : null, price_paid: paid, note });
+    const ok = await onSave({ supply_id: supply.id, date, qty, packs: wet ? packs : null, price_paid: paid, shop_name: shop.trim(), note }, row);
     setSaving(false);
     if (ok) onClose();
   };
+  const dirty = row
+    ? date !== row.date || Number(qty) !== Number(row.qty) || (paid ?? null) !== (row.price_paid != null ? Number(row.price_paid) : null) || shop !== (row.shop_name ?? "") || note !== (row.note ?? "")
+    : note !== "" || paidTouched;
+  const cheaperElsewhere = !!(check?.cheapest && nowPerPack != null && check.cheapest.shop !== shop.trim() && check.cheapest.perPack < nowPerPack - 0.01);
   return (
-    <ERPModal open onClose={onClose} title={`ซื้อเข้า · ${[supply.brand, supply.flavor].filter(Boolean).join(" ")}`} description="สต็อกบวกให้เอง และนับเป็นค่าใช้จ่ายของเดือนนี้" size="md" storageKey="cats.purchase"
-      hasUnsavedChanges={!saving && (note !== "" || paidTouched)}
-      footer={<FooterButtons err={err} saving={saving} label="บันทึกซื้อเข้า" onClose={onClose} onSave={submit} />}>
+    <ERPModal open onClose={onClose} title={`${row ? "แก้ใบซื้อเข้า" : "ซื้อเข้า"} · ${[supply.brand, supply.flavor].filter(Boolean).join(" ")}`}
+      description={row ? "แก้จำนวน ราคา หรือร้านได้ · สต็อกและค่าใช้จ่ายคำนวณใหม่ให้เอง" : "สต็อกบวกให้เอง และนับเป็นค่าใช้จ่ายของเดือนนี้"} size="md" storageKey={row ? undefined : "cats.purchase"}
+      hasUnsavedChanges={!saving && dirty}
+      footer={<FooterButtons err={err} saving={saving} label={row ? "บันทึกการแก้ไข" : "บันทึกซื้อเข้า"} onClose={onClose} onSave={submit} />}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="วันที่ซื้อ"><DateInput value={date} onChange={setDate} /></Field>
+        <Field label="ซื้อจากร้าน" hint={shops.length ? "พิมพ์ใหม่ หรือเลือกร้านที่เคยใช้" : "เช่น Shopee · Pet Mall"}>
+          <input className={inputCls} value={shop} onChange={(e) => setShop(e.target.value)} list="cats-shop-list" placeholder="Shopee · ร้าน …" maxLength={80} />
+          <datalist id="cats-shop-list">{shops.map((x) => <option key={x} value={x} />)}</datalist>
+        </Field>
         {wet ? <>
           <Field label="ซื้อกี่แพ็ค" hint={`1 แพ็ค = ${perPack} ${unit}`}><StepInput value={packs} onChange={(p) => { setPacks(p); changeQty(p ? Math.round(p * perPack * 100) / 100 : null); }} step={1} min={0} unit="แพ็ค" /></Field>
           <Field label={`รวมกี่${unit}`}><StepInput value={qty} onChange={changeQty} step={1} min={0} unit={unit} /></Field>
         </> : (
           <Field label="ซื้อกี่ถุง"><StepInput value={qty} onChange={changeQty} step={1} min={0} unit="ถุง" /></Field>
         )}
-        <Field label="จ่ายไป (บาท)" hint="เติมให้จากราคาที่ตั้งไว้ · แก้ได้ถ้าได้ส่วนลด"><MoneyInput className={inputCls} value={paid} onChange={(x) => { setPaid(toNum(x)); setPaidTouched(true); }} /></Field>
+        <Field label="จ่ายไป (บาท)" hint={row ? undefined : "เติมให้จากราคาที่ตั้งไว้ · แก้ได้ถ้าได้ส่วนลด"}><MoneyInput className={inputCls} value={paid} onChange={(x) => { setPaid(toNum(x)); setPaidTouched(true); }} /></Field>
+        {check && (check.warn || cheaperElsewhere) && (
+          <p className={`rounded-lg px-3 py-2 text-xs sm:col-span-2 ${check.warn ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-600"}`}>
+            {check.warn && <>แพงกว่าครั้งก่อน {check.pctVsLast}% (ครั้งก่อน {fmtQty(check.lastPerPack ?? 0)} บาท/{packWord}){cheaperElsewhere ? " · " : ""}</>}
+            {cheaperElsewhere && check.cheapest && <>เคยถูกสุด {fmtQty(check.cheapest.perPack)} บาท/{packWord} ที่ {check.cheapest.shop}</>}
+          </p>
+        )}
         <Field label="หมายเหตุ" full><input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder="โปร 11.11" /></Field>
       </div>
     </ERPModal>

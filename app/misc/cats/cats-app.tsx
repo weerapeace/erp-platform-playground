@@ -2,6 +2,7 @@
 
 /**
  * 🐾 ทะเบียนแมว (แอป "งานอื่นๆ") — ตัวแอปทั้งหน้า
+ *   รอบ 5: ตัวช่วยเริ่มต้น · วันเกิด/วันรับเลี้ยง · ป้ายน้ำหนักลด · รายการต้องซื้อ · ประวัติราคา · สมุดสุขภาพ (/misc/cats/book)
  *   แท็บ: หน้าแรก (ใกล้ถึงกำหนด + ของใกล้หมด + แมวรูปใหญ่) · อาหาร/ทราย · ค่าใช้จ่าย · ปฏิทิน · คลินิก · ตั้งค่า (LINE) · ถังขยะ
  *   กดแมว = หน้าของแมวตัวนั้น (?cat=<id>)
  *   ข้อมูล/เขียน ผ่าน use-cats (API กลาง /api/cats) · กติกาคำนวณ = lib/cats · lib/cats-supplies · lib/cats-costs · lib/cats-notify
@@ -16,11 +17,13 @@ import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { SoloInstallSection } from "@/components/install-app";
 import { formatDate, todayBangkok } from "@/lib/date";
-import { ageText, CATS_EDIT, CATS_VIEW, doneAgain, dueItems, dueLabel, latestWeight, SEX_LABEL, TREATMENT_LABEL, type Cat, type CatKind, type Supply, type Treatment, type Vaccination } from "@/lib/cats";
+import { ageText, CATS_EDIT, CATS_VIEW, doneAgain, dueItems, dueLabel, latestWeight, SEX_LABEL, TREATMENT_LABEL, type Cat, type CatKind, type Purchase, type Supply, type Treatment, type Vaccination } from "@/lib/cats";
 import { asMealPlan, asNotify, fmtQty, stockUnitLabel, supplyStatus } from "@/lib/cats-supplies";
 import { costEntries, monthSummary } from "@/lib/cats-costs";
+import { anniversaries, nextAnniversary, weightAlert, type SetupStepKey } from "@/lib/cats-extras";
+import { AnniversaryList, PriceHistoryModal, SetupGuide, ShoppingListModal, WeightAlertBadge } from "./extras-ui";
 import { catPhotoUrl, fmtMoney, useCatsData, useCatsSettingsWrite, useCatsWrite } from "./use-cats";
-import { BulkWeighModal, PurchaseModal, RecordFormModal, StockCountModal, type FormTarget } from "./cat-forms";
+import { BulkWeighModal, PurchaseModal, RecordFormModal, StockCountModal, type FormTarget, type PurchaseTarget } from "./cat-forms";
 import { CatDetail, CatPhoto, DuePill } from "./cat-detail";
 import { CatsTrash } from "./cats-trash";
 import { FoodTab } from "./food-tab";
@@ -57,7 +60,9 @@ export function CatsApp() {
   const w = useCatsWrite(reloadAll);
   const saveSetting = useCatsSettingsWrite(reload);
   const today = todayBangkok();
-  const [buy, setBuy] = useState<Supply | null>(null);
+  const [buy, setBuy] = useState<PurchaseTarget | null>(null);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [priceOf, setPriceOf] = useState<Supply | null>(null);
   const [count, setCount] = useState<{ s: Supply; est: number } | null>(null);
   const [zoomImg, setZoomImg] = useState<{ url: string; label: string } | null>(null);
 
@@ -99,6 +104,7 @@ export function CatsApp() {
       .filter((x) => x.st.daysLeft != null && x.st.daysLeft <= notify.supply_days)
       .sort((a, b) => (a.st.daysLeft ?? 0) - (b.st.daysLeft ?? 0));
   }, [data.supplies, data.purchases, plan, notify.supply_days, today]);
+  const annis = useMemo(() => anniversaries(cats, today, 7), [cats, today]);
   const monthTotal = useMemo(() => monthSummary(costEntries(data), today.slice(0, 7), cats.map((c) => c.id)).total, [data, today, cats]);
 
   // ─── การกระทำ ───
@@ -129,13 +135,26 @@ export function CatsApp() {
   };
 
   const supplyLabel = (s: Supply) => [s.brand, s.flavor].filter(Boolean).join(" ");
-  const savePurchase = async (values: Record<string, unknown>) => {
+  const savePurchase = async (values: Record<string, unknown>, row?: Purchase | null) => {
     const s = data.supplies.find((x) => x.id === values.supply_id);
+    if (row) {
+      const before = row as unknown as Record<string, unknown>;
+      const patch = Object.fromEntries(Object.entries(values).filter(([k, val]) => JSON.stringify(val ?? null) !== JSON.stringify(before[k] ?? null) && !(val === "" && before[k] == null)));
+      return Object.keys(patch).length ? w.update("purchases", row.id, patch, before) : true;
+    }
     return !!(await w.create("purchases", values, `ซื้อเข้า ${s ? supplyLabel(s) : ""} +${fmtQty(Number(values.qty))} ${s ? stockUnitLabel(s) : ""}`));
   };
   const saveCount = async (qty: number) => {
     if (!count) return false;
     return w.update("supplies", count.s.id, { stock_base_qty: qty, stock_base_at: new Date().toISOString() }, count.s as unknown as Record<string, unknown>);
+  };
+
+  // ตัวช่วยเริ่มต้น → เปิดฟอร์ม/แท็บของขั้นนั้น
+  const onSetupStep = (k: SetupStepKey) => {
+    if (k === "cats") setForm({ kind: "cats" });
+    else if (k === "supplies") setForm({ kind: "supplies" });
+    else if (k === "notify") go({ view: "settings" });
+    else { go({ view: "food" }); if (k === "meal") setTimeout(() => document.getElementById("cats-meal-plan")?.scrollIntoView({ behavior: "smooth" }), 120); }
   };
 
   // ─── ด่านสิทธิ์ ───
@@ -172,6 +191,7 @@ export function CatsApp() {
   );
   else if (view === "home") body = (
     <div className="space-y-6">
+      {canEdit && <SetupGuide data={data} settings={settings} onStep={onSetupStep} />}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         {[
           { label: "ใกล้ถึงกำหนด", value: String(due.length), tone: due.some((d) => d.daysLeft <= 0) ? "text-rose-600" : "text-slate-800", go: () => document.getElementById("cats-due")?.scrollIntoView({ behavior: "smooth" }) },
@@ -184,9 +204,11 @@ export function CatsApp() {
           </button>
         ))}
       </div>
+      {annis.length > 0 && <AnniversaryList items={annis} onOpen={(id) => go({ cat: id })} />}
       {lowStock.length > 0 && (
         <section>
-          <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="box" /> ของใกล้หมด <span className="text-xs font-normal text-slate-400">ภายใน {notify.supply_days} วัน</span></h2>
+          <h2 className="mb-2 flex items-center gap-2 font-semibold text-slate-700"><Icon name="box" /> ของใกล้หมด <span className="text-xs font-normal text-slate-400">ภายใน {notify.supply_days} วัน</span>
+            <button type="button" onClick={() => setShopOpen(true)} className="ml-auto inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"><Icon name="shopping-cart" /> รายการต้องซื้อ</button></h2>
           <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
             {lowStock.map(({ s, st }) => (
               <div key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
@@ -196,7 +218,7 @@ export function CatsApp() {
                 </button>
                 {st.runOut && <DuePill due={st.runOut} today={today} />}
                 {s.shop_url && <a href={s.shop_url} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100">สั่งซื้อ</a>}
-                {canEdit && <button type="button" onClick={() => setBuy(s)} className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ซื้อเข้า</button>}
+                {canEdit && <button type="button" onClick={() => setBuy({ supply: s })} className="shrink-0 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">ซื้อเข้า</button>}
               </div>
             ))}
           </div>
@@ -238,10 +260,12 @@ export function CatsApp() {
               const worst = due.filter((d) => d.catId === c.id)[0];
               const lw = latestWeight(data.weights, c.id);
               const age = ageText(c.birth_date, today);
+              const wa = weightAlert(data.weights, c.id, today);
               return (
                 <button key={c.id} type="button" onClick={() => go({ cat: c.id })} className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left transition hover:shadow-md">
                   <div className="relative">
                     <CatPhoto cat={c} w={600} className="aspect-square w-full transition group-hover:scale-[1.02]" />
+                    {wa && <WeightAlertBadge alert={wa} className="absolute bottom-2 left-2" />}
                     {worst && worst.daysLeft <= 7 && (
                       <span className={`absolute left-2 top-2 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-white ${dueLabel(worst.daysLeft).tone === "danger" ? "bg-rose-600" : "bg-amber-500"}`}>{dueLabel(worst.daysLeft).text}</span>
                     )}
@@ -267,11 +291,23 @@ export function CatsApp() {
     }
     const name = (id: string) => data.cats.find((c) => c.id === id && c.is_active)?.name;
     for (const v of data.vaccinations) if (name(v.cat_id)) { catOf.set(`gv:${v.id}`, v.cat_id); docs.push({ id: `gv:${v.id}`, no: name(v.cat_id)!, sub: `ฉีด ${v.vaccine_name}`, date: v.date_given, color: "#94a3b8" }); }
+    // วันเกิด / วันรับเลี้ยง ทุกปี (ปีที่แล้ว – ปีหน้า)
+    const ty = Number(today.slice(0, 4));
+    for (const c of cats) for (const [kind, origin] of [["birthday", c.birth_date], ["adopted", c.adopted_date]] as const) {
+      if (!origin) continue;
+      for (const y of [ty - 1, ty, ty + 1]) {
+        const n = nextAnniversary(origin, `${y}-01-01`);
+        if (!n || n.years < 1 || !n.date.startsWith(String(y))) continue;
+        const id = `an:${kind}:${c.id}:${y}`;
+        catOf.set(id, c.id);
+        docs.push({ id, no: c.name, sub: kind === "birthday" ? `วันเกิด ครบ ${n.years} ขวบ` : `ครบ ${n.years} ปีที่มาอยู่บ้าน`, date: n.date, color: kind === "birthday" ? "#db2777" : "#0284c7" });
+      }
+    }
     for (const t of data.treatments) if (name(t.cat_id)) { catOf.set(`gt:${t.id}`, t.cat_id); docs.push({ id: `gt:${t.id}`, no: name(t.cat_id)!, sub: `${TREATMENT_LABEL[t.type]} ${t.product}`, date: t.date_given, color: "#94a3b8" }); }
     body = (
       <div className="rounded-xl border border-slate-200 bg-white p-2 sm:p-3">
         <DocCalendar docs={docs} cursor={cursor} onCursor={setCursor} unit="รายการ" onPick={(id) => { const c = catOf.get(id); if (c) go({ cat: c }); }}
-          hint={<span className="text-xs text-slate-500">สีแดง/ส้ม/เขียว = วันนัด (เลยกำหนด / ใกล้ / ยังไกล) · สีเทา = วันที่ฉีดหรือให้ยาไปแล้ว</span>} />
+          hint={<span className="text-xs text-slate-500">สีแดง/ส้ม/เขียว = วันนัด (เลยกำหนด / ใกล้ / ยังไกล) · สีเทา = วันที่ฉีดหรือให้ยาไปแล้ว · ชมพู = วันเกิด · ฟ้า = วันรับเลี้ยง</span>} />
       </div>
     );
   } else if (view === "clinics") {
@@ -309,7 +345,8 @@ export function CatsApp() {
     );
   } else if (view === "food") body = (
     <FoodTab data={data} mealPlanRaw={settings.meal_plan} canEdit={canEdit} onForm={setForm}
-      onPurchase={setBuy} onCount={(s, est) => setCount({ s, est })}
+      onPurchase={(s) => setBuy({ supply: s })} onCount={(s, est) => setCount({ s, est })}
+      onShopping={() => setShopOpen(true)} onPriceHistory={setPriceOf} onEditPurchase={(s, p) => setBuy({ supply: s, row: p })}
       onDelete={(s) => void w.remove("supplies", s.id, supplyLabel(s))}
       onDeletePurchase={(id, label) => void w.remove("purchases", id, label)}
       onSaveMealPlan={(p, before) => saveSetting("meal_plan", p, before, "บันทึกตารางมื้อแล้ว")} />
@@ -337,7 +374,10 @@ export function CatsApp() {
       <ERPModal open={installOpen} onClose={() => setInstallOpen(false)} title="ติดตั้งแอปแมวบนมือถือ" description="กดไอคอนบนหน้าจอแล้วเข้าทะเบียนแมวได้ทันที ไม่เห็นเมนูอื่นของ ERP" size="md">
         <SoloInstallSection open={installOpen} path="/misc/cats" />
       </ERPModal>
-      <PurchaseModal supply={buy} onClose={() => setBuy(null)} onSave={savePurchase} />
+      <PurchaseModal target={buy} data={data} onClose={() => setBuy(null)} onSave={savePurchase} />
+      <ShoppingListModal open={shopOpen} data={data} plan={plan} today={today} onClose={() => setShopOpen(false)} />
+      <PriceHistoryModal supply={priceOf} data={data} canEdit={canEdit} onClose={() => setPriceOf(null)}
+        onEdit={(s, p) => setBuy({ supply: s, row: p })} onDelete={(p, label) => void w.remove("purchases", p.id, label)} />
       <StockCountModal supply={count?.s ?? null} estimate={count?.est ?? 0} onClose={() => setCount(null)} onSave={saveCount} />
       {zoomImg && <ImageLightbox images={[zoomImg]} index={0} onIndex={() => undefined} onClose={() => setZoomImg(null)} />}
     </div>

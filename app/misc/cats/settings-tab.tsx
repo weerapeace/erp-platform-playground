@@ -74,7 +74,7 @@ export function SettingsTab({ data, settingsRaw, canEdit, isAdmin, onSaveNotify 
           <h3 className="flex items-center gap-2 font-semibold text-slate-700"><Icon name="bell" /> แจ้งเตือนเข้ากลุ่ม LINE</h3>
           <ToggleSwitch on={v.enabled} onChange={(x) => setV((p) => ({ ...p, enabled: x }))} disabled={!canEdit} label={v.enabled ? "เปิดอยู่" : "ปิดอยู่"} />
         </div>
-        <p className="mb-3 text-sm text-slate-500">ส่งสรุปวันละ 1 ข้อความตอน 08:00 เฉพาะวันที่มีเรื่อง: วันที่ถึงจุดเตือน · 1 วันก่อน · วันครบกำหนด (ของใกล้หมดเตือนเพิ่มตอนเหลือ 3 วัน) พร้อมลิงก์ร้านให้กดสั่ง</p>
+        <p className="mb-3 text-sm text-slate-500">ส่งสรุปวันละ 1 ข้อความตอน 08:00 เฉพาะวันที่มีเรื่อง: วันที่ถึงจุดเตือน · 1 วันก่อน · วันครบกำหนด (ของใกล้หมดเตือนเพิ่มตอนเหลือ 3 วัน) พร้อมลิงก์ร้านให้กดสั่ง · น้ำหนักลดผิดปกติ / ไม่ได้ชั่งนาน · วันเกิดและวันรับเลี้ยง (เช้าวันนั้น)</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm"><span className="mb-1 block text-xs font-medium text-slate-600">เตือนวัคซีน / ยา ล่วงหน้า</span>
             <StepInput value={v.health_days} onChange={(x) => setV((p) => ({ ...p, health_days: Math.max(1, Math.min(30, Math.round(x ?? 3))) }))} integer min={1} max={30} unit="วัน" disabled={!canEdit} /></label>

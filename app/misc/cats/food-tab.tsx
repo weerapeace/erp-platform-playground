@@ -14,10 +14,11 @@ import { asMealPlan, fmtQty, mealDaily, stockUnitLabel, supplyStatus, wetKindSum
 import { DuePill } from "./cat-detail";
 import { fmtMoney } from "./use-cats";
 import type { FormTarget } from "./cat-forms";
+import type { Purchase } from "@/lib/cats";
 
 const TYPES: SupplyType[] = ["dry_food", "wet_food", "litter"];
 
-export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCount, onDelete, onDeletePurchase, onSaveMealPlan }: {
+export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCount, onDelete, onDeletePurchase, onSaveMealPlan, onShopping, onPriceHistory, onEditPurchase }: {
   data: CatsData;
   mealPlanRaw: unknown;
   canEdit: boolean;
@@ -27,6 +28,10 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
   onDelete: (s: Supply) => void;
   onDeletePurchase: (id: string, label: string) => void;
   onSaveMealPlan: (plan: MealPlan, before: MealPlan) => Promise<boolean>;
+  /** รอบ 5: รายการต้องซื้อ · ประวัติราคา · แก้ใบซื้อเข้า */
+  onShopping: () => void;
+  onPriceHistory: (s: Supply) => void;
+  onEditPurchase: (s: Supply, p: Purchase) => void;
 }) {
   const today = todayBangkok();
   const saved = useMemo(() => asMealPlan(mealPlanRaw), [mealPlanRaw]);
@@ -63,7 +68,7 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
       </div>
 
       {/* ตารางมื้อ */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
+      <section id="cats-meal-plan" className="scroll-mt-16 rounded-xl border border-slate-200 bg-white p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="font-semibold text-slate-700">ตารางมื้ออาหารเปียก <span className="text-xs font-normal text-slate-400">ตั้งรวมทุกตัว · ใส่ครึ่งชิ้นได้</span></h3>
           {canEdit && dirty && (
@@ -117,8 +122,9 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
 
       {/* ของใช้ */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-y-2">
           <h3 className="font-semibold text-slate-700">ของที่บ้าน</h3>
+          {supplies.length > 0 && <button type="button" onClick={onShopping} className="ml-auto mr-2 inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-3 py-1.5 text-sm font-medium text-orange-700 hover:bg-orange-100"><Icon name="shopping-cart" /> รายการต้องซื้อ</button>}
           {canEdit && <button type="button" onClick={() => onForm({ kind: "supplies" })} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"><Icon name="plus" /> เพิ่มอาหาร/ทราย</button>}
         </div>
         {!supplies.length && <EmptyState icon={<Icon name="box" />} title="ยังไม่มีอาหารหรือทราย" hint="เพิ่มอาหารเม็ด อาหารเปียก (เกรวี่/เจลลี่) และทราย พร้อมราคาและลิงก์ร้าน แล้วระบบจะบอกว่าเหลือกี่วัน" onCreate={canEdit ? () => onForm({ kind: "supplies" }) : undefined} createLabel="เพิ่มอาหาร/ทราย" />}
@@ -160,6 +166,7 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
                       <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         {canEdit && <button type="button" onClick={() => onPurchase(s)} className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"><Icon name="plus" /> ซื้อเข้า</button>}
                         {canEdit && <button type="button" onClick={() => onCount(s, st.remaining)} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">นับสต็อก</button>}
+                        <button type="button" onClick={() => onPriceHistory(s)} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"><Icon name="chart-line" /> ประวัติราคา</button>
                         {s.shop_url && <a href={s.shop_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100"><Icon name="external-link" /> สั่งซื้อ{s.shop_name ? ` (${s.shop_name})` : ""}</a>}
                         {canEdit && <span className="ml-auto flex gap-1">
                           <button type="button" aria-label="แก้ไข" onClick={() => onForm({ kind: "supplies", row: s })} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon name="edit" /></button>
@@ -185,8 +192,12 @@ export function FoodTab({ data, mealPlanRaw, canEdit, onForm, onPurchase, onCoun
               return (
                 <div key={p.id} className="flex items-center gap-3 px-3 py-2 text-sm">
                   <span className="w-24 shrink-0 text-slate-500">{formatDate(p.date)}</span>
-                  <span className="min-w-0 flex-1 truncate text-slate-800">{supplyName(p.supply_id)} <span className="text-slate-500">+{fmtQty(Number(p.qty))} {s ? stockUnitLabel(s) : ""}{p.packs ? ` (${fmtQty(Number(p.packs))} แพ็ค)` : ""}</span></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-800">{supplyName(p.supply_id)} <span className="text-slate-500">+{fmtQty(Number(p.qty))} {s ? stockUnitLabel(s) : ""}{p.packs ? ` (${fmtQty(Number(p.packs))} แพ็ค)` : ""}</span></span>
+                    {p.shop_name && <span className="block truncate text-xs text-slate-500">{p.shop_name}</span>}
+                  </span>
                   <span className="shrink-0 font-medium text-slate-700">{fmtMoney(p.price_paid)}</span>
+                  {canEdit && s && <button type="button" aria-label="แก้ไข" onClick={() => onEditPurchase(s, p)} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon name="edit" /></button>}
                   {canEdit && <button type="button" aria-label="ลบ" onClick={() => onDeletePurchase(p.id, `ซื้อเข้า ${supplyName(p.supply_id)}`)} className="rounded-md p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="trash" /></button>}
                 </div>
               );

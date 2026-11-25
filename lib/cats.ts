@@ -26,6 +26,7 @@ export const CAT_KINDS: Record<CatKind, { table: string; label: string; nameFiel
       photo_r2_key: { type: "text", label: "รูป", max: 300 },
       sex: { type: "enum", label: "เพศ", options: ["male", "female"] },
       birth_date: { type: "date", label: "วันเกิด" },
+      adopted_date: { type: "date", label: "วันรับเลี้ยง" },
       breed: { type: "text", label: "สายพันธุ์", max: 80 },
       color: { type: "text", label: "สี", max: 80 },
       neutered: { type: "bool", label: "ทำหมันแล้ว" },
@@ -113,6 +114,7 @@ export const CAT_KINDS: Record<CatKind, { table: string; label: string; nameFiel
       qty: { type: "num", label: "จำนวน", required: true, min: 0.01, maxNum: 100000 },
       packs: { type: "num", label: "จำนวนแพ็ค", min: 0.01, maxNum: 10000 },
       price_paid: { type: "money", label: "จ่ายไป" },
+      shop_name: { type: "text", label: "ซื้อจากร้าน", max: 80 },
       note: { type: "longtext", label: "หมายเหตุ", max: 500 },
     },
   },
@@ -151,7 +153,7 @@ export const INTERVAL_PRESETS = [{ days: 30, label: "ทุก 1 เดือน
 
 // ─── ชนิดข้อมูลแถว ────────────────────────────────────────────────────────
 type Base = { id: string; is_active: boolean; created_at: string; updated_at: string; deleted_at: string | null };
-export type Cat = Base & { name: string; photo_r2_key: string | null; sex: "male" | "female" | null; birth_date: string | null; breed: string | null; color: string | null; neutered: boolean; microchip: string | null; note: string | null; sort_order: number };
+export type Cat = Base & { name: string; photo_r2_key: string | null; sex: "male" | "female" | null; birth_date: string | null; adopted_date: string | null; breed: string | null; color: string | null; neutered: boolean; microchip: string | null; note: string | null; sort_order: number };
 export type Clinic = Base & { name: string; phone: string | null; address: string | null; map_url: string | null; is_24h: boolean; note: string | null };
 export type Vaccination = Base & { cat_id: string; vaccine_name: string; date_given: string; clinic_id: string | null; next_due_date: string | null; cost: number | null; note: string | null };
 export type Treatment = Base & { cat_id: string; type: "deworm" | "flea"; product: string; date_given: string; interval_days: number | null; next_due_date: string | null; cost: number | null; note: string | null };
@@ -164,7 +166,7 @@ export type Supply = Base & {
   price: number | null; price_per: "piece" | "pack"; daily_g: number | null; pack_lasts_days: number | null;
   stock_base_qty: number; stock_base_at: string; shop_url: string | null; shop_name: string | null; cat_ids: string[] | null; note: string | null; sort_order: number;
 };
-export type Purchase = Base & { supply_id: string; date: string; qty: number; packs: number | null; price_paid: number | null; note: string | null };
+export type Purchase = Base & { supply_id: string; date: string; qty: number; packs: number | null; price_paid: number | null; shop_name: string | null; note: string | null };
 export type VetVisit = Base & { cat_id: string; date: string; clinic_id: string | null; symptoms: string | null; diagnosis: string | null; medicines: string | null; cost: number | null; receipt_r2_key: string | null; note: string | null };
 export type ExpenseCategory = "snack" | "toy" | "grooming" | "vet" | "other";
 export type Expense = Base & { cat_id: string | null; category: ExpenseCategory; date: string; amount: number; note: string | null };

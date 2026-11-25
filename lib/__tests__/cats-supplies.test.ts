@@ -14,7 +14,7 @@ const sup = (p: Partial<Supply>): Supply => ({
   daily_g: 100, pack_lasts_days: null, stock_base_qty: 2, stock_base_at: "2026-11-01T01:00:00Z",
   shop_url: null, shop_name: null, cat_ids: null, note: null, sort_order: 0, ...p,
 });
-const buy = (p: Partial<Purchase>): Purchase => ({ ...base, id: "p1", supply_id: "s1", date: "2026-11-05", qty: 1, packs: null, price_paid: 1000, note: null, created_at: "2026-11-05T03:00:00Z", ...p });
+const buy = (p: Partial<Purchase>): Purchase => ({ ...base, id: "p1", supply_id: "s1", date: "2026-11-05", qty: 1, packs: null, price_paid: 1000, shop_name: null, note: null, created_at: "2026-11-05T03:00:00Z", ...p });
 const plan = (gravy: number[], jelly: number[], pct = 100): MealPlan => ({ meals: gravy.map((g, i) => ({ key: `m${i}`, label: `มื้อ${i}`, gravy: g, jelly: jelly[i] ?? 0 })), dry_ratio_pct: pct });
 
 describe("ตารางมื้อ", () => {
@@ -94,7 +94,7 @@ describe("สต็อก / วันหมด / ต่อเดือน", () =
   });
 });
 
-const cat = (id: string, name: string, active = true) => ({ ...base, id, name, is_active: active, photo_r2_key: null, sex: null, birth_date: null, breed: null, color: null, neutered: false, microchip: null, note: null, sort_order: 0 });
+const cat = (id: string, name: string, active = true) => ({ ...base, id, name, is_active: active, photo_r2_key: null, sex: null, birth_date: null, adopted_date: null, breed: null, color: null, neutered: false, microchip: null, note: null, sort_order: 0 });
 const emptyData = (): CatsData => ({ cats: [cat(CAT1, "มะลิ"), cat(CAT2, "ข้าวตู")], clinics: [], vaccinations: [], treatments: [], weights: [], supplies: [], purchases: [], vet_visits: [], expenses: [] });
 
 describe("สรุปค่าใช้จ่าย", () => {

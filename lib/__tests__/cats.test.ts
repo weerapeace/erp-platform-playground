@@ -3,7 +3,7 @@ import { ageText, cleanCatBody, doneAgain, dueItems, dueLabel, isLatestRecord, l
 
 const base = { is_active: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", deleted_at: null };
 const CAT = "11111111-1111-4111-8111-111111111111";
-const cat = { ...base, id: CAT, name: "มะลิ", photo_r2_key: null, sex: "female" as const, birth_date: "2023-05-10", breed: null, color: null, neutered: true, microchip: null, note: null, sort_order: 0 };
+const cat = { ...base, id: CAT, name: "มะลิ", photo_r2_key: null, sex: "female" as const, birth_date: "2023-05-10", adopted_date: null, breed: null, color: null, neutered: true, microchip: null, note: null, sort_order: 0 };
 const vac = (id: string, given: string, due: string | null, name = "วัคซีนรวม 4 โรค"): Vaccination => ({ ...base, id, cat_id: CAT, vaccine_name: name, date_given: given, clinic_id: null, next_due_date: due, cost: null, note: null });
 const tr = (id: string, type: "deworm" | "flea", given: string, due: string | null, interval: number | null = 30): Treatment => ({ ...base, id, cat_id: CAT, type, product: "Revolution", date_given: given, interval_days: interval, next_due_date: due, cost: null, note: null });
 const data = (p: Partial<CatsData>): CatsData => ({ cats: [cat], clinics: [], vaccinations: [], treatments: [], weights: [], supplies: [], purchases: [], vet_visits: [], expenses: [], ...p });
