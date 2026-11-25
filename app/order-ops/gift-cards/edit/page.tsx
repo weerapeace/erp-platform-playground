@@ -18,15 +18,15 @@ import { SaveBar } from "@/components/save-bar";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
-import { CardDesigner, CardPreview, useCardFonts, type UploadedFont } from "@/components/card-designer";
+import { CardDesignerAny, CardPreview, useCardFonts, type UploadedFont } from "@/components/card-designer";
 import { apiFetch } from "@/lib/api";
 import { formatDateTime } from "@/lib/date";
 import { downloadBlob } from "@/lib/image-clipboard";
-import { cardStatus, fillTexts, hasRole, roleTexts, type CardDoc, type CardTexts } from "@/lib/gift-card-design";
+import { acceptsMessage, cardStatus, faceDoc, fillTexts, foldLine, groupTemplates, hasRole, isFolded, roleTexts, type CardDoc, type CardTexts } from "@/lib/gift-card-design";
 
 type Order = { id: string; order_no: string | null; customer_name: string | null; status: string | null; ordered_at: string | null; ship_by_at: string | null; packed_at: string | null; platform: string | null; platform_code: string | null; brand_id: string | null; brand_name: string | null; note: string | null };
 type Card = { id: string; platform_order_id: string | null; order_no: string | null; platform: string | null; brand_id: string | null; customer_note: string | null; template_id: string | null; doc: CardDoc; message: string | null; note: string | null; print_count: number; printed_at: string | null; printed_by_name: string | null; hand_written_at: string | null; hand_written_by_name: string | null; created_by_name: string | null; updated_at: string; updated_by_name: string | null; deleted_at: string | null; has_prev: boolean };
-type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean };
+type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null };
 type Loaded = { card: Card | null; order: Order | null; note: string | null; draft: { template_id: string; doc: CardDoc } | null; siblings: { id: string; message: string | null; printed_at: string | null; hand_written_at: string | null }[]; templates: Tpl[]; history: { id: string; action: string; metadata: Record<string, unknown>; created_at: string }[] };
 
 async function gcJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
@@ -218,7 +218,7 @@ function Editor() {
             <span className="text-sm font-medium text-slate-700">แก้ทั้งใบ (ลากวาง) — ใบนี้ใบเดียว ไม่กระทบแม่แบบ</span>
             <button type="button" onClick={() => setFull(false)} className={btn}><Icon value="i:check" /> เสร็จ กลับไปแก้ข้อความ</button>
           </div>
-          <CardDesigner value={doc} onChange={setDoc} uploadedFonts={fonts} />
+          <CardDesignerAny value={doc} onChange={setDoc} uploadedFonts={fonts} />
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
@@ -261,12 +261,23 @@ function Editor() {
                 <span className="text-[12px] font-medium text-slate-500">แม่แบบ</span>
                 {!readOnly && <button type="button" onClick={() => setFull(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-700 hover:bg-slate-50"><Icon value="i:palette" /> แก้ทั้งใบ (ฟอนต์ สี รูป)</button>}
               </div>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                {templates.map((t) => (
-                  <button key={t.id} type="button" disabled={readOnly} onClick={() => void applyTemplate(t)} className={`rounded-lg border p-1.5 text-left ${t.id === templateId ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200 hover:border-slate-300"}`}>
-                    <CardPreview doc={fillTexts(t.doc, { message: texts.message || "ข้อความ" })} maxHeight={64} />
-                    <div className="mt-1 truncate text-[11px] text-slate-600">{t.name}</div>
-                  </button>
+              <div className="space-y-3">
+                {groupTemplates(templates.filter((t) => !t.builtin), templates.filter((t) => t.builtin)).map(({ group, items }) => (
+                  <div key={group}>
+                    <div className="mb-1 text-[11px] font-medium text-slate-500">{group}</div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {items.map((t, i) => (
+                        <button key={t.id} type="button" disabled={readOnly} onClick={() => void applyTemplate(t)} className={`rounded-lg border p-1.5 text-left ${t.id === templateId ? "border-violet-400 ring-2 ring-violet-200" : "border-slate-200 hover:border-slate-300"}`}>
+                          <CardPreview doc={faceDoc(fillTexts(t.doc, { message: texts.message || "ข้อความ" }), "out")} maxHeight={64} fold={foldLine(t.doc)} />
+                          <div className="mt-1 flex items-center gap-1"><span className="text-[10px] font-medium text-violet-600">{i + 1}</span><span className="min-w-0 flex-1 truncate text-[11px] text-slate-600">{t.name}</span></div>
+                          <div className="flex flex-wrap gap-0.5">
+                            {!acceptsMessage(t.doc) && <span className="rounded bg-slate-100 px-1 text-[9px] text-slate-500">ข้อความตายตัว</span>}
+                            {isFolded(t.doc) && <span className="rounded bg-sky-50 px-1 text-[9px] text-sky-700">พับ A6</span>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -284,8 +295,13 @@ function Editor() {
           {/* ขวา: ตัวอย่างการ์ด */}
           <div className="order-1 lg:order-2">
             <div className="rounded-xl bg-slate-100 p-4 lg:sticky lg:top-3">
-              <CardPreview doc={doc} maxHeight={420} />
-              <div className="mt-2 text-center text-[11px] text-slate-500">ขนาดจริง {doc.w / 10} × {doc.h / 10} ซม. · หน้าตาตอนพิมพ์</div>
+              {isFolded(doc) ? (
+                <div className="space-y-3">
+                  <div><div className="mb-1 text-[11px] font-medium text-slate-500">ด้านนอก (หลัง + ปกหน้า)</div><CardPreview doc={faceDoc(doc, "out")} maxHeight={220} fold={foldLine(doc)} /></div>
+                  <div><div className="mb-1 text-[11px] font-medium text-slate-500">ด้านใน (ข้อความจากลูกค้า)</div><CardPreview doc={faceDoc(doc, "in")} maxHeight={220} fold={foldLine(doc)} /></div>
+                </div>
+              ) : <CardPreview doc={doc} maxHeight={420} />}
+              <div className="mt-2 text-center text-[11px] text-slate-500">{isFolded(doc) ? `การ์ดพับ A6 · กระดาษ A5 ${doc.w / 10} × ${doc.h / 10} ซม. · เส้นปะแดง = รอยพับ (ไม่ติดตอนพิมพ์)` : `ขนาดจริง ${doc.w / 10} × ${doc.h / 10} ซม. · หน้าตาตอนพิมพ์`}</div>
             </div>
           </div>
         </div>

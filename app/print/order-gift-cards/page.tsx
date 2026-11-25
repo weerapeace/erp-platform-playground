@@ -16,7 +16,7 @@ import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { cardsPrintHtml, cleanDoc, type CardDoc, type CardPrintMode } from "@/lib/gift-card-design";
+import { cardsPrintHtml, cleanDoc, isFolded, type CardDoc, type CardPrintMode } from "@/lib/gift-card-design";
 import { sheetGrid, type GiftCardConfig } from "@/lib/website-gift-cards";
 
 type Card = { id: string; order_no: string | null; doc: CardDoc; printed_at: string | null };
@@ -31,6 +31,7 @@ function Inner() {
   const [err, setErr] = useState<string | null>(null);
   const [mode, setMode] = useState<CardPrintMode>("sheet");
   const [marked, setMarked] = useState(false);
+  const [flipInside, setFlipInside] = useState(false);
 
   const load = useCallback(async () => {
     if (!ids.length) { setCards([]); return; }
@@ -47,8 +48,8 @@ function Inner() {
   const html = useMemo(() => {
     if (!cards) return "";
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    return cardsPrintHtml(cards.map((c) => c.doc), mode, { r2ToUrl: (k) => { const u = r2ImageUrl(k, 1600); return u ? origin + u : null; }, origin, title: `การ์ดของขวัญ ${cards.length} ใบ` });
-  }, [cards, mode]);
+    return cardsPrintHtml(cards.map((c) => c.doc), mode, { r2ToUrl: (k) => { const u = r2ImageUrl(k, 1600); return u ? origin + u : null; }, origin, title: `การ์ดของขวัญ ${cards.length} ใบ`, flipInside });
+  }, [cards, mode, flipInside]);
 
   const mark = async (printed: boolean) => {
     if (!cards?.length || !canEdit) return;
@@ -70,6 +71,7 @@ function Inner() {
   const first = cards?.[0]?.doc;
   const g = first ? sheetGrid({ size: { preset: "custom", w: first.w, h: first.h } } as GiftCardConfig) : null;
   const already = (cards ?? []).filter((c) => c.printed_at).length;
+  const foldN = (cards ?? []).filter((c) => isFolded(c.doc)).length;
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6">
@@ -85,6 +87,12 @@ function Inner() {
         <button onClick={print} disabled={!cards?.length} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์การ์ด</button>
       </div>
       <p className="no-print px-4 pt-3 text-xs text-slate-500 sm:px-6">ตอนพิมพ์ให้ตั้ง &quot;ขนาดจริง (100%)&quot; / ปิด &quot;ย่อให้พอดีหน้า&quot; · กดพิมพ์แล้วระบบติ๊กว่าการ์ดชุดนี้พิมพ์แล้วให้เอง (กันพิมพ์ซ้ำ)</p>
+      {foldN > 0 && (
+        <div className="no-print mx-4 mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[13px] text-sky-900 sm:mx-6">
+          <b>การ์ดพับ {foldN} ใบ (กระดาษ A5 พับครึ่ง)</b> — หน้าแรก ๆ = ด้านนอกทุกใบ ต่อด้วยด้านในทุกใบ (ลำดับเดียวกัน) · วิธีพิมพ์: 1) สั่งพิมพ์เฉพาะหน้าด้านนอก ({foldN} หน้าแรก) 2) เอาปึกกระดาษที่พิมพ์แล้วกลับด้าน ใส่ถาดใหม่ 3) สั่งพิมพ์หน้าด้านในที่เหลือ · เครื่องพิมพ์ 2 หน้าอัตโนมัติ = เลือก &quot;พิมพ์ 2 หน้า พลิกขอบยาว&quot;
+          <label className="ml-2 inline-flex items-center gap-1"><input type="checkbox" checked={flipInside} onChange={(e) => setFlipInside(e.target.checked)} /> ด้านในออกมากลับหัว → หมุนด้านใน 180°</label>
+        </div>
+      )}
       {err && <div className="mx-6 mt-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{err}</div>}
       {!err && cards && !cards.length && <div className="p-10 text-center text-sm text-slate-500">ไม่มีการ์ดที่จะพิมพ์ — เลือกการ์ดจากหน้าเขียนการ์ดของขวัญก่อน</div>}
       {html && cards?.length ? <div className="p-4 sm:p-6"><PrintFrame html={html} maxWidth={mode === "sheet" ? 860 : 640} /></div> : null}

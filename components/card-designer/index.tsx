@@ -23,12 +23,31 @@ import type { TextFontOption, TextStyle } from "@/lib/text-style";
 import {
   CARD_FONTS, CARD_MAX_ELS, CARD_MAX_MM, CARD_MIN_MM, CARD_SIZES, FONT_SIZE_MAX, FONT_SIZE_MIN, STICKERS, elBox, fontStack, googleFontsHref,
   newElId, newImageEl, newShapeEl, newTextEl, resizeDoc, resolveSrc, stickerDataUrl, textCss, uploadFontFaces,
-  type CardDoc, type CardEl, type CardRole, type CardShape, type CardTextStyle,
+  faceDoc, foldLine, isFolded, withFace,
+  type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
 export type UploadedFont = { id: string; name: string };
 const r2Url = (k: string) => r2ImageUrl(k);
-const ROLE_LABEL: Record<CardRole, string> = { message: "ข้อความหลัก", to: "ถึง", from: "จาก" };
+const ROLE_LABEL: Record<CardRole, string> = { message: "ข้อความจากลูกค้า", to: "ถึง", from: "จาก" };
+
+/** เครื่องหมายบนจอ (ไม่ติดตอนพิมพ์): กรอบเส้นปะสีเหลือง = ช่องข้อความจากลูกค้า/ถึง/จาก · เส้นปะแดง = รอยพับ */
+function ScreenMarks({ doc, k, fold, labels = true }: { doc: CardDoc; k: number; fold?: { x?: number; y?: number } | null; labels?: boolean }) {
+  return (
+    <>
+      {doc.els.filter((e) => !e.hidden && e.kind === "text" && e.role).map((e) => {
+        const b = elBox(e, k);
+        return (
+          <div key={`m${e.id}`} className="pointer-events-none absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, outline: "1.5px dashed #BA7517", background: "rgba(250,199,117,.16)" }}>
+            {labels && <span className="absolute -top-4 left-0 whitespace-nowrap rounded bg-amber-100 px-1 text-[9px] leading-4 text-amber-800">{ROLE_LABEL[e.role as CardRole]}</span>}
+          </div>
+        );
+      })}
+      {fold?.x != null && <div className="pointer-events-none absolute top-0 h-full border-l-[1.5px] border-dashed border-rose-500" style={{ left: fold.x * k }} />}
+      {fold?.y != null && <div className="pointer-events-none absolute left-0 w-full border-t-[1.5px] border-dashed border-rose-500" style={{ top: fold.y * k }} />}
+    </>
+  );
+}
 
 // ─── โหลดฟอนต์ (Google + ฟอนต์ที่อัปโหลด) ครั้งเดียวต่อหน้า ───
 export function useCardFonts(uploaded: UploadedFont[] = []) {
@@ -84,7 +103,7 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] 
 }
 
 /** พรีวิวการ์ด (ดูอย่างเดียว) — กว้างเต็มกล่องแม่ หรือกำหนด width (px) */
-export function CardPreview({ doc, width, className = "", maxHeight }: { doc: CardDoc; width?: number; className?: string; maxHeight?: number }) {
+export function CardPreview({ doc, width, className = "", maxHeight, marks = false, fold = null }: { doc: CardDoc; width?: number; className?: string; maxHeight?: number; /** โชว์กรอบช่องข้อความจากลูกค้า (บนจอเท่านั้น) */ marks?: boolean; /** เส้นรอยพับ (การ์ดพับ) */ fold?: { x?: number; y?: number } | null }) {
   const [ref, boxW] = useWidth<HTMLDivElement>();
   let k = (width ?? boxW) / doc.w;
   if (maxHeight && doc.h * k > maxHeight) k = maxHeight / doc.h;
@@ -96,6 +115,7 @@ export function CardPreview({ doc, width, className = "", maxHeight }: { doc: Ca
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {bg && <img src={bg} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: doc.bg.fit }} />}
           {doc.els.filter((e) => !e.hidden).map((e) => <ElView key={e.id} e={e} k={k} />)}
+          {(marks || fold) && <ScreenMarks doc={marks ? doc : { ...doc, els: [] }} k={k} fold={fold} labels={false} />}
         </div>
       )}
     </div>
@@ -115,10 +135,16 @@ const HANDLES: { hx: -1 | 0 | 1; hy: -1 | 0 | 1; cur: string }[] = [
 const r2d = (n: number) => Math.round(n * 100) / 100;
 const btn = (on = false) => `inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[12px] ${on ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"} disabled:opacity-40`;
 
-export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460 }: {
+export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460, fold = null, lockSize = false, faceNote }: {
   value: CardDoc;
   onChange: (next: CardDoc) => void;
   uploadedFonts?: UploadedFont[];
+  /** การ์ดพับ: เส้นรอยพับ (มม.) */
+  fold?: { x?: number; y?: number } | null;
+  /** ล็อกขนาด (การ์ดพับใช้ A5 ตายตัว) */
+  lockSize?: boolean;
+  /** ข้อความบอกด้านที่กำลังแก้ (การ์ดพับ) */
+  faceNote?: string;
   /** ความสูงพื้นที่วางการ์ดบน PC (px) */
   height?: number;
 }) {
@@ -352,7 +378,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
           </>}
         </div>
       </div>
-      <div className="space-y-1.5">
+      {lockSize ? <p className="text-[11px] text-slate-500">ขนาด: กระดาษ A5 พับครึ่ง ({doc.w} × {doc.h} มม.) · เปลี่ยนแนวพับได้ที่แถบด้านบน</p> : <div className="space-y-1.5">
         <div className="text-[11px] font-medium text-slate-500">ขนาดการ์ด</div>
         <select value={sizeKey} onChange={(e) => { const s = CARD_SIZES.find((x) => x.key === e.target.value); if (s) commit(resizeDoc(docRef.current, s.w, s.h)); }} className="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-[12px]">
           {CARD_SIZES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -362,7 +388,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
           <NumField label="กว้าง" value={doc.w} min={CARD_MIN_MM} max={CARD_MAX_MM} onChange={(v) => commit(resizeDoc(docRef.current, v, docRef.current.h))} /> ×
           <NumField label="สูง" value={doc.h} min={CARD_MIN_MM} max={CARD_MAX_MM} onChange={(v) => commit(resizeDoc(docRef.current, docRef.current.w, v))} /> มม.
         </div>
-      </div>
+      </div>}
     </div>
   );
 
@@ -373,16 +399,22 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
       {selected.kind === "text" && selected.style && <>
         <textarea value={selected.text ?? ""} rows={3} maxLength={600} onChange={(e) => patchEl(selected.id, { text: e.target.value }, "text")} placeholder="พิมพ์ข้อความ…"
           className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm" style={{ fontFamily: fontStack(selected.style.font) }} />
-        <div className="flex items-center gap-1.5 text-[12px]">
-          <span className="text-slate-500">ใช้เป็น</span>
-          <select value={selected.role ?? ""} onChange={(e) => {
-            const role = (e.target.value || null) as CardRole | null;
-            // role ละ 1 ชิ้น — ชิ้นเดิมที่มี role นี้ถูกปลดออก
-            commit({ ...docRef.current, els: docRef.current.els.map((x) => (x.id === selected.id ? { ...x, role } : role && x.role === role ? { ...x, role: null } : x)) });
-          }} className="h-7 rounded-md border border-slate-200 bg-white px-1.5">
-            <option value="">ข้อความตายตัว</option>
-            {(Object.keys(ROLE_LABEL) as CardRole[]).map((r) => <option key={r} value={r}>ช่อง "{ROLE_LABEL[r]}" (พนักงานแก้ได้)</option>)}
-          </select>
+        <div className="space-y-1 text-[12px]">
+          <span className="text-slate-500">ชิ้นข้อความนี้คือ</span>
+          <div className="flex flex-wrap gap-1">
+            {([null, "message", "to", "from"] as (CardRole | null)[]).map((role) => {
+              const on = (selected.role ?? null) === role;
+              return (
+                <button key={role ?? "fixed"} type="button" onClick={() => {
+                  // role ละ 1 ชิ้น — ชิ้นเดิมที่มี role นี้ถูกปลดออก
+                  commit({ ...docRef.current, els: docRef.current.els.map((x) => (x.id === selected.id ? { ...x, role } : role && x.role === role ? { ...x, role: null } : x)) });
+                }} className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 ${on ? (role === "message" ? "border-amber-400 bg-amber-50 font-medium text-amber-800" : "border-violet-300 bg-violet-50 text-violet-800") : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  {role === "message" && <Icon value="i:message" />}{role ? ROLE_LABEL[role] : "ข้อความตายตัว"}
+                </button>
+              );
+            })}
+          </div>
+          {selected.role === "message" && <p className="text-[11px] text-amber-700">ระบบเอาหมายเหตุออเดอร์มาใส่ช่องนี้ให้เอง · กรอบเส้นปะสีเหลืองเห็นแค่บนจอ ไม่ติดตอนพิมพ์</p>}
         </div>
         <TextStyleControl
           value={{ font: selected.style.font, color: selected.style.color, bold: selected.style.bold, italic: selected.style.italic, underline: selected.style.underline, align: selected.style.align }}
@@ -463,6 +495,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <button type="button" className={btn()} disabled={!past.current.length} onClick={undo} title="ย้อนกลับ (Ctrl+Z)"><Icon value="i:arrow-back-up" /> ย้อน</button>
           <button type="button" className={btn()} disabled={!future.current.length} onClick={redo} title="ทำซ้ำ (Ctrl+Y)"><Icon value="i:arrow-forward-up" /> ทำซ้ำ</button>
+          {faceNote && <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">{faceNote}</span>}
           <span className="text-[11px] text-slate-400">{doc.w} × {doc.h} มม. · ลูกศร = ขยับ 0.5 มม. (Shift = 5) · Alt ค้าง = ไม่ดูดเส้น</span>
         </div>
         <div ref={wrapRef} className="flex items-center justify-center rounded-xl bg-slate-100 p-3" style={{ minHeight: Math.min(height, doc.h * k + 24) }} onPointerDown={() => setSel(null)}>
@@ -477,6 +510,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
                 </div>
               ))}
             </div>
+            <ScreenMarks doc={doc} k={k} fold={fold} />
             {guides.v.map((x, i) => <div key={`v${i}`} className="pointer-events-none absolute top-0 h-full w-px bg-fuchsia-500" style={{ left: x * k }} />)}
             {guides.h.map((y, i) => <div key={`h${i}`} className="pointer-events-none absolute left-0 h-px w-full bg-fuchsia-500" style={{ top: y * k }} />)}
             {selected && !selected.hidden && (() => {
@@ -537,5 +571,34 @@ function NumField({ label, value, onChange, min = -1000, max = 1000 }: { label: 
       <input value={txt} inputMode="decimal" onChange={(e) => setTxt(e.target.value)} onBlur={done} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         className="h-7 w-full min-w-0 rounded-md border border-slate-200 px-1.5 text-[12px] tabular-nums text-slate-800" />
     </label>
+  );
+}
+
+/**
+ * ตัวออกแบบที่รองรับการ์ดพับ (เจ้าของเลือก 2026-11-25) — การ์ดแผ่นเดียว = CardDesigner ตามเดิม
+ * การ์ดพับ = สลับแก้ "ด้านนอก" (หลัง + ปกหน้า) / "ด้านใน" (ช่องข้อความจากลูกค้า) · เส้นปะแดง = รอยพับ · ขนาด A5 ล็อก
+ * ประวัติย้อน (Ctrl+Z) แยกต่อด้าน — สลับด้านแล้วเริ่มนับใหม่
+ */
+export function CardDesignerAny({ value, onChange, uploadedFonts = [], height = 460 }: { value: CardDoc; onChange: (next: CardDoc) => void; uploadedFonts?: UploadedFont[]; height?: number }) {
+  const [face, setFace] = useState<CardFace>("out");
+  const valueRef = useRef(value); valueRef.current = value;
+  const onFace = useCallback((f: CardDoc) => onChange(withFace(valueRef.current, face, f)), [onChange, face]);
+  if (!isFolded(value)) return <CardDesigner value={value} onChange={onChange} uploadedFonts={uploadedFonts} height={height} />;
+  const side = value.fold === "side";
+  const note = face === "out"
+    ? (side ? "ด้านนอก · ซ้าย = หลังการ์ด · ขวา = ปกหน้า" : "ด้านนอก · บน = หลังการ์ด (กลับหัวตอนพับ) · ล่าง = ปกหน้า")
+    : (side ? "ด้านใน · ซ้าย = ในซ้าย · ขวา = ในขวา" : "ด้านใน · บน = ในบน · ล่าง = ในล่าง");
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white text-[13px]">
+          {([["out", "ด้านนอก (ปกหน้า + หลัง)"], ["in", "ด้านใน"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setFace(k)} className={`h-8 px-3 ${face === k ? "bg-violet-600 font-medium text-white" : "text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+          ))}
+        </div>
+        <span className="text-[12px] text-slate-500">การ์ดพับ A6 (กระดาษ A5 พับครึ่ง · {side ? "พับข้าง เปิดแบบหนังสือ" : "พับบน เปิดขึ้น"}) · เส้นปะแดง = รอยพับ ไม่ติดตอนพิมพ์</span>
+      </div>
+      <CardDesigner key={face} value={faceDoc(value, face)} onChange={onFace} uploadedFonts={uploadedFonts} height={height} fold={foldLine(value)} lockSize faceNote={note} />
+    </div>
   );
 }

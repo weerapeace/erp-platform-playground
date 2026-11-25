@@ -71,10 +71,17 @@ function orderInfo(o: Row, lk: Awaited<ReturnType<typeof lookups>>) {
 }
 
 async function loadTemplates(admin: ReturnType<typeof supabaseAdmin>, withTrash = false) {
-  let q = admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, sort_order, updated_at, updated_by_name, deleted_at").order("sort_order").order("created_at");
+  let q = admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, sort_order, group_name, replaces_builtin, updated_at, updated_by_name, deleted_at").order("sort_order").order("created_at");
   q = withTrash ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
   const { data } = await q;
-  return ((data ?? []) as Row[]).map((t) => ({ id: String(t.id), name: String(t.name), brand_id: str(t.brand_id), doc: cleanDoc(t.doc), is_default: t.is_default === true, builtin: false, updated_at: str(t.updated_at), updated_by_name: str(t.updated_by_name), deleted_at: str(t.deleted_at) }));
+  return ((data ?? []) as Row[]).map((t) => ({ id: String(t.id), name: String(t.name), brand_id: str(t.brand_id), doc: cleanDoc(t.doc), is_default: t.is_default === true, builtin: false, group: str(t.group_name), sort_order: Number(t.sort_order) || 0, replaces_builtin: str(t.replaces_builtin), updated_at: str(t.updated_at), updated_by_name: str(t.updated_by_name), deleted_at: str(t.deleted_at) }));
+}
+/** แม่แบบทั้งหมดที่ใช้ได้ (ของที่ออกแบบเอง + ในตัวที่ยังไม่ถูกแก้) — ในตัวที่มีฉบับแก้แล้วถูกซ่อน (ข้อ 1) */
+async function allTemplates(admin: ReturnType<typeof supabaseAdmin>) {
+  const own = await loadTemplates(admin);
+  const replaced = new Set(own.map((t) => t.replaces_builtin).filter(Boolean));
+  const builtins = builtinTemplates().filter((b) => !replaced.has(b.id)).map((b, i) => ({ ...b, brand_id: null, is_default: false, builtin: true, sort_order: 100000 + i, replaces_builtin: null, updated_at: null, updated_by_name: null, deleted_at: null }));
+  return [...own, ...builtins];
 }
 
 /** แม่แบบที่จะใช้กับออเดอร์ — แบรนด์ตรง+ตั้งเป็นหลัก → แบรนด์ตรง → หลักทั่วไป → ในตัว "วันเกิด"/"เรียบ" */
@@ -96,8 +103,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   if (view === "templates") {
     const trash = sp.get("trash") === "1";
-    const own = await loadTemplates(admin, trash);
-    return NextResponse.json({ templates: trash ? own : [...own, ...builtinTemplates().map((b) => ({ ...b, brand_id: null, is_default: false, builtin: true, updated_at: null, updated_by_name: null, deleted_at: null }))] });
+    return NextResponse.json({ templates: trash ? await loadTemplates(admin, true) : await allTemplates(admin) });
   }
   if (view === "fonts") {
     const { data } = await admin.from("gift_card_fonts").select("id, name, format, size_bytes, created_by_name, created_at").is("deleted_at", null).order("created_at");
@@ -107,9 +113,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   if (tplId) {
     if (isBuiltinId(tplId)) { const b = builtinTemplates().find((x) => x.id === tplId); return b ? NextResponse.json({ template: { ...b, brand_id: null, is_default: false, builtin: true } }) : bad("ไม่พบแม่แบบ", 404); }
     if (!uuidRe.test(tplId)) return bad("ไม่พบแม่แบบ", 404);
-    const { data } = await admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, deleted_at").eq("id", tplId).maybeSingle();
+    const { data } = await admin.from("gift_card_templates").select("id, name, brand_id, doc, is_default, group_name, replaces_builtin, deleted_at").eq("id", tplId).maybeSingle();
     if (!data) return bad("ไม่พบแม่แบบ", 404);
-    return NextResponse.json({ template: { ...(data as Row), doc: cleanDoc((data as Row).doc), builtin: false } });
+    return NextResponse.json({ template: { ...(data as Row), group: str((data as Row).group_name), doc: cleanDoc((data as Row).doc), builtin: false } });
   }
 
   // การ์ดหลายใบ (หน้าพิมพ์)
@@ -145,7 +151,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       const { data: sib } = await admin.from("order_gift_cards").select("id, message, printed_at, hand_written_at").eq("platform_order_id", poId).is("deleted_at", null).order("created_at");
       siblings = (sib ?? []) as Row[];
     } else if (orderId) return bad("ไม่พบออเดอร์", 404);
-    const templates = [...(await loadTemplates(admin)), ...builtinTemplates().map((b) => ({ ...b, brand_id: null, is_default: false, builtin: true }))];
+    const templates = await allTemplates(admin);
     const note = (card?.customer_note as string | null) ?? order?.note ?? null;
     const tpl = pickTemplate(templates, (card?.brand_id as string | null) ?? order?.brand_id ?? null, note);
     // ยังไม่มีการ์ด = ร่างจากแม่แบบ + ข้อความที่เดาจากหมายเหตุ (ยังไม่บันทึกจนกด "บันทึก")
@@ -308,22 +314,30 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (action === "template_save" || action === "template_copy") {
     const denied = await guardApi(request, "order_ops.manage"); if (denied) return denied;
     const me = await whoAmI(request, admin);
-    let doc: CardDoc, name: string, brandId: string | null;
+    let doc: CardDoc, name: string, brandId: string | null, group: string | null;
     if (action === "template_copy") {
       const from = String(body.from ?? "");
       const src = isBuiltinId(from) ? builtinTemplates().find((x) => x.id === from)
-        : uuidRe.test(from) ? (await admin.from("gift_card_templates").select("name, doc, brand_id").eq("id", from).maybeSingle()).data as Row | null : null;
+        : uuidRe.test(from) ? (await admin.from("gift_card_templates").select("name, doc, brand_id, group_name").eq("id", from).maybeSingle()).data as Row | null : null;
       if (!src) return bad("ไม่พบแม่แบบต้นฉบับ", 404);
       doc = cleanDoc((src as Row).doc); name = `${String((src as Row).name)} (สำเนา)`.slice(0, 80); brandId = str((src as Row).brand_id);
+      group = str((src as Row).group_name) ?? str((src as Row).group);
     } else {
       doc = cleanDoc(body.doc);
       name = String(body.name ?? "").trim().slice(0, 80);
       if (!name) return bad("ตั้งชื่อแม่แบบก่อน");
       brandId = body.brand_id && uuidRe.test(String(body.brand_id)) ? String(body.brand_id) : null;
+      group = typeof body.group_name === "string" && body.group_name.trim() ? body.group_name.trim().slice(0, 60) : null;
     }
     const isDefault = body.is_default === true;
     const id = action === "template_save" && body.id && uuidRe.test(String(body.id)) ? String(body.id) : null;
-    const patch: Row = { name, brand_id: brandId, doc, is_default: isDefault, updated_by_name: me.name, updated_at: new Date().toISOString() };
+    // แก้แม่แบบในตัว = เก็บเป็นฉบับแก้ (replaces_builtin) · ในตัวตัวนั้นซ่อน · ลบฉบับแก้ = คืนค่าเดิม
+    const replaces = action === "template_save" && !id && isBuiltinId(String(body.replaces_builtin ?? "")) && builtinTemplates().some((b) => b.id === body.replaces_builtin) ? String(body.replaces_builtin) : null;
+    if (replaces) {
+      const { data: dup } = await admin.from("gift_card_templates").select("id").eq("replaces_builtin", replaces).is("deleted_at", null).limit(1);
+      if (dup?.length) return bad("แม่แบบในตัวนี้ถูกแก้ไว้แล้ว — เปิดฉบับที่แก้จากหน้าตั้งค่า", 409);
+    }
+    const patch: Row = { name, brand_id: brandId, doc, is_default: isDefault, group_name: group, updated_by_name: me.name, updated_at: new Date().toISOString() };
     if (isDefault) {   // หลักได้ใบเดียวต่อแบรนด์ (ไม่มีแบรนด์ = หลักทั่วไป)
       let q = admin.from("gift_card_templates").update({ is_default: false }).eq("is_default", true).is("deleted_at", null);
       q = brandId ? q.eq("brand_id", brandId) : q.is("brand_id", null);
@@ -338,10 +352,38 @@ export async function POST(request: Request): Promise<NextResponse> {
       await writeAudit(admin, { action: "update", entityType: "gift_card_templates", entityId: id, actorId: me.id, actorName: me.name, metadata: { name, ...auditChangeMeta(before as Row, patch, { opaque: ["doc"] }) } });
       return NextResponse.json({ ok: true, id });
     }
-    const { data, error } = await admin.from("gift_card_templates").insert({ ...patch, created_by: me.id, created_by_name: me.name }).select("id").single();
+    // ใหม่ = ต่อท้ายกลุ่ม
+    const { data: last } = await admin.from("gift_card_templates").select("sort_order").is("deleted_at", null).order("sort_order", { ascending: false }).limit(1);
+    const nextOrder = (Number((last?.[0] as Row | undefined)?.sort_order) || 0) + 10;
+    const { data, error } = await admin.from("gift_card_templates").insert({ ...patch, sort_order: nextOrder, replaces_builtin: replaces, created_by: me.id, created_by_name: me.name }).select("id").single();
     if (error || !data) return bad("บันทึกแม่แบบไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
-    await writeAudit(admin, { action: "create", entityType: "gift_card_templates", entityId: String(data.id), actorId: me.id, actorName: me.name, metadata: { name, from: action === "template_copy" ? body.from : undefined } });
+    await writeAudit(admin, { action: "create", entityType: "gift_card_templates", entityId: String(data.id), actorId: me.id, actorName: me.name, metadata: { name, group, from: action === "template_copy" ? body.from : undefined, replaces_builtin: replaces ?? undefined } });
     return NextResponse.json({ ok: true, id: data.id });
+  }
+
+  // จัดลำดับ/ย้ายกลุ่ม (ข้อ 2) — ids = ลำดับใหม่ทั้งกลุ่ม (ของที่ออกแบบเองเท่านั้น) · ย้อนกลับ = ส่งลำดับเดิมกลับมา
+  if (action === "template_order") {
+    const denied = await guardApi(request, "order_ops.manage"); if (denied) return denied;
+    const me = await whoAmI(request, admin);
+    const ids = (Array.isArray(body.ids) ? body.ids : []).map(String).filter((x: string) => uuidRe.test(x)).slice(0, 200);
+    const group = typeof body.group === "string" && body.group.trim() && body.group.trim() !== "ไม่มีกลุ่ม" ? body.group.trim().slice(0, 60) : null;
+    if (!ids.length) return bad("ไม่มีแม่แบบที่จะจัดลำดับ");
+    const { data: before } = await admin.from("gift_card_templates").select("id, name, group_name, sort_order").in("id", ids);
+    const base = Number(body.base) || 0;
+    for (let i = 0; i < ids.length; i++) await admin.from("gift_card_templates").update({ group_name: group, sort_order: base + (i + 1) * 10 }).eq("id", ids[i]);
+    await writeAudit(admin, { action: "template_order", entityType: "gift_card_templates", entityId: ids[0], actorId: me.id, actorName: me.name, metadata: { group, before } });
+    return NextResponse.json({ ok: true, before });
+  }
+  // เปลี่ยนชื่อกลุ่ม — ทุกแม่แบบในกลุ่ม (ในตัวที่ยังไม่แก้ ใช้ชื่อกลุ่มเดิมของระบบ)
+  if (action === "template_group_rename") {
+    const denied = await guardApi(request, "order_ops.manage"); if (denied) return denied;
+    const me = await whoAmI(request, admin);
+    const from = String(body.from ?? "").trim(), to = String(body.to ?? "").trim().slice(0, 60);
+    if (!from || !to) return bad("ตั้งชื่อกลุ่มใหม่ก่อน");
+    const { data, error } = await admin.from("gift_card_templates").update({ group_name: to }).eq("group_name", from).is("deleted_at", null).select("id");
+    if (error) return bad("เปลี่ยนชื่อกลุ่มไม่สำเร็จ", 500);
+    await writeAudit(admin, { action: "template_group_rename", entityType: "gift_card_templates", entityId: String((data?.[0] as Row | undefined)?.id ?? "00000000-0000-0000-0000-000000000000"), actorId: me.id, actorName: me.name, metadata: { changes: { group_name: { from, to } }, count: data?.length ?? 0 } });
+    return NextResponse.json({ ok: true, count: data?.length ?? 0 });
   }
 
   if (action === "ai") {

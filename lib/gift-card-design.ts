@@ -64,12 +64,22 @@ export interface CardEl {
   radius?: number;
 }
 
+export type CardBg = { color: string; image: string | null; fit: "cover" | "contain" };
+/** การ์ดพับ: side = พับข้างเปิดแบบหนังสือ · top = พับบนเปิดขึ้น (เจ้าของเลือก 2026-11-25 รอบ 2) */
+export type CardFold = "side" | "top";
+export type CardFace = "out" | "in";
+
 export interface CardDoc {
   v: 1;
+  /** การ์ดพับ = ขนาดกระดาษทั้งแผ่นก่อนพับ (A5) · el/bg ระดับบน = ด้านนอก (หลัง+ปกหน้า) */
   w: number;
   h: number;
-  bg: { color: string; image: string | null; fit: "cover" | "contain" };
+  bg: CardBg;
   els: CardEl[];
+  /** มี = การ์ดพับครึ่ง (รอยพับกลางแผ่น) */
+  fold?: CardFold | null;
+  /** ด้านในของการ์ดพับ (ช่องข้อความจากลูกค้าอยู่ด้านนี้) */
+  inside?: { bg: CardBg; els: CardEl[] } | null;
 }
 
 export type CardTexts = { message: string; to: string; from: string };
@@ -137,11 +147,50 @@ export function fontStack(font: string): string {
   return `'${fam.replace(/'/g, "")}', 'Sarabun', sans-serif`;
 }
 
-/** ฟอนต์ทั้งหมดที่การ์ดใช้ */
+/** ฟอนต์ทั้งหมดที่การ์ดใช้ (การ์ดพับ = รวมด้านใน) */
 export function docFonts(docs: CardDoc | CardDoc[]): string[] {
   const out = new Set<string>();
-  for (const d of Array.isArray(docs) ? docs : [docs]) for (const e of d.els) if (e.kind === "text" && e.style?.font) out.add(e.style.font);
+  for (const d of Array.isArray(docs) ? docs : [docs]) for (const e of allEls(d)) if (e.kind === "text" && e.style?.font) out.add(e.style.font);
   return [...out];
+}
+
+// ─── การ์ดพับ (A5 พับครึ่ง = A6) ───
+
+/** ขนาดแผ่นก่อนพับ: พับข้าง = A5 แนวนอน (หน้าละ A6 แนวตั้ง) · พับบน = A5 แนวตั้ง (หน้าละ A6 แนวนอน) */
+export const FOLD_SHEET: Record<CardFold, { w: number; h: number; label: string }> = {
+  side: { w: 210, h: 148, label: "พับข้าง เปิดแบบหนังสือ (หน้าการ์ด A6 แนวตั้ง)" },
+  top: { w: 148, h: 210, label: "พับบน เปิดขึ้น (หน้าการ์ด A6 แนวนอน)" },
+};
+export const isFolded = (doc: CardDoc): boolean => doc.fold === "side" || doc.fold === "top";
+/** ชิ้นทุกชิ้นของการ์ด (ด้านนอก + ด้านใน) */
+export const allEls = (doc: CardDoc): CardEl[] => (isFolded(doc) && doc.inside ? [...doc.els, ...doc.inside.els] : doc.els);
+/** รอยพับ (มม.) — พับข้าง = เส้นตั้งที่ x · พับบน = เส้นนอนที่ y */
+export function foldLine(doc: CardDoc): { x?: number; y?: number } | null {
+  if (!isFolded(doc)) return null;
+  return doc.fold === "side" ? { x: doc.w / 2 } : { y: doc.h / 2 };
+}
+/** ด้านหนึ่งของการ์ด เป็น CardDoc ธรรมดา (ใช้กับตัวออกแบบ/วาด/พิมพ์) · การ์ดแผ่นเดียว = ตัวมันเอง */
+export function faceDoc(doc: CardDoc, face: CardFace): CardDoc {
+  if (!isFolded(doc)) return doc;
+  if (face === "in") return { v: 1, w: doc.w, h: doc.h, bg: doc.inside?.bg ?? { color: "#ffffff", image: null, fit: "cover" }, els: doc.inside?.els ?? [] };
+  return { v: 1, w: doc.w, h: doc.h, bg: doc.bg, els: doc.els };
+}
+/** ใส่ด้านที่แก้แล้วกลับเข้าการ์ด */
+export function withFace(doc: CardDoc, face: CardFace, f: CardDoc): CardDoc {
+  if (!isFolded(doc)) return f;
+  return face === "in" ? { ...doc, inside: { bg: f.bg, els: f.els } } : { ...doc, bg: f.bg, els: f.els };
+}
+/** การ์ดพับเปล่า — ด้านในมีช่องข้อความจากลูกค้า + ถึง/จาก ที่ครึ่งหลัง (ขวา/ล่าง) */
+export function newFoldedDoc(fold: CardFold = "side"): CardDoc {
+  const { w, h } = FOLD_SHEET[fold];
+  const half = fold === "side" ? { x: w / 2, y: 0, w: w / 2, h } : { x: 0, y: h / 2, w, h: h / 2 };
+  const m = 10;
+  const inEls: CardEl[] = [
+    { id: newElId(), kind: "text", x: half.x + m, y: half.y + m, w: half.w - m * 2, h: 12, rot: 0, opacity: 1, text: "", role: "to", style: { ...DEFAULT_TEXT_STYLE, font: "Charm", size: 13, align: "left", valign: "top" } },
+    { id: newElId(), kind: "text", x: half.x + m, y: half.y + m + 16, w: half.w - m * 2, h: half.h - m * 2 - 34, rot: 0, opacity: 1, text: "", role: "message", style: { ...DEFAULT_TEXT_STYLE, font: "Charm", size: 20 } },
+    { id: newElId(), kind: "text", x: half.x + m, y: half.y + half.h - m - 12, w: half.w - m * 2, h: 12, rot: 0, opacity: 1, text: "", role: "from", style: { ...DEFAULT_TEXT_STYLE, font: "Charm", size: 13, align: "right", valign: "bottom" } },
+  ];
+  return { v: 1, w, h, bg: { color: "#fffdf8", image: null, fit: "cover" }, els: [], fold, inside: { bg: { color: "#ffffff", image: null, fit: "cover" }, els: inEls } };
 }
 
 // ─── สติ๊กเกอร์ในตัว (ข้อ 9) ───
@@ -259,10 +308,20 @@ export function cleanDoc(raw: unknown): CardDoc {
   const w = num(r.w, 148, CARD_MIN_MM, CARD_MAX_MM);
   const h = num(r.h, 105, CARD_MIN_MM, CARD_MAX_MM);
   const bgr = (r.bg && typeof r.bg === "object" ? r.bg : {}) as Record<string, unknown>;
-  const els = (Array.isArray(r.els) ? r.els : []).slice(0, CARD_MAX_ELS).map((e) => cleanEl(e, { w, h })).filter((e): e is CardEl => !!e);
+  const cleanEls = (arr: unknown) => (Array.isArray(arr) ? arr : []).slice(0, CARD_MAX_ELS).map((e) => cleanEl(e, { w, h })).filter((e): e is CardEl => !!e);
+  const cleanBg = (raw: unknown, d: string): CardBg => {
+    const b = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return { color: hex(b.color, d), image: okSrc(b.image), fit: b.fit === "contain" ? "contain" : "cover" };
+  };
+  const els = cleanEls(r.els);
+  const fold: CardFold | null = r.fold === "side" || r.fold === "top" ? r.fold : null;
+  const ir = (r.inside && typeof r.inside === "object" ? r.inside : {}) as Record<string, unknown>;
+  const inside = fold ? { bg: cleanBg(ir.bg, "#ffffff"), els: cleanEls(ir.els) } : null;
   const ids = new Set<string>();
-  for (const e of els) { if (ids.has(e.id)) e.id = newElId(); ids.add(e.id); }
-  return { v: 1, w, h, bg: { color: hex(bgr.color, "#fffdf8"), image: okSrc(bgr.image), fit: bgr.fit === "contain" ? "contain" : "cover" }, els };
+  for (const e of [...els, ...(inside?.els ?? [])]) { if (ids.has(e.id)) e.id = newElId(); ids.add(e.id); }
+  const doc: CardDoc = { v: 1, w, h, bg: cleanBg(bgr, "#fffdf8"), els };
+  if (fold) { doc.fold = fold; doc.inside = inside; }
+  return doc;
 }
 
 // ─── สร้างชิ้นใหม่ ───
@@ -298,20 +357,30 @@ export function resizeDoc(doc: CardDoc, w: number, h: number): CardDoc {
 // ─── ข้อความตาม role (แบบ A) ───
 
 export function roleTexts(doc: CardDoc): CardTexts {
-  const get = (role: CardRole) => doc.els.find((e) => e.kind === "text" && e.role === role)?.text ?? "";
+  const get = (role: CardRole) => allEls(doc).find((e) => e.kind === "text" && e.role === role)?.text ?? "";
   return { message: get("message"), to: get("to"), from: get("from") };
 }
-export const hasRole = (doc: CardDoc, role: CardRole) => doc.els.some((e) => e.kind === "text" && e.role === role);
+export const hasRole = (doc: CardDoc, role: CardRole) => allEls(doc).some((e) => e.kind === "text" && e.role === role);
+/** แม่แบบนี้ใส่ข้อความจากลูกค้าได้ไหม (มีชิ้น "ข้อความจากลูกค้า") — ป้าย ใส่ข้อความได้ / ข้อความตายตัว */
+export const acceptsMessage = (doc: CardDoc) => hasRole(doc, "message");
 
-/** ใส่ข้อความลงชิ้นที่มี role · การ์ดไม่มีชิ้น message = เพิ่มให้กลางการ์ด · ถึง/จาก ว่าง = ปล่อยว่าง */
+/** ใส่ข้อความลงชิ้นที่มี role · การ์ดไม่มีชิ้น message = เพิ่มให้กลางการ์ด (การ์ดพับ = ด้านในครึ่งหลัง) · ถึง/จาก ว่าง = ปล่อยว่าง */
 export function fillTexts(doc: CardDoc, t: Partial<CardTexts>): CardDoc {
-  let els = doc.els.map((e) => (e.kind === "text" && e.role && t[e.role] !== undefined ? { ...e, text: String(t[e.role]).slice(0, CARD_TEXT_MAX) } : e));
+  const fill = (list: CardEl[]) => list.map((e) => (e.kind === "text" && e.role && t[e.role] !== undefined ? { ...e, text: String(t[e.role]).slice(0, CARD_TEXT_MAX) } : e));
+  const out: CardDoc = { ...doc, els: fill(doc.els), ...(isFolded(doc) && doc.inside ? { inside: { ...doc.inside, els: fill(doc.inside.els) } } : {}) };
   if (t.message !== undefined && !hasRole(doc, "message")) {
-    const el = newTextEl(doc, String(t.message).slice(0, CARD_TEXT_MAX), { font: DEFAULT_FONT, size: 20 });
-    el.role = "message";
-    els = [...els, el];
+    const text = String(t.message).slice(0, CARD_TEXT_MAX);
+    if (isFolded(out)) {
+      const half = out.fold === "side" ? { x: out.w / 2, y: 0, w: out.w / 2, h: out.h } : { x: 0, y: out.h / 2, w: out.w, h: out.h / 2 };
+      const el: CardEl = { id: newElId(), kind: "text", x: half.x + 10, y: half.y + 14, w: half.w - 20, h: half.h - 28, rot: 0, opacity: 1, text, role: "message", style: { ...DEFAULT_TEXT_STYLE, font: DEFAULT_FONT, size: 20 } };
+      out.inside = { bg: out.inside?.bg ?? { color: "#ffffff", image: null, fit: "cover" }, els: [...(out.inside?.els ?? []), el] };
+    } else {
+      const el = newTextEl(doc, text, { font: DEFAULT_FONT, size: 20 });
+      el.role = "message";
+      out.els = [...out.els, el];
+    }
   }
-  return { ...doc, els };
+  return out;
 }
 
 // ─── แม่แบบเริ่มต้น (ใช้ได้ทันที ยังไม่ต้องออกแบบ · กด "ทำสำเนาไปแก้" = เก็บลงฐานข้อมูล) ───
@@ -322,10 +391,25 @@ const T = (o: Omit<Partial<CardEl>, "style"> & { text: string; style: Partial<Ca
 });
 const I = (o: Partial<CardEl> & { src: string }): CardEl => ({ id: newElId(), kind: "image", x: 0, y: 0, w: 10, h: 10, rot: 0, opacity: 1, fit: "contain", ...o });
 
-export function builtinTemplates(): { id: string; name: string; doc: CardDoc }[] {
+export const GROUP_GENERAL = "การ์ดทั่วไป";
+export const GROUP_BDAY = "การ์ดวันเกิด";
+
+export function builtinTemplates(): { id: string; name: string; group: string; doc: CardDoc }[] {
+  const foldBday = (() => {
+    const d = newFoldedDoc("side");   // 210×148 · ซ้าย = หลังการ์ด · ขวา = ปกหน้า
+    d.bg = { color: "#fff4f1", image: null, fit: "cover" };
+    d.els = [
+      T({ x: 125, y: 40, w: 70, h: 26, text: "Happy Birthday", style: { font: "Great Vibes", size: 36, color: "#9b2c4a" } }),
+      I({ x: 118, y: 8, w: 26, h: 30, rot: -10, src: "sticker:balloons" }),
+      I({ x: 176, y: 10, w: 22, h: 22, src: "sticker:confetti" }),
+      I({ x: 150, y: 86, w: 24, h: 26, src: "sticker:cake" }),
+      I({ x: 46, y: 128, w: 13, h: 13, src: "sticker:heart" }),
+    ];
+    return d;
+  })();
   return [
     {
-      id: `${BUILTIN_PREFIX}plain`, name: "การ์ดเรียบ",
+      id: `${BUILTIN_PREFIX}plain`, name: "การ์ดเรียบ", group: GROUP_GENERAL,
       doc: { v: 1, w: 148, h: 105, bg: { color: "#fffdf8", image: null, fit: "cover" }, els: [
         T({ x: 14, y: 8, w: 70, h: 12, text: "", role: "to", style: { font: "Charm", size: 13, align: "left", valign: "top" } }),
         T({ x: 14, y: 24, w: 120, h: 58, text: "", role: "message", style: { font: "Charm", size: 24 } }),
@@ -333,7 +417,7 @@ export function builtinTemplates(): { id: string; name: string; doc: CardDoc }[]
       ] },
     },
     {
-      id: `${BUILTIN_PREFIX}bday`, name: "วันเกิด",
+      id: `${BUILTIN_PREFIX}bday`, name: "วันเกิด", group: GROUP_BDAY,
       doc: { v: 1, w: 148, h: 105, bg: { color: "#fff4f1", image: null, fit: "cover" }, els: [
         I({ x: 8, y: 6, w: 26, h: 30, rot: -10, src: "sticker:balloons" }),
         I({ x: 120, y: 78, w: 18, h: 18, rot: 12, src: "sticker:heart" }),
@@ -344,7 +428,7 @@ export function builtinTemplates(): { id: string; name: string; doc: CardDoc }[]
       ] },
     },
     {
-      id: `${BUILTIN_PREFIX}lux`, name: "หรูเข้ม",
+      id: `${BUILTIN_PREFIX}lux`, name: "หรูเข้ม", group: GROUP_GENERAL,
       doc: { v: 1, w: 148, h: 105, bg: { color: "#1f2a44", image: null, fit: "cover" }, els: [
         { id: newElId(), kind: "shape", x: 6, y: 6, w: 136, h: 93, rot: 0, opacity: 1, shape: "rect", fill: "", stroke: "#e8d3a2", strokeW: 0.5, radius: 2 },
         T({ x: 14, y: 14, w: 120, h: 50, text: "", role: "message", style: { font: "Playfair Display", size: 22, color: "#ffffff" } }),
@@ -352,9 +436,28 @@ export function builtinTemplates(): { id: string; name: string; doc: CardDoc }[]
         T({ x: 34, y: 84, w: 80, h: 10, text: "", role: "from", style: { font: "Cormorant Garamond", size: 12, color: "#e8d3a2" } }),
       ] },
     },
+    { id: `${BUILTIN_PREFIX}bday-fold`, name: "วันเกิด พับ A6", group: GROUP_BDAY, doc: foldBday },
   ].map((t) => ({ ...t, doc: cleanDoc(t.doc) }));
 }
 export const isBuiltinId = (id: string | null | undefined) => !!id && id.startsWith(BUILTIN_PREFIX);
+
+/** แม่แบบ 1 ใบในรายการ (ของที่ออกแบบเอง + ในตัว) — ใช้ทั้งหน้าตั้งค่าและหน้าเขียนการ์ด */
+export type TemplateItem = { id: string; name: string; group: string; sort_order: number; builtin: boolean; replaces_builtin: string | null; doc: CardDoc };
+
+/**
+ * รวมแม่แบบเป็นกลุ่ม (ข้อ 2) — ของที่ออกแบบเองเรียงตาม sort_order · แม่แบบในตัวต่อท้ายกลุ่ม · ในตัวที่ถูกแก้แล้ว = ซ่อน (ใช้ฉบับแก้แทน)
+ * คืน [{ group, items }] เรียงกลุ่มตามลำดับที่เจอครั้งแรก (การ์ดทั่วไป/วันเกิด ก่อน ถ้าไม่มีลำดับอื่น)
+ */
+export function groupTemplates<T extends { id: string; group?: string | null; sort_order?: number | null; builtin?: boolean; replaces_builtin?: string | null }>(own: T[], builtins: T[]): { group: string; items: T[] }[] {
+  const replaced = new Set(own.map((t) => t.replaces_builtin).filter(Boolean) as string[]);
+  const list = [
+    ...[...own].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    ...builtins.filter((b) => !replaced.has(b.id)),
+  ];
+  const map = new Map<string, T[]>();
+  for (const t of list) { const g = (t.group ?? "").trim() || "ไม่มีกลุ่ม"; map.set(g, [...(map.get(g) ?? []), t]); }
+  return [...map.entries()].map(([group, items]) => ({ group, items }));
+}
 
 // ─── หมายเหตุลูกค้า: อ่าน · คัดแยก · เดาข้อความ (ข้อ 1) ───
 
@@ -491,11 +594,27 @@ export type CardPrintMode = "sheet" | "single";
  * เอกสารพิมพ์การ์ดหลายใบ (ข้อ 3) — sheet = เรียงบน A4 มีเส้นประให้ตัด (สูตรจัดวางเดียวกับการ์ดเว็บร้าน sheetGrid)
  *   single = 1 ใบต่อแผ่น กระดาษขนาดการ์ด · การ์ดคนละขนาด = แยกหน้ากันตามขนาด
  */
-export function cardsPrintHtml(docs: CardDoc[], mode: CardPrintMode, opts: { r2ToUrl: (key: string) => string | null; title?: string; /** ใส่โดเมนหน้าฟอนต์ที่อัปโหลด (หน้าต่างพิมพ์ใหม่ใช้ลิงก์สั้นไม่ได้) */ origin?: string }): string {
+export function cardsPrintHtml(docs: CardDoc[], mode: CardPrintMode, opts: { r2ToUrl: (key: string) => string | null; title?: string; /** ใส่โดเมนหน้าฟอนต์ที่อัปโหลด (หน้าต่างพิมพ์ใหม่ใช้ลิงก์สั้นไม่ได้) */ origin?: string; /** การ์ดพับ: หมุนด้านใน 180° (กรณีพิมพ์ออกมากลับหัว) */ flipInside?: boolean }): string {
   const groups = new Map<string, CardDoc[]>();
-  for (const d of docs) { const key = `${d.w}x${d.h}`; groups.set(key, [...(groups.get(key) ?? []), d]); }
+  for (const d of docs.filter((x) => !isFolded(x))) { const key = `${d.w}x${d.h}`; groups.set(key, [...(groups.get(key) ?? []), d]); }
   const pages: string[] = [];
   const pageCss: string[] = [];
+  // การ์ดพับ (A5 พับครึ่ง) — ด้านนอกทุกใบก่อน แล้วด้านในทุกใบ ลำดับเดียวกัน → พิมพ์ด้านนอกเสร็จ กลับกระดาษทั้งปึก แล้วพิมพ์ด้านในต่อ
+  const folded = docs.filter(isFolded);
+  if (folded.length) {
+    pageCss.push(`.fo{position:relative}.fo .cut{position:absolute;left:0;top:0;outline:0.25mm dashed #b8b8b8}.fo .fl{position:absolute;pointer-events:none}`);
+    for (const face of ["out", "in"] as CardFace[]) {
+      for (const d of folded) {
+        const f = faceDoc(d, face);
+        const card = cardHtml(f, { r2ToUrl: opts.r2ToUrl });
+        const flip = face === "in" && opts.flipInside ? `transform:rotate(180deg);transform-origin:${d.w / 2}mm ${d.h / 2}mm;` : "";
+        const inner = `<div class="cut" style="width:${d.w}mm;height:${d.h}mm;${flip}">${card}</div>`;
+        pages.push(mode === "sheet"
+          ? `<div class="pg fo" data-size="a4" style="width:210mm;height:297mm">${inner}</div>`
+          : `<div class="pg fo" data-size="${d.w}x${d.h}" style="width:${d.w}mm;height:${d.h}mm">${inner}</div>`);
+      }
+    }
+  }
   let gi = 0;
   for (const [, list] of groups) {
     const { w, h } = list[0];

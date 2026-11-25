@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buyerNoteOf, builtinTemplates, cardHtml, cardStatus, cardsPrintHtml, classifyNote, cleanDoc, docFonts, extractEngraveText,
+  acceptsMessage, buyerNoteOf, faceDoc, foldLine, groupTemplates, isFolded, newFoldedDoc, withFace, builtinTemplates, cardHtml, cardStatus, cardsPrintHtml, classifyNote, cleanDoc, docFonts, extractEngraveText,
   fillTexts, fontStack, googleFontsHref, resizeDoc, resolveSrc, roleTexts, suggestMessage, uploadFontFaces, type CardDoc,
 } from "@/lib/gift-card-design";
 
@@ -156,5 +156,51 @@ describe("resolveSrc / cardStatus", () => {
     expect(cardStatus({}).key).toBe("draft");
     expect(cardStatus({ printed_at: "x" }).key).toBe("printed");
     expect(cardStatus({ printed_at: "x", hand_written_at: "y" }).key).toBe("written");
+  });
+});
+
+describe("การ์ดพับ A6 + กลุ่มแม่แบบ (2026-11-25)", () => {
+  it("การ์ดพับใหม่ = A5 + ด้านในมีช่องข้อความจากลูกค้า · cleanDoc เก็บ fold/inside ไว้", () => {
+    const d = newFoldedDoc("side");
+    expect([d.w, d.h]).toEqual([210, 148]);
+    expect(isFolded(d)).toBe(true);
+    expect(acceptsMessage(d)).toBe(true);
+    const c = cleanDoc(JSON.parse(JSON.stringify(d)));
+    expect(c.fold).toBe("side");
+    expect(c.inside?.els.some((e) => e.role === "message")).toBe(true);
+    expect(foldLine(c)).toEqual({ x: 105 });
+    expect(foldLine(newFoldedDoc("top"))).toEqual({ y: 105 });
+  });
+  it("fillTexts ใส่ข้อความลงด้านใน · roleTexts อ่านด้านในได้", () => {
+    const d = fillTexts(newFoldedDoc("side"), { message: "สุขสันต์วันเกิด", from: "แม่" });
+    expect(roleTexts(d)).toMatchObject({ message: "สุขสันต์วันเกิด", from: "แม่" });
+    expect(d.els.some((e) => e.text === "สุขสันต์วันเกิด")).toBe(false);
+  });
+  it("faceDoc / withFace สลับด้านโดยไม่ทำด้านอื่นหาย", () => {
+    const d = newFoldedDoc("side");
+    const inside = faceDoc(d, "in");
+    const changed = withFace(d, "in", { ...inside, bg: { ...inside.bg, color: "#eeeeee" } });
+    expect(changed.inside?.bg.color).toBe("#eeeeee");
+    expect(changed.bg.color).toBe(d.bg.color);
+    expect(faceDoc(cleanDoc({ w: 148, h: 105, els: [] }), "in").w).toBe(148);   // การ์ดแผ่นเดียว = ตัวมันเอง
+  });
+  it("การ์ดไม่มีช่องข้อความจากลูกค้า = ข้อความตายตัว", () => {
+    expect(acceptsMessage(cleanDoc({ w: 148, h: 105, els: [{ kind: "text", text: "HBD", style: {} }] }))).toBe(false);
+  });
+  it("พิมพ์การ์ดพับ: ด้านนอกทุกใบก่อน แล้วด้านในทุกใบ", () => {
+    const html = cardsPrintHtml([newFoldedDoc("side"), newFoldedDoc("side")], "single", { r2ToUrl: () => null });
+    expect((html.match(/class="pg fo"/g) ?? []).length).toBe(4);
+  });
+  it("groupTemplates: ในตัวที่ถูกแก้แล้วซ่อน · จัดกลุ่ม · ของที่ออกแบบเองเรียงตาม sort_order", () => {
+    const own = [
+      { id: "b", group: "การ์ดวันเกิด", sort_order: 20, replaces_builtin: null },
+      { id: "a", group: "การ์ดวันเกิด", sort_order: 10, replaces_builtin: "builtin:bday" },
+    ];
+    const builtins = builtinTemplates().map((t) => ({ id: t.id, group: t.group, builtin: true }));
+    const g = groupTemplates<{ id: string; group?: string | null; sort_order?: number; replaces_builtin?: string | null; builtin?: boolean }>(own, builtins);
+    const bday = g.find((x) => x.group === "การ์ดวันเกิด")!;
+    expect(bday.items.map((x) => x.id).slice(0, 2)).toEqual(["a", "b"]);
+    expect(bday.items.some((x) => x.id === "builtin:bday")).toBe(false);
+    expect(bday.items.some((x) => x.id === "builtin:bday-fold")).toBe(true);
   });
 });

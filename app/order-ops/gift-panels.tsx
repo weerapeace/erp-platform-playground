@@ -17,7 +17,7 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { StatFilterCards } from "@/components/stat-filter-cards";
 import { PlatformBadge } from "@/components/platform-icon";
 import { Popover } from "@/components/popover";
-import { askConfirm } from "@/components/modal/ask-dialog";
+import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { Drawer, ERPModal } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
 import dynamic from "next/dynamic";
@@ -27,7 +27,7 @@ import { CardPreview, useCardFonts, type UploadedFont } from "@/components/card-
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
-import { cardStatus, extractEngraveText, type CardDoc } from "@/lib/gift-card-design";
+import { acceptsMessage, cardStatus, extractEngraveText, foldLine, groupTemplates, isFolded, type CardDoc } from "@/lib/gift-card-design";
 import { ENGRAVE_MODE_LABEL, ENGRAVE_SOURCE_LABEL, type EngraveMode, type EngraveSource } from "@/lib/order-ops";
 
 // ลิ้นชักรายละเอียดออเดอร์ (ของศูนย์ออเดอร์) หนัก — โหลดเฉพาะตอนกดเปิดแถว
@@ -46,7 +46,7 @@ type NoteRow = {
 };
 type Counts = { card: number; card_todo: number; engrave: number; engrave_missing: number; other: number; cards: number };
 type CardRow = { id: string; platform_order_id: string | null; order_no: string | null; platform: string | null; brand_name: string | null; customer_note: string | null; message: string | null; note: string | null; print_count: number; printed_at: string | null; printed_by_name: string | null; hand_written_at: string | null; updated_at: string; updated_by_name: string | null; deleted_at: string | null };
-type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
+type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
 type Tab = "card" | "engrave" | "engrave_missing" | "other" | "cards" | "templates";
 
 async function gcJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
@@ -415,6 +415,7 @@ export function GiftTemplates() {
   const [fonts, setFonts] = useState<(UploadedFont & { format: string; size_bytes: number | null })[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState<"" | "msg" | "fixed" | "fold">("");
   const fontRef = useRef<HTMLInputElement>(null);
   useCardFonts(fonts);
 
@@ -435,11 +436,32 @@ export function GiftTemplates() {
     try { const j = await gcJson<{ id: string }>("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_copy", from: t.id }) }); router.push(`/order-ops/gift-cards/template?id=${j.id}`); }
     catch (e) { toast.error((e as Error).message); }
   };
-  const del = async (kind: "template" | "font", id: string, restore = false) => {
+  const del = async (kind: "template" | "font", id: string, restore = false, label = "ย้ายลงถังขยะแล้ว") => {
     try {
       await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind, ids: [id], restore }) });
       void load();
-      if (!restore) toast.undo("ย้ายลงถังขยะแล้ว", async () => { await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind, ids: [id], restore: true }) }); void load(); });
+      if (!restore) toast.undo(label, async () => { await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind, ids: [id], restore: true }) }); void load(); });
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  // เลื่อนลำดับในกลุ่ม (ของที่ออกแบบเอง) — ย้อนกลับได้จากแจ้งผลมุมจอ
+  const move = async (group: string, own: Tpl[], i: number, dir: -1 | 1) => {
+    const ids = own.map((t) => t.id);
+    const j = i + dir; if (j < 0 || j >= ids.length) return;
+    const next = [...ids]; [next[i], next[j]] = [next[j], next[i]];
+    const base = Math.min(...own.map((t) => t.sort_order ?? 0)) - 10;
+    try {
+      await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_order", group, ids: next, base }) });
+      void load();
+      toast.undo("เลื่อนลำดับแล้ว", async () => { await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_order", group, ids, base }) }); void load(); });
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  const renameGroup = async (from: string) => {
+    const to = (await askText({ title: "เปลี่ยนชื่อกลุ่ม", message: "ชื่อกลุ่มใหม่ (ทุกแม่แบบในกลุ่มย้ายตาม)", initial: from, required: true, confirmText: "เปลี่ยนชื่อ" }))?.trim();
+    if (!to || to === from) return;
+    try {
+      await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_group_rename", from, to }) });
+      void load();
+      toast.undo(`เปลี่ยนชื่อกลุ่มเป็น "${to}" แล้ว`, async () => { await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_group_rename", from: to, to: from }) }); void load(); });
     } catch (e) { toast.error((e as Error).message); }
   };
   const uploadFont = async (f: File | undefined) => {
@@ -461,30 +483,75 @@ export function GiftTemplates() {
     <div className="space-y-6">
       <section>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div><h2 className="text-base font-semibold text-slate-800">แม่แบบการ์ด</h2><p className="text-[12px] text-slate-500">ออกแบบครั้งเดียว ใบต่อไปพนักงานแก้แค่ข้อความ · ตั้ง &quot;แม่แบบหลัก&quot; ต่อแบรนด์ได้ · แม่แบบในตัวกด &quot;ทำสำเนาไปแก้&quot;</p></div>
-          <Link href="/order-ops/gift-cards/template" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:plus" /> ออกแบบแม่แบบใหม่</Link>
+          <div><h2 className="text-base font-semibold text-slate-800">แม่แบบการ์ด</h2><p className="text-[12px] text-slate-500">ออกแบบครั้งเดียว ใบต่อไปพนักงานแก้แค่ข้อความ · จัดเป็นกลุ่ม เลข 1, 2, 3 เลื่อนลำดับได้ · แม่แบบในตัวกด &quot;แก้&quot; ได้เลย (คืนค่าเดิมได้)</p></div>
+          <Popover align="right" panelClassName="w-64 p-1.5 text-[13px]" trigger={(toggle) => <button type="button" onClick={toggle} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:plus" /> ออกแบบแม่แบบใหม่</button>}>
+            {() => (
+              <div className="space-y-0.5">
+                <Link href="/order-ops/gift-cards/template" className="block rounded px-2 py-1.5 hover:bg-slate-50"><b className="font-medium">การ์ดแผ่นเดียว</b><span className="block text-[11px] text-slate-500">ขนาด A6 / นามบัตร / กำหนดเอง</span></Link>
+                <Link href="/order-ops/gift-cards/template?new=fold-side" className="block rounded px-2 py-1.5 hover:bg-slate-50"><b className="font-medium">การ์ดพับ A6 · พับข้าง</b><span className="block text-[11px] text-slate-500">กระดาษ A5 พับครึ่ง เปิดแบบหนังสือ · ข้อความลูกค้าอยู่ด้านใน</span></Link>
+                <Link href="/order-ops/gift-cards/template?new=fold-top" className="block rounded px-2 py-1.5 hover:bg-slate-50"><b className="font-medium">การ์ดพับ A6 · พับบน</b><span className="block text-[11px] text-slate-500">กระดาษ A5 พับครึ่ง เปิดขึ้น · ข้อความลูกค้าอยู่ด้านใน</span></Link>
+              </div>
+            )}
+          </Popover>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {tpls.map((t) => (
-            <div key={t.id} className="rounded-xl border border-slate-200 bg-white p-3">
-              <CardPreview doc={t.doc} maxHeight={150} />
-              <div className="mt-2 flex items-center gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{t.name}</span>
-                {t.builtin && <span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500">ในตัว</span>}
-                {t.is_default && <span className="rounded bg-emerald-50 px-1.5 text-[10px] text-emerald-700">หลัก</span>}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {t.builtin
-                  ? <button type="button" onClick={() => void copy(t)} className="h-7 rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">ทำสำเนาไปแก้</button>
-                  : <>
-                    <Link href={`/order-ops/gift-cards/template?id=${t.id}`} className="inline-flex h-7 items-center rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">แก้</Link>
-                    <button type="button" onClick={() => void copy(t)} className="h-7 rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">ทำสำเนา</button>
-                    <button type="button" onClick={() => void del("template", t.id)} className="h-7 rounded-md border border-rose-200 px-2 text-[12px] text-rose-600 hover:bg-rose-50">ลบ</button>
-                  </>}
-              </div>
-            </div>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {([["", "ทั้งหมด"], ["msg", "ใส่ข้อความได้"], ["fixed", "ข้อความตายตัว"], ["fold", "การ์ดพับ"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setKind(k)} className={`h-7 rounded-full border px-3 text-[12px] ${kind === k ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
           ))}
         </div>
+        {(() => {
+          const pass = (t: Tpl) => (kind === "msg" ? acceptsMessage(t.doc) : kind === "fixed" ? !acceptsMessage(t.doc) : kind === "fold" ? isFolded(t.doc) : true);
+          const groups = groupTemplates(tpls.filter((t) => !t.builtin), tpls.filter((t) => t.builtin));
+          return groups.map(({ group, items }) => {
+            const own = items.filter((t) => !t.builtin);
+            const shown = items.filter(pass);
+            if (!shown.length) return null;
+            return (
+              <div key={group} className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Icon value="i:folder" />
+                  <b className="text-sm font-semibold text-slate-800">{group}</b>
+                  <span className="text-[12px] text-slate-400">{items.length} แบบ</span>
+                  <span className="flex-1" />
+                  {own.length > 0 && group !== "ไม่มีกลุ่ม" && <button type="button" onClick={() => void renameGroup(group)} className="h-7 rounded-md border border-slate-200 px-2 text-[12px] text-slate-600 hover:bg-slate-50">เปลี่ยนชื่อกลุ่ม</button>}
+                  <Link href={`/order-ops/gift-cards/template?group=${encodeURIComponent(group === "ไม่มีกลุ่ม" ? "" : group)}`} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 px-2 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:plus" /> เพิ่มในกลุ่มนี้</Link>
+                </div>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  {shown.map((t) => {
+                    const no = items.indexOf(t) + 1;
+                    const oi = own.indexOf(t);
+                    return (
+                      <div key={t.id} className="rounded-lg border border-slate-200 p-2">
+                        <CardPreview doc={t.doc} maxHeight={130} marks fold={foldLine(t.doc)} />
+                        <div className="mt-2 flex items-center gap-1.5">
+                          <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-50 text-[11px] font-medium text-violet-700">{no}</span>
+                          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800" title={t.name}>{t.name}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {acceptsMessage(t.doc) ? <span className="rounded-full bg-emerald-50 px-1.5 text-[10px] text-emerald-700">ใส่ข้อความได้</span> : <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">ข้อความตายตัว</span>}
+                          {isFolded(t.doc) && <span className="rounded-full bg-sky-50 px-1.5 text-[10px] text-sky-700">การ์ดพับ A6</span>}
+                          {t.builtin && <span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500">ในตัว</span>}
+                          {t.replaces_builtin && <span className="rounded bg-amber-50 px-1.5 text-[10px] text-amber-700">ในตัว · แก้แล้ว</span>}
+                          {t.is_default && <span className="rounded bg-emerald-50 px-1.5 text-[10px] text-emerald-700">หลัก</span>}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          <Link href={`/order-ops/gift-cards/template?id=${encodeURIComponent(t.id)}`} className="inline-flex h-7 items-center rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">แก้</Link>
+                          <button type="button" onClick={() => void copy(t)} className="h-7 rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">ทำสำเนา</button>
+                          {!t.builtin && oi > 0 && !kind && <button type="button" onClick={() => void move(group, own, oi, -1)} aria-label="เลื่อนขึ้น" title="เลื่อนไปก่อนหน้า" className="h-7 w-7 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"><Icon value="i:arrow-left" /></button>}
+                          {!t.builtin && oi >= 0 && oi < own.length - 1 && !kind && <button type="button" onClick={() => void move(group, own, oi, 1)} aria-label="เลื่อนลง" title="เลื่อนไปถัดไป" className="h-7 w-7 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"><Icon value="i:arrow-right" /></button>}
+                          {!t.builtin && (t.replaces_builtin
+                            ? <button type="button" onClick={() => void del("template", t.id, false, "คืนค่าแม่แบบในตัวแล้ว")} className="h-7 rounded-md border border-amber-200 px-2 text-[12px] text-amber-700 hover:bg-amber-50">คืนค่าเดิม</button>
+                            : <button type="button" onClick={() => void del("template", t.id)} className="h-7 rounded-md border border-rose-200 px-2 text-[12px] text-rose-600 hover:bg-rose-50">ลบ</button>)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {items.some((t) => t.builtin) && own.length > 0 && <p className="mt-2 text-[11px] text-slate-400">แม่แบบในตัวเรียงท้ายกลุ่ม — กด &quot;แก้&quot; แล้วบันทึก จึงเลื่อนลำดับ/ย้ายกลุ่มได้</p>}
+              </div>
+            );
+          });
+        })()}
         {trash.length > 0 && (
           <details className="mt-3 text-[12px] text-slate-500"><summary className="cursor-pointer">ถังขยะแม่แบบ ({trash.length})</summary>
             <div className="mt-2 flex flex-wrap gap-2">{trash.map((t) => <span key={t.id} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1">{t.name}<button type="button" onClick={() => void del("template", t.id, true)} className="text-sky-700 hover:underline">กู้คืน</button></span>)}</div>
