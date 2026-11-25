@@ -4,6 +4,8 @@
  *   POST { parent_id, tag_id, on }         → ติด (on=true) / ปลด (on=false)
  *   POST { tag_id, name_en }               → แก้ชื่ออังกฤษของแท็ก
  *   POST { create: { name, name_en?, group_id? } } → สร้างแท็กใหม่ (ชื่อซ้ำ = คืนตัวเดิม) · ป๊อป AI ร่าง ขั้นตั้งต้น
+ *   GET  ?usage=<tag_id>                  → { count } สินค้าที่ติดแท็กนี้ (ป๊อปแก้แท็กเตือนก่อนแก้ชื่อ)
+ *   POST { tag_id, update: { name?, name_en?, group_id? } } → แก้แท็ก (มีผลกับทุกสินค้าที่ติดแท็กนี้) · audit changes
  *   POST { tag_id, archive: true|false }    → เก็บเข้าถังขยะ / กู้คืน (is_active) — ใช้ตอนกด "ย้อนกลับ" หลังสร้าง
  *
  * ทำไมไม่ใช้ /api/admin/schema/m2m-links: ตัวนั้นต้องมีสิทธิ์ระดับแอดมินโครงสร้างตาราง
@@ -16,7 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +27,15 @@ const JUNCTION = "parent_skus_v2_product_family_m2m";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const parentId = (new URL(request.url).searchParams.get("parent_id") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  const parentId = (sp.get("parent_id") ?? "").trim();
   const admin = supabaseAdmin();
+  const usage = (sp.get("usage") ?? "").trim();
+  if (usage) {
+    const { count, error } = await admin.from(JUNCTION).select("id", { count: "exact", head: true }).eq("tgt_id", usage);
+    if (error) return NextResponse.json({ count: null, error: error.message }, { status: 400 });
+    return NextResponse.json({ count: count ?? 0, error: null });
+  }
   const [tagsRes, linkRes, groupsRes] = await Promise.all([
     admin.from("product_families").select("id, name, name_en, group_id").eq("is_active", true).order("name", { ascending: true }),
     parentId ? admin.from(JUNCTION).select("tgt_id").eq("src_id", parentId) : Promise.resolve({ data: [], error: null }),
@@ -45,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit")))
     return NextResponse.json({ error: "ต้องมีสิทธิ์แก้สินค้า (products.edit)" }, { status: 401 });
-  let b: { parent_id?: string; tag_id?: string; on?: boolean; name_en?: string | null; archive?: boolean; create?: { name?: string; name_en?: string | null; group_id?: string | null } };
+  let b: { parent_id?: string; tag_id?: string; on?: boolean; name_en?: string | null; archive?: boolean; update?: { name?: string; name_en?: string | null; group_id?: string | null }; create?: { name?: string; name_en?: string | null; group_id?: string | null } };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
@@ -70,6 +79,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const tagId = (b.tag_id ?? "").trim();
   if (!tagId) return NextResponse.json({ error: "ต้องระบุ tag_id" }, { status: 400 });
+
+  // โหมดแก้แท็ก (ชื่อไทย/อังกฤษ/กลุ่ม) — มีผลกับทุกสินค้าที่ติดแท็กนี้ · จดค่าเดิม→ใหม่ (ย้อนกลับได้จากป๊อป)
+  if (b.update) {
+    const { data: before } = await admin.from("product_families").select("name, name_en, group_id").eq("id", tagId).maybeSingle();
+    if (!before) return NextResponse.json({ error: "ไม่พบแท็ก" }, { status: 404 });
+    const patch: Record<string, unknown> = {};
+    if (b.update.name !== undefined) {
+      const nm = String(b.update.name ?? "").trim().slice(0, 80);
+      if (!nm) return NextResponse.json({ error: "ชื่อแท็กห้ามว่าง" }, { status: 400 });
+      const { data: dup } = await admin.from("product_families").select("id").ilike("name", nm).eq("is_active", true).neq("id", tagId).limit(1).maybeSingle();
+      if (dup) return NextResponse.json({ error: `มีแท็กชื่อ "${nm}" อยู่แล้ว` }, { status: 400 });
+      patch.name = nm;
+    }
+    if (b.update.name_en !== undefined) patch.name_en = String(b.update.name_en ?? "").trim().slice(0, 80) || null;
+    if (b.update.group_id !== undefined) patch.group_id = String(b.update.group_id ?? "").trim() || null;
+    if (!Object.keys(patch).length) return NextResponse.json({ success: true, before, error: null });
+    const { error } = await admin.from("product_families").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", tagId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    await writeAudit(admin, { action: "update", entityType: "product_families", entityId: tagId, actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { from: "ai_draft", changes: auditDiff(before as Record<string, unknown>, patch) } });
+    return NextResponse.json({ success: true, before, error: null });
+  }
 
   // โหมดเก็บเข้าถังขยะ/กู้คืน (ไม่ลบจริง — สินค้าที่ติดแท็กนี้ไม่พัง)
   if (b.archive !== undefined) {

@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
-import { ERPModal } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { Spinner } from "@/components/spinner";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -660,6 +660,114 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
               </div>
             </>)}
           </div>
+        )}
+      </div>
+    </ERPModal>
+  );
+}
+
+/**
+ * แก้แท็กประเภทสินค้า (กดชื่อแท็กในขั้นตั้งต้น) — ชื่อไทย/อังกฤษ/กลุ่ม · มีผลกับทุกสินค้าที่ติดแท็กนี้ (บอกจำนวนก่อน)
+ * AI ช่วยคิด = เติมชื่ออังกฤษ/กลุ่มที่ยังว่าง · "แก้กฎ" = ไปตั้งค่าประเภทในขั้น 2 · ย้ายไปถังขยะ = กู้คืนได้
+ * ทุกการแก้ลง audit (changes) + ปุ่มย้อนกลับมุมจอ
+ */
+export function EditTagModal({ tag, groups, canRule, onDone, onEditRule, onClose }: {
+  tag: { id: string; name: string; name_en?: string | null; group_id?: string | null };
+  groups: { id: string; name: string }[]; canRule: boolean;
+  onDone: () => void; onEditRule?: () => void; onClose: () => void;
+}) {
+  const t = useT();
+  const toast = useToast();
+  const [name, setName] = useState(tag.name);
+  const [nameEn, setNameEn] = useState(tag.name_en ?? "");
+  const [groupId, setGroupId] = useState(tag.group_id ?? "");
+  const [count, setCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [aiFilled, setAiFilled] = useState<string[]>([]);
+  const ai = useTagSetupAi();
+  useEffect(() => {
+    apiFetch(`/api/product-tags?usage=${encodeURIComponent(tag.id)}`).then((r) => r.json()).then((j) => setCount(typeof j.count === "number" ? j.count : null)).catch(() => setCount(null));
+  }, [tag.id]);
+  const post = async (body: unknown) => {
+    const j = await apiFetch("/api/product-tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+    if (j.error) throw new Error(j.error);
+    return j;
+  };
+  const dirty = name.trim() !== tag.name || nameEn.trim() !== (tag.name_en ?? "") || groupId !== (tag.group_id ?? "");
+  const askAi = async () => {
+    const d = await ai.run({ name, name_en: nameEn, groups });
+    if (!d) return;
+    const f: string[] = [];
+    if (!nameEn.trim() && d.name_en) { setNameEn(d.name_en); f.push("nameEn"); }
+    if (!groupId && d.group_id) { setGroupId(d.group_id); f.push("groupId"); }
+    setAiFilled(f);
+    if (!f.length) toast.info(t("ชื่ออังกฤษและกลุ่มกรอกไว้แล้ว — AI ไม่ทับ (ล้างช่องที่อยากให้คิดใหม่ก่อน)", "Already filled — AI doesn't overwrite"));
+  };
+  const save = async () => {
+    if (!name.trim()) { toast.warning(t("ชื่อแท็กห้ามว่าง", "Name can't be empty")); return; }
+    if (!dirty) { onClose(); return; }
+    setBusy(true);
+    try {
+      const j = await post({ tag_id: tag.id, update: { name: name.trim(), name_en: nameEn.trim() || null, group_id: groupId || null } });
+      const before = (j.before ?? { name: tag.name, name_en: tag.name_en ?? null, group_id: tag.group_id ?? null }) as { name: string; name_en: string | null; group_id: string | null };
+      onDone(); onClose();
+      toast.undo(t(`แก้แท็ก "${name.trim()}" แล้ว`, `Tag "${name.trim()}" updated`), async () => {
+        try { await post({ tag_id: tag.id, update: { name: before.name, name_en: before.name_en, group_id: before.group_id } }); onDone(); }
+        catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); }
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
+    finally { setBusy(false); }
+  };
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const archive = async () => {
+    setConfirmArchive(false);
+    setBusy(true);
+    try {
+      await post({ tag_id: tag.id, archive: true });
+      onDone(); onClose();
+      toast.undo(t(`ย้าย "${tag.name}" ไปถังขยะแล้ว`, `"${tag.name}" moved to trash`), async () => {
+        try { await post({ tag_id: tag.id, archive: false }); onDone(); } catch (e) { toast.error(e instanceof Error ? e.message : t("กู้คืนไม่สำเร็จ", "Restore failed")); }
+      }, { ms: 8000 });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้ายไม่สำเร็จ", "Failed")); }
+    finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" hasUnsavedChanges={dirty} title={t("แก้แท็กประเภทสินค้า", "Edit product-type tag")}
+      footer={<div className="flex justify-between gap-2 w-full flex-wrap">
+        <button onClick={() => setConfirmArchive(true)} disabled={busy} className="h-9 px-3 text-sm text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">{t("ย้ายแท็กไปถังขยะ", "Move to trash")}</button>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={() => void save()} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{t("บันทึก", "Save")}</button>
+        </div>
+      </div>}>
+      <ConfirmDialog open={confirmArchive} onClose={() => setConfirmArchive(false)} variant="danger"
+        title={t("ย้ายแท็กไปถังขยะ", "Move tag to trash")}
+        message={t(`ย้าย "${tag.name}" ไปถังขยะ? แท็กจะหายจากรายการเลือก${count ? ` (ใช้กับสินค้า ${count} ตัว — ข้อมูลสินค้าไม่พัง)` : ""} · กู้คืนได้ด้วยปุ่มย้อนกลับ`, `Move "${tag.name}" to trash? Restorable.`)}
+        confirmText={t("ย้ายไปถังขยะ", "Move to trash")} cancelText={t("ยกเลิก", "Cancel")} onConfirm={() => void archive()} />
+      <div className="space-y-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className={`flex-1 min-w-0 text-[12px] px-2.5 py-1.5 rounded-lg ${count && count > 1 ? "bg-amber-50 text-amber-800 border border-amber-200" : "bg-slate-50 text-slate-500 border border-slate-200"}`}>
+            {count === null ? t("กำลังนับสินค้าที่ใช้แท็กนี้…", "Counting products…")
+              : t(`ใช้กับสินค้า ${count} ตัว — แก้ชื่อ/กลุ่มจะเปลี่ยนทุกตัว`, `Used by ${count} products — changes apply to all`)}
+          </p>
+          {canRule && <button type="button" onClick={() => void askAi()} disabled={ai.busy} className={AI_BTN}>{ai.busy && <Spinner />}{t("✨ ให้ AI ช่วยคิด", "✨ AI helps")}</button>}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่อไทย", "Thai name")} *</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" /></label>
+          <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่ออังกฤษ", "English name")}</span>
+            <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} className={`w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg${aiMark(aiFilled.includes("nameEn"))}`} /></label>
+        </div>
+        <label className="block"><span className="text-[12px] text-slate-600">{t("อยู่ในกลุ่ม", "Group")}</span>
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className={`w-full h-9 px-2 text-[13px] border border-slate-200 rounded-lg bg-white${aiMark(aiFilled.includes("groupId"))}`}>
+            <option value="">{t("— ไม่ระบุกลุ่ม —", "— no group —")}</option>
+            {groups.slice().sort((a, b) => a.name.localeCompare(b.name, "th")).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select></label>
+        {canRule && onEditRule && (
+          <p className="text-[12px] text-slate-500">
+            {t("หัวข้อ · จุดเด่น · ชนิดช่อง · ช่องกรอกมือ ของประเภทนี้ →", "Questions · highlights · compartments · manual fields →")}{" "}
+            <button type="button" onClick={() => { onClose(); onEditRule(); }} className="text-violet-700 underline">{t("แก้กฎ (ตั้งค่าประเภทในขั้น 2)", "Edit rule (step 2)")}</button>
+          </p>
         )}
       </div>
     </ERPModal>

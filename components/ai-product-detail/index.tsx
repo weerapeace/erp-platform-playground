@@ -23,7 +23,7 @@ import {
   MANUAL_FIELDS, fitsFromSize, highlightChoices, mergeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
   type FitCatalogRow, type ParcelBox,
 } from "@/lib/ai-draft-setup";
-import { CreateTagModal, ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
+import { CreateTagModal, EditTagModal, ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
@@ -131,14 +131,17 @@ function ModelPicker() {
  * แท็กมีผลกับ AI 2 ทาง: ① ใช้จับ "กฎตามประเภทสินค้า"  ② ส่งเข้า prompt ให้ AI รู้ว่าสินค้าเป็นของประเภทไหน
  * แสดง 2 ภาษา (ไทย · EN) — แท็กไหนยังไม่มีชื่ออังกฤษ เติมได้ในที่เดียวกัน
  */
-function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false }: {
+function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, onEditRule }: {
   parentId: string; onChanged?: () => void; onCount?: (n: number) => void;
   /** แท็กที่ติดอยู่ (ไว้สร้างกฎประเภทจากแท็ก) */
   onPicked?: (tags: { id: string; name: string }[]) => void;
   /** สร้างกฎประเภทไปพร้อมแท็กใหม่ได้ (tasks.approve) */
   canRule?: boolean;
+  /** ป๊อปแก้แท็ก → "แก้กฎ" = ไปตั้งค่าประเภทในขั้น 2 */
+  onEditRule?: () => void;
 }) {
   const [createName, setCreateName] = useState<string | null>(null);
+  const [editTag, setEditTag] = useState<TagRow | null>(null);
   const [all, setAll] = useState<TagRow[] | null>(null);
   const [groups, setGroups] = useState<TagGroupLike[]>([]);
   const [mine, setMine] = useState<Set<string>>(new Set());
@@ -207,7 +210,11 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false }: 
       <div className="flex items-center gap-1.5 flex-wrap">
         {picked.map((t) => (
           <span key={t.id} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-full border border-emerald-300 bg-emerald-50 text-[12px] text-emerald-700">
-            {t.name}{t.name_en ? <span className="text-emerald-500/70 text-[10.5px]">· {t.name_en}</span> : null}
+            {/* กดชื่อ = แก้แท็ก (ชื่อ/EN/กลุ่ม) · กด ✕ = เอาออกจากสินค้านี้ */}
+            <button type="button" onClick={() => setEditTag(t)} title="กดเพื่อแก้แท็ก" className="inline-flex items-center gap-1 hover:underline">
+              {t.name}{t.name_en ? <span className="text-emerald-500/70 text-[10.5px]">· {t.name_en}</span> : null}
+              <span className="text-emerald-500/70 text-[10px]">✎</span>
+            </button>
             <button type="button" disabled={busy === t.id} onClick={() => void toggle(t)} title="เอาแท็กนี้ออก"
               className="w-5 h-5 rounded-full text-emerald-600 hover:bg-emerald-100 disabled:opacity-40">✕</button>
           </span>
@@ -255,6 +262,10 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false }: 
       {createName !== null && (
         <CreateTagModal parentId={parentId} initialName={createName} groups={groups} canRule={canRule}
           onDone={() => { setSearch(""); void load(); onChanged?.(); }} onClose={() => setCreateName(null)} />
+      )}
+      {editTag && (
+        <EditTagModal tag={editTag} groups={groups} canRule={canRule}
+          onDone={() => { void load(); onChanged?.(); }} onEditRule={onEditRule} onClose={() => setEditTag(null)} />
       )}
     </div>
   );
@@ -1196,7 +1207,8 @@ export function AiProductDetailModal({
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-2.5">
-                  <TagPicker key={tagTick} parentId={parentId} onChanged={() => setRulesTick((x) => x + 1)} onCount={setTagCount} onPicked={setPickedTags} canRule={canRule} />
+                  <TagPicker key={tagTick} parentId={parentId} onChanged={() => setRulesTick((x) => x + 1)} onCount={setTagCount} onPicked={setPickedTags} canRule={canRule}
+                    onEditRule={() => { setStep(1); if (rulesMatched.length) setRuleEditOpen(true); else setNewRuleOpen(true); }} />
                   {tagCount === 0 && <p className="mt-1 text-[11.5px] text-rose-600">{t("● จำเป็น: ติดแท็กประเภทสินค้าอย่างน้อย 1 แท็ก — AI จะรู้ว่าเป็นสินค้าอะไรและเข้ากฎที่ตั้งไว้", "● Required: add at least one product-type tag")}</p>}
                   {rulesMatched.length > 0 && (
                     <p className="mt-1.5 text-[12px] text-emerald-700">
@@ -1330,8 +1342,12 @@ export function AiProductDetailModal({
                             <div key={s.id} className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${n > 0 ? "border-fuchsia-200 bg-fuchsia-50/40" : "border-slate-200"}`}>
                               <span className="flex-1 min-w-0 truncate text-[12.5px] text-slate-700">{t(s.name, s.name_en || s.name)}</span>
                               <button type="button" onClick={() => set(Math.max(0, n - 1))} className="w-6 h-6 rounded border border-slate-200 text-slate-500" aria-label={t("ลด", "Less")}>−</button>
-                              <span className="w-5 text-center text-[12.5px] tabular-nums">{n}</span>
-                              <button type="button" onClick={() => set(Math.min(20, n + 1))} className="w-6 h-6 rounded border border-slate-200 text-slate-500" aria-label={t("เพิ่ม", "More")}>＋</button>
+                              {/* พิมพ์ตัวเลขได้ (0-99) · มือถือขึ้นแป้นตัวเลข · ± ยังกดได้ */}
+                              <input value={n ? String(n) : ""} placeholder="0" inputMode="numeric" aria-label={t(`จำนวน ${s.name}`, `Count of ${s.name}`)}
+                                onChange={(e) => { const v = Number(e.target.value.replace(/[^0-9]/g, "").slice(0, 2)); set(Number.isFinite(v) ? Math.min(99, v) : 0); }}
+                                onFocus={(e) => e.currentTarget.select()}
+                                className="w-11 h-7 text-center text-[12.5px] tabular-nums border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-fuchsia-100 focus:border-fuchsia-300" />
+                              <button type="button" onClick={() => set(Math.min(99, n + 1))} className="w-6 h-6 rounded border border-slate-200 text-slate-500" aria-label={t("เพิ่ม", "More")}>＋</button>
                             </div>
                           );
                         })}
