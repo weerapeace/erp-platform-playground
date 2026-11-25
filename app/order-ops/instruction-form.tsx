@@ -243,6 +243,7 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1"><OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} onFound={onFound} autoFocus={!row} /></div>
             <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
+            {f.platform_order_id && <a href={`/master/platform-orders/${f.platform_order_id}`} target="_blank" rel="noopener noreferrer" title="ดูรายละเอียดออเดอร์ในแท็บใหม่" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="open" className="h-4 w-4" /> ดูออเดอร์</a>}
           </div>
         </Field>
         <div className="grid gap-3 sm:grid-cols-3">

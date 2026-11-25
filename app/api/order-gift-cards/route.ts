@@ -21,6 +21,7 @@ import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { whoAmI } from "@/lib/order-ops-server";
 import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, ENGRAVE_NO_WARN_STATUSES, isEngraveMode, type EngraveMode } from "@/lib/order-ops";
 import { chatAdapter } from "@/lib/chat/registry";
+import { printSummaryOf } from "@/lib/print-log-server";
 import { CHAT_CHANNELS, type ChatChannel } from "@/lib/chat/types";
 import {
   builtinTemplates, buyerNoteOf, classifyNote, cleanDoc, fillTexts, isBuiltinId, roleTexts, suggestMessage, type CardDoc,
@@ -34,6 +35,7 @@ const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { s
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const str = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
 const cleanQ = (q: string) => q.replace(/[%,()*"\\]/g, " ").trim().slice(0, 80);
+const INS_COLS = "id, platform_order_id, order_no, platform, customer_name, sku, commands, command_details, engrave, engrave_text, engrave_type, engrave_position, note, status, done_at, via_chat, chat_note, created_at";
 const CARD_COLS = "id, platform_order_id, order_no, platform, brand_id, customer_note, template_id, message, note, print_count, printed_at, printed_by_name, hand_written_at, hand_written_by_name, created_by_name, updated_by_name, created_at, updated_at, deleted_at";
 const ORDER_COLS = "id, order_no, external_order_id, customer_name, status, platform_status, ordered_at, ship_by_at, platform_id, brand_id, source, packed_at, shopee_note:raw->shopee->>message_to_seller, tt_note:raw->tiktok->>buyer_message, lz_note:raw->lazada->>remarks, lz_gift:raw->lazada->>gift_message, m_note:raw->>note";
 
@@ -223,14 +225,19 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
   if (hitErr) console.error("[order-gift-cards] หาออเดอร์สินค้าสลักไม่สำเร็จ:", hitErr.message);
   const withNote = ((notesRes.data ?? []) as Row[]).filter((o) => noteOfRow(o));
   const noteIds = new Set(withNote.map((o) => String(o.id)));
-  const extraIds = [...new Set(((engHits ?? []) as Row[]).map((r) => String(r.order_id)))].filter((id) => !noteIds.has(id));
+  // คำสั่งพิเศษในช่วงนี้ (+ ที่ยังไม่ทำทุกใบ) — รวมเป็นรายการเดียวกับงานเข้า (เจ้าของเลือก 2026-11-25 ข้อ 1) · คำสั่งที่ไม่ผูกออเดอร์ = แถวของตัวเอง
+  const { data: periodIns } = await admin.from("order_instructions").select(INS_COLS).is("deleted_at", null).or(`created_at.gte.${since},status.eq.todo`).order("created_at", { ascending: false }).limit(1000);
+  const extraIds = [...new Set([
+    ...((engHits ?? []) as Row[]).map((r) => String(r.order_id)),
+    ...((periodIns ?? []) as Row[]).map((r) => str(r.platform_order_id)).filter((x): x is string => !!x),
+  ])].filter((id) => !noteIds.has(id));
   const extraRes = await Promise.all(chunkOf(extraIds).map((c) => admin.from("platform_orders").select(ORDER_COLS).in("id", c).or("source.is.null,source.neq.email")));
   const allOrders = [...withNote, ...extraRes.flatMap((r) => (r.data ?? []) as Row[])];
   const chunks = chunkOf(allOrders.map((o) => String(o.id)));
   const [cardsRes, kindsRes, insRes, itemsRes, lk] = await Promise.all([
     Promise.all(chunks.map((c) => admin.from("order_gift_cards").select("id, platform_order_id, message, printed_at, hand_written_at, updated_at").in("platform_order_id", c).is("deleted_at", null))),
     Promise.all(chunks.map((c) => admin.from("order_note_kinds").select("platform_order_id, card, engrave").in("platform_order_id", c))),
-    Promise.all(chunks.map((c) => admin.from("order_instructions").select("id, platform_order_id, status, engrave").in("platform_order_id", c).is("deleted_at", null))),
+    Promise.all(chunks.map((c) => admin.from("order_instructions").select(INS_COLS).in("platform_order_id", c).is("deleted_at", null))),
     Promise.all(chunks.map((c) => admin.from("platform_order_items").select("order_id, sku_code, name, qty, matched_sku_id, matched_parent_sku_id").in("order_id", c))),
     lookups(admin, [...new Set(allOrders.map((o) => str(o.platform_id)).filter((x): x is string => !!x))], [...new Set(allOrders.map((o) => str(o.brand_id)).filter((x): x is string => !!x))]),
   ]);
@@ -253,6 +260,24 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     return m;
   };
   const cards = group(cardsRes), kinds = group(kindsRes), ins = group(insRes), items = group(itemsRes);
+  const allIns = [...insRes.flatMap((r) => (r.data ?? []) as Row[]), ...((periodIns ?? []) as Row[]).filter((x) => !x.platform_order_id || !allOrders.some((o) => String(o.id) === String(x.platform_order_id)))];
+  const engPrints = await printSummaryOf(admin, "engrave_sheet", allIns.filter((x) => x.engrave === true && str(x.engrave_text)).map((x) => String(x.id)));
+  /** สถานะงาน + สถานะพิมพ์ของ 1 แถว (ข้อ 3) */
+  const workOf = (list: Row[], cardList: Row[], orderStatus: string | null) => {
+    const closed = (ENGRAVE_NO_WARN_STATUSES as readonly string[]).includes(String(orderStatus ?? ""));
+    const work = !list.length ? "none" : list.some((x) => x.status !== "done") ? "todo" : "done";
+    const engNeed = list.filter((x) => x.engrave === true && str(x.engrave_text));
+    const engDone = engNeed.filter((x) => engPrints.has(String(x.id)));
+    const lastEng = engDone.map((x) => engPrints.get(String(x.id))!.last).sort().pop() ?? null;
+    const cardDone = cardList.filter((c) => c.printed_at || c.hand_written_at);
+    const needs = engNeed.length + cardList.length, ok = engDone.length + cardDone.length;
+    return {
+      work, closed,
+      print: { state: needs === 0 ? "none" : ok >= needs ? "done" : "todo", engrave_total: engNeed.length, engrave_printed: engDone.length, engrave_last: lastEng, card_total: cardList.length, card_printed: cardDone.length },
+    };
+  };
+  const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+  const startToday = new Date(`${today}T00:00:00+07:00`).getTime();
   let rows = allOrders.map((o) => {
     const info = orderInfo(o, lk);
     const auto = classifyNote(info.note);
@@ -262,14 +287,34 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     const k = kinds.get(info.id)?.[0];
     const kind = k ? { card: k.card === true, engrave: k.engrave === true } : kindAuto;
     const parents = [...new Map(eg.items.filter((i) => i.parent_id).map((i) => [i.parent_id as string, { id: i.parent_id as string, code: i.parent_code, mode: i.mode }])).values()];
+    const insList = ins.get(info.id) ?? [];
+    const cardList = cards.get(info.id) ?? [];
     return {
-      ...info, kind, kind_auto: kindAuto, overridden: !!k, cards: cards.get(info.id) ?? [], instructions: ins.get(info.id) ?? [],
-      engrave: { sources: eg.sources, items: eg.items.filter((i) => i.engrave), needs_name: kind.engrave && eg.needsName },
+      ...info, kind: { ...kind, chat: insList.some((x) => x.via_chat === true) }, kind_auto: kindAuto, overridden: !!k, cards: cardList, instructions: insList,
+      engrave: { sources: eg.sources, items: eg.items.filter((i) => i.engrave), needs_name: kind.engrave && eg.needsName && !insList.some((x) => x.engrave === true && str(x.engrave_text)) },
       parents,
       chat_ready: !!(info.platform_code && (CHAT_CHANNELS as readonly string[]).includes(info.platform_code) && chatAdapter(info.platform_code as ChatChannel)),
+      ...workOf(insList, cardList, info.status),
     };
-  }).filter((r) => r.note || r.kind.engrave);
+  }).filter((r) => r.note || r.kind.engrave || r.instructions.length);
+  // คำสั่งที่ไม่ผูกออเดอร์ในศูนย์ (พิมพ์เลขเอง/จากแชท) = แถวของตัวเอง
+  const orphans = ((periodIns ?? []) as Row[]).filter((x) => !x.platform_order_id || !allOrders.some((o) => String(o.id) === String(x.platform_order_id)));
+  rows = [...rows, ...orphans.map((x) => ({
+    id: `ins:${x.id}`, order_no: str(x.order_no), customer_name: str(x.customer_name), status: null, ordered_at: str(x.created_at), ship_by_at: null, packed_at: null,
+    platform: str(x.platform), platform_code: null, brand_id: null, brand_name: null, note: null,
+    kind: { card: false, engrave: x.engrave === true, chat: x.via_chat === true }, kind_auto: { card: false, engrave: x.engrave === true }, overridden: false,
+    cards: [] as Row[], instructions: [x],
+    engrave: { sources: [] as string[], items: [] as Row[], needs_name: false }, parents: [] as Row[], chat_ready: false,
+    ...workOf([x], [], null),
+  }))] as typeof rows;
+  const open = (r: (typeof rows)[number]) => !r.closed;
   const counts = {
+    // สถานะงาน (การ์ดตัวเลข · ข้อ 4) — ไม่นับออเดอร์ที่ส่งแล้ว/ยกเลิก ในงานค้าง
+    no_ins: rows.filter((r) => r.work === "none" && open(r)).length,
+    ins_todo: rows.filter((r) => r.work === "todo").length,
+    print_todo: rows.filter((r) => r.print.state === "todo" && open(r)).length,
+    done_today: rows.filter((r) => r.instructions.some((x) => x.status === "done" && new Date(String(x.done_at ?? 0)).getTime() >= startToday)).length,
+    chat: rows.filter((r) => r.kind.chat).length,
     card: rows.filter((r) => r.kind.card).length,
     card_todo: rows.filter((r) => r.kind.card && !r.cards.some((c) => c.printed_at || c.hand_written_at)).length,
     engrave: rows.filter((r) => r.kind.engrave).length,
@@ -280,16 +325,24 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     all: rows.length,
   };
   if (sp.get("counts") === "1") return { counts, days };
-  const tab = sp.get("tab") ?? "card";
-  if (tab === "card") rows = rows.filter((r) => r.kind.card);
-  else if (tab === "engrave") rows = rows.filter((r) => r.kind.engrave);
-  else if (tab === "engrave_missing") rows = rows.filter((r) => r.engrave.needs_name);
-  else if (tab === "other") rows = rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave);
+  // กรองสถานะงาน (state) + ชนิด (kind) — tab เดิมยังใช้ได้
+  const state = sp.get("state") ?? (sp.get("tab") === "engrave_missing" ? "engrave_missing" : sp.get("tab") ? "all" : "no_ins");
+  const kindF = sp.get("kind") ?? (["card", "engrave", "other"].includes(sp.get("tab") ?? "") ? sp.get("tab") : "");
+  if (state === "no_ins") rows = rows.filter((r) => r.work === "none" && open(r));
+  else if (state === "ins_todo") rows = rows.filter((r) => r.work === "todo");
+  else if (state === "engrave_missing") rows = rows.filter((r) => r.engrave.needs_name);
+  else if (state === "print_todo") rows = rows.filter((r) => r.print.state === "todo" && open(r));
+  else if (state === "done_today") rows = rows.filter((r) => r.instructions.some((x) => x.status === "done" && new Date(String(x.done_at ?? 0)).getTime() >= startToday));
+  if (kindF === "card") rows = rows.filter((r) => r.kind.card);
+  else if (kindF === "engrave") rows = rows.filter((r) => r.kind.engrave);
+  else if (kindF === "chat") rows = rows.filter((r) => r.kind.chat);
+  else if (kindF === "other") rows = rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave);
+  rows.sort((a, b) => String(b.ordered_at ?? "").localeCompare(String(a.ordered_at ?? "")));
   const qq = cleanQ(sp.get("q") ?? "").toLowerCase();
   if (qq) rows = rows.filter((r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""}`.toLowerCase().includes(qq));
   // รุ่นที่ชื่อมีคำว่า "สลัก" แต่ยังไม่ได้ตั้ง "สินค้าสลักชื่อ" — แค่แนะนำ ไม่ตั้งให้เอง
   let suggest: { id: string; code: string | null; name: string | null }[] = [];
-  if (tab === "engrave" || tab === "engrave_missing") {
+  if (kindF === "engrave" || state === "engrave_missing") {
     const { data: sg } = await admin.from("parent_skus_v2").select("id, code, name_th").ilike("name_th", "%สลัก%").is("engrave_mode", null).eq("is_active", true).order("code").limit(30);
     suggest = ((sg ?? []) as Row[]).map((r) => ({ id: String(r.id), code: str(r.code), name: str(r.name_th) }));
   }

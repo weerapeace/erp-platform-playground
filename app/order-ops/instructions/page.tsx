@@ -30,7 +30,7 @@ import { EngraveSettings, InstructionForm, type Ins, type InsPrefill } from "../
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
 import Link from "next/link";
 import { ScrollTabs } from "@/components/scroll-tabs";
-import { GIFT_INBOX_TABS, GiftCardsList, GiftInbox, GiftTemplates, type GiftCounts, type GiftInboxTab } from "../gift-panels";
+import { GIFT_INBOX_TABS, GiftCardsList, GiftInbox, GiftTemplates, InstructionTrash, type GiftCounts, type GiftInboxKind, type GiftInboxTab } from "../gift-panels";
 
 type Wait = {
   id: string; order_no: string | null; platform: string | null; customer_name: string | null; sku: string | null; note: string | null;
@@ -54,46 +54,53 @@ export default function InstructionsPage() {
   );
 }
 
-// หน้ารวม "คำสั่งพิเศษ & การ์ด" (เจ้าของเลือก widget 2026-11-25 ข้อ 1-5) — 5 ส่วน ?s=
-//   inbox งานเข้า (ออเดอร์มีหมายเหตุ/สินค้าสลัก ?tab=card|engrave|engrave_missing|other) · orders คำสั่งพิเศษ · wait รอของ · cards การ์ดทั้งหมด · settings แม่แบบ+ฟอนต์
-//   ลิงก์เก่า ?view=wait และ /order-ops/gift-cards พามาส่วนที่ถูกต้อง · ตัวเลขบนปุ่มส่วน = งานค้าง
-type Section = "inbox" | "orders" | "wait" | "cards" | "settings";
-const SECTIONS: Section[] = ["inbox", "orders", "wait", "cards", "settings"];
+// หน้ารวม "คำสั่งพิเศษ & การ์ด" — 4 ส่วน ?s= (เจ้าของเลือก 2026-11-25: รวมงานเข้า + คำสั่งพิเศษเป็นรายการเดียว)
+//   inbox งานพิเศษ (1 แถว = 1 ออเดอร์ · ?tab= สถานะงาน · ?kind= ชนิด) · wait รอของ · cards การ์ดทั้งหมด · settings คำสั่ง/เครื่องสลัก/แม่แบบ/ฟอนต์
+//   ลิงก์เก่า ?s=orders(&open=<คำสั่ง>) ?view=wait /order-ops/gift-cards พามาส่วนที่ถูกต้อง · ตัวเลขบนปุ่มส่วน = งานค้าง
+type Section = "inbox" | "wait" | "cards" | "settings";
+const SECTIONS: Section[] = ["inbox", "wait", "cards", "settings"];
+const KINDS: GiftInboxKind[] = ["", "card", "engrave", "chat", "other"];
 
 function Body() {
   const router = useRouter();
   const sp = useSearchParams();
   const canManage = usePermission("order_ops.manage");
   const raw = sp.get("s") ?? (sp.get("view") === "wait" ? "wait" : null);
+  const legacyOrders = raw === "orders";
   const section: Section = SECTIONS.includes(raw as Section) ? (raw as Section) : "inbox";
-  const inboxTab: GiftInboxTab = GIFT_INBOX_TABS.includes(sp.get("tab") as GiftInboxTab) ? (sp.get("tab") as GiftInboxTab) : "card";
+  const legacyTab = sp.get("tab");
+  const inboxTab: GiftInboxTab = GIFT_INBOX_TABS.includes(legacyTab as GiftInboxTab) ? (legacyTab as GiftInboxTab)
+    : legacyTab === "engrave_missing" ? "engrave_missing" : legacyOrders ? (sp.get("open") ? "all" : "ins_todo") : legacyTab ? "all" : "no_ins";
+  const inboxKind: GiftInboxKind = KINDS.includes((sp.get("kind") ?? "") as GiftInboxKind) ? ((sp.get("kind") ?? "") as GiftInboxKind)
+    : ["card", "engrave", "other"].includes(legacyTab ?? "") ? (legacyTab as GiftInboxKind) : "";
   const go = (s: Section, extra: Record<string, string> = {}) => {
-    const p = new URLSearchParams({ ...(s === "inbox" ? {} : { s }), ...extra });
+    const p = new URLSearchParams({ ...(s === "inbox" ? {} : { s }), ...Object.fromEntries(Object.entries(extra).filter(([, v]) => v)) });
     router.replace(`/order-ops/instructions${p.toString() ? `?${p}` : ""}`);
   };
   const [summary, setSummary] = useState<Summary>({});
   const [gift, setGift] = useState<GiftCounts>({});
   const [bump, setBump] = useState(0);
-  // "+ คำสั่งพิเศษ" = ลูกค้าแจ้งทางแชท (ไม่ได้ลงหมายเหตุ) → เลือกออเดอร์ในป๊อป (เจ้าของเลือก 2026-11-25 ข้อ 4)
+  // "+ คำสั่งพิเศษ" = ลูกค้าแจ้งทางแชท (ไม่ได้ลงหมายเหตุ) → เลือกออเดอร์ในป๊อป
   const [chatNew, setChatNew] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [optOpen, setOptOpen] = useState(false);
+  const [engraveOpen, setEngraveOpen] = useState(false);
   const canEditIns = usePermission("order_ops.edit");
   const canDeleteIns = usePermission("order_ops.delete");
-  const { options: hubOptions } = useOpsOptions();
+  const { options: hubOptions, reload: reloadOptions } = useOpsOptions();
   const refresh = () => setBump((b) => b + 1);
 
   // ตัวเลขบนปุ่มส่วน — โหลดครั้งแรก (ส่วนที่เปิดอยู่อัปเดตต่อเองตอนโหลดรายการ)
   useEffect(() => {
-    void opsJson<{ summary: Summary }>("/api/order-ops?t=instructions&page=1&page_size=1&status=todo").then((r) => setSummary(r.summary)).catch(() => {});
+    void opsJson<{ summary: Summary }>("/api/order-ops?t=instructions&page=1&page_size=10&status=todo").then((r) => setSummary(r.summary)).catch(() => {});
     void opsJson<{ counts: GiftCounts }>("/api/order-gift-cards?view=notes&counts=1").then((r) => setGift(r.counts)).catch(() => {});
   }, [bump]);
 
-  const inboxTodo = (gift.card_todo ?? 0) + (gift.engrave_todo ?? 0);
   const tabs: { key: Section; label: string; badge?: number; danger?: boolean; icon: string }[] = [
-    { key: "inbox", label: "งานเข้า", badge: inboxTodo, danger: (gift.engrave_missing ?? 0) > 0, icon: "i:inbox" },
-    { key: "orders", label: "คำสั่งพิเศษ", badge: summary.todo, icon: "i:gift" },
+    { key: "inbox", label: "งานพิเศษ", badge: (gift.no_ins ?? 0) + (gift.ins_todo ?? 0), danger: (gift.engrave_missing ?? 0) > 0, icon: "i:inbox" },
     { key: "wait", label: "รอของ", badge: summary.waiting, icon: "i:clock" },
     { key: "cards", label: "การ์ดทั้งหมด", icon: "i:printer" },
-    ...(canManage ? [{ key: "settings" as Section, label: "ตั้งค่า (แม่แบบ/ฟอนต์)", icon: "i:palette" }] : []),
+    ...(canManage ? [{ key: "settings" as Section, label: "ตั้งค่า", icon: "i:settings" }] : []),
   ];
 
   return (
@@ -101,18 +108,19 @@ function Body() {
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-900">คำสั่งพิเศษ &amp; การ์ด</h1>
-          <p className="text-sm text-slate-500">ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก → สร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
+          <p className="text-sm text-slate-500">ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก/แจ้งทางแชท → กดแถวสร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
         </div>
         <div className="flex flex-wrap gap-2">
-        {canEditIns && <button type="button" onClick={() => setChatNew(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" title="ลูกค้าแจ้งทางแชท ไม่ได้ลงหมายเหตุในออเดอร์"><Icon value="i:plus" /> คำสั่งพิเศษ</button>}
-        {(section === "inbox" || section === "cards") && (
-          <Link href="/order-ops/gift-cards/edit?new=1" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:plus" /> การ์ดใหม่ (ไม่ผูกออเดอร์)</Link>
-        )}
+          {canEditIns && <button type="button" onClick={() => setChatNew(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" title="ลูกค้าแจ้งทางแชท ไม่ได้ลงหมายเหตุในออเดอร์"><Icon value="i:plus" /> คำสั่งพิเศษ</button>}
+          {(section === "inbox" || section === "cards") && (
+            <Link href="/order-ops/gift-cards/edit?new=1" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:plus" /> การ์ดใหม่ (ไม่ผูกออเดอร์)</Link>
+          )}
+          {section === "inbox" && canDeleteIns && <button type="button" onClick={() => setTrashOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"><Icon value="i:trash" /> ถังขยะคำสั่ง</button>}
         </div>
       </div>
       {chatNew && (
         <InstructionForm row={null} prefill={{ via_chat: true }} options={hubOptions} readOnly={!canEditIns} canDelete={canDeleteIns}
-          onClose={() => setChatNew(false)} onSaved={() => { setChatNew(false); refresh(); go("orders"); }} />
+          onClose={() => setChatNew(false)} onSaved={() => { setChatNew(false); refresh(); go("inbox", { tab: "ins_todo", kind: "chat" }); }} />
       )}
       <ScrollTabs activeKey={section} className="mb-3 border-b border-slate-200">
         {tabs.map((t) => (
@@ -123,248 +131,31 @@ function Body() {
           </button>
         ))}
       </ScrollTabs>
-      {(section === "orders" || section === "wait") && <TrialBanner trialCount={summary.trial ?? 0} onChanged={refresh} />}
-      {section === "inbox" ? <GiftInbox tab={inboxTab} onTab={(t) => go("inbox", t === "card" ? {} : { tab: t })} onCounts={(c) => setGift((x) => ({ ...x, ...c }))} />
-        : section === "orders" ? <OrdersView bump={bump} onSummary={setSummary} onWait={() => go("wait")} initialQ={sp.get("q") ?? ""} openId={sp.get("open")} />
-        : section === "wait" ? <WaitView bump={bump} onSummary={setSummary} />
+      {(section === "inbox" || section === "wait") && <TrialBanner trialCount={summary.trial ?? 0} onChanged={refresh} />}
+      {section === "inbox" ? (
+        <GiftInbox key={bump} tab={inboxTab} kind={inboxKind} openIns={legacyOrders ? sp.get("open") : null}
+          onTab={(t) => go("inbox", { tab: t === "no_ins" ? "" : t, kind: inboxKind })}
+          onKind={(k) => go("inbox", { tab: inboxTab === "no_ins" ? "" : inboxTab, kind: k })}
+          onCounts={(c) => setGift((x) => ({ ...x, ...c }))} />
+      ) : section === "wait" ? <WaitView bump={bump} onSummary={setSummary} />
         : section === "cards" ? <GiftCardsList onCount={() => {}} />
-        : canManage ? <GiftTemplates /> : <AccessDenied message="จัดการแม่แบบต้องมีสิทธิ์ order_ops.manage" />}
-    </>
-  );
-}
-
-/* ───────────── แท็บคำสั่งพิเศษ ───────────── */
-
-function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: { bump: number; onSummary: (s: Summary) => void; onWait: () => void; /** มาจากปุ่ม "มีคำสั่งสลักแล้ว" ในงานเข้า */ initialQ?: string; openId?: string | null }) {
-  const toast = useToast();
-  const isPhone = !useMediaQuery("(min-width: 768px)");
-  const canEdit = usePermission("order_ops.edit");
-  const canDelete = usePermission("order_ops.delete");
-  const canManage = usePermission("order_ops.manage");
-  const { options, reload: reloadOptions } = useOpsOptions();
-  const [filter, setFilter] = useState(initialQ ? "all" : "todo");
-  const [q, setQ] = useState(initialQ);
-  const pendingOpen = useRef<string | null>(openId);
-  const [trash, setTrash] = useState(false);
-  const [printF, setPrintF] = useState<"" | "unprinted" | "printed">("");
-  const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<Ins[]>([]);
-  const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState<Summary>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [editing, setEditing] = useState<Ins | "new" | null>(null);
-  const [optOpen, setOptOpen] = useState(false);
-  const [engraveOpen, setEngraveOpen] = useState(false);
-  const specials = options.filter((o) => o.kind === "engrave_special" && o.is_active).map((o) => o.label);
-
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    const p = new URLSearchParams({ t: "instructions", page: String(page), page_size: "50" });
-    if (trash) p.set("trash", "1");
-    else if (filter === "todo") p.set("status", "todo");
-    else if (filter === "engrave") { p.set("status", "todo"); p.set("engrave", "1"); }
-    else if (filter === "done") p.set("status", "done");
-    if (q.trim()) p.set("q", q.trim());
-    if (printF && !trash) p.set("print", printF);
-    try {
-      const r = await opsJson<{ rows: Ins[]; total: number; summary: Summary }>(`/api/order-ops?${p}`);
-      setRows(r.rows); setTotal(r.total);
-      if (!trash) { setSummary(r.summary); onSummary(r.summary); }
-      if (pendingOpen.current) { const hit = r.rows.find((x) => x.id === pendingOpen.current); pendingOpen.current = null; if (hit) setEditing(hit); }
-    } catch (e) { setError((e as Error).message); }
-    finally { setLoading(false); }
-  }, [page, trash, filter, q, printF, onSummary]);
-
-  useEffect(() => { const t = setTimeout(() => void load(), q ? 300 : 0); return () => clearTimeout(t); }, [load, bump, q]);
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [filter, trash, q, printF]);
-  // กลับมาจากแท็บใบสลัก → โหลดใหม่ ให้จำนวนครั้งที่พิมพ์อัปเดต
-  useEffect(() => { const on = () => void load(); window.addEventListener("focus", on); return () => window.removeEventListener("focus", on); }, [load]);
-
-  const sel = rows.filter((r) => selected.has(r.id));
-
-  const bulkStatus = async (status: "todo" | "done") => {
-    const ids = sel.map((r) => r.id);
-    const prev = sel.map((r) => ({ id: r.id, status: r.status }));
-    try {
-      const r = await opsJson<{ updated: number }>("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", ids, patch: { status } }) });
-      setSelected(new Set()); void load();
-      toast.undo(`${status === "done" ? "ทำเครื่องหมายเสร็จ" : "ตั้งเป็นยังไม่ทำ"} ${r.updated} รายการ`, async () => {
-        for (const s of ["todo", "done"] as const) {
-          const back = prev.filter((x) => x.status === s).map((x) => x.id);
-          if (back.length) await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", ids: back, patch: { status: s } }) });
-        }
-        void load();
-      });
-    } catch (e) { toast.error((e as Error).message); }
-  };
-  const bulkDelete = async (hard = false) => {
-    const ids = sel.map((r) => r.id);
-    if (hard && !(await askConfirm({ title: `ลบถาวร ${ids.length} รายการ?`, message: "ลบแล้วกู้คืนไม่ได้", confirmText: "ลบถาวร", variant: "danger" }))) return;
-    try {
-      const r = await opsJson<{ count: number }>("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "instructions", ids, hard }) });
-      setSelected(new Set()); void load();
-      if (!hard) toast.undo(`ย้ายลงถังขยะ ${r.count} รายการ`, async () => { await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "instructions", ids, restore: true }) }); void load(); });
-      else toast.success(`ลบถาวร ${r.count} รายการ`);
-    } catch (e) { toast.error((e as Error).message); }
-  };
-  const restore = async () => {
-    try { await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "instructions", ids: sel.map((r) => r.id), restore: true }) }); setSelected(new Set()); void load(); toast.success("กู้คืนแล้ว"); }
-    catch (e) { toast.error((e as Error).message); }
-  };
-  const printSheets = (list: Ins[]) => {
-    const ids = list.filter((r) => r.engrave && r.engrave_text).map((r) => r.id);
-    if (!ids.length) { toast.error("รายการที่เลือกไม่มีชื่อสลัก"); return; }
-    window.open(`/print/engrave-sheets?ids=${ids.join(",")}`, "_blank");
-  };
-  const toggleDone = async (r: Ins) => {
-    const to = r.status === "done" ? "todo" : "done";
-    try {
-      await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: r.id, patch: { status: to } }) });
-      void load();
-      toast.undo(to === "done" ? "เสร็จแล้ว" : "ตั้งเป็นยังไม่ทำ", async () => { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: r.id, patch: { status: r.status } }) }); void load(); });
-    } catch (e) { toast.error((e as Error).message); }
-  };
-
-  const cmdChips = (r: Ins) => (
-    <div className="flex flex-wrap gap-1">
-      {r.via_chat && <Pill tone="warning">แจ้งทางแชท</Pill>}
-      {r.commands.map((c) => <Pill key={c}>{commandSummary(c, r.command_details?.[c])}</Pill>)}
-      {r.engrave && r.engrave_text && <Pill tone="accent">สลัก: {r.engrave_text} · {r.engrave_type ?? "-"} · {r.engrave_position ?? "-"}{r.engrave_font ? ` · ${r.engrave_font}` : ""}</Pill>}
-      {r.engrave && r.engrave_text && invalidEngraveChars(r.engrave_text, specials).length > 0 && <Pill tone="danger">มีตัวที่สลักไม่ได้</Pill>}
-      {!r.commands.length && !(r.engrave && r.engrave_text) && <span className="text-xs text-slate-400">-</span>}
-      {r.note && <span className="w-full text-xs text-slate-500">หมายเหตุ: {r.note}</span>}
-      {r.via_chat && r.chat_note && <span className="w-full text-xs text-amber-700">แชท: {r.chat_note}</span>}
-    </div>
-  );
-  // สถานะพิมพ์ (ใบสลัก + การ์ด) — จากประวัติพิมพ์กลาง
-  const printPill = (r: Ins) => {
-    const ps = r.print_state;
-    if (!ps || ps.state === "none") return <span className="text-xs text-slate-300">-</span>;
-    const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : "");
-    return (
-      <div className="space-y-0.5 text-[11px] leading-tight">
-        {ps.engrave && (ps.engrave.n > 0
-          ? <div className="text-emerald-700">ใบสลัก พิมพ์แล้ว {ps.engrave.n} ครั้ง<br /><span className="text-slate-400">{when(ps.engrave.last)}</span></div>
-          : <div className="text-rose-600">ใบสลัก ยังไม่พิมพ์</div>)}
-        {ps.card && (ps.card.printed >= ps.card.total
-          ? <div className="text-emerald-700">การ์ด พิมพ์แล้ว{ps.card.total > 1 ? ` ${ps.card.printed}/${ps.card.total}` : ""}<br /><span className="text-slate-400">{when(ps.card.last)}{ps.card.by ? ` · ${ps.card.by}` : ""}</span></div>
-          : <div className="text-rose-600">การ์ด ยังไม่พิมพ์ {ps.card.printed}/{ps.card.total}</div>)}
-      </div>
-    );
-  };
-  const statusPill = (r: Ins) => <Pill tone={INSTRUCTION_STATUS[r.status].tone}>{INSTRUCTION_STATUS[r.status].label}</Pill>;
-
-  const columns: MiniColumn<Ins>[] = [
-    { key: "order", header: "ออเดอร์", width: "1.3fr", locked: true, sortValue: (r) => r.order_no, cell: (r) => (
-      <div className="min-w-0">
-        <div className="flex items-center gap-1 font-mono text-xs">{r.order_no} {r.is_trial && <TrialPill />}</div>
-        <div className="truncate text-xs text-slate-500">{r.platform ?? "-"} · {r.customer_name ?? "-"}{r.platform_order_id ? "" : " · ไม่ผูกศูนย์ออเดอร์"}</div>
-      </div>) },
-    { key: "sku", header: "สินค้า", width: "8rem", sortValue: (r) => r.sku ?? "", cell: (r) => <span className="font-mono text-xs">{r.sku ?? "-"}</span> },
-    { key: "cmd", header: "คำสั่ง / สลัก", width: "2fr", cell: cmdChips },
-    { key: "status", header: "สถานะ", width: "6.5rem", sortValue: (r) => r.status, cell: (r) => (
-      <button disabled={!canEdit || trash} onClick={(e) => { e.stopPropagation(); void toggleDone(r); }} title={canEdit ? "กดสลับ เสร็จ / ยังไม่ทำ" : ""}>{statusPill(r)}</button>) },
-    { key: "printst", header: "สถานะพิมพ์", width: "9rem", cell: printPill },
-    { key: "print", header: "พิมพ์", width: "5rem", align: "center", cell: (r) => r.engrave && r.engrave_text ? (
-      <div onClick={(e) => e.stopPropagation()}>
-        <button onClick={() => printSheets([r])} disabled={trash} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"><Icon name="printer" className="h-3.5 w-3.5" /> พิมพ์</button>
-      </div>) : <span className="text-xs text-slate-300">-</span> },
-    { key: "created", header: "บันทึกเมื่อ", width: "7.5rem", sortValue: (r) => r.created_at, cell: (r) => <span className="text-xs text-slate-500">{fmtDate(r.created_at)}<br />{r.created_by_name ?? ""}</span> },
-  ];
-
-  return (
-    <>
-      <StatFilterCards
-        value={trash ? "" : filter}
-        onChange={(k) => { if (k === "waiting") { onWait(); return; } setTrash(false); setFilter(k); }}
-        showZero
-        cards={[
-          { key: "todo", label: "ยังไม่ทำ", value: summary.todo, tone: "warning" },
-          { key: "engrave", label: "ต้องสลักชื่อ", value: summary.engrave, tone: "info" },
-          { key: "waiting", label: "รอของ (ยังไม่แจ้ง)", value: summary.waiting, tone: "warning" },
-          { key: "done", label: "เสร็จวันนี้", value: summary.done_today, tone: "success", hint: "กดดูที่เสร็จทั้งหมด" },
-          { key: "all", label: "ทั้งหมด", value: filter === "all" ? total : null, tone: "neutral" },
-        ]}
-      />
-      <div className="my-2 flex flex-wrap items-center gap-2">
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขออเดอร์ / ชื่อลูกค้า / SKU / ชื่อสลัก" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
-        {!trash && (
-          <select value={printF} onChange={(e) => setPrintF(e.target.value as typeof printF)} aria-label="สถานะพิมพ์" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
-            <option value="">สถานะพิมพ์: ทั้งหมด</option><option value="unprinted">ยังพิมพ์ไม่ครบ</option><option value="printed">พิมพ์ครบแล้ว</option>
-          </select>
-        )}
-        <TrashToggle on={trash} onChange={setTrash} />
-        {canManage && <button onClick={() => setOptOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> จัดการคำสั่ง</button>}
-        {canManage && <button onClick={() => setEngraveOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> ตั้งค่าเครื่องสลัก</button>}
-        {canEdit && !trash && <button onClick={() => setEditing("new")} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700"><Icon name="plus" className="h-4 w-4" /> เพิ่มคำสั่ง</button>}
-      </div>
-
-      {sel.length > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">
-          <span>เลือก {sel.length} รายการ</span>
-          <span className="flex-1" />
-          {!trash && <button onClick={() => printSheets(sel)} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs"><Icon name="printer" className="mr-1 inline h-3.5 w-3.5" />พิมพ์ใบสลักชื่อ</button>}
-          {!trash && canEdit && <button onClick={() => bulkStatus("done")} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">เสร็จ</button>}
-          {!trash && canEdit && <button onClick={() => bulkStatus("todo")} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">ยังไม่ทำ</button>}
-          {!trash && canDelete && <button onClick={() => bulkDelete(false)} className="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs text-rose-600">ลบ</button>}
-          {trash && canDelete && <button onClick={restore} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">กู้คืน</button>}
-          {trash && canManage && <button onClick={() => bulkDelete(true)} className="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs text-rose-600">ลบถาวร</button>}
-          <button onClick={() => setSelected(new Set())} className="text-xs text-sky-700 underline">ยกเลิกเลือก</button>
-        </div>
-      )}
-
-      {error ? <ErrorState title={error} onRetry={load} />
-        : loading && !rows.length ? <LoadingState />
-        : (
-          <MiniTable
-            rows={rows}
-            columns={columns}
-            rowKey={(r) => r.id}
-            hideSearch
-            selectable
-            selected={selected}
-            onSelectedChange={setSelected}
-            onRowClick={(r) => setEditing(r)}
-            layout={isPhone ? "cards" : "table"}
-            storageKey="order-ops-instructions"
-            countUnit="รายการ"
-            emptyText={trash ? "ถังขยะว่าง" : q ? "ไม่พบรายการ ลองเปลี่ยนคำค้น" : "ยังไม่มีคำสั่งพิเศษ — กด \"เพิ่มคำสั่ง\" หรือ \"ใส่ข้อมูลตัวอย่าง\" เพื่อลองใช้"}
-            renderCard={(r) => (
-              <div className="space-y-1.5 p-1">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-mono text-xs">{r.order_no}</span>
-                  <span className="flex items-center gap-1">{r.is_trial && <TrialPill />}{statusPill(r)}</span>
-                </div>
-                <div className="text-xs text-slate-500">{r.platform ?? "-"} · {r.customer_name ?? "-"} · <span className="font-mono">{r.sku ?? "-"}</span></div>
-                {cmdChips(r)}
-                {printPill(r)}
-                {!trash && (
-                  <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
-                    {r.engrave && r.engrave_text && <button onClick={() => printSheets([r])} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs"><Icon name="printer" className="mr-1 inline h-3.5 w-3.5" />พิมพ์{r.print_count ? ` (${r.print_count})` : ""}</button>}
-                    {canEdit && <button onClick={() => toggleDone(r)} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs">{r.status === "done" ? "ยังไม่ทำ" : "เสร็จ"}</button>}
-                  </div>
-                )}
+        : canManage ? (
+          <div className="space-y-6">
+            <section>
+              <h2 className="text-base font-semibold text-slate-800">คำสั่งพิเศษ</h2>
+              <p className="mb-2 text-[12px] text-slate-500">ชิปคำสั่ง (ห่อ · การ์ด · เปลี่ยนสินค้า …) + ชนิดกล่องตั้งค่า + ตัวเลือก · ตัวพิเศษ/ฟอนต์/รหัสท้าย SKU ของเครื่องสลัก</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setOptOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:settings" /> จัดการคำสั่ง</button>
+                <button type="button" onClick={() => setEngraveOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:settings" /> ตั้งค่าเครื่องสลัก</button>
+                <button type="button" onClick={() => setTrashOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:trash" /> ถังขยะคำสั่ง</button>
               </div>
-            )}
-          />
-        )}
-      <Pager page={page - 1} pageSize={50} total={total} onPage={(p) => setPage(p + 1)} unitLabel="รายการ" hideWhenSingle />
-
-      {editing && (
-        <InstructionForm
-          row={editing === "new" ? null : editing}
-          options={options}
-          onManageEngrave={canManage ? () => setEngraveOpen(true) : undefined}
-          readOnly={!canEdit || trash}
-          canDelete={canDelete && !trash}
-          onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); void load(); }}
-        />
-      )}
-      <OptionsManager open={optOpen} onClose={() => setOptOpen(false)} kind="instruction_command" options={options} onChanged={reloadOptions} />
-      <EngraveSettings open={engraveOpen} onClose={() => setEngraveOpen(false)} options={options} onChanged={reloadOptions} />
+            </section>
+            <GiftTemplates />
+          </div>
+        ) : <AccessDenied message="ตั้งค่าต้องมีสิทธิ์ order_ops.manage" />}
+      <InstructionTrash open={trashOpen} onClose={() => setTrashOpen(false)} onRestored={refresh} />
+      <OptionsManager open={optOpen} onClose={() => setOptOpen(false)} kind="instruction_command" options={hubOptions} onChanged={reloadOptions} />
+      <EngraveSettings open={engraveOpen} onClose={() => setEngraveOpen(false)} options={hubOptions} onChanged={reloadOptions} />
     </>
   );
 }
