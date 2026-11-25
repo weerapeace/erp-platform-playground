@@ -10,9 +10,11 @@ import { useCreativeOptions } from "./use-options";
 import { DEFAULT_SKIP_SUBTASKS, loadProductModeCfg, saveProductModeCfg, type ProductEditMode, type ProductModeCfg } from "./product-edit-mode";
 import { listSubtaskTypes, type SubtaskType } from "./data";
 import { Icon } from "@/components/icon";
+import { getLang } from "@/lib/lang";
 
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-const fmt = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${TH_MONTH[d.getMonth()]} ${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+const EN_MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmt = (iso: string) => { const d = new Date(iso); const en = getLang() === "en"; return `${d.getDate()} ${(en ? EN_MONTH : TH_MONTH)[d.getMonth()]} ${d.getFullYear() + (en ? 0 : 543)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 
 export function ProductModeManager({ showToast }: { showToast: (m: string) => void }) {
   const t = useT();

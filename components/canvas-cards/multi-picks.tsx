@@ -77,7 +77,7 @@ export function MarketingSkuMultiPick({ selected, onChange }: { selected: MktSku
         sku_active: it.sku_active, sku_total: it.sku_total, note: it.note,
         brand_id: it.brand_id, label_id: it.label_id, badge_ids: it.badge_ids ?? [],
       })));
-    }).catch((e) => { if (alive) setError(e instanceof Error ? e.message : "โหลดไม่ได้"); }).finally(() => { if (alive) setLoading(false); });
+    }).catch((e) => { if (alive) setError(e instanceof Error ? e.message : t("โหลดไม่ได้", "Failed to load")); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [t]);
   const q = query.trim().toLowerCase();

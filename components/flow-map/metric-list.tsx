@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ERPModal } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
@@ -27,9 +28,9 @@ export function FlowMetricListModal({ metric, onClose }: { metric: FlowMetricKey
     try {
       const r = await apiFetch(`/api/flow-map/list?metric=${encodeURIComponent(key)}`);
       const j = await r.json();
-      if (!r.ok || j?.error) throw new Error(j?.error || "โหลดรายการไม่สำเร็จ");
+      if (!r.ok || j?.error) throw new Error(j?.error || tr("โหลดรายการไม่สำเร็จ", "Failed to load list"));
       setRows((j.rows ?? []) as FlowMetricRow[]); setTotal(Number(j.total) || 0);
-    } catch (e) { setErr(e instanceof Error ? e.message : "โหลดรายการไม่สำเร็จ"); setRows([]); }
+    } catch (e) { setErr(e instanceof Error ? e.message : tr("โหลดรายการไม่สำเร็จ", "Failed to load list")); setRows([]); }
   }, []);
   useEffect(() => { if (metric) void load(metric); }, [metric, load]);
   if (!metric) return null;

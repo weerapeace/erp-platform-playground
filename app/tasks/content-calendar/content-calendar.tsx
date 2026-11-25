@@ -16,6 +16,7 @@ import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
 import {
   listContent, listBrands, listCampaigns, listBrandCalStyles, updateContent, getRecommendedTimes, type RecommendedTimes,
@@ -100,9 +101,10 @@ function storyPosted(e: CalEntry): boolean {
   return targets.length > 0 && targets.every((p) => ps[p] === "posted");
 }
 function NoFileBadge() {
+  const t = useT();
   return (
-    <span title="Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ดรูป/วิดีโอ (＋ เพิ่ม / จัดการ)"
-      className="shrink-0 text-[9px] leading-none text-amber-600">ไม่มีไฟล์</span>
+    <span title={t("Story นี้ยังไม่มีไฟล์ — กดเปิด แล้วใส่ไฟล์ที่การ์ดรูป/วิดีโอ (＋ เพิ่ม / จัดการ)", "This story has no file yet — open it and add files in the image/video card (＋ Add / Manage)")}
+      className="shrink-0 text-[9px] leading-none text-amber-600">{t("ไม่มีไฟล์", "No file")}</span>
   );
 }
 
@@ -112,11 +114,23 @@ const platReadiness = (e: CalEntry, pset?: PlatformSettings | null): PlatReady[]
 const READY_RING: Record<PlatReady["state"], string> = {
   posted: "ring-emerald-500 bg-emerald-50", scheduled: "ring-blue-500 bg-blue-50", failed: "ring-rose-500 bg-rose-50", ready: "ring-emerald-400 bg-white", missing: "ring-amber-400 bg-amber-50", skip: "ring-slate-300 bg-slate-100 opacity-50",
 };
-const READY_LABEL: Record<PlatReady["state"], string> = { posted: "โพสต์แล้ว", scheduled: "ตั้งเวลาแล้ว", failed: "โพสต์อัตโนมัติไม่สำเร็จ", ready: "พร้อมโพสต์", missing: "ยังขาด", skip: "ข้าม" };
-const MISSING_LABEL = { caption: "แคปชั่น", image: "รูป" } as const;
+// ป้ายสองภาษา (getter → ประเมินตอน render ตามภาษาปัจจุบัน)
+const READY_LABEL: Record<PlatReady["state"], string> = {
+  get posted() { return tr("โพสต์แล้ว", "Posted"); },
+  get scheduled() { return tr("ตั้งเวลาแล้ว", "Scheduled"); },
+  get failed() { return tr("โพสต์อัตโนมัติไม่สำเร็จ", "Auto-post failed"); },
+  get ready() { return tr("พร้อมโพสต์", "Ready to post"); },
+  get missing() { return tr("ยังขาด", "Missing"); },
+  get skip() { return tr("ข้าม", "Skipped"); },
+};
+const MISSING_LABEL: Record<"caption" | "image", string> = {
+  get caption() { return tr("แคปชั่น", "Caption"); },
+  get image() { return tr("รูป", "Image"); },
+};
 
 /** แถวไอคอนแพลตฟอร์มเล็ก ๆ บนการ์ด — วงสีบอกความพร้อม (เขียว=พร้อม/โพสต์แล้ว · เหลือง=ยังขาดแคปชั่นหรือรูป · เทา=ข้าม) */
 function PlatIcons({ list, size = 12 }: { list: PlatReady[]; size?: number }) {
+  useT(); // re-render ตอนสลับภาษา
   if (!list.length) return null;
   return (
     <span className="inline-flex items-center gap-0.5 shrink-0">
@@ -138,6 +152,7 @@ function PlatIcons({ list, size = 12 }: { list: PlatReady[]; size?: number }) {
 /** ปุ่มในการ์ดลอย (ต่อแพลตฟอร์ม): 📋 คัดลอกแคปชั่น · ☐ โพสต์แล้ว — texts = ข้อความที่ประกอบแล้ว (undefined = กำลังโหลด) */
 type QvActions = { texts: Record<string, string> | "error" | undefined; busy: string | null; onCopy: (code: string) => void; onTogglePosted: (code: string) => void };
 function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onFull }: { e: CalEntry; plats: PlatReady[]; open: boolean; anchor: HTMLElement | null; rect?: DOMRect | null; actions?: QvActions; onClose: () => void; onOpen: () => void; onFull?: () => void }) {
+  const t = useT();
   if (!open || !anchor || typeof document === "undefined") return null;
   // การ์ดในปฏิทินถูกสร้างใหม่ทุกครั้งที่หน้าอัปเดต (เช่น หลังติ๊กโพสต์แล้ว/ขึ้นแจ้งเตือน) → ปุ่มเดิมหลุดจากหน้า ใช้ตำแหน่งที่จำไว้ตอนเปิดแทน
   const r = anchor.isConnected || !rect ? anchor.getBoundingClientRect() : rect;
@@ -165,8 +180,8 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
         )}
         <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
           <PlatIcons list={plats} size={10} />
-          <span className={e.fileCount ? "text-slate-400" : "text-amber-600"}>{e.fileCount ? <><Icon value="i:paperclip" className="mr-1" />{e.fileCount} ไฟล์</> : "ยังไม่มีไฟล์"}</span>
-          <span className="ml-auto text-slate-400">คลิกเพื่อเปิด</span>
+          <span className={e.fileCount ? "text-slate-400" : "text-amber-600"}>{e.fileCount ? <><Icon value="i:paperclip" className="mr-1" />{e.fileCount} {t("ไฟล์", "files")}</> : t("ยังไม่มีไฟล์", "No file yet")}</span>
+          <span className="ml-auto text-slate-400">{t("คลิกเพื่อเปิด", "Click to open")}</span>
         </div>
       </div>,
       document.body,
@@ -194,7 +209,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
           ))}
         </div>
       ) : (
-        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700"><Icon value="i:photo" className="mr-1" />ยังไม่มีรูปที่จะลง</div>
+        <div className="mt-2 rounded-md border border-dashed border-amber-300 bg-amber-50 px-2 py-2 text-center text-[11px] text-amber-700"><Icon value="i:photo" className="mr-1" />{t("ยังไม่มีรูปที่จะลง", "No images to post yet")}</div>
       )}
       {/* ต่อแพลตฟอร์ม */}
       {plats.length > 0 && (
@@ -206,11 +221,11 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
               {/* โพสต์แล้ว + มีปุ่มติ๊ก = ปุ่มเขียวทำหน้าที่เป็นป้ายแทน (ไม่ให้ซ้ำ) */}
               {!(actions && p.state === "posted") && (
                 <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "failed" ? "bg-rose-100 text-rose-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
-                  {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
+                  {p.state === "missing" ? `${t("ขาด", "Missing")} ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
                 </span>
               )}
-              {(p.state === "ready" || p.state === "missing") && <span className={`text-[10px] ${p.manual ? "text-slate-500" : "text-violet-600"}`} title={p.manual ? "แพลตฟอร์มนี้ระบบยังโพสต์ให้ไม่ได้ — คัดลอกแคปชั่นแล้วลงในแอปเอง แล้วติ๊กว่าลงแล้ว" : "ระบบโพสต์ให้ได้ (กดโพสต์เลย หรือตั้งคิว)"}>{p.manual ? <><Icon value="i:hand-stop" className="mr-1" />ต้องกดเอง</> : <><Icon value="i:robot" className="mr-1" />ระบบลงให้</>}</span>}
-              {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? "ลงเป็น Story — ไม่ต้องมีแคปชั่น" : "ตั้งไว้ที่ปุ่มตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป"}>{p.isStory ? "Story" : "ไม่ใช้แคปชั่น"}</span>}
+              {(p.state === "ready" || p.state === "missing") && <span className={`text-[10px] ${p.manual ? "text-slate-500" : "text-violet-600"}`} title={p.manual ? t("แพลตฟอร์มนี้ระบบยังโพสต์ให้ไม่ได้ — คัดลอกแคปชั่นแล้วลงในแอปเอง แล้วติ๊กว่าลงแล้ว", "Auto-post isn't available for this platform — copy the caption, post in the app, then tick as posted") : t("ระบบโพสต์ให้ได้ (กดโพสต์เลย หรือตั้งคิว)", "Auto-post available (post now or queue)")}>{p.manual ? <><Icon value="i:hand-stop" className="mr-1" />{t("ต้องกดเอง", "Manual")}</> : <><Icon value="i:robot" className="mr-1" />{t("ระบบลงให้", "Auto")}</>}</span>}
+              {p.captionOff && p.state !== "skip" && <span className="text-[10px] text-slate-400" title={p.isStory ? t("ลงเป็น Story — ไม่ต้องมีแคปชั่น", "Posted as a story — no caption needed") : t("ตั้งไว้ที่ปุ่มตั้งค่าแพลตฟอร์ม — แพลตฟอร์มนี้ลงแค่รูป", "Set in platform settings — this platform posts images only")}>{p.isStory ? "Story" : t("ไม่ใช้แคปชั่น", "No caption")}</span>}
               <span className="ml-auto flex items-center gap-1 shrink-0">
                 {p.images.length > 0 && e.platformImages[p.code]?.length ? <span className="text-[10px] text-slate-400"><Icon value="i:photo" className="mr-1" />{e.platformImages[p.code].length}</span> : null}
                 {/* 📋 คัดลอกแคปชั่นที่จะโพสต์ (ข้อความเดียวกับปุ่ม 📋 ใน drawer) */}
@@ -219,7 +234,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
                   const loading = tx === undefined;
                   return (
                     <button type="button" onClick={() => actions.onCopy(p.code)} disabled={loading || tx === "error" || !text}
-                      title={loading ? "กำลังเตรียมแคปชั่น…" : tx === "error" ? "โหลดแคปชั่นไม่สำเร็จ — เปิดการ์ดเพื่อคัดลอก" : text ? `คัดลอกแคปชั่น ${platformLabel(p.code)}` : "ยังไม่มีแคปชั่น — คลิกการ์ดเพื่อเขียน"}
+                      title={loading ? t("กำลังเตรียมแคปชั่น…", "Preparing caption…") : tx === "error" ? t("โหลดแคปชั่นไม่สำเร็จ — เปิดการ์ดเพื่อคัดลอก", "Couldn't load caption — open the card to copy") : text ? t(`คัดลอกแคปชั่น ${platformLabel(p.code)}`, `Copy ${platformLabel(p.code)} caption`) : t("ยังไม่มีแคปชั่น — คลิกการ์ดเพื่อเขียน", "No caption yet — click the card to write one")}
                       className="h-5 w-6 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-200 disabled:opacity-40">{loading ? "…" : <Icon value="i:clipboard-list" />}</button>
                   );
                 })()}
@@ -228,10 +243,10 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
                   const posted = p.state === "posted"; const busy = actions.busy === p.code;
                   return (
                     <button type="button" onClick={() => actions.onTogglePosted(p.code)} disabled={busy}
-                      title={posted ? "โพสต์แล้ว — กดอีกครั้งเพื่อยกเลิก" : "โพสต์เสร็จแล้ว → ติ๊กที่นี่ (บันทึกทันที)"}
+                      title={posted ? t("โพสต์แล้ว — กดอีกครั้งเพื่อยกเลิก", "Posted — click again to undo") : t("โพสต์เสร็จแล้ว → ติ๊กที่นี่ (บันทึกทันที)", "Done posting → tick here (saves instantly)")}
                       className={`h-5 inline-flex items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium disabled:opacity-60 ${posted ? "bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700" : "bg-white text-slate-500 border-slate-300 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700"}`}>
                       <span className={`inline-flex h-3 w-3 items-center justify-center rounded-sm border text-[8px] leading-none ${posted ? "bg-white text-emerald-600 border-white" : "bg-white border-slate-400"}`}>{busy ? "…" : posted ? "✓" : ""}</span>
-                      โพสต์แล้ว
+                      {t("โพสต์แล้ว", "Posted")}
                     </button>
                   );
                 })()}
@@ -241,10 +256,10 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen, onF
         </div>
       )}
       <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-        <span>{missingAny.length ? <><Icon value="i:alert-triangle" className="mr-1" />ยังขาด {missingAny.length}/{plats.length} แพลตฟอร์ม</> : plats.length ? "✓ ครบทุกแพลตฟอร์ม" : "ยังไม่เลือกแพลตฟอร์ม"}</span>
+        <span>{missingAny.length ? <><Icon value="i:alert-triangle" className="mr-1" />{t("ยังขาด", "Missing")} {missingAny.length}/{plats.length} {t("แพลตฟอร์ม", "platforms")}</> : plats.length ? t("✓ ครบทุกแพลตฟอร์ม", "✓ All platforms ready") : t("ยังไม่เลือกแพลตฟอร์ม", "No platform selected")}</span>
         {onFull
-          ? <button type="button" onClick={onFull} className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-700">เปิดแก้เต็ม ↗</button>
-          : <span>คลิกการ์ดเพื่อเปิดแก้</span>}
+          ? <button type="button" onClick={onFull} className="rounded-md bg-violet-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-violet-700">{t("เปิดแก้เต็ม ↗", "Open full editor ↗")}</button>
+          : <span>{t("คลิกการ์ดเพื่อเปิดแก้", "Click the card to edit")}</span>}
       </div>
     </div>,
     document.body,
@@ -637,7 +652,7 @@ export function ContentCalendarView() {
               <PlatIcons list={plats} />
               {/* สรุปผลลง: ✓ลงแล้ว/ทั้งหมด · ! = โพสต์อัตโนมัติล้ม */}
               {(() => { const live = plats.filter((p) => p.state !== "skip"); const done = live.filter((p) => p.state === "posted").length; const fail = live.some((p) => p.state === "failed");
-                return live.length > 0 ? <span title={`ลงแล้ว ${done} จาก ${live.length} แพลตฟอร์ม${fail ? " · มีที่โพสต์อัตโนมัติไม่สำเร็จ" : ""}`} className={`shrink-0 rounded px-1 text-[9px] font-semibold tabular-nums ${fail ? "bg-rose-100 text-rose-700" : done === live.length ? "bg-emerald-100 text-emerald-700" : done ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>{fail ? "!" : "✓"}{done}/{live.length}</span> : null; })()}
+                return live.length > 0 ? <span title={t(`ลงแล้ว ${done} จาก ${live.length} แพลตฟอร์ม`, `Posted ${done} of ${live.length} platforms`) + (fail ? t(" · มีที่โพสต์อัตโนมัติไม่สำเร็จ", " · some auto-posts failed") : "")} className={`shrink-0 rounded px-1 text-[9px] font-semibold tabular-nums ${fail ? "bg-rose-100 text-rose-700" : done === live.length ? "bg-emerald-100 text-emerald-700" : done ? "bg-amber-100 text-amber-800" : "bg-slate-100 text-slate-500"}`}>{fail ? "!" : "✓"}{done}/{live.length}</span> : null; })()}
             </>
           )}
         </button>

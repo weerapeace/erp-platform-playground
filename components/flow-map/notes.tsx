@@ -12,6 +12,7 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import {
   FLOW_NOTE_MAX, FLOW_NOTE_LIMIT, cleanFlowNote,
@@ -26,7 +27,7 @@ const parsePersonal = (raw: unknown): Personal | null => {
   return out;
 };
 const newId = () => `p_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-const json = async (r: Response) => { const j = await r.json().catch(() => ({})); if (!r.ok || j?.error) throw new Error(j?.error || "บันทึกโน้ตไม่สำเร็จ"); return j; };
+const json = async (r: Response) => { const j = await r.json().catch(() => ({})); if (!r.ok || j?.error) throw new Error(j?.error || tr("บันทึกโน้ตไม่สำเร็จ", "Failed to save note")); return j; };
 
 /** โน้ตทั้งหมดของคนนี้ (ส่วนตัว) + ของทีม */
 export function useFlowNotes() {
@@ -53,7 +54,7 @@ export function useFlowNotes() {
     ...Object.entries(personal).map(([id, d]) => ({ ...d, id, shared: false, mine: true })),
     ...team,
   ];
-  const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : "บันทึกโน้ตไม่สำเร็จ");
+  const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : tr("บันทึกโน้ตไม่สำเร็จ", "Failed to save note"));
 
   /** สร้างโน้ตใหม่ (ส่วนตัว) แล้วคืน id ไว้เปิดแก้ทันที */
   const add = (d: Omit<FlowNoteData, "author" | "at">): string => {
@@ -84,12 +85,12 @@ export function useFlowNotes() {
         const j = await json(await apiFetch("/api/flow-map/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }));
         setTeam((ts) => [...ts, j.data as FlowNote]);
         setPersonal((p) => { const q = { ...p }; delete q[n.id]; return q; });
-        toast.success("แชร์โน้ตให้ทั้งทีมเห็นแล้ว");
+        toast.success(tr("แชร์โน้ตให้ทั้งทีมเห็นแล้ว", "Note shared with the team"));
       } else {
         await json(await apiFetch(`/api/flow-map/notes?id=${encodeURIComponent(n.id)}`, { method: "DELETE" }));
         setTeam((ts) => ts.filter((x) => x.id !== n.id));
         setPersonal((p) => ({ ...p, [newId()]: { ...data, at: new Date().toISOString() } }));
-        toast.success("เปลี่ยนเป็นโน้ตส่วนตัวแล้ว");
+        toast.success(tr("เปลี่ยนเป็นโน้ตส่วนตัวแล้ว", "Note is now private"));
       }
     } catch (e) { fail(e); }
   };

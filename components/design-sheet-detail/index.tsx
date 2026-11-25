@@ -3294,7 +3294,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             source={{ label: form.code || form.name, href: `/master/design-dashboard?open=${encodeURIComponent(form.id)}` }} onClose={() => setPlanOpen(false)} />
         )}
         {orderSeed && form?.id && (
-          <OrderBatchEntryModal open seedLines={orderSeed} title={`ลงออเดอร์จากใบงาน ${form.code}`} onClose={() => setOrderSeed(null)}
+          <OrderBatchEntryModal open seedLines={orderSeed} title={t(`ลงออเดอร์จากใบงาน ${form.code}`, `Create order from sheet ${form.code}`)} onClose={() => setOrderSeed(null)}
             brand={form.brand_id ? { id: form.brand_id, name: brands.find((b) => b.id === form.brand_id)?.name ?? null } : null} />
         )}
       {form?.id && (

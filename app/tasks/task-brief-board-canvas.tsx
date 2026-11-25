@@ -12,6 +12,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { LoadingState } from "@/components/state-views";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { usePushToast } from "@/components/toast";
@@ -22,7 +23,7 @@ import { loadBriefBoardItems } from "./brief-board-items";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
-  loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
+  loading: () => <LoadingState label={tr("กำลังโหลดกระดาน...", "Loading board...")} boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
 
 type El = { id?: string; type?: string; isDeleted?: boolean; fileId?: string; text?: string; originalText?: string; customData?: { kind?: string; contentIds?: string[] } | null };

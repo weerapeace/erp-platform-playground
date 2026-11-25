@@ -154,18 +154,18 @@ export function SkuFormModal({
     <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-800">{mode === "edit" ? "✎ แก้ไขสินค้า (SKU)" : "＋ เพิ่มสินค้าใหม่ (SKU)"}</h3>
+          <h3 className="text-lg font-semibold text-slate-800">{mode === "edit" ? tr("✎ แก้ไขสินค้า (SKU)", "✎ Edit product (SKU)") : tr("＋ เพิ่มสินค้าใหม่ (SKU)", "＋ New product (SKU)")}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
         </div>
         <div className="p-5 overflow-auto flex-1">
           {loading ? (
-            <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลดฟอร์ม…</div>
+            <div className="py-10 text-center text-slate-400 text-sm">{tr("กำลังโหลดฟอร์ม…", "Loading form…")}</div>
           ) : (
             <>
               {/* คัดลอกสินค้า — ป้ายอ้างอิงรหัสเดิม (ให้ตั้งรหัสใหม่ไม่ให้ซ้ำ) */}
               {mode === "create" && copyFromCode && (
                 <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
-                  📋 คัดลอกจากสินค้า <span className="font-mono font-semibold">{copyFromCode}</span> — ⚠ แก้ <b>รหัส</b> ให้เป็นรหัสใหม่ (ห้ามซ้ำ) ก่อนบันทึก
+                  📋 {tr("คัดลอกจากสินค้า", "Copied from product")} <span className="font-mono font-semibold">{copyFromCode}</span> {tr("— ⚠ แก้", "— ⚠ Change the")} <b>{tr("รหัส", "code")}</b> {tr("ให้เป็นรหัสใหม่ (ห้ามซ้ำ) ก่อนบันทึก", "to a new, unique code before saving")}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
@@ -182,10 +182,10 @@ export function SkuFormModal({
           {err && <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
         </div>
         <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
-          <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{tr("ยกเลิก", "Cancel")}</button>
           <button onClick={save} disabled={saving || loading}
             className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {saving ? "กำลังบันทึก..." : "บันทึก"}
+            {saving ? tr("กำลังบันทึก...", "Saving...") : tr("บันทึก", "Save")}
           </button>
         </div>
       </div>

@@ -67,6 +67,6 @@ export function parentSkuExtraTabs(): NonNullable<MasterCRUDConfig["extraTabs"]>
     { key: "prices", label: tr("ราคา", "Prices"), icon: "💰", after: "content", render: ({ recordId }) => <ParentPriceTab parentId={recordId} /> },
     // key ยังเป็น "issues" ตั้งใจ — ตำแหน่ง/การซ่อนแท็บที่ทีมตั้งไว้ในตัวออกแบบหน้า (x:issues) และที่แต่ละคนซ่อนไว้ ใช้ต่อได้ไม่ต้องย้ายข้อมูล
     { key: "issues", label: tr("ผลิต", "Production"), icon: "🏭", render: ({ recordId }) => <ParentProductionTab parentId={recordId} /> },
-    { key: "packing", label: tr("แพ็ค", "Packing"), icon: "📦", render: ({ recordId }) => (recordId ? <ParentPackingTab parentId={recordId} /> : <p className="p-3 text-sm text-slate-500">บันทึกรุ่นนี้ก่อน แล้วค่อยตั้งการแพ็ค</p>) },
+    { key: "packing", label: tr("แพ็ค", "Packing"), icon: "📦", render: ({ recordId }) => (recordId ? <ParentPackingTab parentId={recordId} /> : <p className="p-3 text-sm text-slate-500">{tr("บันทึกรุ่นนี้ก่อน แล้วค่อยตั้งการแพ็ค", "Save this model first, then set up packing")}</p>) },
   ];
 }

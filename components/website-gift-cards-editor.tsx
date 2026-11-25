@@ -88,7 +88,7 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
   const setWrap = (id: string, p: Partial<GiftWrapStyle>) => setCfg((c) => (c ? { ...c, wraps: c.wraps.map((w) => (w.id === id ? { ...w, ...p } : w)) } : c));
 
   const pv = useMemo(() => cfg?.designs.find((d) => d.id === previewId) ?? cfg?.designs.find((d) => d.enabled) ?? cfg?.designs[0], [cfg, previewId]);
-  const sample = cfg?.occasions[0]?.messages[0] ?? "สุขสันต์วันเกิดนะ ขอให้ปีนี้เป็นปีที่ดีที่สุด";
+  const sample = cfg?.occasions[0]?.messages[0] ?? t("สุขสันต์วันเกิดนะ ขอให้ปีนี้เป็นปีที่ดีที่สุด", "Happy birthday! Wishing you your best year yet");
 
   const save = async () => {
     if (!cfg) return;
@@ -256,7 +256,7 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
                         <div className="flex-1 min-w-0 grid gap-1.5 sm:grid-cols-3">
                           <div>
                             <label className={lbl}>{t("ชื่อแบบ", "Style name")}</label>
-                            <input value={w.name} onChange={(e) => setWrap(w.id, { name: e.target.value.slice(0, 40) })} className={inputCls} placeholder="กล่องของขวัญ" />
+                            <input value={w.name} onChange={(e) => setWrap(w.id, { name: e.target.value.slice(0, 40) })} className={inputCls} placeholder={t("กล่องของขวัญ", "Gift box")} />
                           </div>
                           <div>
                             <label className={lbl}>{t("ชื่ออังกฤษ (ไม่ใส่ = ใช้ชื่อไทย)", "English name (blank = use Thai name)")}</label>
@@ -295,14 +295,14 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
                   <li key={o.id} {...dragO.rowProps(i)} className={`rounded-lg border border-slate-200 bg-white px-2 py-2 flex gap-2 ${dragO.rowCls(i)}`}>
                     <DragHandle {...dragO.handleProps(i)} />
                     <div className="w-32 shrink-0">
-                      <input value={o.label} onChange={(e) => set({ occasions: cfg.occasions.map((x) => (x.id === o.id ? { ...x, label: e.target.value.slice(0, 30) } : x)) })} className={inputCls} placeholder="วันเกิด" />
+                      <input value={o.label} onChange={(e) => set({ occasions: cfg.occasions.map((x) => (x.id === o.id ? { ...x, label: e.target.value.slice(0, 30) } : x)) })} className={inputCls} placeholder={t("วันเกิด", "Birthday")} />
                     </div>
                     <textarea
                       rows={Math.max(2, o.messages.length)}
                       value={o.messages.join("\n")}
                       onChange={(e) => set({ occasions: cfg.occasions.map((x) => (x.id === o.id ? { ...x, messages: e.target.value.split("\n").slice(0, 8) } : x)) })}
                       className={`${inputCls} flex-1 min-w-0`}
-                      placeholder="สุขสันต์วันเกิดนะ ขอให้ปีนี้เป็นปีที่ดีที่สุด"
+                      placeholder={t("สุขสันต์วันเกิดนะ ขอให้ปีนี้เป็นปีที่ดีที่สุด", "Happy birthday! Wishing you your best year yet")}
                     />
                     <button type="button" onClick={() => set({ occasions: cfg.occasions.filter((x) => x.id !== o.id) })} className="text-xs text-rose-500 px-1 self-start" title={t("ลบโอกาสนี้", "Delete this occasion")}>
                       🗑
@@ -348,7 +348,7 @@ export function GiftCardsEditor({ open, onClose, shopSlug, shopId }: { open: boo
           {/* พรีวิว */}
           <aside className="lg:sticky lg:top-0 self-start space-y-2">
             <p className="text-xs font-medium text-slate-600">{t("พรีวิวการ์ดจริง —", "Live card preview —")} {pv?.name}</p>
-            {pv && <GiftCardPreview cfg={cfg} design={pv} to="คุณแม่" from="น้องมิว" message={sample} font={font} />}
+            {pv && <GiftCardPreview cfg={cfg} design={pv} to={t("คุณแม่", "Mom")} from={t("น้องมิว", "Mew")} message={sample} font={font} />}
             <div className="flex gap-1.5">
               {GIFT_FONTS.filter((f) => cfg.fonts.includes(f.key)).map((f) => (
                 <button key={f.key} type="button" className={seg(font === f.key)} style={{ fontFamily: f.family }} onClick={() => setFont(f.key)}>

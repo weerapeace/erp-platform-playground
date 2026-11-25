@@ -65,7 +65,7 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
   loading: () => (
     <div className="fixed inset-0 z-[140] bg-black/30 flex items-center justify-center">
       <div className="bg-white rounded-xl px-5 py-3 text-sm text-slate-500 shadow-2xl inline-flex items-center gap-2">
-        <span className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" /> กำลังเปิด…
+        <span className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" /> {tr("กำลังเปิด…", "Opening…")}
       </div>
     </div>
   ),
@@ -73,15 +73,15 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
 // 📦 Bundle (กลุ่ม SKU ที่จับรวมกัน) — โหลดเฉพาะตอนกดปุ่ม
 // 🎨 Swatch (รูปแผ่นตัวอย่าง กดบนรูปเปิด SKU) — โหลดเฉพาะตอนกดปุ่ม
 const SwatchBrowser = nextDynamic(() => import("@/components/sku-swatch-browser").then((m) => m.SwatchBrowser), {
-  ssr: false, loading: () => <div className="py-12 text-center text-sm text-slate-400">กำลังโหลด Swatch…</div>,
+  ssr: false, loading: () => <div className="py-12 text-center text-sm text-slate-400">{tr("กำลังโหลด Swatch…", "Loading swatches…")}</div>,
 });
 const BundleBrowser = nextDynamic(() => import("@/components/sku-bundle-browser").then((m) => m.BundleBrowser), {
-  ssr: false, loading: () => <div className="py-12 text-center text-sm text-slate-400">กำลังโหลด Bundle…</div>,
+  ssr: false, loading: () => <div className="py-12 text-center text-sm text-slate-400">{tr("กำลังโหลด Bundle…", "Loading bundles…")}</div>,
 });
 // 🛒 กล่องพักสินค้าจาก Taobao — โหลดเฉพาะตอนกดปุ่ม (ไม่ให้ถ่วง bundle หน้าหลัก)
 const TaobaoBrowser = nextDynamic(() => import("@/components/taobao-browser").then((m) => m.TaobaoBrowser), {
   ssr: false,
-  loading: () => <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>,
+  loading: () => <div className="text-center py-16 text-slate-400 text-sm">{tr("กำลังโหลด…", "Loading…")}</div>,
 });
 // ป๊อปอัป bulk edit ของกลาง — โหลดเฉพาะตอนกด "แก้ไขข้อมูล" (data-table ใหญ่ ไม่เอาเข้า bundle หน้านี้)
 const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").then((m) => ({ default: m.BulkEditAllModal })), { ssr: false });
@@ -104,8 +104,8 @@ function savedNav(): SkuNav | null { return readStep<SkuNav>(NAV_KEY); }
 function patchNav(p: Partial<SkuNav>): void { patchStep<SkuNav>(NAV_KEY, p, { gp: [], tf: EMPTY_FILTER }); }
 
 const CARD_FIELDS: { key: string; label: string }[] = [
-  { key: "image",  label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "ชื่อ" },
-  { key: "price",  label: "ราคาขาย" }, { key: "buy_price", label: "ราคาซื้อ (ล่าสุด)" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
+  { key: "image", get label() { return tr("รูป", "Image"); } }, { key: "code", get label() { return tr("รหัส", "Code"); } }, { key: "name", get label() { return tr("ชื่อ", "Name"); } },
+  { key: "price", get label() { return tr("ราคาขาย", "Selling price"); } }, { key: "buy_price", get label() { return tr("ราคาซื้อ (ล่าสุด)", "Buying price (latest)"); } }, { key: "stock", get label() { return tr("สต๊อกคงเหลือ", "Stock on hand"); } }, { key: "tags", get label() { return tr("แท็ก", "Tags"); } }, { key: "status", get label() { return tr("สถานะ", "Status"); } },
 ];
 /** ข้อความราคาซื้อ (ฝั่ง server ส่งมาเฉพาะคนที่มีสิทธิ์ดูต้นทุน — ไม่มี = "—") */
 function fmtBuy(bp: SkuCard["buy_price"]): string { return bp && bp.price > 0 ? formatAmount(bp.price, bp.currency) : "—"; }
@@ -114,7 +114,7 @@ const CORE_KEYS = new Set(DEFAULT_CARD_FIELDS);   // 7 ฟิลด์หลั�
 const CORE_COLUMNS = new Set(["id", "code", "name_th", "list_price", "is_active", "cover_image_r2_key"]);
 function fmtCell(v: unknown): string {
   if (v == null || v === "") return "—";
-  if (typeof v === "boolean") return v ? "ใช่" : "ไม่";
+  if (typeof v === "boolean") return v ? tr("ใช่", "Yes") : tr("ไม่", "No");
   if (typeof v === "number") return v.toLocaleString("th-TH");
   return String(v);
 }
@@ -136,9 +136,9 @@ const SORTS = [
 /** เช็คว่าการ์ดนี้ข้อมูลไม่ครบตรงไหน (ไว้โชว์ป้ายเตือน + กรอง) */
 function cardWarnings(c: SkuCard): string[] {
   const w: string[] = [];
-  if (!c.image) w.push("ไม่มีรูป");
-  if (c.variant_count == null && (c.list_price == null || c.list_price <= 0)) w.push("ไม่มีราคา");   // Parent ไม่มีราคา = ไม่เตือน
-  if (c.tags.length === 0) w.push("ไม่มีแท็ก");
+  if (!c.image) w.push(tr("ไม่มีรูป", "No image"));
+  if (c.variant_count == null && (c.list_price == null || c.list_price <= 0)) w.push(tr("ไม่มีราคา", "No price"));   // Parent ไม่มีราคา = ไม่เตือน
+  if (c.tags.length === 0) w.push(tr("ไม่มีแท็ก", "No tags"));
   return w;
 }
 
@@ -398,11 +398,11 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
     try {
       const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
-      toast.success(`คัดลอกเป็น ${j.code} แล้ว — เปิดให้แก้ไขต่อได้เลย`);
+      if (!res.ok || j.error) throw new Error(j.error ?? tr("คัดลอกไม่สำเร็จ", "Copy failed"));
+      toast.success(tr(`คัดลอกเป็น ${j.code} แล้ว — เปิดให้แก้ไขต่อได้เลย`, `Copied as ${j.code} — opened for editing`));
       await reloadFirst();
       if (j.id) setPeekId(String(j.id));   // เด้งไปที่ SKU ตัวใหม่
-    } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("คัดลอกไม่สำเร็จ", "Copy failed")); }
   };
 
   const childGroups = (tree?.groups ?? []).filter((g) => g.parent_group_id === currentGroupId);
@@ -470,8 +470,8 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
       const ids = (j.ids ?? []) as string[];
       setSelected(new Set(ids));
-      if ((j.total ?? 0) > ids.length) toast.success(`เลือกได้สูงสุด ${ids.length.toLocaleString("th-TH")} รายการ (กรองให้แคบลงถ้าต้องการมากกว่านี้)`);
-    } catch { toast.error("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
+      if ((j.total ?? 0) > ids.length) toast.success(tr(`เลือกได้สูงสุด ${ids.length.toLocaleString("th-TH")} รายการ (กรองให้แคบลงถ้าต้องการมากกว่านี้)`, `Selected the maximum of ${ids.length.toLocaleString("th-TH")} items (narrow the filter for more)`));
+    } catch { toast.error(tr("เลือกทั้งหมดไม่สำเร็จ", "Select all failed")); } finally { setSelectingAll(false); }
   };
 
   // ── bulk: ใช้ของกลางทั้งหมด (ไม่ hardcode) ──
@@ -484,7 +484,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
       body: JSON.stringify({ edits: ids.map((id) => ({ id, changes })) }),
     });
     const j = await res.json().catch(() => null);
-    if (!res.ok || !j || j.error) throw new Error(j?.error ?? "แก้ไม่สำเร็จ");
+    if (!res.ok || !j || j.error) throw new Error(j?.error ?? tr("แก้ไม่สำเร็จ", "Update failed"));
     return (j.affected as number) ?? ids.length;
   }, [apiPath]);
   const bulkAddTag = async (tagId: string) => {
@@ -492,13 +492,13 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
     try {
       const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, links: ids.map((src_id) => ({ src_id, tgt_id: tagId })) }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`ติดแท็กให้ ${ids.length} รายการแล้ว`); clearSel(); void reloadFirst();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ติดแท็กไม่สำเร็จ"); }
+      toast.success(tr(`ติดแท็กให้ ${ids.length} รายการแล้ว`, `Tagged ${ids.length} items`)); clearSel(); void reloadFirst();
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("ติดแท็กไม่สำเร็จ", "Tagging failed")); }
   };
   const bulkStatus = async (active: boolean) => {
     const ids = [...selected]; if (ids.length === 0) return;
-    try { const n = await bulkUpdateCentral(ids, { is_active: active }); toast.success(`${active ? "เปิด" : "ปิด"}ใช้งาน ${n} รายการแล้ว`); clearSel(); void reloadFirst(); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+    try { const n = await bulkUpdateCentral(ids, { is_active: active }); toast.success(active ? tr(`เปิดใช้งาน ${n} รายการแล้ว`, `Activated ${n} items`) : tr(`ปิดใช้งาน ${n} รายการแล้ว`, `Deactivated ${n} items`)); clearSel(); void reloadFirst(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : tr("ทำรายการไม่สำเร็จ", "Action failed")); }
   };
   // ป๊อปอัป bulk edit ของกลาง onApply → ยิง route กลาง
   const applyBulkEdit = async (changes: Record<string, unknown>): Promise<{ affected: number }> => {
@@ -516,24 +516,24 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
         c.qty_on_hand ?? "", c.tags.join("|"), c.is_active ? "ใช้งาน" : "ปิด"].map(esc).join(",")));
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "skus-export.csv"; a.click(); URL.revokeObjectURL(a.href);
-    toast.success(`Export ${rows.length} รายการแล้ว`);
+    toast.success(tr(`Export ${rows.length} รายการแล้ว`, `Exported ${rows.length} items`));
   };
 
   const saveCard = async (fields: string[], target: "me" | "all") => {
     try {
       const res = await apiFetch("/api/card-layouts", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope: CARD_SCOPE, fields, target }) });
-      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || tr("บันทึกไม่สำเร็จ", "Save failed"));
       setCardFields(fields); setCustomizeOpen(false);
-      toast.success(target === "all" ? "บันทึกเป็นค่าเริ่มต้นของทุกคนแล้ว" : "บันทึกการ์ดของคุณแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      toast.success(target === "all" ? tr("บันทึกเป็นค่าเริ่มต้นของทุกคนแล้ว", "Saved as everyone's default") : tr("บันทึกการ์ดของคุณแล้ว", "Your card layout saved"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); }
   };
   const resetCard = async () => {
     try {
       await apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}&target=me`, { method: "DELETE" });
       const j = await apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}`).then((r) => r.json());
       setCardFields(((j.default as string[] | null) && (j.default as string[]).length ? (j.default as string[]) : DEFAULT_CARD_FIELDS));
-      setCustomizeOpen(false); toast.success("รีเซ็ตการ์ดแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "รีเซ็ตไม่สำเร็จ"); }
+      setCustomizeOpen(false); toast.success(tr("รีเซ็ตการ์ดแล้ว", "Card layout reset"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("รีเซ็ตไม่สำเร็จ", "Reset failed")); }
   };
 
   return (
@@ -661,14 +661,14 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
         {!search.trim() && tagFilter.tagIds.length > 0 && (
           <>
             <span className="text-slate-300">›</span>
-            <span className="text-slate-700 font-medium">🔖 {tagFilter.tagIds.map((id) => tagNameById.get(id) ?? "แท็ก").join(", ")}</span>
+            <span className="text-slate-700 font-medium">🔖 {tagFilter.tagIds.map((id) => tagNameById.get(id) ?? t("แท็ก", "Tag")).join(", ")}</span>
             <button onClick={clearTags} className="text-slate-400 hover:text-rose-500 text-xs ml-1">✕</button>
           </>
         )}
         {special && (
           <span className="flex items-center gap-1">
             <span className="text-slate-300">›</span>
-            <span className="text-slate-700 font-medium">{special === "all" ? "📋 ทั้งหมด" : special === "trash" ? "🗑 ถังขยะ" : "🕒 ล่าสุด"}</span>
+            <span className="text-slate-700 font-medium">{special === "all" ? t("📋 ทั้งหมด", "📋 All") : special === "trash" ? t("🗑 ถังขยะ", "🗑 Trash") : t("🕒 ล่าสุด", "🕒 Recent")}</span>
           </span>
         )}
         {!cardsMode && groupPath.map((c, i) => (
@@ -693,7 +693,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             )}
             {/* แถบเครื่องมือการ์ดกลาง: จำนวน · ปุ่มของหน้า · สลับการ์ด/ตาราง · ขนาดการ์ด (− N +) */}
             <CardViewBar gallery={gallery}
-              count={<>{total.toLocaleString("th-TH")} รายการ{onlyIncomplete ? ` · ข้อมูลไม่ครบในหน้านี้ ${shown.length.toLocaleString("th-TH")}` : ""}</>}
+              count={<>{total.toLocaleString("th-TH")} {t("รายการ", "items")}{onlyIncomplete ? t(` · ข้อมูลไม่ครบในหน้านี้ ${shown.length.toLocaleString("th-TH")}`, ` · incomplete on this page ${shown.length.toLocaleString("th-TH")}`) : ""}</>}
               view={view === "table" ? "table" : "cards"} onView={(v) => setViewPersist(v === "table" ? "table" : "card")}>
                 {!pick && <button onClick={allShownSelected ? clearSel : selectAllShown}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
@@ -798,25 +798,25 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           )}
           <select onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v) void bulkAddTag(v); }} defaultValue=""
             className="h-8 px-2 text-[12px] rounded-lg text-slate-700 bg-white">
-            <option value="">🏷️ ติดแท็ก…</option>
+            <option value="">{t("🏷️ ติดแท็ก…", "🏷️ Add tag…")}</option>
             {(tree?.tags ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-          <button onClick={() => bulkStatus(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">เปิดใช้งาน</button>
-          <button onClick={() => bulkStatus(false)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">ปิดใช้งาน</button>
+          <button onClick={() => bulkStatus(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("เปิดใช้งาน", "Activate")}</button>
+          <button onClick={() => bulkStatus(false)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("ปิดใช้งาน", "Deactivate")}</button>
           <button onClick={exportCsv} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">⬇ Export CSV</button>
-          {entity === "parent-skus" && <button onClick={() => openSpecExport([...selected])} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">📤 ส่งออกรายละเอียด</button>}
-          {entity === "skus" && <button onClick={() => setBundleAddOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">📦 ส่งเข้า Bundle</button>}
-          <button onClick={() => setPrintOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">🏷️ พิมพ์บาร์โค้ด</button>
-          <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
+          {entity === "parent-skus" && <button onClick={() => openSpecExport([...selected])} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">{t("📤 ส่งออกรายละเอียด", "📤 Export specs")}</button>}
+          {entity === "skus" && <button onClick={() => setBundleAddOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">{t("📦 ส่งเข้า Bundle", "📦 Add to bundle")}</button>}
+          <button onClick={() => setPrintOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">{t("🏷️ พิมพ์บาร์โค้ด", "🏷️ Print barcodes")}</button>
+          <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">{t("ยกเลิก", "Cancel")}</button>
         </div>
       )}
       {bulkEditOpen && bulkFields.length > 0 && (
         <BulkEditAllModal
           fields={bulkFields}
           count={selected.size}
-          title={`แก้ ${selected.size.toLocaleString("th-TH")} รายการที่เลือก`}
-          note={`จะแก้เฉพาะ ${selected.size.toLocaleString("th-TH")} รายการที่เลือกไว้ — เลือกข้อมูลที่จะแก้แล้วใส่ค่าใหม่`}
-          applyLabel="บันทึก"
+          title={t(`แก้ ${selected.size.toLocaleString("th-TH")} รายการที่เลือก`, `Edit ${selected.size.toLocaleString("th-TH")} selected items`)}
+          note={t(`จะแก้เฉพาะ ${selected.size.toLocaleString("th-TH")} รายการที่เลือกไว้ — เลือกข้อมูลที่จะแก้แล้วใส่ค่าใหม่`, `Only the ${selected.size.toLocaleString("th-TH")} selected items will change — pick the fields and enter new values`)}
+          applyLabel={t("บันทึก", "Save")}
           onApply={applyBulkEdit}
           onClose={() => setBulkEditOpen(false)}
         />
@@ -843,10 +843,10 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
             apiPath={isParent ? "parent-skus" : "skus"}
             title={isParent ? "Parent SKUs" : "SKU"}
             mediaGallery={isParent
-              ? { entityType: "parent_skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }
-              : { entityType: "skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
+              ? { entityType: "parent_skus_v2", title: t("รูปภาพเพิ่มเติม", "More images"), maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }
+              : { entityType: "skus_v2", title: t("รูปภาพเพิ่มเติม", "More images"), maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
             extraRowActions={isParent ? undefined : [{
-              label: "คัดลอก", icon: "⧉",
+              label: t("คัดลอก", "Copy"), icon: "⧉",
               onClick: (row) => setCopyPending({ id: String(row.id), code: String(row.code ?? row.id) }),
             }]}
             recordId={peekId}
@@ -863,7 +863,7 @@ export function SkuTagBrowser({ mode = "manage", onPickSku, onPick, entity: enti
           moduleKey="parent-skus-v2"
           apiPath="parent-skus"
           title="Parent SKUs"
-          mediaGallery={{ entityType: "parent_skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
+          mediaGallery={{ entityType: "parent_skus_v2", title: t("รูปภาพเพิ่มเติม", "More images"), maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
           recordId={parentPeekId}
           onClose={() => setParentPeekId(null)}
           onChanged={() => void reloadFirst()}
@@ -883,6 +883,7 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
   /** กดชิป "📦 Parent" → เปิด drawer Parent (ไม่เปิดการ์ด SKU) */
   onOpenParent?: (parentId: string) => void;
 }) {
+  const t = useT();
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
@@ -898,7 +899,7 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
       {/* 🖼 ลากรูปมาวาง: ไฮไลต์ทั้งการ์ด · กำลังอัป: แถบ UploadProgress ทับล่างการ์ด */}
       {img?.over && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-1 bg-indigo-50/90 border-2 border-dashed border-indigo-400 rounded-xl text-indigo-700 text-[13px] font-medium pointer-events-none">
-          <Icon name="upload" size={22} />{c.image ? "ปล่อยเพื่อเพิ่มรูป" : "ปล่อยเพื่อใส่รูป"}
+          <Icon name="upload" size={22} />{c.image ? t("ปล่อยเพื่อเพิ่มรูป", "Drop to add image") : t("ปล่อยเพื่อใส่รูป", "Drop to set image")}
         </div>
       )}
       {img?.up && (
@@ -909,7 +910,7 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
       <span
         onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onPointerDownHandle(); }}
         onClick={(e) => { e.stopPropagation(); }}
-        title="เลือก / ลากคลุมเพื่อเลือกหลายรายการ"
+        title={t("เลือก / ลากคลุมเพื่อเลือกหลายรายการ", "Select / drag across to select many")}
         className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : selectMode ? "bg-white border-slate-300 text-slate-300" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
       {has("image") && (
         <div className="relative aspect-[5/4] bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -919,12 +920,12 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
               // ยังไม่มีรูป + แก้ได้: PC = "ลากรูปมาวาง" · มือถือ = ปุ่มถ่ายรูป / เลือกรูป (ของกลาง usePhotoCapture)
               ? (img.touch
                 ? <div className="flex flex-col items-center gap-1.5" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-                    <button type="button" onClick={img.camera} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="camera" size={14} />ถ่ายรูป</button>
-                    <button type="button" onClick={img.library} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="photo" size={14} />เลือกรูป</button>
+                    <button type="button" onClick={img.camera} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="camera" size={14} />{t("ถ่ายรูป", "Take photo")}</button>
+                    <button type="button" onClick={img.library} className="h-8 px-3 rounded-full bg-white border border-slate-200 text-[12px] text-slate-700 inline-flex items-center gap-1"><Icon name="photo" size={14} />{t("เลือกรูป", "Choose image")}</button>
                   </div>
-                : <div className="flex flex-col items-center gap-1 text-slate-400 text-[12px]"><Icon name="upload" size={22} />ลากรูปมาวาง<span className="text-[10px]">หรือชี้แล้วกด Ctrl+V</span></div>)
+                : <div className="flex flex-col items-center gap-1 text-slate-400 text-[12px]"><Icon name="upload" size={22} />{t("ลากรูปมาวาง", "Drop an image")}<span className="text-[10px]">{t("หรือชี้แล้วกด Ctrl+V", "or hover and press Ctrl+V")}</span></div>)
               : <span className="text-3xl text-slate-300">🏷️</span>}
-          {c.image_from_child && <span className={`${GALLERY_LABEL} absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white`} title="Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก">ตัวอย่างจากลูก</span>}
+          {c.image_from_child && <span className={`${GALLERY_LABEL} absolute bottom-1 left-1 text-[9px] px-1 py-0.5 rounded bg-slate-800/70 text-white`} title={t("Parent ยังไม่มีรูปของตัวเอง — โชว์รูปจาก SKU ลูก", "Parent has no image of its own — showing a child SKU image")}>{t("ตัวอย่างจากลูก", "From child")}</span>}
         </div>
       )}
       <div className="p-2.5">
@@ -936,7 +937,7 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
         {showTopRow && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {has("code") && <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">{c.code}</span>}
-            {has("status") && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? "ใช้งาน" : "ปิด"}</span>}
+            {has("status") && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? t("ใช้งาน", "Active") : t("ปิด", "Off")}</span>}
           </div>
         )}
         {/* การ์ดจำกัด 2 บรรทัดเพื่อให้สูงเท่ากัน — ชี้ที่ชื่อเพื่อดูเต็ม (มุมมองตารางแสดงเต็มอยู่แล้ว) */}
@@ -944,21 +945,21 @@ function SkuCardView({ c, img = null, fields, extraDefs, thumbW = 320, selected,
         {/* 📦 Parent SKU ของตัวนี้ — กดเปิด drawer Parent (stopPropagation ไม่ให้เปิดการ์ด SKU) */}
         {c.parent && (
           <button type="button" onClick={(e) => { e.stopPropagation(); onOpenParent?.(c.parent!.id); }} onPointerDown={(e) => e.stopPropagation()}
-            title={`Parent SKU: ${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด`}
+            title={t(`Parent SKU: ${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด`, `Parent SKU: ${c.parent.code} · ${c.parent.name || ""} — click to open`)}
             className={`${GALLERY_LABEL} mt-1 inline-flex items-center gap-1 max-w-full text-[10px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100`}>
             <span className="shrink-0">📦</span><span className="font-mono truncate">{c.parent.code}</span>
           </button>
         )}
         {c.variant_count != null ? (
-          <div className="mt-1.5 text-[12px] text-indigo-600">📦 {c.variant_count.toLocaleString("th-TH")} ตัวลูก (SKU)</div>
+          <div className="mt-1.5 text-[12px] text-indigo-600">📦 {c.variant_count.toLocaleString("th-TH")} {t("ตัวลูก (SKU)", "child SKUs")}</div>
         ) : showPriceRow ? (
           <div className="flex items-center justify-between mt-1.5">
             {has("price") ? <span className="text-[13px] font-medium text-slate-800">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</span> : <span />}
-            {has("stock") && <span className="text-[11px] text-slate-400">สต๊อก {c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</span>}
+            {has("stock") && <span className="text-[11px] text-slate-400">{t("สต๊อก", "Stock")} {c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</span>}
           </div>
         ) : null}
         {c.variant_count == null && has("buy_price") && c.buy_price !== undefined && (
-          <div className={`${GALLERY_LABEL} mt-0.5 text-[11px] text-slate-500`} title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>ซื้อ {fmtBuy(c.buy_price)}</div>
+          <div className={`${GALLERY_LABEL} mt-0.5 text-[11px] text-slate-500`} title={c.buy_price?.label ?? t("ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)", "No buying price yet (no PO / supplier price / standard cost)")}>{t("ซื้อ", "Buy")} {fmtBuy(c.buy_price)}</div>
         )}
         {has("tags") && c.tags.length > 0 && (
           <div className={`${GALLERY_LABEL} flex flex-wrap gap-1 mt-1.5`}>
@@ -982,11 +983,12 @@ function SortTh({ label, ascKey, descKey, sortKey, onSort, align = "left", class
   label: string; ascKey: string; descKey: string; sortKey: string; onSort: (k: string) => void; align?: "left" | "right";
   className?: string;
 }) {
+  const t = useT();
   const asc = sortKey === ascKey, desc = sortKey === descKey;
   const on = asc || desc;
   return (
     <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""} ${className}`}>
-      <button type="button" onClick={() => onSort(asc ? descKey : ascKey)} title={`เรียงตาม${label}`}
+      <button type="button" onClick={() => onSort(asc ? descKey : ascKey)} title={t(`เรียงตาม${label}`, `Sort by ${label}`)}
         className={`inline-flex items-center gap-1 hover:text-slate-800 ${on ? "text-indigo-600 font-semibold" : ""} ${align === "right" ? "flex-row-reverse" : ""}`}>
         {label}<span className={`text-[10px] ${on ? "" : "text-slate-300"}`}>{asc ? "▲" : desc ? "▼" : "⇅"}</span>
       </button>
@@ -1005,6 +1007,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
   wheelRef?: (el: HTMLElement | null) => void;   // ติด Ctrl+ลูกกลิ้ง (useCtrlWheel ของกลาง)
   attEntity?: string;   // entity_type ของรูปในแกลเลอรี (skus_v2 / parent_skus_v2) → ป๊อปรูปเลื่อนดูรูปอื่นได้
 }) {
+  const t = useT();
   const showParent = rows.some((r) => r.parent !== undefined);   // เฉพาะโหมด SKU (Parent เองไม่มีคอลัมน์นี้)
   // 🖼 กดรูป = ป๊อปรูปใหญ่ (ของกลาง ImageLightbox) — เปิดรูปหลักทันที แล้วโหลดรูปอื่นของตัวนั้นมาให้เลื่อนดู
   const [lb, setLb] = useState<{ images: LightboxImage[]; index: number } | null>(null);
@@ -1028,9 +1031,9 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
     if (it?.up) return <div style={{ width: Math.max(size, 120) }}><UploadProgress {...it.up} /></div>;
     if (!c.image && it) {
       return it.touch
-        ? <button type="button" onClick={(e) => { e.stopPropagation(); it.library(); }} title="เพิ่มรูป"
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); it.library(); }} title={t("เพิ่มรูป", "Add image")}
             style={{ width: size, height: size }} className="shrink-0 inline-flex items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-slate-400"><Icon name="camera" size={16} /></button>
-        : <span title="ลากรูปมาวางที่แถวนี้ หรือชี้แล้วกด Ctrl+V" style={{ width: size, height: size }} className="shrink-0 inline-flex items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-slate-400"><Icon name="upload" size={14} /></span>;
+        : <span title={t("ลากรูปมาวางที่แถวนี้ หรือชี้แล้วกด Ctrl+V", "Drop an image on this row, or hover and press Ctrl+V")} style={{ width: size, height: size }} className="shrink-0 inline-flex items-center justify-center rounded border border-dashed border-slate-300 bg-slate-50 text-slate-400"><Icon name="upload" size={14} /></span>;
     }
     return <HoverImage url={c.image} size={size} previewSize={previewSize} alt={c.code} fallback="—" onOpen={() => openImages(c)} />;
   };
@@ -1054,7 +1057,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                 className={`shrink-0 inline-flex w-5 h-5 rounded border items-center justify-center text-[11px] ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
               {imgCell(c, Math.max(40, imgPx))}
               <div className="flex-1 min-w-0">
-                <div className="font-mono text-[11px] text-slate-500 truncate">{c.code}{!c.is_active && <span className="ml-1 text-slate-400">· ปิด</span>}</div>
+                <div className="font-mono text-[11px] text-slate-500 truncate">{c.code}{!c.is_active && <span className="ml-1 text-slate-400">· {t("ปิด", "Off")}</span>}</div>
                 <div className="text-[13px] text-slate-800 leading-snug line-clamp-2">{c.name || <span className="text-slate-300">—</span>}</div>
               </div>
               <div className="shrink-0 text-right">
@@ -1074,16 +1077,16 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
         <thead className="bg-slate-50 text-slate-500 text-[12px]">
           <tr className="text-left">
             <th className="px-2 py-2 w-8"></th>
-            <th className="px-2 py-2" style={{ width: imgPx + 16 }}>รูป</th>
-            <SortTh label="รหัส" ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
-            <SortTh label="ชื่อ" ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
-            {showParent && <th className="px-3 py-2 font-medium whitespace-nowrap" title="Parent SKU ของแถวนี้ — กดเพื่อเปิด">Parent</th>}
-            <SortTh label="ราคาขาย" ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
-            {showCost && <th className="px-3 py-2 font-medium text-right whitespace-nowrap" title="ราคาซื้อล่าสุด — จากใบ PO ล่าสุด ถ้าไม่มีใช้ราคาร้าน ถ้าไม่มีอีกใช้ต้นทุนมาตรฐานใน SKU (ชี้ที่ตัวเลขเพื่อดูที่มา)">ราคาซื้อ</th>}
-            <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
-            <th className="px-3 py-2 font-medium">แท็ก</th>
-            <th className="px-3 py-2 font-medium">สถานะ</th>
-            <th className="px-3 py-2 font-medium">เตือน</th>
+            <th className="px-2 py-2" style={{ width: imgPx + 16 }}>{t("รูป", "Image")}</th>
+            <SortTh label={t("รหัส", "Code")} ascKey="code" descKey="code_desc" sortKey={sortKey} onSort={onSort} />
+            <SortTh label={t("ชื่อ", "Name")} ascKey="name" descKey="name_desc" sortKey={sortKey} onSort={onSort} className="w-full" />
+            {showParent && <th className="px-3 py-2 font-medium whitespace-nowrap" title={t("Parent SKU ของแถวนี้ — กดเพื่อเปิด", "This row's Parent SKU — click to open")}>Parent</th>}
+            <SortTh label={t("ราคาขาย", "Price")} ascKey="price_asc" descKey="price_desc" sortKey={sortKey} onSort={onSort} align="right" />
+            {showCost && <th className="px-3 py-2 font-medium text-right whitespace-nowrap" title={t("ราคาซื้อล่าสุด — จากใบ PO ล่าสุด ถ้าไม่มีใช้ราคาร้าน ถ้าไม่มีอีกใช้ต้นทุนมาตรฐานใน SKU (ชี้ที่ตัวเลขเพื่อดูที่มา)", "Latest buying price — from the latest PO, else the supplier price, else the SKU's standard cost (hover the number to see the source)")}>{t("ราคาซื้อ", "Buy price")}</th>}
+            <th className="px-3 py-2 font-medium text-right">{t("สต๊อก", "Stock")}</th>
+            <th className="px-3 py-2 font-medium">{t("แท็ก", "Tags")}</th>
+            <th className="px-3 py-2 font-medium">{t("สถานะ", "Status")}</th>
+            <th className="px-3 py-2 font-medium">{t("เตือน", "Warnings")}</th>
           </tr>
         </thead>
         <tbody>
@@ -1105,18 +1108,18 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                 {showParent && (
                   <td className="px-3 py-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     {c.parent
-                      ? <button type="button" onClick={() => onOpenParent?.(c.parent!.id)} title={`${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด Parent`}
+                      ? <button type="button" onClick={() => onOpenParent?.(c.parent!.id)} title={t(`${c.parent.code} · ${c.parent.name || ""} — กดเพื่อเปิด Parent`, `${c.parent.code} · ${c.parent.name || ""} — click to open Parent`)}
                           className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100">📦 {c.parent.code}</button>
                       : <span className="text-slate-300 text-[11px]">—</span>}
                   </td>
                 )}
                 <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</td>
                 {showCost && (
-                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap" title={c.buy_price?.label ?? "ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)"}>
+                  <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap" title={c.buy_price?.label ?? t("ยังไม่มีราคาซื้อ (ไม่มี PO / ราคาร้าน / ต้นทุนมาตรฐาน)", "No buying price yet (no PO / supplier price / standard cost)")}>
                     {c.variant_count != null ? "—" : (
                       <span className={c.buy_price ? "text-slate-700" : "text-slate-300"}>
                         {fmtBuy(c.buy_price)}
-                        {c.buy_price && <span className="ml-1 text-[9px] text-slate-400 align-middle">{c.buy_price.source === "po" ? "PO" : c.buy_price.source === "list" ? "ร้าน" : "มาตรฐาน"}</span>}
+                        {c.buy_price && <span className="ml-1 text-[9px] text-slate-400 align-middle">{c.buy_price.source === "po" ? "PO" : c.buy_price.source === "list" ? t("ร้าน", "Supplier") : t("มาตรฐาน", "Standard")}</span>}
                       </span>
                     )}
                   </td>
@@ -1128,7 +1131,7 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
                     {c.tags.length > 2 && <span className="text-[10px] text-slate-400">+{c.tags.length - 2}</span>}
                   </div>
                 </td>
-                <td className="px-3 py-1.5"><span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? "ใช้งาน" : "ปิด"}</span></td>
+                <td className="px-3 py-1.5"><span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? t("ใช้งาน", "Active") : t("ปิด", "Off")}</span></td>
                 <td className="px-3 py-1.5 whitespace-nowrap">{w.length > 0 ? <span className="text-[11px] text-amber-700" title={w.join(", ")}>⚠ {w.length}</span> : <span className="text-emerald-500 text-[11px]">✓</span>}</td>
               </tr>
             );
@@ -1142,21 +1145,22 @@ function SkuTable({ rows, selected, selectMode, onToggle, onOpen, sortKey, onSor
 function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
   value: string[]; avail: FieldDef[]; onClose: () => void; onSave: (f: string[], t: "me" | "all") => void; onReset: () => void;
 }) {
+  const t = useT();
   const [sel, setSel] = useState<string[]>(value);
   const [target, setTarget] = useState<"me" | "all">("me");
   const toggle = (k: string) => setSel((s) => s.includes(k) ? s.filter((x) => x !== k) : [...s, k]);
   return (
-    <ERPModal open onClose={onClose} title="ปรับแต่งการ์ด SKU" size="sm"
+    <ERPModal open onClose={onClose} title={t("ปรับแต่งการ์ด SKU", "Customize SKU card")} size="sm"
       footer={
         <div className="flex items-center justify-between w-full">
-          <button onClick={onReset} className="h-9 px-3 text-[13px] text-slate-500 hover:underline">รีเซ็ตเป็นค่าเริ่มต้น</button>
+          <button onClick={onReset} className="h-9 px-3 text-[13px] text-slate-500 hover:underline">{t("รีเซ็ตเป็นค่าเริ่มต้น", "Reset to default")}</button>
           <div className="flex gap-2">
-            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={() => onSave(sel, target)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">บันทึก</button>
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+            <button onClick={() => onSave(sel, target)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("บันทึก", "Save")}</button>
           </div>
         </div>
       }>
-      <p className="text-[12px] text-slate-500 mb-2">เลือกฟิลด์ที่จะโชว์บนการ์ด</p>
+      <p className="text-[12px] text-slate-500 mb-2">{t("เลือกฟิลด์ที่จะโชว์บนการ์ด", "Choose fields to show on the card")}</p>
       <div className="flex flex-col gap-1.5 mb-3">
         {CARD_FIELDS.map((f) => (
           <label key={f.key} className="flex items-center gap-2 text-[13px] cursor-pointer">
@@ -1166,7 +1170,7 @@ function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
       </div>
       {avail.length > 0 && (
         <div className="mb-4 pt-3 border-t border-slate-100">
-          <p className="text-[12px] text-slate-500 mb-2">＋ เพิ่มฟิลด์อื่นของ SKU <span className="text-[10px] text-slate-400">(จากทะเบียน field — ไม่ตายตัว)</span></p>
+          <p className="text-[12px] text-slate-500 mb-2">{t("＋ เพิ่มฟิลด์อื่นของ SKU", "＋ Add other SKU fields")} <span className="text-[10px] text-slate-400">{t("(จากทะเบียน field — ไม่ตายตัว)", "(from the field registry)")}</span></p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 max-h-44 overflow-auto pr-1">
             {avail.map((f) => (
               <label key={f.key} className="flex items-center gap-2 text-[12px] cursor-pointer">
@@ -1177,10 +1181,10 @@ function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
         </div>
       )}
       <div className="pt-3 border-t border-slate-100">
-        <p className="text-[12px] text-slate-500 mb-1.5">บันทึกให้</p>
+        <p className="text-[12px] text-slate-500 mb-1.5">{t("บันทึกให้", "Save for")}</p>
         <div className="flex gap-2">
-          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "me"} onChange={() => setTarget("me")} /> เฉพาะฉัน</label>
-          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "all"} onChange={() => setTarget("all")} /> ทุกคน (ต้องมีสิทธิ์)</label>
+          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "me"} onChange={() => setTarget("me")} /> {t("เฉพาะฉัน", "Only me")}</label>
+          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "all"} onChange={() => setTarget("all")} /> {t("ทุกคน (ต้องมีสิทธิ์)", "Everyone (needs permission)")}</label>
         </div>
       </div>
     </ERPModal>

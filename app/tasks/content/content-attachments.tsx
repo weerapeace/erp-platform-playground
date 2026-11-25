@@ -104,6 +104,7 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
 
 // การ์ดพรีวิวลิงก์ (รูป OG + หัวข้อ + โดเมน)
 export function LinkPreviewCard({ att, onDelete }: { att: ContentAttachment; onDelete: () => void }) {
+  const t = useT();
   const host = (() => { try { return new URL(att.url ?? "").hostname.replace(/^www\./, ""); } catch { return att.url ?? ""; } })();
   return (
     <div className="relative group flex gap-2 border border-slate-200 rounded-lg overflow-hidden bg-white">
@@ -115,7 +116,7 @@ export function LinkPreviewCard({ att, onDelete }: { att: ContentAttachment; onD
         <p className="text-sm font-medium text-slate-700 line-clamp-2">{att.label || host}</p>
         <p className="text-[11px] text-slate-400 truncate mt-0.5">{host}</p>
       </a>
-      <button onClick={onDelete} title="ลบ" className="absolute top-1 right-1 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
+      <button onClick={onDelete} title={t("ลบ", "Delete")} className="absolute top-1 right-1 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
     </div>
   );
 }

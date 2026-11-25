@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { RangeInput } from "@/components/range-input";
 import { apiFetch } from "@/lib/api";
 import type { BagParams } from "@/lib/bag-templates";
@@ -84,11 +85,11 @@ type EditSnap = { edits: Uint8Array | null; bg: number[] };
 async function toCanvas(file: File, max: number): Promise<HTMLCanvasElement> {
   const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise<HTMLImageElement>((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => bad(new Error("เปิดรูปนี้ไม่ได้ ลองไฟล์ JPG หรือ PNG")); im.src = url; });
+    const img = await new Promise<HTMLImageElement>((ok, bad) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => bad(new Error(tr("เปิดรูปนี้ไม่ได้ ลองไฟล์ JPG หรือ PNG", "Can't open this image — try a JPG or PNG file"))); im.src = url; });
     const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement("canvas");
     c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
-    const g = c.getContext("2d"); if (!g) throw new Error("เครื่องนี้วาดรูปไม่ได้");
+    const g = c.getContext("2d"); if (!g) throw new Error(tr("เครื่องนี้วาดรูปไม่ได้", "This device can't draw images"));
     g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
     return c;
   } finally { URL.revokeObjectURL(url); }

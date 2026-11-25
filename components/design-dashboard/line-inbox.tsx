@@ -141,10 +141,11 @@ export function LineInboxDrawer({ open, onClose, canEdit, isAdmin, sheets, onCon
             <LineGroupSetup slot="design_intake" setupUrl={`${API}?setup=1`} reloadKey={setupKey}
               onOpenConsole={() => setConsoleOpen(true)} onChanged={onChanged}
               text={{
-                purpose: "ส่งงานออกแบบ",
-                readyNote: "ส่งข้อความ + รูปกี่รูปก็ได้ในกลุ่มนี้ ของคนเดิมภายใน 5 นาทีรวมเป็นงานเดียว บอทตอบครั้งเดียวหลังรูปครบ (ไม่เสียโควตา) · ส่งงานถัดไปทันที พิมพ์ \"งานใหม่\" นำหน้า · ข้อความคุยเล่นบอทเงียบและย้ายไป \"ไม่ใช่งาน\" ให้เอง",
-                pickHint: "แนะนำกลุ่มที่ใช้ส่งงานออกแบบอย่างเดียว — ทุกข้อความและรูปในกลุ่มที่เลือกจะเข้ากล่องนี้",
-                busyWarn: "กลุ่มนี้ใช้กับระบบอื่นอยู่ — ข้อความ/รูปเรื่องอื่นจะเข้ากล่องงานออกแบบด้วย",
+                purpose: t("ส่งงานออกแบบ", "Send design jobs"),
+                readyNote: t("ส่งข้อความ + รูปกี่รูปก็ได้ในกลุ่มนี้ ของคนเดิมภายใน 5 นาทีรวมเป็นงานเดียว บอทตอบครั้งเดียวหลังรูปครบ (ไม่เสียโควตา) · ส่งงานถัดไปทันที พิมพ์ \"งานใหม่\" นำหน้า · ข้อความคุยเล่นบอทเงียบและย้ายไป \"ไม่ใช่งาน\" ให้เอง",
+                  "Send text + any number of images in this group. Messages from the same person within 5 minutes become one job; the bot replies once when all images are in (no quota used) · To start the next job right away, type \"งานใหม่\" first · Chit-chat gets no reply and is moved to \"Not a job\" automatically"),
+                pickHint: t("แนะนำกลุ่มที่ใช้ส่งงานออกแบบอย่างเดียว — ทุกข้อความและรูปในกลุ่มที่เลือกจะเข้ากล่องนี้", "Use a group only for sending design jobs — every message and image in the chosen group goes to this inbox"),
+                busyWarn: t("กลุ่มนี้ใช้กับระบบอื่นอยู่ — ข้อความ/รูปเรื่องอื่นจะเข้ากล่องงานออกแบบด้วย", "This group is used by another system — unrelated messages/images will also land in the design inbox"),
               }} />
           )}
 

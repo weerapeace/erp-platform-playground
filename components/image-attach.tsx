@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 // ⚠️ import วนกัน (duplicate-upload ใช้ prepareResizedImage/uploadPreparedImage จากไฟล์นี้) — ปลอดภัยเพราะเรียกใช้ในฟังก์ชันเท่านั้น ไม่มีโค้ดระดับบนสุดที่ใช้ของอีกไฟล์
 import { askDuplicateUploads, uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { UploadProgress, imageStepProgress, type UploadProgressState } from "@/components/upload-progress";
@@ -59,7 +60,7 @@ export async function uploadPreparedImage(prepared: File, opts?: { folder?: stri
   const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
   // เซิร์ฟเวอร์ตอบไม่ใช่ JSON (เช่น หมดเวลา/ไฟล์ใหญ่เกิน) → บอกเป็นภาษาคน แทน "Unexpected token…"
   const j = await res.json().catch(() => null);
-  if (!j) throw new Error(res.status === 413 ? "ไฟล์ใหญ่เกินที่ส่งได้ — ลองย่อรูปก่อน" : `ส่งไฟล์ไม่สำเร็จ (รหัส ${res.status}) — ลองลงซ้ำ`);
+  if (!j) throw new Error(res.status === 413 ? tr("ไฟล์ใหญ่เกินที่ส่งได้ — ลองย่อรูปก่อน", "File too large to send — try shrinking the image first") : tr(`ส่งไฟล์ไม่สำเร็จ (รหัส ${res.status}) — ลองลงซ้ำ`, `Upload failed (code ${res.status}) — try again`));
   if (j.error) throw new Error(j.error);
   return { r2_key: j.r2_key as string, file_name: opts?.fileName ?? prepared.name, content_type: (j.content_type as string) || prepared.type, size_bytes: (j.size as number) ?? prepared.size };
 }
@@ -93,7 +94,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
       for (const [i, f] of imgs.entries()) {
         setUp(imageStepProgress("prepare", f, i + 1, imgs.length));
         try { cands.push({ file: await prepareResizedImage(f, maxSize), original: f }); }
-        catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+        catch (e) { pushToast("error", tr("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + (e as Error).message); }
       }
       if (cands.length) setUp(imageStepProgress("check", cands[0].original, 1, cands.length));
       // onAttach ต้องได้ชื่อไฟล์/ชนิด/ขนาดต่อรูป → ใช้ askDuplicateUploads (ได้แผนต่อไฟล์) แทนทางลัดที่คืนแค่ key
@@ -106,9 +107,9 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
           await onAttach(reuse
             ? { r2_key: reuse.r2_key, file_name: item.original.name, content_type: item.file.type, size_bytes: reuse.size_bytes ?? item.file.size }
             : await uploadPreparedImage(item.file, { folder: "creative-tasks", fileName: item.original.name }), item.original);
-        } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+        } catch (e) { pushToast("error", tr("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + (e as Error).message); }
       }
-    } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+    } catch (e) { pushToast("error", tr("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + (e as Error).message); }
     finally { setUp(null); }
   };
 
@@ -141,8 +142,8 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
           {images.map((im, i) => (
             <div key={im.id} className="relative group">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}&w=320`} alt={im.file_name ?? ""} onClick={() => setLbIndex(i)} title="กดเพื่อดูเต็มจอ" className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-              <button onClick={() => void onDelete(im.id)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>
+              <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}&w=320`} alt={im.file_name ?? ""} onClick={() => setLbIndex(i)} title={t("กดเพื่อดูเต็มจอ", "Click to view full screen")} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+              <button onClick={() => void onDelete(im.id)} title={t("ลบรูป", "Delete image")} className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>
             </div>
           ))}
         </div>
@@ -179,11 +180,11 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
     try {
       const r = await uploadImagesWithDupCheck(imgs, {
         folder, max: maxSize, existingKeys: valRef.current,
-        onError: (_, e) => setErr("อัปโหลดรูปไม่สำเร็จ: " + e.message),
+        onError: (_, e) => setErr(tr("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + e.message),
         onProgress: setUp,
       });
       if (r?.keys.length) onChange([...valRef.current, ...r.keys]);
-    } catch (e) { setErr("อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+    } catch (e) { setErr(tr("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + (e as Error).message); }
     finally { setUp(null); }
   };
 
@@ -220,8 +221,8 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
           {value.map((k, i) => (
             <div key={`${k}-${i}`} className="relative group">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=320`} alt="" onClick={() => setLbIndex(i)} title="กดเพื่อดูเต็มจอ" className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
-              {!disabled && <button type="button" onClick={() => removeAt(i)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>}
+              <img src={`/api/r2-image?key=${encodeURIComponent(k)}&w=320`} alt="" onClick={() => setLbIndex(i)} title={t("กดเพื่อดูเต็มจอ", "Click to view full screen")} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+              {!disabled && <button type="button" onClick={() => removeAt(i)} title={t("ลบรูป", "Delete image")} className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs [@media(hover:hover)]:opacity-0 group-hover:opacity-100 shadow">✕</button>}
             </div>
           ))}
         </div>

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { useFileDrop } from "@/components/file-drop";
@@ -55,7 +56,7 @@ async function uploadPrint(assetId: string, file: File, onProgress: (pct: number
       xhr.setRequestHeader("Content-Type", "image/png");
       xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(Math.round((e.loaded / e.total) * 100));
       xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`(${xhr.status})`)));
-      xhr.onerror = () => reject(new Error("ส่งไฟล์เข้าคลังไม่สำเร็จ — เน็ตหลุด หรือที่เก็บไฟล์ไม่ยอมรับ"));
+      xhr.onerror = () => reject(new Error(tr("ส่งไฟล์เข้าคลังไม่สำเร็จ — เน็ตหลุด หรือที่เก็บไฟล์ไม่ยอมรับ", "Upload failed — connection lost or storage rejected the file")));
       xhr.send(file);
     });
   }

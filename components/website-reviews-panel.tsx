@@ -251,7 +251,7 @@ export function WebsiteReviewsPanel({ shopSlug, shopId }: { shopSlug: string; sh
             )}
             <div>
               <label className="block text-[11px] font-medium text-slate-500 mb-1">{t("💬 คำตอบจากร้าน (โชว์ใต้รีวิวบนเว็บ · เว้นว่าง = ไม่ตอบ)", "💬 Shop reply (shown under the review on the site · blank = no reply)")}</label>
-              <textarea value={reply} onChange={(e) => setReply(e.target.value.slice(0, 1000))} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="เช่น ขอบคุณมากค่ะ ดีใจที่ชอบนะคะ 🙏" />
+              <textarea value={reply} onChange={(e) => setReply(e.target.value.slice(0, 1000))} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder={t("เช่น ขอบคุณมากค่ะ ดีใจที่ชอบนะคะ 🙏", "e.g. Thank you so much — glad you like it 🙏")} />
             </div>
           </div>
         )}

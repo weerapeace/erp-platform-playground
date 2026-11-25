@@ -5,6 +5,7 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { StatusMeta } from "@/lib/design-sheets-meta";
 import type { BrandTheme } from "@/lib/brand-theme";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { SheetHoverWrap, type SheetHoverPref } from "./sheet-hover";
 import { CardDeadline, CoverPreview, NoPickVeil, PickBadge, deadlineLabel, deadlineTone, safeColor, sheetCoverUrl, sheetIsOwn } from "./dashboard-helpers";
@@ -62,19 +63,19 @@ export type BoardCardProps = SheetCardProps & {
 export type CardImgSize = "s" | "m" | "l";
 export const BOARD_CARD_SCOPE = "design-dashboard-card";
 export const BOARD_CARD_FIELDS: { key: string; label: string }[] = [
-  { key: "cover", label: "รูปปก" },
-  { key: "name", label: "ชื่องาน" },
-  { key: "brand_dot", label: "จุดสีแบรนด์" },
-  { key: "code", label: "รหัส DS" },
-  { key: "brand_name", label: "ชื่อแบรนด์" },
-  { key: "library", label: "ป้าย Library" },
-  { key: "note", label: "ไอคอนโน้ต" },
-  { key: "deadline", label: "กำหนดส่ง" },
-  { key: "order_date", label: "วันที่สั่ง" },
-  { key: "status", label: "ป้ายสถานะ" },
-  { key: "waiting", label: "รออะไรอยู่ (เช็กลิสต์)" },
-  { key: "tags", label: "ป้าย ตีราคา / มีราคา / มี SKU / ใบเสนอราคา" },
-  { key: "excerpt", label: "รายละเอียดงานย่อ" },
+  { key: "cover", get label() { return tr("รูปปก", "Cover"); } },
+  { key: "name", get label() { return tr("ชื่องาน", "Job name"); } },
+  { key: "brand_dot", get label() { return tr("จุดสีแบรนด์", "Brand color dot"); } },
+  { key: "code", get label() { return tr("รหัส DS", "DS code"); } },
+  { key: "brand_name", get label() { return tr("ชื่อแบรนด์", "Brand name"); } },
+  { key: "library", get label() { return tr("ป้าย Library", "Library badge"); } },
+  { key: "note", get label() { return tr("ไอคอนโน้ต", "Note icon"); } },
+  { key: "deadline", get label() { return tr("กำหนดส่ง", "Due date"); } },
+  { key: "order_date", get label() { return tr("วันที่สั่ง", "Order date"); } },
+  { key: "status", get label() { return tr("ป้ายสถานะ", "Status badge"); } },
+  { key: "waiting", get label() { return tr("รออะไรอยู่ (เช็กลิสต์)", "Waiting for (checklist)"); } },
+  { key: "tags", get label() { return tr("ป้าย ตีราคา / มีราคา / มี SKU / ใบเสนอราคา", "Badges: costed / priced / SKU / quotation"); } },
+  { key: "excerpt", get label() { return tr("รายละเอียดงานย่อ", "Short details"); } },
 ];
 /** ค่าเริ่มต้น = หน้าตาการ์ดแบบเดิมก่อนมีตัวตั้งค่า */
 export const BOARD_CARD_DEFAULT = ["cover", "name", "brand_dot", "code", "library", "note", "deadline", "waiting", "tags"];
@@ -131,7 +132,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
           <span className="font-mono text-[10px] text-slate-400">{sheet.code}</span>
-          {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
+          {sheet.in_library && <span title={t("จัดการที่ Design Library", "Managed in Design Library")} className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
         </div>
         <div className="line-clamp-2 text-xs font-semibold text-slate-800">{sheet.name}</div>
         {st && (
@@ -221,7 +222,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
       case "brand_dot": return <span key={k} className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />;
       case "code": return <span key={k} className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>;
       case "brand_name": return sheet.brand_name ? <span key={k} className="min-w-0 truncate text-[10px] text-slate-500">{sheet.brand_name}</span> : null;
-      case "library": return sheet.in_library ? <span key={k} title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span> : null;
+      case "library": return sheet.in_library ? <span key={k} title={t("จัดการที่ Design Library", "Managed in Design Library")} className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span> : null;
       case "note": return sheet.note ? <span key={k} className="shrink-0 cursor-help text-[11px]" title={`📝 ${sheet.note}`}>📝</span> : null;
       case "deadline": return <span key={k} className="ml-auto shrink-0"><CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>;
       case "order_date": return sheet.order_date ? <span key={k} className="shrink-0 text-[10px] text-slate-400" title={t("วันที่สั่ง", "Order date")}>{t("สั่ง", "Ord")} {new Date(`${String(sheet.order_date).slice(0, 10)}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span> : null;
@@ -280,7 +281,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
           <div className="mt-0.5 flex items-center gap-1.5 whitespace-nowrap">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
             <span className="truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
-            {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
+            {sheet.in_library && <span title={t("จัดการที่ Design Library", "Managed in Design Library")} className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
           {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}
@@ -292,7 +293,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
           <div className="mt-1 flex items-center gap-1 whitespace-nowrap">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: brandColor }} />
             <span className="min-w-0 truncate font-mono text-[10px] text-slate-400">{sheet.code}</span>
-            {sheet.in_library && <span title="จัดการที่ Design Library" className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
+            {sheet.in_library && <span title={t("จัดการที่ Design Library", "Managed in Design Library")} className="shrink-0 rounded bg-indigo-50 px-1 text-[9px] font-semibold text-indigo-600">Library</span>}
             <span className="ml-auto flex shrink-0 items-center gap-1">{noteIcon}<CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} /></span>
           </div>
           {!pickMode && <WaitingChip sheet={sheet} canEdit={canEditWaiting} onWaitingChange={onWaitingChange} />}

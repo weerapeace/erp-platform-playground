@@ -14,6 +14,7 @@ import { ErrorState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
 import { useLang, useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { auditEntityInfo } from "@/lib/audit-entities";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { cleanErpSlots, erpSlotText, type FsErpSlot } from "@/lib/file-sort-history";
@@ -24,7 +25,7 @@ type HistoryResp = { entries?: ActivityEntry[]; has_more?: boolean; actors?: Act
 async function fetchHistory(params: URLSearchParams): Promise<HistoryResp> {
   const res = await apiFetch(`/api/file-sort/history?${params.toString()}`);
   const j = (await res.json().catch(() => ({}))) as HistoryResp;
-  if (!res.ok || j.error) throw new Error(j.error || "โหลดประวัติไฟล์ไม่สำเร็จ");
+  if (!res.ok || j.error) throw new Error(j.error || tr("โหลดประวัติไฟล์ไม่สำเร็จ", "Couldn't load file history"));
   return j;
 }
 

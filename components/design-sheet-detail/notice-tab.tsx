@@ -445,7 +445,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                         <button key={tb.key || "general"} type="button" onClick={() => toggleTab(tb)}
                           title={tb.kind === "orphan" ? t("แท็บนี้ไม่อยู่ในรายการ Parent แล้ว (อาจเป็นของเก่า)", "Not in the Parent list any more (may be old)") : undefined}
                           className={`h-7 px-2 text-xs rounded-lg border ${on ? "border-blue-400 bg-blue-50 text-blue-700" : "border-dashed border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
-                          {on ? "✓ " : "+ "}{tb.label}{tb.kind === "orphan" ? " ·เก่า" : ""}
+                          {on ? "✓ " : "+ "}{tb.label}{tb.kind === "orphan" ? t(" ·เก่า", " ·old") : ""}
                         </button>
                       );
                     })}

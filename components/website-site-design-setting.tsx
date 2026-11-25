@@ -203,7 +203,7 @@ function BtnPv({ kind, colors, hover }: { kind: ButtonKind; colors: Colors; hove
   return (
     <span className={`${base} group ${hover === "lift" ? "hover:-translate-y-0.5 hover:shadow-md" : ""}`} style={style}>
       {hover === "fill" && kind !== "under" && <span aria-hidden className="absolute inset-0 origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-500" style={{ background: "rgba(0,0,0,.28)" }} />}
-      <span className="relative">ช้อปเลย</span>
+      <span className="relative">{tr("ช้อปเลย", "Shop now")}</span>
       {hover === "arrow" && <span className="relative transition-transform group-hover:translate-x-1">→</span>}
     </span>
   );
@@ -223,7 +223,7 @@ function LinkPv({ mode, colors }: { mode: LinkHover; colors: Colors }) {
             : "hover:underline";
   return (
     <span className={`text-xs cursor-pointer ${cls}`} style={{ color: colors.ink, ["--pv-link" as string]: colors.brand }}>
-      อ่านเรื่องราวของเรา
+      {tr("อ่านเรื่องราวของเรา", "Read our story")}
     </span>
   );
 }
@@ -237,7 +237,7 @@ function InputPv({ mode, colors }: { mode: InputStyle; colors: Colors }) {
         : { border: "1px solid #DEDEDA", background: "#fff", padding: "5px 8px", borderRadius: 6 };
   return (
     <span className="block w-28 text-[11px] text-slate-400" style={style}>
-      อีเมลของคุณ
+      {tr("อีเมลของคุณ", "Your email")}
     </span>
   );
 }
@@ -318,8 +318,8 @@ function IconsPv({ style, ink }: { style: HeaderIconStyle; ink: string }) {
   if (style === "text")
     return (
       <span className="flex gap-2 text-[10px] tracking-wider" style={{ color: ink }}>
-        <span>ค้นหา</span>
-        <span>ตะกร้า (2)</span>
+        <span>{tr("ค้นหา", "Search")}</span>
+        <span>{tr("ตะกร้า (2)", "Cart (2)")}</span>
       </span>
     );
   const sw = style === "thin" ? 1.1 : style === "bold" ? 2.1 : 1.5;

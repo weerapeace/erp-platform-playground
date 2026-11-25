@@ -185,10 +185,11 @@ export function IdeasView({ canEdit, isAdmin = false, initialView = "all", searc
         <div className="mb-3">
           <LineGroupSetup slot="design_idea" setupUrl="/api/design-ideas?setup=1" reloadKey={setupKey} onOpenConsole={() => setConsoleOpen(true)}
             text={{
-              purpose: "ส่งไอเดีย",
-              readyNote: "ใครในกลุ่มก็ส่งรูป ลิงก์ หรือข้อความได้ ของคนเดิมภายใน 5 นาทีรวมเป็นชุดเดียว บอทตอบครั้งเดียวหลังส่งครบ (ไม่เสียโควตา) · ไอเดียถัดไปทันที พิมพ์ \"ไอเดียใหม่\" นำหน้า",
-              pickHint: "แนะนำกลุ่มที่ใช้ส่งไอเดียอย่างเดียว — ทุกข้อความและรูปในกลุ่มที่เลือกจะเข้ากล่องรอคัด",
-              busyWarn: "กลุ่มนี้ใช้กับระบบอื่นอยู่ — ข้อความ/รูปเรื่องอื่นจะเข้ากล่องรอคัดด้วย",
+              purpose: t("ส่งไอเดีย", "Send ideas"),
+              readyNote: t("ใครในกลุ่มก็ส่งรูป ลิงก์ หรือข้อความได้ ของคนเดิมภายใน 5 นาทีรวมเป็นชุดเดียว บอทตอบครั้งเดียวหลังส่งครบ (ไม่เสียโควตา) · ไอเดียถัดไปทันที พิมพ์ \"ไอเดียใหม่\" นำหน้า",
+                "Anyone in the group can send images, links or text. Messages from the same person within 5 minutes become one set; the bot replies once when done (no quota used) · To start the next idea right away, type \"ไอเดียใหม่\" first"),
+              pickHint: t("แนะนำกลุ่มที่ใช้ส่งไอเดียอย่างเดียว — ทุกข้อความและรูปในกลุ่มที่เลือกจะเข้ากล่องรอคัด", "Use a group only for sending ideas — every message and image in the chosen group goes to the sorting inbox"),
+              busyWarn: t("กลุ่มนี้ใช้กับระบบอื่นอยู่ — ข้อความ/รูปเรื่องอื่นจะเข้ากล่องรอคัดด้วย", "This group is used by another system — unrelated messages/images will also land in the sorting inbox"),
             }} />
         </div>
       )}

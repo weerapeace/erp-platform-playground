@@ -15,6 +15,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { useAuth } from "@/components/auth";
@@ -32,7 +33,7 @@ import type { FlowNotifyApi } from "./notify";
 import type { FlowBasket } from "./request";
 
 const fmtNum = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 0 });
-const KIND_LABEL: Record<NotifyTarget["kind"], string> = { bell: "ในแอป (กระดิ่ง)", group: "LINE กลุ่ม", dm: "LINE ส่วนตัว", oa: "LINE OA", email: "อีเมล", popup: "ป๊อปอัป", discord: "Discord" };
+const kindLabel = (): Record<NotifyTarget["kind"], string> => ({ bell: tr("ในแอป (กระดิ่ง)", "In-app (bell)"), group: tr("LINE กลุ่ม", "LINE group"), dm: tr("LINE ส่วนตัว", "Personal LINE"), oa: "LINE OA", email: tr("อีเมล", "Email"), popup: tr("ป๊อปอัป", "Popup"), discord: "Discord" });
 
 export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLine, onOpenAll, onBack, bare }: {
   node: string; api: FlowNotifyApi; canAdmin: boolean; basket: FlowBasket;
@@ -76,7 +77,7 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
     try {
       const r = await apiFetch("/api/flow-map/notify/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: topic.id }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j?.error) toast.error(String(j?.error ?? "ส่งทดสอบไม่สำเร็จ"));
+      if (!r.ok || j?.error) toast.error(String(j?.error ?? t("ส่งทดสอบไม่สำเร็จ", "Test failed")));
       else toast.success(t("ส่งเข้ากระดิ่งของคุณแล้ว — ดูที่รูปกระดิ่งมุมบน (ถึงคุณคนเดียว)", "Sent to your bell"));
     } catch { toast.error(t("ส่งทดสอบไม่สำเร็จ", "Test failed")); }
     setBusy(null);
@@ -94,7 +95,7 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
     try {
       const r = await apiFetch("/api/admin/line-console", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slot, test: true }) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j?.error) toast.error(String(j?.error ?? "ส่งทดสอบไม่สำเร็จ"));
+      if (!r.ok || j?.error) toast.error(String(j?.error ?? t("ส่งทดสอบไม่สำเร็จ", "Test failed")));
       else toast.success(t(`ส่งเข้า${label}แล้ว`, `Sent to ${label}`));
     } catch { toast.error(t("ส่งทดสอบไม่สำเร็จ", "Test failed")); }
     setBusy(null);
@@ -175,7 +176,7 @@ export function NodeNotifyPanel({ node, api, canAdmin, basket, onEdit, onOpenLin
                 return (
                   <span key={i} title={c.text} className={`inline-flex items-start gap-1 max-w-full text-[11.5px] leading-snug px-2 py-1 rounded-lg border ${NOTIFY_STATES[c.state].chip}`}>
                     <Icon value={NOTIFY_CHANNELS[notifyChannelOf(s)].icon} size={12} className="mt-px shrink-0" />
-                    <span className="font-medium whitespace-nowrap shrink-0">{KIND_LABEL[s.kind]}</span>
+                    <span className="font-medium whitespace-nowrap shrink-0">{kindLabel()[s.kind]}</span>
                     <span className="min-w-0">· {c.state === "off" ? `${c.short ?? s.to} — ${t("ปิดไว้", "off")}` : c.short ?? (c.state === "ok" ? s.to : c.text)}</span>
                   </span>
                 );

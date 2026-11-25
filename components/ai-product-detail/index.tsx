@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -46,7 +47,7 @@ function AutoTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) 
 
 /** ช่องข้อความที่ AI เขียนให้ — เรียงตามที่เห็นในฟอร์ม */
 const FIELDS: { key: string; label: string; lang: "th" | "en"; long?: boolean }[] = [
-  { key: "name_th",             label: "ชื่อสินค้า",          lang: "th" },
+  { key: "name_th",             get label() { return tr("ชื่อสินค้า", "Product name"); }, lang: "th" },
   { key: "introduction",        label: "Introduction",        lang: "th", long: true },
   { key: "description",         label: "Description",         lang: "th", long: true },
   { key: "name_en",             label: "Name En",             lang: "en" },
@@ -73,9 +74,9 @@ type PromptRow = { brand_id: string | null; platform: string | null; prompt: str
  * เขียนซ้ำที่นี่เพราะไฟล์นั้นเป็นโค้ดฝั่งเซิร์ฟเวอร์ (ต่อ Supabase/R2) ดึงเข้าหน้าเว็บตรง ๆ ไม่ได้
  */
 const CFG_FIELDS: { field: string; label: string; en: string; hint: string }[] = [
-  { field: "name_th",      label: "ชื่อสินค้า",   en: "Name En",             hint: "เช่น ขึ้นต้นด้วยแบรนด์ (Collection) ตามด้วยประเภทสินค้า + คำ SEO 3 คำ + รหัสสินค้า" },
-  { field: "introduction", label: "Introduction", en: "Introduction En",     hint: "เช่น 2-3 บรรทัด เปิดด้วยปัญหาที่สินค้าช่วยแก้ ปิดด้วยจุดขายเด่น" },
-  { field: "description",  label: "Description",  en: "English Description", hint: "เช่น แบ่งเป็นหัวข้อ: จุดเด่น / วัสดุ / ขนาด / การดูแล ใช้ • นำหน้าแต่ละข้อ" },
+  { field: "name_th",      get label() { return tr("ชื่อสินค้า", "Product name"); }, en: "Name En",             get hint() { return tr("เช่น ขึ้นต้นด้วยแบรนด์ (Collection) ตามด้วยประเภทสินค้า + คำ SEO 3 คำ + รหัสสินค้า", "e.g. start with the brand (Collection), then product type + 3 SEO words + product code"); } },
+  { field: "introduction", label: "Introduction", en: "Introduction En",     get hint() { return tr("เช่น 2-3 บรรทัด เปิดด้วยปัญหาที่สินค้าช่วยแก้ ปิดด้วยจุดขายเด่น", "e.g. 2-3 lines: open with the problem it solves, close with the key selling point"); } },
+  { field: "description",  label: "Description",  en: "English Description", get hint() { return tr("เช่น แบ่งเป็นหัวข้อ: จุดเด่น / วัสดุ / ขนาด / การดูแล ใช้ • นำหน้าแต่ละข้อ", "e.g. split into sections: highlights / material / size / care, each line starting with •"); } },
 ];
 
 /** แท็กสินค้า 2 ภาษา (product_families) */
@@ -89,6 +90,7 @@ const fmtBaht = (n: number) => (n < 1 ? n.toFixed(2) : n.toFixed(1));
 const MODEL_CHOICES = AI_MODEL_CHOICES.map((m) => ({ ...m, perItem: productDetailCostThb(m) }));
 
 function ModelPicker() {
+  const t = useT();
   const [model, setModel] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -107,15 +109,15 @@ function ModelPicker() {
         body: JSON.stringify({ key: "ai_product_model", value: { model: id } }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setModel(id); setMsg("บันทึกแล้ว — กด “ให้คิดใหม่” เพื่อใช้โมเดลนี้");
-    } catch (e) { setMsg(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      setModel(id); setMsg(t("บันทึกแล้ว — กด “ให้คิดใหม่” เพื่อใช้โมเดลนี้", "Saved — press “Redraft” to use this model"));
+    } catch (e) { setMsg(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); }
   };
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-2.5 mb-2">
       <p className="text-[12px] font-medium text-slate-600 mb-1.5">
-        🧠 โมเดล AI ที่ใช้เขียน <span className="font-normal text-slate-400">· ยิ่งแพงยิ่งเขียนดี — ราคาต่อสินค้า 1 ตัว (รูป ~5 ใบ)</span>
+        🧠 {t("โมเดล AI ที่ใช้เขียน", "AI model for writing")} <span className="font-normal text-slate-400">{t("· ยิ่งแพงยิ่งเขียนดี — ราคาต่อสินค้า 1 ตัว (รูป ~5 ใบ)", "· pricier writes better — cost per product (~5 images)")}</span>
       </p>
       <div className="space-y-1">
         {MODEL_CHOICES.map((m) => {
@@ -127,15 +129,15 @@ function ModelPicker() {
               <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${on ? "border-fuchsia-500 bg-fuchsia-500" : "border-slate-300"}`} />
               <span className="text-[12.5px] font-medium text-slate-700 w-[110px] shrink-0">{m.id}</span>
               <span className="text-[11.5px] text-slate-500 flex-1 min-w-0">{m.note}</span>
-              <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums shrink-0">~{fmtBaht(m.perItem)} บาท</span>
+              <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums shrink-0">~{fmtBaht(m.perItem)} {t("บาท", "THB")}</span>
             </button>
           );
         })}
       </div>
       {msg && <p className="mt-1.5 text-[11.5px] text-slate-500">{msg}</p>}
       <p className="mt-1 text-[11px] text-slate-400">
-        ทั้งระบบ 1,482 สินค้า: {MODEL_CHOICES.filter((m) => ["gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.4"].includes(m.id))
-          .map((m) => `${m.id} ≈ ${Math.round(m.perItem * 1482).toLocaleString()} บาท`).join(" · ")}
+        {t("ทั้งระบบ 1,482 สินค้า:", "All 1,482 products:")} {MODEL_CHOICES.filter((m) => ["gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.4"].includes(m.id))
+          .map((m) => `${m.id} ≈ ${Math.round(m.perItem * 1482).toLocaleString()} ${t("บาท", "THB")}`).join(" · ")}
       </p>
     </div>
   );
@@ -155,6 +157,7 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, on
   /** ป๊อปแก้แท็ก → "แก้กฎ" = ไปตั้งค่าประเภทในขั้น 2 */
   onEditRule?: () => void;
 }) {
+  const tt = useT();
   const [createName, setCreateName] = useState<string | null>(null);
   const [editTag, setEditTag] = useState<TagRow | null>(null);
   const [all, setAll] = useState<TagRow[] | null>(null);
@@ -197,15 +200,15 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, on
       const parents = on ? [] : ancestorTagsOf(t.id, all ?? [], groups, (x) => x.name).filter((p) => !mine.has(p.id)).reverse();
       for (const p of parents) await setTag(p.id, true);
       await setTag(t.id, !on);
-      if (parents.length) setInfo(`ติดแท็กแม่ “${parents.map((p) => p.name).join(", ")}” ให้ด้วย (เอาออกได้)`);
+      if (parents.length) setInfo(tt(`ติดแท็กแม่ “${parents.map((p) => p.name).join(", ")}” ให้ด้วย (เอาออกได้)`, `Also tagged parent “${parents.map((p) => p.name).join(", ")}” (removable)`));
       onChanged?.();
-    } catch (e) { setMsg(e instanceof Error ? e.message : "เปลี่ยนแท็กไม่สำเร็จ"); }
+    } catch (e) { setMsg(e instanceof Error ? e.message : tt("เปลี่ยนแท็กไม่สำเร็จ", "Couldn't change tag")); }
     finally { setBusy(""); }
   };
 
   // หมายเหตุ: การตั้งชื่ออังกฤษของแท็กย้ายไปหน้า Tags Manager (ที่นี่โชว์เฉย ๆ ไม่ให้รก)
 
-  if (all === null) return <p className="text-[12px] text-slate-400"><Spinner /> กำลังโหลดแท็ก…</p>;
+  if (all === null) return <p className="text-[12px] text-slate-400"><Spinner /> {tt("กำลังโหลดแท็ก…", "Loading tags…")}</p>;
 
   const picked = all.filter((t) => mine.has(t.id));
   const q = search.trim().toLowerCase();
@@ -217,8 +220,8 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, on
   return (
     <div>
       <div className="flex items-center gap-2 mb-1 flex-wrap">
-        <span className="text-[12.5px] font-medium text-slate-600">แท็กประเภทสินค้า</span>
-        <span className="text-[11.5px] text-slate-400">แท็กช่วยให้ AI รู้ว่าเป็นสินค้าประเภทไหน และไปเข้ากฎที่ตั้งไว้</span>
+        <span className="text-[12.5px] font-medium text-slate-600">{tt("แท็กประเภทสินค้า", "Product type tags")}</span>
+        <span className="text-[11.5px] text-slate-400">{tt("แท็กช่วยให้ AI รู้ว่าเป็นสินค้าประเภทไหน และไปเข้ากฎที่ตั้งไว้", "Tags tell the AI the product type and match it to your rules")}</span>
       </div>
 
       {/* แท็กที่ติดอยู่ = ชิปพร้อมปุ่มเอาออก · เพิ่มแท็กใหม่ผ่านดรอปดาวน์ค้นหาได้ (ไม่กางรายการทั้งหมดให้รก) */}
@@ -226,24 +229,24 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, on
         {picked.map((t) => (
           <span key={t.id} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-full border border-emerald-300 bg-emerald-50 text-[12px] text-emerald-700">
             {/* กดชื่อ = แก้แท็ก (ชื่อ/EN/กลุ่ม) · กด ✕ = เอาออกจากสินค้านี้ */}
-            <button type="button" onClick={() => setEditTag(t)} title="กดเพื่อแก้แท็ก" className="inline-flex items-center gap-1 hover:underline">
+            <button type="button" onClick={() => setEditTag(t)} title={tt("กดเพื่อแก้แท็ก", "Click to edit tag")} className="inline-flex items-center gap-1 hover:underline">
               {t.name}{t.name_en ? <span className="text-emerald-500/70 text-[10.5px]">· {t.name_en}</span> : null}
               <span className="text-emerald-500/70 text-[10px]">✎</span>
             </button>
-            <button type="button" disabled={busy === t.id} onClick={() => void toggle(t)} title="เอาแท็กนี้ออก"
+            <button type="button" disabled={busy === t.id} onClick={() => void toggle(t)} title={tt("เอาแท็กนี้ออก", "Remove this tag")}
               className="w-5 h-5 rounded-full text-emerald-600 hover:bg-emerald-100 disabled:opacity-40">✕</button>
           </span>
         ))}
-        {picked.length === 0 && <span className="text-[12px] text-slate-400">ยังไม่ได้ติดแท็ก</span>}
+        {picked.length === 0 && <span className="text-[12px] text-slate-400">{tt("ยังไม่ได้ติดแท็ก", "No tags yet")}</span>}
 
         <div className="relative">
           <button type="button" onClick={() => setOpen((o) => !o)}
             className="h-7 px-2.5 text-[12px] font-medium rounded-full border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50">
-            ＋ เพิ่มแท็ก
+            {tt("＋ เพิ่มแท็ก", "＋ Add tag")}
           </button>
           {open && (
             <div className="absolute z-20 mt-1 w-[260px] bg-white border border-slate-200 rounded-lg shadow-lg p-2">
-              <input value={search} onChange={(e) => setSearch(e.target.value)} autoFocus placeholder="ค้นหาแท็ก (ไทย/EN)…"
+              <input value={search} onChange={(e) => setSearch(e.target.value)} autoFocus placeholder={tt("ค้นหาแท็ก (ไทย/EN)…", "Search tags (TH/EN)…")}
                 className="w-full h-8 px-2 mb-1.5 text-[13px] border border-slate-200 rounded-md" />
               <div className="max-h-44 overflow-y-auto">
                 {options.map((t) => (
@@ -252,21 +255,21 @@ function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false, on
                     className="w-full text-left px-2 py-1.5 rounded-md text-[13px] text-slate-700 hover:bg-slate-50 disabled:opacity-40">
                     {t.name}
                     <span className={`ml-1.5 text-[11px] ${t.name_en ? "text-slate-400" : "text-amber-500"}`}>
-                      {t.name_en ? `· ${t.name_en}` : "· ยังไม่มี EN"}
+                      {t.name_en ? `· ${t.name_en}` : tt("· ยังไม่มี EN", "· no EN yet")}
                     </span>
                   </button>
                 ))}
-                {options.length === 0 && <p className="px-2 py-3 text-[12px] text-slate-400 text-center">ไม่พบแท็กที่ค้นหา</p>}
+                {options.length === 0 && <p className="px-2 py-3 text-[12px] text-slate-400 text-center">{tt("ไม่พบแท็กที่ค้นหา", "No matching tags")}</p>}
               </div>
               {/* ค้นไม่เจอ/ไม่ตรงเป๊ะ → สร้างแท็กใหม่ได้เลย (ป๊อปใส่ชื่ออังกฤษ/กลุ่ม + สร้างกฎประเภทไปด้วย) */}
               {q && !all.some((t) => t.name.trim().toLowerCase() === q) && (
                 <button type="button" onClick={() => { setCreateName(search.trim()); setOpen(false); }}
                   className="mt-1 w-full h-8 px-2 text-[12.5px] font-medium rounded-md border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-left">
-                  ＋ สร้างแท็ก “{search.trim()}”
+                  {tt(`＋ สร้างแท็ก “${search.trim()}”`, `＋ Create tag “${search.trim()}”`)}
                 </button>
               )}
               <p className="mt-1 pt-1 border-t border-slate-100 text-[11px] text-slate-400">
-                ตั้งชื่ออังกฤษของแท็กได้ที่หน้า SKU → แท็บ Tags Manager
+                {tt("ตั้งชื่ออังกฤษของแท็กได้ที่หน้า SKU → แท็บ Tags Manager", "Set English tag names on the SKU page → Tags Manager tab")}
               </p>
             </div>
           )}
@@ -405,7 +408,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
           <div>
             <p className="text-[11.5px] text-slate-500 mb-1">{t("② หรือ ชื่อสินค้ามีคำว่า (คั่นด้วยลูกน้ำ)", "② Or the name contains (comma-separated)")}</p>
             <input value={keywordsText} onChange={(e) => setKeywordsText(e.target.value)}
-              placeholder={suggestKeyword ? `เช่น ${suggestKeyword}` : t("เช่น กระเป๋าสตางค์, wallet", "e.g. wallet, purse")}
+              placeholder={suggestKeyword ? t(`เช่น ${suggestKeyword}`, `e.g. ${suggestKeyword}`) : t("เช่น กระเป๋าสตางค์, wallet", "e.g. wallet, purse")}
               className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
           </div>
         </div>
@@ -464,7 +467,7 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
         <label className="flex items-center gap-2 text-[12.5px] text-slate-600">
           <input type="checkbox" checked={edit.brand_id !== null} className="h-4 w-4 accent-indigo-600" disabled={!brandId}
             onChange={(e) => setEdit({ ...edit, brand_id: e.target.checked ? brandId ?? null : null })} />
-          ใช้เฉพาะแบรนด์ของสินค้าตัวนี้ {brandId ? "" : t("(สินค้ายังไม่ระบุแบรนด์)", "(no brand set)")}
+          {t("ใช้เฉพาะแบรนด์ของสินค้าตัวนี้", "Only for this product's brand")} {brandId ? "" : t("(สินค้ายังไม่ระบุแบรนด์)", "(no brand set)")}
         </label>
 
         {/* ปุ่มบันทึกลอยติดขอบล่าง — เดิมอยู่สุดหน้าจอที่ต้องเลื่อนลงไปหา พิมพ์เสร็จแล้วกดปิดเลย ของหาย */}
@@ -492,20 +495,20 @@ function RulesEditor({ brandId, suggestKeyword }: { brandId?: string | null; sug
           <div className="flex items-center gap-2 flex-wrap">
             <b className="text-[12.5px] text-slate-700">{r.name}</b>
             {(r.required_topics ?? []).length > 0 && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700">บังคับ {r.required_topics.length} หัวข้อ</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700">{t(`บังคับ ${r.required_topics.length} หัวข้อ`, `${r.required_topics.length} required headings`)}</span>
             )}
             {r.hint && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">{t("มีใบ้ถาวร", "has saved hints")}</span>}
           </div>
           <p className="text-[11.5px] text-slate-400 mt-0.5">
-            {(r.tag_ids ?? []).length > 0 && `แท็ก ${r.tag_ids.length} รายการ`}
+            {(r.tag_ids ?? []).length > 0 && t(`แท็ก ${r.tag_ids.length} รายการ`, `${r.tag_ids.length} tags`)}
             {(r.tag_ids ?? []).length > 0 && (r.name_keywords ?? []).length > 0 && " · "}
-            {(r.name_keywords ?? []).length > 0 && `ชื่อมีคำว่า: ${r.name_keywords.join(", ")}`}
+            {(r.name_keywords ?? []).length > 0 && t(`ชื่อมีคำว่า: ${r.name_keywords.join(", ")}`, `Name contains: ${r.name_keywords.join(", ")}`)}
           </p>
         </button>
       ))}
       <button type="button" onClick={() => openEdit({ ...EMPTY_RULE, name_keywords: suggestKeyword ? [suggestKeyword] : [] })}
         className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
-        + สร้างกฎใหม่
+        {t("+ สร้างกฎใหม่", "+ New rule")}
       </button>
       {msg && <span className="ml-2 text-[12px] text-slate-500">{msg}</span>}
     </div>
@@ -880,7 +883,7 @@ export function AiProductDetailModal({
   }, []);
   const autoBox = useMemo(() => (boxes ? pickParcelBox(dims, boxes) : null), [boxes, dims.w, dims.h, dims.d]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!parcelManual && autoBox) setParcelId(autoBox.id); }, [autoBox, parcelManual]);
-  const boxLabel = (b: ParcelBox) => `${b.name}${b.size_text ? ` (${b.size_text})` : ` (${b.width_cm}×${b.length_cm}×${b.height_cm} ซม.)`}`;
+  const boxLabel = (b: ParcelBox) => `${b.name}${b.size_text ? ` (${b.size_text})` : ` (${b.width_cm}×${b.length_cm}×${b.height_cm} ${t("ซม.", "cm")})`}`;
 
   // ── ช่องกรอกมือ ──
   const [manual, setManual] = useState<Record<string, string>>(() => Object.fromEntries(MANUAL_FIELDS.map((f) => [f.key, curStr(f.key)])));
@@ -1094,7 +1097,7 @@ export function AiProductDetailModal({
         body: JSON.stringify({ parent_id: parentId, extra: extra.trim() || undefined, answers: qa.length ? qa : undefined, fields: pickFields, template: tpl ?? undefined, facts: facts(), skip_keys: skip }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j?.error) throw new Error(j?.error || `เรียก AI ไม่สำเร็จ (${r.status})`);
+      if (!r.ok || j?.error) throw new Error(j?.error || tr(`เรียก AI ไม่สำเร็จ (${r.status})`, `AI call failed (${r.status})`));
       const data = (j.data ?? {}) as Result;
       setRes(data);
       // ติ๊กเฉพาะช่องที่ของเดิมยังว่าง (กันทับงานที่เขียนเอง)
@@ -1174,7 +1177,7 @@ export function AiProductDetailModal({
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <span className="text-[11.5px] text-slate-400 w-full sm:w-auto">
-            {res ? `AI ดูรูป ${res.image_count ?? 0} รูป${(res.rules_used?.length ?? 0) > 0 ? ` · ใช้กฎ: ${res.rules_used?.join(", ")}` : ""}${tpl ? ` · แม่แบบ: ${tpl.name}` : ""}`
+            {res ? t(`AI ดูรูป ${res.image_count ?? 0} รูป${(res.rules_used?.length ?? 0) > 0 ? ` · ใช้กฎ: ${res.rules_used?.join(", ")}` : ""}${tpl ? ` · แม่แบบ: ${tpl.name}` : ""}`, `AI viewed ${res.image_count ?? 0} images${(res.rules_used?.length ?? 0) > 0 ? ` · rules: ${res.rules_used?.join(", ")}` : ""}${tpl ? ` · template: ${tpl.name}` : ""}`)
               : t("ค่าที่ได้จะลงในฟอร์ม ต้องกดบันทึกเองอีกที", "Results go into the form — you still press Save")}
           </span>
           <div className="flex gap-2 ml-auto">
@@ -1290,12 +1293,12 @@ export function AiProductDetailModal({
               <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden bg-white">
                 <button type="button" onClick={() => setCfgScope("global")}
                   className={`h-8 px-3 text-[12px] font-medium ${cfgScope === "global" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
-                  ค่ากลาง (ทุกแบรนด์)
+                  {t("ค่ากลาง (ทุกแบรนด์)", "Default (all brands)")}
                 </button>
                 <button type="button" onClick={() => setCfgScope("brand")} disabled={!brandId}
                   title={brandId ? t("ตั้งคำสั่งเฉพาะแบรนด์ของสินค้าตัวนี้", "Set a prompt just for this product's brand") : t("สินค้าตัวนี้ยังไม่ได้ระบุแบรนด์", "This product has no brand set")}
                   className={`h-8 px-3 text-[12px] font-medium border-l border-slate-200 disabled:opacity-40 ${cfgScope === "brand" ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
-                  เฉพาะแบรนด์นี้
+                  {t("เฉพาะแบรนด์นี้", "This brand only")}
                 </button>
               </div>
               <span className="text-[11.5px] text-slate-400">
@@ -1331,8 +1334,7 @@ export function AiProductDetailModal({
                   {cfgMsg && <span className="text-[12px] text-slate-500">{cfgMsg}</span>}
                 </div>
                 <p className="text-[11.5px] text-slate-400">
-                  กติกาความปลอดภัย (ห้ามแต่งข้อมูลที่ไม่เห็น · ห้ามเดาขนาด · ต้องตอบเป็น JSON) ระบบใส่ให้อัตโนมัติเสมอ ไม่ต้องเขียนเอง ·
-                  แก้จากหน้ารวมได้ที่ งาน → ตั้งค่า → Prompt แคปชั่น AI
+                  {t("กติกาความปลอดภัย (ห้ามแต่งข้อมูลที่ไม่เห็น · ห้ามเดาขนาด · ต้องตอบเป็น JSON) ระบบใส่ให้อัตโนมัติเสมอ ไม่ต้องเขียนเอง · แก้จากหน้ารวมได้ที่ งาน → ตั้งค่า → Prompt แคปชั่น AI", "Safety rules (no made-up details · no guessed sizes · JSON answers) are always added automatically — no need to write them · edit the global prompt at Tasks → Settings → AI caption prompt")}
                 </p>
               </>
             )}
@@ -1768,7 +1770,7 @@ export function AiProductDetailModal({
             )}
             {willOverwrite > 0 && (
               <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[12.5px] text-amber-800">
-                ⚠️ มี {willOverwrite} ช่องที่ติ๊กไว้และ<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> — กด “ใส่ลงฟอร์ม” ในขั้นสุดท้ายจะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)
+                ⚠️ {t(`มี ${willOverwrite} ช่องที่ติ๊กไว้และ`, `${willOverwrite} ticked field(s) `)}<b>{t("มีข้อความเดิมอยู่แล้ว", "already has text")}</b> {t("— กด “ใส่ลงฟอร์ม” ในขั้นสุดท้ายจะเขียนทับของเดิม (ยังไม่บันทึกจนกว่าจะกดบันทึกในฟอร์ม)", "— “Put into form” in the last step will overwrite it (nothing is saved until you press Save in the form)")}
               </div>
             )}
             {/* ไทย | English ข้างกัน (เจ้าของเลือกแบบ A) · มือถือ = ไทยบน อังกฤษล่าง */}

@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamicImport from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
@@ -24,7 +25,7 @@ import { layoutZones, diffZoneMoves, zoneFrames, sheetCards, ZONE_KIND, SHEET_KI
 
 const CanvasSketch = dynamicImport(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
-  loading: () => <div className="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400">กำลังเปิดกระดาน…</div>,
+  loading: () => <div className="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400">{tr("กำลังเปิดกระดาน…", "Opening board…")}</div>,
 });
 
 export const BRAND_CANVAS_ENTITY = "design_brand_canvas";

@@ -10,13 +10,14 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { LoadingState } from "@/components/state-views";
 
 // ตัวกระดาน + ชุดการ์ด + สร้างคอนเทนต์จากที่เลือก — โหลดเมื่อกางกระดานเท่านั้น (ไม่ถ่วงลิ้นชักงาน)
 const TaskBriefCanvas = dynamic(() => import("./task-brief-board-canvas"), {
   ssr: false,
-  loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
+  loading: () => <LoadingState label={tr("กำลังโหลดกระดาน...", "Loading board...")} boxClassName="flex h-[50vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
 
 /** รูปที่วางบนกระดานบรีฟของงาน ย่อเหลือด้านยาว 600px (webp) ก่อนเก็บขึ้น R2 — เจ้าของเลือก 2026-11-21 ไม่อยากเปลือง R2 */

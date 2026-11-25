@@ -249,7 +249,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                   <p className="px-3 py-1.5 bg-slate-50 text-[12px] font-medium text-slate-600">{t("แยกตามชนิดงาน (เว้นว่าง = ใช้ค่าตั้งต้น)", "Per job type (blank = default)")}</p>
                   {types.map((ty) => {
                     const key = `type:${ty.name}`;
-                    const ex = nasFolderFor(draft, sampleBrand?.folder ?? "[01] Louis Montini", ty.folder, "ชื่องาน", ty.name);
+                    const ex = nasFolderFor(draft, sampleBrand?.folder ?? "[01] Louis Montini", ty.folder, t("ชื่องาน", "Job name"), ty.name);
                     return (
                       <div key={ty.name} className="grid grid-cols-[110px_minmax(0,1fr)] gap-2 items-start px-3 py-1.5 border-t border-slate-100">
                         <span className="text-[13px] text-slate-700 pt-2 truncate">{ty.name}</span>

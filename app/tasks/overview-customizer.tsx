@@ -204,7 +204,7 @@ export const PRESETS: ThemePreset[] = [
 async function uploadImage(file: File): Promise<string> {
   const fd = new FormData(); fd.append("file", file); fd.append("folder", "overview-theme");
   const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
-  if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+  if (j.error || !j.r2_key) throw new Error(j.error || tr("อัปโหลดไม่สำเร็จ", "Upload failed"));
   return j.r2_key as string;
 }
 

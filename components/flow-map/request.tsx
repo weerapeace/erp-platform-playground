@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
@@ -62,7 +63,7 @@ async function sendToIssueReport(items: FlowRequestItem[], description: string, 
     body: JSON.stringify({ app_id: appId, app_name: appName ?? "แผนผังการทำงาน", description, priority: "medium", reporterName }),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j?.error) throw new Error(j?.error || "ส่งไม่สำเร็จ");
+  if (!r.ok || j?.error) throw new Error(j?.error || tr("ส่งไม่สำเร็จ", "Failed to send"));
   return String(j.id ?? "");
 }
 

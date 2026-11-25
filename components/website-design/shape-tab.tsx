@@ -96,9 +96,9 @@ export function ShapeTab() {
               const btnFont = { fontFamily: `"${tr.font || theme.fonts.body}", sans-serif`, fontWeight: tr.weight, letterSpacing: `${tr.spacing / 100}em`, textTransform: tr.uppercase ? ("uppercase" as const) : ("none" as const), fontStyle: tr.italic ? "italic" : "normal" };
               return (
                 <>
-                  <span className="text-white" style={{ background: theme.colors.brand, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>เพิ่มลงตะกร้า</span>
-                  <span style={{ border: `1px solid #D6D6D2`, color: theme.colors.ink, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>ดูเพิ่มเติม</span>
-                  <span className="text-xs text-slate-400 px-3 py-2 bg-white" style={{ border: `${theme.shape.borderWidth}px solid #DEDEDA`, borderRadius: theme.shape.inputRadius ?? r.sm, minWidth: 120 }}>ช่องกรอก…</span>
+                  <span className="text-white" style={{ background: theme.colors.brand, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>{t("เพิ่มลงตะกร้า", "Add to cart")}</span>
+                  <span style={{ border: `1px solid #D6D6D2`, color: theme.colors.ink, borderRadius: br, padding: pad, fontSize: fs, ...btnFont }}>{t("ดูเพิ่มเติม", "See more")}</span>
+                  <span className="text-xs text-slate-400 px-3 py-2 bg-white" style={{ border: `${theme.shape.borderWidth}px solid #DEDEDA`, borderRadius: theme.shape.inputRadius ?? r.sm, minWidth: 120 }}>{t("ช่องกรอก…", "Input field…")}</span>
                   <span className="inline-block w-24 h-16" style={{ background: theme.colors.surface, border: `${theme.shape.borderWidth}px solid #e7e7e4`, borderRadius: theme.shape.cardRadius ?? r.lg, boxShadow: shadow }} />
                   <span className="inline-block w-16 h-16 bg-slate-300" style={{ borderRadius: theme.shape.imageRadius ?? r.lg }} />
                 </>

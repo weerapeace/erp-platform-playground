@@ -227,7 +227,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setSubs((tpl.steps ?? []).filter((s) => s.title?.trim()).map((s) => ({
       include: !skip.includes(s.type ?? "custom"), autoSkip: skip.includes(s.type ?? "custom"),
       title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
-      assignees: (s.assignee_ids ?? []).map((aid, i) => ({ id: aid, label: s.assignee_labels?.[i] ?? "ผู้ใช้" })),
+      assignees: (s.assignee_ids ?? []).map((aid, i) => ({ id: aid, label: s.assignee_labels?.[i] ?? t("ผู้ใช้", "User") })),
       type: s.type ?? "custom", config: s.config ?? {},
     })));
   };

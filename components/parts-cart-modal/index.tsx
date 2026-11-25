@@ -133,7 +133,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
             {opts.map((o) => (
               <label key={o.item_id} className="flex items-center gap-2 py-0.5 text-sm">
                 <input type="radio" name={`kit-${ownerId}-${m.group}`} checked={pk.choices[m.group!] === o.item_id} onChange={() => onPk({ choices: { ...pk.choices, [m.group!]: o.item_id } })} />
-                <span className="min-w-0 flex-1 truncate">{byId.get(o.item_id)?.name}</span><span className="text-xs text-slate-500">× {o.qty}{o.cm ? ` · ${o.cm} ซม.` : ""}</span>
+                <span className="min-w-0 flex-1 truncate">{byId.get(o.item_id)?.name}</span><span className="text-xs text-slate-500">× {o.qty}{o.cm ? ` · ${o.cm} ${t("ซม.", "cm")}` : ""}</span>
               </label>
             ))}
           </div>
@@ -142,7 +142,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
       return (
         <label key={m.item_id} className="flex items-center gap-2 py-0.5 text-sm">
           <input type="checkbox" checked={pk.on[m.item_id] ?? m.on} onChange={(e) => onPk({ on: { ...pk.on, [m.item_id]: e.target.checked } })} />
-          <span className="min-w-0 flex-1 truncate">{byId.get(m.item_id)?.name}</span><span className="text-xs text-slate-500">× {m.qty}{m.cm ? ` · ${m.cm} ซม.` : ""}</span>
+          <span className="min-w-0 flex-1 truncate">{byId.get(m.item_id)?.name}</span><span className="text-xs text-slate-500">× {m.qty}{m.cm ? ` · ${m.cm} ${t("ซม.", "cm")}` : ""}</span>
         </label>
       );
     });
@@ -400,7 +400,7 @@ export function PartsCartModal({ open, onClose, items, onConfirm, onItemsChanged
                         <div key={p.id} className="flex flex-col rounded-lg border border-slate-200 p-2.5">
                           <div className="mb-1 flex items-start justify-between gap-2">
                             <div className="min-w-0"><div className="truncate text-sm font-medium text-slate-800">{t(`ชุด${p.name}`, `${p.name} set`)}</div>
-                              <div className="text-[11px] text-slate-500">{p.name}{p.mode === "length" ? ` · ${selfCm ?? 30} ซม./ชุด` : " × 1"}</div></div>
+                              <div className="text-[11px] text-slate-500">{p.name}{p.mode === "length" ? ` · ${selfCm ?? 30} ${t("ซม./ชุด", "cm/set")}` : " × 1"}</div></div>
                             {canManage && <button type="button" onClick={() => openSetEditor(p.id)} title={t("แก้ชุด", "Edit set")} aria-label={t(`แก้ชุด ${p.name}`, `Edit set ${p.name}`)}
                               className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Icon value="i:pencil" className="text-sm" /></button>}
                           </div>

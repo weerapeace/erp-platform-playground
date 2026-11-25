@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { ErrorState } from "@/components/state-views";
 import { getTask, type TaskDetail } from "../../data";
@@ -25,7 +26,7 @@ export default function TaskReferencePage() {
   useEffect(() => {
     if (!id) return;
     let alive = true;
-    getTask(id).then((d) => { if (alive) setTask(d); }).catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "โหลดงานไม่สำเร็จ"); });
+    getTask(id).then((d) => { if (alive) setTask(d); }).catch((e) => { if (alive) setErr(e instanceof Error ? e.message : tr("โหลดงานไม่สำเร็จ", "Couldn't load task")); });
     return () => { alive = false; };
   }, [id]);
 

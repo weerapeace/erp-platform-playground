@@ -51,14 +51,14 @@ export function StoryQuickModal({ open, onClose, day, brands, defaultBrandId, on
         platforms: ["instagram", "facebook"], platform_formats: { instagram: "story", facebook: "story" },
         scheduled_at: `${day}T10:00`, note: null,
       });
-    } catch (e) { pushToast("error", e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); setSaving(false); return; }
+    } catch (e) { pushToast("error", e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); setSaving(false); return; }
     // ที่อยู่ไฟล์ (ไม่บังคับ): อัปโหลดขึ้น R2 (รูป/วิดีโอ) หรือเก็บเป็นลิงก์
     // Story ถูกสร้างไปแล้ว → ถ้าแนบไฟล์พลาด ไม่ให้กดสร้างซ้ำ (จะได้ Story ซ้ำ) แค่บอกให้ไปใส่ไฟล์ทีหลัง
     try {
       if (file) {
         const fd = new FormData(); fd.append("file", file); fd.append("folder", "creative-content");
         const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-        const j = await up.json().catch(() => ({ error: "อัปโหลดไม่สำเร็จ" }));
+        const j = await up.json().catch(() => ({ error: t("อัปโหลดไม่สำเร็จ", "Upload failed") }));
         if (j.error) throw new Error(j.error as string);
         await addContentAttachment(r.id, { kind: file.type.startsWith("video/") ? "video" : "image", r2_key: j.r2_key as string, file_name: file.name, content_type: j.content_type as string, size_bytes: j.size as number });
       }

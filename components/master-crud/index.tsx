@@ -1135,11 +1135,11 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const next = withTeamLangs(cur?.value ?? teamLangValue, langScope, langs);
       const res = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: FORM_LANG_TEAM_KEY, value: next }) });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      if (!res.ok || j?.error) throw new Error(j?.error || tr("บันทึกไม่สำเร็จ", "Save failed"));
       setTeamLangValue(next);
-      notify.success(langs ? "ตั้งค่าเริ่มต้นภาษาของทุกคนแล้ว" : "ล้างค่าเริ่มต้นแล้ว — ทุกคนเห็นทุกภาษา");
+      notify.success(langs ? tr("ตั้งค่าเริ่มต้นภาษาของทุกคนแล้ว", "Default languages set for everyone") : tr("ล้างค่าเริ่มต้นแล้ว — ทุกคนเห็นทุกภาษา", "Default cleared — everyone sees all languages"));
     } catch (e) {
-      notify.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      notify.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed"));
     } finally {
       setTeamLangSaving(false);
     }
@@ -3277,7 +3277,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 
         {Object.keys(urlFilter).length > 0 && (
           <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-            🔎 กำลังแสดงเฉพาะรายการที่กรองจากลิงก์ที่เปิดมา
+            🔎 {tr("กำลังแสดงเฉพาะรายการที่กรองจากลิงก์ที่เปิดมา", "Showing only items filtered by the link you opened")}
             <button onClick={clearUrlFilter} className="ml-auto text-xs font-medium px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-100">{tr("✕ ล้างตัวกรอง (ดูทั้งหมด)", "✕ Clear filters (show all)")}</button>
           </div>
         )}
@@ -3964,7 +3964,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                     />
                   ) : (
                     <div className="text-xs text-slate-400 text-center py-3">
-                      บันทึกรายการก่อน แล้วค่อยเพิ่มรูปภาพเพิ่มเติม
+                      {tr("บันทึกรายการก่อน แล้วค่อยเพิ่มรูปภาพเพิ่มเติม", "Save the record first, then add more images")}
                     </div>
                   )}
                 </div>
@@ -5130,7 +5130,7 @@ function M2mChipsCell({ vals }: { vals: string[] }) {
     <>
       <button ref={btnRef} type="button" onClick={openPop} title={tr("กดดูรายการทั้งหมด", "Click to see all")}
         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
-        📎 {vals.length} รายการ ▾
+        📎 {tr(`${vals.length} รายการ ▾`, `${vals.length} items ▾`)}
       </button>
       {open && pos && createPortal(
         <>
@@ -5138,7 +5138,7 @@ function M2mChipsCell({ vals }: { vals: string[] }) {
           <div className="fixed z-[999] w-[360px] max-h-[320px] overflow-auto bg-white border border-slate-200 rounded-lg shadow-xl p-2"
             style={{ top: pos.top, left: pos.left }}>
             <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-100 sticky top-0 bg-white">
-              <span className="text-xs font-medium text-slate-600">📎 {vals.length} รายการ</span>
+              <span className="text-xs font-medium text-slate-600">📎 {tr(`${vals.length} รายการ`, `${vals.length} items`)}</span>
               <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 text-base leading-none">✕</button>
             </div>
             <div className="flex flex-wrap gap-1">{vals.map(chip)}</div>

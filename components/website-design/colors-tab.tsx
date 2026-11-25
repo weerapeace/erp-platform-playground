@@ -42,7 +42,7 @@ export function ColorsTab() {
                 <div className="rounded-lg h-16 px-3 flex flex-col justify-center gap-1.5 border border-black/5" style={{ background: p.colors.page }}>
                   <span style={{ fontFamily: `"${p.fonts.display}", serif`, color: p.colors.ink, fontSize: 15, letterSpacing: p.key === "luxury" ? "0.12em" : undefined }}>LOUIS MONTINI</span>
                   <span className="inline-block w-fit text-[10px] px-2.5 py-0.5" style={{ background: p.colors.brand, color: "#fff", borderRadius: p.shape.button === "pill" ? 999 : p.shape.button === "square" ? 0 : 6 }}>
-                    ช้อปเลย
+                    {t("ช้อปเลย", "Shop now")}
                   </span>
                 </div>
                 <p className="text-sm font-medium text-slate-800 mt-1.5">{labelEn(p.label)}</p>
@@ -242,7 +242,7 @@ export function ColorsLivePreview({ theme, sample }: { theme: Theme; sample: Sam
   const [hoverBtn, setHoverBtn] = useState(false);
   const [hoverName, setHoverName] = useState<number | null>(null);
   const c = theme.colors;
-  const name = sample?.name || "กระเป๋าหนังแท้ รุ่นตัวอย่าง";
+  const name = sample?.name || t("กระเป๋าหนังแท้ รุ่นตัวอย่าง", "Sample leather bag");
   const img = sample?.images[0] ?? null;
   const price = sample?.price || 1290;
   const compare = sample?.comparePrice && sample.comparePrice > price ? sample.comparePrice : Math.round((price * 1.25) / 10) * 10;
@@ -266,7 +266,7 @@ export function ColorsLivePreview({ theme, sample }: { theme: Theme; sample: Sam
       <div className="p-1.5">
         <span className="inline-flex items-center gap-1 text-[8px]" style={{ color: sale ? c.stockLow : c.stockIn }}>
           <span className="w-1 h-1 rounded-full" style={{ background: sale ? c.stockLow : c.stockIn }} />
-          {sale ? "เหลือน้อย" : "พร้อมส่ง"}
+          {sale ? t("เหลือน้อย", "Low stock") : t("พร้อมส่ง", "In stock")}
         </span>
         <div
           className="text-[10px] leading-snug line-clamp-2 cursor-pointer"
@@ -295,11 +295,11 @@ export function ColorsLivePreview({ theme, sample }: { theme: Theme; sample: Sam
           className="w-full h-7 rounded-md text-[11px] font-medium transition-colors"
           style={{ background: hoverBtn ? c.brandDeep : c.brand, color: resolveOnBrand(c) }}
         >
-          ใส่ตะกร้า
+          {t("ใส่ตะกร้า", "Add to cart")}
         </button>
         <div className="flex items-center justify-between gap-1">
-          <span className="text-[10px] underline cursor-pointer" style={{ color: c.link || c.brand }}>ดูรายละเอียดเพิ่มเติม</span>
-          <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: soft, color: c.brandDeep }}>ส่งฟรี</span>
+          <span className="text-[10px] underline cursor-pointer" style={{ color: c.link || c.brand }}>{t("ดูรายละเอียดเพิ่มเติม", "View details")}</span>
+          <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: soft, color: c.brandDeep }}>{t("ส่งฟรี", "Free shipping")}</span>
         </div>
         <p className="text-[9px]" style={{ color: c.muted }}>{t("ชี้ปุ่ม/ชื่อสินค้าเพื่อดูสีตอนชี้", "Hover the button/product name to see hover colors")}</p>
       </div>

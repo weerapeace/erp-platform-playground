@@ -15,6 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { setEditContext, clearEditContext } from "@/lib/edit-context";
@@ -57,9 +58,9 @@ export function useTaskChanges(taskId: string, subtaskId: string | null, enabled
     try {
       const r = await apiFetch(`/api/record-versions?task_id=${taskId}${subtaskId ? `&subtask_id=${subtaskId}` : ""}`);
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || tr("โหลดไม่สำเร็จ", "Load failed"));
       setChanges(((j.changes ?? []) as TaskChange[]).filter((c) => c.source !== "restore"));
-    } catch (e) { setError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
+    } catch (e) { setError(e instanceof Error ? e.message : tr("โหลดไม่สำเร็จ", "Load failed")); }
   }, [taskId, subtaskId, enabled]);
   useEffect(() => { void reload(); }, [reload]);
   const active = useMemo(() => (changes ?? []).filter((c) => c.in_effect), [changes]);

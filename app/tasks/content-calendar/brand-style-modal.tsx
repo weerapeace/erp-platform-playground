@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { saveBrandCalStyle, type BrandCalStyle, type BrandOption } from "../data";
@@ -29,7 +30,7 @@ export function BrandStyleModal({ brand, current, onClose, onSaved, pushToast }:
     try {
       const fd = new FormData(); fd.append("file", file); fd.append("folder", "content-calendar");
       const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-      const j = await res.json().catch(() => ({ error: "อัปโหลดไม่สำเร็จ" }));
+      const j = await res.json().catch(() => ({ error: tr("อัปโหลดไม่สำเร็จ", "Upload failed") }));
       if (j.error) { pushToast("error", j.error as string); return; }
       setBgKey(j.r2_key as string);
     } catch (e) { pushToast("error", (e as Error).message); }

@@ -543,7 +543,7 @@ export function OverviewDashboard({
                 emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
                 searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
                 searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-                tableId="creative-tasks" exportFilename="งาน-creative"
+                tableId="creative-tasks" exportFilename={t("งาน-creative", "creative-tasks")}
                 selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
                 enableCards
                 cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
@@ -701,7 +701,7 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
               emptyMessage={t("ไม่มีงาน", "No tasks")}
               searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
               searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-              tableId="my-doing" exportFilename="งานที่ฉันทำ"
+              tableId="my-doing" exportFilename={t("งานที่ฉันทำ", "my-tasks")}
               enableCards
               cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
               onRowClick={(row) => onOpenTask(row.id)}
@@ -722,7 +722,7 @@ function MyTasksView({ doing, delegated, isSoloMine, onOpenTask, accent, columns
               emptyMessage={t("ไม่มีงาน", "No tasks")}
               searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
               searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-              tableId="my-delegated" exportFilename="งานที่มอบหมาย"
+              tableId="my-delegated" exportFilename={t("งานที่มอบหมาย", "delegated-tasks")}
               enableCards
               cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
               onRowClick={(row) => onOpenTask(row.id)}

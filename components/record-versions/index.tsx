@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { getLang } from "@/lib/lang";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 
@@ -27,7 +28,8 @@ const groupOf = (v: Version): Exclude<Group, "all"> => (isImageGroup(v.field_key
 const textOf = (x: unknown): string | null => (x == null ? null : typeof x === "string" ? x : JSON.stringify(x));
 const keyOf = (x: unknown): string | null => (x && typeof x === "object" && typeof (x as { r2_key?: unknown }).r2_key === "string" ? (x as { r2_key: string }).r2_key : null);
 const TH_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-const when = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${TH_MONTH[d.getMonth()]} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+const EN_MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const when = (iso: string) => { const d = new Date(iso); return `${d.getDate()} ${(getLang() === "en" ? EN_MONTH : TH_MONTH)[d.getMonth()]} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 const who = (s: string | null) => (s ? s.split("@")[0] : "");
 
 export function RecordVersionsPanel({ entityType, entityId, canRestore, fieldLabel, onRestored }: {

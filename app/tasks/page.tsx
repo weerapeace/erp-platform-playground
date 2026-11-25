@@ -264,7 +264,7 @@ export default function TasksPage() {
     const failed = res.filter((r) => r.status === "rejected").length;
     await reload();
     if (failed) { pushToast("error", t(`เปลี่ยนวันไม่สำเร็จ ${failed} งาน`, `${failed} failed`)); if (failed === list.length) { tasksSWR.mutate(before); return; } }
-    const label = list.length === 1 ? `"${list[0].task.title}"` : `${list.length} งาน`;
+    const label = list.length === 1 ? `"${list[0].task.title}"` : t(`${list.length} งาน`, `${list.length} tasks`);
     toastApi.undo(t(`เปลี่ยนวันส่ง ${label} แล้ว`, `Moved ${label}`), async () => {
       apply(list.map((m) => ({ id: m.task.id, to: m.task.due_date ? String(m.task.due_date).slice(0, 10) : null })));
       await Promise.allSettled(list.map((m) => updateTask(m.task.id, { due_date: m.task.due_date ? String(m.task.due_date).slice(0, 10) : null })));

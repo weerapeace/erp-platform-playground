@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { ErrorState, LoadingState } from "@/components/state-views";
@@ -34,9 +35,9 @@ export function useFlowNotify() {
     setErr(null);
     try {
       const j = await apiFetch("/api/flow-map/notify").then((r) => r.json());
-      if (j?.error || !j?.data) { setErr(String(j?.error ?? "โหลดไม่สำเร็จ")); return; }
+      if (j?.error || !j?.data) { setErr(String(j?.error ?? tr("โหลดไม่สำเร็จ", "Failed to load"))); return; }
       setLive(j.data as NotifyLive); setAt((j.at as string) ?? null); setFailed((j.failed as string[]) ?? []);
-    } catch { setErr("โหลดสถานะแจ้งเตือนไม่สำเร็จ"); }
+    } catch { setErr(tr("โหลดสถานะแจ้งเตือนไม่สำเร็จ", "Failed to load notification status")); }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
   return { live, at, failed, err, reload };
@@ -54,6 +55,7 @@ function Dot({ state }: { state: NotifyState }) {
 }
 /** ชิปปลายทางในช่องตาราง (สั้น) — ชี้ดูเหตุผลเต็ม */
 function TargetChips({ topic, live, ch }: { topic: NotifyTopic; live: NotifyLive; ch: NotifyChannel }) {
+  const t = useT();
   const cells = notifyTopicCells(topic, live);
   const items = topic.send.map((s, i) => ({ s, c: cells[i] })).filter((x) => notifyChannelOf(x.s) === ch);
   if (!items.length) return <span className="text-slate-300">—</span>;
@@ -61,7 +63,7 @@ function TargetChips({ topic, live, ch }: { topic: NotifyTopic; live: NotifyLive
     <span className="flex flex-wrap gap-1">
       {items.map(({ s, c }, i) => (
         <span key={i} title={c.text} className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md border whitespace-nowrap ${NOTIFY_STATES[c.state].chip}`}>
-          <Dot state={c.state} />{c.short ?? (s.kind === "dm" ? "LINE ส่วนตัว" : s.kind === "oa" ? "LINE OA" : s.to)}
+          <Dot state={c.state} />{c.short ?? (s.kind === "dm" ? t("LINE ส่วนตัว", "Personal LINE") : s.kind === "oa" ? "LINE OA" : s.to)}
         </span>
       ))}
     </span>
@@ -307,7 +309,7 @@ export function FlowNotifyPanel({ api, selected, onSelect, onOpenNode, canAdmin,
             <div key={i} className={`rounded-lg border px-2.5 py-1.5 ${NOTIFY_STATES[c.state].chip}`}>
               <div className="flex items-center gap-1.5 text-[12.5px]">
                 <Icon value={NOTIFY_CHANNELS[ch].icon} />
-                <span className="font-medium">{s.kind === "bell" ? t("กระดิ่ง ERP", "ERP bell") : s.kind === "popup" ? t("ป๊อปอัป ERP", "ERP popup") : s.kind === "group" ? "LINE กลุ่ม" : s.kind === "dm" ? t("LINE ส่วนตัว", "Personal LINE") : s.kind === "oa" ? "LINE OA" : s.kind === "email" ? t("อีเมล", "Email") : "Discord"}</span>
+                <span className="font-medium">{s.kind === "bell" ? t("กระดิ่ง ERP", "ERP bell") : s.kind === "popup" ? t("ป๊อปอัป ERP", "ERP popup") : s.kind === "group" ? t("LINE กลุ่ม", "LINE group") : s.kind === "dm" ? t("LINE ส่วนตัว", "Personal LINE") : s.kind === "oa" ? "LINE OA" : s.kind === "email" ? t("อีเมล", "Email") : "Discord"}</span>
                 <span className="ml-auto text-[11px]">{NOTIFY_STATES[c.state].label}</span>
               </div>
               <div className="text-[12px] mt-0.5">{c.text}</div>

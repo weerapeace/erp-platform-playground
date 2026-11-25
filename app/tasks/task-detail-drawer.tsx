@@ -79,20 +79,21 @@ function QuickField({ label, value, dot, highlight, active, onOpen, onClose, edi
   label: string; value: string | null | undefined; dot?: string | null; highlight?: boolean;
   active: boolean; onOpen: () => void; onClose: () => void; editor: ReactNode;
 }) {
+  const t = useT();
   if (active) {
     return (
       <div className="min-w-0">
         <p className="text-xs text-slate-400 mb-0.5">{label}</p>
         <div className="flex items-start gap-1">
           <div className="flex-1 min-w-0">{editor}</div>
-          <button type="button" onClick={onClose} title="ปิด" className="text-slate-300 hover:text-slate-600 text-xs shrink-0 mt-2">✕</button>
+          <button type="button" onClick={onClose} title={t("ปิด", "Close")} className="text-slate-300 hover:text-slate-600 text-xs shrink-0 mt-2">✕</button>
         </div>
       </div>
     );
   }
   // แบบกะทัดรัด (เจ้าของเลือก 2026-11-21): หัวข้อซ้าย · ค่าขวา บรรทัดเดียว
   return (
-    <button type="button" onClick={onOpen} title="คลิกเพื่อแก้" className="w-full min-w-0 text-left group rounded-md -mx-1 px-1 py-1 hover:bg-violet-50/60 transition-colors flex items-baseline gap-2">
+    <button type="button" onClick={onOpen} title={t("คลิกเพื่อแก้", "Click to edit")} className="w-full min-w-0 text-left group rounded-md -mx-1 px-1 py-1 hover:bg-violet-50/60 transition-colors flex items-baseline gap-2">
       <p className="w-[76px] shrink-0 text-[11px] text-slate-400 truncate">{label}</p>
       <p className={`min-w-0 flex-1 text-sm font-medium flex items-center gap-1.5 ${highlight ? "text-red-600" : "text-slate-800"}`}>
         {dot && value && <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: dot || "#cbd5e1" }} />}

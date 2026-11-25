@@ -21,6 +21,7 @@ import { labelName } from "@/lib/marketing/sku-list";
 import { copyText } from "@/components/copy-button";
 import { usePushToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
+import { getLang } from "@/lib/lang";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { todayBangkok } from "@/lib/date";
@@ -47,7 +48,9 @@ import { platformMeta, type PlatformOpt } from "../use-options";
 type Step = "setup" | "draft" | "review" | "done";
 type Pillar = { id: string; name: string; is_active?: boolean };
 
-const WD_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+const WD_TH = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"]; // ไทย (ไม่ห่อ — wd() เลือกตามภาษา)
+const WD_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const wd = () => (getLang() === "en" ? WD_EN : WD_TH);
 const LEVEL_CLS: Record<"error" | "warn" | "info" | "ok", string> = {
   error: "text-red-600", warn: "text-amber-600", info: "text-slate-400", ok: "text-emerald-600",
 };
@@ -195,7 +198,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const brandName = brands.find((b) => b.id === brandId)?.name ?? "";
   const recTimesText = useMemo(() => [1, 2, 3, 4, 5, 6, 0]
     .filter((d) => recTimes[String(d)]?.length)
-    .map((d) => `${WD_TH[d]} ${recTimes[String(d)].map((x) => x.time).join("/")}`).join(" · "), [recTimes]);
+    .map((d) => `${wd()[d]} ${recTimes[String(d)].map((x) => x.time).join("/")}`).join(" · "), [recTimes, t]);
   const rangeOk = !!start && !!end && start <= end;
   const trendOptions = useMemo(() => (rangeOk ? selectableTrends(trendRows, brandId || null, start, end) : []), [trendRows, brandId, start, end, rangeOk]);
   const defaultTrendIds = useMemo(() => {
@@ -788,7 +791,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               <div>
                 <div className="mb-1 text-xs text-slate-500">{t("ภาพรวม: จุดสี = แพลตฟอร์มที่จะลงใหม่ · จุดเทา = ของเดิม · กรอบเหลือง = มีคำเตือน", "Overview: colored = new · gray = existing · yellow = warning")}</div>
                 <div className="grid grid-cols-7 gap-1">
-                  {WD_TH.map((w) => <div key={w} className="text-center text-[11px] text-slate-400">{w}</div>)}
+                  {wd().map((w) => <div key={w} className="text-center text-[11px] text-slate-400">{w}</div>)}
                   {Array.from({ length: miniCal.lead }).map((_, i) => <div key={`b${i}`} />)}
                   {Array.from({ length: miniCal.n }).map((_, i) => {
                     const d = addDaysKey(miniCal.first, i);

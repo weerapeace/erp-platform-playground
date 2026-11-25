@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { usePushToast } from "@/components/toast";
 import { FLOW_EDGES, FLOW_EDGE_TYPES, FLOW_NODES, type FlowEdgeType } from "@/lib/flow-map";
 import { DANGER_TEXT, FLOW_PAGE_INFO, apiHuman, pageKey, partForText } from "@/lib/flow-map-pages";
@@ -29,7 +30,8 @@ type Api = { key: string; path: string; write: boolean; th: string | null; n: nu
 type Tab = "parts" | "data" | "zones";
 type Hover = { kind: string; text: string; does: string | null; locked: boolean } | null;
 const newId = () => Math.random().toString(36).slice(2, 9);
-const KIND_TH: Record<string, string> = { BUTTON: "ปุ่ม", A: "ลิงก์", INPUT: "ช่องกรอก", SELECT: "ตัวเลือก", TEXTAREA: "ช่องข้อความ", LABEL: "ป้าย" };
+// ชนิดองค์ประกอบ (โชว์ตอนชี้) — ฟังก์ชัน เพื่อให้ตามภาษาที่เลือก
+const kindTh = (): Record<string, string> => ({ BUTTON: tr("ปุ่ม", "Button"), A: tr("ลิงก์", "Link"), INPUT: tr("ช่องกรอก", "Input"), SELECT: tr("ตัวเลือก", "Select"), TEXTAREA: tr("ช่องข้อความ", "Text area"), LABEL: tr("ป้าย", "Label") });
 
 /** ข้อความสั้นที่บอกว่าองค์ประกอบนี้คืออะไร (ตัวหนังสือบนปุ่ม / aria-label / placeholder / หัวข้อแรก) */
 function elText(el: Element): string {
@@ -140,7 +142,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
         if (method !== "GET" && method !== "HEAD") {
           noteApi(url, method);
           setHover({ kind: "", text: "", does: null, locked: true });
-          return Promise.resolve(new win.Response(JSON.stringify({ error: "หน้าตัวอย่างล็อกการบันทึกไว้ — เปิดหน้าจริงเพื่อทำงาน" }), { status: 423, headers: { "Content-Type": "application/json" } }));
+          return Promise.resolve(new win.Response(JSON.stringify({ error: tr("หน้าตัวอย่างล็อกการบันทึกไว้ — เปิดหน้าจริงเพื่อทำงาน", "Saving is locked in the preview — open the real page to work") }), { status: 423, headers: { "Content-Type": "application/json" } }));
         }
         return orig(input, init);
       }) as typeof win.fetch;
@@ -149,7 +151,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
     // ล็อกปุ่มอันตราย (กดก่อนหน้าเห็น)
     doc.addEventListener("click", (ev) => {
       const el = (ev.target as Element | null)?.closest?.("button, a, [role=button], input[type=submit]");
-      if (el && DANGER_TEXT.test(elText(el))) { ev.preventDefault(); ev.stopPropagation(); setHover({ kind: KIND_TH[el.tagName] ?? "ปุ่ม", text: elText(el), does: partForText(infoRef.current, elText(el))?.does ?? null, locked: true }); }
+      if (el && DANGER_TEXT.test(elText(el))) { ev.preventDefault(); ev.stopPropagation(); setHover({ kind: kindTh()[el.tagName] ?? tr("ปุ่ม", "Button"), text: elText(el), does: partForText(infoRef.current, elText(el))?.does ?? null, locked: true }); }
     }, true);
     doc.addEventListener("submit", (ev) => { ev.preventDefault(); ev.stopPropagation(); }, true);
     // ชี้ปุ่ม/ช่อง → บอกชื่อ + กดแล้วทำอะไร
@@ -159,7 +161,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
       if (!el) return;
       const text = elText(el);
       if (!text) return;
-      setHover({ kind: KIND_TH[el.tagName] ?? (/^H\d$/.test(el.tagName) ? "หัวข้อ" : el.tagName === "TH" ? "หัวคอลัมน์" : "ส่วน"), text, does: partForText(infoRef.current, text)?.does ?? null, locked: false });
+      setHover({ kind: kindTh()[el.tagName] ?? (/^H\d$/.test(el.tagName) ? tr("หัวข้อ", "Heading") : el.tagName === "TH" ? tr("หัวคอลัมน์", "Column header") : tr("ส่วน", "Section")), text, does: partForText(infoRef.current, text)?.does ?? null, locked: false });
     });
   };
 
@@ -204,7 +206,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
       const el = doc ? pickBlock(doc.elementFromPoint(p.vx, p.vy), doc) : null;
       if (!el) { setSnapRect(null); return; }
       const r = el.getBoundingClientRect();
-      setSnapRect({ x: r.left + scroll.x, y: r.top + scroll.y, w: r.width, h: r.height, label: `${KIND_TH[el.tagName] ?? el.tagName.toLowerCase()}${elText(el) ? ` “${elText(el).slice(0, 40)}”` : ""}` });
+      setSnapRect({ x: r.left + scroll.x, y: r.top + scroll.y, w: r.width, h: r.height, label: `${kindTh()[el.tagName] ?? el.tagName.toLowerCase()}${elText(el) ? ` “${elText(el).slice(0, 40)}”` : ""}` });
       return;
     }
     const d = dragRef.current;
@@ -388,7 +390,7 @@ export function FlowPagePreview({ nodeId, onClose, numOf, page }: { nodeId: stri
               {mode === "zone" ? (
                 <span className="text-slate-500">{zm === "free" ? t("ลากวาดกรอบ · ลากกรอบ = ย้าย · มุมขวาล่าง = ขยาย · กดกรอบแล้วกด Delete = ลบ · Ctrl+Z = เรียกคืน", "Drag to draw · drag to move · corner to resize · Delete removes · Ctrl+Z restores") : t("ชี้ที่ส่วนของหน้า แล้วกดเพื่อเลือกทั้งกล่อง", "Point at a part and click to select it")}</span>
               ) : hover?.locked ? (
-                <span className="text-amber-700"><Icon value="i:lock" /> {t("หน้าตัวอย่างล็อกการบันทึก/ลบไว้ (กันแก้ข้อมูลจริง)", "Saving is locked in the preview")}{hover.text ? ` — ${hover.kind} “${hover.text}”${hover.does ? ` · กดแล้ว: ${hover.does}` : ""}` : ""}</span>
+                <span className="text-amber-700"><Icon value="i:lock" /> {t("หน้าตัวอย่างล็อกการบันทึก/ลบไว้ (กันแก้ข้อมูลจริง)", "Saving is locked in the preview")}{hover.text ? ` — ${hover.kind} “${hover.text}”${hover.does ? ` · ${t("กดแล้ว", "Click")}: ${hover.does}` : ""}` : ""}</span>
               ) : hover ? (
                 <span className="text-slate-600">{t("ชี้อยู่", "Pointing at")}: {hover.kind} <b className="font-medium">“{hover.text}”</b>{hover.does ? <> · {t("กดแล้ว", "Click")}: {hover.does}</> : <span className="text-slate-400"> · {t("ยังไม่มีคำอธิบายในทะเบียน", "No description yet")}</span>}</span>
               ) : <span className="text-slate-400">{t("ชี้ที่ปุ่ม/ช่องในหน้า เพื่อดูว่ากดแล้วทำอะไร · ปุ่มบันทึก/ลบถูกล็อกไว้", "Hover a button to see what it does · saving is locked")}</span>}

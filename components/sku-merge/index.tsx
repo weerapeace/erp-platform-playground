@@ -13,6 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { Spinner } from "@/components/spinner";
 
@@ -24,29 +25,30 @@ const SKIP = new Set(["id", "code", "is_active", "created_at", "updated_at", "cr
 
 // ป้ายชื่อกลุ่มความเชื่อมโยง (key จาก erp_merge_skus_preview)
 const REL_LABELS: { key: string; label: string }[] = [
-  { key: "images", label: "🖼️ รูปภาพ" },
-  { key: "tags", label: "🏷️ แท็ก/หมวด" },
-  { key: "supplier_items", label: "💰 ราคาต่อร้าน" },
-  { key: "supplier_history", label: "📈 ประวัติราคา" },
-  { key: "stock_movements", label: "📦 การเคลื่อนไหวสต๊อก" },
-  { key: "favorites", label: "⭐ รายการโปรด" },
-  { key: "attribute_values", label: "🧩 คุณสมบัติ" },
-  { key: "creative", label: "🎨 งานครีเอทีฟ" },
-  { key: "purchase", label: "🛒 จัดซื้อ/รับของ" },
-  { key: "sales", label: "🧾 ขาย/ป้ายกล่อง/มาร์เก็ตเพลส" },
-  { key: "bom_lines", label: "🧾 สูตรผลิต BOM (บรรทัด)" },
-  { key: "bom_headers", label: "🧾 หัว BOM" },
-  { key: "mo", label: "🏭 ใบสั่งผลิต MO" },
+  { key: "images", get label() { return tr("🖼️ รูปภาพ", "🖼️ Images"); } },
+  { key: "tags", get label() { return tr("🏷️ แท็ก/หมวด", "🏷️ Tags / categories"); } },
+  { key: "supplier_items", get label() { return tr("💰 ราคาต่อร้าน", "💰 Supplier prices"); } },
+  { key: "supplier_history", get label() { return tr("📈 ประวัติราคา", "📈 Price history"); } },
+  { key: "stock_movements", get label() { return tr("📦 การเคลื่อนไหวสต๊อก", "📦 Stock movements"); } },
+  { key: "favorites", get label() { return tr("⭐ รายการโปรด", "⭐ Favorites"); } },
+  { key: "attribute_values", get label() { return tr("🧩 คุณสมบัติ", "🧩 Attributes"); } },
+  { key: "creative", get label() { return tr("🎨 งานครีเอทีฟ", "🎨 Creative tasks"); } },
+  { key: "purchase", get label() { return tr("🛒 จัดซื้อ/รับของ", "🛒 Purchasing / receiving"); } },
+  { key: "sales", get label() { return tr("🧾 ขาย/ป้ายกล่อง/มาร์เก็ตเพลส", "🧾 Sales / carton labels / marketplace"); } },
+  { key: "bom_lines", get label() { return tr("🧾 สูตรผลิต BOM (บรรทัด)", "🧾 BOM (lines)"); } },
+  { key: "bom_headers", get label() { return tr("🧾 หัว BOM", "🧾 BOM headers"); } },
+  { key: "mo", get label() { return tr("🏭 ใบสั่งผลิต MO", "🏭 Manufacturing orders (MO)"); } },
 ];
 
 const fmt = (v: unknown): string => {
   if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "boolean") return v ? "ใช่" : "ไม่";
+  if (typeof v === "boolean") return v ? tr("ใช่", "Yes") : tr("ไม่", "No");
   return String(v);
 };
 const isScalar = (v: unknown) => v === null || ["string", "number", "boolean"].includes(typeof v);
 
 export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [primary, setPrimary] = useState<SkuPickerValue | null>(null);
   const [dup, setDup] = useState<SkuPickerValue | null>(null);
@@ -91,7 +93,7 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
       setPRec((pr.data ?? null) as Rec | null);
       setDRec((dr.data ?? null) as Rec | null);
       if (pv.error) toast.error(pv.error); else setPreview((pv.preview ?? {}) as Rec);
-    } catch { toast.error("โหลดข้อมูลเปรียบเทียบไม่สำเร็จ"); }
+    } catch { toast.error(tr("โหลดข้อมูลเปรียบเทียบไม่สำเร็จ", "Couldn't load comparison data")); }
     finally { setLoading(false); }
   }, [primary, dup, toast]);
 
@@ -113,10 +115,10 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
         body: JSON.stringify({ primary_id: primary.id, duplicate_id: dup.id, field_overrides }),
       });
       const j = await res.json();
-      if (!res.ok || j.error) throw new Error(j.error || "รวม SKU ไม่สำเร็จ");
+      if (!res.ok || j.error) throw new Error(j.error || tr("รวม SKU ไม่สำเร็จ", "SKU merge failed"));
       setDone((j.result ?? {}) as Rec);
-      toast.success("รวม SKU สำเร็จ");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "รวม SKU ไม่สำเร็จ"); }
+      toast.success(tr("รวม SKU สำเร็จ", "SKUs merged"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("รวม SKU ไม่สำเร็จ", "SKU merge failed")); }
     finally { setSubmitting(false); }
   };
 
@@ -127,10 +129,10 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
   if (done) {
     const counts = (done.counts ?? {}) as Rec;
     return (
-      <ERPModal open onClose={() => { onDone(); }} title="✅ รวม SKU สำเร็จ" size="md"
-        footer={<button onClick={() => onDone()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">เสร็จ</button>}>
+      <ERPModal open onClose={() => { onDone(); }} title={t("✅ รวม SKU สำเร็จ", "✅ SKUs merged")} size="md"
+        footer={<button onClick={() => onDone()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("เสร็จ", "Done")}</button>}>
         <div className="space-y-2 text-sm">
-          <p className="text-slate-700">โอนความเชื่อมโยงของ <b className="font-mono">{String(done.dup_code ?? "")}</b> มาที่ <b className="font-mono">{String(done.primary_code ?? "")}</b> แล้ว · ตัวซ้ำถูกยุบเข้าถังขยะ (กู้คืนได้)</p>
+          <p className="text-slate-700">{t("โอนความเชื่อมโยงของ", "Moved links from")} <b className="font-mono">{String(done.dup_code ?? "")}</b> {t("มาที่", "to")} <b className="font-mono">{String(done.primary_code ?? "")}</b> {t("แล้ว · ตัวซ้ำถูกยุบเข้าถังขยะ (กู้คืนได้)", "· the duplicate was moved to the trash (restorable)")}</p>
           <div className="grid grid-cols-2 gap-1.5 text-[12px]">
             {Object.entries(counts).filter(([, n]) => Number(n) > 0).map(([k, n]) => (
               <div key={k} className="flex justify-between px-2.5 py-1.5 rounded-md bg-slate-50 border border-slate-100">
@@ -145,19 +147,19 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
   }
 
   return (
-    <ERPModal open onClose={onClose} title="🔗 จัดการ SKU ซ้ำ (รวม/ยุบ)" size="xl"
-      description="เลือก SKU หลักที่จะเก็บ + SKU ซ้ำที่จะยุบ → ระบบโอนรูป/แท็ก/สต๊อก/ราคา/BOM ฯลฯ มาตัวหลัก แล้วยุบตัวซ้ำเข้าถังขยะ"
+    <ERPModal open onClose={onClose} title={t("🔗 จัดการ SKU ซ้ำ (รวม/ยุบ)", "🔗 Duplicate SKUs (merge)")} size="xl"
+      description={t("เลือก SKU หลักที่จะเก็บ + SKU ซ้ำที่จะยุบ → ระบบโอนรูป/แท็ก/สต๊อก/ราคา/BOM ฯลฯ มาตัวหลัก แล้วยุบตัวซ้ำเข้าถังขยะ", "Pick the main SKU to keep + the duplicate to merge → images/tags/stock/prices/BOM etc. move to the main SKU and the duplicate goes to the trash")}
       footer={
         <div className="flex items-center justify-between w-full gap-3">
           <label className={`flex items-center gap-2 text-[12px] ${bothPicked ? "text-slate-600" : "text-slate-300"}`}>
             <input type="checkbox" checked={confirmed} disabled={!bothPicked} onChange={(e) => setConfirmed(e.target.checked)} className="w-4 h-4 accent-rose-600" />
-            เข้าใจแล้วว่าตัวซ้ำจะถูกยุบเข้าถังขยะ และ BOM/MO จะชี้มาตัวหลัก
+            {t("เข้าใจแล้วว่าตัวซ้ำจะถูกยุบเข้าถังขยะ และ BOM/MO จะชี้มาตัวหลัก", "I understand the duplicate goes to the trash and BOM/MO will point to the main SKU")}
           </label>
           <div className="flex gap-2 shrink-0">
-            <button onClick={onClose} disabled={submitting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
+            <button onClick={onClose} disabled={submitting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
             <button onClick={submit} disabled={!bothPicked || !confirmed || submitting || loading}
               className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50 inline-flex items-center gap-2">
-              {submitting && <Spinner />}{submitting ? "กำลังรวม…" : "🔗 รวม SKU"}
+              {submitting && <Spinner />}{submitting ? t("กำลังรวม…", "Merging…") : t("🔗 รวม SKU", "🔗 Merge SKUs")}
             </button>
           </div>
         </div>
@@ -166,34 +168,34 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
         {/* 1) เลือก SKU */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="p-3 rounded-lg border-2 border-emerald-200 bg-emerald-50/40">
-            <p className="text-[12px] font-semibold text-emerald-700 mb-1.5">✔ SKU หลัก (เก็บไว้)</p>
-            <SkuPicker value={primary} onChange={setPrimary} placeholder="เลือก SKU หลัก…" />
+            <p className="text-[12px] font-semibold text-emerald-700 mb-1.5">{t("✔ SKU หลัก (เก็บไว้)", "✔ Main SKU (keep)")}</p>
+            <SkuPicker value={primary} onChange={setPrimary} placeholder={t("เลือก SKU หลัก…", "Pick main SKU…")} />
           </div>
           <div className="p-3 rounded-lg border-2 border-rose-200 bg-rose-50/40">
-            <p className="text-[12px] font-semibold text-rose-700 mb-1.5">✕ SKU ซ้ำ (ยุบเข้าถังขยะ)</p>
-            <SkuPicker value={dup} onChange={setDup} placeholder="เลือก SKU ซ้ำ…" />
+            <p className="text-[12px] font-semibold text-rose-700 mb-1.5">{t("✕ SKU ซ้ำ (ยุบเข้าถังขยะ)", "✕ Duplicate SKU (to trash)")}</p>
+            <SkuPicker value={dup} onChange={setDup} placeholder={t("เลือก SKU ซ้ำ…", "Pick duplicate SKU…")} />
           </div>
         </div>
 
         {primary && dup && primary.id === dup.id && (
-          <p className="text-[12px] text-rose-600">⚠️ SKU หลักและ SKU ซ้ำต้องเป็นคนละตัว</p>
+          <p className="text-[12px] text-rose-600">{t("⚠️ SKU หลักและ SKU ซ้ำต้องเป็นคนละตัว", "⚠️ Main and duplicate SKU must be different")}</p>
         )}
 
-        {loading && <div className="py-6 flex items-center justify-center gap-2 text-sm text-slate-400"><Spinner /> กำลังโหลดข้อมูลเปรียบเทียบ…</div>}
+        {loading && <div className="py-6 flex items-center justify-center gap-2 text-sm text-slate-400"><Spinner /> {t("กำลังโหลดข้อมูลเปรียบเทียบ…", "Loading comparison…")}</div>}
 
         {bothPicked && !loading && (
           <>
             {/* 2) เทียบฟิลด์ที่ต่างกัน */}
             <div>
-              <p className="text-[13px] font-semibold text-slate-600 mb-1.5">เลือกข้อมูลที่จะใช้ (ฟิลด์ที่ต่างกัน {diffs.length})</p>
+              <p className="text-[13px] font-semibold text-slate-600 mb-1.5">{t(`เลือกข้อมูลที่จะใช้ (ฟิลด์ที่ต่างกัน ${diffs.length})`, `Choose values to keep (${diffs.length} differing fields)`)}</p>
               {diffs.length === 0 ? (
-                <p className="text-[12px] text-slate-400 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">ฟิลด์หลักเหมือนกันหมด — ตัวหลักจะใช้ค่าเดิม</p>
+                <p className="text-[12px] text-slate-400 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">{t("ฟิลด์หลักเหมือนกันหมด — ตัวหลักจะใช้ค่าเดิม", "Main fields are identical — the main SKU keeps its values")}</p>
               ) : (
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <div className="grid grid-cols-[1fr_1fr_1fr] gap-px bg-slate-100 text-[11px] font-medium text-slate-500">
-                    <div className="bg-slate-50 px-2.5 py-1.5">ฟิลด์</div>
-                    <div className="bg-emerald-50 px-2.5 py-1.5">ตัวหลัก ({primary!.code})</div>
-                    <div className="bg-rose-50 px-2.5 py-1.5">ตัวซ้ำ ({dup!.code})</div>
+                    <div className="bg-slate-50 px-2.5 py-1.5">{t("ฟิลด์", "Field")}</div>
+                    <div className="bg-emerald-50 px-2.5 py-1.5">{t("ตัวหลัก", "Main")} ({primary!.code})</div>
+                    <div className="bg-rose-50 px-2.5 py-1.5">{t("ตัวซ้ำ", "Duplicate")} ({dup!.code})</div>
                   </div>
                   <div className="max-h-[30vh] overflow-y-auto divide-y divide-slate-100">
                     {diffs.map((c) => {
@@ -220,14 +222,14 @@ export function SkuMergeModal({ onClose, onDone }: { onClose: () => void; onDone
             {/* 3) พรีวิวความเชื่อมโยง */}
             {preview && (
               <div>
-                <p className="text-[13px] font-semibold text-slate-600 mb-1.5">จะโอนมาตัวหลัก (จากตัวซ้ำ {dup!.code})</p>
+                <p className="text-[13px] font-semibold text-slate-600 mb-1.5">{t(`จะโอนมาตัวหลัก (จากตัวซ้ำ ${dup!.code})`, `Will move to the main SKU (from duplicate ${dup!.code})`)}</p>
                 {previewTotal === 0 && stockQty === 0 ? (
-                  <p className="text-[12px] text-slate-400 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">ตัวซ้ำนี้ไม่มีความเชื่อมโยงอื่น — จะแค่ยุบเข้าถังขยะ</p>
+                  <p className="text-[12px] text-slate-400 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100">{t("ตัวซ้ำนี้ไม่มีความเชื่อมโยงอื่น — จะแค่ยุบเข้าถังขยะ", "This duplicate has no other links — it will just go to the trash")}</p>
                 ) : (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[12px]">
                     {stockQty !== 0 && (
                       <div className="flex justify-between px-2.5 py-1.5 rounded-md bg-amber-50 border border-amber-100">
-                        <span className="text-slate-500">📦 สต๊อกคงเหลือ</span><span className="font-medium text-slate-700">+{stockQty}</span>
+                        <span className="text-slate-500">{t("📦 สต๊อกคงเหลือ", "📦 Stock on hand")}</span><span className="font-medium text-slate-700">+{stockQty}</span>
                       </div>
                     )}
                     {REL_LABELS.map((r) => {

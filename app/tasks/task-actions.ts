@@ -47,7 +47,7 @@ export async function applyTaskTransition(task: CreativeTask, toKey: string, opt
     if (force) done = await withOpenSubtaskCheck((c) => transitionTask(task.id, toKey, undefined, true, c));
     else {
       const t = transitionBetween(task.status, toKey);
-      if (!t) { pushToast("error", `เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`); return false; }
+      if (!t) { pushToast("error", lang(`เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`, `Can't change "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}"`)); return false; }
       // เงื่อนไขก่อนเข้าสถานะ (ตั้งต่อสถานะ · เจ้าของเลือก 2026-11-22) — เฉพาะการย้ายไปข้างหน้า · โหลดตัวเช็กเมื่อใช้ (ไม่ถ่วงทุกหน้า)
       if (!t.kind || t.kind === "normal" || t.kind === "approve") {
         const { checkStatusGate } = await import("./status-gate-check");

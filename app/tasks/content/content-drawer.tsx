@@ -534,7 +534,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     if (file.size > 25 * 1024 * 1024) { pushToast("error", t("วิดีโอเกิน 25MB — ตั้งโฟลเดอร์ Drive ของแบรนด์ก่อน หรือวางลิงก์ Google Drive แทน", "Video over 25MB — set the brand's Drive folder or paste a Drive link")); return; }
     const fd = new FormData(); fd.append("file", file); fd.append("folder", "creative-content");
     const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-    const j = await res.json().catch(() => ({ error: "อัปโหลดไม่สำเร็จ" }));
+    const j = await res.json().catch(() => ({ error: t("อัปโหลดไม่สำเร็จ", "Upload failed") }));
     if (j.error) { pushToast("error", j.error as string); return; }
     await addContentAttachment(contentId, { kind: "video", r2_key: j.r2_key as string, file_name: file.name, content_type: j.content_type as string, size_bytes: j.size as number });
     await loadAttachments();
@@ -1209,7 +1209,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </label>
           )}
         </span>} />
-      {planOpen && <AddToPlanModal open defaultTitle={`โพสต์: ${d.title}`} source={{ label: d.title || "โพสต์", href: `/tasks/content-calendar?content=${encodeURIComponent(contentId)}` }} onClose={() => setPlanOpen(false)} />}
+      {planOpen && <AddToPlanModal open defaultTitle={t(`โพสต์: ${d.title}`, `Post: ${d.title}`)} source={{ label: d.title || t("โพสต์", "Post"), href: `/tasks/content-calendar?content=${encodeURIComponent(contentId)}` }} onClose={() => setPlanOpen(false)} />}
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={brandId} brandLabel={brandLabel} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); mutateSWR(PLATFORM_SETTINGS_SWR_KEY, v); setPsOpen(false); }} pushToast={pushToast} />}

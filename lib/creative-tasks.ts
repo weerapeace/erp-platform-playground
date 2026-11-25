@@ -64,19 +64,19 @@ export const statusLabelFb = (k: string) => { const m = STATUS_META[k as Creativ
 
 // ---- ประเภทงาน creative ----
 export const TASK_TYPES: { value: string; label: string }[] = [
-  { value: "photo_shoot",     label: "ถ่ายรูปสินค้า" },
-  { value: "photo_edit",      label: "แต่งรูปสินค้า" },
-  { value: "product_image",   label: "รูปสินค้า (ปก/Detail)" },
+  { value: "photo_shoot",     get label() { return tr("ถ่ายรูปสินค้า", "Product photo shoot"); } },
+  { value: "photo_edit",      get label() { return tr("แต่งรูปสินค้า", "Product photo editing"); } },
+  { value: "product_image",   get label() { return tr("รูปสินค้า (ปก/Detail)", "Product images (cover/detail)"); } },
   { value: "banner",          label: "Content Banner" },
-  { value: "promote_banner",  label: "Banner โปรโมต" },
+  { value: "promote_banner",  get label() { return tr("Banner โปรโมต", "Promo banner"); } },
   { value: "video",           label: "Video Content" },
-  { value: "social_post",     label: "โพสต์ Social" },
-  { value: "product_listing", label: "ลงสินค้า Marketplace" },
-  { value: "caption",         label: "เขียน Caption" },
-  { value: "hashtag",         label: "หา Hashtag" },
-  { value: "campaign_plan",   label: "วางแผนแคมเปญ" },
-  { value: "approval",        label: "งานอนุมัติ" },
-  { value: "other",           label: "อื่น ๆ" },
+  { value: "social_post",     get label() { return tr("โพสต์ Social", "Social post"); } },
+  { value: "product_listing", get label() { return tr("ลงสินค้า Marketplace", "Marketplace listing"); } },
+  { value: "caption",         get label() { return tr("เขียน Caption", "Write caption"); } },
+  { value: "hashtag",         get label() { return tr("หา Hashtag", "Find hashtags"); } },
+  { value: "campaign_plan",   get label() { return tr("วางแผนแคมเปญ", "Campaign planning"); } },
+  { value: "approval",        get label() { return tr("งานอนุมัติ", "Approval task"); } },
+  { value: "other",           get label() { return tr("อื่น ๆ", "Other"); } },
 ];
 
 // ---- แพลตฟอร์ม ----
@@ -110,17 +110,17 @@ export const TRANSITIONS: Record<CreativeStatus, CreativeStatus[]> = {
 
 /** ปุ่ม action ที่เด่น ๆ ต่อสถานะ (ใช้ใน Queue/Kanban) */
 export const PRIMARY_ACTIONS: Record<CreativeStatus, { to: CreativeStatus; label: string }[]> = {
-  backlog:     [{ to: "in_progress", label: "▶ เริ่มงาน" }],
-  ready:       [{ to: "in_progress", label: "▶ เริ่มงาน" }],
-  in_progress: [{ to: "need_review", label: "📤 ส่งตรวจ" }, { to: "blocked", label: "⚠ ติดปัญหา" }],
-  need_review: [{ to: "approved", label: "✓ อนุมัติ" }, { to: "revision", label: "↩ ตีกลับแก้" }],
-  revision:    [{ to: "in_progress", label: "▶ แก้ต่อ" }],
-  approved:    [{ to: "published", label: "🚀 เผยแพร่" }, { to: "scheduled", label: "🗓 ตั้งเวลา" }],
-  scheduled:   [{ to: "published", label: "🚀 เผยแพร่" }],
-  published:   [{ to: "done", label: "✓ ปิดงาน" }],
-  blocked:     [{ to: "in_progress", label: "▶ ทำต่อ" }],
-  done:        [{ to: "in_progress", label: "↩ เปิดใหม่" }],
-  cancelled:   [{ to: "backlog", label: "↩ เปิดใหม่" }],
+  backlog:     [{ to: "in_progress", get label() { return tr("▶ เริ่มงาน", "▶ Start"); } }],
+  ready:       [{ to: "in_progress", get label() { return tr("▶ เริ่มงาน", "▶ Start"); } }],
+  in_progress: [{ to: "need_review", get label() { return tr("📤 ส่งตรวจ", "📤 Submit for review"); } }, { to: "blocked", get label() { return tr("⚠ ติดปัญหา", "⚠ Blocked"); } }],
+  need_review: [{ to: "approved", get label() { return tr("✓ อนุมัติ", "✓ Approve"); } }, { to: "revision", get label() { return tr("↩ ตีกลับแก้", "↩ Send back"); } }],
+  revision:    [{ to: "in_progress", get label() { return tr("▶ แก้ต่อ", "▶ Continue fixing"); } }],
+  approved:    [{ to: "published", get label() { return tr("🚀 เผยแพร่", "🚀 Publish"); } }, { to: "scheduled", get label() { return tr("🗓 ตั้งเวลา", "🗓 Schedule"); } }],
+  scheduled:   [{ to: "published", get label() { return tr("🚀 เผยแพร่", "🚀 Publish"); } }],
+  published:   [{ to: "done", get label() { return tr("✓ ปิดงาน", "✓ Close task"); } }],
+  blocked:     [{ to: "in_progress", get label() { return tr("▶ ทำต่อ", "▶ Resume"); } }],
+  done:        [{ to: "in_progress", get label() { return tr("↩ เปิดใหม่", "↩ Reopen"); } }],
+  cancelled:   [{ to: "backlog", get label() { return tr("↩ เปิดใหม่", "↩ Reopen"); } }],
 };
 
 /** ความคืบหน้าอัตโนมัติตามสถานะ (Option 2 ในสเปค — แก้เองทับได้) */

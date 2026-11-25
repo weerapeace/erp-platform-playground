@@ -76,7 +76,7 @@ function Sketch({ kind, brand }: { kind: ProductMaterialView; brand: string }) {
     return (
       <div className="relative h-20 rounded-lg border border-slate-200 bg-white overflow-hidden p-2 flex flex-col gap-1.5">
         <div className="h-1.5 w-1/2 rounded bg-slate-500" />
-        <p className="text-[9px] leading-tight text-slate-500">ผลิตจาก <span className="text-slate-700">หนังวัวแท้</span> ซับในผ้า · ตะเข็บคู่</p>
+        <p className="text-[9px] leading-tight text-slate-500">{t("ผลิตจาก", "Made of")} <span className="text-slate-700">{t("หนังวัวแท้", "genuine cowhide")}</span> {t("ซับในผ้า · ตะเข็บคู่", "fabric lining · double stitching")}</p>
         <span className="mt-auto self-start rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">{t("ไม่มีลิงก์", "No link")}</span>
       </div>
     );

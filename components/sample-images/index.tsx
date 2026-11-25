@@ -558,7 +558,7 @@ export function SampleImagesPage() {
       if (!plan.files.length) { toast.error(t("ไม่มีรูปให้ดาวน์โหลด", "No photos to download")); return; }
       if (plan.files.length > 300 && !(await askConfirm({ title: t("รูปเยอะมาก", "Lots of photos"), message: t(`${plan.files.length} รูป อาจใช้เวลานานและกินหน่วยความจำเครื่อง — ดาวน์โหลดต่อไหม?`, `${plan.files.length} photos — this may take a while. Continue?`), confirmText: t("ดาวน์โหลด", "Download") }))) return;
       zipCancel.current = false;
-      const zipName = `${plan.name}${selected.length ? ` (${selected.length} รูป)` : ""}`;
+      const zipName = `${plan.name}${selected.length ? t(` (${selected.length} รูป)`, ` (${selected.length} photos)`) : ""}`;
       const n = await downloadImagesAsZip(plan.files.map((f) => ({ url: sampleImgUrl(f.key), name: f.name })), zipName,
         (d, tot) => setZipUp({ label: t("กำลังโหลดรูปลง .zip", "Downloading to .zip"), name: zipName, pct: Math.round((d / Math.max(1, tot)) * 100), count: { current: Math.min(tot, d + 1), total: tot } }),
         { fetchBlob: fetchR2Blob, concurrency: 4, cancelled: () => zipCancel.current });

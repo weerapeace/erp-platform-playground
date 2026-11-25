@@ -13,6 +13,7 @@ import { useEffect, useState, useCallback, useRef, type MutableRefObject } from 
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 
 export type SummaryMap = Record<string, "sum" | "count" | "avg">;
 
@@ -37,14 +38,14 @@ type FullLayout = {
 };
 
 const COLOR_OPTS = [
-  { key: "red", label: "แดง" }, { key: "orange", label: "ส้ม" }, { key: "amber", label: "เหลือง" },
-  { key: "green", label: "เขียว" }, { key: "blue", label: "ฟ้า" }, { key: "purple", label: "ม่วง" }, { key: "slate", label: "เทา" },
+  { key: "red", get label() { return tr("แดง", "Red"); } }, { key: "orange", get label() { return tr("ส้ม", "Orange"); } }, { key: "amber", get label() { return tr("เหลือง", "Yellow"); } },
+  { key: "green", get label() { return tr("เขียว", "Green"); } }, { key: "blue", get label() { return tr("ฟ้า", "Blue"); } }, { key: "purple", get label() { return tr("ม่วง", "Purple"); } }, { key: "slate", get label() { return tr("เทา", "Gray"); } },
 ];
 const OP_OPTS: { key: RowColorOp; label: string }[] = [
-  { key: "eq", label: "เท่ากับ" }, { key: "ne", label: "ไม่เท่ากับ" },
-  { key: "lt", label: "น้อยกว่า" }, { key: "lte", label: "น้อยกว่า/เท่ากับ" },
-  { key: "gt", label: "มากกว่า" }, { key: "gte", label: "มากกว่า/เท่ากับ" },
-  { key: "empty", label: "ว่าง" }, { key: "not_empty", label: "ไม่ว่าง" },
+  { key: "eq", get label() { return tr("เท่ากับ", "Equals"); } }, { key: "ne", get label() { return tr("ไม่เท่ากับ", "Not equal"); } },
+  { key: "lt", get label() { return tr("น้อยกว่า", "Less than"); } }, { key: "lte", get label() { return tr("น้อยกว่า/เท่ากับ", "Less than or equal"); } },
+  { key: "gt", get label() { return tr("มากกว่า", "Greater than"); } }, { key: "gte", get label() { return tr("มากกว่า/เท่ากับ", "Greater than or equal"); } },
+  { key: "empty", get label() { return tr("ว่าง", "Is empty"); } }, { key: "not_empty", get label() { return tr("ไม่ว่าง", "Is not empty"); } },
 ];
 
 export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embedded = false, showSummaries = true, saveRef, onSummaries, seed, seedKey, getStateRef, disableSelfSave = false }: {
@@ -58,6 +59,7 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
   getStateRef?: MutableRefObject<(() => LayoutPanelState) | null>;         // ให้พ่อดึงค่าปัจจุบันไปเซฟลงมุมมอง
   disableSelfSave?: boolean;                                               // true = ไม่ให้ save() เขียน table layout (พ่อเซฟลงมุมมองเอง)
 }) {
+  const t = useT();
   const [fields, setFields] = useState<{ value: string; label: string; visible: boolean }[]>([]);
   const [full, setFull] = useState<FullLayout | null>(null);
   const [loading, setLoading] = useState(true);
@@ -169,12 +171,12 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
   const save = async () => {
     if (disableSelfSave) return;   // โหมดแก้มุมมอง: พ่อเป็นคนเซฟลง config ของมุมมองเอง
     setSaving(true); setErr(null); setMsg(null);
-    try { await persist(); setMsg("บันทึกแล้ว ✓ (เปิดตารางใหม่จะใช้ค่านี้)"); setTimeout(() => setMsg(null), 4000); }
+    try { await persist(); setMsg(tr("บันทึกแล้ว ✓ (เปิดตารางใหม่จะใช้ค่านี้)", "Saved ✓ (applies next time the table opens)")); setTimeout(() => setMsg(null), 4000); }
     catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setSaving(false); }
   };
 
   const forceForEveryone = async () => {
-    if (!confirm("บังคับใช้คอลัมน์/ค่าตั้งนี้กับทุกคน?\n\n• มุมมองเริ่มต้น (ดาว ★) ของตารางนี้จะถูกยกเลิกทั้งหมด เพื่อให้ค่ากลางนี้แสดงผล\n• ผู้ใช้ที่เคยจัดคอลัมน์เองในเครื่อง อาจต้องกด \"รีเซ็ตเป็นค่าเริ่มต้น\" ในตารางอีกครั้ง")) return;
+    if (!confirm(tr("บังคับใช้คอลัมน์/ค่าตั้งนี้กับทุกคน?\n\n• มุมมองเริ่มต้น (ดาว ★) ของตารางนี้จะถูกยกเลิกทั้งหมด เพื่อให้ค่ากลางนี้แสดงผล\n• ผู้ใช้ที่เคยจัดคอลัมน์เองในเครื่อง อาจต้องกด \"รีเซ็ตเป็นค่าเริ่มต้น\" ในตารางอีกครั้ง", "Apply these columns/settings to everyone?\n\n• All default views (★) of this table will be unset so these defaults show\n• People who arranged columns on their own device may need to press \"Reset to default\" in the table again"))) return;
     setSaving(true); setErr(null); setMsg(null);
     try {
       await persist();
@@ -183,7 +185,7 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       for (const v of defaults) {
         await apiFetch("/api/admin/saved-views", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: v.id, is_default: false }) });
       }
-      setMsg(`บังคับใช้กับทุกคนแล้ว ✓${defaults.length ? ` — ยกเลิกมุมมองเริ่มต้น ${defaults.length} อัน` : ""}`);
+      setMsg(tr(`บังคับใช้กับทุกคนแล้ว ✓${defaults.length ? ` — ยกเลิกมุมมองเริ่มต้น ${defaults.length} อัน` : ""}`, `Applied to everyone ✓${defaults.length ? ` — unset ${defaults.length} default view(s)` : ""}`));
       setTimeout(() => setMsg(null), 6000);
     } catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setSaving(false); }
   };
@@ -195,20 +197,20 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
   useEffect(() => { onSummaries?.(summaries, setSummaryFor); }, [summaries, onSummaries, setSummaryFor]);
   if (saveRef) saveRef.current = save;
 
-  if (loading) return <div className="text-sm text-slate-400 py-10 text-center">กำลังโหลด…</div>;
+  if (loading) return <div className="text-sm text-slate-400 py-10 text-center">{t("กำลังโหลด…", "Loading…")}</div>;
 
   const card = "bg-white border border-slate-200 rounded-xl p-5";
   const sel = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white";
   const colSelect = (val: string, on: (v: string) => void, allowNone = true) => (
     <select value={val} onChange={(e) => on(e.target.value)} className={sel}>
-      {allowNone && <option value="">— ไม่กำหนด —</option>}
+      {allowNone && <option value="">{t("— ไม่กำหนด —", "— None —")}</option>}
       {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
     </select>
   );
   const dirSelect = (val: SortDir, on: (v: SortDir) => void) => (
     <select value={val} onChange={(e) => on(e.target.value as SortDir)} className={sel}>
-      <option value="asc">น้อย → มาก (A→Z, เก่า→ใหม่)</option>
-      <option value="desc">มาก → น้อย (Z→A, ใหม่→เก่า)</option>
+      <option value="asc">{t("น้อย → มาก (A→Z, เก่า→ใหม่)", "Ascending (A→Z, old→new)")}</option>
+      <option value="desc">{t("มาก → น้อย (Z→A, ใหม่→เก่า)", "Descending (Z→A, new→old)")}</option>
     </select>
   );
 
@@ -216,26 +218,26 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
     <div className={embedded ? "space-y-4" : "max-w-2xl mx-auto px-6 py-6 space-y-5"}>
       {/* การเรียง + จัดกลุ่ม */}
       <div className={card}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-4">ค่าเริ่มต้นตาราง</h3>
+        <h3 className="text-sm font-semibold text-slate-800 mb-4">{t("ค่าเริ่มต้นตาราง", "Table defaults")}</h3>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">เรียงเริ่มต้น (Default sort)</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">{t("เรียงเริ่มต้น (Default sort)", "Default sort")}</label>
             <div className="flex flex-wrap gap-2">{colSelect(sortCol, setSortCol)} {sortCol && dirSelect(sortDir, setSortDir)}</div>
           </div>
           {sortCol && (
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1.5">เรียงรอง (ตัวตัดสินเมื่อค่าหลักเท่ากัน)</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">{t("เรียงรอง (ตัวตัดสินเมื่อค่าหลักเท่ากัน)", "Secondary sort (tie-breaker)")}</label>
               <div className="flex flex-wrap gap-2">{colSelect(sort2Col, setSort2Col)} {sort2Col && dirSelect(sort2Dir, setSort2Dir)}</div>
             </div>
           )}
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">จัดกลุ่มเริ่มต้น (Group by)</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">{t("จัดกลุ่มเริ่มต้น (Group by)", "Default group by")}</label>
             {colSelect(groupBy, setGroupBy)}
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1.5">จำนวนแถวต่อหน้าเริ่มต้น</label>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">{t("จำนวนแถวต่อหน้าเริ่มต้น", "Default rows per page")}</label>
             <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className={sel}>
-              {[10, 20, 50, 100, 200].map((n) => <option key={n} value={n}>{n} แถว/หน้า</option>)}
+              {[10, 20, 50, 100, 200].map((n) => <option key={n} value={n}>{t(`${n} แถว/หน้า`, `${n} rows/page`)}</option>)}
             </select>
           </div>
         </div>
@@ -245,15 +247,15 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       {showColumns && (
         <div className={card}>
           <div className="flex items-center justify-between mb-1">
-            <h3 className="text-sm font-semibold text-slate-800">คอลัมน์ที่โชว์เริ่มต้น (View default)</h3>
+            <h3 className="text-sm font-semibold text-slate-800">{t("คอลัมน์ที่โชว์เริ่มต้น (View default)", "Default visible columns")}</h3>
             <div className="flex gap-2 text-xs">
-              <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, true])))} className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
-              <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, false])))} className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">ไม่เลือก</button>
+              <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, true])))} className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">{t("เลือกทั้งหมด", "Select all")}</button>
+              <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, false])))} className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">{t("ไม่เลือก", "Select none")}</button>
             </div>
           </div>
-          <p className="text-xs text-slate-500 mb-3">เปิดตารางครั้งแรกจะโชว์คอลัมน์ที่ติ๊กไว้ · ผู้ใช้ปรับเองได้ภายหลัง · ป้าย <span className="px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium">ซ่อน</span> = field ที่ตั้งให้ซ่อนไว้ (ยังติ๊กให้โชว์ในตารางนี้ได้)</p>
+          <p className="text-xs text-slate-500 mb-3">{t("เปิดตารางครั้งแรกจะโชว์คอลัมน์ที่ติ๊กไว้ · ผู้ใช้ปรับเองได้ภายหลัง · ป้าย", "Ticked columns show when the table first opens · users can change them later · the")} <span className="px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium">{t("ซ่อน", "Hidden")}</span> {t("= field ที่ตั้งให้ซ่อนไว้ (ยังติ๊กให้โชว์ในตารางนี้ได้)", "tag = a field set to hidden (you can still tick it to show here)")}</p>
           {fields.length === 0 ? (
-            <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">— ไม่มีคอลัมน์ —</div>
+            <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">{t("— ไม่มีคอลัมน์ —", "— No columns —")}</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
               {fields.map((f) => (
@@ -261,7 +263,7 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
                   <input type="checkbox" checked={colVis[f.value] ?? true} onChange={(e) => setColVis((p) => ({ ...p, [f.value]: e.target.checked }))} className="rounded border-slate-300 w-4 h-4" />
                   <span className={`flex-1 min-w-0 truncate inline-flex items-center gap-1.5 ${f.visible ? "" : "text-slate-400"}`}>
                     <span className="truncate">{f.label}</span>
-                    {!f.visible && <span className="shrink-0 px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium" title="field นี้ถูกตั้งให้ซ่อน (is_visible=false) — ติ๊กเพื่อบังคับโชว์ในตารางนี้">ซ่อน</span>}
+                    {!f.visible && <span className="shrink-0 px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium" title={t("field นี้ถูกตั้งให้ซ่อน (is_visible=false) — ติ๊กเพื่อบังคับโชว์ในตารางนี้", "This field is set to hidden (is_visible=false) — tick to force it to show in this table")}>{t("ซ่อน", "Hidden")}</span>}
                   </span>
                   <code className="text-[10px] text-slate-400 shrink-0">{f.value}</code>
                 </label>
@@ -272,12 +274,12 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
             <button type="button"
               onClick={() => {
                 if (typeof window === "undefined") return;
-                if (!confirm(`รีเซ็ตมุมมองตาราง "${tableId}" ที่จำไว้ในเครื่องนี้?\n\nคอลัมน์/ฟิลเตอร์/ความหนาแน่นที่คุณเคยปรับเอง จะกลับไปใช้ค่าเริ่มต้นของระบบ`)) return;
-                try { const p1 = `erp-dt-${tableId}`; const p2 = `erp-card-cfg-${tableId}`; Object.keys(localStorage).forEach((k) => { if (k.startsWith(p1) || k === p2) localStorage.removeItem(k); }); alert("รีเซ็ตแล้ว ✓ — เปิดตารางใหม่จะเห็นค่าเริ่มต้นล่าสุด"); }
-                catch { alert("รีเซ็ตไม่สำเร็จ"); }
+                if (!confirm(t(`รีเซ็ตมุมมองตาราง "${tableId}" ที่จำไว้ในเครื่องนี้?\n\nคอลัมน์/ฟิลเตอร์/ความหนาแน่นที่คุณเคยปรับเอง จะกลับไปใช้ค่าเริ่มต้นของระบบ`, `Reset the saved view of table "${tableId}" on this device?\n\nColumns/filters/density you adjusted will go back to the system defaults`))) return;
+                try { const p1 = `erp-dt-${tableId}`; const p2 = `erp-card-cfg-${tableId}`; Object.keys(localStorage).forEach((k) => { if (k.startsWith(p1) || k === p2) localStorage.removeItem(k); }); alert(t("รีเซ็ตแล้ว ✓ — เปิดตารางใหม่จะเห็นค่าเริ่มต้นล่าสุด", "Reset ✓ — reopen the table to see the latest defaults")); }
+                catch { alert(t("รีเซ็ตไม่สำเร็จ", "Reset failed")); }
               }}
-              className="h-8 px-3 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 inline-flex items-center gap-1">↺ รีเซ็ตมุมมองตารางของฉัน</button>
-            <p className="text-[11px] text-amber-600 flex-1 min-w-[200px]">กดปุ่มนี้ถ้าแก้คอลัมน์ด้านบนแล้วแต่ในตารางยังไม่เปลี่ยน (ระบบจำการปรับแต่งของแต่ละคนไว้ในเครื่อง — ปุ่มนี้รีเซ็ตเฉพาะเครื่องของคุณ)</p>
+              className="h-8 px-3 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 inline-flex items-center gap-1">{t("↺ รีเซ็ตมุมมองตารางของฉัน", "↺ Reset my table view")}</button>
+            <p className="text-[11px] text-amber-600 flex-1 min-w-[200px]">{t("กดปุ่มนี้ถ้าแก้คอลัมน์ด้านบนแล้วแต่ในตารางยังไม่เปลี่ยน (ระบบจำการปรับแต่งของแต่ละคนไว้ในเครื่อง — ปุ่มนี้รีเซ็ตเฉพาะเครื่องของคุณ)", "Press this if you changed the columns above but the table hasn't changed (each person's tweaks are stored on their device — this resets only yours)")}</p>
           </div>
         </div>
       )}
@@ -285,12 +287,12 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       {/* สีแถวตามเงื่อนไข */}
       <div className={card}>
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">ระบายสีแถวตามเงื่อนไข</h3>
-          <button onClick={() => setRules((r) => [...r, { column: fields[0]?.value ?? "", op: "eq", value: "", color: "red" }])} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">+ เพิ่มกฎ</button>
+          <h3 className="text-sm font-semibold text-slate-800">{t("ระบายสีแถวตามเงื่อนไข", "Conditional row colors")}</h3>
+          <button onClick={() => setRules((r) => [...r, { column: fields[0]?.value ?? "", op: "eq", value: "", color: "red" }])} className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">{t("+ เพิ่มกฎ", "+ Add rule")}</button>
         </div>
-        <p className="text-xs text-slate-500 mb-3">เช่น สต๊อก น้อยกว่า 10 → แดง · กฎบนสุดที่เข้าเงื่อนไขชนะ</p>
+        <p className="text-xs text-slate-500 mb-3">{t("เช่น สต๊อก น้อยกว่า 10 → แดง · กฎบนสุดที่เข้าเงื่อนไขชนะ", "e.g. stock less than 10 → red · the top matching rule wins")}</p>
         {rules.length === 0 ? (
-          <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">— ยังไม่มีกฎ —</div>
+          <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">{t("— ยังไม่มีกฎ —", "— No rules yet —")}</div>
         ) : (
           <div className="space-y-2">
             {rules.map((r, i) => {
@@ -300,7 +302,7 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
                 <div key={i} className="flex flex-wrap items-center gap-2 bg-slate-50 rounded-lg p-2">
                   <select value={r.column} onChange={(e) => upd({ column: e.target.value })} className={sel}>{fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
                   <select value={r.op} onChange={(e) => upd({ op: e.target.value as RowColorOp })} className={sel}>{OP_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select>
-                  {!noVal && <input value={r.value ?? ""} onChange={(e) => upd({ value: e.target.value })} placeholder="ค่า" className={`${sel} w-24`} />}
+                  {!noVal && <input value={r.value ?? ""} onChange={(e) => upd({ value: e.target.value })} placeholder={t("ค่า", "Value")} className={`${sel} w-24`} />}
                   <select value={r.color} onChange={(e) => upd({ color: e.target.value })} className={sel}>{COLOR_OPTS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
                   <span className="w-6 h-6 rounded border border-slate-300" style={{ backgroundColor: ({ red:"#fecaca",orange:"#fed7aa",amber:"#fde68a",green:"#bbf7d0",blue:"#bfdbfe",purple:"#e9d5ff",slate:"#e2e8f0" } as Record<string,string>)[r.color] }} />
                   <button onClick={() => setRules((arr) => arr.filter((_, j) => j !== i))} className="ml-auto text-slate-400 hover:text-red-500 text-sm">✕</button>
@@ -314,8 +316,8 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       {/* สรุปท้ายคอลัมน์ — ซ่อนได้ถ้าไปโชว์ inline ที่รายการคอลัมน์ */}
       {showSummaries && (
       <div className={card}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">สรุปท้ายคอลัมน์ (Total row)</h3>
-        <p className="text-xs text-slate-500 mb-3">แสดงแถวสรุปท้ายตาราง เช่น รวมยอด/นับจำนวน/เฉลี่ย ของคอลัมน์ที่เลือก</p>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">{t("สรุปท้ายคอลัมน์ (Total row)", "Total row")}</h3>
+        <p className="text-xs text-slate-500 mb-3">{t("แสดงแถวสรุปท้ายตาราง เช่น รวมยอด/นับจำนวน/เฉลี่ย ของคอลัมน์ที่เลือก", "Show a summary row at the bottom, e.g. sum/count/average of chosen columns")}</p>
         <div className="space-y-2">
           {fields.map((f) => {
             const cur = summaries[f.value] ?? "";
@@ -325,10 +327,10 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
                 <select value={cur}
                   onChange={(e) => setSummaries((p) => { const n = { ...p }; const v = e.target.value; if (v) n[f.value] = v as "sum" | "count" | "avg"; else delete n[f.value]; return n; })}
                   className={sel}>
-                  <option value="">— ไม่สรุป —</option>
-                  <option value="sum">รวมยอด (sum)</option>
-                  <option value="count">นับจำนวน (count)</option>
-                  <option value="avg">เฉลี่ย (avg)</option>
+                  <option value="">{t("— ไม่สรุป —", "— None —")}</option>
+                  <option value="sum">{t("รวมยอด (sum)", "Sum")}</option>
+                  <option value="count">{t("นับจำนวน (count)", "Count")}</option>
+                  <option value="avg">{t("เฉลี่ย (avg)", "Average")}</option>
                 </select>
               </div>
             );
@@ -339,19 +341,19 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
 
       {/* actions — ซ่อนปุ่ม save ถ้าพ่อ (Studio) รวมปุ่มบันทึกแล้ว (saveRef) */}
       <div className="flex items-center gap-3 flex-wrap">
-        {!saveRef && <button onClick={save} disabled={saving} className="h-10 px-6 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกค่าเริ่มต้นตาราง"}</button>}
+        {!saveRef && <button onClick={save} disabled={saving} className="h-10 px-6 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกค่าเริ่มต้นตาราง", "Save table defaults")}</button>}
         {showColumns && (
-          <button onClick={forceForEveryone} disabled={saving} title="บันทึก + ยกเลิกมุมมองเริ่มต้น (ดาว) ของตารางนี้ เพื่อให้ค่ากลางนี้แสดงผลกับทุกคน"
-            className="h-10 px-5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50">📌 บังคับใช้กับทุกคน</button>
+          <button onClick={forceForEveryone} disabled={saving} title={t("บันทึก + ยกเลิกมุมมองเริ่มต้น (ดาว) ของตารางนี้ เพื่อให้ค่ากลางนี้แสดงผลกับทุกคน", "Save + unset this table's default (★) views so these defaults show for everyone")}
+            className="h-10 px-5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50">{t("📌 บังคับใช้กับทุกคน", "📌 Apply to everyone")}</button>
         )}
         {msg && <span className="text-sm text-emerald-600">{msg}</span>}
         {err && <span className="text-sm text-red-600">⚠️ {err}</span>}
       </div>
       {showColumns && (
         <>
-          <p className="text-[11px] text-slate-400 -mt-2">ℹ️ ถ้าตารางมี “มุมมองเริ่มต้น (ดาว ★)” อยู่ มุมมองนั้นจะชนะค่านี้ — กด “บังคับใช้กับทุกคน” เพื่อล้างมุมมองดาวของตารางนี้</p>
+          <p className="text-[11px] text-slate-400 -mt-2">ℹ️ {t("ถ้าตารางมี “มุมมองเริ่มต้น (ดาว ★)” อยู่ มุมมองนั้นจะชนะค่านี้ — กด “บังคับใช้กับทุกคน” เพื่อล้างมุมมองดาวของตารางนี้", "If the table has a “default view (★)”, it wins over these settings — press “Apply to everyone” to clear this table's starred views")}</p>
           <div className="text-center pt-2">
-            <Link href={`/admin/table-layouts?table=${encodeURIComponent(tableId)}`} className="text-sm text-blue-600 hover:underline">จัดคอลัมน์ / ความหนาแน่น / จำนวนต่อหน้า (ตัวจัดเลย์เอาต์เต็ม) →</Link>
+            <Link href={`/admin/table-layouts?table=${encodeURIComponent(tableId)}`} className="text-sm text-blue-600 hover:underline">{t("จัดคอลัมน์ / ความหนาแน่น / จำนวนต่อหน้า (ตัวจัดเลย์เอาต์เต็ม) →", "Columns / density / page size (full layout editor) →")}</Link>
           </div>
         </>
       )}

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { LoadingState, ErrorState } from "@/components/state-views";
 import { StorageProviderBadge } from "@/components/storage-rules";
@@ -25,9 +26,9 @@ export function useStorageRules(enabled: boolean): { rules: StorageRule[] | null
     setError(null);
     apiFetch("/api/storage-rules").then((r) => r.json().then((j) => ({ ok: r.ok, j }))).then(({ ok, j }) => {
       if (!alive) return;
-      if (!ok || j?.error) { setError(j?.error || "โหลดกฎที่เก็บไฟล์ไม่สำเร็จ"); setRules([]); return; }
+      if (!ok || j?.error) { setError(j?.error || tr("โหลดกฎที่เก็บไฟล์ไม่สำเร็จ", "Failed to load storage rules")); setRules([]); return; }
       setRules((j?.data ?? []) as StorageRule[]);
-    }).catch(() => { if (alive) { setError("โหลดกฎที่เก็บไฟล์ไม่สำเร็จ"); setRules([]); } });
+    }).catch(() => { if (alive) { setError(tr("โหลดกฎที่เก็บไฟล์ไม่สำเร็จ", "Failed to load storage rules")); setRules([]); } });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, key]);

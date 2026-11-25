@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import { MoneyInput } from "@/components/money-input";
-import { useT } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { cutoffText, quoteMethod, visibleMethods, type ShippingConfig } from "@/lib/website-shipping";
 
@@ -18,6 +18,8 @@ const quickPostals = (): [string, string][] => [["10200", tr("กทม.", "Bang
 
 export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConfig; selectedId: string | null }) {
   const t = useT();
+  // EN = เหมือนเว็บร้าน /en: ใช้ชื่อ/เวลาส่งภาษาอังกฤษของวิธีส่ง (ว่าง = ใช้ไทย)
+  const en = useLang().lang === "en";
   const [subtotal, setSubtotal] = useState("990");
   const [qty, setQty] = useState("1");
   const [postal, setPostal] = useState("10200");
@@ -63,7 +65,7 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-shipping-methods-preview>
         <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h4 className="text-base font-semibold text-slate-900">วิธีจัดส่ง</h4>
+          <h4 className="text-base font-semibold text-slate-900">{t("วิธีจัดส่ง", "Shipping method")}</h4>
           <span className="text-[10px] uppercase tracking-wider text-slate-400">{t("หน้าชำระเงินของลูกค้า", "Customer checkout")}</span>
         </div>
         {!rows.length && <p className="text-sm text-slate-400">{t("ยังไม่มีวิธีที่เปิดอยู่ — ลูกค้าจะสั่งซื้อไม่ได้", "No method is on — customers can't order")}</p>}
@@ -71,13 +73,14 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
           {rows.map(({ m, q }) => {
             const on = m.id === selectedId;
             const off = q.reason === "area";
+            const eta = (en && m.eta_en) || m.eta;
             const line = off
-              ? "ส่งไม่ถึงรหัสไปรษณีย์นี้"
+              ? t("ส่งไม่ถึงรหัสไปรษณีย์นี้", "Doesn't ship to this postcode")
               : [
-                  m.eta ? (m.kind === "ship" && /^\d/.test(m.eta) ? `ถึงภายใน ${m.eta}` : m.eta) : "",
-                  cutoffText(m, now),
-                  !m.codAllowed && m.kind === "ship" ? "ไม่รับเก็บเงินปลายทาง" : "",
-                  q.remoteFee ? `รวมพื้นที่ห่างไกล ${money(q.remoteFee)}` : "",
+                  eta ? (m.kind === "ship" && /^\d/.test(eta) ? t(`ถึงภายใน ${eta}`, `Arrives within ${eta}`) : eta) : "",
+                  cutoffText(m, now, en ? "en" : "th"),
+                  !m.codAllowed && m.kind === "ship" ? t("ไม่รับเก็บเงินปลายทาง", "No cash on delivery") : "",
+                  q.remoteFee ? t(`รวมพื้นที่ห่างไกล ${money(q.remoteFee)}`, `Incl. remote area ${money(q.remoteFee)}`) : "",
                 ].filter(Boolean).join(" · ");
             return (
               <div key={m.id} className={`flex items-start gap-2.5 rounded-xl border p-3 ${off ? "opacity-50" : ""} ${on ? "border-slate-900 bg-slate-50" : "border-slate-200"}`}>
@@ -85,12 +88,12 @@ export function ShippingCustomerPreview({ cfg, selectedId }: { cfg: ShippingConf
                 <span className="text-lg leading-none">{m.kind === "pickup" ? "🏪" : "🚚"}</span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-3">
-                    <span className="text-sm font-medium text-slate-900">{m.name || "(ไม่มีชื่อ)"}</span>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{off ? "—" : q.fee ? money(q.fee) : "ฟรี"}</span>
+                    <span className="text-sm font-medium text-slate-900">{(en && m.name_en) || m.name || t("(ไม่มีชื่อ)", "(untitled)")}</span>
+                    <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{off ? "—" : q.fee ? money(q.fee) : t("ฟรี", "Free")}</span>
                   </span>
                   {line && <span className="mt-0.5 block text-xs text-slate-500">{line}</span>}
-                  {!off && q.toFree > 0 && <span className="mt-1 block text-xs text-emerald-700">ซื้ออีก {money(q.toFree)} ส่งฟรี</span>}
-                  {m.note && <span className="mt-1 block text-xs text-slate-600">📍 {m.note}</span>}
+                  {!off && q.toFree > 0 && <span className="mt-1 block text-xs text-emerald-700">{t(`ซื้ออีก ${money(q.toFree)} ส่งฟรี`, `Spend ${money(q.toFree)} more for free shipping`)}</span>}
+                  {(en && m.note_en) || m.note ? <span className="mt-1 block text-xs text-slate-600">📍 {(en && m.note_en) || m.note}</span> : null}
                 </span>
               </div>
             );

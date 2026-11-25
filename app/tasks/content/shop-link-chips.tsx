@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { CopyButton } from "@/components/copy-button";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -16,7 +17,7 @@ import { platformMeta, platformLabel } from "../use-options";
 
 export type ShopLink = { platform: string; url: string | null; price: number | null };
 
-const FALLBACK: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE", website: "เว็บ" };
+const FALLBACK: Record<string, string> = { shopee: "Shopee", lazada: "Lazada", tiktok: "TikTok", line_shopping: "LINE", get website() { return tr("เว็บ", "Web"); } };
 const isHex = (c?: string | null) => !!c && /^#[0-9a-f]{6}$/i.test(c);
 
 /** โหลดลิงก์ร้านของ Parent SKU (ไม่มี parent = ว่าง) */

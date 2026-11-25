@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { clearProfileCache, readProfileCache, shouldReloadProfile, writeProfileCache, writeProfilePerms, type CachedProfile } from "@/lib/auth-profile-cache";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 // ============================================================
 // Auth — Supabase Auth จริง (email/password)
@@ -183,7 +184,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 };
 
 const ROLE_LABELS: Record<Role, string> = {
-  admin: "ผู้ดูแลระบบ", manager: "ผู้จัดการ", staff: "พนักงาน", viewer: "ผู้ชม (ดูอย่างเดียว)",
+  get admin() { return tr("ผู้ดูแลระบบ", "Admin"); }, get manager() { return tr("ผู้จัดการ", "Manager"); },
+  get staff() { return tr("พนักงาน", "Staff"); }, get viewer() { return tr("ผู้ชม (ดูอย่างเดียว)", "Viewer (read-only)"); },
 };
 const ROLE_COLORS: Record<Role, string> = {
   admin:   "bg-purple-100 text-purple-700 border-purple-200",
@@ -341,7 +343,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoginError(null);
     const { error } = await supabaseBrowser.auth.signInWithPassword({ email, password });
     if (error) {
-      setLoginError(error.message === "Invalid login credentials" ? "อีเมลหรือรหัสผ่านไม่ถูกต้อง" : error.message);
+      setLoginError(error.message === "Invalid login credentials" ? tr("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "Incorrect email or password") : error.message);
       return false;
     }
     return true;

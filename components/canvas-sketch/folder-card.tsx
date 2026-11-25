@@ -15,17 +15,18 @@ import { useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { suppressUnload } from "@/lib/canvas-unload-guard";
 
 /** การ์ดโฟลเดอร์บน Excalidraw (กล่องเล็ก): 📁 ชื่อ (บน) + path เล็กสีเทา (ล่าง) · คำใบ้เป็น tooltip ตอนชี้ */
 export function folderCardSkeleton(f: { path: string; label: string }): Record<string, unknown>[] {
   const fid = Math.random().toString(36).slice(2, 9);
   const gid = `folder-${fid}`;
-  const data = { kind: "folder", id: fid, path: f.path, label: f.label, tooltip: "ดับเบิลคลิก = เปิดโฟลเดอร์" };
+  const data = { kind: "folder", id: fid, path: f.path, label: f.label, tooltip: tr("ดับเบิลคลิก = เปิดโฟลเดอร์", "Double-click = open folder") };
   const W = 250, H = 60;
   return [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ecfeff", strokeColor: "#0891b2", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
-    { type: "text", x: 12, y: 9, width: W - 24, text: `📁 ${f.label || "โฟลเดอร์"}`, fontSize: 15, strokeColor: "#155e75", groupIds: [gid], customData: data },
+    { type: "text", x: 12, y: 9, width: W - 24, text: `📁 ${f.label || tr("โฟลเดอร์", "Folder")}`, fontSize: 15, strokeColor: "#155e75", groupIds: [gid], customData: data },
     { type: "text", x: 12, y: 32, width: W - 24, text: f.path, fontSize: 10, strokeColor: "#64748b", groupIds: [gid], customData: data },
   ];
 }
@@ -51,7 +52,7 @@ export function FolderCardModal({ open, onClose, onPlace }: {
   const place = () => {
     const path = form.path.trim();
     if (!path) return;
-    const label = form.label.trim() || path.split(/[\\/]/).filter(Boolean).pop() || "โฟลเดอร์";
+    const label = form.label.trim() || path.split(/[\\/]/).filter(Boolean).pop() || t("โฟลเดอร์", "Folder");
     onPlace(folderCardSkeleton({ path, label }), { path, label });
     setForm({ label: "", path: "" });
   };

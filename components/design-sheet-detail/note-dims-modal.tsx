@@ -95,7 +95,7 @@ export function NoteDimsModal<T extends CostItemLike>({ open, onClose, items, on
   // มือถือ: ปุ่มถ่ายรูปโน้ตตรง (ของกลาง photo-capture · ดัดโน้ตเอียงให้ตรงก่อนให้ AI อ่าน)
   const fileBtn = (label: string) => (
     <>
-    <CameraButton onFiles={(fs) => { if (fs[0]) void read(fs[0]); }} multiple={false} disabled={busy} label="ถ่ายรูปโน้ต"
+    <CameraButton onFiles={(fs) => { if (fs[0]) void read(fs[0]); }} multiple={false} disabled={busy} label={t("ถ่ายรูปโน้ต", "Photo of note")}
       className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 text-sm font-medium text-blue-700 disabled:opacity-50" />
     <label className={`inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border px-3 text-sm font-medium ${busy ? "border-slate-200 text-slate-400" : "border-blue-300 bg-white text-blue-700 hover:bg-blue-50"}`}>
       <Icon value="i:camera" className="text-[15px]" />{label}

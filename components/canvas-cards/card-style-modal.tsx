@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { Popover } from "@/components/popover";
 import { TextStyleControl } from "@/components/text-style-control";
@@ -18,14 +19,15 @@ import { CARD_FIELDS, CARD_FONTS, CARD_PRESETS, STYLED_TYPES, applyTextStyleToFi
 
 export type SavedCardPreset = { id: string; name: string; type: StyledCardType; style: CardStyle };
 
-const SAMPLE: Record<StyledCardType, CardValues> = {
-  content: { title: "LY22 Video", no: "CN-202611-0012 · draft", sched: "🗓 23 พ.ย. 14:00", plat: "Instagram · Facebook", brief: "ถ่ายนางแบบถือ ฉากขาว\nโชว์ซิปด้านใน", ref: "🔗 Ref 2", cap: "ลุคหวานพร้อมออกเดต…" },
-  task: { title: "ถ่ายรูป LY22", no: "T-202611-0031", count: "งานย่อย (3)", subs: "☑ เตรียมสินค้า\n☐ ถ่ายรูป\n☐ รีทัช" },
-  sku: { code: "LY22-01", name: "กระเป๋าถือ Fleur", color: "ดำ", price: "฿890" },
-  parent_sku: { code: "LY22", name: "Louis Montini กระเป๋าถือ LY22" },
+// ข้อมูลตัวอย่างในพรีวิว — ฟังก์ชัน เพื่อให้เปลี่ยนตามภาษาที่เลือก
+const sampleOf = (): Record<StyledCardType, CardValues> => ({
+  content: { title: "LY22 Video", no: "CN-202611-0012 · draft", sched: tr("🗓 23 พ.ย. 14:00", "🗓 23 Nov 14:00"), plat: "Instagram · Facebook", brief: tr("ถ่ายนางแบบถือ ฉากขาว\nโชว์ซิปด้านใน", "Model holding bag, white backdrop\nShow inner zip"), ref: "🔗 Ref 2", cap: tr("ลุคหวานพร้อมออกเดต…", "Sweet look, date-ready…") },
+  task: { title: tr("ถ่ายรูป LY22", "Photo shoot LY22"), no: "T-202611-0031", count: tr("งานย่อย (3)", "Subtasks (3)"), subs: tr("☑ เตรียมสินค้า\n☐ ถ่ายรูป\n☐ รีทัช", "☑ Prepare product\n☐ Photo shoot\n☐ Retouch") },
+  sku: { code: "LY22-01", name: tr("กระเป๋าถือ Fleur", "Fleur handbag"), color: tr("ดำ", "Black"), price: "฿890" },
+  parent_sku: { code: "LY22", name: tr("Louis Montini กระเป๋าถือ LY22", "Louis Montini handbag LY22") },
   trend: { title: "Coquette pastel", heat: "🔥 hot" },
-  design_sheet: { code: "DS-0142", name: "กระเป๋าถือ Fleur v2", brand: "Louis Montini", status: "กำลังออกแบบ" },
-};
+  design_sheet: { code: "DS-0142", name: tr("กระเป๋าถือ Fleur v2", "Fleur handbag v2"), brand: "Louis Montini", status: tr("กำลังออกแบบ", "Designing") },
+});
 
 export function CardStyleModal({ open, onClose, mine, team, canTeam, presets, onSave, onSavePresets }: {
   open: boolean;
@@ -56,7 +58,8 @@ export function CardStyleModal({ open, onClose, mine, team, canTeam, presets, on
   const fontOpts = useMemo(() => CARD_FONTS.map((f) => ({ value: String(f.id), label: t(f.th, f.en), css: `"${f.css}", sans-serif` })), [t]);
   const copyTo = (targets: number[]) => set({ ...style, fields: style.fields.map((f, k) => (targets.includes(k) && k !== curIdx ? copyFieldLook(cur, f) : f)) });
   const labelOf = (k: string) => { const f = CARD_FIELDS[type].find((x) => x.key === k); return f ? t(f.th, f.en) : k; };
-  const preview = useMemo(() => styledTexts(style, SAMPLE[type]), [style, type]);
+  const sample = useMemo(() => sampleOf(), [t]);   // t เปลี่ยน = สลับภาษา → สร้างตัวอย่างใหม่
+  const preview = useMemo(() => styledTexts(style, sample[type]), [style, type, sample]);
   const fontCss = (id: number) => CARD_FONTS.find((f) => f.id === id)?.css ?? "Nunito";
   const lineCss = (f: CardStyle["fields"][number]) => textStyleCss({ ...cardFieldTextStyle(f), italic: false, list: undefined }, (v) => `"${fontCss(Number(v))}", sans-serif`);
   const myPresets = presets.filter((p) => p.type === type);
@@ -139,7 +142,7 @@ export function CardStyleModal({ open, onClose, mine, team, canTeam, presets, on
                     <button type="button" onClick={() => move(i, 1)} aria-label={t("ลง", "Down")} className="hover:text-violet-700"><Icon value="i:chevron-down" size={12} /></button>
                   </span>
                   <span className={`w-24 shrink-0 truncate sm:w-32 ${f.on ? "text-slate-700" : "text-slate-400"}`}>{labelOf(f.key)}</span>
-                  <span className={`min-w-0 flex-1 truncate ${f.on ? "" : "opacity-40"}`} style={{ ...lineCss(f), fontSize: Math.min(f.size, 16), lineHeight: 1.3 }}>{String(SAMPLE[type][f.key] ?? labelOf(f.key)).split("\n")[0]}</span>
+                  <span className={`min-w-0 flex-1 truncate ${f.on ? "" : "opacity-40"}`} style={{ ...lineCss(f), fontSize: Math.min(f.size, 16), lineHeight: 1.3 }}>{String(sample[type][f.key] ?? labelOf(f.key)).split("\n")[0]}</span>
                   <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{f.size}px</span>
                   {f.maxLines != null && <label onClick={(e) => e.stopPropagation()} className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500">{t("สูงสุด", "max")}<input type="number" min={1} max={20} value={f.maxLines} onChange={(e) => setField(i, { maxLines: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })} className="h-7 w-12 rounded-md border border-slate-200 px-1" />{t("บรรทัด", "lines")}</label>}
                 </div>

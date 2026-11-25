@@ -11,6 +11,7 @@
 import { shortcutKey } from "@/lib/shortcut-key";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { FontSelect } from "@/components/font-select";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
@@ -208,7 +209,7 @@ export function CanvasBoard({
       if (!item) return;
       const file = item.getAsFile(); if (!file) return;
       e.preventDefault();
-      if (uploadDisabled) { toast.error(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
+      if (uploadDisabled) { toast.error(uploadDeniedMessage ?? tr("ไม่สามารถอัปโหลดไฟล์ได้", "Can't upload files")); return; }
       setUploading(true);
       try {
         const ext = (file.type.split("/")[1] || "png").replace("+xml", "");

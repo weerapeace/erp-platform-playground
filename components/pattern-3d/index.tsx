@@ -888,7 +888,7 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
     const buf = stage.current?.exportGlb();
     if (!buf) return;
     const url = URL.createObjectURL(new Blob([buf], { type: "model/gltf-binary" })), a = document.createElement("a");
-    a.href = url; a.download = `${(saveName || "โมเดล 3 มิติ").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)}.glb`;
+    a.href = url; a.download = `${(saveName || t("โมเดล 3 มิติ", "3D model")).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)}.glb`;
     document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
   /** บันทึกภาพที่เห็นอยู่เป็นไฟล์ JPG (มุมและการซูมตามที่ดูอยู่) */
@@ -896,7 +896,7 @@ export function Pattern3D({ mode, pieces, threads, bag, assembly, sim, sewn, pie
     const url = stage.current?.snapshot();
     if (!url) return;
     const a = document.createElement("a");
-    a.href = url; a.download = `${(saveName || "ภาพ 3 มิติ").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)}.jpg`;
+    a.href = url; a.download = `${(saveName || t("ภาพ 3 มิติ", "3D view")).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 80)}.jpg`;
     document.body.appendChild(a); a.click(); a.remove();
   };
 

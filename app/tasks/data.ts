@@ -132,7 +132,7 @@ export function withinThisWeek(t: { due_date: string | null; status: string }): 
 export type ApiError = Error & { code?: string; status?: number; data?: Record<string, unknown> };
 
 async function jsonOrThrow(res: Response): Promise<Record<string, unknown>> {
-  const j = await res.json().catch(() => ({ error: "เครือข่ายผิดพลาด" }));
+  const j = await res.json().catch(() => ({ error: tr("เครือข่ายผิดพลาด", "Network error") }));
   if (!res.ok || j.error) {
     const err = new Error((j.error as string) || `HTTP ${res.status}`) as ApiError;
     err.status = res.status; err.data = j;
@@ -221,7 +221,7 @@ export async function deleteTask(id: string): Promise<void> {
 export async function syncTaskDrive(id: string, opts?: { destination_name?: string; folder_name?: string }): Promise<{ url: string | null; uploaded: number; archived: number }> {
   const res = await apiFetch(`/api/creative-tasks/${id}/drive-folder`, { method: "POST", body: opts ? JSON.stringify(opts) : undefined });
   const j = await res.json();
-  if (!res.ok || j.error) throw new Error(j.error || "สร้างโฟลเดอร์/อัปไฟล์ไม่สำเร็จ");
+  if (!res.ok || j.error) throw new Error(j.error || tr("สร้างโฟลเดอร์/อัปไฟล์ไม่สำเร็จ", "Couldn't create folder / upload files"));
   return { url: (j.url as string) ?? null, uploaded: Number(j.uploaded ?? 0), archived: Number(j.archived ?? 0) };
 }
 export type DriveFolderInfo = { configured: boolean; structured: boolean; parent_name?: string; suggested_name?: string; suggested_destination?: string; destinations?: { id: string; name: string }[] };
@@ -789,7 +789,7 @@ export async function getLinkPreview(url: string): Promise<LinkPreview> {
   const res = await apiFetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
   const j = await res.json().catch(() => ({}));
   if (j?.data) return j.data as LinkPreview;
-  throw new Error((j?.error as string) || "ดึงข้อมูลลิงก์ไม่สำเร็จ");
+  throw new Error((j?.error as string) || tr("ดึงข้อมูลลิงก์ไม่สำเร็จ", "Couldn't fetch link info"));
 }
 
 // ---- เทมเพลตบรีฟ (โน้ต + Ref ของ "รายการงานที่ต้องการ") — กติกา/ตรวจข้อมูลอยู่ที่ lib/brief-templates ----

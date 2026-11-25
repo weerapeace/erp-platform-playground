@@ -209,7 +209,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
               {(["th", "both", "en"] as Lang[]).map((l) => (
                 <button key={l} type="button" onClick={() => setLang(l)}
                   className={`rounded-full border px-2.5 py-0.5 text-xs ${lang === l ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500"}`}>
-                  {l === "th" ? "ไทย" : l === "en" ? "EN" : "ไทย + EN"}
+                  {l === "th" ? t("ไทย", "Thai") : l === "en" ? "EN" : t("ไทย + EN", "Thai + EN")}
                 </button>
               ))}
             </div>

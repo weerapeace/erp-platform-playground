@@ -716,13 +716,14 @@ export function AssetLibrary() {
 
 // แถบซ้าย: อัลบั้มเป็นต้นไม้ของกลาง — อัลบั้มปกติ (เกิน 6 ย่อ) → กลุ่ม SAMPLE ตามแบรนด์ (ยุบไว้) → กางทีละชั้น
 function SideAlbums({ collections, activeId, onSelect }: { collections: AssetCollection[]; activeId: string | null; onSelect: (id: string) => void }) {
+  const t = useT();
   const options = useMemo(() => buildAlbumOptions(collections), [collections]);
   return (
     <AlbumTree key={options.length ? "ready" : "empty"} options={options} activeId={activeId}
       renderRow={(o, x) => (
         <div className="flex items-center min-w-0" style={{ paddingLeft: x.depth * 12 }}>
           {x.hasKids
-            ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? "ยุบ" : "กาง"}>{x.expanded ? "▾" : "▸"}</button>
+            ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? t("ยุบ", "Collapse") : t("กาง", "Expand")}>{x.expanded ? "▾" : "▸"}</button>
             : <span className="w-4 shrink-0" />}
           <div className="flex-1 min-w-0 flex flex-col" title={albumFullName(o)}>
             <SideItem active={activeId === o.value} onClick={() => onSelect(o.value)} label={o.label} count={o.count} icon="📁" />

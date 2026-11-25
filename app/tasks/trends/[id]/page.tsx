@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
@@ -26,7 +27,7 @@ import { Icon } from "@/components/icon";
 
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
   ssr: false,
-  loading: () => <LoadingState label="กำลังโหลดกระดาน..." boxClassName="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
+  loading: () => <LoadingState label={tr("กำลังโหลดกระดาน...", "Loading board...")} boxClassName="flex h-[60vh] items-center justify-center rounded-xl border border-slate-200 text-sm text-slate-400" />,
 });
 
 /** ขนาด "หน้ากระดาษ" ของบอร์ดเทรนด์ (16:9) */

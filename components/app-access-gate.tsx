@@ -47,8 +47,9 @@ export function useAppGuard(appKey: string): { blocked: boolean; appLabel: strin
 
 /** ห่อเนื้อหา — ถ้าไม่มีสิทธิ์เข้าแอปนี้ โชว์ AccessDenied แทน */
 export function AppAccessGate({ appKey, children }: { appKey: string; children: React.ReactNode }) {
+  const t = useT();
   const { blocked, appLabel } = useAppGuard(appKey);
-  if (blocked) return <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${appLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />;
+  if (blocked) return <AccessDenied message={t(`คุณไม่มีสิทธิ์เข้าถึงแอป "${appLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`, `You don't have access to the "${appLabel}" app — contact an admin if you need it`)} />;
   return <>{children}</>;
 }
 

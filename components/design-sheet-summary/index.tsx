@@ -409,7 +409,7 @@ export function DesignSheetSummaryBuilder({ open, summaryId, initialSheetIds = [
   };
 
   // รูปสรุป — เรียก copy ทันทีใน onClick (ส่ง Promise ให้ clipboard) เพื่อคงสิทธิ์ของการกด
-  const fileBase = (doc.title || "สรุปงาน").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60);
+  const fileBase = (doc.title || t("สรุปงาน", "Summary")).replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60);
   const makePng = () => htmlToPngBlob(renderSummaryBody(doc, sheets), { width: 960 });
   const copyImage = async () => {
     setImgBusy("copy");

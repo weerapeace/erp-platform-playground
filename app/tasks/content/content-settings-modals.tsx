@@ -211,7 +211,7 @@ export function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved,
   const removeActive = async () => { if (!active || !(await askConfirm({ title: t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`), variant: "danger" }))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
 
   // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
-  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้", link: "Shopee: https://shp.ee/xxx\nLazada: https://lzd.co/yyy" };
+  const sampleVars = { caption: t("ข้อความตัวอย่างที่พิมพ์เอง", "Sample text you typed"), hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: t("ดำ", "Black"), sku: "TTM061-04", product: t("กระเป๋าสตางค์หนังแท้", "Genuine leather wallet"), link: "Shopee: https://shp.ee/xxx\nLazada: https://lzd.co/yyy" };
 
   const save = async () => {
     setSaving(true);
@@ -313,7 +313,7 @@ export function CaptionConfigModal({ cfg, brandId, brandLabel, platforms, onClos
           {brandId && (
             <div>
               <label className="text-xs text-slate-400">{t("ของแบรนด์", "Brand")} — {brandLabel || brandId}</label>
-              <ERPInput value={val.hashtags_by_brand?.[brandKey] ?? ""} onChange={(e) => setHashBrand(e.target.value)} placeholder="#แบรนด์ #ของน่ารัก" />
+              <ERPInput value={val.hashtags_by_brand?.[brandKey] ?? ""} onChange={(e) => setHashBrand(e.target.value)} placeholder={t("#แบรนด์ #ของน่ารัก", "#brand #cute")} />
             </div>
           )}
           <div className="grid grid-cols-2 gap-2">

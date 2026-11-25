@@ -291,7 +291,7 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
           <DeviceModeToggle mode={device.mode} viewport={device.viewport} onChange={(m) => { device.onChange(m); close(); }} className="w-full [&>button]:flex-1" />
           {/* ติดตั้งแอปบนเครื่องนี้ — Android/Chrome เด้งกล่องติดตั้ง · iPad/iPhone บอกวิธี แชร์ → เพิ่มไปหน้าจอโฮม */}
           <button type="button"
-            onClick={async () => { const r = await pwa.install(); if (r === "samsung") { setInstallHint(SAMSUNG_INSTALL_HINT); openInChrome(); return; } setInstallHint(r === "ios" ? IOS_INSTALL_HINT : r === "unsupported" ? UNSUPPORTED_INSTALL_HINT : r === "installed" ? "✓ เปิดในโหมดแอปอยู่แล้ว" : null); }}
+            onClick={async () => { const r = await pwa.install(); if (r === "samsung") { setInstallHint(SAMSUNG_INSTALL_HINT); openInChrome(); return; } setInstallHint(r === "ios" ? IOS_INSTALL_HINT : r === "unsupported" ? UNSUPPORTED_INSTALL_HINT : r === "installed" ? t("✓ เปิดในโหมดแอปอยู่แล้ว", "✓ Already open in app mode") : null); }}
             className={`mt-1.5 w-full h-8 rounded-md border text-xs font-medium ${pwa.installed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`}>
             {pwa.installed ? t("✓ ติดตั้งแอปนี้แล้ว (โหมดแอป)", "✓ App installed (app mode)") : t("📲 ติดตั้งแอปนี้บนเครื่องนี้", "📲 Install this app on this device")}
           </button>
@@ -354,11 +354,11 @@ export function AccountMenu({ onDark = false, device, compact = false, placement
             <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
               {(["tablet", "phone", "desktop"] as DeviceLayout[]).map((d) => (
                 <button key={d} type="button" onClick={() => setQrLayout(d)}
-                  className={`h-8 rounded px-3 text-xs font-medium transition ${qrLayout === d ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{DEVICE_ICON[d]} {d === "desktop" ? "คอม" : DEVICE_LABEL[d]}</button>
+                  className={`h-8 rounded px-3 text-xs font-medium transition ${qrLayout === d ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{DEVICE_ICON[d]} {d === "desktop" ? t("คอม", "Desktop") : DEVICE_LABEL[d]}</button>
               ))}
             </div>
             <DeviceQrPanel layout={qrLayout} {...device.qr} className="w-full" />
-            <p className="text-[11px] text-slate-400 text-center leading-snug">{qrLayout === "desktop" ? "เปิดลิงก์ใน Chrome / Edge ของคอมที่จะติดตั้ง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)" : "สแกนด้วยกล้องของเครื่องปลายทาง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)"}</p>
+            <p className="text-[11px] text-slate-400 text-center leading-snug">{qrLayout === "desktop" ? t("เปิดลิงก์ใน Chrome / Edge ของคอมที่จะติดตั้ง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)", "Open the link in Chrome / Edge on the computer to install (sign in on that device the first time)") : t("สแกนด้วยกล้องของเครื่องปลายทาง (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)", "Scan with the target device's camera (sign in on that device the first time)")}</p>
           </div>
         </ERPModal>
       )}

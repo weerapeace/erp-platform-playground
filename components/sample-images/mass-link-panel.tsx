@@ -9,6 +9,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { Icon } from "@/components/icon";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
@@ -22,7 +23,7 @@ let cache: Promise<SkuPickerCatalog> | null = null;
 /** รายการรุ่นทั้งหมด (โหลดครั้งเดียวต่อการเปิดหน้า) */
 export function loadProductCatalog(): Promise<SkuPickerCatalog> {
   cache = cache ?? apiFetch("/api/parent-skus/spec-export?catalog=1").then((r) => r.json()).then((j: { data?: SkuPickerCatalog; error?: string }) => {
-    if (j.error || !j.data) throw new Error(j.error || "โหลดรายการสินค้าไม่สำเร็จ");
+    if (j.error || !j.data) throw new Error(j.error || tr("โหลดรายการสินค้าไม่สำเร็จ", "Failed to load products"));
     return j.data;
   }).catch((e) => { cache = null; throw e; });
   return cache;

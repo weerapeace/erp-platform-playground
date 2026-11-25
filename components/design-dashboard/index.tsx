@@ -1229,7 +1229,7 @@ export function DesignDashboard() {
         onOrder={() => void openOrderFromPicked()} orderLoading={orderLoading} />
 
       {/* 📦 ลงออเดอร์จากใบงานที่ติ๊ก (ของกลาง) */}
-      {orderSeed && <OrderBatchEntryModal open seedLines={orderSeed.seeds} brand={orderSeed.brand} title="ลงออเดอร์จากใบงานออกแบบ" onClose={() => setOrderSeed(null)} />}
+      {orderSeed && <OrderBatchEntryModal open seedLines={orderSeed.seeds} brand={orderSeed.brand} title={t("ลงออเดอร์จากใบงานออกแบบ", "Create order from design sheets")} onClose={() => setOrderSeed(null)} />}
 
       {/* เลือกแคมเปญปลายทาง (ของกลาง) */}
       <CampaignBoardPicker open={campaignPickOpen} onClose={() => setCampaignPickOpen(false)} sheetIds={Array.from(pickedIds)} />

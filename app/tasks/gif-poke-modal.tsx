@@ -53,10 +53,10 @@ export function GifPokeModal({ open, onClose, onSent, isAdmin, prefillRecipient 
     try {
       const res = await apiFetch(`/api/gif-poke/library?id=${g.id}`, { method: "DELETE" });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) { setErr(j.error || "ลบไม่สำเร็จ"); return; }
+      if (!res.ok || j.error) { setErr(j.error || t("ลบไม่สำเร็จ", "Delete failed")); return; }
       setLib((prev) => prev.filter((x) => x.id !== g.id));
       if (selId === g.id) setSelId(null);
-    } catch { setErr("ลบไม่สำเร็จ — เชื่อมต่อไม่ได้"); }
+    } catch { setErr(t("ลบไม่สำเร็จ — เชื่อมต่อไม่ได้", "Delete failed — can't connect")); }
     finally { setDeleting(false); setDelAsk(null); }
   };
   const fileRef = useRef<HTMLInputElement | null>(null);

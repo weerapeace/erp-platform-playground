@@ -36,9 +36,10 @@ const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
 /** ป้าย "มี BOM" ของสีของรุ่น — กดเปิดสูตรในหน้า BOM */
 function BomBadge({ bom }: { bom: { code: string; sku: string } }) {
+  const t = useT();
   return (
-    <a href={`/master/bom?open=${encodeURIComponent(bom.sku)}`} target="_blank" rel="noopener" title={`${bom.code} — เปิดสูตร`}
-      className="mr-1 shrink-0 rounded bg-emerald-50 px-1.5 text-[10px] font-medium leading-5 text-emerald-700 hover:bg-emerald-100">มี BOM</a>
+    <a href={`/master/bom?open=${encodeURIComponent(bom.sku)}`} target="_blank" rel="noopener" title={t(`${bom.code} — เปิดสูตร`, `${bom.code} — open recipe`)}
+      className="mr-1 shrink-0 rounded bg-emerald-50 px-1.5 text-[10px] font-medium leading-5 text-emerald-700 hover:bg-emerald-100">{t("มี BOM", "Has BOM")}</a>
   );
 }
 

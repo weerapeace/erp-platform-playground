@@ -1106,17 +1106,17 @@ export function ApprovalDialog({
         <div className="p-6">
           {mode === "choose" ? (
             <>
-              <h3 className="font-semibold text-slate-900 text-base mb-1">อนุมัติเอกสาร</h3>
+              <h3 className="font-semibold text-slate-900 text-base mb-1">{tr("อนุมัติเอกสาร", "Approve document")}</h3>
               <p className="text-sm text-slate-500 mb-5">{documentLabel}</p>
 
               <div className="mb-4">
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  หมายเหตุ (ไม่บังคับ)
+                  {tr("หมายเหตุ (ไม่บังคับ)", "Note (optional)")}
                 </label>
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  placeholder="ระบุหมายเหตุหรือเงื่อนไขการอนุมัติ..."
+                  placeholder={tr("ระบุหมายเหตุหรือเงื่อนไขการอนุมัติ...", "Add a note or approval conditions...")}
                   rows={3}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
                 />
@@ -1127,13 +1127,13 @@ export function ApprovalDialog({
                   onClick={onClose}
                   className="flex-1 h-9 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
                 >
-                  ยกเลิก
+                  {tr("ยกเลิก", "Cancel")}
                 </button>
                 <button
                   onClick={() => setMode("reject")}
                   className="flex-1 h-9 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
                 >
-                  ปฏิเสธ
+                  {tr("ปฏิเสธ", "Reject")}
                 </button>
                 <button
                   onClick={() => onApprove(comment)}
@@ -1141,23 +1141,23 @@ export function ApprovalDialog({
                   className="flex-1 h-9 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-1"
                 >
                   {loading && <IconLoader />}
-                  อนุมัติ
+                  {tr("อนุมัติ", "Approve")}
                 </button>
               </div>
             </>
           ) : (
             <>
-              <h3 className="font-semibold text-slate-900 text-base mb-1">ปฏิเสธเอกสาร</h3>
+              <h3 className="font-semibold text-slate-900 text-base mb-1">{tr("ปฏิเสธเอกสาร", "Reject document")}</h3>
               <p className="text-sm text-slate-500 mb-4">{documentLabel}</p>
 
               <div className="mb-4">
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  เหตุผลที่ปฏิเสธ <span className="text-red-500">*</span>
+                  {tr("เหตุผลที่ปฏิเสธ", "Reason for rejection")} <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="ระบุเหตุผลที่ปฏิเสธ..."
+                  placeholder={tr("ระบุเหตุผลที่ปฏิเสธ...", "Enter the reason for rejection...")}
                   rows={3}
                   className="w-full px-3 py-2 text-sm border border-red-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
                   autoFocus
@@ -1169,7 +1169,7 @@ export function ApprovalDialog({
                   onClick={() => setMode("choose")}
                   className="flex-1 h-9 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50"
                 >
-                  กลับ
+                  {tr("กลับ", "Back")}
                 </button>
                 <button
                   onClick={() => onReject(rejectReason)}
@@ -1177,7 +1177,7 @@ export function ApprovalDialog({
                   className="flex-1 h-9 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-1"
                 >
                   {loading && <IconLoader />}
-                  ยืนยันการปฏิเสธ
+                  {tr("ยืนยันการปฏิเสธ", "Confirm rejection")}
                 </button>
               </div>
             </>

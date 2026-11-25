@@ -255,8 +255,8 @@ export function PatternProjectEditor({ id }: { id: string }) {
   const compareRef = useMemo(() => {
     const c = (template as { compareRef?: { label?: unknown; pieces?: unknown } } | null)?.compareRef;
     const ps = c ? cleanProjectPieces(c.pieces) : [];
-    return ps.length ? { label: typeof c?.label === "string" ? c.label : "รุ่นเทียบ", pieces: ps } : null;
-  }, [template]);
+    return ps.length ? { label: typeof c?.label === "string" ? c.label : t("รุ่นเทียบ", "Compare model"), pieces: ps } : null;
+  }, [template, t]);
   const saveCompare = (): string | null => {
     const r2 = (v: number) => Math.round(v * 100) / 100;
     const slim = (s: Shape): Shape => (s.k === "path" ? { k: "path", nodes: s.nodes.map((n) => Object.fromEntries(Object.entries(n).map(([k, v]) => [k, typeof v === "number" ? r2(v) : v])) as typeof n) } : { ...s, x: r2(s.x), y: r2(s.y), w: r2(s.w), h: r2(s.h) });

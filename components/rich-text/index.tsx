@@ -25,6 +25,7 @@ import { Mark } from "@tiptap/core";
 import { useEffect, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { TextFormatBar, applyTextShortcut, useLinkRequest, type TextFormatAdapter } from "@/components/text-format-bar";
 import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 // ---- รูปย่อ-ขยายได้: ลากมุมขวาล่าง + กว้างจำได้ (width attribute) ----
 function ImageNodeView({ node, updateAttributes, selected, editor }: NodeViewProps) {
@@ -42,7 +43,7 @@ function ImageNodeView({ node, updateAttributes, selected, editor }: NodeViewPro
       <img ref={imgRef} src={node.attrs.src as string} alt="" draggable={false}
         className={`block max-w-full rounded ${selected ? "ring-2 ring-blue-400" : ""}`} style={{ width: "100%" }} />
       {editor.isEditable && selected && (
-        <span onMouseDown={startResize} title="ลากเพื่อย่อ/ขยาย"
+        <span onMouseDown={startResize} title={tr("ลากเพื่อย่อ/ขยาย", "Drag to resize")}
           className="absolute right-0 bottom-0 w-3.5 h-3.5 -mr-1 -mb-1 bg-blue-500 border-2 border-white rounded-sm cursor-nwse-resize" />
       )}
     </NodeViewWrapper>
@@ -204,7 +205,7 @@ export function RichTextEditor({
       {editable && (
         <div className="flex flex-wrap items-center gap-1 px-2 py-1 border-b border-slate-200 bg-slate-50">
           <TextFormatBar t={t} adapter={adapter} dock="never" flat linkRequest={linkReq}
-            extra={<Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />} />
+            extra={<Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title={t("ลำดับเลข", "Numbered list")} />} />
           {placeholder && editor.isEmpty && <span className="ml-1 text-[11px] text-slate-400 truncate">{placeholder}</span>}
         </div>
       )}
@@ -220,26 +221,26 @@ export function RichTextEditor({
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
           <Btn on={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive("heading", { level: 1 })} label="H1" />
           <Btn on={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive("heading", { level: 2 })} label="H2" />
-          <Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />
+          <Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title={t("ลำดับเลข", "Numbered list")} />
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
-          <select title="ฟอนต์" onChange={(e) => e.target.value ? editor.chain().focus().setFontFamily(e.target.value).run() : editor.chain().focus().unsetFontFamily().run()}
+          <select title={t("ฟอนต์", "Font")} onChange={(e) => e.target.value ? editor.chain().focus().setFontFamily(e.target.value).run() : editor.chain().focus().unsetFontFamily().run()}
             className="h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-            {FONTS.map((f) => <option key={f} value={f}>{f || "ฟอนต์"}</option>)}
+            {FONTS.map((f) => <option key={f} value={f}>{f || t("ฟอนต์", "Font")}</option>)}
           </select>
           <span className="w-px h-5 bg-slate-200 mx-0.5" />
-          <Btn on={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} label="⊞" title="แทรกตาราง" />
-          {onUploadImage && <Btn on={() => imgInput(editor, onUploadImage)} label="🖼" title="แทรกรูป" />}
+          <Btn on={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} label="⊞" title={t("แทรกตาราง", "Insert table")} />
+          {onUploadImage && <Btn on={() => imgInput(editor, onUploadImage)} label="🖼" title={t("แทรกรูป", "Insert image")} />}
           {editor.isActive("image") && <>
-            <span className="text-[11px] text-slate-400">ขนาดรูป:</span>
-            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "25%" }).run()} label="เล็ก" />
-            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "50%" }).run()} label="กลาง" />
-            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "75%" }).run()} label="ใหญ่" />
-            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "100%" }).run()} label="เต็ม" />
+            <span className="text-[11px] text-slate-400">{t("ขนาดรูป:", "Image size:")}</span>
+            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "25%" }).run()} label={t("เล็ก", "S")} />
+            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "50%" }).run()} label={t("กลาง", "M")} />
+            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "75%" }).run()} label={t("ใหญ่", "L")} />
+            <Btn on={() => editor.chain().focus().updateAttributes("image", { width: "100%" }).run()} label={t("เต็ม", "Full")} />
           </>}
           {editor.isActive("table") && <>
-            <Btn on={() => editor.chain().focus().addColumnAfter().run()} label="+คอลัมน์" />
-            <Btn on={() => editor.chain().focus().addRowAfter().run()} label="+แถว" />
-            <Btn on={() => editor.chain().focus().deleteTable().run()} label="ลบตาราง" />
+            <Btn on={() => editor.chain().focus().addColumnAfter().run()} label={t("+คอลัมน์", "+Column")} />
+            <Btn on={() => editor.chain().focus().addRowAfter().run()} label={t("+แถว", "+Row")} />
+            <Btn on={() => editor.chain().focus().deleteTable().run()} label={t("ลบตาราง", "Delete table")} />
           </>}
         </div>
       )}

@@ -138,11 +138,12 @@ export function AlbumTree({ options, renderRow, activeId, groupLabel }: {
 function PickRow({ o, on, multi, depth = 0, showPath, ctx, onPick }: {
   o: AlbumOption; on: boolean; multi: boolean; depth?: number; showPath?: boolean; ctx?: AlbumRowCtx; onPick: () => void;
 }) {
+  const t = useT();
   return (
     <div className={`flex items-stretch ${on ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
       <span style={{ width: 4 + depth * 14 }} className="shrink-0" />
       {ctx?.hasKids
-        ? <button type="button" onClick={ctx.toggle} className="w-5 shrink-0 text-[11px] text-slate-400 hover:text-slate-700" aria-label={ctx.expanded ? "ยุบ" : "กาง"}>{ctx.expanded ? "▾" : "▸"}</button>
+        ? <button type="button" onClick={ctx.toggle} className="w-5 shrink-0 text-[11px] text-slate-400 hover:text-slate-700" aria-label={ctx.expanded ? t("ยุบ", "Collapse") : t("กาง", "Expand")}>{ctx.expanded ? "▾" : "▸"}</button>
         : <span className="w-5 shrink-0" />}
       <button type="button" onClick={onPick} className="flex-1 min-w-0 flex items-start gap-2 py-1.5 pr-2 text-left">
         {multi && <span className={`mt-0.5 shrink-0 w-3.5 h-3.5 rounded border text-[10px] leading-[12px] text-center ${on ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 bg-white"}`}>{on ? "✓" : ""}</span>}

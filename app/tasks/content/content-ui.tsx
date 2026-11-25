@@ -13,6 +13,7 @@ export function StatusBadge({ status }: { status: ContentStatus }) {
 
 // เมนู ⋯ เล็ก ๆ ท้ายหัวการ์ด (ของที่ไม่ได้ใช้ทุกครั้ง) · กดที่อื่นแล้วปิดเอง
 export function RowMenu({ items, label, up = false }: { items: { label: string; icon?: string; onClick: () => void }[]; label?: string; up?: boolean }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -25,7 +26,7 @@ export function RowMenu({ items, label, up = false }: { items: { label: string; 
     <div ref={boxRef} className="relative">
       {label
         ? <button type="button" onClick={() => setOpen((o) => !o)} className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{label}</button>
-        : <button type="button" onClick={() => setOpen((o) => !o)} title="เพิ่มเติม" className="text-slate-400 hover:text-violet-700 px-1 leading-none text-base">⋯</button>}
+        : <button type="button" onClick={() => setOpen((o) => !o)} title={t("เพิ่มเติม", "More")} className="text-slate-400 hover:text-violet-700 px-1 leading-none text-base">⋯</button>}
       {open && (
         <div className={`absolute z-20 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 ${up ? "left-0 bottom-full mb-1" : "right-0 top-full mt-1"}`}>
           {items.map((it) => (
