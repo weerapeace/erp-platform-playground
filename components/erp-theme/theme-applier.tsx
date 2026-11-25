@@ -15,6 +15,7 @@ import { themeCssVars, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { themeForApp } from "@/lib/erp-theme-assign";
 import { CARD_SELECTOR, EFFECT_ATTRS, themeEffects, type ThemeEffects, type ThemeLayer } from "@/lib/erp-theme-effects";
 import { ensureThemeFont, useActiveThemes } from "./active-themes";
+import { ThemeParticles } from "./particles";
 import { useIsMobileScreen, useMotionPref } from "./motion-pref";
 
 let appliedVars: string[] = [];
@@ -118,6 +119,7 @@ export function ThemeApplier({ appKey, decor = true }: { appKey: string | null |
   return (
     <>
       {fx.page && <div aria-hidden className="tm-page-layer" style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none", ...layerStyle(fx.page) }} />}
+      {fx.particles && <ThemeParticles kind={fx.particles.kind} color={fx.particles.color} speed={fx.particles.speed} fixed />}
       {fx.mascot && (
         <div aria-hidden className="tm-mascot" style={{ position: "fixed", right: 16, bottom: 16, zIndex: 40, width: 64, height: 64, pointerEvents: "none" }}>
           {fx.mascot.image

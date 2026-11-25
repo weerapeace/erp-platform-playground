@@ -6,7 +6,7 @@ const pc = { mobile: false, motionOff: false };
 
 describe("themeEffects", () => {
   it("ไม่มีธีม = ไม่ทาอะไร", () => {
-    expect(themeEffects(null, pc)).toEqual({ attrs: {}, vars: {}, page: null, banner: null, mascot: null });
+    expect(themeEffects(null, pc)).toEqual({ attrs: {}, vars: {}, page: null, banner: null, mascot: null, particles: null });
   });
 
   it("ธีมเริ่มต้น: ไม่มีเอฟเฟกต์ (ตัวนับเลขทำงานเหมือนเดิม)", () => {
@@ -17,7 +17,7 @@ describe("themeEffects", () => {
 
   it("ม่วงครีเอทีฟ: ปุ่มไล่สี+แสงวิ่ง · แถบบน · เมนูข้างไล่สี · เข้าหน้า", () => {
     const e = themeEffects(presetConfig("creative-violet"), pc);
-    expect(e.attrs).toMatchObject({ "tm-btn": "grad", "tm-shine": "1", "tm-topbar": "1", "tm-sidegrad": "1", "tm-enter": "1", "tm-hover": "1", "tm-ganim": "1" });
+    expect(e.attrs).toMatchObject({ "tm-btn": "grad", "tm-shine": "1", "tm-topbar": "1", "tm-sidegrad": "1", "tm-enter": "fade", "tm-hover": "1", "tm-ganim": "1" });
     expect(e.attrs["tm-count"]).toBeUndefined();
     expect(e.vars["--tm-topbar"]).toContain("linear-gradient");
   });
@@ -139,5 +139,23 @@ describe("การ์ด รอบ 3", () => {
     const { CARD_SELECTOR } = await import("../erp-theme-effects");
     const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
     expect(css).toContain(CARD_SELECTOR);
+  });
+});
+
+describe("รอบ 4: เข้าหน้า · อนุภาค · ป้ายด่วน", () => {
+  const cfg = mergeThemeConfig(DEFAULT_THEME_CONFIG, { effects: { enter: "zoom", particles: "sakura", targets: { badge: { fx: ["blink", "pulse"], strength: 2 } } } });
+  it("เข้าหน้าบอกแบบใน attr", () => {
+    expect(themeEffects(cfg, pc).attrs["tm-enter"]).toBe("zoom");
+  });
+  it("อนุภาค: PC มี · มือถือ/ปิดแอนิเมชัน ไม่มี", () => {
+    expect(themeEffects(cfg, pc).particles?.kind).toBe("sakura");
+    expect(themeEffects(cfg, { mobile: true, motionOff: false }).particles).toBeNull();
+    expect(themeEffects(cfg, { mobile: false, motionOff: true }).particles).toBeNull();
+  });
+  it("ป้ายด่วน: attr + แอนิเมชัน + วงสีเหลืองอำพัน", () => {
+    const e = themeEffects(cfg, pc);
+    expect(e.attrs["tm-fx-badge"]).toBe("blink pulse");
+    expect(e.vars["--tm-anim-badge"]).toMatch(/tmBlink .+, tmPulse/);
+    expect(e.vars["--tm-ring-badge"]).toContain("217, 119, 6");
   });
 });

@@ -686,6 +686,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "พรีวิวในตัวแก้ธีม (ใช้ ThemePreviewBridge — ตัวทาธีมจะไม่ทาทับเมื่อมี data-theme-preview) · เว็บร้าน",
   },
   {
+    key: "theme-particles", label: "อนุภาคตกแต่ง (หิมะ/ดาว/ฟอง/ซากุระ)", code: "ThemeParticles", category: "feature",
+    source: { path: "components/erp-theme/particles", names: ["ThemeParticles"] },
+    what: "อนุภาคลอยด้วย CSS ล้วน ตำแหน่งคงที่ กดทะลุได้ เคารพลดการเคลื่อนไหว ไม่พิมพ์ · fixed = เต็มจอหลังเนื้อหา · ไม่ fixed = เต็มกล่องแม่",
+    when: "ของตกแต่งตามธีม/เทศกาล (ธีมกลาง ThemeApplier + พรีวิวธีม)",
+    notWhen: "แจ้งผลสำเร็จแบบพลุ → lib/confetti · มือถือ/ผู้ใช้ปิดแอนิเมชัน (themeEffects คืน null ให้อยู่แล้ว)",
+  },
+  {
     key: "erp-theme-preview", label: "พรีวิวธีม + แผงปรับธีม 9 หมวด", code: "ThemePreview · ThemeEditorPanel", category: "feature",
     source: { path: "components/erp-theme/preview", names: ["ThemePreview"] },
     what: "หน้าตัวอย่าง ERP ที่วาดตามค่าธีมครบ (แถบบน เมนูข้าง แบนเนอร์ การ์ดตัวเลข ตาราง ช่องกรอก ป๊อปอัป มาสคอต แอนิเมชัน) PC/มือถือ/มืด · compact = การ์ดย่อ · แผงปรับ components/erp-theme/editor-panel · พรีวิวหน้าจริงผ่าน iframe + ThemePreviewBridge (app/layout)",

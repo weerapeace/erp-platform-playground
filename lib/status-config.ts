@@ -86,3 +86,10 @@ export function getStatusStyle(code: string, moduleKey?: string): StatusStyle {
   const ov = moduleKey ? MODULE_STATUS_OVERRIDES[moduleKey]?.[code] : undefined;
   return ov ? { ...base, ...ov } : base;
 }
+
+/**
+ * สถานะ "ด่วน/รอคนจัดการ" — ป้ายพวกนี้รับเอฟเฟกต์จุด "ป้ายด่วน" ของธีม (กระพริบนุ่ม/pulse/เรือง · ธีมกลาง รอบ 4)
+ * สีป้ายยังล็อกตามเดิม — ธีมแค่ทำให้ขยับเพื่อดึงสายตา
+ */
+export const URGENT_STATUSES = new Set(["submitted", "waiting_approval", "pending", "waiting", "low_stock"]);
+export const isUrgentStatus = (code: string | null | undefined) => !!code && URGENT_STATUSES.has(code);

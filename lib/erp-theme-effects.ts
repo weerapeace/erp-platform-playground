@@ -10,7 +10,7 @@ import { SPEED_FACTOR, effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpTh
 import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
 
 /** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
-export const ROUND2_TARGETS: EffectTarget[] = ["button", "topbar", "menu", "number", "bell", "card"];
+export const ROUND2_TARGETS: EffectTarget[] = ["button", "topbar", "menu", "number", "bell", "card", "badge"];
 
 /**
  * "การ์ด" ในหน้าจริง (รอบ 3) = กล่องขาว มีเส้นขอบ มุมมน ในเนื้อหาของหน้า ([data-tm-page])
@@ -33,6 +33,8 @@ export type ThemeEffects = {
   page: ThemeLayer | null;
   banner: (ThemeLayer & { animate: boolean }) | null;
   mascot: { image: string | null; color: string } | null;
+  /** อนุภาคตกแต่ง (รอบ 4) — มือถือ/ปิดแอนิเมชัน = null */
+  particles: { kind: "snow" | "stars" | "bubbles" | "sakura"; color: string; speed: number } | null;
 };
 
 /** แบนเนอร์อยู่หลังหัวหน้า (ตัวหนังสือเข้ม) → จางลงไม่เกินเท่านี้ ถ้าเปิดตัวกันอ่านยาก */
@@ -43,7 +45,7 @@ const SOFT = { banner: 0.42, page: 0.16 };
 export const imgUrl = (key: string, w: number) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
 
 export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): ThemeEffects {
-  const none: ThemeEffects = { attrs: {}, vars: {}, page: null, banner: null, mascot: null };
+  const none: ThemeEffects = { attrs: {}, vars: {}, page: null, banner: null, mascot: null, particles: null };
   if (!raw) return none;
   const c = env.mobile ? mobileLiteConfig(raw) : raw;
   const p = scaleOf(c.colors.primary);
@@ -72,7 +74,7 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   if (sp.sidebar) attrs["tm-sidegrad"] = "1";
   // แอนิเมชัน
   if (motion) {
-    if (a.enter) attrs["tm-enter"] = "1";
+    if (c.effects.enter !== "none") attrs["tm-enter"] = c.effects.enter;   // fade | up | zoom | blur (รอบ 4)
     if (g.animate && (sp.top || sp.banner || sp.button || sp.page)) attrs["tm-ganim"] = "1";
   }
   if (a.hover) attrs["tm-hover"] = "1";
@@ -90,7 +92,7 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
     const list = v.fx.filter((e) => (motion ? true : !MOTION_FX.has(e)) && e !== "countUp" && e !== "shine");
     if (!list.length) continue;
     attrs[`tm-fx-${t}`] = list.join(" ");
-    vars[`--tm-ring-${t}`] = rgba(p[500], 0.55);
+    vars[`--tm-ring-${t}`] = rgba(t === "badge" ? "#d97706" : p[500], 0.55);   // ป้ายด่วนใช้วงสีเหลืองอำพัน (สีป้ายล็อก)
     vars[`--tm-spread-${t}`] = `${fxSpread(v.strength)}px`;
     vars[`--tm-blinkmin-${t}`] = String(blinkMinOpacity(v.strength));
     const text = t === "number";
@@ -162,12 +164,13 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   } : null;
 
   const mascot = a.mascot && motion ? { image: a.mascotImage ? `/api/r2-image?key=${encodeURIComponent(a.mascotImage)}` : null, color: scaleOf(c.colors.accent)[500] } : null;
-  return { attrs, vars, page, banner, mascot };
+  const particles = motion && c.effects.particles !== "none" ? { kind: c.effects.particles, color: scaleOf(c.colors.accent)[300], speed: SPEED_FACTOR[a.speed] } : null;
+  return { attrs, vars, page, banner, mascot, particles };
 }
 
 /** ชื่อ attr ทั้งหมดที่ตัวทาธีมอาจตั้ง (ไว้ล้างตอนเปลี่ยนแอป/ไม่มีธีม) */
 export const EFFECT_ATTRS = [
   "tm-btn", "tm-shine", "tm-topbar", "tm-sidebar", "tm-sidegrad", "tm-enter", "tm-ganim", "tm-hover", "tm-count",
   "tm-fx-button", "tm-fx-topbar", "tm-fx-menu", "tm-fx-number", "tm-fx-bell", "tm-scale", "tm-ripple", "tm-underline", "tm-wiggle",
-  "tm-fx-card", "tm-card-border", "tm-card-run", "tm-card-bar", "tm-card-shadow", "tm-card-hglow", "tm-inset", "tm-stagger",
+  "tm-fx-badge", "tm-fx-card", "tm-card-border", "tm-card-run", "tm-card-bar", "tm-card-shadow", "tm-card-hglow", "tm-inset", "tm-stagger",
 ] as const;

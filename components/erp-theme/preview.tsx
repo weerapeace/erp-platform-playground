@@ -15,6 +15,7 @@ import {
 import { blinkMinOpacity, fxDuration, fxSpread, hasFx, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
 import { Icon } from "@/components/icon";
 import { ensureThemeFont } from "./active-themes";
+import { ThemeParticles } from "./particles";
 import { PART_INFO } from "@/lib/erp-theme-easy";
 const PART_LABEL = Object.fromEntries(Object.entries(PART_INFO).map(([k, v]) => [k, v.label])) as Record<EffectTarget, string>;
 
@@ -354,7 +355,7 @@ export function ThemePreview({
   );
 
   // อนุภาค (ข้อ 27)
-  const particles = anim && fx.particles !== "none" && <Particles kind={fx.particles} spd={spd} color={a[300]} />;
+  const particles = anim && fx.particles !== "none" && <ThemeParticles kind={fx.particles} speed={spd} color={a[300]} />;
 
   const menuFx = fxStyle("menu");
   const rootStyle = {
@@ -419,23 +420,6 @@ export function ThemePreview({
       {compact ? <ScaleToFit width={560}>{body}</ScaleToFit>
         : mob ? <div style={{ display: "flex", justifyContent: "center", background: dark ? "#020617" : "#e2e8f0", borderRadius: 12, padding: 14 }}>{body}</div> : body}
     </>
-  );
-}
-
-/** อนุภาคตกแต่ง (หิมะ/ดาว/ฟอง/ซากุระ) — วาดด้วย CSS ล้วน ตำแหน่งคงที่ตามลำดับ (ไม่สุ่มทุกครั้ง) · กดทะลุได้ */
-function Particles({ kind, spd, color }: { kind: "snow" | "stars" | "bubbles" | "sakura"; spd: number; color: string }) {
-  const n = kind === "stars" ? 14 : 12;
-  return (
-    <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 2, pointerEvents: "none", overflow: "hidden", ["--fall" as string]: "520px" }}>
-      {Array.from({ length: n }, (_, i) => {
-        const left = (i * 37 + 11) % 100, size = 4 + ((i * 7) % 6), dur = (6 + ((i * 13) % 6)) * spd, del = -((i * 1.7) % 8);
-        const base: React.CSSProperties = { position: "absolute", left: `${left}%`, top: 0, width: size, height: size };
-        if (kind === "snow") return <span key={i} style={{ ...base, borderRadius: 99, background: "#fff", boxShadow: "0 0 3px rgba(148,163,184,.8)", animation: `tmpFall ${dur}s linear ${del}s infinite` }} />;
-        if (kind === "sakura") return <span key={i} style={{ ...base, width: size + 3, height: size + 1, borderRadius: "0 100% 0 100%", background: "#f9a8d4", opacity: 0.85, animation: `tmpFall ${dur * 1.2}s linear ${del}s infinite` }} />;
-        if (kind === "bubbles") return <span key={i} style={{ ...base, top: "auto", bottom: 0, width: size + 4, height: size + 4, borderRadius: 99, border: `1.5px solid ${color}`, background: "rgba(255,255,255,.25)", animation: `tmpRise ${dur}s ease-in ${del}s infinite` }} />;
-        return <span key={i} style={{ ...base, top: `${(i * 29) % 90}%`, width: size - 1, height: size - 1, background: "#fde68a", transform: "rotate(45deg)", borderRadius: 1, animation: `tmpTwinkle ${2 + (i % 3)}s ease-in-out ${del / 3}s infinite` }} />;
-      })}
-    </div>
   );
 }
 

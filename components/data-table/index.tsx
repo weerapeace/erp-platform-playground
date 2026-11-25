@@ -16,7 +16,7 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { readRelationLabel } from "@/lib/relation";
 import { formatDate } from "@/lib/date";
 import { formatAmount } from "@/lib/money";
-import { getStatusStyle } from "@/lib/status-config";
+import { getStatusStyle, isUrgentStatus } from "@/lib/status-config";
 import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
 import {
   getRowActionStorageKey,
@@ -165,7 +165,7 @@ export function StatusBadge({ status, module }: { status: string; module?: strin
   const ctxModule = React.useContext(StatusModuleContext);
   const cfg = getStatusStyle(status, module ?? ctxModule);
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+    <span data-tm-urgent={isUrgentStatus(status) ? "" : undefined} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
       {cfg.label}
     </span>
   );

@@ -299,3 +299,19 @@ html[data-tm-stagger] .tm-stagger-in { animation: tmStaggerIn calc(.45s * var(--
 @keyframes tmStaggerIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 /* เรือง + ขอบวิ่ง พร้อมกัน — รวมเป็นรายการเดียว (animation ทับกันไม่ได้) */
 html[data-tm-card-run][data-tm-fx-card~="glow"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):not(:has(table)) { animation: var(--tm-anim-card), tmCardRun calc(4s * var(--tm-speed, 1)) linear infinite; }
+
+/* ================================================================
+   ธีมกลาง — รอบ 4: เข้าหน้า 4 แบบ · ป้ายด่วน (อนุภาค = components/erp-theme/particles ใน ThemeApplier)
+   ================================================================ */
+/* เข้าหน้า: data-tm-enter = fade | up | zoom | blur (ค่าเดิม "1" = fade) · สั้น ๆ แล้วเอาออก (ThemeApplier ถอดคลาส .tm-enter) */
+html[data-tm-enter="up"] [data-tm-page].tm-enter { animation: tmEnterUp calc(.45s * var(--tm-speed, 1)) cubic-bezier(.22, 1, .36, 1); }
+html[data-tm-enter="zoom"] [data-tm-page].tm-enter { animation: tmEnterZoom calc(.4s * var(--tm-speed, 1)) cubic-bezier(.22, 1, .36, 1); }
+html[data-tm-enter="blur"] [data-tm-page].tm-enter { animation: tmEnterBlur calc(.45s * var(--tm-speed, 1)) ease-out; }
+@keyframes tmEnterUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes tmEnterZoom { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes tmEnterBlur { from { opacity: 0; filter: blur(6px); } to { opacity: 1; filter: none; } }
+/* ป้ายด่วน (ป้ายสถานะกลางที่ติด data-tm-urgent · lib/status-config URGENT_STATUSES) — สีป้ายล็อกเหมือนเดิม */
+html[data-tm-fx-badge] [data-tm-urgent] {
+  --tm-ring: var(--tm-ring-badge); --tm-spread: var(--tm-spread-badge); --tm-blinkmin: var(--tm-blinkmin-badge);
+  animation: var(--tm-anim-badge);
+}
