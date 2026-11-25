@@ -99,12 +99,13 @@ function Sheet({ r, first, specials }: { r: Row; first: boolean; specials: strin
               const ch = line[i] ?? "";
               const lower = ch >= "a" && ch <= "z";
               // ทุกช่องใช้ "เส้นฐาน" เดียวกัน (ชั้นนอกขนาด/ระยะบรรทัดเท่ากันทุกช่อง) · เส้นปะสูงจากเส้นฐาน GUIDE_PX
-              // ตัวพิมพ์เล็กย่อให้ทั้งตัว (รวมหาง l/i) อยู่ใต้เส้นปะ · ตัวใหญ่/ตัวเลขสูงทะลุเส้นปะ — เจ้าของขอ 2026-11-25
+              // ตัวพิมพ์เล็กย่อให้ทั้งตัว (รวมหาง l/i) อยู่ใต้เส้นปะ · ช่องตัวใหญ่/ตัวเลข/สัญลักษณ์ไม่มีเส้นปะ (ดูง่ายกว่า) — เจ้าของขอ 2026-11-25
               const strut = { fontFamily: `"${font}", serif`, fontSize: 52, lineHeight: "66px" } as const;
+              const guide = lower || !ch;
               return (
                 <div key={i} className={`${cell} relative min-h-[66px] items-end`}>
                   <div className="relative w-full px-1 font-bold" style={strut}>
-                    <span className="inline-block w-full border-t-2 border-dashed border-slate-500 align-baseline" style={{ height: GUIDE_PX }} />
+                    <span className={`inline-block w-full border-t-2 border-dashed align-baseline ${guide ? "border-slate-500" : "border-transparent"}`} style={{ height: GUIDE_PX }} />
                     <div className="absolute inset-0 px-1 text-center" style={strut}>
                       <span className="align-baseline" style={{ fontSize: lower ? LOWER_PX : 52 }}>{ch}</span>
                     </div>
