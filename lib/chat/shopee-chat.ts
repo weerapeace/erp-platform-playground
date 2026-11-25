@@ -53,26 +53,39 @@ export const pullShopeeChats: ShopPuller = async (admin, shop, cursor, ctx) => {
   const changed: ShopeeConvRow[] = [];
   const diag: Record<string, unknown> = { at: new Date().toISOString(), pages: 0, raw: 0, parsed: 0 };
   let next = "";
+  // ⚠️ เจอจริง 2026-11-25: direction "latest" ไม่ใส่ตัวชี้ = Shopee เริ่มจากห้องเก่าสุด (หน้าแรกเป็นห้องปี 2024)
+  //    → ใช้ direction "older" + ตัวชี้ = เวลาตอนนี้ (นาโนวินาที) = ไล่จากห้องใหม่สุดถอยหลัง
+  //    ห้องที่ปักหมุด (pinned) อาจอยู่บนสุดทั้งที่เก่า → ไม่ใช้ตัดสินว่า "ถึงห้องเก่าแล้ว"
   try {
+    const seen = new Set<string>();
     for (let page = 0; page < 5 && changed.length < MAX_CONVS_PER_RUN; page++) {
-      const q: Record<string, string | number> = { direction: "latest", type: "all", page_size: 20 };
-      if (next) q.next_timestamp_nano = next;
+      const q: Record<string, string | number> = { direction: "older", type: "all", page_size: 20, next_timestamp_nano: next || `${Date.now()}000000` };
       const r = resp(await shopeeFetch("/api/v2/sellerchat/get_conversation_list", { query: q, ...auth }));
       const rawList = Array.isArray(r.conversations) ? r.conversations as Obj[] : [];
       const rows = rawList.map((c) => shopeeConvOf(c)).filter((c): c is ShopeeConvRow => !!c);
       if (page === 0) {
+        diag.direction = "older";
         diag.resp_keys = Object.keys(r).slice(0, 20);
         diag.conv_keys = rawList[0] ? Object.keys(rawList[0]).slice(0, 40) : [];
         diag.first_ts_raw = rawList[0] ? String(rawList[0].last_message_timestamp ?? "") : null;
-        diag.newest = rows[0]?.lastMs ? new Date(rows[0].lastMs).toISOString() : null;
+        // ลำดับเวลาของหน้าแรก (ไม่มีข้อมูลลูกค้า) — ไว้ยืนยันว่าเรียงใหม่→เก่าจริง
+        diag.order = rows.map((c, i) => `${rawList[i]?.pinned === true ? "P" : ""}${c.lastMs ? new Date(c.lastMs).toISOString().slice(0, 16) : "?"}`).slice(0, 20);
       }
       diag.pages = page + 1; diag.raw = Number(diag.raw) + rawList.length; diag.parsed = Number(diag.parsed) + rows.length;
-      let older = false;
-      for (const c of rows) { if (c.lastMs > sinceMs) changed.push(c); else older = true; }
+      let newerOnPage = 0;
+      for (const [i, c] of rows.entries()) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        if (c.lastMs > sinceMs) { changed.push(c); if (rawList[i]?.pinned !== true) newerOnPage++; }
+      }
+      const newest = rows.reduce((m, c) => Math.max(m, c.lastMs), 0);
+      if (!diag.newest || newest > Date.parse(String(diag.newest))) diag.newest = newest ? new Date(newest).toISOString() : null;
       const pr = (r.page_result ?? {}) as Obj;
       next = String(((pr.next_cursor ?? {}) as Obj).next_message_time_nano ?? "");
-      if (older || pr.more !== true || !next) break;
+      // หน้านี้ไม่มีห้องใหม่ (ไม่นับห้องปักหมุด) = ถอยมาถึงห้องที่ดึงแล้ว → หยุด
+      if (newerOnPage === 0 || pr.more !== true || !next) break;
     }
+    changed.sort((a, b) => b.lastMs - a.lastMs);
   } catch (e) { return { events: [], cursor: { ...cursor, diag: { ...diag, error: String((e as Error)?.message ?? e).slice(0, 200) } }, ...failState(e) }; }
   if (changed.length === 0) {
     // ไม่มีห้องใหม่ — บอกเหตุผลที่ตรวจได้ (ร้านไม่มีแชทเลย / อ่านห้องไม่ออก / ทุกห้องเก่ากว่าที่ดึงแล้ว)
