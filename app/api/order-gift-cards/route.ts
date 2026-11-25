@@ -317,6 +317,20 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     engrave: { sources: [] as string[], items: [] as Row[], needs_name: false }, parents: [] as Row[], chat_ready: false,
     ...workOf([x], [], null), not_special: false,
   }))] as typeof rows;
+  // การ์ดไม่ผูกออเดอร์ (ปุ่ม "การ์ดใหม่") = แถวของตัวเอง — แทนแท็บการ์ดทั้งหมดเดิม (เจ้าของสั่ง 2026-11-25)
+  const { data: looseCards } = await admin.from("order_gift_cards").select("id, order_no, message, printed_at, hand_written_at, updated_at, created_at")
+    .is("platform_order_id", null).is("deleted_at", null).or(`updated_at.gte.${since},and(printed_at.is.null,hand_written_at.is.null)`).order("updated_at", { ascending: false }).limit(300);
+  rows = [...rows, ...((looseCards ?? []) as Row[]).map((c) => {
+    const w = workOf([], [c], null);
+    return {
+      id: `card:${c.id}`, order_no: str(c.order_no), customer_name: null, status: null, ordered_at: str(c.created_at), ship_by_at: null, packed_at: null,
+      platform: null, platform_code: null, brand_id: null, brand_name: null, note: str(c.message) ? `การ์ด: ${str(c.message)}` : "การ์ด (ไม่ผูกออเดอร์)", special_wrap: [] as string[],
+      kind: { card: true, engrave: false, chat: false }, kind_auto: { card: true, engrave: false }, overridden: false,
+      cards: [c], instructions: [] as Row[],
+      engrave: { sources: [] as string[], items: [] as Row[], needs_name: false }, parents: [] as Row[], chat_ready: false,
+      ...w, work: (c.printed_at || c.hand_written_at ? "done" : "todo") as "done" | "todo", not_special: false,
+    };
+  })] as typeof rows;
   const hiddenRows = rows.filter((r) => r.not_special);
   rows = rows.filter((r) => !r.not_special);
   // ต้องส่งภายในพรุ่งนี้ (เวลาไทย) หรือเลยกำหนด · แพ็กแล้วแต่งานพิเศษยังไม่เสร็จ (ข้อ 3-4)

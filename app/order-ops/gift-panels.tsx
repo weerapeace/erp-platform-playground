@@ -120,7 +120,7 @@ export function GiftInbox({ tab, onTab, kind, onKind, openIns, onCounts }: {
 const DAY = 86_400_000;
 /** เริ่มวันนี้ (เวลาไทย) */
 const startTodayTH = () => { const d = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10); return new Date(`${d}T00:00:00+07:00`).getTime(); };
-const orderRow = (r: NoteRow) => !r.id.startsWith("ins:");
+const orderRow = (r: NoteRow) => !r.id.startsWith("ins:") && !r.id.startsWith("card:");
 const isSpecialRow = (r: NoteRow) => r.kind.card || r.kind.engrave || !!r.special_wrap?.length || r.instructions.length > 0;
 /** แพ็กแล้วแต่งานพิเศษยังไม่เสร็จ (ข้อ 4) — ตรงกับตัวนับฝั่ง API */
 const packedUndone = (r: NoteRow) => (!!r.packed_at || r.status === "packed") && r.work !== "done" && isSpecialRow(r) && r.status !== "cancelled";
@@ -242,6 +242,7 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
 
   // กดแถว = ป๊อปคำสั่งพิเศษ: มีคำสั่งแล้ว → เปิดแก้ใบแรก · ยังไม่มี → เปิดใหม่กรอกจากออเดอร์ให้แล้ว (บันทึกเมื่อกด "บันทึก")
   const openRow = (r: NoteRow) => {
+    if (r.id.startsWith("card:")) { router.push(`/order-ops/gift-cards/edit?id=${r.id.slice(5)}`); return; }
     if (r.instructions.length) { void openExisting(r.instructions[0].id); return; }
     const it = r.engrave.items[0];
     setInsFor({
@@ -324,7 +325,7 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
     } catch (e) { toast.error((e as Error).message); }
   };
   const writeHref = (r: NoteRow) => (r.cards[0] ? `/order-ops/gift-cards/edit?id=${r.cards[0].id}` : `/order-ops/gift-cards/edit?order=${r.id}`);
-  const isOrderRow = (r: NoteRow) => !r.id.startsWith("ins:");
+  const isOrderRow = (r: NoteRow) => !r.id.startsWith("ins:") && !r.id.startsWith("card:");
 
   const kindMenu = (r: NoteRow) => (
     <Popover align="right" panelClassName="w-72 p-2 text-[13px]" trigger={(toggle) => <button type="button" onClick={toggle} title="เมนู" className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"><Icon value="i:dots-vertical" /></button>}>
@@ -501,13 +502,13 @@ export function InstructionTrash({ open, onClose, onRestored }: { open: boolean;
 
 // ───────────── การ์ดทั้งหมด ─────────────
 
-export function GiftCardsList({ onCount }: { onCount: (n: number) => void }) {
+export function GiftCardsList({ onCount, trashOnly = false }: { onCount: (n: number) => void; /** โชว์แค่ถังขยะ (หน้าตั้งค่า) */ trashOnly?: boolean }) {
   const toast = useToast();
   const router = useRouter();
   const canEdit = usePermission("order_ops.edit");
   const canDelete = usePermission("order_ops.delete");
   const isMobile = useMediaQuery("(max-width: 767px)");
-  const [trash, setTrash] = useState(false);
+  const [trash, setTrash] = useState(trashOnly);
   const [status, setStatus] = useState<"" | "todo" | "done">("");
   const [rows, setRows] = useState<CardRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -579,7 +580,7 @@ export function GiftCardsList({ onCount }: { onCount: (n: number) => void }) {
             {canEdit && <button type="button" onClick={() => void unprint(selIds)} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px]">เอาติ๊กพิมพ์แล้วออก</button>}
             {canDelete && <button type="button" onClick={async () => { if (await askConfirm({ title: `ลบการ์ด ${sel.size} ใบ?`, message: "ย้ายลงถังขยะ กู้คืนได้", confirmText: "ย้ายลงถังขยะ", variant: "danger" })) void del(selIds); }} className="h-8 rounded-md border border-rose-200 bg-white px-2 text-[12px] text-rose-600">ลบ</button>}
           </>}
-          {canDelete && <button type="button" onClick={() => setTrash((t) => !t)} className={`inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[12px] ${trash ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"}`}><Icon value="i:trash" /> {trash ? "ออกจากถังขยะ" : "ถังขยะ"}</button>}
+          {canDelete && !trashOnly && <button type="button" onClick={() => setTrash((t) => !t)} className={`inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[12px] ${trash ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 bg-white text-slate-600"}`}><Icon value="i:trash" /> {trash ? "ออกจากถังขยะ" : "ถังขยะ"}</button>}
         </div>
       }
       emptyText={trash ? "ถังขยะว่าง" : "ยังไม่มีการ์ด — ไปที่แท็บ \"การ์ด / ห่อของขวัญ\" แล้วกดเขียนการ์ด"}

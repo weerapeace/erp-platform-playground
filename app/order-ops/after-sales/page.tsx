@@ -1,13 +1,14 @@
 "use client";
 
 // ============================================================
-// 🛠 ซ่อม / คืนสินค้า — /order-ops/after-sales (แอป ช่องทางขาย/ออเดอร์ออนไลน์)
-// แท็บ งานซ่อม (รอของลูกค้า → ซ่อม → รอแพ็กส่งกลับ → ส่งคืนแล้ว) · ของคืน/ตีกลับ (รอตรวจ → ตรวจแล้ว → ปิดงาน)
+// 🛠 รอของ & ซ่อม/เปลี่ยนคืน — /order-ops/after-sales (แอป ช่องทางขาย/ออเดอร์ออนไลน์)
+// แท็บ รอของ (?kind=wait · ย้ายมาจากหน้าคำสั่งพิเศษ 2026-11-25) · งานซ่อม (รอของลูกค้า → ซ่อม → รอแพ็กส่งกลับ → ส่งคืนแล้ว)
+//      · เปลี่ยน/คืน (?kind=return · รอตรวจ → ตรวจแล้ว → ปิดงาน) · ตัวเลขบนแท็บ = งานค้าง
 // ย้ายจากแอปเก่า repair-and-return (2026-11-24 · ช่วงทดลอง: ปุ่มรับเข้าสต๊อกยังไม่แตะสต๊อกจริง)
 // API /api/order-ops?t=cases · กติกา lib/order-ops · ชิ้นส่วนร่วม ../instructions + ../shared
 // ============================================================
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -22,6 +23,8 @@ import { Icon } from "@/components/icon";
 import { ImageAttachKeys } from "@/components/image-attach";
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { WaitView } from "../wait-view";
 import { caseStatusInfo, caseStatusList, defaultCaseStatus, nextCaseStatuses, REPAIR_RESOLUTIONS, type CaseKind } from "@/lib/order-ops";
 import {
   Field, HistoryList, OptionsManager, OrderNoField, Pill, SkuField, TrashToggle, TrialBanner, TrialPill,
@@ -52,7 +55,46 @@ export default function AfterSalesPage() {
   );
 }
 
+type Tab = "wait" | "repair" | "return";
+/** หัวหน้า + แท็บ รอของ · ซ่อม · เปลี่ยน/คืน (ตัวเลขงานค้างบนแท็บ) */
 function Body() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const k = sp.get("kind");
+  const tab: Tab = k === "wait" ? "wait" : k === "return" ? "return" : "repair";
+  const [counts, setCounts] = useState<{ wait?: number; repair?: number; ret?: number }>({});
+  const [bump, setBump] = useState(0);
+  useEffect(() => {
+    void opsJson<{ summary: { waiting?: number } }>("/api/order-ops?t=instructions&page=1&page_size=1").then((r) => setCounts((c) => ({ ...c, wait: r.summary.waiting }))).catch(() => {});
+    void opsJson<{ summary: Summary }>("/api/order-ops?t=cases&kind=repair&page=1&page_size=1").then((r) => setCounts((c) => ({ ...c, repair: (r.summary.repairing ?? 0) + (r.summary.ready ?? 0), ret: r.summary.returns_open }))).catch(() => {});
+  }, [bump, tab]);
+  const tabs: { key: Tab; label: string; icon: string; badge?: number }[] = [
+    { key: "wait", label: "รอของ", icon: "clock", badge: counts.wait },
+    { key: "repair", label: "ซ่อม", icon: "tool", badge: counts.repair },
+    { key: "return", label: "เปลี่ยน / คืน", icon: "arrows-exchange", badge: counts.ret },
+  ];
+  return (
+    <>
+      <div className="mb-2">
+        <h1 className="text-xl font-bold text-slate-900">รอของ &amp; ซ่อม/เปลี่ยนคืน</h1>
+        <p className="text-sm text-slate-500">งานหลังขายที่ต้องติดตามกับลูกค้า — รอของเข้า · ซ่อม · เปลี่ยน/คืน/ตีกลับ · ผูกกับออเดอร์ในศูนย์ออเดอร์ด้วยเลขออเดอร์</p>
+      </div>
+      <ScrollTabs activeKey={tab} className="mb-3 border-b border-slate-200">
+        {tabs.map((t) => (
+          <button key={t.key} type="button" data-tab-key={t.key} onClick={() => router.replace(t.key === "repair" ? "/order-ops/after-sales" : `/order-ops/after-sales?kind=${t.key}`)}
+            className={`-mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm ${tab === t.key ? "border-sky-600 font-medium text-sky-700" : "border-transparent text-slate-600 hover:text-slate-800"}`}>
+            <Icon name={t.icon} className="h-4 w-4" /> {t.label}
+            {!!t.badge && <span className="rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-700">{t.badge}</span>}
+          </button>
+        ))}
+      </ScrollTabs>
+      {tab === "wait" ? <WaitView bump={bump} onSummary={(s) => setCounts((c) => ({ ...c, wait: s.waiting }))} />
+        : <CasesView key={tab} onSummary={(x) => setCounts((c) => ({ ...c, repair: (x.repairing ?? 0) + (x.ready ?? 0), ret: x.returns_open }))} />}
+    </>
+  );
+}
+
+function CasesView({ onSummary }: { onSummary: (s: Summary) => void }) {
   const toast = useToast();
   const router = useRouter();
   const sp = useSearchParams();
@@ -75,6 +117,7 @@ function Body() {
   const [editing, setEditing] = useState<Case | "new" | null>(null);
   const [optOpen, setOptOpen] = useState(false);
   const [bump, setBump] = useState(0);
+  const onSummaryRef = useRef(onSummary); onSummaryRef.current = onSummary;
 
   const setKind = (k: CaseKind) => { setFilter("open"); router.replace(k === "return" ? "/order-ops/after-sales?kind=return" : "/order-ops/after-sales"); };
 
@@ -91,7 +134,7 @@ function Body() {
     if (q.trim()) p.set("q", q.trim());
     try {
       const r = await opsJson<{ rows: Case[]; total: number; summary: Summary }>(`/api/order-ops?${p}`);
-      setRows(r.rows); setTotal(r.total); if (!trash) setSummary(r.summary);
+      setRows(r.rows); setTotal(r.total); if (!trash) { setSummary(r.summary); onSummaryRef.current(r.summary); }
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }, [kind, page, trash, statusFilter, q]);
@@ -154,16 +197,6 @@ function Body() {
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">ซ่อม / คืนสินค้า</h1>
-          <p className="text-sm text-slate-500">งานซ่อมหลังขาย · ของคืน / ตีกลับ — ผูกกับออเดอร์ในศูนย์ออเดอร์ด้วยเลขออเดอร์</p>
-        </div>
-        <div className="flex rounded-lg border border-slate-200 p-0.5 text-sm">
-          <button onClick={() => setKind("repair")} className={`rounded-md px-3 py-1 ${kind === "repair" ? "bg-sky-50 font-medium text-sky-700" : "text-slate-600"}`}>งานซ่อม</button>
-          <button onClick={() => setKind("return")} className={`rounded-md px-3 py-1 ${kind === "return" ? "bg-sky-50 font-medium text-sky-700" : "text-slate-600"}`}>ของคืน / ตีกลับ</button>
-        </div>
-      </div>
       <TrialBanner trialCount={summary.trial ?? 0} onChanged={() => setBump((b) => b + 1)} />
       <StatFilterCards
         value={trash ? "" : filter}

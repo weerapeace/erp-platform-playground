@@ -73,7 +73,7 @@ export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
   file:                          E("files", "ไฟล์ที่อัปโหลด"),
   platform_email:                E("sales", "อีเมลยอดขายแพลตฟอร์ม"),
   order_instructions:            E("sales", "คำสั่งพิเศษออเดอร์", () => "/order-ops/instructions"),
-  order_waitlist:                E("sales", "รายการรอของ", () => "/order-ops/instructions?s=wait"),
+  order_waitlist:                E("sales", "รายการรอของ", () => "/order-ops/after-sales?kind=wait"),
   after_sales_cases:             E("sales", "ซ่อม / คืนสินค้า", () => "/order-ops/after-sales"),
   order_ops_options:             E("sales", "ตัวเลือกงานหลังขาย", () => "/order-ops/instructions"),
   order_gift_cards:              E("sales", "การ์ดของขวัญ", (id) => `/order-ops/gift-cards/edit?id=${id}`),
