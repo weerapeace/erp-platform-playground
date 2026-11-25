@@ -48,7 +48,10 @@ import { SampleAlbumPickerModal } from "./album-picker";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { SAMPLE_ALBUM_SORTS, SAMPLE_NOTE_MAX, SAMPLE_PHOTO_SORTS, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, albumMatches, albumPath, browseAlbums, nextVersionName, productLinkLabel, canMoveAlbum, inBrandTab, isDayAlbum, nextProductName, photoMatches, photosToMove, reorderIds, sortAlbums, sortPhotos, splitSampleFiles, thaiShortDate, type SampleAlbum, type SampleBrand, type SamplePhoto } from "@/lib/sample-images";
 import { BrandDot, SampleAlbumCard, SampleAlbumPath, SampleBrandBar, SamplePhotoTile, SampleSearchSort, sampleImgUrl, useSampleSorts } from "./parts";
-import { linkAlbumProduct, reorderAlbumsFlat } from "./api";
+import { linkAlbumProduct, reorderAlbumsFlat, loadAlbumZipFiles, saveAlbumKeywords, savePhotoKeywords } from "./api";
+import { KeywordChips, PhotoKeywordsDialog } from "./keywords";
+import { downloadImagesAsZip } from "@/lib/zip";
+import { fetchR2Blob } from "@/lib/r2-image";
 import { createSubAlbum, deleteEmptyAlbum, ensureTodayAlbum, loadSamples, moveAlbumTo, movePhotosTo, moveToSheet, renameAlbum, reorderAlbums, reorderPhotos, restoreSample, saveAlbumNote, setAlbumBrand, trashSample, uploadSample } from "./api";
 
 /** ลากสลับลำดับ: ตำแหน่งที่ชี้บนรูป/การ์ด — ขอบซ้าย 30% = วางก่อน · ขอบขวา 30% = วางหลัง · กลาง = รวม/ย้ายเข้า (แบบเดิม) */
@@ -158,6 +161,9 @@ export function SampleImagesPage() {
   const [linkTarget, setLinkTarget] = useState<SampleAlbum | null>(null);   // หน้าเชื่อมสินค้า (อัลบั้มที่เปิด / การ์ดไหนก็ได้)
   const [linkedImgs, setLinkedImgs] = useState<{ key: string; label: string }[]>([]);   // แผงเลือกอัลบั้มปลายทาง
   const [up, setUp] = useState<UploadProgressState | null>(null);
+  const [zipUp, setZipUp] = useState<UploadProgressState | null>(null);   // ดาวน์โหลด .zip (2026-11-25)
+  const zipCancel = useRef(false);
+  const [kwOpen, setKwOpen] = useState(false);   // ป๊อปคำค้นของรูปที่เลือก
   const cancelRef = useRef(false);
   const [picking, setPicking] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
@@ -499,6 +505,69 @@ export function SampleImagesPage() {
   // ── อัลบั้มในอัลบั้ม (เจ้าของสั่ง 2026-11-14): สร้างจากรูปที่เลือก · ย้ายรูป/อัลบั้ม · เปลี่ยนชื่อ · ลบอัลบั้มว่าง ──
   // อัลบั้มของวัน = โชว์เป็นวันที่ · อัลบั้มที่ตั้งชื่อเอง (ชั้นไหนก็ได้ เช่น Louis Batch สร้าง) = ชื่อจริง
   const nameOf = (a: SampleAlbum | null | undefined) => (a ? albumFullName(a, brandOf(a.brand_id)?.name) : "");
+
+  // ── คำค้น (เจ้าของเลือกแบบ C + ข้อ 2-4 · 2026-11-25): อัลบั้ม = asset_collections.keywords · รูป = assets.keywords ──
+  //   คำที่เคยใช้ (เด้งให้กด) = คำของอัลบั้มแบรนด์เดียวกัน + รูปในอัลบั้มที่เปิด
+  const keywordPool = useMemo(() => [
+    ...(albums ?? []).filter((a) => !album || (a.brand_id ?? null) === (album.brand_id ?? null)).map((a) => a.keywords),
+    ...(photos ?? []).map((p) => p.keywords),
+  ], [albums, album, photos]);
+  const saveAlbumKw = async (target: SampleAlbum, next: string[], undoOf?: string[]) => {
+    const before = target.keywords ?? [];
+    setBusy(true);
+    try {
+      const r = await saveAlbumKeywords(target.id, next);
+      setAlbums((as) => as && as.map((a) => (a.id === target.id ? { ...a, keywords: r.keywords } : a)));
+      if (!undoOf) toast.action(t("บันทึกคำค้นแล้ว", "Keywords saved"), t("ย้อนกลับ", "Undo"), () => void saveAlbumKw({ ...target, keywords: r.keywords }, before, r.keywords), { ms: 6000 });
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const applyPhotoKw = (rows: { id: string; keywords: string[] }[]) => {
+    const m = new Map(rows.map((r) => [r.id, r.keywords]));
+    setPhotos((ps) => ps && ps.map((p) => (m.has(p.id) ? { ...p, keywords: m.get(p.id) } : p)));
+  };
+  const savePhotoKw = async (targets: SamplePhoto[], edit: { add: string[]; remove: string[] }) => {
+    const before = targets.map((p) => ({ id: p.id, keywords: p.keywords ?? [] }));
+    setBusy(true);
+    try {
+      const r = await savePhotoKeywords(targets.map((p) => p.id), edit);
+      applyPhotoKw(r.photos);
+      setKwOpen(false);
+      toast.action(t(`บันทึกคำค้นของ ${targets.length} รูปแล้ว`, `Saved keywords of ${targets.length} photo(s)`), t("ย้อนกลับ", "Undo"), () => void (async () => {
+        try {
+          // ย้อน = ตั้งคำค้นกลับเป็นชุดเดิมของแต่ละรูป (จับกลุ่มรูปที่ชุดเดิมเหมือนกัน)
+          const groups = new Map<string, { set: string[]; ids: string[] }>();
+          for (const b of before) { const k = JSON.stringify(b.keywords); const g = groups.get(k) ?? { set: b.keywords, ids: [] }; g.ids.push(b.id); groups.set(k, g); }
+          for (const g of groups.values()) applyPhotoKw((await savePhotoKeywords(g.ids, { set: g.set })).photos);
+          toast.success(t("ย้อนกลับแล้ว", "Undone"));
+        } catch (e) { toast.error((e as Error).message); }
+      })(), { ms: 8000 });
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  // ── ดาวน์โหลด .zip (ข้อ 1): ไม่เลือก = ทั้งอัลบั้ม รวมอัลบั้มย่อยเป็นโฟลเดอร์ · เลือกไว้ = เฉพาะที่เลือก ──
+  //   เบราว์เซอร์โหลดรูปจากตัวเสิร์ฟรูป (erp-img) ตรง แล้วรวมเป็น zip ในเครื่อง — ไม่ผ่าน Vercel (ตัวเสิร์ฟล่ม = fetchR2Blob ลองผ่านแอปเอง)
+  const downloadZip = async () => {
+    if (!album || zipUp) return;
+    try {
+      setZipUp({ label: t("กำลังเตรียม .zip", "Preparing .zip"), name: nameOf(album), pct: null });
+      const plan = selected.length
+        ? { name: nameOf(album), files: selected.map((p) => ({ key: p.r2_key, name: p.file_name || `${p.id}.jpg` })) }
+        : await loadAlbumZipFiles(album.id);
+      if (!plan.files.length) { toast.error(t("ไม่มีรูปให้ดาวน์โหลด", "No photos to download")); return; }
+      if (plan.files.length > 300 && !(await askConfirm({ title: t("รูปเยอะมาก", "Lots of photos"), message: t(`${plan.files.length} รูป อาจใช้เวลานานและกินหน่วยความจำเครื่อง — ดาวน์โหลดต่อไหม?`, `${plan.files.length} photos — this may take a while. Continue?`), confirmText: t("ดาวน์โหลด", "Download") }))) return;
+      zipCancel.current = false;
+      const zipName = `${plan.name}${selected.length ? ` (${selected.length} รูป)` : ""}`;
+      const n = await downloadImagesAsZip(plan.files.map((f) => ({ url: sampleImgUrl(f.key), name: f.name })), zipName,
+        (d, tot) => setZipUp({ label: t("กำลังโหลดรูปลง .zip", "Downloading to .zip"), name: zipName, pct: Math.round((d / Math.max(1, tot)) * 100), count: { current: Math.min(tot, d + 1), total: tot } }),
+        { fetchBlob: fetchR2Blob, concurrency: 4, cancelled: () => zipCancel.current });
+      if (zipCancel.current) toast.info(t("ยกเลิกดาวน์โหลดแล้ว", "Download cancelled"));
+      else if (!n) toast.error(t("โหลดรูปไม่ได้เลย ลองใหม่อีกครั้ง", "Couldn't download any photo"));
+      else toast.success(n < plan.files.length ? t(`ดาวน์โหลด ${n} จาก ${plan.files.length} รูป (บางรูปโหลดไม่ได้)`, `${n} of ${plan.files.length} downloaded`) : t(`ดาวน์โหลด ${n} รูปแล้ว`, `${n} photo(s) downloaded`));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setZipUp(null); }
+  };
   // undo = ทำย้อนได้ → แจ้งเตือนมีปุ่ม "ย้อนกลับ" 8 วิ (เจ้าของขอ 2026-11-17 หลังเผลอลากอัลบั้มผิด)
   const act = async (fn: () => Promise<string | null>, stayOn?: string | null, undo?: () => Promise<void>) => {
     setBusy(true);
@@ -868,6 +937,13 @@ export function SampleImagesPage() {
                     <button type="button" onClick={() => void createSub([])} disabled={busy} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:folders" />{t("อัลบั้มย่อย", "Sub-album")}</button>
                   )}
                   <span className="flex-1" />
+                  {!trashView && (album.deep.photos > 0 || selected.length > 0) && (
+                    <button type="button" onClick={() => void downloadZip()} disabled={!!zipUp}
+                      title={selected.length ? t("ดาวน์โหลดเฉพาะรูปที่เลือกเป็นไฟล์ .zip", "Download the selected photos as .zip") : t("ดาวน์โหลดทั้งอัลบั้มเป็นไฟล์ .zip (อัลบั้มย่อย = โฟลเดอร์ในไฟล์)", "Download the whole album as .zip (sub-albums = folders)")}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-sky-200 bg-white px-3 text-[12px] text-sky-700 hover:bg-sky-50 disabled:opacity-60">
+                      <Icon value="i:download" />{selected.length ? t(`.zip ที่เลือก (${selected.length})`, `.zip selected (${selected.length})`) : t(`.zip ทั้งอัลบั้ม (${album.deep.photos})`, `.zip album (${album.deep.photos})`)}
+                    </button>
+                  )}
                   {list.length > 0 && (
                     <button type="button" onClick={() => setSel(allOn ? new Set() : new Set(list.map((p) => p.id)))} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50">
                       {allOn ? t("ไม่เลือกทั้งหมด", "Clear all") : t(`เลือกทั้งหมด (${list.length})`, `Select all (${list.length})`)}
@@ -880,6 +956,14 @@ export function SampleImagesPage() {
                   )}
                   <GalleryColumnsControl cols={cols} onChange={setCols} as="select" wheelHint />
                 </div>
+
+                {zipUp && <UploadProgress {...zipUp} onCancel={() => { zipCancel.current = true; }} />}
+
+                {/* คำค้นของอัลบั้ม (2026-11-25) — กดชิป = ค้นด้วยคำนั้น · พิมพ์แล้วเด้งคำที่เคยใช้ในแบรนด์ */}
+                {!trashView && (canEdit || (album.keywords ?? []).length > 0) && (
+                  <KeywordChips value={album.keywords ?? []} canEdit={canEdit} busy={busy} pool={keywordPool}
+                    onChange={(next) => void saveAlbumKw(album, next)} onPick={(k) => setQuery(k)} />
+                )}
 
                 {/* รูปที่มีอยู่แล้วของสินค้าที่เชื่อม — เทียบกับ SAMPLE ได้เลย (ข้อเสนอ 1) */}
                 {!trashView && linkedImgs.length > 0 && (
@@ -1003,7 +1087,7 @@ export function SampleImagesPage() {
                         const over = zone === "merge";
                         const idx = list.indexOf(p);
                         return (
-                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over} thumbW={thumbW(480)} onView={() => setViewAt(idx)}
+                          <SamplePhotoTile key={p.id} photo={p} on={on} onToggle={() => toggle(p.id)} faded={trashView} highlight={over} thumbW={thumbW(480)} onView={() => setViewAt(idx)} onKeyword={(k) => setQuery(k)}
                             extra={{ ...dragProps(() => photoDrag(p.id)), ...(trashView ? {} : photoDrop(p.id)), ...selAttr(`p:${p.id}`) }}>
                             {over && <span className="pointer-events-none absolute inset-x-1.5 top-1.5 rounded-md bg-emerald-600/90 px-1.5 py-0.5 text-center text-[11px] text-white">{t("ปล่อย = รวมเป็นอัลบั้มใหม่", "Drop to make an album")}</span>}
                             {(zone === "before" || zone === "after") && <span aria-hidden className={`pointer-events-none absolute inset-y-1 z-10 w-1.5 rounded-full bg-violet-500 ${zone === "before" ? "left-0" : "right-0"}`} />}
@@ -1095,6 +1179,7 @@ export function SampleImagesPage() {
           <>
             {album && canUpload && <button type="button" onClick={() => void createSub(selected.map((p) => p.id))} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:folders" />{!isDayAlbum(album) ? t("สร้าง Version จากที่เลือก", "New version from selection") : t("สร้างอัลบั้มจากที่เลือก", "New album from selection")}</button>}
             {album && canUpload && !isDayAlbum(album) && <button type="button" onClick={() => void createOutside(selected.map((p) => p.id))} disabled={busy} title={t("สร้างอัลบั้มใหม่ระดับเดียวกับอัลบั้มนี้ แล้วย้ายรูปที่เลือกไปไว้", "New album next to this one with the selected photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("สร้างอัลบั้มไว้ข้างนอก", "New album outside")}</button>}
+            {canEdit && selected.length > 0 && <button type="button" onClick={() => setKwOpen(true)} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-200 bg-white px-3 text-sm text-sky-700 hover:bg-sky-50 disabled:opacity-60"><Icon value="i:tag" />{t("คำค้น", "Keywords")}</button>}
             {album && canEdit && <button type="button" onClick={() => setChooser("photos")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon value="i:transfer-out" />{t("ย้ายไปอัลบั้ม…", "Move to album…")}</button>}
             {canMove && <button type="button" onClick={() => setPicking(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:arrow-right" />{t("ส่งไป Design Dashboard", "Send to Design Dashboard")}</button>}
             {canDelete && <button type="button" onClick={() => setAskDelete(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon value="i:trash" />{t("ลบ (ไปถังขยะ)", "Delete (to trash)")}</button>}
@@ -1103,6 +1188,10 @@ export function SampleImagesPage() {
         )}
         {trashView && canEdit && <button type="button" onClick={() => void doRestore()} disabled={busy} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"><Icon value="i:arrow-back-up" />{t("เอากลับ", "Restore")}</button>}
       </BulkActionBar>
+
+      {kwOpen && selected.length > 0 && (
+        <PhotoKeywordsDialog open onClose={() => setKwOpen(false)} photos={selected} pool={keywordPool} busy={busy} onSave={(edit) => void savePhotoKw(selected, edit)} />
+      )}
 
       {linkTarget && (
         <LinkProductDialog open albumId={linkTarget.id} albumName={nameOf(linkTarget)} brandId={linkTarget.brand_id} parentCodes={linkTarget.parent_sku_codes ?? []} skuCodes={linkTarget.sku_codes ?? []}

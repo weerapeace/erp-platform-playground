@@ -28,6 +28,8 @@ export type SamplePhoto = {
   moved_to: SampleSheetRef[];
   /** ลำดับแบบ "จัดเอง" ในอัลบั้มนี้ (asset_collection_map.sort_order · ไม่มี = ยังไม่จัด → ต่อท้ายตามลำดับที่ลง) */
   sort_order?: number | null;
+  /** คำค้นของรูป (assets.keywords · 2026-11-25) */
+  keywords?: string[];
 };
 export type SampleBrand = { id: string; name: string; color: string | null; logo_url: string | null };
 export type SampleAlbum = {
@@ -52,7 +54,71 @@ export type SampleAlbum = {
   /** เชื่อมสินค้า (2026-11-17): รหัส Parent SKU · รหัส SKU ลูก (ว่าง = ทั้งรุ่น) */
   parent_sku_codes?: string[];
   sku_codes?: string[];
+  /** คำค้นของอัลบั้ม (asset_collections.keywords · 2026-11-25) */
+  keywords?: string[];
 };
+
+// ── คำค้น (keyword) ของอัลบั้ม/รูป (เจ้าของเลือกแบบ C 2026-11-25) ──
+export const SAMPLE_KEYWORD_LEN = 40;
+export const SAMPLE_KEYWORD_MAX = 30;
+/** ทำความสะอาดรายการคำค้น: รับ array หรือข้อความคั่น , / ขึ้นบรรทัด → ตัดช่องว่าง · ไม่ซ้ำ (ไม่สนตัวพิมพ์) · ยาว/จำนวนไม่เกินกำหนด */
+export function cleanKeywords(v: unknown): string[] {
+  const raw = Array.isArray(v) ? v.flatMap((x) => (typeof x === "string" ? x.split(/[,\n]/) : [])) : typeof v === "string" ? v.split(/[,\n]/) : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of raw) {
+    const k = r.replace(/\s+/g, " ").trim().slice(0, SAMPLE_KEYWORD_LEN);
+    if (!k || seen.has(k.toLowerCase())) continue;
+    seen.add(k.toLowerCase()); out.push(k);
+    if (out.length >= SAMPLE_KEYWORD_MAX) break;
+  }
+  return out;
+}
+/** เก็บลง assets.keywords (ข้อความ) — ว่าง = null */
+export const keywordText = (ks: readonly string[]): string | null => (ks.length ? ks.join(", ") : null);
+/** เพิ่ม/ลบคำค้นทีละหลายรูป — ลบก่อนแล้วค่อยเพิ่ม (ไม่สนตัวพิมพ์) */
+export function editKeywords(current: readonly string[], add: readonly string[], remove: readonly string[]): string[] {
+  const rm = new Set(remove.map((k) => k.trim().toLowerCase()));
+  return cleanKeywords([...current.filter((k) => !rm.has(k.toLowerCase())), ...add]);
+}
+/** คำที่เคยใช้ (เด้งให้กดตอนพิมพ์) — คำที่ขึ้นต้นด้วยที่พิมพ์มาก่อน แล้วเรียงตามใช้บ่อย · ไม่เอาคำที่มีอยู่แล้ว */
+export function keywordSuggestions(lists: readonly (readonly string[] | undefined)[], typed: string, exclude: readonly string[] = [], limit = 8): string[] {
+  const count = new Map<string, { k: string; n: number }>();
+  for (const l of lists) for (const k of l ?? []) { const key = k.toLowerCase(); const c = count.get(key); if (c) c.n++; else count.set(key, { k, n: 1 }); }
+  const ex = new Set(exclude.map((k) => k.toLowerCase()));
+  const q = typed.trim().toLowerCase();
+  const starts = (key: string) => (q && key.startsWith(q) ? 0 : 1);
+  return [...count.entries()].filter(([key]) => !ex.has(key) && (!q || key.includes(q)))
+    .sort(([a, x], [b, y]) => starts(a) - starts(b) || y.n - x.n || a.localeCompare(b, "th"))
+    .slice(0, limit).map(([, v]) => v.k);
+}
+
+/** ไฟล์ใน .zip ทั้งอัลบั้ม: รูปของอัลบั้มนี้อยู่ชั้นนอก · อัลบั้มย่อยเป็นโฟลเดอร์ (ซ้อนตามชั้น) · ไม่รวมรูปในถังขยะ · ชื่อซ้ำในที่เดียวกัน = ต่อเลข */
+export function albumZipFiles<T extends { id: string; parent_id: string | null }>(
+  albums: readonly T[], rootId: string, nameOf: (id: string) => string,
+  photosOf: (albumId: string) => readonly Pick<SamplePhoto, "r2_key" | "file_name" | "trashed">[],
+): { key: string; name: string }[] {
+  const safe = (s: string) => s.replace(/[\\/:*?"<>|]+/g, "-").trim() || "album";
+  const out: { key: string; name: string }[] = [];
+  const used = new Set<string>();
+  for (const id of [rootId, ...descendantIds(albums, rootId)]) {
+    const path = albumPath(albums, id);
+    const folder = path.slice(path.indexOf(rootId) + 1).map((x) => safe(nameOf(x))).join("/");
+    photosOf(id).forEach((p, i) => {
+      if (p.trashed || !p.r2_key) return;
+      let name = (folder ? `${folder}/` : "") + safe(p.file_name || `image_${i + 1}.jpg`);
+      if (used.has(name.toLowerCase())) {
+        const dot = name.lastIndexOf("."), hasExt = dot > name.lastIndexOf("/");
+        const base = hasExt ? name.slice(0, dot) : name, ext = hasExt ? name.slice(dot) : "";
+        let n = 2; while (used.has(`${base}_${n}${ext}`.toLowerCase())) n++;
+        name = `${base}_${n}${ext}`;
+      }
+      used.add(name.toLowerCase());
+      out.push({ key: p.r2_key, name });
+    });
+  }
+  return out;
+}
 
 /** ป้ายสินค้าที่เชื่อม เช่น "GG-BAG24 · 2 SKU" · ไม่เชื่อม = null */
 export function productLinkLabel(a: Pick<SampleAlbum, "parent_sku_codes" | "sku_codes">): string | null {
@@ -317,18 +383,18 @@ export function sortPhotos<T extends Pick<SamplePhoto, "created_at" | "file_name
 
 /** อัลบั้มตรงคำค้นไหม — ค้นจากชื่อจริง ("SAMPLE Good Goods 15 พ.ย. 2569" / "2026-11-15-002") · ชื่อบนการ์ด · ชื่อแบรนด์
  *  · วันที่สร้างอัลบั้มแบบไทย (เวลาไทย) — ค้น "15 พ.ย." เจอทุกอัลบั้มของวันนั้น รวมอัลบั้มที่ตั้งชื่อเอง (เจ้าของสั่ง 2026-11-15) · คำค้นว่าง = ตรงทุกอัน */
-export function albumMatches(a: Labelled & { note?: string | null; parent_sku_codes?: string[]; sku_codes?: string[] }, query: string, brandName?: string | null): boolean {
+export function albumMatches(a: Labelled & { note?: string | null; parent_sku_codes?: string[]; sku_codes?: string[]; keywords?: string[] }, query: string, brandName?: string | null): boolean {
   const q = query.trim(), toks = tokenize(q);
   if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
   // ค้นด้วยรหัส Parent SKU / SKU ลูกที่เชื่อมได้ด้วย (ข้อเสนอ 3 · 2026-11-17)
-  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName, a.note, ...(a.parent_sku_codes ?? []), ...(a.sku_codes ?? [])] }) > 0;
+  return scoreRow(q, toks, { texts: [a.name, albumCardLabel(a), thaiShortDate(new Date(a.created_at)), brandName, a.note, ...(a.parent_sku_codes ?? []), ...(a.sku_codes ?? []), ...(a.keywords ?? [])] }) > 0;
 }
 
 /** รูปตรงคำค้นไหม — ชื่อไฟล์ · เลข/ชื่อใบงานที่รูปถูกส่งเข้าไป (DS-2026-0008) · คำค้นว่าง = ตรงทุกรูป */
-export function photoMatches(p: Pick<SamplePhoto, "file_name" | "moved_to">, query: string): boolean {
+export function photoMatches(p: Pick<SamplePhoto, "file_name" | "moved_to"> & { keywords?: string[] }, query: string): boolean {
   const q = query.trim(), toks = tokenize(q);
   if (!toks.length) return true;   // ว่าง / มีแต่เครื่องหมาย = ไม่กรอง
-  return scoreRow(q, toks, { texts: [p.file_name, ...p.moved_to.flatMap((s) => [s.code, s.name])] }) > 0;
+  return scoreRow(q, toks, { texts: [p.file_name, ...p.moved_to.flatMap((s) => [s.code, s.name]), ...(p.keywords ?? [])] }) > 0;
 }
 
 /** การ์ดหน้าแฟ้ม: ไม่ค้น = อัลบั้มชั้นบนสุดของแท็บแบรนด์ · ค้น = อัลบั้มทุกชั้นที่ตรง + บอกว่าอยู่ในอัลบั้มไหน (inside) — เรียงตามที่เลือก */

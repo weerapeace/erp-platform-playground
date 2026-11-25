@@ -107,25 +107,43 @@ export async function downloadImagesAsZip(
   images: { url: string; name: string }[],
   zipName: string,
   onProgress?: (done: number, total: number) => void,
+  opts: {
+    /** วิธีโหลดไฟล์เอง (เช่น fetchR2Blob = โหลดจากตัวเสิร์ฟรูปตรง ไม่ผ่าน Vercel) · ไม่ส่ง = fetch(url) */
+    fetchBlob?: (url: string) => Promise<Blob>;
+    /** โหลดพร้อมกันกี่ไฟล์ (ค่าเริ่ม 1 = ทีละไฟล์แบบเดิม) */
+    concurrency?: number;
+    /** คืน true = หยุด (ปุ่มยกเลิก) — ไฟล์ที่กำลังโหลดอยู่จะโหลดจนจบ ไม่ตัดกลางทาง */
+    cancelled?: () => boolean;
+  } = {},
 ): Promise<number> {
+  const got: (ZipEntry | null)[] = images.map(() => null);
+  let next = 0, done = 0;
+  const load = async (i: number) => {
+    try {
+      let buf: Uint8Array | null = null;
+      if (opts.fetchBlob) buf = new Uint8Array(await (await opts.fetchBlob(images[i].url)).arrayBuffer());
+      else { const res = await fetch(images[i].url); if (res.ok) buf = new Uint8Array(await res.arrayBuffer()); }
+      if (buf) got[i] = { name: images[i].name || `image_${i + 1}`, data: buf };
+    } catch { /* ข้ามไฟล์ที่โหลดไม่ได้ */ }
+  };
+  onProgress?.(0, images.length);
+  const worker = async () => {
+    while (next < images.length && !opts.cancelled?.()) { const i = next++; await load(i); onProgress?.(++done, images.length); }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(opts.concurrency ?? 1, 8)) }, worker));
+  if (opts.cancelled?.()) return 0;
   const entries: ZipEntry[] = [];
   const used = new Set<string>();
-  for (let i = 0; i < images.length; i++) {
-    onProgress?.(i, images.length);
-    try {
-      const res = await fetch(images[i].url);
-      if (!res.ok) continue;
-      const buf = new Uint8Array(await res.arrayBuffer());
-      let name = images[i].name || `image_${i + 1}`;
-      if (used.has(name)) {                                  // กันชื่อซ้ำใน zip
-        const dot = name.lastIndexOf(".");
-        name = dot > 0 ? `${name.slice(0, dot)}_${i + 1}${name.slice(dot)}` : `${name}_${i + 1}`;
-      }
-      used.add(name);
-      entries.push({ name, data: buf });
-    } catch { /* ข้ามไฟล์ที่โหลดไม่ได้ */ }
-  }
-  onProgress?.(images.length, images.length);
+  got.forEach((e, i) => {
+    if (!e) return;
+    let name = e.name;
+    if (used.has(name)) {                                  // กันชื่อซ้ำใน zip
+      const dot = name.lastIndexOf(".");
+      name = dot > 0 ? `${name.slice(0, dot)}_${i + 1}${name.slice(dot)}` : `${name}_${i + 1}`;
+    }
+    used.add(name);
+    entries.push({ name, data: e.data });
+  });
   if (entries.length === 0) return 0;
 
   const zip = buildZip(entries);

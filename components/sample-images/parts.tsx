@@ -241,10 +241,12 @@ export function SampleAlbumPath({ path, brandColor, nameOf, onBack, onOpen, crum
 
 /** ช่องรูป 1 รูป: กด = เลือก/เลิกเลือก · ชี้แล้วมีปุ่มดูรูปเต็ม · ป้าย → DS-xxxx = อยู่ในใบงานแล้ว
  *  faded = รูปในถังขยะ · highlight = ลากผ่าน · extra = props ลาก-วาง · children = ป้ายลอยเพิ่ม (เช่น "ปล่อย = รวมเป็นอัลบั้มใหม่") */
-export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children, thumbW = 480, onView }: {
+export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, children, thumbW = 480, onView, onKeyword }: {
   photo: SamplePhoto; on: boolean; onToggle: () => void; faded?: boolean; highlight?: boolean; thumbW?: number;
   /** ดูรูปใหญ่ (ป๊อปเต็มจอ ImageLightbox) — ส่งมา = ดับเบิลคลิกรูป / ปุ่มแว่นขยาย เปิดดู · ไม่ส่ง = ปุ่มเปิดรูปในแท็บใหม่แบบเดิม */
   onView?: () => void;
+  /** กดชิปคำค้นของรูป = ค้นด้วยคำนั้น (2026-11-25) */
+  onKeyword?: (k: string) => void;
   extra?: HTMLAttributes<HTMLDivElement>; children?: ReactNode;
 }) {
   const t = useT();
@@ -264,6 +266,15 @@ export function SamplePhotoTile({ photo, on, onToggle, faded, highlight, extra, 
       {children}
       <div className="gallery-label space-y-1 px-2 py-1.5">
         <div className="truncate text-[11px] text-slate-500">{p.file_name}</div>
+        {(p.keywords ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {(p.keywords ?? []).slice(0, 3).map((k) => (
+              <button key={k} type="button" draggable={false} onClick={() => onKeyword?.(k)} disabled={!onKeyword} title={onKeyword ? t(`ค้นด้วย "${k}"`, `Search "${k}"`) : k}
+                className="max-w-full truncate rounded bg-sky-50 px-1.5 py-0.5 text-[10.5px] text-sky-700 hover:bg-sky-100 disabled:hover:bg-sky-50">{k}</button>
+            ))}
+            {(p.keywords ?? []).length > 3 && <span title={(p.keywords ?? []).slice(3).join(", ")} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10.5px] text-slate-500">+{(p.keywords ?? []).length - 3}</span>}
+          </div>
+        )}
         {p.moved_to.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {p.moved_to.map((s) => (

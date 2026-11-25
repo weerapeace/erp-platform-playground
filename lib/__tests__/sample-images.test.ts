@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextProductName, nextVersionName, brandViewItems, brandCards, albumMonthKey, isAutoAlbumName, sortSubAlbums, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel } from "../sample-images";
+import { nextProductName, nextVersionName, brandViewItems, brandCards, albumMonthKey, isAutoAlbumName, sortSubAlbums, reorderIds, browseAlbums, albumMatches, photoMatches, sortAlbums, sortPhotos, isAlbumSort, isPhotoSort, SAMPLE_TAB_ALL, SAMPLE_TAB_NONE, albumCardLabel, albumFullName, brandPhotoTotals, inBrandTab, albumPath, albumPreviewKeys, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, photosToMove, sampleAlbumMark, sampleAlbumName, sampleCounts, splitSampleFiles, thaiShortDate, productLinkLabel, cleanKeywords, editKeywords, keywordSuggestions, keywordText, albumZipFiles } from "../sample-images";
 
 describe("อัลบั้มของวัน vs อัลบั้มที่ตั้งชื่อเอง (ชั้นบนสุด)", () => {
   it("ชั้นบนสุด + ชื่อแบบ SAMPLE <แบรนด์> <วันที่> = อัลบั้มของวัน · ชื่ออื่น/อัลบั้มย่อย = ไม่ใช่", () => {
@@ -325,5 +325,41 @@ describe("หน้าแรกแยกแบรนด์", () => {
   it("การ์ดแบรนด์: ไม่มีรูป = ไม่โชว์", () => {
     const cards = brandCards(list, [{ id: "g", name: "Good Goods", color: null, logo_url: null }, { id: "x", name: "X", color: null, logo_url: null }]);
     expect(cards.map((c) => [c.id, c.albums, c.photos])).toEqual([["g", 2, 12]]);
+  });
+});
+
+// ── คำค้น + .zip (2026-11-25) ──
+describe("คำค้นของอัลบั้ม/รูป", () => {
+  it("cleanKeywords: แยกคอมมา/บรรทัด ตัดช่องว่าง ไม่ซ้ำ", () => {
+    expect(cleanKeywords(" tote ,  ผ้าแคนวาส\nTote, ,")).toEqual(["tote", "ผ้าแคนวาส"]);
+    expect(cleanKeywords(["a", "b,c", 5])).toEqual(["a", "b", "c"]);
+    expect(cleanKeywords(null)).toEqual([]);
+    expect(cleanKeywords(Array.from({ length: 50 }, (_, i) => `k${i}`))).toHaveLength(30);
+  });
+  it("keywordText / editKeywords", () => {
+    expect(keywordText([])).toBeNull();
+    expect(keywordText(["a", "b"])).toBe("a, b");
+    expect(editKeywords(["แดง", "tote"], ["กรม"], ["TOTE"])).toEqual(["แดง", "กรม"]);
+  });
+  it("keywordSuggestions: ขึ้นต้นก่อน แล้วใช้บ่อย · ไม่เอาที่มีอยู่", () => {
+    const pool = [["แดง", "tote"], ["แดงเข้ม", "tote"], ["สีแดง"], undefined];
+    expect(keywordSuggestions(pool, "")).toEqual(["tote", "แดง", "แดงเข้ม", "สีแดง"]);
+    expect(keywordSuggestions(pool, "แดง")).toEqual(["แดง", "แดงเข้ม", "สีแดง"]);
+    expect(keywordSuggestions(pool, "", ["TOTE"])).not.toContain("tote");
+  });
+  it("albumMatches / photoMatches ค้นจากคำค้นได้", () => {
+    expect(albumMatches({ name: "Product 041", created_at: "2026-11-20T03:00:00Z", parent_id: "p", keywords: ["ผ้าแคนวาส"] }, "แคนวาส")).toBe(true);
+    expect(photoMatches({ file_name: "3M2A4621.jpg", moved_to: [], keywords: ["แดง"] }, "แดง")).toBe(true);
+    expect(photoMatches({ file_name: "3M2A4621.jpg", moved_to: [] }, "แดง")).toBe(false);
+  });
+  it("albumZipFiles: อัลบั้มย่อย = โฟลเดอร์ · ข้ามถังขยะ · ชื่อซ้ำต่อเลข", () => {
+    const tree = [{ id: "r", parent_id: null }, { id: "s", parent_id: "r" }, { id: "t", parent_id: "s" }, { id: "x", parent_id: null }];
+    const names: Record<string, string> = { r: "Product 041", s: "Version 1", t: "แดง/ขาว" };
+    const ph = (k: string, n: string, trashed = false) => ({ r2_key: k, file_name: n, trashed });
+    const photos: Record<string, ReturnType<typeof ph>[]> = { r: [ph("k1", "a.jpg"), ph("k2", "a.jpg"), ph("k3", "b.jpg", true)], s: [ph("k4", "c.jpg")], t: [ph("k5", "d.jpg")], x: [ph("k6", "z.jpg")] };
+    expect(albumZipFiles(tree, "r", (id) => names[id], (id) => photos[id] ?? [])).toEqual([
+      { key: "k1", name: "a.jpg" }, { key: "k2", name: "a_2.jpg" },
+      { key: "k4", name: "Version 1/c.jpg" }, { key: "k5", name: "Version 1/แดง-ขาว/d.jpg" },
+    ]);
   });
 });

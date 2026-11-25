@@ -10,6 +10,9 @@
  * POST {action:"move_album", album_id, to_parent_id|null}           → ย้ายทั้งอัลบั้มเข้าไปในอีกอัลบั้ม / ขึ้นชั้นบนสุด (กันวนซ้ำ)
  * POST {action:"create_top", brand_id?, name}                      → สร้างอัลบั้มชั้นบนสุดตั้งชื่อเอง (Louis Batch · ชื่อ+แบรนด์ซ้ำ = ใช้อันเดิม)
  * POST {action:"rename", album_id, name}                            → เปลี่ยนชื่ออัลบั้ม · อัลบั้มของวัน = ตั้ง "ชื่อที่โชว์" (display_name · ว่าง = กลับไปโชว์วันที่ · ชื่อจริงตามวันที่คงไว้)
+ * POST {action:"keywords", album_id, keywords}                     → คำค้นของอัลบั้ม (ทั้งชุด · ว่าง = ลบหมด · 2026-11-25)
+ * POST {action:"photo_keywords", asset_ids, add?, remove?, keywords?} → คำค้นของรูป (assets.keywords) เพิ่ม/ลบทีละหลายรูป · keywords = ตั้งทั้งชุด
+ * GET ?zip=<album id>    → รายการไฟล์สำหรับ .zip ทั้งอัลบั้ม (อัลบั้มย่อย = โฟลเดอร์ · ไม่รวมถังขยะ)
  * POST {action:"note", album_id, note}                              → โน้ตของอัลบั้ม (ว่าง = ลบโน้ต)
  * POST {action:"reorder_photos", album_id, asset_ids}               → ลำดับรูปแบบจัดเอง (asset_ids = ทั้งชุดตามลำดับใหม่ · รูปแรก = ปก)
  * POST {action:"reorder_albums", parent_id|null, album_ids}         → ลำดับอัลบั้มย่อยแบบจัดเอง (asset_collections.sort_order)
@@ -27,11 +30,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, writeAudit } from "@/lib/audit";
 import { actorId } from "@/app/api/assets/shared";
 import { albumsForProduct, childSkus, codeList, productImages } from "@/lib/sample-product-links";
 import {
-  SAMPLE_ALBUM_MARK, SAMPLE_NOTE_MAX, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
+  SAMPLE_ALBUM_MARK, SAMPLE_NOTE_MAX, albumZipFiles, cleanKeywords, editKeywords, keywordText, canMoveAlbum, descendantIds, inferAlbumBrand, isDayAlbum, looksLikeDayAlbumName, parentOf, parseSampleMark, rollupAlbum, sampleAlbumMark, sampleAlbumName, sampleCounts,
   type SampleAlbum, type SampleBrand, type SamplePhoto, type SampleSheetRef,
 } from "@/lib/sample-images";
 
@@ -45,9 +48,9 @@ const NAME_MAX = 80;
 type Admin = ReturnType<typeof supabaseAdmin>;
 const chunks = <T,>(xs: T[]): T[][] => { const out: T[][] = []; for (let i = 0; i < xs.length; i += CHUNK) out.push(xs.slice(i, i + CHUNK)); return out; };
 
-type AssetLite = { id: string; r2_key: string; file_name: string | null; width: number | null; height: number | null; status: string | null; created_at: string };
+type AssetLite = { id: string; r2_key: string; file_name: string | null; width: number | null; height: number | null; status: string | null; created_at: string; keywords: string | null };
 type BrandRow = SampleBrand & { is_customer_job: boolean | null };
-type AlbumRow = { id: string; name: string; description: string | null; created_at: string; note: string | null; display_name: string | null; sort_order: number | null; parent_sku_codes?: unknown; sku_codes?: unknown; brandId: string | null; parentId: string | null };
+type AlbumRow = { id: string; name: string; description: string | null; created_at: string; note: string | null; display_name: string | null; sort_order: number | null; parent_sku_codes?: unknown; sku_codes?: unknown; keywords?: unknown; brandId: string | null; parentId: string | null };
 
 /** r2_key → ใบงานที่แนบรูปนี้อยู่ (ดูจากไฟล์แนบจริงของใบงาน) */
 async function sheetsByKey(admin: Admin, keys: string[]): Promise<Map<string, SampleSheetRef[]>> {
@@ -84,7 +87,7 @@ async function loadBrands(admin: Admin): Promise<BrandRow[]> {
 
 /** อัลบั้ม SAMPLE ทั้งหมด (ล่าสุดก่อน) พร้อมแบรนด์/อัลบั้มแม่จากป้าย */
 async function loadAlbums(admin: Admin, limit = ALBUM_LIMIT): Promise<AlbumRow[]> {
-  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order, parent_sku_codes, sku_codes")
+  const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order, parent_sku_codes, sku_codes, keywords")
     .like("description", `${SAMPLE_ALBUM_MARK}%`).order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return ((data ?? []) as Omit<AlbumRow, "brandId" | "parentId">[]).flatMap((a) => {
@@ -124,7 +127,7 @@ export async function GET(request: NextRequest) {
     }
     const assets = new Map<string, AssetLite>();
     for (const part of chunks([...new Set(map.map((m) => m.asset_id))])) {
-      const { data, error: e } = await admin.from("assets").select("id, r2_key, file_name, width, height, status, created_at").in("id", part);
+      const { data, error: e } = await admin.from("assets").select("id, r2_key, file_name, width, height, status, created_at, keywords").in("id", part);
       if (e) throw new Error(e.message);
       for (const a of (data ?? []) as AssetLite[]) assets.set(a.id, a);
     }
@@ -135,7 +138,7 @@ export async function GET(request: NextRequest) {
       const a = assets.get(m.asset_id);
       if (!a) continue;
       const list = byAlbum.get(m.collection_id) ?? [];
-      list.push({ id: a.id, r2_key: a.r2_key, file_name: a.file_name ?? "", width: a.width, height: a.height, created_at: a.created_at, trashed: a.status === "trashed", moved_to: moved.get(a.r2_key) ?? [], sort_order: m.sort_order ?? null });
+      list.push({ id: a.id, r2_key: a.r2_key, file_name: a.file_name ?? "", width: a.width, height: a.height, created_at: a.created_at, trashed: a.status === "trashed", moved_to: moved.get(a.r2_key) ?? [], sort_order: m.sort_order ?? null, keywords: cleanKeywords(a.keywords) });
       byAlbum.set(m.collection_id, list);
     }
     const tree = albumsRaw.map((a) => ({ id: a.id, parent_id: a.parentId }));
@@ -148,7 +151,7 @@ export async function GET(request: NextRequest) {
         suggested_brand_id: a.brandId || parent ? null : inferAlbumBrand(ps),
         counts: sampleCounts(ps), deep: { photos: r.photos, sent: r.sent, sub_count: r.sub_count }, preview_keys: r.preview_keys,
         note: a.note ?? null, display_name: a.display_name ?? null, sort_order: a.sort_order ?? null,
-        parent_sku_codes: codeList(a.parent_sku_codes), sku_codes: codeList(a.sku_codes),
+        parent_sku_codes: codeList(a.parent_sku_codes), sku_codes: codeList(a.sku_codes), keywords: cleanKeywords(a.keywords),
       };
     });
     // ทุกแบรนด์ที่เปิดใช้ — แบรนด์ของเราขึ้นก่อน แล้วค่อยแบรนด์ที่ติ๊กงานลูกค้า
@@ -156,6 +159,14 @@ export async function GET(request: NextRequest) {
     const brands: SampleBrand[] = [...brandRows]
       .sort((x, y) => Number(!!x.is_customer_job) - Number(!!y.is_customer_job))
       .map(({ id, name, color, logo_url }) => ({ id, name, color, logo_url }));
+    // ── ดาวน์โหลด .zip ทั้งอัลบั้ม: รายการไฟล์ (รวมอัลบั้มย่อยเป็นโฟลเดอร์) — เบราว์เซอร์โหลดรูปจากตัวเสิร์ฟรูปเอง (ไม่ผ่าน Vercel) ──
+    const zipId = sp.get("zip");
+    if (zipId) {
+      if (!albums.some((a) => a.id === zipId)) return NextResponse.json({ data: null, error: "ไม่พบอัลบั้ม" }, { status: 404 });
+      const label = (id: string) => { const a = albums.find((x) => x.id === id); return a ? (a.display_name?.trim() || a.name) : "album"; };
+      const files = albumZipFiles(albums, zipId, label, (id) => byAlbum.get(id) ?? []);
+      return NextResponse.json({ data: { name: label(zipId), files }, error: null }, { headers: { "Cache-Control": "no-store" } });
+    }
     const photos = albumId
       ? (byAlbum.get(albumId) ?? []).sort((x, y) => x.created_at.localeCompare(y.created_at) || x.file_name.localeCompare(y.file_name))
       : null;
@@ -200,7 +211,7 @@ async function rebrandBranch(admin: Admin, all: AlbumRow[], rootId: string, bran
 const cleanName = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, NAME_MAX) : "");
 
 export async function POST(request: NextRequest) {
-  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string | null; to_parent_id?: string | null; name?: string; note?: string | null; asset_ids?: string[]; album_ids?: string[]; from_album_id?: string; to_album_id?: string; parent_codes?: unknown; sku_codes?: unknown };
+  let body: { action?: string; brand_id?: string | null; album_id?: string; parent_id?: string | null; to_parent_id?: string | null; name?: string; note?: string | null; asset_ids?: string[]; album_ids?: string[]; from_album_id?: string; to_album_id?: string; parent_codes?: unknown; sku_codes?: unknown; keywords?: unknown; add?: unknown; remove?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const brandOf = async (id: string | null | undefined) => {
@@ -349,6 +360,49 @@ export async function POST(request: NextRequest) {
       if (error) return NextResponse.json({ error: "บันทึกการเชื่อมสินค้าไม่สำเร็จ" }, { status: 500 });
       await audit("update", album.id, { field: "product_link", old_value: before, new_value: { parent_sku_codes: parentCodes, sku_codes: skuCodes } });
       return NextResponse.json({ data: { id: album.id, parent_sku_codes: parentCodes, sku_codes: skuCodes }, error: null });
+    }
+
+    // ── คำค้นของอัลบั้ม (ทั้งชุด · ว่าง = ลบหมด) ──
+    if (body.action === "keywords") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      const all = await loadAlbums(admin, 2000);
+      const album = all.find((a) => a.id === body.album_id);
+      if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
+      const before = cleanKeywords(album.keywords);
+      const keywords = cleanKeywords(body.keywords);
+      if (JSON.stringify(before) === JSON.stringify(keywords)) return NextResponse.json({ data: { id: album.id, keywords }, error: null });
+      const { error } = await admin.from("asset_collections").update({ keywords }).eq("id", album.id);
+      if (error) return NextResponse.json({ error: "บันทึกคำค้นไม่สำเร็จ" }, { status: 500 });
+      await audit("update", album.id, { field: "keywords", old_value: before, new_value: keywords, changes: auditDiff({ keywords: before }, { keywords }) });
+      return NextResponse.json({ data: { id: album.id, keywords }, error: null });
+    }
+
+    // ── คำค้นของรูป: เพิ่ม/ลบทีละหลายรูป (assets.keywords) · ส่ง keywords = ตั้งทั้งชุด (รูปเดียว) ──
+    if (body.action === "photo_keywords") {
+      const denied = await guardApi(request, "assets.edit");
+      if (denied) return denied;
+      if (!assetIds.length) return NextResponse.json({ error: "เลือกรูปก่อน" }, { status: 400 });
+      const add = cleanKeywords(body.add), remove = cleanKeywords(body.remove);
+      const setAll = body.keywords !== undefined ? cleanKeywords(body.keywords) : null;
+      const rows: { id: string; keywords: string | null }[] = [];
+      for (const part of chunks(assetIds)) {
+        const { data, error } = await admin.from("assets").select("id, keywords").in("id", part);
+        if (error) throw new Error(error.message);
+        rows.push(...((data ?? []) as typeof rows));
+      }
+      const actor = await actorId(request);
+      const out: { id: string; keywords: string[] }[] = [];
+      for (const r of rows) {
+        const before = cleanKeywords(r.keywords);
+        const next = setAll ?? editKeywords(before, add, remove);
+        out.push({ id: r.id, keywords: next });
+        if (JSON.stringify(before) === JSON.stringify(next)) continue;
+        const { error } = await admin.from("assets").update({ keywords: keywordText(next) }).eq("id", r.id);
+        if (error) return NextResponse.json({ error: "บันทึกคำค้นของรูปไม่สำเร็จ" }, { status: 500 });
+        await writeAudit(admin, { action: "update", entityType: "asset", entityId: r.id, actorId: actor, metadata: { kind: "sample", field: "keywords", changes: auditDiff({ keywords: keywordText(before) }, { keywords: keywordText(next) }) } });
+      }
+      return NextResponse.json({ data: { photos: out }, error: null });
     }
 
     if (body.action === "note") {

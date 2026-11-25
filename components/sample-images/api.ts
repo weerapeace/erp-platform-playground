@@ -128,3 +128,17 @@ export const reorderAlbumsFlat = (albumIds: string[]) =>
   post<{ ordered: number }>({ action: "reorder_flat", album_ids: albumIds }, "บันทึกลำดับอัลบั้มไม่สำเร็จ");
 export const reorderAlbums = (parentId: string | null, albumIds: string[]) =>
   post<{ ordered: number }>({ action: "reorder_albums", parent_id: parentId, album_ids: albumIds }, "บันทึกลำดับอัลบั้มไม่สำเร็จ");
+
+// ── คำค้น + ดาวน์โหลด .zip (เจ้าของเลือกแบบ C + ข้อ 1-4 · 2026-11-25) ──
+/** คำค้นของอัลบั้ม — ส่งทั้งชุด (ว่าง = ลบหมด) */
+export const saveAlbumKeywords = (albumId: string, keywords: string[]) =>
+  post<{ id: string; keywords: string[] }>({ action: "keywords", album_id: albumId, keywords }, "บันทึกคำค้นไม่สำเร็จ");
+
+/** คำค้นของรูป: เพิ่ม/ลบทีละหลายรูป · set = ตั้งทั้งชุด (ใช้กับรูปเดียว) → คำค้นใหม่ของแต่ละรูป */
+export const savePhotoKeywords = (assetIds: string[], edit: { add?: string[]; remove?: string[]; set?: string[] }) =>
+  post<{ photos: { id: string; keywords: string[] }[] }>({ action: "photo_keywords", asset_ids: assetIds, add: edit.add ?? [], remove: edit.remove ?? [], ...(edit.set ? { keywords: edit.set } : {}) }, "บันทึกคำค้นของรูปไม่สำเร็จ");
+
+/** รายการไฟล์ทั้งอัลบั้ม (รวมอัลบั้มย่อยเป็นโฟลเดอร์) สำหรับ .zip */
+export async function loadAlbumZipFiles(albumId: string): Promise<{ name: string; files: { key: string; name: string }[] }> {
+  return (await json<{ data: { name: string; files: { key: string; name: string }[] } }>(await apiFetch(`/api/sample-images?zip=${encodeURIComponent(albumId)}`), "โหลดรายการรูปไม่สำเร็จ")).data;
+}
