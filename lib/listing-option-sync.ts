@@ -80,3 +80,18 @@ export function sizePricesForNewColor(models: readonly ModelLite[], sizeCount: n
     return best ?? fallback;
   });
 }
+
+/**
+ * ชั้นไหนคือ "สี" — ชั้นที่แต่ละค่าตรงกับสีในระบบตัวเดียวมากที่สุด (ไซซ์/จำนวน = ค่าเดียวกระจายหลายสี) · เสมอ = ชื่อชั้นมีคำว่า สี/color → ชั้นแรก
+ * tiers[i].values[j].skus = รหัสบนร้านของตัวเลือกที่มีค่านี้ · คืน index ของชั้น (ไม่มีชั้น = -1)
+ * ใช้: Lazada (lib/lazada-option-edit) · LINE (variant-structure-editor) — บางสินค้าเรียง "จำนวน · สี"
+ */
+export function pickColorTier(tiers: readonly { name: string; values: readonly { skus: readonly (string | null | undefined)[] }[] }[], sysCodes: readonly string[]): number {
+  if (!tiers.length) return -1;
+  const score = (t: (typeof tiers)[number]) => t.values.filter((val) => {
+    const hits = new Set<string | null>(val.skus.map((sku) => sysCodes.filter((c) => skuMatchesSys(sku, c)).sort((a, b) => b.length - a.length)[0] ?? null));
+    return hits.size === 1 && !hits.has(null);
+  }).length;
+  const isColor = (t: (typeof tiers)[number]) => /colou?r|สี/i.test(t.name);
+  return tiers.map((t, i) => ({ i, sc: score(t), c: isColor(t) })).sort((a, b) => b.sc - a.sc || Number(b.c) - Number(a.c) || a.i - b.i)[0].i;
+}

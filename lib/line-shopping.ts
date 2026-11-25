@@ -91,6 +91,17 @@ export async function lineUpdateProduct(apiKey: string, productId: string, field
   } catch (e) { return { ok: false, status: 0, sent: [], error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
 }
 
+// เปลี่ยนชื่อค่าตัวเลือก (PATCH /products/{id} { variantOptions: { option1: { name, data: [{ currentValue, newValue }] }, option2? } })
+// สเปก product.UpdateProductDetailsRequest ของ MyShop — payload จาก lib/line-variant-structure planRenameOptionValues · ยังไม่ทดสอบกับร้านจริง
+export async function lineRenameVariantValues(apiKey: string, productId: string, variantOptions: Record<string, unknown>): Promise<{ ok: boolean; status: number; error?: string }> {
+  try {
+    const r = await fetch(`${LINE_SHOPPING_BASE}/products/${encodeURIComponent(productId)}`, { method: "PATCH", headers: headers(apiKey), body: JSON.stringify({ variantOptions }) });
+    if (r.ok) return { ok: true, status: r.status };
+    const body = await r.text().catch(() => "");
+    return { ok: false, status: r.status, error: friendly(r.status, body) };
+  } catch (e) { return { ok: false, status: 0, error: `เชื่อมต่อไม่ได้: ${(e as Error).message}` }; }
+}
+
 // อัปเดตรายละเอียดตัวเลือก 1 ตัว (PATCH /products/{id}/variant · id ของตัวเลือกอยู่ใน body)
 // รับ: barcode / sku / imageUrl / weight (กก. 0.01–999.99) — สเปก product.ProductVariantDetailsUpdateRequest · ไม่ส่งราคา/สต๊อกจากตรงนี้
 export async function lineUpdateVariant(apiKey: string, productId: string, v: { id: string | number; weight?: number; barcode?: string; sku?: string; imageUrl?: string }): Promise<{ ok: boolean; status: number; sent: string[]; error?: string }> {

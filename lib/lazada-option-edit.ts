@@ -11,7 +11,7 @@
  *   - ส่ง Status ของทุก SKU ที่ส่งไปด้วยเสมอ (ไม่ส่ง = Lazada ถือเป็น active)
  * สต๊อกสีใหม่ = 0 (เหมือน Shopee · BigSeller เติมให้ถ้าผูกรหัส — ไม่ส่งสต๊อกขณะ BigSeller ซิงค์)
  */
-import { skuMatchesSys } from "@/lib/listing-option-sync";
+import { pickColorTier } from "@/lib/listing-option-sync";
 import type { LazadaListingView, LazadaSkuView } from "@/lib/lazada-listing-edit";
 
 export const LAZ_OPT_NAME_MAX = 20;
@@ -63,14 +63,9 @@ export function lazOptionGroups(v: Pick<LazadaListingView, "skus" | "variations"
  * (Lazada บางสินค้าเรียง "จำนวน · สี" — สีไม่ได้อยู่ชั้นแรกเสมอ)
  */
 export function lazColorGroup(groups: LazOptGroup[], skus: Pick<LazadaSkuView, "skuId" | "sellerSku">[], sysCodes: readonly string[]): string | null {
-  if (!groups.length) return null;
-  const skuOf = new Map(skus.map((x) => [x.skuId, x.sellerSku ?? ""]));
-  const score = (g: LazOptGroup) => g.values.filter((val) => {
-    const hits = new Set<string | null>(val.skuIds.map((id) => sysCodes.filter((c) => skuMatchesSys(skuOf.get(id), c)).sort((a, b) => b.length - a.length)[0] ?? null));
-    return hits.size === 1 && !hits.has(null);
-  }).length;
-  const isColor = (g: LazOptGroup) => /colou?r|สี/i.test(`${g.name} ${g.label}`);
-  return [...groups].sort((a, b) => score(b) - score(a) || Number(isColor(b)) - Number(isColor(a)) || groups.indexOf(a) - groups.indexOf(b))[0].name;
+  const skuOf = new Map(skus.map((x) => [x.skuId, x.sellerSku]));
+  const i = pickColorTier(groups.map((g) => ({ name: `${g.name} ${g.label}`, values: g.values.map((val) => ({ skus: val.skuIds.map((id) => skuOf.get(id)) })) })), sysCodes);
+  return i < 0 ? null : groups[i].name;
 }
 
 /** แบบย่อให้ lib/listing-option-sync (tierIndex = [ตำแหน่งในชั้นสี, ตำแหน่งในชั้นอื่น]) */

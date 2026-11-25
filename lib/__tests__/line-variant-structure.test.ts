@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineOptionStructure, planAddOptionValue, planDeleteOptionValue, variantsWithValue } from "@/lib/line-variant-structure";
+import { lineOptionStructure, planAddOptionValue, planDeleteOptionValue, planRenameOptionValues, variantsWithValue } from "@/lib/line-variant-structure";
 
 // ข้อมูลจริงย่อจาก LINE (สินค้า 2 ชั้น: สี × ไซส์ · สินค้า 1 ชั้น: สี)
 const two = {
@@ -38,18 +38,18 @@ describe("ลบค่าตัวเลือก — ลบทุกตัว�
 });
 
 describe("เพิ่มค่าตัวเลือก — payload แบบเดียวกับตอนสร้างสินค้า", () => {
-  it("สินค้า 1 ชั้น: เพิ่มสี 1 ตัว · index ต่อท้าย · สต๊อก 0", () => {
+  it("สินค้า 1 ชั้น: เพิ่มสี 1 ตัว · index ต่อท้าย · สต๊อกตามที่ส่ง (LINE บังคับ > 0)", () => {
     const st = lineOptionStructure(one)!;
-    const p = planAddOptionValue(st, 0, " สีน้ำตาล ", [{ otherValue: null, price: 2690, weight: 0.5, sku: "WHB08-11", barcode: "" }]);
+    const p = planAddOptionValue(st, 0, " สีน้ำตาล ", [{ otherValue: null, price: 2690, weight: 0.5, sku: "WHB08-11", barcode: "", stock: 4 }]);
     expect(p.errors).toEqual([]);
     expect(p.payload).toEqual({
       variantOptions: { option1: { name: "สี", data: [{ value: "สีดำ" }, { value: "สีน้ำตาล" }] } },
-      variants: [{ onHandNumber: 0, price: 2690, weight: 0.5, sku: "WHB08-11", options: [1] }],
+      variants: [{ onHandNumber: 4, price: 2690, weight: 0.5, sku: "WHB08-11", options: [1] }],
     });
   });
   it("สินค้า 2 ชั้น: เพิ่มสีใหม่ = 1 ตัวต่อไซส์ · options [สีใหม่, ไซส์]", () => {
     const st = lineOptionStructure(two)!;
-    const rows = ["S", "M", "L"].map((z) => ({ otherValue: z, price: 1490, weight: 0.3, sku: `MGN402-03${z}`, barcode: null }));
+    const rows = ["S", "M", "L"].map((z) => ({ otherValue: z, price: 1490, weight: 0.3, sku: `MGN402-03${z}`, barcode: null, stock: 2 }));
     const p = planAddOptionValue(st, 0, "แดง (03)", rows);
     expect(p.errors).toEqual([]);
     expect(p.payload!.variantOptions.option2).toEqual({ name: "ไซส์", data: [{ value: "S" }, { value: "M" }, { value: "L" }] });
@@ -57,20 +57,36 @@ describe("เพิ่มค่าตัวเลือก — payload แบบ
   });
   it("เพิ่มไซส์ใหม่ = 1 ตัวต่อสี · options [สี, ไซส์ใหม่]", () => {
     const st = lineOptionStructure(two)!;
-    const rows = ["น้ำตาล (01)", "ดำ (02)"].map((c, i) => ({ otherValue: c, price: 1490, weight: 0.3, sku: `X-${i}`, barcode: null }));
+    const rows = ["น้ำตาล (01)", "ดำ (02)"].map((c, i) => ({ otherValue: c, price: 1490, weight: 0.3, sku: `X-${i}`, barcode: null, stock: 1 }));
     expect(planAddOptionValue(st, 1, "XL", rows).payload!.variants.map((v) => v.options)).toEqual([[0, 3], [1, 3]]);
   });
   it("ค่าผิด: ค่าซ้ำ · แถวไม่ครบ · ราคา 0 · น้ำหนักเกิน · SKU ซ้ำของเดิม/ซ้ำกันเอง", () => {
     const st = lineOptionStructure(two)!;
     expect(planAddOptionValue(st, 1, "m", []).errors).toEqual(["“m” มีอยู่แล้วในไซส์", "ต้องกรอกให้ครบทุกสี (2 แถว)"]);
     const p = planAddOptionValue(st, 1, "XL", [
-      { otherValue: "น้ำตาล (01)", price: 0, weight: 1000, sku: "MGN402-01S", barcode: null },
-      { otherValue: "ดำ (02)", price: 10, weight: 0.3, sku: "", barcode: null },
+      { otherValue: "น้ำตาล (01)", price: 0, weight: 1000, sku: "MGN402-01S", barcode: null, stock: 1 },
+      { otherValue: "ดำ (02)", price: 10, weight: 0.3, sku: "", barcode: null, stock: 0 },
     ]);
     expect(p.errors).toEqual([
       "สี น้ำตาล (01): ราคาต้องมากกว่า 0", "สี น้ำตาล (01): น้ำหนักต้องอยู่ระหว่าง 0.01–999.99 กก.", "สี น้ำตาล (01): SKU “MGN402-01S” มีอยู่แล้วในสินค้านี้",
-      "สี ดำ (02): กรอก SKU",
+      "สี ดำ (02): สต๊อกเป็น 0 — LINE ต้องมีสต๊อกอย่างน้อย 1", "สี ดำ (02): กรอก SKU",
     ]);
     expect(p.payload).toBeNull();
+  });
+});
+
+describe("เปลี่ยนชื่อค่าตัวเลือก (PATCH /products/{id} variantOptions)", () => {
+  it("ส่งเฉพาะค่าที่เปลี่ยน · ชั้นที่ไม่เปลี่ยนไม่ส่ง", () => {
+    const st = lineOptionStructure(two)!;
+    const p = planRenameOptionValues(st, { "0|ดำ (02)": " ดำด้าน (02) " });
+    expect(p.errors).toEqual([]);
+    expect(p.payload).toEqual({ option1: { name: "สี", data: [{ currentValue: "ดำ (02)", newValue: "ดำด้าน (02)" }] } });
+    expect(p.changes).toEqual([{ option: "สี", before: "ดำ (02)", after: "ดำด้าน (02)" }]);
+  });
+  it("ว่าง/ซ้ำ = error · ไม่เปลี่ยนอะไร = error", () => {
+    const st = lineOptionStructure(two)!;
+    expect(planRenameOptionValues(st, { "0|ดำ (02)": " " }).errors.join()).toContain("ว่างไม่ได้");
+    expect(planRenameOptionValues(st, { "0|ดำ (02)": "น้ำตาล (01)" }).errors.join()).toContain("ซ้ำ");
+    expect(planRenameOptionValues(st, {}).payload).toBeNull();
   });
 });

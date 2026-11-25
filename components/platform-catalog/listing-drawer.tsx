@@ -485,7 +485,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
   const optionsTab = !form || !line ? noLine : (
     <div className="space-y-2">
       <div className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-sm">
-        {([["price", "ราคา"], ["detail", "น้ำหนัก · บาร์โค้ด · รูป · SKU"], ["structure", "เพิ่ม/ลบตัวเลือก"]] as const).map(([k, label], i) => (
+        {([["price", "ราคา"], ["detail", "น้ำหนัก · บาร์โค้ด · รูป · SKU"], ["structure", "ชื่อ · เพิ่ม/ลบตัวเลือก"]] as const).map(([k, label], i) => (
           <button key={k} type="button" onClick={() => setOptMode(k)} aria-pressed={optMode === k}
             className={`h-8 px-3 ${i ? "border-l border-slate-200" : ""} ${optMode === k ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
         ))}
@@ -508,7 +508,7 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
           ? <MiniTable rows={form.variants} columns={detailCols} rowKey={(v) => v.id} dense hideToolbar emptyText="ไม่มีตัวเลือก" resizable storageKey="listing-drawer-options-detail" />
           : listingId && <VariantStructureEditor listingId={listingId} structure={line.structure} display={line.display} canEdit={canEdit}
               blockedReason={dirty ? "มีที่แก้ค้างยังไม่ได้บันทึก — กด “บันทึกขึ้น LINE” หรือ “ยกเลิกที่แก้” ก่อน แล้วค่อยเพิ่ม/ลบตัวเลือก" : null}
-              defaults={{ price: form.variants[0]?.price ?? null, weight: form.variants[0]?.weight ?? null }}
+              defaults={{ price: form.variants[0]?.price ?? null, weight: form.variants[0]?.weight ?? null }} matchedParent={matchedParent}
               onDone={() => { setReload((n) => n + 1); if (listingId) onChanged?.(listingId, {}); }} />}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         {priceDiffN > 0 && <span className="text-rose-600">ลูกค้าจ่ายไม่ตรงในระบบ {priceDiffN.toLocaleString()} ตัวเลือก</span>}

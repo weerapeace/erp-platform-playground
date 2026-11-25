@@ -2,6 +2,8 @@
  * เพิ่ม/ลบค่าตัวเลือกของสินค้าบน LINE จากลิ้นชักสินค้าบนร้าน — /api/line-shopping/listing-variants
  *  POST { listing_id, action: "add", option_index, value, rows: NewVariantRow[] }
  *  POST { listing_id, action: "delete", option_index, value }
+ *  POST { listing_id, action: "rename", renames: { "ชั้น|ค่าเดิม": ชื่อใหม่ } }   — ทำได้แม้เปิดขายอยู่ (ไม่เพิ่ม/ลบตัวเลือก) · 2026-11-25
+ *  เพิ่ม: สต๊อกตั้งต้น = สต๊อกในระบบ (หลังบ้านอ่านเองเมื่อรหัสตรงกับ SKU ในระบบ) ไม่งั้นค่าที่กรอก · LINE บังคับ > 0
  *  (products.platforms.publish — ส่งขึ้นร้านจริง)
  *  กันพลาด (เฟสแรก): ทำได้เฉพาะสินค้าที่ "ปิดขายอยู่" (ลูกค้าไม่เห็นระหว่างแก้) · ไม่อยู่บนร้านแล้ว = ไม่ได้
  *  ลบ = LINE ลบทุกตัวเลือกที่มีค่านี้ → ตรวจ planDeleteOptionValue (ห้ามลบจนไม่เหลือ) ก่อนส่ง
@@ -13,9 +15,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { lineAddVariants, lineDeleteVariantOption, lineGetProduct } from "@/lib/line-shopping";
+import { lineAddVariants, lineDeleteVariantOption, lineGetProduct, lineRenameVariantValues } from "@/lib/line-shopping";
 import { lineApiKey } from "@/lib/line-shopping-server";
-import { lineOptionStructure, planAddOptionValue, planDeleteOptionValue, type NewVariantRow } from "@/lib/line-variant-structure";
+import { lineOptionStructure, planAddOptionValue, planDeleteOptionValue, planRenameOptionValues, type NewVariantRow } from "@/lib/line-variant-structure";
+import { listingSysVariants } from "@/lib/platform-listing-drift-server";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
@@ -26,13 +29,13 @@ const n = (x: unknown) => { if (x == null || x === "") return null; const k = Nu
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.publish"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { listing_id?: string; action?: string; option_index?: unknown; value?: unknown; rows?: unknown };
+  let body: { listing_id?: string; action?: string; option_index?: unknown; value?: unknown; rows?: unknown; renames?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const listingId = String(body.listing_id ?? "").trim();
-  const action = body.action === "add" || body.action === "delete" ? body.action : null;
+  const action = body.action === "add" || body.action === "delete" || body.action === "rename" ? body.action : null;
   const optIdx = Number(body.option_index);
   const value = String(body.value ?? "").trim();
-  if (!listingId || !action || !(optIdx === 0 || optIdx === 1) || !value) return NextResponse.json({ error: "ข้อมูลไม่ครบ (listing_id · action · option_index · value)" }, { status: 400 });
+  if (!listingId || !action || (action !== "rename" && (!(optIdx === 0 || optIdx === 1) || !value))) return NextResponse.json({ error: "ข้อมูลไม่ครบ (listing_id · action · option_index · value)" }, { status: 400 });
 
   const admin = supabaseAdmin();
   const { data: l } = await admin.from("platform_catalog_listings").select("id, platform_id, brand_id, external_product_id, title, status, raw").eq("id", listingId).maybeSingle();
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const line = (row.raw?.line && typeof row.raw.line === "object") ? row.raw.line as Record<string, unknown> : null;
   const st = lineOptionStructure(line);
   if (!productId || !line || !st) return NextResponse.json({ error: "ยังไม่มีข้อมูลตัวเลือกของสินค้านี้จาก LINE — กด “ดึงสินค้าจาก LINE” ก่อน" }, { status: 400 });
-  if (line.isDisplay !== false) return NextResponse.json({ error: "ปิดขายสินค้านี้ก่อน แล้วค่อยเพิ่ม/ลบตัวเลือก (กันลูกค้าเห็นระหว่างแก้)" }, { status: 400 });
+  if (action !== "rename" && line.isDisplay !== false) return NextResponse.json({ error: "ปิดขายสินค้านี้ก่อน แล้วค่อยเพิ่ม/ลบตัวเลือก (กันลูกค้าเห็นระหว่างแก้)" }, { status: 400 });
 
   const k = await lineApiKey(admin, row.brand_id, row.platform_id);
   if (!k.apiKey) return NextResponse.json({ error: k.error }, { status: 400 });
@@ -53,18 +56,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let metaChange: Record<string, unknown>;
   let send: () => Promise<{ ok: boolean; status: number; error?: string }>;
-  if (action === "delete") {
+  if (action === "rename") {
+    const renames: Record<string, string> = {};
+    if (body.renames && typeof body.renames === "object" && !Array.isArray(body.renames)) for (const [k, x] of Object.entries(body.renames as Record<string, unknown>)) if (typeof x === "string") renames[k] = x;
+    const p = planRenameOptionValues(st, renames);
+    if (p.errors.length || !p.payload) return NextResponse.json({ error: p.errors.join(" · "), errors: p.errors }, { status: 400 });
+    const payload = p.payload;
+    metaChange = { action, changes: p.changes.map((c) => ({ label: `ชื่อตัวเลือก ${c.option}`, before: c.before, after: c.after })) };
+    send = () => lineRenameVariantValues(key, productId, payload as unknown as Record<string, unknown>);
+  } else if (action === "delete") {
     const p = planDeleteOptionValue(st, optIdx, value);
     if (p.error) return NextResponse.json({ error: p.error }, { status: 400 });
     metaChange = { action, option: p.name, value: p.value, affected: p.affected.map((v) => v.sku ?? v.id) };
     send = () => lineDeleteVariantOption(key, productId, p.name, p.value);
   } else {
     const rows: NewVariantRow[] = (Array.isArray(body.rows) ? body.rows : []).map((x) => (x && typeof x === "object" ? x as Record<string, unknown> : {}))
-      .map((x) => ({ otherValue: x.otherValue == null ? null : String(x.otherValue), price: n(x.price), weight: n(x.weight), sku: String(x.sku ?? ""), barcode: x.barcode == null ? null : String(x.barcode) }));
+      .map((x) => ({ otherValue: x.otherValue == null ? null : String(x.otherValue), price: n(x.price), weight: n(x.weight), sku: String(x.sku ?? ""), barcode: x.barcode == null ? null : String(x.barcode), stock: n(x.stock) }));
+    // สต๊อกตั้งต้น: รหัสตรงกับ SKU ในระบบ = ใช้สต๊อกในระบบ (อ่านเองตอนนี้ ไม่เชื่อหน้าเว็บ) · ไม่ตรง = ค่าที่กรอก
+    const sys = await listingSysVariants(admin, listingId, user?.id ?? null);
+    const stockOf = new Map(sys.ok ? sys.variants.map((x) => [x.code.trim().toUpperCase(), x.stock ?? 0]) : []);
+    for (const r of rows) { const own = stockOf.get(r.sku.trim().toUpperCase()); if (own != null) r.stock = own; }
     const p = planAddOptionValue(st, optIdx, value, rows);
     if (p.errors.length || !p.payload) return NextResponse.json({ error: p.errors.join(" · "), errors: p.errors }, { status: 400 });
     const payload = p.payload;
-    metaChange = { action, option: st.options[optIdx].name, value, added: payload.variants.map((v) => v.sku) };
+    metaChange = { action, option: st.options[optIdx].name, value, added: payload.variants.map((v) => v.sku), stock: payload.variants.map((v) => v.onHandNumber) };
     send = () => lineAddVariants(key, productId, payload as unknown as Record<string, unknown>);
   }
 
