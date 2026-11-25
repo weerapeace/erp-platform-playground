@@ -46,9 +46,11 @@ type NoteRow = {
   special_wrap?: string[];
   /** สถานะงาน: none = ยังไม่สร้างคำสั่ง · todo = คำสั่งยังไม่ทำ · done = เสร็จ */
   work: "none" | "todo" | "done"; closed: boolean;
+  /** คนกด "ไม่ใช่งานพิเศษ" ไว้ */
+  not_special?: boolean;
   print: { state: "none" | "todo" | "done"; engrave_total: number; engrave_printed: number; engrave_last: string | null; card_total: number; card_printed: number };
 };
-type Counts = { no_ins: number; ins_todo: number; print_todo: number; done_today: number; chat: number; card: number; card_todo: number; engrave: number; engrave_missing: number; engrave_todo: number; other: number; all: number; cards: number };
+type Counts = { due_soon: number; packed_undone: number; hidden: number; no_ins: number; ins_todo: number; print_todo: number; done_today: number; chat: number; card: number; card_todo: number; engrave: number; engrave_missing: number; engrave_todo: number; other: number; all: number; cards: number };
 type CardRow = { id: string; platform_order_id: string | null; order_no: string | null; platform: string | null; brand_name: string | null; customer_note: string | null; message: string | null; note: string | null; print_count: number; printed_at: string | null; printed_by_name: string | null; hand_written_at: string | null; updated_at: string; updated_by_name: string | null; deleted_at: string | null };
 type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; is_special?: boolean | null; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
 
@@ -70,8 +72,8 @@ function StatusPill({ c }: { c: { printed_at?: string | null; hand_written_at?: 
  *   1 แถว = 1 ออเดอร์ (มีหมายเหตุ/สินค้าสลัก/มีคำสั่ง) · คำสั่งที่ไม่ผูกออเดอร์ = แถวของตัวเอง
  *   กดแถว = ป๊อปคำสั่งพิเศษ (มีแล้วเปิดแก้ · ยังไม่มีเปิดใหม่กรอกให้แล้ว) · ดูออเดอร์ = ปุ่มในป๊อป
  */
-export type GiftInboxTab = "no_ins" | "ins_todo" | "engrave_missing" | "print_todo" | "done_today" | "all";
-export const GIFT_INBOX_TABS: GiftInboxTab[] = ["no_ins", "ins_todo", "engrave_missing", "print_todo", "done_today", "all"];
+export type GiftInboxTab = "no_ins" | "ins_todo" | "engrave_missing" | "print_todo" | "due_soon" | "packed_undone" | "done_today" | "all" | "hidden";
+export const GIFT_INBOX_TABS: GiftInboxTab[] = ["no_ins", "ins_todo", "engrave_missing", "print_todo", "due_soon", "packed_undone", "done_today", "all", "hidden"];
 export type GiftInboxKind = "" | "card" | "engrave" | "chat" | "other";
 export type GiftCounts = Partial<Counts>;
 
@@ -95,8 +97,11 @@ export function GiftInbox({ tab, onTab, kind, onKind, openIns, onCounts }: {
           { key: "ins_todo", label: "คำสั่งยังไม่ทำ", value: counts.ins_todo ?? null, tone: "info", icon: <Icon value="i:gift" />, keep: true },
           { key: "engrave_missing", label: "สลัก แต่ไม่มีชื่อ", value: counts.engrave_missing ?? null, tone: "danger", icon: <Icon value="i:alert-triangle" />, hint: "ต้องทักลูกค้า", keep: true },
           { key: "print_todo", label: "ยังพิมพ์ไม่ครบ", value: counts.print_todo ?? null, tone: "warning", icon: <Icon value="i:printer" />, hint: "ใบสลัก / การ์ด", keep: true },
+          { key: "due_soon", label: "ใกล้/เลยกำหนดส่ง", value: counts.due_soon ?? null, tone: "danger", icon: <Icon value="i:clock" />, hint: "งานยังไม่เสร็จ ส่งภายในพรุ่งนี้", keep: true },
+          { key: "packed_undone", label: "แพ็กแล้ว งานยังไม่เสร็จ", value: counts.packed_undone ?? null, tone: "danger", icon: <Icon value="i:package" />, hint: "กันลืมสลัก/การ์ด", keep: true },
           { key: "done_today", label: "เสร็จวันนี้", value: counts.done_today ?? null, tone: "success", icon: <Icon value="i:check" />, keep: true },
           { key: "all", label: "ทั้งหมด", value: counts.all ?? null, tone: "neutral", keep: true },
+          { key: "hidden", label: "ไม่ใช่งานพิเศษ", value: counts.hidden ?? null, tone: "neutral", icon: <Icon value="i:eye-off" />, hint: "ซ่อนไว้ · กดดูคืนได้", keep: true },
         ]}
       />
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -111,6 +116,34 @@ export function GiftInbox({ tab, onTab, kind, onKind, openIns, onCounts }: {
 }
 
 // ───────────── รายการงานพิเศษ ─────────────
+
+const DAY = 86_400_000;
+/** เริ่มวันนี้ (เวลาไทย) */
+const startTodayTH = () => { const d = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10); return new Date(`${d}T00:00:00+07:00`).getTime(); };
+const orderRow = (r: NoteRow) => !r.id.startsWith("ins:");
+const isSpecialRow = (r: NoteRow) => r.kind.card || r.kind.engrave || !!r.special_wrap?.length || r.instructions.length > 0;
+/** แพ็กแล้วแต่งานพิเศษยังไม่เสร็จ (ข้อ 4) — ตรงกับตัวนับฝั่ง API */
+const packedUndone = (r: NoteRow) => (!!r.packed_at || r.status === "packed") && r.work !== "done" && isSpecialRow(r) && r.status !== "cancelled";
+const pillCls = "inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium";
+/** สถานะแพ็ก (จากศูนย์ออเดอร์) */
+function PackPill({ r }: { r: NoteRow }) {
+  if (r.status === "cancelled") return <span className={`${pillCls} bg-slate-100 text-slate-500`}>ยกเลิก</span>;
+  if (r.packed_at || r.status === "packed" || r.status === "shipped") return <span className={`${pillCls} bg-emerald-50 text-emerald-700`} title={r.packed_at ? fmt(r.packed_at) : ""}>แพ็กแล้ว{r.packed_at ? ` ${new Date(r.packed_at).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })}` : ""}</span>;
+  if (!orderRow(r)) return <span className="text-[11px] text-slate-300">—</span>;
+  return <span className={`${pillCls} bg-slate-100 text-slate-600`}>รอแพ็ก</span>;
+}
+/** สถานะส่ง: ส่งแล้ว · ยกเลิก · เลยกำหนด (แดง) · ส่งภายในวันนี้/พรุ่งนี้ (เหลือง) · ส่งภายใน วันที่ (ข้อ 2) */
+function ShipPill({ r }: { r: NoteRow }) {
+  if (r.status === "shipped") return <span className={`${pillCls} bg-emerald-50 text-emerald-700`}>ส่งแล้ว</span>;
+  if (r.status === "cancelled") return <span className={`${pillCls} bg-slate-100 text-slate-500`}>ยกเลิก</span>;
+  if (!r.ship_by_at) return <span className="text-[11px] text-slate-300">{orderRow(r) ? "ไม่มีกำหนดส่ง" : "—"}</span>;
+  const due = new Date(r.ship_by_at).getTime();
+  const t0 = startTodayTH();
+  if (due < Date.now()) { const d = Math.max(1, Math.ceil((Date.now() - due) / DAY)); return <span className={`${pillCls} bg-rose-100 text-rose-700`} title={fmt(r.ship_by_at)}>เลยกำหนด {d} วัน</span>; }
+  if (due < t0 + DAY) return <span className={`${pillCls} bg-amber-100 text-amber-800`} title={fmt(r.ship_by_at)}>ส่งภายในวันนี้</span>;
+  if (due < t0 + 2 * DAY) return <span className={`${pillCls} bg-amber-50 text-amber-700`} title={fmt(r.ship_by_at)}>ส่งภายในพรุ่งนี้</span>;
+  return <span className={`${pillCls} bg-slate-100 text-slate-600`} title={fmt(r.ship_by_at)}>ส่งภายใน {new Date(r.ship_by_at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span>;
+}
 
 const SELLER_CHAT: Record<string, { label: string; href: string }> = {
   shopee: { label: "เปิดแชทใน Shopee Seller Centre", href: "https://seller.shopee.co.th/webchat/conversations" },
@@ -219,6 +252,20 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
     });
   };
 
+  /** ไม่ใช่งานพิเศษ (ซ่อน) / กลับเป็นงานพิเศษ — หลายออเดอร์ได้ · ย้อนกลับจากแจ้งผลมุมจอ (ข้อ 1) */
+  const setNotSpecial = async (list: NoteRow[], value: boolean) => {
+    const ids = list.filter(isOrderRow).map((r) => r.id);
+    if (!ids.length) { toast.warning("คำสั่งที่ไม่ผูกศูนย์ออเดอร์ซ่อนไม่ได้ — ลบคำสั่งแทน"); return; }
+    try {
+      await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "not_special", order_ids: ids, value }) });
+      setSel(new Set());
+      void load();
+      toast.undo(value ? `ซ่อน ${ids.length} ออเดอร์แล้ว (ไม่ใช่งานพิเศษ)` : `กลับเป็นงานพิเศษ ${ids.length} ออเดอร์`, async () => {
+        await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "not_special", order_ids: ids, value: !value }) });
+        void load();
+      });
+    } catch (e) { toast.error((e as Error).message); }
+  };
   const setKind = async (r: NoteRow, next: { card: boolean; engrave: boolean } | null) => {
     try {
       await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify(next ? { action: "kind", order_id: r.id, ...next } : { action: "kind", order_id: r.id, reset: true }) });
@@ -313,6 +360,10 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
   );
   const actions = (r: NoteRow) => (
     <div className="flex flex-wrap items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {canEdit && r.work === "none" && !r.not_special && <button type="button" onClick={() => openRow(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[12px] font-medium text-sky-700 hover:bg-sky-100"><Icon value="i:plus" /> สร้างคำสั่ง</button>}
+      {canEdit && isOrderRow(r) && (r.not_special
+        ? <button type="button" onClick={() => void setNotSpecial([r], false)} className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-700 hover:bg-slate-50"><Icon value="i:arrow-back-up" /> กลับเป็นงานพิเศษ</button>
+        : r.work === "none" && <button type="button" onClick={() => void setNotSpecial([r], true)} title="ไม่ต้องทำอะไรพิเศษ — ซ่อนจากรายการ (ย้อนกลับได้)" className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:eye-off" /> ไม่ใช่งานพิเศษ</button>)}
       {r.engrave.needs_name && <button type="button" onClick={() => setChatFor(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-rose-200 bg-white px-2 text-[12px] font-medium text-rose-700 hover:bg-rose-50"><Icon value="i:message-circle" /> ทักแชทลูกค้า</button>}
       {r.kind.card && canEdit && isOrderRow(r) && <Link href={writeHref(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 text-[12px] font-medium text-violet-700 hover:bg-violet-100"><Icon value="i:pencil" /> {r.cards.length ? "การ์ด" : "เขียนการ์ด"}</Link>}
       {opening && r.instructions.some((i) => i.id === opening) && <span className="text-[11px] text-slate-400">กำลังเปิด…</span>}
@@ -325,9 +376,11 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
     { key: "order", header: "ออเดอร์", width: "10.5rem", cell: (r) => <div><span className="font-mono text-[12px] text-slate-800">{r.order_no}</span><div className="text-[11px] text-slate-400">{fmt(r.ordered_at)}{r.packed_at ? " · แพ็กแล้ว" : ""}{!isOrderRow(r) ? " · ไม่ผูกศูนย์ออเดอร์" : ""}</div></div>, sortValue: (r) => r.ordered_at ?? "" },
     { key: "work", header: "งาน (สินค้า / คำสั่ง)", width: "minmax(12rem,1.4fr)", cell: (r) => <WorkCell r={r} /> },
     { key: "note", header: "ข้อความลูกค้า", width: "minmax(11rem,1.3fr)", cell: (r) => <NoteCell r={r} />, sortValue: (r) => (r.engrave.needs_name ? "0" : "1") },
-    { key: "state", header: "สถานะงาน", width: "7.5rem", cell: (r) => <WorkPill r={r} />, sortValue: (r) => r.work },
+    { key: "state", header: "สถานะงาน", width: "7.5rem", cell: (r) => <div className="flex flex-col items-start gap-1"><WorkPill r={r} />{packedUndone(r) && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700">แพ็กไปแล้ว งานยังไม่เสร็จ</span>}</div>, sortValue: (r) => r.work },
+    { key: "pack", header: "แพ็ก", width: "7rem", cell: (r) => <PackPill r={r} />, sortValue: (r) => r.packed_at ?? "" },
+    { key: "ship", header: "ส่ง", width: "8rem", cell: (r) => <ShipPill r={r} />, sortValue: (r) => (r.ship_by_at && !r.closed ? r.ship_by_at : "9999") },
     { key: "print", header: "พิมพ์", width: "7.5rem", cell: (r) => <PrintCell r={r} />, sortValue: (r) => r.print.state },
-    { key: "act", header: "", width: "10rem", align: "right", cell: actions, noExport: true },
+    { key: "act", header: "", width: "12rem", align: "right", cell: actions, noExport: true },
   ];
 
   if (err) return <ErrorState title={err} onRetry={load} />;
@@ -351,6 +404,9 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
           {canEdit && <button type="button" onClick={() => void bulkStatus("done")} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">เสร็จ</button>}
           {canEdit && <button type="button" onClick={() => void bulkStatus("todo")} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">ยังไม่ทำ</button>}
           {canDeleteIns && <button type="button" onClick={() => void bulkDelete()} className="rounded-md border border-rose-200 bg-white px-2 py-1 text-xs text-rose-600">ลบคำสั่ง</button>}
+          {canEdit && (tab === "hidden"
+            ? <button type="button" onClick={() => void setNotSpecial((rows ?? []).filter((r) => sel.has(r.id)), false)} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">กลับเป็นงานพิเศษ</button>
+            : <button type="button" onClick={() => void setNotSpecial((rows ?? []).filter((r) => sel.has(r.id)), true)} className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs">ไม่ใช่งานพิเศษ</button>)}
           <button type="button" onClick={() => setSel(new Set())} className="text-xs text-sky-700 underline">ยกเลิกเลือก</button>
         </div>
       )}
@@ -372,6 +428,7 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
             <WorkCell r={r} compact />
             <NoteCell r={r} />
             <PrintCell r={r} />
+            <div className="flex flex-wrap gap-1"><PackPill r={r} /><ShipPill r={r} />{packedUndone(r) && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700">แพ็กไปแล้ว งานยังไม่เสร็จ</span>}</div>
             <div className="flex items-center justify-between gap-2"><span className="text-[11px] text-slate-400">{fmt(r.ordered_at)}</span>{actions(r)}</div>
           </div>
         )}
@@ -380,7 +437,7 @@ function NotesList({ tab, kind, openIns, onCounts }: { tab: GiftInboxTab; kind: 
             {[30, 90, 180, 365].map((d) => <option key={d} value={d}>{d} วันล่าสุด</option>)}
           </select>
         }
-        emptyText={tab === "no_ins" ? "ไม่มีออเดอร์ที่ยังไม่สร้างคำสั่ง" : tab === "ins_todo" ? "ไม่มีคำสั่งที่ยังไม่ทำ" : tab === "engrave_missing" ? "ไม่มีออเดอร์สลักชื่อที่ลูกค้ายังไม่บอกชื่อ" : tab === "print_todo" ? "พิมพ์ครบทุกออเดอร์แล้ว" : tab === "done_today" ? "วันนี้ยังไม่มีคำสั่งที่เสร็จ" : "ไม่มีรายการในช่วงนี้"}
+        emptyText={tab === "no_ins" ? "ไม่มีออเดอร์ที่ยังไม่สร้างคำสั่ง" : tab === "ins_todo" ? "ไม่มีคำสั่งที่ยังไม่ทำ" : tab === "engrave_missing" ? "ไม่มีออเดอร์สลักชื่อที่ลูกค้ายังไม่บอกชื่อ" : tab === "print_todo" ? "พิมพ์ครบทุกออเดอร์แล้ว" : tab === "done_today" ? "วันนี้ยังไม่มีคำสั่งที่เสร็จ" : tab === "due_soon" ? "ไม่มีงานที่ใกล้กำหนดส่ง" : tab === "packed_undone" ? "ไม่มีออเดอร์ที่แพ็กแล้วแต่งานยังไม่เสร็จ" : tab === "hidden" ? "ยังไม่มีออเดอร์ที่ตั้งว่าไม่ใช่งานพิเศษ" : "ไม่มีรายการในช่วงนี้"}
       />
 
       {(insFor || insRow) && (

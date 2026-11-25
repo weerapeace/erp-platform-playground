@@ -80,6 +80,7 @@ export const ENTITY_INFO: Record<string, AuditEntityInfo> = {
   gift_card_templates:           E("sales", "แม่แบบการ์ดของขวัญ", (id) => `/order-ops/gift-cards/template?id=${id}`),
   gift_card_fonts:               E("sales", "ฟอนต์การ์ดของขวัญ", () => "/order-ops/instructions?s=settings"),
   order_note_kinds:              E("sales", "คัดแยกหมายเหตุออเดอร์", () => "/order-ops/instructions"),
+  order_not_special:             E("sales", "ไม่ใช่งานพิเศษ (ซ่อนจากคำสั่งพิเศษ)", () => "/order-ops/instructions"),
   chat_conversation:             E("sales", "ห้องแชทลูกค้า", (id) => `/chat?c=${id}`),
   chat_settings:                 E("sales", "ตั้งค่าห้องแชท"),
   packing_sounds:                E("sales", "เสียงสถานีแพ็ค", () => "/packing"),

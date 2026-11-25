@@ -239,13 +239,16 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
   const extraRes = await Promise.all(chunkOf(extraIds).map((c) => admin.from("platform_orders").select(ORDER_COLS).in("id", c).or("source.is.null,source.neq.email")));
   const allOrders = [...withNote, ...extraRes.flatMap((r) => (r.data ?? []) as Row[])];
   const chunks = chunkOf(allOrders.map((o) => String(o.id)));
-  const [cardsRes, kindsRes, insRes, itemsRes, lk] = await Promise.all([
+  const [cardsRes, kindsRes, insRes, itemsRes, lk, notSpecialRes] = await Promise.all([
     Promise.all(chunks.map((c) => admin.from("order_gift_cards").select("id, platform_order_id, message, printed_at, hand_written_at, updated_at").in("platform_order_id", c).is("deleted_at", null))),
     Promise.all(chunks.map((c) => admin.from("order_note_kinds").select("platform_order_id, card, engrave").in("platform_order_id", c))),
     Promise.all(chunks.map((c) => admin.from("order_instructions").select(INS_COLS).in("platform_order_id", c).is("deleted_at", null))),
     Promise.all(chunks.map((c) => admin.from("platform_order_items").select("order_id, sku_code, name, qty, matched_sku_id, matched_parent_sku_id").in("order_id", c))),
     lookups(admin, [...new Set(allOrders.map((o) => str(o.platform_id)).filter((x): x is string => !!x))], [...new Set(allOrders.map((o) => str(o.brand_id)).filter((x): x is string => !!x))]),
+    Promise.all(chunks.map((c) => admin.from("order_not_special").select("platform_order_id").in("platform_order_id", c))),
   ]);
+  // คนกด "ไม่ใช่งานพิเศษ" ไว้ (2026-11-25 ข้อ 1) — ซ่อนจากรายการ ดูคืนได้ที่ state=hidden
+  const notSpecial = new Set(notSpecialRes.flatMap((r) => ((r.data ?? []) as Row[]).map((x) => String(x.platform_order_id))));
   const itemRows = itemsRes.flatMap((r) => (r.data ?? []) as Row[]);
   // SKU ลูก → รุ่น (parent) · รหัสรุ่น + ค่าที่ตั้งไว้ (ใช้โชว์ + เมนู "ตั้งรุ่นนี้เป็นสินค้าสลักชื่อ")
   const skuIds = [...new Set(itemRows.map((r) => str(r.matched_sku_id)).filter((x): x is string => !!x))];
@@ -301,6 +304,7 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
       parents,
       chat_ready: !!(info.platform_code && (CHAT_CHANNELS as readonly string[]).includes(info.platform_code) && chatAdapter(info.platform_code as ChatChannel)),
       ...workOf(insList, cardList, info.status),
+      not_special: notSpecial.has(info.id),
     };
   }).filter((r) => r.note || r.kind.engrave || r.instructions.length || r.special_wrap.length);
   // คำสั่งที่ไม่ผูกออเดอร์ในศูนย์ (พิมพ์เลขเอง/จากแชท) = แถวของตัวเอง
@@ -311,8 +315,15 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     kind: { card: false, engrave: x.engrave === true, chat: x.via_chat === true }, kind_auto: { card: false, engrave: x.engrave === true }, overridden: false,
     cards: [] as Row[], instructions: [x],
     engrave: { sources: [] as string[], items: [] as Row[], needs_name: false }, parents: [] as Row[], chat_ready: false,
-    ...workOf([x], [], null),
+    ...workOf([x], [], null), not_special: false,
   }))] as typeof rows;
+  const hiddenRows = rows.filter((r) => r.not_special);
+  rows = rows.filter((r) => !r.not_special);
+  // ต้องส่งภายในพรุ่งนี้ (เวลาไทย) หรือเลยกำหนด · แพ็กแล้วแต่งานพิเศษยังไม่เสร็จ (ข้อ 3-4)
+  const endTomorrow = startToday + 2 * 86_400_000;
+  const special = (r: (typeof rows)[number]) => r.kind.card || r.kind.engrave || r.special_wrap.length > 0 || r.instructions.length > 0;
+  const dueSoon = (r: (typeof rows)[number]) => !r.closed && r.work !== "done" && special(r) && !!r.ship_by_at && new Date(r.ship_by_at).getTime() < endTomorrow && r.status !== "shipped";
+  const packedUndone = (r: (typeof rows)[number]) => (!!r.packed_at || r.status === "packed") && r.work !== "done" && special(r) && r.status !== "cancelled";
   const open = (r: (typeof rows)[number]) => !r.closed;
   const counts = {
     // สถานะงาน (การ์ดตัวเลข · ข้อ 4) — ไม่นับออเดอร์ที่ส่งแล้ว/ยกเลิก ในงานค้าง
@@ -329,6 +340,9 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     engrave_todo: rows.filter((r) => r.kind.engrave && !r.instructions.some((i) => i.engrave) && !(ENGRAVE_NO_WARN_STATUSES as readonly string[]).includes(String(r.status ?? ""))).length,
     other: rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave).length,
     all: rows.length,
+    due_soon: rows.filter(dueSoon).length,
+    packed_undone: rows.filter(packedUndone).length,
+    hidden: hiddenRows.length,
   };
   if (sp.get("counts") === "1") return { counts, days };
   // กรองสถานะงาน (state) + ชนิด (kind) — tab เดิมยังใช้ได้
@@ -339,11 +353,16 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
   else if (state === "engrave_missing") rows = rows.filter((r) => r.engrave.needs_name);
   else if (state === "print_todo") rows = rows.filter((r) => r.print.state === "todo" && open(r));
   else if (state === "done_today") rows = rows.filter((r) => r.instructions.some((x) => x.status === "done" && new Date(String(x.done_at ?? 0)).getTime() >= startToday));
+  else if (state === "due_soon") rows = rows.filter(dueSoon);
+  else if (state === "packed_undone") rows = rows.filter(packedUndone);
+  else if (state === "hidden") rows = hiddenRows;
   if (kindF === "card") rows = rows.filter((r) => r.kind.card);
   else if (kindF === "engrave") rows = rows.filter((r) => r.kind.engrave);
   else if (kindF === "chat") rows = rows.filter((r) => r.kind.chat);
   else if (kindF === "other") rows = rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave);
-  rows.sort((a, b) => String(b.ordered_at ?? "").localeCompare(String(a.ordered_at ?? "")));
+  // ต้องส่งก่อน ขึ้นก่อน (ข้อ 5) — ไม่มีกำหนดส่ง/ส่งแล้ว ต่อท้าย เรียงใหม่สุดก่อน
+  const shipKey = (r: (typeof rows)[number]) => (r.ship_by_at && !r.closed && r.status !== "shipped" ? r.ship_by_at : "9999");
+  rows.sort((a, b) => shipKey(a).localeCompare(shipKey(b)) || String(b.ordered_at ?? "").localeCompare(String(a.ordered_at ?? "")));
   const qq = cleanQ(sp.get("q") ?? "").toLowerCase();
   if (qq) rows = rows.filter((r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""}`.toLowerCase().includes(qq));
   // รุ่นที่ชื่อมีคำว่า "สลัก" แต่ยังไม่ได้ตั้ง "สินค้าสลักชื่อ" — แค่แนะนำ ไม่ตั้งให้เอง
@@ -555,6 +574,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     await admin.from("order_gift_cards").update(patch).eq("id", id);
     await writeAudit(admin, { action: on ? "hand_written" : "hand_written_undo", entityType: "order_gift_cards", entityId: id, actorId: me.id, actorName: me.name, metadata: { order_no: (before as Row).order_no, changes: [{ field: "hand_written_at", old: (before as Row).hand_written_at ?? null, new: patch.hand_written_at }] } });
     return NextResponse.json({ ok: true });
+  }
+
+  if (action === "not_special") {
+    const ids = (Array.isArray(body.order_ids) ? body.order_ids : []).map(String).filter((x: string) => uuidRe.test(x)).slice(0, 500);
+    if (!ids.length) return bad("ไม่มีออเดอร์ที่เลือก (คำสั่งที่ไม่ผูกศูนย์ออเดอร์ซ่อนไม่ได้)");
+    const on = body.value !== false;
+    if (on) {
+      const { error } = await admin.from("order_not_special").upsert(ids.map((id: string) => ({ platform_order_id: id, created_by: me.id, created_by_name: me.name })), { onConflict: "platform_order_id" });
+      if (error) return bad("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    } else {
+      const { error } = await admin.from("order_not_special").delete().in("platform_order_id", ids);
+      if (error) return bad("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    }
+    await writeAuditMany(admin, ids.map((id: string) => ({ action: on ? "not_special" : "not_special_undo", entityType: "order_not_special", entityId: id, actorId: me.id, actorName: me.name, metadata: { changes: [{ field: "not_special", old: !on, new: on }] } })));
+    return NextResponse.json({ ok: true, count: ids.length });
   }
 
   if (action === "kind") {
