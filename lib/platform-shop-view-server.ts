@@ -111,9 +111,11 @@ async function terminalStatuses(admin: Admin): Promise<Set<string>> {
 }
 
 /** จำนวนงาน (แอปจัดการงาน) ที่ยังไม่ปิด ต่อ Parent SKU — นับทั้งงานที่ผูกหลายสินค้า และช่องสินค้าหลักของงาน */
-async function openTaskCounts(admin: Admin, parentIds: string[]): Promise<Map<string, number>> {
+/** งานค้างต่อ Parent SKU: จำนวน + รายการย่อ (สูงสุด 5 ใบ ใหม่สุดก่อน) — ป้ายงานค้างกดเปิดงานได้ (เจ้าของเลือก 2026-11-25 ข้อ 4) */
+async function openTasksOf(admin: Admin, parentIds: string[]): Promise<{ counts: Map<string, number>; lists: Map<string, { id: string; no: string | null; title: string | null }[]> }> {
   const out = new Map<string, number>();
-  if (!parentIds.length) return out;
+  const lists = new Map<string, { id: string; no: string | null; title: string | null; at?: string }[]>();
+  if (!parentIds.length) return { counts: out, lists };
   const terminal = await terminalStatuses(admin);
   const pairs: { task_id: string; parent_sku_id: string }[] = [];
   await Promise.all(chunks(parentIds).map(async (ids) => {
@@ -126,9 +128,14 @@ async function openTaskCounts(admin: Admin, parentIds: string[]): Promise<Map<st
   }));
   const taskIds = [...new Set(pairs.map((p) => p.task_id))];
   const open = new Set<string>();
+  const info = new Map<string, { id: string; no: string | null; title: string | null; at: string }>();
   await Promise.all(chunks(taskIds).map(async (ids) => {
-    const { data } = await admin.from("erp_creative_tasks").select("id, status").in("id", ids).eq("is_active", true);
-    for (const t of (data ?? []) as { id: string; status: string | null }[]) if (!terminal.has(t.status ?? "")) open.add(t.id);
+    const { data } = await admin.from("erp_creative_tasks").select("id, status, task_no, title, created_at").in("id", ids).eq("is_active", true);
+    for (const t of (data ?? []) as { id: string; status: string | null; task_no: string | null; title: string | null; created_at: string | null }[]) {
+      if (terminal.has(t.status ?? "")) continue;
+      open.add(t.id);
+      info.set(t.id, { id: t.id, no: t.task_no, title: t.title, at: t.created_at ?? "" });
+    }
   }));
   const seen = new Set<string>();
   for (const p of pairs) {
@@ -136,8 +143,11 @@ async function openTaskCounts(admin: Admin, parentIds: string[]): Promise<Map<st
     if (!open.has(p.task_id) || seen.has(k)) continue;
     seen.add(k);
     out.set(p.parent_sku_id, (out.get(p.parent_sku_id) ?? 0) + 1);
+    const t = info.get(p.task_id);
+    if (t) { const l = lists.get(p.parent_sku_id) ?? []; l.push(t); lists.set(p.parent_sku_id, l); }
   }
-  return out;
+  for (const [k, l] of lists) lists.set(k, l.sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")).slice(0, 5).map(({ id, no, title }) => ({ id, no, title })));
+  return { counts: out, lists };
 }
 
 type ParentRow = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; platform_category_id: string | null };
@@ -218,6 +228,7 @@ export type ShopViewData = {
   not_listed: ShopParent[] | null;
   no_image: ShopParent[] | null;
   last_imported_at: string | null;
+  shop_ref: string | null;
   categories: ShopCategory[];
 };
 
@@ -250,9 +261,10 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
   const noCoverRows = brandParents ? brandParents.filter((p) => !p.cover_image_r2_key) : null;
 
   const taskParentIds = [...new Set([...matchedIds, ...(notListedRows ?? []).map((p) => p.id), ...(noCoverRows ?? []).map((p) => p.id)])];
-  const [tasks, imgStates] = await Promise.all([
-    openTaskCounts(admin, taskParentIds),
+  const [{ counts: tasks, lists: taskLists }, imgStates, shopRef] = await Promise.all([
+    openTasksOf(admin, taskParentIds),
     noCoverRows ? imageStates(admin, noCoverRows.map((p) => p.id)) : Promise.resolve(new Map<string, "sku_only" | "none">()),
+    shopRefOf(admin, platformId, brandId),
   ]);
 
   const dups = duplicateCounts(liveRows);   // ตัวที่ไม่อยู่บนร้านแล้วไม่นับเป็นตัวซ้ำ
@@ -267,6 +279,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
       matched_cover_key: p?.cover_image_r2_key ?? null, category_id: p?.platform_category_id ?? null,
       match_ignored: !!r.match_ignored, dup_count: dups.get(r.id) ?? 0,
       open_tasks: r.matched_parent_sku_id ? (tasks.get(r.matched_parent_sku_id) ?? 0) : 0,
+      open_task_list: r.matched_parent_sku_id ? taskLists.get(r.matched_parent_sku_id) : undefined,
       // ของขวัญ (LINE เท่านั้น · ไม่มีข้อมูล = null) — กอง "ยังไม่เปิดของขวัญ"
       gift_on: platformCode === "line_shopping" && r.line?.giftOption != null ? r.line.giftOption !== "NO_GIFT" : null,
     };
@@ -275,7 +288,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
   const toParent = (p: ParentRow): ShopParent => ({
     id: p.id, code: p.code ?? "", name: p.name_th, cover_key: p.cover_image_r2_key,
     image_state: p.cover_image_r2_key ? "ok" : (imgStates.get(p.id) ?? "none"),
-    open_tasks: tasks.get(p.id) ?? 0, category_id: p.platform_category_id,
+    open_tasks: tasks.get(p.id) ?? 0, open_task_list: taskLists.get(p.id), category_id: p.platform_category_id,
   });
 
   // หมวดกลางที่สินค้าแบรนด์นี้ใช้ (ชิปกรอง) — เรียงตามลำดับที่ตั้งไว้
@@ -292,8 +305,18 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
     not_listed: notListedRows ? notListedRows.map(toParent) : null,
     no_image: noCoverRows ? noCoverRows.map(toParent) : null,
     last_imported_at: last,
+    shop_ref: shopRef,
     categories,
   };
+}
+
+/** รหัส/ลิงก์ร้านของบัญชีร้าน — แบรนด์ที่เลือก · ไม่เลือกแบรนด์ = ใช้ได้เมื่อร้านนี้มีบัญชีเดียว */
+async function shopRefOf(admin: Admin, platformId: string, brandId: string): Promise<string | null> {
+  let q = admin.from("platform_accounts").select("external_shop_id").eq("platform_id", platformId).not("external_shop_id", "is", null).limit(2);
+  if (brandId) q = q.eq("brand_id", brandId);
+  const { data } = await q;
+  const refs = [...new Set(((data ?? []) as { external_shop_id: string | null }[]).map((r) => (r.external_shop_id ?? "").trim()).filter(Boolean))];
+  return refs.length === 1 ? refs[0] : null;
 }
 
 /**

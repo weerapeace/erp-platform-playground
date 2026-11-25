@@ -325,6 +325,9 @@ export function duplicateCounts<T extends { id: string; title: string | null; sk
 
 // ───────── รายการที่ API มุมมองหน้าร้านส่งมา ─────────
 
+/** งานค้างย่อ (ป้ายงานค้างในหน้าร้าน) */
+export type OpenTaskRef = { id: string; no: string | null; title: string | null };
+
 export type ShopItem = ListingShopSummary & {
   id: string;
   external_product_id: string | null;
@@ -342,6 +345,8 @@ export type ShopItem = ListingShopSummary & {
   dup_count: number;
   /** งาน (แอปจัดการงาน) ที่ยังไม่ปิดของสินค้าที่จับคู่ไว้ */
   open_tasks: number;
+  /** งานที่ยังไม่ปิด (สูงสุด 5 ใบ) — ป้าย "งานค้าง" กดเปิดงานได้ */
+  open_task_list?: OpenTaskRef[];
   /** เปิดส่งเป็นของขวัญไหม (LINE giftOption ≠ NO_GIFT) · null = ไม่รู้ / ไม่ใช่ LINE */
   gift_on?: boolean | null;
 };
@@ -355,6 +360,7 @@ export type ShopParent = {
   /** ok = มีรูปปก · sku_only = ไม่มีรูปปกแต่มีรูปที่ SKU · none = ไม่มีรูปเลย */
   image_state: "ok" | "sku_only" | "none";
   open_tasks: number;
+  open_task_list?: OpenTaskRef[];
   /** หมวดกลาง (platform_central_categories) */
   category_id: string | null;
 };
@@ -397,6 +403,8 @@ export type ShopViewResponse = {
   no_image: ShopParent[] | null;
   /** ดึง/นำเข้าข้อมูลจากร้านล่าสุด */
   last_imported_at: string | null;
+  /** รหัส/ลิงก์ร้านจากบัญชีร้าน (platform_accounts.external_shop_id) — ใช้สร้างลิงก์หน้าสินค้า Shopee/LINE · null = ไม่รู้ */
+  shop_ref?: string | null;
   /** หมวดกลางของสินค้าแบรนด์นี้ (ว่าง = ยังไม่ได้เลือกแบรนด์) */
   categories: ShopCategory[];
   platform_counts?: Record<string, number>;

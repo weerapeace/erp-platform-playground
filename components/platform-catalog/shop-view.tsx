@@ -7,6 +7,8 @@
  * ข้อมูล: GET /api/platform-catalog?view=shop (สรุปฝั่ง server ด้วย lib/platform-listing-health) — อ่านอย่างเดียว
  * ของกลางที่ใช้: StatFilterCards (ผ่าน ShopQueues) · ScrollTabs · MiniTable · Pager · BulkActionBar · HoverImage · state-views · Icon
  * สร้างงาน: ป๊อปสร้างงานเดิมของแอปจัดการงาน (CreateTaskModal + presetProducts) — ได้งาน 1 ใบรวมสินค้าที่เลือก
+ * ปุ่มท้ายแถว (เจ้าของเลือกแบบ B 2026-11-25): ปุ่มเดียวตามสถานะ (จับคู่ · ปิดขาย · ดูสต๊อก · ปกติไม่มี) + ↗ เปิดบนร้าน + ⋮ เมนู
+ *   สร้างงานย้ายไปเมนู ⋮ และแถบติ๊กหลายรายการ · ป้าย "งานค้าง" กดเปิดงานได้
  * ร้านเลือก/แบรนด์/ปุ่มดึงสินค้า อยู่ที่หน้าแม่ (ใช้ร่วมกับมุมมองจับคู่)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,10 +26,12 @@ import { HoverImage } from "@/components/hover-image";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { listingLinks } from "@/lib/platform-links";
+import { Popover } from "@/components/popover";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
   DEFAULT_SHOP_TAB, SHOP_STATE_LABEL, SHOP_TABS, compareListedOrder, inShopQueue, inShopTab, notListedTrustworthy, shopStateOf,
-  type ShopItem, type ShopParent, type ShopTab, type ShopViewResponse,
+  type OpenTaskRef, type ShopItem, type ShopParent, type ShopTab, type ShopViewResponse,
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
 import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
@@ -237,8 +241,75 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   };
 
   // ---------- คอลัมน์ ----------
-  const taskBadge = (n: number) => n > 0 && (
-    <span className="text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100 whitespace-nowrap">งานค้าง {n}</span>
+  const badgeCls = "text-[11px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100 whitespace-nowrap";
+  const taskBadge = (n: number, list?: OpenTaskRef[]) => {
+    if (n <= 0) return null;
+    if (!list?.length) return <span className={badgeCls}>งานค้าง {n}</span>;
+    if (list.length === 1 && n === 1) return (
+      <a href={`/tasks?task=${list[0].id}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={`เปิดงาน ${list[0].no ?? ""} ${list[0].title ?? ""}`} className={`${badgeCls} hover:bg-violet-100`}>งานค้าง 1 ↗</a>
+    );
+    return (
+      <span onClick={(e) => e.stopPropagation()}>
+        <Popover panelClassName="w-64 p-1" trigger={(toggle) => <button type="button" onClick={toggle} className={`${badgeCls} hover:bg-violet-100`}>งานค้าง {n} ▾</button>}>
+          {(close) => (
+            <div className="text-xs">
+              {list.map((t) => <a key={t.id} href={`/tasks?task=${t.id}`} target="_blank" rel="noopener noreferrer" onClick={close} className="block truncate rounded px-2 py-1.5 hover:bg-slate-50"><span className="font-mono text-slate-500">{t.no ?? "งาน"}</span> {t.title ?? ""}</a>)}
+              {n > list.length && <div className="px-2 py-1 text-[11px] text-slate-400">และอีก {n - list.length} งาน</div>}
+            </div>
+          )}
+        </Popover>
+      </span>
+    );
+  };
+  // ---------- ปุ่มท้ายแถว (แบบ B) ----------
+  const iconBtn = "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800";
+  const menuItem = "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-slate-50";
+  const rowActs = (it: ShopItem) => {
+    const lk = listingLinks(platformCode, it.external_product_id, data?.shop_ref);
+    const ext = it.state !== "gone" ? (lk.storefront ?? lk.sellerCenter) : null;
+    const matched = !!it.matched_parent_sku_id;
+    let smart: React.ReactNode = null;
+    if (!matched && !it.match_ignored) smart = <button type="button" onClick={onGoMatch} className="h-7 px-2 text-xs text-white bg-violet-600 rounded-md hover:bg-violet-700 whitespace-nowrap">จับคู่</button>;
+    else if (it.state === "out" && isLine && canPublish && it.display) smart = <button type="button" disabled={disp.busy} onClick={() => disp.request([it.id], "hide", [it.title || it.sku_code || ""])} title="ของหมดแต่ยังเปิดขาย — ปิดขายบน LINE (ถามก่อน)" className="h-7 px-2 text-xs text-rose-700 border border-rose-200 rounded-md hover:bg-rose-50 whitespace-nowrap disabled:opacity-50">ปิดขาย</button>;
+    else if (it.state === "out" && !isLine && lk.sellerCenter) smart = <a href={lk.sellerCenter} target="_blank" rel="noopener noreferrer" title={`ของหมดแต่ยังเปิดขาย — ปิดที่${lk.sellerLabel}`} className="inline-flex h-7 items-center px-2 text-xs text-rose-700 border border-rose-200 rounded-md hover:bg-rose-50 whitespace-nowrap">ปิดขาย ↗</a>;
+    else if (it.state === "low") smart = <button type="button" onClick={() => setOpenId(it.id)} title="ดูสต๊อกแต่ละตัวเลือก" className="h-7 px-2 text-xs text-amber-800 border border-amber-200 rounded-md hover:bg-amber-50 whitespace-nowrap">ดูสต๊อก</button>;
+    const canTask = canCreateTask && matched;
+    const canCopyOne = canCopy && matched && it.state !== "gone";
+    return (
+      <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        {smart}
+        {ext && <a href={ext} target="_blank" rel="noopener noreferrer" title={lk.storefront ? "เปิดหน้าสินค้าบนร้าน" : `เปิด${lk.sellerLabel}`} aria-label="เปิดบนร้าน" className={iconBtn}><Icon name="external-link" /></a>}
+        <Popover align="right" panelClassName="w-56 p-1" trigger={(toggle) => <button type="button" onClick={toggle} aria-label="คำสั่งอื่น" title="คำสั่งอื่น" className={iconBtn}><Icon name="dots-vertical" /></button>}>
+          {(close) => (
+            <div className="text-xs text-slate-700">
+              <button type="button" onClick={() => { close(); setOpenId(it.id); }} className={menuItem}><Icon name="view" />ดูรายละเอียด</button>
+              {canTask && <button type="button" onClick={() => { close(); setTaskFor([pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)]); }} className={menuItem}><Icon name="add" />สร้างงาน</button>}
+              {canCopyOne && <button type="button" onClick={() => { close(); setCopySources({ [it.matched_parent_sku_id as string]: { listing_id: it.id, platform_code: platformCode, platform_name: copySourceName(platformCode) } }); setAddFor([{ id: it.matched_parent_sku_id as string, code: it.matched_code ?? "", name: it.matched_name ?? it.title }]); }} className={menuItem}><Icon name="documents" />ลงร้านอื่นจากรายการนี้</button>}
+              {matched && <button type="button" onClick={() => { close(); onGoMatch(); }} className={menuItem}><Icon name="link" />เปลี่ยนสินค้าที่จับคู่</button>}
+              {lk.storefront && lk.sellerCenter && <a href={lk.sellerCenter} target="_blank" rel="noopener noreferrer" onClick={close} className={menuItem}><Icon name="open" />{lk.sellerLabel}</a>}
+            </div>
+          )}
+        </Popover>
+      </span>
+    );
+  };
+  const parentActs = (p: ShopParent) => (
+    <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+      {canAdd && tab === "notlisted" && (
+        <button type="button" onClick={() => { setCopySources(undefined); setAddFor([{ id: p.id, code: p.code, name: p.name }]); }} title="ลงสินค้านี้ขึ้นร้าน (ตัวช่วยลงสินค้า)"
+          className="h-7 px-2 text-xs text-white bg-violet-600 rounded-md hover:bg-violet-700 inline-flex items-center gap-1 whitespace-nowrap">
+          <Icon name="upload" />ลงร้าน
+        </button>
+      )}
+      <Popover align="right" panelClassName="w-52 p-1" trigger={(toggle) => <button type="button" onClick={toggle} aria-label="คำสั่งอื่น" title="คำสั่งอื่น" className={iconBtn}><Icon name="dots-vertical" /></button>}>
+        {(close) => (
+          <div className="text-xs text-slate-700">
+            {canCreateTask && <button type="button" onClick={() => { close(); setTaskFor([pickerOf(p.id, p.code, p.name, p.cover_key)]); }} className={menuItem}><Icon name="add" />สร้างงาน</button>}
+            <a href={`/master/parent-skus?open=${encodeURIComponent(p.id)}`} target="_blank" rel="noopener noreferrer" onClick={close} className={menuItem}><Icon name="open" />เปิดสินค้าในระบบ</a>
+          </div>
+        )}
+      </Popover>
+    </span>
   );
   const itemCols: MiniColumn<ShopItem>[] = [
     {
@@ -255,7 +326,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
                 {it.sku_code || "ไม่มี SKU"}{it.variants > 0 ? ` · ${it.variants.toLocaleString()} ตัวเลือก` : ""}{it.category ? ` · ${it.category}` : ""}
               </div>
               <div className="flex flex-wrap gap-1 mt-0.5">
-                {taskBadge(it.open_tasks)}
+                {taskBadge(it.open_tasks, it.open_task_list)}
                 {it.dup_count > 1 && <span className="text-[11px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-100">ชื่อ+รหัสซ้ำ ×{it.dup_count}</span>}
                 {it.imageKnown && !shopImg && <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">{erpImg ? "ร้านไม่มีรูป · โชว์รูปในระบบ" : "ไม่มีรูปบนร้าน"}</span>}
               </div>
@@ -292,15 +363,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         : it.match_ignored ? <span className="text-xs text-slate-400">ไม่ต้องจับคู่</span>
         : <button type="button" onClick={onGoMatch} className="text-xs text-amber-700 hover:underline">ยังไม่จับคู่ — ไปจับคู่</button>,
     },
-    {
-      key: "act", header: "", width: "6.5rem", align: "right", locked: true,
-      cell: (it) => canCreateTask && it.matched_parent_sku_id ? (
-        <button type="button" onClick={() => setTaskFor([pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)])}
-          className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap">
-          <Icon name="add" />สร้างงาน
-        </button>
-      ) : null,
-    },
+    { key: "act", header: "", width: "9rem", align: "right", locked: true, cell: (it) => rowActs(it) },
   ];
   const parentCols: MiniColumn<ShopParent>[] = [
     {
@@ -311,7 +374,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
           <div className="min-w-0">
             <div className="truncate" title={p.name ?? ""}>{p.name || p.code}</div>
             <div className="text-[11px] text-slate-400 font-mono truncate">{p.code}</div>
-            <div className="flex flex-wrap gap-1 mt-0.5">{taskBadge(p.open_tasks)}</div>
+            <div className="flex flex-wrap gap-1 mt-0.5">{taskBadge(p.open_tasks, p.open_task_list)}</div>
           </div>
         </div>
       ),
@@ -320,25 +383,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       key: "img", header: "รูปในระบบ", width: "1.2fr",
       cell: (p) => <span className={`text-xs ${p.image_state === "none" ? "text-rose-600" : p.image_state === "sku_only" ? "text-amber-700" : "text-slate-500"}`}>{IMG_STATE_LABEL[p.image_state]}</span>,
     },
-    {
-      key: "act", header: "", width: tab === "notlisted" ? "11rem" : "6.5rem", align: "right", locked: true,
-      cell: (p) => (
-        <span className="inline-flex gap-1">
-          {canAdd && tab === "notlisted" && (
-            <button type="button" onClick={() => { setCopySources(undefined); setAddFor([{ id: p.id, code: p.code, name: p.name }]); }} title="ลงสินค้านี้ขึ้นร้าน (ตัวช่วยลงสินค้า)"
-              className="h-7 px-2 text-xs text-white bg-violet-600 rounded-md hover:bg-violet-700 inline-flex items-center gap-1 whitespace-nowrap">
-              <Icon name="upload" />ลงร้าน
-            </button>
-          )}
-          {canCreateTask && (
-            <button type="button" onClick={() => setTaskFor([pickerOf(p.id, p.code, p.name, p.cover_key)])}
-              className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap">
-              <Icon name="add" />สร้างงาน
-            </button>
-          )}
-        </span>
-      ),
-    },
+    { key: "act", header: "", width: tab === "notlisted" ? "7.5rem" : "3rem", align: "right", locked: true, cell: (p) => parentActs(p) },
   ];
 
   // ---------- แสดงผล ----------
@@ -462,7 +507,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
             renderCard={(it) => (
               <ListingCard badges={(
                 <>
-                  {it.open_tasks > 0 && <div className="flex flex-wrap gap-1">{taskBadge(it.open_tasks)}</div>}
+                  {it.open_tasks > 0 && <div className="flex flex-wrap gap-1">{taskBadge(it.open_tasks, it.open_task_list)}</div>}
                   {isLine && it.display != null && it.state !== "gone" && (
                     <div className="flex items-center justify-between text-[11px] text-slate-500" onClick={(e) => e.stopPropagation()}>
                       <span>{it.display ? "เปิดขายบน LINE" : "ปิดขายอยู่"}</span>
@@ -479,11 +524,8 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
                   {it.matched_parent_sku_id
                     ? <span className="truncate font-mono text-emerald-700" title={it.matched_name ?? ""}>✓ {it.matched_code || "จับคู่แล้ว"}</span>
                     : it.match_ignored ? <span className="text-slate-400">ไม่ต้องจับคู่</span>
-                    : <button type="button" onClick={onGoMatch} className="truncate text-amber-700 hover:underline">ยังไม่จับคู่ — ไปจับคู่</button>}
-                  {canCreateTask && it.matched_parent_sku_id && (
-                    <button type="button" onClick={() => setTaskFor([pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)])}
-                      className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 hover:bg-slate-50"><Icon name="add" />สร้างงาน</button>
-                  )}
+                    : <span className="truncate text-amber-700">ยังไม่จับคู่</span>}
+                  <span className="ml-auto shrink-0">{rowActs(it)}</span>
                 </div>
               )} />
             )}
