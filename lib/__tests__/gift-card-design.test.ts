@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
+import { isSpecialTemplate, newFoldedDoc as nfdSpecial,
   acceptsMessage, buyerNoteOf, faceDoc, foldLine, groupTemplates, isFolded, newFoldedDoc, withFace, builtinTemplates, cardHtml, cardStatus, cardsPrintHtml, classifyNote, cleanDoc, docFonts, extractEngraveText,
   fillTexts, fontStack, googleFontsHref, resizeDoc, resolveSrc, roleTexts, suggestMessage, uploadFontFaces, type CardDoc,
 } from "@/lib/gift-card-design";
@@ -202,5 +202,16 @@ describe("การ์ดพับ A6 + กลุ่มแม่แบบ (2026-
     expect(bday.items.map((x) => x.id).slice(0, 2)).toEqual(["a", "b"]);
     expect(bday.items.some((x) => x.id === "builtin:bday")).toBe(false);
     expect(bday.items.some((x) => x.id === "builtin:bday-fold")).toBe(true);
+  });
+});
+
+describe("isSpecialTemplate", () => {
+  const flat = { v: 1 as const, w: 100, h: 70, bg: { color: "#fff", image: null, fit: "cover" as const }, els: [] };
+  it("ติ๊กไว้ใช้ค่าที่ติ๊ก · ยังไม่ตั้ง = การ์ดพับเป็นพิเศษ", () => {
+    expect(isSpecialTemplate({ doc: flat })).toBe(false);
+    expect(isSpecialTemplate({ doc: nfdSpecial("side") })).toBe(true);
+    expect(isSpecialTemplate({ is_special: true, doc: flat })).toBe(true);
+    expect(isSpecialTemplate({ is_special: false, doc: nfdSpecial("top") })).toBe(false);
+    expect(isSpecialTemplate({ is_special: null, doc: flat })).toBe(false);
   });
 });

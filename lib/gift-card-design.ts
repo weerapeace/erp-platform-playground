@@ -439,6 +439,8 @@ export function builtinTemplates(): { id: string; name: string; group: string; d
     { id: `${BUILTIN_PREFIX}bday-fold`, name: "วันเกิด พับ A6", group: GROUP_BDAY, doc: foldBday },
   ].map((t) => ({ ...t, doc: cleanDoc(t.doc) }));
 }
+/** แม่แบบนี้เป็น "การ์ดพิเศษ" ไหม — ติ๊กไว้ใช้ค่านั้น · ยังไม่ตั้ง = การ์ดพับถือเป็นพิเศษ (เจ้าของเลือก 2026-11-25 รอบ 5 ข้อ 3) */
+export const isSpecialTemplate = (t: { is_special?: boolean | null; doc: CardDoc }): boolean => (typeof t.is_special === "boolean" ? t.is_special : isFolded(t.doc));
 export const isBuiltinId = (id: string | null | undefined) => !!id && id.startsWith(BUILTIN_PREFIX);
 
 /** แม่แบบ 1 ใบในรายการ (ของที่ออกแบบเอง + ในตัว) — ใช้ทั้งหน้าตั้งค่าและหน้าเขียนการ์ด */

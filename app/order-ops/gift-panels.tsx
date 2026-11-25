@@ -26,7 +26,7 @@ import { CardPreview, useCardFonts, type UploadedFont } from "@/components/card-
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
-import { acceptsMessage, cardStatus, extractEngraveText, foldLine, groupTemplates, isFolded, type CardDoc } from "@/lib/gift-card-design";
+import { acceptsMessage, cardStatus, extractEngraveText, foldLine, groupTemplates, isFolded, isSpecialTemplate, type CardDoc } from "@/lib/gift-card-design";
 import { ENGRAVE_MODE_LABEL, ENGRAVE_SOURCE_LABEL, commandSummary, type CommandDetail, type EngraveMode, type EngraveSource } from "@/lib/order-ops";
 import { InstructionForm, type Ins, type InsPrefill } from "./instruction-form";
 import { useOpsOptions } from "./shared";
@@ -50,7 +50,7 @@ type NoteRow = {
 };
 type Counts = { no_ins: number; ins_todo: number; print_todo: number; done_today: number; chat: number; card: number; card_todo: number; engrave: number; engrave_missing: number; engrave_todo: number; other: number; all: number; cards: number };
 type CardRow = { id: string; platform_order_id: string | null; order_no: string | null; platform: string | null; brand_name: string | null; customer_note: string | null; message: string | null; note: string | null; print_count: number; printed_at: string | null; printed_by_name: string | null; hand_written_at: string | null; updated_at: string; updated_by_name: string | null; deleted_at: string | null };
-type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
+type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; is_special?: boolean | null; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
 
 async function gcJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(url, init);
@@ -540,7 +540,7 @@ export function GiftTemplates() {
   const [fonts, setFonts] = useState<(UploadedFont & { format: string; size_bytes: number | null })[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [kind, setKind] = useState<"" | "msg" | "fixed" | "fold">("");
+  const [kind, setKind] = useState<"" | "msg" | "fixed" | "fold" | "special">("");
   const fontRef = useRef<HTMLInputElement>(null);
   useCardFonts(fonts);
 
@@ -566,6 +566,14 @@ export function GiftTemplates() {
       await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind, ids: [id], restore }) });
       void load();
       if (!restore) toast.undo(label, async () => { await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind, ids: [id], restore: true }) }); void load(); });
+    } catch (e) { toast.error((e as Error).message); }
+  };
+  // ติ๊ก "การ์ดพิเศษ" (คำสั่งการ์ดพิเศษเห็นเฉพาะแม่แบบพิเศษ) — ย้อนกลับได้จากแจ้งผลมุมจอ
+  const setSpecial = async (t: Tpl, value: boolean) => {
+    try {
+      const j = await gcJson<{ before: boolean | null }>("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_special", id: t.id, value }) });
+      void load();
+      toast.undo(value ? `ตั้ง "${t.name}" เป็นการ์ดพิเศษแล้ว` : `"${t.name}" เป็นการ์ดธรรมดาแล้ว`, async () => { await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_special", id: t.id, value: j.before }) }); void load(); });
     } catch (e) { toast.error((e as Error).message); }
   };
   // เลื่อนลำดับในกลุ่ม (ของที่ออกแบบเอง) — ย้อนกลับได้จากแจ้งผลมุมจอ
@@ -620,12 +628,12 @@ export function GiftTemplates() {
           </Popover>
         </div>
         <div className="mb-3 flex flex-wrap gap-1.5">
-          {([["", "ทั้งหมด"], ["msg", "ใส่ข้อความได้"], ["fixed", "ข้อความตายตัว"], ["fold", "การ์ดพับ"]] as const).map(([k, l]) => (
+          {([["", "ทั้งหมด"], ["msg", "ใส่ข้อความได้"], ["fixed", "ข้อความตายตัว"], ["fold", "การ์ดพับ"], ["special", "การ์ดพิเศษ"]] as const).map(([k, l]) => (
             <button key={k} type="button" onClick={() => setKind(k)} className={`h-7 rounded-full border px-3 text-[12px] ${kind === k ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
           ))}
         </div>
         {(() => {
-          const pass = (t: Tpl) => (kind === "msg" ? acceptsMessage(t.doc) : kind === "fixed" ? !acceptsMessage(t.doc) : kind === "fold" ? isFolded(t.doc) : true);
+          const pass = (t: Tpl) => (kind === "msg" ? acceptsMessage(t.doc) : kind === "fixed" ? !acceptsMessage(t.doc) : kind === "fold" ? isFolded(t.doc) : kind === "special" ? isSpecialTemplate(t) : true);
           const groups = groupTemplates(tpls.filter((t) => !t.builtin), tpls.filter((t) => t.builtin));
           return groups.map(({ group, items }) => {
             const own = items.filter((t) => !t.builtin);
@@ -655,6 +663,7 @@ export function GiftTemplates() {
                         <div className="mt-1 flex flex-wrap gap-1">
                           {acceptsMessage(t.doc) ? <span className="rounded-full bg-emerald-50 px-1.5 text-[10px] text-emerald-700">ใส่ข้อความได้</span> : <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">ข้อความตายตัว</span>}
                           {isFolded(t.doc) && <span className="rounded-full bg-sky-50 px-1.5 text-[10px] text-sky-700">การ์ดพับ A6</span>}
+                          {isSpecialTemplate(t) ? <span className="rounded-full bg-violet-100 px-1.5 text-[10px] font-medium text-violet-800">การ์ดพิเศษ</span> : <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500">การ์ดธรรมดา</span>}
                           {t.builtin && <span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500">ในตัว</span>}
                           {t.replaces_builtin && <span className="rounded bg-amber-50 px-1.5 text-[10px] text-amber-700">ในตัว · แก้แล้ว</span>}
                           {t.is_default && <span className="rounded bg-emerald-50 px-1.5 text-[10px] text-emerald-700">หลัก</span>}
@@ -662,6 +671,7 @@ export function GiftTemplates() {
                         <div className="mt-2 flex flex-wrap gap-1">
                           <Link href={`/order-ops/gift-cards/template?id=${encodeURIComponent(t.id)}`} className="inline-flex h-7 items-center rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">แก้</Link>
                           <button type="button" onClick={() => void copy(t)} className="h-7 rounded-md border border-slate-200 px-2 text-[12px] hover:bg-slate-50">ทำสำเนา</button>
+                          {!t.builtin && <button type="button" onClick={() => void setSpecial(t, !isSpecialTemplate(t))} title="คำสั่ง การ์ดพิเศษ เห็นเฉพาะแม่แบบพิเศษ · การ์ดธรรมดา เห็นเฉพาะธรรมดา" className="h-7 rounded-md border border-violet-200 px-2 text-[12px] text-violet-700 hover:bg-violet-50">{isSpecialTemplate(t) ? "เป็นธรรมดา" : "เป็นพิเศษ"}</button>}
                           {!t.builtin && oi > 0 && !kind && <button type="button" onClick={() => void move(group, own, oi, -1)} aria-label="เลื่อนขึ้น" title="เลื่อนไปก่อนหน้า" className="h-7 w-7 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"><Icon value="i:arrow-left" /></button>}
                           {!t.builtin && oi >= 0 && oi < own.length - 1 && !kind && <button type="button" onClick={() => void move(group, own, oi, 1)} aria-label="เลื่อนลง" title="เลื่อนไปถัดไป" className="h-7 w-7 rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"><Icon value="i:arrow-right" /></button>}
                           {!t.builtin && (t.replaces_builtin

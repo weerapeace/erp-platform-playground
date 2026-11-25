@@ -438,3 +438,18 @@ export function parseMoney(v: unknown): number | null {
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100) / 100;
 }
+
+/** ไอคอนของปุ่มคำสั่ง (ป๊อปคำสั่งพิเศษ 2 คอลัมน์ · เจ้าของเลือก 2026-11-25 รอบ 5) — ดูจากชื่อคำสั่ง · ไม่ตรงอะไร = ป้าย */
+export function commandIconOf(label: string): string {
+  const s = label.trim();
+  if (/สลัก/.test(s)) return "signature";
+  if (/การ์ด.*พิเศษ|พิเศษ.*การ์ด/.test(s)) return "sparkles";
+  if (/การ์ด/.test(s)) return "gift-card";
+  if (/ห่อ/.test(s)) return "gift";
+  if (/ไซส์|ไซซ์|เข็มขัด|ยาว|สั้น/.test(s)) return "ruler";
+  if (/ตัด/.test(s)) return "scissors";
+  if (/เปลี่ยน|สลับ/.test(s)) return "arrows-exchange";
+  if (/สติ๊?ก/.test(s)) return "sticker";
+  if (/อื่น/.test(s)) return "dots-vertical";
+  return "tag";
+}

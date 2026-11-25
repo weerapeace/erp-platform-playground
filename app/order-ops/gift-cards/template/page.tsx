@@ -20,7 +20,7 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { CardDesignerAny, type UploadedFont } from "@/components/card-designer";
 import { apiFetch } from "@/lib/api";
-import { builtinTemplates, hasRole, isBuiltinId, isFolded, newFoldedDoc, type CardDoc } from "@/lib/gift-card-design";
+import { builtinTemplates, hasRole, isBuiltinId, isFolded, isSpecialTemplate, newFoldedDoc, type CardDoc } from "@/lib/gift-card-design";
 
 async function gcJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(url, init);
@@ -55,6 +55,7 @@ function Body() {
   const [name, setName] = useState("");
   const [brandId, setBrandId] = useState("");
   const [isDefault, setIsDefault] = useState(false);
+  const [special, setSpecial] = useState(false);
   const [group, setGroup] = useState("");
   const [groups, setGroups] = useState<string[]>([]);
   const [saved, setSaved] = useState("");
@@ -63,12 +64,12 @@ function Body() {
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const snap = (d: CardDoc | null, n: string, b: string, def: boolean, g = "") => JSON.stringify([d, n, b, def, g]);
+  const snap = (d: CardDoc | null, n: string, b: string, def: boolean, g = "", sp2 = false) => JSON.stringify([d, n, b, def, g, sp2]);
   const load = useCallback(async () => {
     setErr(null);
     try {
       const [t, f, b, all] = await Promise.all([
-        rawId ? gcJson<{ template: { name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; group?: string | null } }>(`/api/order-gift-cards?template=${encodeURIComponent(rawId)}`) : Promise.resolve(null),
+        rawId ? gcJson<{ template: { name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; is_special?: boolean | null; group?: string | null } }>(`/api/order-gift-cards?template=${encodeURIComponent(rawId)}`) : Promise.resolve(null),
         gcJson<{ fonts: UploadedFont[] }>("/api/order-gift-cards?view=fonts"),
         apiFetch("/api/brands").then((r) => r.json()).catch(() => ({ data: [] })),
         gcJson<{ templates: { group?: string | null }[] }>("/api/order-gift-cards?view=templates").catch(() => ({ templates: [] })),
@@ -78,21 +79,22 @@ function Body() {
       setBrands(((b.data ?? []) as { id: string; name: string; is_customer_job?: boolean }[]).filter((x) => !x.is_customer_job).map((x) => ({ id: x.id, name: x.name })));
       const d = t?.template.doc ?? (newKind === "fold-side" ? newFoldedDoc("side") : newKind === "fold-top" ? newFoldedDoc("top") : builtinTemplates()[0].doc);
       const n = t?.template.name ?? "", br = t?.template.brand_id ?? "", def = t?.template.is_default ?? false, g = t?.template.group ?? sp.get("group") ?? "";
-      setDoc(d); setName(n); setBrandId(br); setIsDefault(def); setGroup(g);
-      setSaved(rawId ? snap(d, n, br, def, g) : "");
+      const spc = isSpecialTemplate({ is_special: t?.template.is_special ?? null, doc: d });
+      setDoc(d); setName(n); setBrandId(br); setIsDefault(def); setGroup(g); setSpecial(spc);
+      setSaved(rawId ? snap(d, n, br, def, g, spc) : "");
     } catch (e) { setErr((e as Error).message); }
   }, [rawId, newKind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, [load]);
 
-  const dirty = !!doc && snap(doc, name, brandId, isDefault, group) !== saved;
+  const dirty = !!doc && snap(doc, name, brandId, isDefault, group, special) !== saved;
   const save = async () => {
     if (!doc) return;
     if (!name.trim()) { toast.error("ตั้งชื่อแม่แบบก่อน"); return; }
     setSaving(true);
     try {
-      const j = await gcJson<{ id: string }>("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_save", id, name, brand_id: brandId || null, doc, is_default: isDefault, group_name: group || null, replaces_builtin: builtinId }) });
+      const j = await gcJson<{ id: string }>("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "template_save", id, name, brand_id: brandId || null, doc, is_default: isDefault, is_special: special, group_name: group || null, replaces_builtin: builtinId }) });
       toast.success(builtinId ? "บันทึกฉบับแก้แล้ว — แม่แบบในตัวเดิมกด \"คืนค่าเดิม\" ในหน้าตั้งค่าได้" : "บันทึกแม่แบบแล้ว");
-      setSaved(snap(doc, name, brandId, isDefault, group));
+      setSaved(snap(doc, name, brandId, isDefault, group, special));
       if (!id) router.replace(`/order-ops/gift-cards/template?id=${j.id}`);
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
@@ -118,6 +120,7 @@ function Body() {
         <label className="min-w-[180px] text-[12px] text-slate-500">แบรนด์
           <BrandSelect brands={brands} value={brandId} onChange={setBrandId} emptyLabel="ทุกแบรนด์" className="mt-0.5 h-9 w-full" />
         </label>
+        <label className="flex h-9 items-center gap-2 text-sm text-violet-800" title="คำสั่ง การ์ดพิเศษ ในป๊อปคำสั่งพิเศษ เห็นเฉพาะแม่แบบที่ติ๊ก · การ์ดธรรมดา เห็นเฉพาะที่ไม่ติ๊ก"><input type="checkbox" checked={special} onChange={(e) => setSpecial(e.target.checked)} /> การ์ดพิเศษ</label>
         <label className="flex h-9 items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> ใช้เป็นแม่แบบหลัก{brandId ? "ของแบรนด์นี้" : " (ทั่วไป)"}</label>
       </div>
       {!hasRole(doc, "message") && (

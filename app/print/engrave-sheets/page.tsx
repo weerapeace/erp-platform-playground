@@ -4,9 +4,14 @@
 // 🖨 ใบสลักชื่อ — /print/engrave-sheets?ids=<id,id,…>
 // 1 ออเดอร์ = 1 แถบ: หัว (สลักชื่อ · รูปแบบ · ตำแหน่ง · เลขออเดอร์) + ช่องตัวอักษร 10 ช่อง (เกิน 10 ตัว = แถวที่ 2)
 // หน้าตาเหมือนแอปเก่า order-instruction-manager · นับจำนวนครั้งที่พิมพ์ (POST action print)
+// &cards=<การ์ด,…> = พิมพ์การ์ดของออเดอร์ไปพร้อมกัน (ปุ่ม "พิมพ์ทั้งหมด" · เจ้าของเลือก 2026-11-25 รอบ 5 ข้อ 8)
+//   การ์ดพิมพ์ในหน้าต่างใหม่ (กระดาษ/ขนาดคนละแบบกับใบสลัก) ด้วยสูตรเดียวกับหน้าพิมพ์การ์ด (cardsPrintHtml) · ติ๊กพิมพ์แล้ว + ประวัติพิมพ์ gift_card
 // ============================================================
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { r2ImageUrl } from "@/lib/r2-image";
+import { cardsPrintHtml, cleanDoc, type CardDoc } from "@/lib/gift-card-design";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { usePrintLog } from "@/components/report/use-print-log";
@@ -31,6 +36,27 @@ function Sheets() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [specials, setSpecials] = useState<string[]>([]);
+  const cardIds = (sp.get("cards") ?? "").split(",").filter(Boolean);
+  const [cards, setCards] = useState<{ id: string; order_no: string | null; doc: CardDoc }[]>([]);
+  useEffect(() => {
+    if (!cardIds.length) return;
+    apiFetch(`/api/order-gift-cards?ids=${cardIds.join(",")}`).then((r) => r.json())
+      .then((j: { cards?: { id: string; order_no: string | null; doc: unknown }[] }) => setCards((j.cards ?? []).map((c) => ({ ...c, doc: cleanDoc(c.doc) }))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
+  const cardHtml = useMemo(() => {
+    if (!cards.length) return "";
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    return cardsPrintHtml(cards.map((c) => c.doc), "sheet", { r2ToUrl: (k) => { const u = r2ImageUrl(k, 1600); return u ? origin + u : null; }, origin, title: `การ์ดของขวัญ ${cards.length} ใบ` });
+  }, [cards]);
+  const trackCards = usePrintLog("gift_card", cards.map((c) => ({ doc_id: c.id, doc_no: c.order_no })));
+  const printCards = () => {
+    if (!cardHtml) return;
+    printReportHtmlInNewWindow(cardHtml);
+    trackCards("print");
+    void apiFetch("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "printed", ids: cards.map((c) => c.id) }) }).catch(() => {});
+  };
 
   useEffect(() => {
     if (!ids.length) { setError("ยังไม่ได้เลือกรายการ"); return; }
@@ -53,6 +79,8 @@ function Sheets() {
     void apiFetch("/api/order-ops", { method: "POST", body: JSON.stringify({ action: "print", ids: (rows ?? []).map((r) => r.id) }) }).catch(() => {});
     window.print();
   };
+  /** พิมพ์ทั้งหมด: เปิดการ์ดในหน้าต่างใหม่ก่อน (ต้องอยู่ในจังหวะกดปุ่ม ไม่งั้นเบราว์เซอร์บล็อก) แล้วพิมพ์ใบสลักในหน้านี้ */
+  const printAll = () => { printCards(); window.setTimeout(print, 400); };
 
   if (error) return <div className="p-6 text-sm text-rose-600">{error}</div>;
   if (!rows) return <LoadingState label="กำลังเตรียมใบสลักชื่อ…" />;
@@ -61,13 +89,21 @@ function Sheets() {
     <div className="min-h-screen bg-slate-100 p-4 print:bg-white print:p-0">
       <style>{"@page{size:auto;margin:6mm} @media print{.no-print{display:none!important}.sheet{break-inside:avoid}}"}</style>
       <div className="no-print mx-auto mb-3 flex max-w-[270mm] items-center gap-3">
-        <h1 className="flex-1 text-lg font-bold text-slate-800">ใบสลักชื่อ {rows.length} ใบ</h1>
-        <button onClick={print} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"><Icon name="printer" /> พิมพ์</button>
+        <h1 className="flex-1 text-lg font-bold text-slate-800">ใบสลักชื่อ {rows.length} ใบ{cards.length ? ` + การ์ด ${cards.length} ใบ` : ""}</h1>
+        {cards.length > 0 && <button onClick={printCards} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"><Icon name="gift-card" /> พิมพ์การ์ด</button>}
+        <button onClick={print} className={`inline-flex items-center gap-1 rounded-lg px-4 py-2 text-sm font-medium ${cards.length ? "border border-slate-300 bg-white text-slate-700" : "bg-slate-900 text-white"}`}><Icon name="printer" /> พิมพ์{cards.length ? "ใบสลัก" : ""}</button>
+        {cards.length > 0 && <button onClick={printAll} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white"><Icon name="printer" /> พิมพ์ทั้งหมด</button>}
       </div>
       <div className="mx-auto max-w-[270mm] bg-white p-3 print:max-w-none print:p-0">
         {rows.map((r, idx) => <Sheet key={r.id} r={r} first={idx === 0} specials={specials} />)}
         {!rows.length && <p className="p-6 text-center text-sm text-slate-500">รายการที่เลือกไม่มีชื่อสลัก</p>}
       </div>
+      {cardHtml && (
+        <div className="no-print mx-auto mt-4 max-w-[270mm]">
+          <p className="mb-2 text-xs text-slate-500">การ์ดของออเดอร์ (พิมพ์แยกหน้าต่าง · ตั้ง &quot;ขนาดจริง 100%&quot; · กดพิมพ์แล้วติ๊กว่าการ์ดพิมพ์แล้วให้เอง)</p>
+          <PrintFrame html={cardHtml} maxWidth={860} />
+        </div>
+      )}
     </div>
   );
 }

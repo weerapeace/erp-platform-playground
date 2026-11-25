@@ -27,100 +27,10 @@ import {
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
-export type UploadedFont = { id: string; name: string };
+import { CardElView as ElView, CardPreview, ScreenMarks, cardFontOptions, useCardFonts, useWidth, type UploadedFont } from "./preview";
+export { CardPreview, CardQuickEdit, cardFontOptions, useCardFonts, type UploadedFont } from "./preview";
 const r2Url = (k: string) => r2ImageUrl(k);
 const ROLE_LABEL: Record<CardRole, string> = { message: "ข้อความจากลูกค้า", to: "ถึง", from: "จาก" };
-
-/** เครื่องหมายบนจอ (ไม่ติดตอนพิมพ์): กรอบเส้นปะสีเหลือง = ช่องข้อความจากลูกค้า/ถึง/จาก · เส้นปะแดง = รอยพับ */
-function ScreenMarks({ doc, k, fold, labels = true }: { doc: CardDoc; k: number; fold?: { x?: number; y?: number } | null; labels?: boolean }) {
-  return (
-    <>
-      {doc.els.filter((e) => !e.hidden && e.kind === "text" && e.role).map((e) => {
-        const b = elBox(e, k);
-        return (
-          <div key={`m${e.id}`} className="pointer-events-none absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, outline: "1.5px dashed #BA7517", background: "rgba(250,199,117,.16)" }}>
-            {labels && <span className="absolute -top-4 left-0 whitespace-nowrap rounded bg-amber-100 px-1 text-[9px] leading-4 text-amber-800">{ROLE_LABEL[e.role as CardRole]}</span>}
-          </div>
-        );
-      })}
-      {fold?.x != null && <div className="pointer-events-none absolute top-0 h-full border-l-[1.5px] border-dashed border-rose-500" style={{ left: fold.x * k }} />}
-      {fold?.y != null && <div className="pointer-events-none absolute left-0 w-full border-t-[1.5px] border-dashed border-rose-500" style={{ top: fold.y * k }} />}
-    </>
-  );
-}
-
-// ─── โหลดฟอนต์ (Google + ฟอนต์ที่อัปโหลด) ครั้งเดียวต่อหน้า ───
-export function useCardFonts(uploaded: UploadedFont[] = []) {
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    if (!document.getElementById("gcd-fonts")) {
-      const l = document.createElement("link");
-      l.id = "gcd-fonts"; l.rel = "stylesheet"; l.href = googleFontsHref(CARD_FONTS.map((f) => f.family));
-      document.head.appendChild(l);
-    }
-    let st = document.getElementById("gcd-upfonts") as HTMLStyleElement | null;
-    if (!st) { st = document.createElement("style"); st.id = "gcd-upfonts"; document.head.appendChild(st); }
-    st.textContent = uploadFontFaces(uploaded.map((f) => `upload:${f.id}`));
-  }, [uploaded]);
-}
-
-/** ตัวเลือกฟอนต์ให้ TextStyleControl */
-export function cardFontOptions(uploaded: UploadedFont[] = []): TextFontOption[] {
-  return [
-    ...CARD_FONTS.map((f) => ({ value: f.family, label: f.label, css: fontStack(f.family) })),
-    ...uploaded.map((f) => ({ value: `upload:${f.id}`, label: `${f.name} (แบรนด์)`, css: fontStack(`upload:${f.id}`) })),
-  ];
-}
-
-// ─── วาดชิ้นเดียว (ใช้ทั้งพรีวิวและตัวออกแบบ) ───
-function ElView({ e, k }: { e: CardEl; k: number }) {
-  const b = elBox(e, k);
-  const box: CSSProperties = { position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, opacity: e.opacity };
-  if (e.kind === "text" && e.style) {
-    const t = textCss(e.style, k) as CSSProperties;
-    return <div style={box}><div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...t }}><span style={{ display: "block" }}>{e.text || " "}</span></div></div>;
-  }
-  if (e.kind === "image") {
-    const url = resolveSrc(e.src, r2Url);
-    // eslint-disable-next-line @next/next/no-img-element
-    return url ? <img src={url} alt="" draggable={false} style={{ ...box, objectFit: e.fit ?? "contain", userSelect: "none" }} /> : null;
-  }
-  const sw = (e.strokeW ?? 0) * k;
-  if (e.shape === "line") return <div style={{ ...box, height: 0, borderTop: `${Math.max(sw, 1)}px solid ${e.stroke || "#000"}` }} />;
-  return <div style={{ ...box, boxSizing: "border-box", background: e.fill || "transparent", border: e.stroke ? `${sw}px solid ${e.stroke}` : "none", borderRadius: e.shape === "ellipse" ? "50%" : (e.radius ?? 0) * k }} />;
-}
-
-function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T>(null);
-  const [w, setW] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth));
-    ro.observe(el); setW(el.clientWidth);
-    return () => ro.disconnect();
-  }, []);
-  return [ref, w];
-}
-
-/** พรีวิวการ์ด (ดูอย่างเดียว) — กว้างเต็มกล่องแม่ หรือกำหนด width (px) */
-export function CardPreview({ doc, width, className = "", maxHeight, marks = false, fold = null }: { doc: CardDoc; width?: number; className?: string; maxHeight?: number; /** โชว์กรอบช่องข้อความจากลูกค้า (บนจอเท่านั้น) */ marks?: boolean; /** เส้นรอยพับ (การ์ดพับ) */ fold?: { x?: number; y?: number } | null }) {
-  const [ref, boxW] = useWidth<HTMLDivElement>();
-  let k = (width ?? boxW) / doc.w;
-  if (maxHeight && doc.h * k > maxHeight) k = maxHeight / doc.h;
-  const bg = resolveSrc(doc.bg.image, r2Url);
-  return (
-    <div ref={ref} className={className} style={width ? { width } : undefined}>
-      {k > 0 && (
-        <div style={{ position: "relative", overflow: "hidden", width: doc.w * k, height: doc.h * k, background: doc.bg.color, margin: "0 auto" }} className="rounded-[2px] shadow-sm ring-1 ring-black/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {bg && <img src={bg} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: doc.bg.fit }} />}
-          {doc.els.filter((e) => !e.hidden).map((e) => <ElView key={e.id} e={e} k={k} />)}
-          {(marks || fold) && <ScreenMarks doc={marks ? doc : { ...doc, els: [] }} k={k} fold={fold} labels={false} />}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── ตัวออกแบบ ───
 

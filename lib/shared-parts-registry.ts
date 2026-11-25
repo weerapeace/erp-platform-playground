@@ -1680,9 +1680,9 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "canvas-sketch.md",
   },
   {
-    key: "card-designer", label: "ตัวออกแบบการ์ดขนาดจริง (ลากวางแบบ Canva)", code: "CardDesigner · CardPreview · lib/gift-card-design", category: "feature",
-    source: { path: "components/card-designer", names: ["CardDesigner", "CardPreview"] },
-    what: "ออกแบบการ์ด/ป้ายขนาดจริง (มม.) แบบลากวาง: ข้อความหลายกล่อง (ฟอนต์ไทย-อังกฤษ 20 แบบ + ฟอนต์แบรนด์ที่อัปโหลด · ใช้ TextStyleControl กลาง) · รูป PNG พื้นโปร่ง (อัปโหลด/คลังรูปกลาง) · สติ๊กเกอร์ในตัว · รูปทรง · สีพื้น/รูปพื้น · ลาก ย่อขยาย หมุน ดูดกึ่งกลาง/ขอบ · ชั้น ซ่อน ล็อก · ย้อนกลับ/ทำซ้ำ · ชิ้นข้อความตั้ง role (ข้อความหลัก/ถึง/จาก) ให้แม่แบบเติมข้อความเองได้ · พิมพ์ด้วย cardsPrintHtml (A4 มีเส้นตัด / 1 ใบต่อแผ่น) · PNG ด้วย lib/gift-card-png",
+    key: "card-designer", label: "ตัวออกแบบการ์ดขนาดจริง (ลากวางแบบ Canva)", code: "CardDesigner · CardPreview · CardQuickEdit · lib/gift-card-design", category: "feature",
+    source: { path: "components/card-designer", names: ["CardDesigner", "CardPreview", "CardQuickEdit"] },
+    what: "ออกแบบการ์ด/ป้ายขนาดจริง (มม.) แบบลากวาง: ข้อความหลายกล่อง (ฟอนต์ไทย-อังกฤษ 20 แบบ + ฟอนต์แบรนด์ที่อัปโหลด · ใช้ TextStyleControl กลาง) · รูป PNG พื้นโปร่ง (อัปโหลด/คลังรูปกลาง) · สติ๊กเกอร์ในตัว · รูปทรง · สีพื้น/รูปพื้น · ลาก ย่อขยาย หมุน ดูดกึ่งกลาง/ขอบ · ชั้น ซ่อน ล็อก · ย้อนกลับ/ทำซ้ำ · ชิ้นข้อความตั้ง role (ข้อความหลัก/ถึง/จาก) ให้แม่แบบเติมข้อความเองได้ · พิมพ์ด้วย cardsPrintHtml (A4 มีเส้นตัด / 1 ใบต่อแผ่น) · PNG ด้วย lib/gift-card-png · แก้ด่วน CardQuickEdit (ไฟล์เบา preview.tsx: ลากข้อความบนการ์ด + พิมพ์/เพิ่ม/ลบข้อความ ใช้ในป๊อปคำสั่งพิเศษ · ตัวออกแบบเต็มโหลดแยกด้วย next/dynamic)",
     when: "การ์ดของขวัญจากหมายเหตุออเดอร์ (/order-ops/gift-cards + แม่แบบ) · งานอื่นที่ต้องออกแบบชิ้นงานพิมพ์ขนาดเล็กขนาดเป๊ะ มีรูป/ฟอนต์อิสระ (การ์ดขอบคุณ ป้ายแขวน ฯลฯ)",
     notWhen: "เอกสารมีตาราง/ช่องข้อมูลจากระบบ → PdfmeDesigner หรือแม่แบบเอกสาร · วาดอิสระ/วางการ์ดบนกระดานไม่มีขนาดจริง → CanvasSketch · ไฟล์เส้นให้โรงงาน (ข้อความเป็นเส้น) → บล็อกพิมพ์ (lib/block-print-layout) · การ์ดที่ลูกค้าเลือกเองบนเว็บร้าน → lib/website-gift-cards",
     doc: "order-gift-cards.md",

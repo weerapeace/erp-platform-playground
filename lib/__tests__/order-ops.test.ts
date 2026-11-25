@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
+import { commandIconOf,
   canMoveCase,
   choiceGroups,
   cleanCommandDetails,
@@ -175,5 +175,18 @@ describe("คำสั่งพิเศษ รอบ 2: ข้อความ�
   it("ห่อพิเศษจับจากรหัสขึ้นต้น (รวมรหัสที่มีของต่อท้าย)", () => {
     expect(specialWrapCodes(["GIFT01-05.2", "WK41-01", "gift01"], ["GIFT01"])).toEqual(["GIFT01-05.2", "gift01"]);
     expect(specialWrapCodes(["WK41-01"], ["GIFT01"])).toEqual([]);
+  });
+});
+
+describe("commandIconOf", () => {
+  it("เลือกไอคอนจากชื่อคำสั่ง", () => {
+    expect(commandIconOf("การ์ดพิเศษ")).toBe("sparkles");
+    expect(commandIconOf("การ์ดธรรมดา")).toBe("gift-card");
+    expect(commandIconOf("ห่อ")).toBe("gift");
+    expect(commandIconOf("แก้ไซส์เข็มขัด")).toBe("ruler");
+    expect(commandIconOf("ตัดชื่อออก")).toBe("scissors");
+    expect(commandIconOf("เปลี่ยนสินค้า")).toBe("arrows-exchange");
+    expect(commandIconOf("อื่นๆ")).toBe("dots-vertical");
+    expect(commandIconOf("อะไรก็ได้")).toBe("tag");
   });
 });

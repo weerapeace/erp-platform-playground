@@ -14,11 +14,12 @@ import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { LoadingState, ErrorState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
+import { r2ImageUrl } from "@/lib/r2-image";
 
 export type PickedOrder = {
   id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null;
   status: string | null; packed: boolean; note: string | null; has_instruction: boolean;
-  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
+  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
 };
 
 const DAY_OPTIONS = [7, 14, 30, 90];
@@ -91,6 +92,12 @@ export function PlatformOrderPicker({ open, onClose, onPick, title = "เลื�
             <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
               {rows.map((o) => (
                 <button key={o.id} type="button" onClick={() => { onPick(o); onClose(); }} className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50">
+                  {o.items.some((i) => i.image_key) && (
+                    <div className="flex shrink-0 -space-x-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {o.items.filter((i) => i.image_key).slice(0, 3).map((i, n) => <img key={n} src={r2ImageUrl(i.image_key, 96) ?? ""} alt="" loading="lazy" className="h-10 w-10 rounded-md border-2 border-white object-cover" />)}
+                    </div>
+                  )}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-mono text-xs">{o.order_no}</span>

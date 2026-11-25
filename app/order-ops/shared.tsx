@@ -83,7 +83,7 @@ export function TrialBanner({ trialCount, onChanged }: { trialCount: number; onC
 
 export type OrderHit = {
   id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null; status: string | null; note: string | null;
-  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
+  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
 };
 type Existing = { instructions: { id: string; status: string }[]; cases: { id: string; kind: string; status: string }[] };
 

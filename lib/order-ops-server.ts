@@ -45,7 +45,7 @@ export type OrderHit = {
   status: string | null;
   /** หมายเหตุที่ลูกค้าเขียนตอนสั่ง (Shopee message_to_seller / buyer_message / note) */
   note: string | null;
-  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
+  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
 };
 
 /** หาออเดอร์จากศูนย์ออเดอร์ด้วยเลขออเดอร์ (ตรงตัว) — ไม่เจอ = null (ใบเก่า/ยังไม่ดึง ก็ยังพิมพ์เองได้) */
@@ -68,6 +68,14 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
     admin.from("platform_order_items").select("sku_code, name, qty, matched_sku_id").eq("order_id", String(o.id)).limit(50),
   ]);
   const p = plat as Row | null;
+  const its = ((items ?? []) as Row[]).map((i) => ({
+    sku: (i.sku_code as string) ?? null,
+    name: (i.name as string) ?? null,
+    qty: Number(i.qty ?? 1) || 1,
+    sku_id: (i.matched_sku_id as string) ?? null,
+    image_key: null as string | null,
+  }));
+  await attachItemImages(admin, its);
   return {
     id: String(o.id),
     order_no: String(o.order_no ?? o.external_order_id ?? code),
@@ -76,13 +84,29 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
     ordered_at: (o.ordered_at as string) ?? null,
     status: (o.status as string) ?? null,
     note: noteOf(o),
-    items: ((items ?? []) as Row[]).map((i) => ({
-      sku: (i.sku_code as string) ?? null,
-      name: (i.name as string) ?? null,
-      qty: Number(i.qty ?? 1) || 1,
-      sku_id: (i.matched_sku_id as string) ?? null,
-    })),
+    items: its,
   };
+}
+
+/**
+ * รูปสินค้าของรายการในออเดอร์ (เจ้าของขอ 2026-11-25 รอบ 5 ข้อ 7) — รูปปก SKU ก่อน ไม่มีใช้รูปปกรุ่น
+ * จับคู่จาก matched_sku_id · ยังไม่จับคู่ = หาจากรหัส SKU ตรงตัว · แก้รายการเดิม (ใส่ image_key)
+ */
+export async function attachItemImages(admin: Admin, items: { sku: string | null; sku_id: string | null; image_key?: string | null }[]): Promise<void> {
+  if (!items.length) return;
+  const chunk = <T,>(a: T[]) => { const out: T[][] = []; for (let i = 0; i < a.length; i += 150) out.push(a.slice(i, i + 150)); return out; };
+  const ids = [...new Set(items.map((i) => i.sku_id).filter((x): x is string => !!x))];
+  const codes = [...new Set(items.filter((i) => !i.sku_id && i.sku).map((i) => String(i.sku).trim()).filter(Boolean))];
+  const rows: Row[] = [];
+  for (const c of chunk(ids)) rows.push(...(((await admin.from("skus_v2").select("id, code, cover_image_r2_key, parent_sku_id").in("id", c)).data ?? []) as Row[]));
+  for (const c of chunk(codes)) rows.push(...(((await admin.from("skus_v2").select("id, code, cover_image_r2_key, parent_sku_id").in("code", c)).data ?? []) as Row[]));
+  const parentIds = [...new Set(rows.filter((r) => !r.cover_image_r2_key && r.parent_sku_id).map((r) => String(r.parent_sku_id)))];
+  const parentImg = new Map<string, string>();
+  for (const c of chunk(parentIds)) for (const r of ((await admin.from("parent_skus_v2").select("id, cover_image_r2_key").in("id", c)).data ?? []) as Row[]) if (r.cover_image_r2_key) parentImg.set(String(r.id), String(r.cover_image_r2_key));
+  const imgOf = (r: Row) => (r.cover_image_r2_key as string) || (r.parent_sku_id ? parentImg.get(String(r.parent_sku_id)) ?? null : null);
+  const byId = new Map(rows.map((r) => [String(r.id), imgOf(r)]));
+  const byCode = new Map(rows.map((r) => [String(r.code ?? ""), imgOf(r)]));
+  for (const i of items) i.image_key = (i.sku_id ? byId.get(i.sku_id) : null) ?? (i.sku ? byCode.get(String(i.sku).trim()) ?? null : null);
 }
 
 /** ตัดช่องที่ไม่อนุญาตทิ้ง + ข้อความยาวเกิน */
@@ -115,7 +139,7 @@ export async function loadEngraveSpecials(admin: Admin): Promise<string[]> {
 export type PickerOrder = {
   id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null;
   status: string | null; packed: boolean; note: string | null; has_instruction: boolean;
-  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null }[];
+  items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
 };
 
 /**
@@ -158,8 +182,9 @@ export async function listPickerOrders(admin: Admin, o: { q: string; days: numbe
   for (const i of (items ?? []) as Row[]) {
     const k = String(i.order_id);
     if (!itemsBy.has(k)) itemsBy.set(k, []);
-    itemsBy.get(k)!.push({ sku: (i.sku_code as string) ?? null, name: (i.name as string) ?? null, qty: Number(i.qty ?? 1) || 1, sku_id: (i.matched_sku_id as string) ?? null });
+    itemsBy.get(k)!.push({ sku: (i.sku_code as string) ?? null, name: (i.name as string) ?? null, qty: Number(i.qty ?? 1) || 1, sku_id: (i.matched_sku_id as string) ?? null, image_key: null });
   }
+  await attachItemImages(admin, [...itemsBy.values()].flat());
   const platBy = new Map(((plats ?? []) as Row[]).map((p) => [String(p.id), (p.name_th as string) || (p.code as string) || null]));
   const hasIns = new Set(((ins ?? []) as Row[]).map((r) => String(r.platform_order_id)));
   return {

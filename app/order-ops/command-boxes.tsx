@@ -4,7 +4,9 @@
 // กล่องตั้งค่าต่อคำสั่งในป๊อปคำสั่งพิเศษ — รอบ 2 (เจ้าของเลือก widget 2026-11-25 ข้อ 1-6)
 //   ChoiceBox   ห่อ/การ์ดแทรก/สติกเกอร์: ตัวเลือกแยกกลุ่ม + คงเหลือวัสดุ (ตัวเลือกผูก SKU → สต๊อกกลาง lib/sku-stock)
 //   SpecialWrapPanel  ห่อพิเศษ (สินค้ารหัสขึ้นต้นตามที่ตั้ง เช่น GIFT01): รูป + วัสดุ (Set บรรจุภัณฑ์กลางของหน้าแพ็ก) + วิธีห่อ
-//   CardBox     การ์ด: ข้อความจากหมายเหตุ + เลือกแม่แบบ (กลุ่ม) + ตัวอย่าง → บันทึกคำสั่ง = สร้าง/อัปเดตการ์ดของออเดอร์ (ผ่าน saveCards)
+//   CardBox     การ์ด: ข้อความจากหมายเหตุ + เลือกแม่แบบ (การ์ดธรรมดาเห็นแม่แบบธรรมดา · การ์ดพิเศษเห็นแม่แบบที่ติ๊กพิเศษ)
+//               + ตัวอย่างสด ลากข้อความ/เพิ่มข้อความได้ (CardQuickEdit) + "ออกแบบเต็ม" โหลดตัวออกแบบตอนกดเท่านั้น (รอบ 5)
+//               → บันทึกคำสั่ง = สร้าง/อัปเดตการ์ดของออเดอร์ (ผ่าน saveCards)
 //   PhraseBox   แก้ไซส์เข็มขัด: ข้อความลัด "{n}" ตัวเลข "{u}" หน่วย
 //   SwapBox     เปลี่ยนสินค้า: SKU รุ่นเดียวกันก่อน (ตัวเดารหัสเดียวกับหน้าแพ็ก) + เลือก SKU รุ่นอื่น (SkuPicker กลาง)
 // ข้อมูล: /api/order-ops?t=ins_context · ?t=stock · /api/order-gift-cards (การ์ด/แม่แบบ)
@@ -13,14 +15,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { CardPreview, useCardFonts } from "@/components/card-designer";
+import { CardQuickEdit, useCardFonts } from "@/components/card-designer/preview";
+import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { PHRASE_UNITS, choiceGroups, fillPhrase, phraseNeeds, phrasesOf, type CommandDetail } from "@/lib/order-ops";
-import { faceDoc, fillTexts, foldLine, groupTemplates, isFolded, roleTexts, suggestMessage, type CardDoc } from "@/lib/gift-card-design";
+import { fillTexts, groupTemplates, hasRole, isFolded, isSpecialTemplate, roleTexts, suggestMessage, type CardDoc } from "@/lib/gift-card-design";
 import { inputCls, opsJson, type OptionRow } from "./shared";
 import dynamic from "next/dynamic";
 // Set บรรจุภัณฑ์ต่อรุ่น (ของกลางหน้าแพ็ก) หนัก — โหลดเฉพาะตอนกด "ตั้งวัสดุ + วิธีห่อ"
+// ตัวออกแบบการ์ดเต็ม (ย่อ/หมุน/รูป/สติ๊กเกอร์) หนัก — โหลดเฉพาะตอนกด "ออกแบบเต็ม" (เจ้าของเลือก รอบ 5 ข้อ 2)
+const CardDesignerAny = dynamic(() => import("@/components/card-designer").then((m) => m.CardDesignerAny), { ssr: false, loading: () => <p className="py-10 text-center text-sm text-slate-400">กำลังโหลดตัวออกแบบ…</p> });
 const ParentPackingTab = dynamic(() => import("@/components/packing-station/packaging").then((m) => m.ParentPackingTab), { ssr: false });
 
 const LOW_STOCK = 5;
@@ -158,7 +163,7 @@ export function SwapBox({ fromSku, detail, onChange }: { fromSku: string; detail
   );
 }
 
-type Tpl = { id: string; name: string; doc: CardDoc; builtin: boolean; group?: string | null; sort_order?: number; replaces_builtin?: string | null };
+type Tpl = { id: string; name: string; doc: CardDoc; builtin: boolean; is_special?: boolean | null; group?: string | null; sort_order?: number; replaces_builtin?: string | null };
 /** ที่ป๊อปใช้ตอนบันทึก: การ์ดของคำสั่งนี้ (สร้าง/อัปเดต) */
 export type CardDraft = { cardId: string | null; baseDoc: CardDoc | null; templateId: string | null; message: string };
 
@@ -170,6 +175,9 @@ export function CardBox({ command, option, orderId, index, detail, onChange, dra
   const [card, setCard] = useState<{ id: string; doc: CardDoc; template_id: string | null; printed_at: string | null; hand_written_at: string | null } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  /** หน้าตาที่แก้ในป๊อป (ย้ายข้อความ/เพิ่มข้อความ/ออกแบบเต็ม) — null = ใช้หน้าตาแม่แบบ/การ์ดเดิม */
+  const [edited, setEdited] = useState<CardDoc | null>(null);
+  const [full, setFull] = useState(false);
   useCardFonts();
   const special = /พิเศษ/.test(command);
   const groupHint = optExtra(option).template_group;
@@ -204,44 +212,62 @@ export function CardBox({ command, option, orderId, index, detail, onChange, dra
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
-  const groups = useMemo(() => groupTemplates(tpls.filter((t) => !t.builtin), tpls.filter((t) => t.builtin)), [tpls]);
+  // การ์ดธรรมดา = แม่แบบธรรมดาเท่านั้น · การ์ดพิเศษ = แม่แบบที่ติ๊กพิเศษเท่านั้น (ติ๊กที่หน้าแม่แบบ · รอบ 5 ข้อ 3)
+  const pool = useMemo(() => tpls.filter((t) => isSpecialTemplate(t) === special), [tpls, special]);
+  const groups = useMemo(() => groupTemplates(pool.filter((t) => !t.builtin), pool.filter((t) => t.builtin)), [pool]);
   const defaultTpl = useMemo(() => {
     const inGroup = groupHint ? groups.find((g) => g.group === groupHint)?.items ?? [] : [];
-    const pool = inGroup.length ? inGroup : groups.flatMap((g) => g.items);
-    return (special ? pool.find((t) => isFolded(t.doc)) : pool.find((t) => !isFolded(t.doc))) ?? pool[0] ?? null;
-  }, [groups, groupHint, special]);
+    return (inGroup.length ? inGroup : groups.flatMap((g) => g.items))[0] ?? null;
+  }, [groups, groupHint]);
   const tplId = detail.template_id || card?.template_id || defaultTpl?.id || "";
   const tpl = tpls.find((t) => t.id === tplId) ?? null;
   const message = detail.message ?? "";
   // การ์ดเดิมและไม่ได้เปลี่ยนแม่แบบ → ใช้หน้าตาเดิม (แก้ทั้งใบไว้ก็ไม่หาย) · เปลี่ยนแม่แบบ → ใช้แม่แบบใหม่
   const baseDoc = card && (!detail.template_id || detail.template_id === card.template_id) ? card.doc : tpl?.doc ?? null;
-  const preview = baseDoc ? fillTexts(baseDoc, { message: message || "ข้อความ" }) : null;
+  // แม่แบบไม่มีช่องข้อความลูกค้า → เพิ่มช่องให้ครั้งเดียว (กันรหัสชิ้นเปลี่ยนทุกครั้งที่วาด = ลากไม่ได้)
+  const base = useMemo(() => { const b0 = edited ?? baseDoc; return b0 && !hasRole(b0, "message") ? fillTexts(b0, { message: "" }) : b0; }, [edited, baseDoc]);
+  const working = useMemo(() => (base ? fillTexts(base, { message }) : null), [base, message]);
+  const pickTpl = (id: string) => { setEdited(null); onChange({ template_id: id }); };
 
   useEffect(() => {
-    draftRef.current[command] = { cardId: card?.id ?? null, baseDoc, templateId: tpl && !tpl.builtin ? tpl.id : null, message };
-  }, [command, card, baseDoc, tpl, message, draftRef]);
+    draftRef.current[command] = { cardId: card?.id ?? null, baseDoc: base, templateId: tpl && !tpl.builtin ? tpl.id : null, message };
+  }, [command, card, base, tpl, message, draftRef]);
 
+  const noPool = loaded && !pool.length && !card;
   return (
     <div className="space-y-2">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <textarea value={message} onChange={(e) => onChange({ message: e.target.value })} rows={3} placeholder="ข้อความบนการ์ด" className={inputCls} />
-          {!card && note && <p className="text-[11px] text-slate-400">ดึงจากหมายเหตุลูกค้าให้แล้ว · แก้ได้</p>}
-          <select value={tplId} onChange={(e) => onChange({ template_id: e.target.value })} className="h-8 w-full rounded-lg border border-slate-300 px-2 text-xs" aria-label="แม่แบบการ์ด">
-            {groups.map((g) => <optgroup key={g.group} label={g.group}>{g.items.map((t, i) => <option key={t.id} value={t.id}>{i + 1} · {t.name}{isFolded(t.doc) ? " (พับ A6)" : ""}</option>)}</optgroup>)}
-          </select>
+      {noPool ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[12px] text-amber-800">
+          ยังไม่มีแม่แบบ{special ? "การ์ดพิเศษ" : "การ์ดธรรมดา"} — ติ๊ก &quot;การ์ดพิเศษ&quot; ที่หน้าแม่แบบการ์ด (ตั้งค่า › แม่แบบการ์ด) · ตอนนี้พิมพ์ข้อความไว้ก่อนได้
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {groups.flatMap((g) => g.items).map((t) => (
+            <button key={t.id} type="button" onClick={() => pickTpl(t.id)} title={t.group ?? ""}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] ${t.id === tplId ? "border-sky-400 bg-sky-50 font-medium text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              {t.name}{isFolded(t.doc) ? " · พับ" : ""}
+            </button>
+          ))}
+          {card && detail.template_id && detail.template_id !== card.template_id && <span className="self-center text-[10px] text-amber-700">เปลี่ยนแม่แบบ = ใช้หน้าตาแม่แบบใหม่แทนการ์ดเดิม</span>}
         </div>
-        {preview && (
-          <div className="w-full shrink-0 sm:w-44">
-            <CardPreview doc={faceDoc(preview, isFolded(preview) ? "in" : "out")} maxHeight={110} fold={foldLine(preview)} />
-            <div className="mt-1 text-center text-[10px] text-slate-400">{isFolded(preview) ? "ด้านใน (การ์ดพับ)" : "ตัวอย่าง"}</div>
-          </div>
-        )}
-      </div>
+      )}
+      {working ? (
+        <CardQuickEdit doc={working} onChange={setEdited} message={message} onMessage={(v) => onChange({ message: v })} maxHeight={200}
+          onFull={() => setFull(true)} onReset={edited ? () => setEdited(null) : undefined} />
+      ) : (
+        <textarea value={message} onChange={(e) => onChange({ message: e.target.value })} rows={3} placeholder="ข้อความบนการ์ด" className={inputCls} />
+      )}
+      {!card && note && <p className="text-[11px] text-slate-400">ข้อความดึงจากหมายเหตุลูกค้าให้แล้ว · แก้ได้</p>}
       <p className="text-[11px] text-slate-500">
         {card ? <>การ์ดของออเดอร์นี้: {card.printed_at ? <span className="text-emerald-700">พิมพ์แล้ว</span> : card.hand_written_at ? <span className="text-emerald-700">เขียนมือแล้ว</span> : <span className="text-rose-600">ยังไม่พิมพ์</span>} · บันทึกคำสั่ง = อัปเดตการ์ดใบนี้</> : orderId ? "บันทึกคำสั่ง = สร้างการ์ดของออเดอร์นี้ให้เลย (อยู่ใน การ์ดทั้งหมด พิมพ์ได้ทันที)" : "ยังไม่ผูกออเดอร์ — บันทึกแล้วสร้างการ์ดไม่ผูกออเดอร์"}
-        {card && <a href={`/order-ops/gift-cards/edit?id=${card.id}`} target="_blank" rel="noopener noreferrer" className="ml-2 text-sky-700 hover:underline">แก้ทั้งใบ / พิมพ์ ↗</a>}
+        {card && <a href={`/order-ops/gift-cards/edit?id=${card.id}`} target="_blank" rel="noopener noreferrer" className="ml-2 text-sky-700 hover:underline">เปิดหน้าการ์ด ↗</a>}
       </p>
+      {full && working && (
+        <ERPModal open onClose={() => setFull(false)} title={`ออกแบบการ์ด — ${command}`} size="xl" storageKey="order-ops-card-full" zIndex={70}
+          footer={<div className="flex w-full items-center gap-2"><span className="flex-1 text-[11px] text-slate-500">แก้แล้วมีผลกับการ์ดของคำสั่งนี้ · บันทึกจริงตอนกด &quot;บันทึก&quot; ในป๊อปคำสั่ง</span><button type="button" onClick={() => setFull(false)} className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700">เสร็จ</button></div>}>
+          <CardDesignerAny value={working} onChange={(d) => { setEdited(d); const m = roleTexts(d).message; if (m !== message) onChange({ message: m }); }} height={460} />
+        </ERPModal>
+      )}
     </div>
   );
 }
