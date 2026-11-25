@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildTiktokSkusPayload, planTiktokSkuEdit, tiktokOptNameKey, tiktokOptionGroups, tiktokSkuFormOf, tiktokSkuSignature } from "@/lib/tiktok-sku-edit";
+import { buildTiktokNewSkus, buildTiktokSkusPayload, planTiktokSkuEdit, tiktokMainWarehouse, tiktokModelsLite, tiktokOptNameKey, tiktokOptionGroups, tiktokSkuFormOf, tiktokSkuSignature, type TiktokSkuAdd } from "@/lib/tiktok-sku-edit";
 import { tiktokListingView } from "@/lib/tiktok-listing-edit";
 
 // รูปคำตอบ Get Product จริง (ย่อ): 2 สี × 2 ไซซ์ · สีมีรูป
@@ -81,5 +81,60 @@ describe("buildTiktokSkusPayload", () => {
   it("ไม่รู้ uri รูป = error", () => {
     const f = tiktokSkuFormOf(g); f.images["id:V1"] = "r2:missing.jpg";
     expect(buildTiktokSkusPayload(raw.skus, g, f, (ref) => (ref.startsWith("tts:") ? ref.slice(4) : null), { includeInventory: false }).errors.length).toBe(1);
+  });
+});
+
+// ───────── เพิ่มสีจากระบบ (2026-11-25) ─────────
+describe("เพิ่มสีจากระบบ", () => {
+  const g = tiktokOptionGroups(view.skus);
+  const shopSkus = view.skus.map((x) => x.sellerSku);
+  const withAdds = (adds: TiktokSkuAdd[]) => ({ ...tiktokSkuFormOf(g), adds });
+  const red: TiktokSkuAdd = { code: "BAG-03", name: "แดง", image: "r2:products/red.jpg", price: null, stock: 4, sizes: [{ valueKey: "id:Z1", sku: "BAG-03S", price: 950, stock: 4 }] };
+  it("สี×ไซซ์: ผ่าน + นับ SKU ใหม่ + รูปใหม่ต้องฝาก", () => {
+    const p = planTiktokSkuEdit(g, withAdds([red]), { status: "ACTIVATE", existingSkus: shopSkus });
+    expect(p.errors).toEqual([]);
+    expect(p.addsChanged).toBe(true);
+    expect(p.changed).toBe(true);
+    expect(p.newSkuCount).toBe(1);
+    expect(p.newImages).toEqual(["r2:products/red.jpg"]);
+    expect(p.changes.at(-1)!.after).toContain("BAG-03S");
+    expect(p.warnings.join()).toContain("สต๊อกตามระบบ");
+  });
+  it("สต๊อก 0 / ชื่อซ้ำ / ไม่มีรูป / รหัสซ้ำ / ราคาต่ำ = error", () => {
+    const e = (a: Partial<TiktokSkuAdd>, z?: Partial<NonNullable<TiktokSkuAdd["sizes"]>[number]>) =>
+      planTiktokSkuEdit(g, withAdds([{ ...red, ...a, sizes: [{ ...red.sizes![0], ...z }] }]), { status: "ACTIVATE", existingSkus: shopSkus }).errors.join();
+    expect(e({}, { stock: 0 })).toContain("สต๊อกเป็น 0");
+    expect(e({}, { stock: null })).toContain("ใส่สต๊อก");
+    expect(e({ name: "ดำ" })).toContain("ชื่อซ้ำ");
+    expect(e({ image: null })).toContain("ต้องใส่รูป");
+    expect(e({}, { sku: "BAG-01S" })).toContain("มีบนร้านแล้ว");
+    expect(e({}, { price: 10 })).toContain("ราคาต้องอยู่ระหว่าง");
+    expect(e({}, { sku: "BAG 03S" })).toContain("ช่องว่าง");
+    expect(planTiktokSkuEdit(g, withAdds([{ ...red, sizes: [] }]), { status: "ACTIVATE" }).errors.join()).toContain("อย่างน้อย 1");
+  });
+  it("ส่ง: SKU ใหม่ไม่มี id · สีใหม่ value_name + รูป · ไซซ์เดิม value_id · สต๊อกคลังหลัก", () => {
+    const f = withAdds([red]);
+    const uriOf = (ref: string) => (ref.startsWith("tts:") ? ref.slice(4) : ref === "r2:products/red.jpg" ? "tos-red" : null);
+    const out = buildTiktokNewSkus(g, f, uriOf, { warehouseId: tiktokMainWarehouse(raw.skus)! });
+    expect(out.errors).toEqual([]);
+    expect(out.skus).toEqual([{
+      seller_sku: "BAG-03S", price: { amount: "950", currency: "THB" }, inventory: [{ warehouse_id: "W1", quantity: 4 }],
+      sales_attributes: [{ id: "100000", value_name: "แดง", sku_img: { uri: "tos-red" } }, { id: "100007", value_id: "Z1" }],
+    }]);
+  });
+  it("สินค้าที่ขายอยู่ + เพิ่มสี: ตัวเลือกเดิมส่งสต๊อกเฉพาะที่ ≥ 1", () => {
+    const out = buildTiktokSkusPayload(raw.skus, g, tiktokSkuFormOf(g), (r) => r.slice(4), { includeInventory: true, positiveOnly: true });
+    expect(out.skus.map((x) => x.inventory ?? null)).toEqual([[{ warehouse_id: "W1", quantity: 3 }], null, [{ warehouse_id: "W1", quantity: 5 }]]);
+  });
+  it("ชั้นเดียว: seller_sku = รหัสสี · ไม่มีรูปตัวเลือก = ไม่ส่งรูป", () => {
+    const one = tiktokListingView({ id: "P2", title: "x", skus: [{ id: "A1", seller_sku: "KR64-01", price: { sale_price: "249" }, inventory: [{ warehouse_id: "W9", quantity: 2 }], sales_attributes: [{ id: "100000", name: "สี", value_name: "เชอร์รี่ | 01" }] }] })!;
+    const g1 = tiktokOptionGroups(one.skus);
+    const f = { ...tiktokSkuFormOf(g1), adds: [{ code: "KR64-02", name: "ดำ | 02", image: null, price: 249, stock: 7 }] };
+    const p = planTiktokSkuEdit(g1, f, { status: "ACTIVATE", existingSkus: ["KR64-01"] });
+    expect(p.errors).toEqual([]);
+    expect(p.warnings.join()).toContain("ไม่มีรูป");
+    const out = buildTiktokNewSkus(g1, f, () => null, { warehouseId: "W9" });
+    expect(out.skus).toEqual([{ seller_sku: "KR64-02", price: { amount: "249", currency: "THB" }, inventory: [{ warehouse_id: "W9", quantity: 7 }], sales_attributes: [{ id: "100000", value_name: "ดำ | 02" }] }]);
+    expect(tiktokModelsLite(g1, one.skus)).toEqual([{ sku: "KR64-01", price: 249, tierIndex: [0] }]);
   });
 });

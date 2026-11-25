@@ -12,6 +12,8 @@
  * ตัวเลือก (2026-11-13 "ทำ 1,2,4"): skus{ before_sig, primary, images{valueKey: ref}, names{"group|value": ชื่อ} } — รูปตัวเลือก (ชั้นหลัก) + ชื่อตัวเลือก (lib/tiktok-sku-edit)
  *   ต้องส่ง skus ทั้งชุด → สินค้าที่ขายอยู่: บันทึกเป็นร่างก่อน (AS_DRAFT · TikTok ไม่เก็บสต๊อกในร่างของสินค้าที่ขายอยู่) แล้วค่อยส่งตรวจ → ไม่แตะสต๊อก
  *   ฉบับร่าง: AS_DRAFT ครั้งเดียว (ส่งสต๊อกเดิมของร่างกลับ) · หลังส่ง เทียบสต๊อกก่อน/หลัง ถ้าเปลี่ยน = เตือนชัด ๆ
+ *   เพิ่มสีจากระบบ (2026-11-25 · skus.adds[{ code, name, image, price, stock, sizes? }]): สต๊อก = สต๊อกในระบบที่หลังบ้านอ่านเอง (0 = เพิ่มไม่ได้)
+ *     → อ่านสินค้าสดอีกรอบ (ลายเซ็นต้องเท่าเดิม) → ส่งครั้งเดียว (ขายอยู่ = LISTING · ร่าง = AS_DRAFT) ตัวเลือกเดิมส่งสต๊อกเท่าที่อ่านได้ (≥1) + สีใหม่พร้อมสต๊อก
  * ตารางขนาด: "tpl:<id>" = แม่แบบบน TikTok (/api/tiktok-shop/size-charts) · "tts:<uri>"/"r2:<key>" = รูป
  * ไม่แตะราคา (listing-prices) / สต๊อก / รหัส SKU
  */
@@ -20,13 +22,14 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { ttsErrorText, ttsPartialEdit } from "@/lib/tiktok-shop";
+import { ttsErrorText, ttsPartialEdit, ttsShopWarehouseId } from "@/lib/tiktok-shop";
 import {
   planTiktokDescription, planTiktokMedia, planTiktokTitle, samePkg, tiktokListingView, tiktokMediaBase, tiktokPkgFields, tiktokR2KeyOfRef, tiktokSizeChartRef, tiktokUriOfRef,
   type TiktokPkg, type TiktokWriteResponse,
 } from "@/lib/tiktok-listing-edit";
 import { tiktokTemplateIdOfRef } from "@/lib/tiktok-size-chart";
-import { buildTiktokSkusPayload, planTiktokSkuEdit, tiktokOptionGroups, tiktokSkuSignature, type TiktokSkuForm } from "@/lib/tiktok-sku-edit";
+import { buildTiktokNewSkus, buildTiktokSkusPayload, planTiktokSkuEdit, tiktokMainWarehouse, tiktokOptionGroups, tiktokSkuSignature, type TiktokSkuAdd, type TiktokSkuForm } from "@/lib/tiktok-sku-edit";
+import { listingSysVariants } from "@/lib/platform-listing-drift-server";
 import { planTiktokDelivery, sameDelivery, tiktokDeliveryValue, type TtsDeliveryOption, type TtsDeliveryValue } from "@/lib/tiktok-delivery";
 import { isGoneStatus } from "@/lib/platform-listing-health";
 import { loadTtsListingLive, saveTtsSlimCopy, ttsCategoryMeta, ttsGetProductRetry, ttsShopDeliveryOptions, ttsUploadRef, ttsViewWithReview } from "../shared";
@@ -55,6 +58,18 @@ const attrStateOf = (v: unknown): TtsAttrState | null => {
     if (list.length) out[String(k)] = list;
   }
   return out;
+};
+
+/** สีใหม่จากระบบ (body.skus.adds) — กันค่าแปลก · สต๊อกชั้นเดียวหลังบ้านอ่านจากระบบเองทีหลัง */
+const addsOf = (v: unknown): TiktokSkuAdd[] => {
+  if (!Array.isArray(v)) return [];
+  const str = (x: unknown) => String(x ?? "").trim();
+  return v.slice(0, 50).map((x): TiktokSkuAdd | null => {
+    const o = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+    const code = str(o.code); if (!code) return null;
+    const sizes = Array.isArray(o.sizes) ? o.sizes.map((z) => { const q = (z && typeof z === "object" ? z : {}) as Record<string, unknown>; return { valueKey: str(q.valueKey), sku: str(q.sku), price: numOrNull(q.price), stock: numOrNull(q.stock) }; }).filter((z) => z.valueKey) : undefined;
+    return { code, name: str(o.name), image: str(o.image) || null, price: numOrNull(o.price), stock: numOrNull(o.stock), ...(sizes ? { sizes } : {}) };
+  }).filter((x): x is TiktokSkuAdd => !!x);
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -88,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   };
   const skuIn: { beforeSig: string; form: TiktokSkuForm } | null = k && typeof k.before_sig === "string" ? {
     beforeSig: k.before_sig,
-    form: { primary: typeof k.primary === "string" ? k.primary : null, images: recOf(k.images), names: Object.fromEntries(Object.entries(recOf(k.names)).map(([a, b]) => [a, b ?? ""])) },
+    form: { primary: typeof k.primary === "string" ? k.primary : null, images: recOf(k.images), names: Object.fromEntries(Object.entries(recOf(k.names)).map(([a, b]) => [a, b ?? ""])), adds: addsOf(k.adds) },
   } : null;
   if (!listingId || (!wantTitle && !wantDesc && !media && !wantExtra && !skuIn && !dlv)) return reply({ ok: false, view: null, error: "ข้อมูลไม่ครบ (listing_id + ชื่อ / รายละเอียด / รูป/กล่อง / คุณลักษณะ / ตัวเลือก / การจัดส่ง)" }, 400);
 
@@ -120,7 +135,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (ex.size && ex.size.before !== baseSizeRef) return reply({ ok: false, view, error: `ตารางขนาด${conflict}` }, 409);
   if (skuIn && skuIn.beforeSig !== tiktokSkuSignature(view.skus)) return reply({ ok: false, view, error: `ตัวเลือก${conflict}` }, 409);
   const groups = skuIn ? tiktokOptionGroups(view.skus) : [];
-  const skuPlan = skuIn ? planTiktokSkuEdit(groups, skuIn.form, { status: view.status ?? view.productStatus, hasDraft: view.hasDraft }) : null;
+  // สีใหม่: สต๊อก = สต๊อกจริงในระบบ (อ่านเองตอนนี้ ไม่เชื่อค่าจากหน้าเว็บ) · สินค้าสี×ไซซ์ = รหัสไซซ์ที่มีในระบบใช้ของระบบ ไม่มี = ค่าที่กรอก
+  const addStockNotes: string[] = []; const addNotFound: string[] = [];
+  if (skuIn?.form.adds?.length) {
+    const sys = await listingSysVariants(admin, listingId, user?.id ?? null);
+    if (!sys.ok) return reply({ ok: false, view, error: `อ่านสต๊อกในระบบไม่ได้: ${sys.error} — ยังไม่ได้แก้อะไร` }, sys.status);
+    const stockOf = new Map(sys.variants.map((x) => [x.code.trim().toUpperCase(), x.stock]));
+    skuIn.form.adds = skuIn.form.adds.map((a) => {
+      const own = stockOf.has(a.code.toUpperCase()) ? stockOf.get(a.code.toUpperCase()) ?? 0 : null;
+      if (own == null) addNotFound.push(a.code);
+      else if (a.stock != null && own !== a.stock) addStockNotes.push(`${a.code}: สต๊อกในระบบเปลี่ยนเป็น ${own} (หน้าเว็บเห็น ${a.stock})`);
+      if (groups.length < 2) return { ...a, stock: own ?? 0 };
+      return { ...a, stock: own ?? 0, sizes: (a.sizes ?? []).map((z) => ({ ...z, stock: stockOf.has(z.sku.toUpperCase()) ? stockOf.get(z.sku.toUpperCase()) ?? 0 : z.stock })) };
+    });
+  }
+  const skuPlan = skuIn ? planTiktokSkuEdit(groups, skuIn.form, { status: view.status ?? view.productStatus, hasDraft: view.hasDraft, existingSkus: view.skus.map((x) => x.sellerSku) }) : null;
   const baseDelivery = tiktokDeliveryValue(view.deliveryIds);
   if (dlv && !sameDelivery(dlv.before, baseDelivery)) return reply({ ok: false, view, error: `การจัดส่ง${conflict}` }, 409);
   let dlvShop: { options: TtsDeliveryOption[]; limits: TtsDeliveryOption[] | null } | null = null;
@@ -136,7 +165,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const mediaPlan = media ? planTiktokMedia(base.images.map((x) => x.uri), base.pkg, media.images!, media.pkg!) : null;
   const descPlan = wantDesc ? planTiktokDescription(baseDesc, String(body.description)) : null;
   const descChanged = !!descPlan?.changed;
-  const errors = [...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(codPlan?.errors ?? []), ...(sizePlan?.errors ?? []), ...(skuPlan?.changed ? skuPlan.errors : []), ...(dlvPlan?.changed ? dlvPlan.errors : [])];
+  const errors = [...(addNotFound.length ? [`ไม่พบสี ${addNotFound.join(", ")} ในระบบแล้ว (อาจถูกปิดหรือเปลี่ยนรหัส) — ปิดแล้วเปิดลิ้นชักใหม่`] : []), ...(titlePlan?.errors ?? []), ...(descChanged ? descPlan!.errors : []), ...(mediaPlan?.errors ?? []), ...(attrPlan?.errors ?? []), ...(codPlan?.errors ?? []), ...(sizePlan?.errors ?? []), ...(skuPlan?.changed ? skuPlan.errors : []), ...(dlvPlan?.changed ? dlvPlan.errors : [])];
   if (errors.length) return reply({ ok: false, view, error: errors.join(" · ") }, 400);
   const dlvChanged = !!dlvPlan?.changed;
   const titleChanged = !!titlePlan?.changed;
@@ -220,8 +249,34 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let resp: Record<string, unknown>;
   // ฉบับร่าง = บันทึกเป็นร่างต่อ (ไม่ส่งตรวจ/ไม่เผยแพร่) — เผยแพร่ทำแยก (ปุ่มเผยแพร่ในลิ้นชัก)
   const isDraft = (view.status ?? view.productStatus) === "DRAFT";
-  const skuWarnings: string[] = [];
-  if (skuChanged) {
+  const skuWarnings: string[] = [...addStockNotes];
+  const addsChanged = !!skuPlan?.addsChanged;
+  /** สต๊อกก่อนส่ง (ใช้เทียบหลังส่ง) — เพิ่มสี = ค่าที่อ่านสด ๆ ก่อนส่ง · ไม่งั้น = ตอนเปิดหน้า */
+  let stockBefore = new Map(view.skus.map((x) => [x.skuId, x.stock]));
+  let newSellerSkus: string[] = [];
+  if (skuChanged && addsChanged) {
+    // เพิ่มสี: อ่านสินค้าสดอีกรอบก่อนส่ง (สต๊อกตัวเลือกเดิมต้องเป็นค่าล่าสุด) → ส่งครั้งเดียวพร้อมสต๊อก (ร่าง AS_DRAFT ของสินค้าที่ขายอยู่ไม่เก็บสต๊อก)
+    let pre: Record<string, unknown>;
+    try { pre = await ttsGetProductRetry(live.accessToken, live.cipher, live.productId); }
+    catch (e) { const error = `อ่านสินค้าจาก TikTok ก่อนส่งไม่ได้: ${ttsErrorText(e)} — ยังไม่ได้แก้อะไร`; await audit({ ok: false, step: "adds_reread", error, uploaded: uploaded.size }); return reply({ ok: false, view, error }, 502); }
+    const preView = tiktokListingView(pre);
+    if (!preView || tiktokSkuSignature(preView.skus) !== skuIn!.beforeSig) {
+      await audit({ ok: false, step: "adds_reread", error: "conflict", uploaded: uploaded.size });
+      return reply({ ok: false, view: preView ?? view, error: `ตัวเลือก${conflict}` }, 409);
+    }
+    stockBefore = new Map(preView.skus.map((x) => [x.skuId, x.stock]));
+    let warehouseId = tiktokMainWarehouse(pre.skus);
+    if (!warehouseId) { try { warehouseId = await ttsShopWarehouseId(live.accessToken, live.cipher); } catch { /* ด้านล่าง */ } }
+    if (!warehouseId) { const error = "ไม่รู้คลังสินค้าของร้าน TikTok — ยังไม่ได้แก้อะไร"; await audit({ ok: false, step: "adds_warehouse", error, uploaded: uploaded.size }); return reply({ ok: false, view, error }, 502); }
+    const uriOf = (ref: string) => tiktokUriOfRef(ref) ?? uploaded.get(ref) ?? null;
+    const built = buildTiktokSkusPayload(pre.skus, groups, skuIn!.form, uriOf, { includeInventory: true, positiveOnly: !isDraft });
+    const added = buildTiktokNewSkus(groups, skuIn!.form, uriOf, { warehouseId });
+    const errs = [...built.errors, ...added.errors];
+    if (errs.length) { const error = errs.join(" · "); await audit({ ok: false, error, uploaded: uploaded.size }); return reply({ ok: false, view, error }, 400); }
+    skuWarnings.push(...built.warnings);
+    fields.skus = [...built.skus, ...added.skus];
+    newSellerSkus = added.skus.map((x) => String(x.seller_sku ?? ""));
+  } else if (skuChanged) {
     const uriOf = (ref: string) => tiktokUriOfRef(ref) ?? uploaded.get(ref) ?? null;
     const built = buildTiktokSkusPayload(live.detail.skus, groups, skuIn!.form, uriOf, { includeInventory: isDraft });
     if (built.errors.length) { const error = built.errors.join(" · "); await audit({ ok: false, error, uploaded: uploaded.size }); return reply({ ok: false, view, error }, 400); }
@@ -241,8 +296,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try { resp = await ttsPartialEdit(live.accessToken, live.cipher, live.productId, fields, isDraft ? { saveMode: "AS_DRAFT" } : {}); }
   catch (e) {
     const error = ttsErrorText(e);
-    await audit({ ok: false, error, raw_error: (e as Error).message, uploaded: uploaded.size, skus_saved_as_draft: skuChanged && !isDraft });
-    return reply({ ok: false, view, error: `แก้สินค้าบน TikTok ไม่สำเร็จ: ${error}${skuChanged && !isDraft ? " (ตัวเลือกถูกบันทึกเป็นร่างใน Seller Center แล้ว แต่ยังไม่ส่งตรวจ — กดบันทึกอีกครั้ง หรือส่งใน Seller Center)" : ""}` }, 502);
+    const draftSaved = skuChanged && !isDraft && !addsChanged;
+    await audit({ ok: false, error, raw_error: (e as Error).message, uploaded: uploaded.size, skus_saved_as_draft: draftSaved, ...(addsChanged ? { new_skus: newSellerSkus } : {}) });
+    return reply({ ok: false, view, error: `แก้สินค้าบน TikTok ไม่สำเร็จ: ${error}${draftSaved ? " (ตัวเลือกถูกบันทึกเป็นร่างใน Seller Center แล้ว แต่ยังไม่ส่งตรวจ — กดบันทึกอีกครั้ง หรือส่งใน Seller Center)" : ""}` }, 502);
   }
 
   // ดึงกลับตรวจ: ฉบับขาย (สำเนาย่อ) + ฉบับรอตรวจ (ของใหม่ไปถึงไหม)
@@ -253,7 +309,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // สถานะตรวจ: เชื่อของที่ดึงกลับก่อน — คำตอบของ Partial Edit บอก APPROVED (ของฉบับที่ขายอยู่) ทั้งที่ของใหม่รอตรวจ (เจอจริง 2026-11-12)
   const respAudit = String((resp.audit as { status?: unknown } | undefined)?.status ?? "");
   const auditStatus = freshView?.auditStatus ?? respAudit;
-  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", attrChanged ? "คุณลักษณะ" : "", codChanged ? "COD" : "", sizeChanged ? "ตารางขนาด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : "", skuChanged ? "ตัวเลือก" : "", dlvChanged ? "การจัดส่ง" : ""].filter(Boolean).join("/");
+  const what = [titleChanged ? "ชื่อ" : "", descChanged ? "รายละเอียด" : "", attrChanged ? "คุณลักษณะ" : "", codChanged ? "COD" : "", sizeChanged ? "ตารางขนาด" : "", mediaPlan?.imagesChanged ? "รูป" : "", mediaPlan?.weightChanged || mediaPlan?.boxChanged ? "กล่อง" : "", skuChanged ? (addsChanged ? `ตัวเลือก (+${skuPlan!.newSkuCount} สีใหม่)` : "ตัวเลือก") : "", dlvChanged ? "การจัดส่ง" : ""].filter(Boolean).join("/");
   let summary = `แก้${what}แล้ว`;
   let pending = false;
   warnings.push(...skuWarnings);
@@ -274,12 +330,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (dlvChanged && freshView && !sameDelivery(tiktokDeliveryValue(freshView.deliveryIds), dlvPlan!.ids.length ? dlvPlan!.ids : null)) {
     warnings.push("TikTok ตอบรับแล้ว แต่การจัดส่งที่ดึงกลับมายังไม่ตรงกับที่ตั้ง — กดดึงตัวนี้อีกครั้งในอีกสักครู่ ถ้ายังไม่ตรงให้ตั้งใน Seller Center");
   }
-  // แก้ตัวเลือกแล้วสต๊อกต้องเท่าเดิม (เราไม่ได้ส่งสต๊อก) — ต่างไป = เตือนชัด ๆ (อาจมีออเดอร์/BigSeller ปรับพอดี ก็ได้)
+  // แก้ตัวเลือกแล้วสต๊อกต้องเท่าเดิม (ไม่ส่งสต๊อก · เพิ่มสี = ส่งค่าที่อ่านก่อนส่ง) — ต่างไป = เตือนชัด ๆ (อาจมีออเดอร์/BigSeller ปรับพอดี ก็ได้)
   if (skuChanged && freshView) {
-    const before = new Map(view.skus.map((x) => [x.skuId, x.stock]));
+    const before = stockBefore;
     const moved = freshView.skus.filter((x) => before.has(x.skuId) && before.get(x.skuId) !== x.stock);
     if (moved.length) warnings.push(`สต๊อกบน TikTok ต่างจากก่อนกดบันทึก ${moved.length} ตัวเลือก (เช่น ${moved[0].label}: ${before.get(moved[0].skuId) ?? "—"} → ${moved[0].stock ?? "—"}) — อาจมีออเดอร์หรือ BigSeller ปรับพอดี ตรวจใน Seller Center`);
     const lost = view.skus.filter((x) => !freshView.skus.some((y) => y.skuId === x.skuId));
+    if (addsChanged) {
+      const seen = newSellerSkus.filter((ss) => freshView.skus.some((y) => (y.sellerSku ?? "").toUpperCase() === ss.toUpperCase()));
+      if (seen.length === newSellerSkus.length) summary += ` · สีใหม่ ${seen.length} ตัวเลือกอยู่บนร้านแล้ว`;
+      else if (!isDraft) warnings.push(`สีใหม่ ${newSellerSkus.length - seen.length} ตัวเลือกยังไม่ขึ้นร้าน — รอ TikTok ตรวจ (สต๊อกส่งไปพร้อมแล้ว) · ถ้าผ่านแล้วยังไม่เห็น กดดึงตัวนี้จาก TikTok`);
+      else warnings.push(`ร่างยังไม่เห็นสีใหม่ ${newSellerSkus.length - seen.length} ตัวเลือก — กดดึงตัวนี้จาก TikTok อีกครั้ง`);
+    }
     if (lost.length) warnings.push(`ตัวเลือกหายไป ${lost.length} ตัว (${lost.slice(0, 3).map((x) => x.label).join(", ")}) — ตรวจใน Seller Center ทันที`);
   }
   // ฉบับร่าง: บันทึกเป็นร่างต่อ (ไม่ส่งตรวจ) — ถ้าดึงกลับแล้วไม่ใช่ร่าง = เตือนชัด ๆ
@@ -293,6 +355,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const err = await saveTtsSlimCopy(admin, live.row, freshDetail);
     if (err) warnings.push(`บันทึกสำเนาในระบบไม่สำเร็จ: ${err}`);
   }
-  await audit({ ok: true, audit_status: auditStatus || null, edit_resp_audit: respAudit || null, pending, summary, warnings, refreshed: !!freshView, uploaded: uploaded.size });
+  await audit({ ...(addsChanged ? { new_skus: newSellerSkus, adds: skuIn!.form.adds } : {}), ok: true, audit_status: auditStatus || null, edit_resp_audit: respAudit || null, pending, summary, warnings, refreshed: !!freshView, uploaded: uploaded.size });
   return reply({ ok: true, view: freshView ?? tiktokListingView(live.detail, titleChanged ? { id: live.productId, title: titlePlan!.title } : undefined), summary, warnings, error: null });
 }
