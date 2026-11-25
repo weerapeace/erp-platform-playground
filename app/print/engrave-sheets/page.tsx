@@ -16,6 +16,9 @@ import { DEFAULT_ENGRAVE_FONT, ENGRAVE_POSITION_EN, ENGRAVE_TYPE_EN, invalidEngr
 type Row = { id: string; order_no: string; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null; engrave_font: string | null };
 
 const TYPE_COLOR: Record<string, string> = { "พิมพ์จม": "#2563eb", "ฟอยเงิน": "#6b7280", "ฟอยทอง": "#ca8a04" };
+/** เส้นปะสูงจากเส้นฐานตัวอักษร (px) · ตัวพิมพ์เล็กขนาด LOWER_PX ทั้งตัวอยู่ใต้เส้นนี้ ตัวใหญ่ 52px ทะลุขึ้นไป */
+const GUIDE_PX = 20;
+const LOWER_PX = 30;
 
 export default function EngraveSheetsPage() {
   return <Suspense fallback={<LoadingState />}><Sheets /></Suspense>;
@@ -95,10 +98,17 @@ function Sheet({ r, first, specials }: { r: Row; first: boolean; specials: strin
             {Array.from({ length: 10 }, (_, i) => {
               const ch = line[i] ?? "";
               const lower = ch >= "a" && ch <= "z";
+              // ทุกช่องใช้ "เส้นฐาน" เดียวกัน (ชั้นนอกขนาด/ระยะบรรทัดเท่ากันทุกช่อง) · เส้นปะสูงจากเส้นฐาน GUIDE_PX
+              // ตัวพิมพ์เล็กย่อให้ทั้งตัว (รวมหาง l/i) อยู่ใต้เส้นปะ · ตัวใหญ่/ตัวเลขสูงทะลุเส้นปะ — เจ้าของขอ 2026-11-25
+              const strut = { fontFamily: `"${font}", serif`, fontSize: 52, lineHeight: "66px" } as const;
               return (
-                <div key={i} className={`${cell} relative min-h-[60px] items-end pb-1`}>
-                  <span className="pointer-events-none absolute left-1 right-1 top-1/2 border-t-2 border-dashed border-slate-500" />
-                  <span className={`relative bg-white px-0.5 font-bold leading-none ${lower ? "text-[28px]" : "text-[52px]"}`} style={{ fontFamily: `"${font}", serif` }}>{ch}</span>
+                <div key={i} className={`${cell} relative min-h-[66px] items-end`}>
+                  <div className="relative w-full px-1 font-bold" style={strut}>
+                    <span className="inline-block w-full border-t-2 border-dashed border-slate-500 align-baseline" style={{ height: GUIDE_PX }} />
+                    <div className="absolute inset-0 px-1 text-center" style={strut}>
+                      <span className="align-baseline" style={{ fontSize: lower ? LOWER_PX : 52 }}>{ch}</span>
+                    </div>
+                  </div>
                 </div>
               );
             })}
