@@ -384,6 +384,8 @@ function OptionTruthPicker({ rows, pick, onPick, sendable, canShop, needCentral,
 }) {
   const codes = rows.map((r) => r.label);
   const shopOk = canShop && (!needCentral || central);
+  // "สี: Cherry Red (01) · ไซซ์: M" → "Cherry Red (01) · M" (โชว์แค่ค่า — ชื่อชั้นซ้ำทุกแถว)
+  const valuesOnly = (s: string) => s.split(" · ").map((seg) => seg.replace(/^[^:]{1,20}:\s*/, "")).join(" · ");
   const nShop = codes.filter((c) => pick[c] === "shop").length, nSys = codes.filter((c) => pick[c] === "sys").length;
   const btn = (on: boolean, tone: "shop" | "sys") => `min-h-7 w-full rounded-md border px-2 py-1 text-left text-[11px] leading-snug disabled:opacity-40 ${on ? (tone === "sys" ? "border-violet-400 bg-violet-50 text-violet-900" : "border-emerald-400 bg-emerald-50 text-emerald-900") : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
   return (
@@ -398,10 +400,10 @@ function OptionTruthPicker({ rows, pick, onPick, sendable, canShop, needCentral,
         <div key={r.label} className="grid grid-cols-1 items-center gap-1 sm:grid-cols-[7rem_1fr_1fr]">
           <span className="font-mono text-[11px] text-slate-500">{r.label}</span>
           <button type="button" disabled={disabled || !shopOk} onClick={() => onPick([r.label], "shop")} className={btn(pick[r.label] === "shop", "shop")}>
-            {pick[r.label] === "shop" && <Icon name="done" className="mr-0.5" />}ร้าน: {r.before}
+            {pick[r.label] === "shop" && <Icon name="done" className="mr-0.5" />}ร้าน: {valuesOnly(r.before)}
           </button>
           <button type="button" disabled={disabled || !sendable} onClick={() => onPick([r.label], "sys")} className={btn(pick[r.label] === "sys", "sys")}>
-            {pick[r.label] === "sys" && <Icon name="done" className="mr-0.5" />}ระบบ: {r.after}
+            {pick[r.label] === "sys" && <Icon name="done" className="mr-0.5" />}ระบบ: {valuesOnly(r.after)}
           </button>
         </div>
       ))}
