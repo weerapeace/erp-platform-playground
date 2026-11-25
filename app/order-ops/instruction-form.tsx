@@ -276,6 +276,8 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
   const tileCls = (on: boolean) => `group flex flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2.5 text-center text-[12px] leading-tight transition-colors ${on ? "border-sky-400 bg-sky-50 font-medium text-sky-800" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"}`;
   // ไอคอนขยับตอนชี้/กด (เจ้าของเลือกแบบ B) — ปิดเองถ้าเครื่องตั้ง "ลดการเคลื่อนไหว"
   const tileIcon = "h-6 w-6 motion-safe:transition-transform motion-safe:duration-200 motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-110 motion-safe:group-active:scale-90";
+  /** เจอออเดอร์ในศูนย์ออเดอร์ (มีรายการสินค้า) → ช่องทาง/ลูกค้า/SKU อ่านอย่างเดียว */
+  const linked = !!f.platform_order_id && items.length > 0;
   const listItems: Item[] = items.length ? items : f.sku ? [{ sku: f.sku, name: null, qty: 1, sku_id: null, image_key: null }] : [];
 
   const engraveBox = f.engrave && (
@@ -347,16 +349,30 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
               {f.platform_order_id && <button type="button" onClick={() => setOrderOpen(true)} title="ดูรายละเอียดออเดอร์ (ลิ้นชักข้าง ฟอร์มไม่หาย)" className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-2 text-sm hover:bg-slate-50"><Icon name="layout-sidebar-right" className="h-4 w-4" /><span className="hidden sm:inline">ดูออเดอร์</span></button>}
             </div>
           </Field>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="ช่องทาง">
-              <select value={f.platform} onChange={(e) => set("platform", e.target.value)} className={inputCls}>
-                <option value="">-</option>
-                {[...new Set([...PLATFORMS, ...(f.platform ? [f.platform] : [])])].map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </Field>
-            <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
-          </div>
-          {!multi && <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={setSku} items={items} decode={decLabel} /></Field>}
+          {linked ? (
+            // เจอออเดอร์ในศูนย์ออเดอร์ = ข้อมูลจากร้าน อ่านอย่างเดียว (เจ้าของสั่ง 2026-11-25) · เปลี่ยนออเดอร์ได้จากปุ่ม "เลือก"
+            <div className="grid grid-cols-2 gap-2">
+              {([["ช่องทาง", f.platform], ["ชื่อลูกค้า", f.customer_name]] as const).map(([l, v]) => (
+                <div key={l}>
+                  <div className="mb-1 text-xs text-slate-500">{l}</div>
+                  <div title="มาจากศูนย์ออเดอร์ — แก้ไม่ได้" className="flex h-9 items-center gap-1.5 truncate rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"><Icon name="lock" className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{v || "-"}</span></div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="ช่องทาง">
+                  <select value={f.platform} onChange={(e) => set("platform", e.target.value)} className={inputCls}>
+                    <option value="">-</option>
+                    {[...new Set([...PLATFORMS, ...(f.platform ? [f.platform] : [])])].map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </Field>
+                <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
+              </div>
+              {!multi && <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={setSku} items={items} decode={decLabel} /></Field>}
+            </>
+          )}
           {listItems.length > 0 && (
             <div>
               <div className="mb-1 text-xs text-slate-500">{multi ? "ลูกค้าซื้อหลายชิ้น — ติ๊กชิ้นที่ต้องทำคำสั่ง (1 ชิ้น = 1 คำสั่ง)" : `ลูกค้าซื้อ ${listItems.reduce((n, i) => n + i.qty, 0)} ชิ้น`}</div>
