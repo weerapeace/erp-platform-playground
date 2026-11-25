@@ -150,3 +150,13 @@
 - เรือง + ขอบวิ่ง พร้อมกัน = รวมเป็น animation รายการเดียว (กฎแยกท้ายหัวข้อ)
 - การ์ดโผล่ทีละใบ: ThemeApplier ไล่ใส่ `.tm-stagger-in` ให้การ์ดที่เห็นบนจอ (สูงสุด 30 ใบ · เช็ก 3 รอบ 0.04/0.4/1 วิ หลังเปลี่ยนหน้า เผื่อข้อมูลมาช้า)
 - เงาในช่องกรอก: input/textarea/select ในเนื้อหาของหน้า
+
+## ตัวแก้ธีมแบบใช้ง่าย (เจ้าของเลือก 2026-11-25: B + C แบบ 1 + ข้อ 1–6)
+
+| ส่วน | ไฟล์ |
+|---|---|
+| กติกา (pure) | `lib/erp-theme-easy.ts` — motionLevel/withMotionLevel (แถบความเคลื่อนไหว 0–3) · currentFxPreset · ADV_GROUPS (4 กลุ่ม = 11 หมวดเดิม) · SETTINGS_INDEX/searchSettings · PART_INFO (7 ชิ้นที่คลิกแก้ได้) · เทสต์ `lib/__tests__/erp-theme-easy.test.ts` |
+| แผง | `components/erp-theme/editor-panel.tsx` — ThemeEasyPanel (สีหลัก · สไตล์ · ความเคลื่อนไหว · ความมน · รูป) · ThemeAdvancedPanel (4 กลุ่มพับได้ · ไฮไลต์หมวดที่ค้นเจอ) · TargetFxEditor (การ์ดเอฟเฟกต์มีตัวอย่างขยับ · เกิน 2 ตัวเก่าหลุด) · PartQuickEditor (เนื้อหาป๊อปแก้ชิ้น) |
+| พรีวิว | `ThemePreview` props `editMode / selectedPart / onPartClick` — ชิ้นติด `data-part` · ชี้เห็นป้ายชื่อ · คลิกถูกดักก่อนถึงปุ่ม (ปุ่มในพรีวิวไม่ทำงานระหว่างโหมดคลิกแก้) |
+| หน้า | `/admin/themes/[id]` — สลับ ง่าย/ละเอียด (จำต่อเครื่อง localStorage erp-theme-editor-mode) · ช่องค้นหา · ป๊อปแก้ชิ้น (PC ลอยใต้ชิ้น · จอ < 1024px = BottomSheet) · สวิตช์ "คลิกแก้" · "เทียบก่อน/หลัง" ลากเส้นกลาง (จอเล็ก/มือถือ = ปุ่ม ร่าง/ที่เผยแพร่) |
+| เผยแพร่ | `components/erp-theme/publish-dialog.tsx` — โน้ต + ติ๊กธีมบริษัท/แอปที่จะใช้ (ติ๊กไว้ก่อน = ที่ใช้อยู่) → publish แล้ว PUT assignments · ปุ่มย้อนกลับ · ไม่มี theme.assign = เผยแพร่อย่างเดียว |

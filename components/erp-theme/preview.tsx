@@ -15,6 +15,8 @@ import {
 import { blinkMinOpacity, fxDuration, fxSpread, hasFx, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
 import { Icon } from "@/components/icon";
 import { ensureThemeFont } from "./active-themes";
+import { PART_INFO } from "@/lib/erp-theme-easy";
+const PART_LABEL = Object.fromEntries(Object.entries(PART_INFO).map(([k, v]) => [k, v.label])) as Record<EffectTarget, string>;
 
 export type PreviewSample = "purchase" | "products" | "tasks";
 
@@ -73,14 +75,21 @@ const CSS = `
 .tmp-under.on::after{animation:tmpUnder .5s ease-out}
 .tmp-row:hover td{background:var(--ps)}
 .tmp-mascot{animation:tmpFloat calc(3s*var(--spd)) ease-in-out infinite}
+.tmp-edit [data-part]{cursor:pointer}
+.tmp-edit [data-part]:hover{outline:2px dashed #a78bfa;outline-offset:2px}
+.tmp-edit [data-part-sel]{outline:2px solid #7c3aed!important;outline-offset:2px}
 @media (prefers-reduced-motion: reduce){.tmp-root *,.tmp-root *::after{animation:none!important;transition:none!important}}
 `;
 
 const ENTER: Record<string, string> = { none: "none", fade: "tmpFade", up: "tmpUp", zoom: "tmpZoom", blur: "tmpBlur" };
 
 export function ThemePreview({
-  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false,
+  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false, editMode = false, selectedPart = null, onPartClick,
 }: {
+  /** โหมดคลิกแก้: ชี้ชิ้นแล้วเห็นชื่อ + กรอบประ · คลิก = onPartClick (ปุ่มในพรีวิวไม่ทำงานจริงระหว่างนี้) */
+  editMode?: boolean;
+  selectedPart?: EffectTarget | null;
+  onPartClick?: (part: EffectTarget, el: HTMLElement) => void;
   config: ErpThemeConfig;
   device?: "pc" | "mobile";
   sample?: PreviewSample;
@@ -176,14 +185,14 @@ export function ThemePreview({
   };
   const btnCls = `${c.components.button === "solid" ? btnFx.cls : ""}${anim && fx.scaleHover ? " tmp-scale" : ""}`;
   const PrimaryBtn = ({ children, onBanner }: { children: React.ReactNode; onBanner?: boolean }) => (
-    <button type="button" className={btnCls} onClick={ripple} style={{ ...btn(), ...(onBanner ? { zIndex: 1, border: "1px solid rgba(255,255,255,.7)" } : {}) }}>{children}</button>
+    <button type="button" {...pp("button")} className={btnCls} onClick={ripple} style={{ ...btn(), ...(onBanner ? { zIndex: 1, border: "1px solid rgba(255,255,255,.7)" } : {}) }}>{children}</button>
   );
 
   const badgeFx = fxStyle("badge");
   const badge = (k: string, label: string) => {
     const [bg, tx, solid] = STATUS[k];
     const urgent = k === "wait";
-    return <span className={urgent ? badgeFx.cls : ""} style={{ display: "inline-block", fontSize: fs - 2, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", ...(c.components.badge === "solid" ? { background: solid, color: "#fff" } : { background: bg, color: tx }), ...(urgent ? badgeFx.style : {}) }}>{label}</span>;
+    return <span {...(urgent ? pp("badge") : {})} className={urgent ? badgeFx.cls : ""} style={{ display: "inline-block", fontSize: fs - 2, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", ...(c.components.badge === "solid" ? { background: solid, color: "#fff" } : { background: bg, color: tx }), ...(urgent ? badgeFx.style : {}) }}>{label}</span>;
   };
 
   const sideBg = c.components.sidebar === "dark" ? "#1e293b" : c.components.sidebar === "brand" ? p[700] : P.surf;
@@ -192,6 +201,24 @@ export function ThemePreview({
 
   // ตัวเลขนับขึ้น (จุด "ตัวเลขสรุป" มี countUp)
   const rootRef = useRef<HTMLDivElement>(null);
+  const [hoverLbl, setHoverLbl] = useState<{ label: string; x: number; y: number } | null>(null);
+  const editing = editMode && !compact;
+  const pp = (part: EffectTarget): Record<string, string> => (editing ? { "data-part": part, "data-part-label": PART_LABEL[part], ...(selectedPart === part ? { "data-part-sel": "" } : {}) } : {});
+  const onRootClickCapture = (e: React.MouseEvent) => {
+    if (!editing) return;
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-part]");
+    if (!el || !rootRef.current?.contains(el)) return;
+    e.preventDefault(); e.stopPropagation();
+    onPartClick?.(el.dataset.part as EffectTarget, el);
+  };
+  const onRootMove = (e: React.MouseEvent) => {
+    if (!editing || !rootRef.current) return;
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-part]");
+    if (!el) { if (hoverLbl) setHoverLbl(null); return; }
+    const r = el.getBoundingClientRect(), R0 = rootRef.current.getBoundingClientRect();
+    const next = { label: el.dataset.partLabel ?? "", x: r.left - R0.left, y: Math.max(0, r.top - R0.top - 18) };
+    if (!hoverLbl || hoverLbl.label !== next.label || hoverLbl.x !== next.x || hoverLbl.y !== next.y) setHoverLbl(next);
+  };
   const counting = anim && hasFx(c.effects, "number", "countUp");
   useEffect(() => {
     if (!counting || !rootRef.current) return;
@@ -215,13 +242,13 @@ export function ThemePreview({
   const topFx = fxStyle("topbar");
   const bellFx = fxStyle("bell");
   const top = (
-    <div className={topFx.cls} style={{ position: "relative", background: sp.top ? grad : p[600], color: "#fff", padding: mob ? "9px 12px" : "8px 12px", ...topFx.style, ...(topFx.style.animation?.toString().includes("tmpShift") ? { backgroundImage: "none" } : {}) }}>
+    <div {...pp("topbar")} className={topFx.cls} style={{ position: "relative", background: sp.top ? grad : p[600], color: "#fff", padding: mob ? "9px 12px" : "8px 12px", ...topFx.style, ...(topFx.style.animation?.toString().includes("tmpShift") ? { backgroundImage: "none" } : {}) }}>
       {bgLayer("top")}
       <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontWeight: c.typography.headingWeight }}>{mob ? s.app : `ERP · ${s.app}`}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center", fontSize: fs + 2 }}>
           <span className={wig} style={{ display: "inline-flex" }}><Icon name="search" /></span>
-          <span className={bellFx.cls} style={{ position: "relative", display: "inline-flex", borderRadius: 999, transformOrigin: "50% 10%", ...bellFx.style }}>
+          <span {...pp("bell")} className={bellFx.cls} style={{ position: "relative", display: "inline-flex", borderRadius: 999, transformOrigin: "50% 10%", ...bellFx.style }}>
             <span className={wig} style={{ display: "inline-flex" }}><Icon name="bell" /></span>
             <span style={{ position: "absolute", top: -1, right: -2, width: 7, height: 7, borderRadius: 99, background: "#ef4444", border: "1.5px solid #fff" }} />
           </span>
@@ -256,9 +283,9 @@ export function ThemePreview({
   const stats = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: gap - 4, marginBottom: gap }}>
       {s.stats.map(([l, v], i) => (
-        <div key={l} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px` }), ...cardFx.style, ...hringVar, ...delay(i + 1) }}>
+        <div key={l} {...pp("card")} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px` }), ...cardFx.style, ...hringVar, ...delay(i + 1) }}>
           <div style={{ fontSize: fs - 2, color: P.mut }}>{l}</div>
-          <div data-cnt={v} className={numFx.cls} style={{ display: "inline-block", fontSize: fs + (mob ? 2 : 5), fontWeight: c.typography.headingWeight, ...numFx.style }}>{v.toLocaleString()}</div>
+          <div data-cnt={v} {...pp("number")} className={numFx.cls} style={{ display: "inline-block", fontSize: fs + (mob ? 2 : 5), fontWeight: c.typography.headingWeight, ...numFx.style }}>{v.toLocaleString()}</div>
         </div>
       ))}
     </div>
@@ -281,14 +308,14 @@ export function ThemePreview({
   const table = mob ? (
     <div>
       {s.rows.slice(0, compact ? 2 : 4).map((r, i) => (
-        <div key={r[0]} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px`, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }), ...cardFx.style, ...hringVar, ...delay(i + 5) }}>
+        <div key={r[0]} {...pp("card")} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px`, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }), ...cardFx.style, ...hringVar, ...delay(i + 5) }}>
           <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: fs - 2, color: P.mut }}>{r[0]}</div><div>{r[1]}</div></div>
           {badge(r[3], r[4])}
         </div>
       ))}
     </div>
   ) : (
-    <div className={`tmp-en${hglow}`} style={{ ...cardBox({ overflow: "hidden" }), ...hringVar, ...delay(5) }}>
+    <div {...pp("card")} className={`tmp-en${hglow}`} style={{ ...cardBox({ overflow: "hidden" }), ...hringVar, ...delay(5) }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead><tr>{s.cols.map((h) => <th key={h} style={{ textAlign: "left", fontWeight: 500, fontSize: fs - 2, color: P.mut, padding: `${pad}px 10px`, borderBottom: `1px solid ${P.bd}`, background: c.components.table === "lines" ? (dark ? "#0b1220" : "#f8fafc") : undefined }}>{h}</th>)}</tr></thead>
         <tbody>
@@ -335,10 +362,12 @@ export function ThemePreview({
     position: "relative", overflow: "hidden", background: pageBg, color: P.tx, fontFamily: font.family, fontSize: fs, lineHeight: 1.45,
     borderRadius: 12, border: `1px solid ${dark ? "#334155" : "#cbd5e1"}`,
   } as React.CSSProperties;
-  const cls = `tmp-root ${sp.page && anim && g.animate ? "tmp-ganim" : ""}`;
+  const cls = `tmp-root ${sp.page && anim && g.animate ? "tmp-ganim" : ""} ${editing ? "tmp-edit" : ""}`;
+  const rootEvents = editing ? { onClickCapture: onRootClickCapture, onMouseMove: onRootMove, onMouseLeave: () => setHoverLbl(null) } : {};
+  const lbl = editing && hoverLbl && <div aria-hidden style={{ position: "absolute", left: hoverLbl.x, top: hoverLbl.y, zIndex: 9, pointerEvents: "none", fontSize: 10, background: "#4c1d95", color: "#fff", borderRadius: 4, padding: "1px 6px", whiteSpace: "nowrap" }}>{hoverLbl.label} · คลิกเพื่อแก้</div>;
 
   const body = mob ? (
-    <div key={replayKey} ref={rootRef} className={cls} style={{ ...rootStyle, width: compact ? "100%" : 300 }}>
+    <div key={replayKey} ref={rootRef} className={cls} style={{ ...rootStyle, width: compact ? "100%" : 300 }} {...rootEvents}>
       {top}
       <div style={{ position: "relative" }}>
         {bgLayer("page")}
@@ -346,14 +375,15 @@ export function ThemePreview({
       </div>
       {!compact && (
         <div style={{ position: "relative", zIndex: 1, display: "flex", borderTop: `1px solid ${P.bd}`, background: P.surf }}>
-          {["หน้าแรก", s.app, "งาน", "ฉัน"].map((t, i) => <div key={t} className={i === 1 ? menuFx.cls : ""} style={{ flex: 1, textAlign: "center", fontSize: fs - 2, padding: "6px 0", color: i === 1 ? p[600] : P.mut, ...(i === 1 ? { ...menuFx.style, color: menuFx.style.backgroundImage ? "#fff" : p[600] } : {}) }}>{t}</div>)}
+          {["หน้าแรก", s.app, "งาน", "ฉัน"].map((t, i) => <div key={t} {...(i === 1 ? pp("menu") : {})} className={i === 1 ? menuFx.cls : ""} style={{ flex: 1, textAlign: "center", fontSize: fs - 2, padding: "6px 0", color: i === 1 ? p[600] : P.mut, ...(i === 1 ? { ...menuFx.style, color: menuFx.style.backgroundImage ? "#fff" : p[600] } : {}) }}>{t}</div>)}
         </div>
       )}
       {particles}
       {mascot}
+      {lbl}
     </div>
   ) : (
-    <div key={replayKey} ref={rootRef} className={cls} style={rootStyle}>
+    <div key={replayKey} ref={rootRef} className={cls} style={rootStyle} {...rootEvents}>
       {top}
       <div style={{ position: "relative", display: "flex" }}>
         {bgLayer("page")}
@@ -366,7 +396,7 @@ export function ThemePreview({
                 : {};
               const icon = ["home", "file-text", "chart-bar", "settings"][i];
               return (
-                <div key={t} className={on ? menuFx.cls : ""} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: R, marginBottom: 2, fontWeight: on ? 500 : 400, ...st, ...(on ? { ...menuFx.style, ...(menuFx.style.backgroundImage ? { color: "#fff" } : {}) } : {}) }}>
+                <div key={t} {...(on ? pp("menu") : {})} className={on ? menuFx.cls : ""} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: R, marginBottom: 2, fontWeight: on ? 500 : 400, ...st, ...(on ? { ...menuFx.style, ...(menuFx.style.backgroundImage ? { color: "#fff" } : {}) } : {}) }}>
                   <span className={wig} style={{ display: "inline-flex" }}><Icon name={icon} /></span>{t}
                 </div>
               );
@@ -379,6 +409,7 @@ export function ThemePreview({
       </div>
       {particles}
       {mascot}
+      {lbl}
     </div>
   );
 

@@ -6,6 +6,9 @@
  *   ข้อ 3 ย้อน/ทำซ้ำ (Ctrl+Z / Ctrl+Shift+Z) + ประวัติเวอร์ชัน (เอาเวอร์ชันเก่ามาเป็นร่าง)
  *   ข้อ 5 พรีวิวด้วยหน้าจริงของโมดูล (ตอนนี้หน้าจริงตามแค่สี — ที่เหลือมาเฟส 3–4)
  *   แก้แล้วบันทึกร่างอัตโนมัติ · คนอื่นยังเห็นของเดิมจนกด "เผยแพร่"
+ *   ใช้ง่าย (2026-11-25 · B+C แบบ 1 + ข้อ 1–6): โหมดง่าย 5 อย่าง / ละเอียด 4 กลุ่ม · ค้นหาการตั้งค่า
+ *   · คลิกชิ้นในพรีวิว = ป๊อปแก้เฉพาะชิ้น (มือถือ = แผงล่าง) · ชี้เห็นชื่อชิ้น + สวิตช์โหมดคลิกแก้
+ *   · พรีวิวเทียบก่อน/หลังแบบลากเส้นกลาง · เผยแพร่ + เลือกแอปในขั้นเดียว
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -16,11 +19,14 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog, Drawer } from "@/components/modal";
-import { askText } from "@/components/modal/ask-dialog";
+import { BottomSheet } from "@/components/modal/bottom-sheet";
+import { PublishThemeDialog } from "@/components/erp-theme/publish-dialog";
+import { refreshActiveThemes } from "@/components/erp-theme/active-themes";
 import { ErrorState, LoadingState, EmptyState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { ThemePreview, type PreviewSample } from "@/components/erp-theme/preview";
-import { ThemeEditorPanel, THEME_CATEGORIES, type ThemeCategory } from "@/components/erp-theme/editor-panel";
+import { PartQuickEditor, ThemeAdvancedPanel, ThemeEasyPanel } from "@/components/erp-theme/editor-panel";
+import { PART_INFO, groupOfCat, searchSettings, type AdvGroupKey, type EditorCategory, type PreviewPart } from "@/lib/erp-theme-easy";
 import { THEME_PREVIEW_MSG, themePreviewMessage } from "@/components/erp-theme/preview-bridge";
 import {
   autoFixContrast, mergeThemeConfig, normalizeThemeConfig, themeIssues, type ErpThemeConfig,
@@ -52,14 +58,31 @@ export default function ThemeEditorPage() {
   const [err, setErr] = useState<string | null>(null);
   const [cfg, setCfg] = useState<ErpThemeConfig | null>(null);
   const [name, setName] = useState("");
-  const [cat, setCat] = useState<ThemeCategory>("colors");
+  // แผง: โหมดง่าย / ละเอียด (จำต่อเครื่อง) · กลุ่มที่เปิด · หมวดที่ให้เด่น (จากค้นหา/ป๊อป)
+  const [mode, setModeState] = useState<"easy" | "adv">("easy");
+  useEffect(() => { try { if (localStorage.getItem("erp-theme-editor-mode") === "adv") setModeState("adv"); } catch { /* ข้าม */ } }, []);
+  const setMode = (m: "easy" | "adv") => { setModeState(m); try { localStorage.setItem("erp-theme-editor-mode", m); } catch { /* ข้าม */ } };
+  const [openGroup, setOpenGroup] = useState<AdvGroupKey | null>("look");
+  const [focusCat, setFocusCat] = useState<EditorCategory | null>(null);
+  const [q, setQ] = useState("");
+  const goTo = (cat: EditorCategory) => { setMode("adv"); setOpenGroup(groupOfCat(cat)); setFocusCat(cat); setQ(""); };
+  // คลิกแก้ในพรีวิว (C)
+  const [editMode, setEditMode] = useState(true);
+  const [pop, setPop] = useState<{ part: PreviewPart; x: number; y: number } | null>(null);
+  const previewBox = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => { const f = () => setNarrow(window.innerWidth < 1024); f(); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  // เทียบก่อน/หลัง
+  const [compare, setCompare] = useState(false);
+  const [split, setSplit] = useState(50);
+  const [showPublished, setShowPublished] = useState(false);
+  const [publishOpen, setPublishOpen] = useState(false);
   const [device, setDevice] = useState<"pc" | "mobile">("pc");
   const [sample, setSample] = useState<PreviewSample>("purchase");
   const [view, setView] = useState<"sample" | "real">("sample");
   const [realHref, setRealHref] = useState(REAL_PAGES[0].href);
   const [dark, setDark] = useState(false);
   const [replay, setReplay] = useState(0);
-  const [comparing, setComparing] = useState(false);
   const [save, setSave] = useState<"idle" | "pending" | "saving" | "saved" | "error">("idle");
   const [histOpen, setHistOpen] = useState(false);
   useEffect(() => { if (new URLSearchParams(window.location.search).get("history") === "1") setHistOpen(true); }, []);
@@ -170,12 +193,23 @@ export default function ThemeEditorPage() {
     if (!r.ok || j.error) throw new Error(j.error || "ทำรายการไม่สำเร็จ");
     return j.data as Theme;
   };
-  const doPublish = async () => {
-    const note = await askText({ title: "เผยแพร่ธีม", message: "จดสั้น ๆ ว่าเปลี่ยนอะไร (ไม่บังคับ) — ไว้ดูในประวัติเวอร์ชัน", placeholder: "เช่น เปลี่ยนสีหลักเป็นน้ำทะเล", confirmText: "เผยแพร่" });
-    if (note === null) return;
+  const doPublish = async (note: string, changes: { scope: string; theme_id: string | null }[]) => {
     setBusy(true);
-    try { await post({ action: "publish", note }); toast.success("เผยแพร่แล้ว — โมดูลที่ใช้ธีมนี้จะเห็นของใหม่ (เมื่อเฟส 3 เปิดใช้)"); await load(); }
-    catch (e) { toast.error((e as Error).message); } finally { setBusy(false); setConfirm(null); }
+    try {
+      await post({ action: "publish", note });
+      if (changes.length) {
+        const r = await apiFetch("/api/themes/assignments", { method: "PUT", body: JSON.stringify({ changes }) });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.error) throw new Error(`เผยแพร่แล้ว แต่เลือกแอปไม่สำเร็จ: ${j.error || "ลองใหม่ที่แท็บแอปใช้ธีมไหน"}`);
+        const prev = j.previous as { scope: string; theme_id: string | null }[];
+        toast.undo(`เผยแพร่แล้ว + เปลี่ยนธีมของ ${changes.length} ที่`, async () => {
+          await apiFetch("/api/themes/assignments", { method: "PUT", body: JSON.stringify({ changes: prev }) });
+          void refreshActiveThemes();
+        });
+      } else toast.success("เผยแพร่แล้ว — แอปที่ใช้ธีมนี้จะเห็นของใหม่");
+      void refreshActiveThemes();
+      await load();
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); setConfirm(null); }
   };
   const doDiscard = async () => {
     setBusy(true);
@@ -194,7 +228,7 @@ export default function ThemeEditorPage() {
   };
 
   const published = useMemo(() => (theme?.published_config ? normalizeThemeConfig(theme.published_config) : null), [theme]);
-  const shown = peek ? normalizeThemeConfig(peek.config) : comparing && published ? published : cfg;
+  const shown = peek ? normalizeThemeConfig(peek.config) : showPublished && published ? published : cfg;
   const issues = useMemo(() => (cfg ? themeIssues(cfg) : []), [cfg]);
 
   // ── พรีวิวหน้าจริง: ส่งสีเข้า iframe ───────────
@@ -218,6 +252,29 @@ export default function ThemeEditorPage() {
   const saveLabel = { idle: theme.has_unpublished ? "มีร่างที่ยังไม่เผยแพร่" : "ตรงกับฉบับที่เผยแพร่", pending: "รอบันทึก…", saving: "กำลังบันทึก…", saved: "บันทึกร่างแล้ว", error: "บันทึกไม่สำเร็จ" }[save];
   const btn = "h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 inline-flex items-center gap-1";
   const seg = (on: boolean) => `h-7 px-2.5 rounded-md text-xs ${on ? "bg-blue-50 text-blue-800 font-medium border border-blue-200" : "text-slate-600 border border-transparent hover:bg-slate-100"}`;
+  const results = searchSettings(q);
+  const onPartClick = (part: PreviewPart, el: HTMLElement) => {
+    const box = previewBox.current?.getBoundingClientRect(), r = el.getBoundingClientRect();
+    if (!box) return;
+    const x = Math.min(Math.max(8, r.left - box.left), Math.max(8, box.width - 290));
+    setPop({ part, x, y: r.bottom - box.top + 8 });
+  };
+  const popBody = pop && (
+    <>
+      <PartQuickEditor config={cfg} part={pop.part} onPatch={onPatch} readOnly={readOnly} />
+      <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">แก้ตรงนี้ = {PART_INFO[pop.part].plural} เปลี่ยนตาม</div>
+      <button type="button" className="mt-1.5 text-xs text-blue-700 hover:underline" onClick={() => { goTo(PART_INFO[pop.part].cat); setPop(null); }}>ตั้งค่าทั้งหมดของชิ้นนี้ →</button>
+    </>
+  );
+  const canCompare = !!published && !peek && view === "sample";
+  const onSplitDrag = (e: React.PointerEvent) => {
+    const box = previewBox.current?.getBoundingClientRect();
+    if (!box) return;
+    const move = (ev: PointerEvent) => setSplit(Math.min(95, Math.max(5, ((ev.clientX - box.left) / box.width) * 100)));
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    e.preventDefault();
+  };
 
   return (
     <PlaygroundShell>
@@ -234,7 +291,7 @@ export default function ThemeEditorPage() {
           {canEdit && <button type="button" className={btn} onClick={doRedo} disabled={!redo.current.length} title="ทำซ้ำ (Ctrl+Shift+Z)"><Icon name="arrow-forward-up" /></button>}
           <button type="button" className={btn} onClick={() => setHistOpen(true)}><Icon name="history" /> ประวัติ</button>
           {canEdit && theme.published_version > 0 && theme.has_unpublished && <button type="button" className={btn} onClick={() => setConfirm("discard")}>ทิ้งร่าง</button>}
-          {canPublish && <button type="button" disabled={busy || !!theme.deleted_at || (!theme.has_unpublished && theme.published_version > 0)} onClick={() => void doPublish()} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40">เผยแพร่</button>}
+          {canPublish && <button type="button" disabled={busy || !!theme.deleted_at} onClick={() => setPublishOpen(true)} className="h-8 px-4 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-40">{!theme.has_unpublished && theme.published_version > 0 ? "เลือกแอปที่ใช้…" : "เผยแพร่ + เลือกแอป…"}</button>}
         </div>
       </div>
 
@@ -252,8 +309,20 @@ export default function ThemeEditorPage() {
       <div className="p-3 sm:p-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* แผงปรับ (มือถืออยู่ล่างพรีวิว) */}
         <aside className="order-2 lg:order-1 rounded-xl border border-slate-200 bg-white p-3 lg:sticky lg:top-14 lg:self-start lg:max-h-[calc(100vh-72px)] lg:overflow-y-auto">
-          <div className="flex flex-wrap gap-1 mb-2">
-            {THEME_CATEGORIES.map((c) => <button key={c.key} type="button" onClick={() => setCat(c.key)} className={seg(cat === c.key)}>{c.label}</button>)}
+          <div className="flex items-center gap-1 mb-2">
+            <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+              <button type="button" className={seg(mode === "easy")} onClick={() => setMode("easy")}>ง่าย</button>
+              <button type="button" className={seg(mode === "adv")} onClick={() => setMode("adv")}>ละเอียด</button>
+            </div>
+            <div className="relative flex-1 min-w-0">
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา เช่น เงา ขอบ กระพริบ" className="w-full h-8 rounded-lg border border-slate-200 px-2 text-xs" aria-label="ค้นหาการตั้งค่า" />
+              {results.length > 0 && (
+                <div className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                  {results.map((r) => <button key={r.label} type="button" onClick={() => goTo(r.cat)} className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-slate-50">{r.label}</button>)}
+                </div>
+              )}
+              {q.trim() && !results.length && <div className="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg px-2.5 py-1.5 text-xs text-slate-400">ไม่พบการตั้งค่านี้</div>}
+            </div>
           </div>
           {issues.length > 0 && (
             <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900 space-y-1">
@@ -263,7 +332,9 @@ export default function ThemeEditorPage() {
               )}
             </div>
           )}
-          <ThemeEditorPanel config={cfg} category={cat} onPatch={onPatch} readOnly={readOnly} />
+          {mode === "easy"
+            ? <ThemeEasyPanel config={cfg} onPatch={onPatch} onReplace={(n) => apply(n)} readOnly={readOnly} />
+            : <ThemeAdvancedPanel config={cfg} onPatch={onPatch} readOnly={readOnly} open={openGroup} onToggle={(g) => { setOpenGroup(g); setFocusCat(null); }} focusCat={focusCat} />}
         </aside>
 
         {/* พรีวิว */}
@@ -288,24 +359,48 @@ export default function ThemeEditorPage() {
             )}
             <label className="text-xs text-slate-600 inline-flex items-center gap-1"><input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} disabled={view === "real"} /> โหมดมืด</label>
             {view === "sample" && <button type="button" className={btn} onClick={() => setReplay((n) => n + 1)}><Icon name="refresh" /> เล่นแอนิเมชันอีกครั้ง</button>}
-            {published && !peek && <span className="ml-auto text-[11px] text-slate-400">กดค้างที่พรีวิว = ดูฉบับที่เผยแพร่อยู่</span>}
+            <span className="ml-auto flex items-center gap-1.5">
+              {view === "sample" && canEdit && <label className="text-xs text-slate-600 inline-flex items-center gap-1" title="ชี้ชิ้นในพรีวิวเห็นชื่อ · คลิกเพื่อแก้เฉพาะชิ้น"><input type="checkbox" checked={editMode} onChange={(e) => { setEditMode(e.target.checked); setPop(null); }} /> คลิกแก้</label>}
+              {canCompare && (device === "mobile" || narrow
+                ? <div className="flex rounded-lg border border-slate-200 bg-white p-0.5"><button type="button" className={seg(!showPublished)} onClick={() => setShowPublished(false)}>ร่าง</button><button type="button" className={seg(showPublished)} onClick={() => setShowPublished(true)}>ที่เผยแพร่</button></div>
+                : <button type="button" className={btn} onClick={() => { setCompare((v) => !v); setPop(null); }} aria-pressed={compare}>{compare ? "ปิดเทียบ" : "เทียบก่อน/หลัง"}</button>)}
+            </span>
           </div>
 
-          <div
-            className="relative select-none"
-            onPointerDown={() => { if (published && !peek) setComparing(true); }}
-            onPointerUp={() => setComparing(false)} onPointerLeave={() => setComparing(false)} onPointerCancel={() => setComparing(false)}
-          >
-            {comparing && <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 rounded-full bg-slate-900/80 text-white text-xs px-3 py-1">ฉบับที่เผยแพร่อยู่ (v{theme.published_version})</div>}
+          <div ref={previewBox} className="relative">
             {view === "sample" ? (
-              shown && <ThemePreview config={shown} device={device} sample={sample} dark={dark} replayKey={replay} />
+              compare && canCompare && device === "pc" && !narrow && published ? (
+                <div className="relative select-none">
+                  <ThemePreview config={published} device={device} sample={sample} dark={dark} replayKey={replay} />
+                  <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - split}% 0 0)` }}>
+                    <ThemePreview config={cfg} device={device} sample={sample} dark={dark} replayKey={replay} />
+                  </div>
+                  <div className="absolute top-0 bottom-0 z-10 w-0.5 bg-slate-900/70 cursor-ew-resize" style={{ left: `${split}%` }} onPointerDown={onSplitDrag}>
+                    <span className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 rounded-full bg-white border border-slate-300 shadow flex items-center justify-center text-[10px] text-slate-600">⇆</span>
+                  </div>
+                  <span className="absolute top-2 left-2 z-10 rounded-full bg-slate-900/75 text-white text-[10px] px-2 py-0.5">ร่างที่แก้อยู่</span>
+                  <span className="absolute top-2 right-2 z-10 rounded-full bg-slate-900/75 text-white text-[10px] px-2 py-0.5">ที่เผยแพร่ v{theme.published_version}</span>
+                </div>
+              ) : (
+                shown && <ThemePreview config={shown} device={device} sample={sample} dark={dark} replayKey={replay}
+                  editMode={editMode && canEdit && !readOnly && !showPublished} selectedPart={pop?.part ?? null} onPartClick={onPartClick} />
+              )
             ) : (
               <div className={device === "mobile" ? "flex justify-center rounded-xl bg-slate-200 p-3" : ""}>
                 <iframe ref={frameRef} key={realHref} src={`${realHref}?embed=1`} title="พรีวิวหน้าจริง" onLoad={sendVars}
-                  className={`bg-white rounded-xl border border-slate-300 ${device === "mobile" ? "w-[375px] h-[680px]" : "w-full h-[640px]"} ${comparing ? "" : ""}`} />
+                  className={`bg-white rounded-xl border border-slate-300 ${device === "mobile" ? "w-[375px] h-[680px]" : "w-full h-[640px]"}`} />
+              </div>
+            )}
+            {/* ป๊อปแก้ชิ้น (PC) */}
+            {pop && !narrow && (
+              <div className="absolute z-20 w-[280px] rounded-xl border border-slate-200 bg-white shadow-xl p-3" style={{ left: pop.x, top: pop.y }}>
+                <div className="flex items-center mb-2"><span className="text-sm font-medium text-slate-800 flex-1">แก้: {PART_INFO[pop.part].label}</span>
+                  <button type="button" onClick={() => setPop(null)} className="w-6 h-6 rounded hover:bg-slate-100 text-slate-500" aria-label="ปิด">✕</button></div>
+                {popBody}
               </div>
             )}
           </div>
+          {view === "sample" && editMode && canEdit && !compare && <p className="text-[11px] text-slate-400 mt-1.5">ชี้ชิ้นในพรีวิวเห็นชื่อ · คลิกเพื่อแก้เฉพาะชิ้น (ปิด "คลิกแก้" ถ้าอยากกดลองปุ่มจริง)</p>}
           {view === "real" && <p className="text-[11px] text-slate-400 mt-1.5">หน้าจริงตอนนี้เปลี่ยนตามได้แค่สีหลัก/สีเน้น · ตัวอักษร ขอบมน รูปพื้นหลัง ไล่สี และแอนิเมชันจะเห็นในหน้าจริงหลังเฟส 3–4 (หน้าตัวอย่างเห็นครบแล้ว) · พรีวิวนี้ไม่บันทึกอะไรลงหน้าจริง</p>}
         </section>
       </div>
@@ -331,6 +426,13 @@ export default function ThemeEditorPage() {
           </ul>
         )}
       </Drawer>
+
+      {/* ป๊อปแก้ชิ้น (จอเล็ก = แผงล่าง) */}
+      <BottomSheet open={!!pop && narrow} onClose={() => setPop(null)} title={pop ? `แก้: ${PART_INFO[pop.part].label}` : ""} backKey="theme-part">
+        <div className="px-4 pb-4">{popBody}</div>
+      </BottomSheet>
+
+      <PublishThemeDialog open={publishOpen} themeId={theme.id} themeName={theme.name} onClose={() => setPublishOpen(false)} onPublish={doPublish} />
 
       <ConfirmDialog open={confirm === "discard"} onClose={() => setConfirm(null)} onConfirm={() => void doDiscard()} loading={busy}
         title="ทิ้งร่าง" variant="danger" confirmText="ทิ้งร่าง"
