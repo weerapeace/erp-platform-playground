@@ -29,6 +29,8 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
 import { acceptsMessage, cardStatus, extractEngraveText, foldLine, groupTemplates, isFolded, type CardDoc } from "@/lib/gift-card-design";
 import { ENGRAVE_MODE_LABEL, ENGRAVE_SOURCE_LABEL, type EngraveMode, type EngraveSource } from "@/lib/order-ops";
+import { InstructionForm, type InsPrefill } from "./instruction-form";
+import { useOpsOptions } from "./shared";
 
 // ลิ้นชักรายละเอียดออเดอร์ (ของศูนย์ออเดอร์) หนัก — โหลดเฉพาะตอนกดเปิดแถว
 const OrderDetailView = dynamic(() => import("@/app/master/platform-orders/order-detail-view").then((m) => m.OrderDetailView), { ssr: false, loading: () => <LoadingState /> });
@@ -138,6 +140,9 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "engrave_missi
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const [chatFor, setChatFor] = useState<NoteRow | null>(null);
+  const [insFor, setInsFor] = useState<InsPrefill | null>(null);
+  const { options: opsOptions } = useOpsOptions();
+  const canDeleteIns = usePermission("order_ops.delete");
   const onCountsRef = useRef(onCounts); onCountsRef.current = onCounts;
 
   const load = useCallback(async () => {
@@ -167,15 +172,15 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "engrave_missi
       });
     } catch (e) { toast.error((e as Error).message); }
   };
-  const sendEngrave = async (r: NoteRow) => {
-    const text = extractEngraveText(r.note);
-    const ok = await askConfirm({ title: "ส่งไปคำสั่งสลักชื่อ?", message: `สร้างคำสั่งสลักชื่อของออเดอร์ ${r.order_no ?? ""}${text ? ` · ชื่อที่จะสลัก: "${text}"` : " · ยังไม่มีชื่อที่จะสลัก (ไปใส่ทีหลังได้)"} · ไปแก้รูปแบบ/ตำแหน่ง/ลบได้ที่หน้าคำสั่งพิเศษ`, confirmText: "ส่งไปคำสั่งสลักชื่อ" });
-    if (!ok) return;
-    try {
-      await gcJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", order_no: r.order_no, platform: r.platform, customer_name: r.customer_name, platform_order_id: r.id, engrave: true, engrave_text: text || null, note: r.note?.slice(0, 500) ?? null, commands: [] }) });
-      toast.success("สร้างคำสั่งสลักชื่อแล้ว");
-      void load();
-    } catch (e) { toast.error((e as Error).message); }
+  // "ส่งไปสั่งสลัก" = เปิดป๊อปคำสั่งพิเศษทันที (ออเดอร์ สินค้า ชื่อจากหมายเหตุ กรอกให้แล้ว) — บันทึกเมื่อกด "บันทึก" (เจ้าของเลือก 2026-11-25 ข้อ 1)
+  const sendEngrave = (r: NoteRow) => {
+    const it = r.engrave.items[0];
+    setInsFor({
+      order_no: r.order_no ?? "", platform: r.platform ?? "", customer_name: r.customer_name ?? "", platform_order_id: r.id,
+      sku: it?.sku_code ?? "", engrave: true, engrave_text: extractEngraveText(r.note) || "",
+      ...(it?.decoded?.type ? { engrave_type: it.decoded.type } : {}), ...(it?.decoded?.position ? { engrave_position: it.decoded.position } : {}),
+      note: r.note ? `ลูกค้าเขียน: ${r.note.slice(0, 480)}` : "",
+    });
   };
   const printSelected = () => {
     const ids = (rows ?? []).filter((r) => sel.has(r.id)).flatMap((r) => r.cards.map((c) => c.id));
@@ -218,7 +223,7 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "engrave_missi
       {isEng ? (
         r.instructions.some((i) => i.engrave)
           ? (() => { const ins = r.instructions.find((i) => i.engrave); return <Link href={`/order-ops/instructions?s=orders&q=${encodeURIComponent(r.order_no ?? "")}&open=${ins?.id ?? ""}`} className="text-[12px] text-emerald-700 hover:underline">มีคำสั่งสลักแล้ว ({ins?.status === "done" ? "เสร็จ" : "ยังไม่ทำ"}) →</Link>; })()
-          : canEdit && <button type="button" onClick={() => void sendEngrave(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100"><Icon value="i:send" /> ส่งไปสั่งสลัก</button>
+          : canEdit && <button type="button" onClick={() => sendEngrave(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100"><Icon value="i:send" /> ส่งไปสั่งสลัก</button>
       ) : canEdit && (
         <Link href={writeHref(r)} className="inline-flex h-7 items-center gap-1 rounded-md bg-violet-600 px-2.5 text-[12px] font-medium text-white hover:bg-violet-700"><Icon value="i:pencil" /> {r.cards.length ? "ดู / แก้การ์ด" : "เขียนการ์ด"}</Link>
       )}
@@ -293,6 +298,10 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "engrave_missi
         </Drawer>
       )}
 
+      {insFor && (
+        <InstructionForm row={null} prefill={insFor} options={opsOptions} readOnly={!canEdit} canDelete={canDeleteIns}
+          onClose={() => setInsFor(null)} onSaved={() => { setInsFor(null); void load(); }} />
+      )}
       <ERPModal open={!!chatFor} onClose={() => setChatFor(null)} title="ทักแชทลูกค้า" size="sm"
         footer={<button type="button" onClick={() => setChatFor(null)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">ปิด</button>}>
         {chatFor && (

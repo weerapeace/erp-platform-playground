@@ -9,6 +9,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { usePrintLog } from "@/components/report/use-print-log";
 import { LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
 import { DEFAULT_ENGRAVE_FONT, ENGRAVE_POSITION_EN, ENGRAVE_TYPE_EN, invalidEngraveChars, splitEngraveChars, type EngravePosition, type EngraveType } from "@/lib/order-ops";
@@ -46,6 +47,8 @@ function Sheets() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
+  // ประวัติพิมพ์กลาง (print_logs · doc_type engrave_sheet) — ป้าย "พิมพ์แล้ว" ในหน้าคำสั่งพิเศษ · จับทั้งปุ่มพิมพ์และ Ctrl+P
+  usePrintLog("engrave_sheet", (rows ?? []).map((r) => ({ doc_id: r.id, doc_no: r.order_no })));
   const print = () => {
     void apiFetch("/api/order-ops", { method: "POST", body: JSON.stringify({ action: "print", ids: (rows ?? []).map((r) => r.id) }) }).catch(() => {});
     window.print();

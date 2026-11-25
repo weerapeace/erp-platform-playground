@@ -93,3 +93,11 @@
 - ป้าย "ใส่ข้อความได้ / ข้อความตายตัว" = `acceptsMessage(doc)` (มีชิ้น role=message) · ชื่อ role message บนจอ = "ข้อความจากลูกค้า" + กรอบเส้นปะเหลือง (ScreenMarks · ไม่ติดตอนพิมพ์)
 - การ์ดพับ: `CardDoc.fold` = side|top · `inside` = ด้านใน · ขนาด = กระดาษ A5 ก่อนพับ (FOLD_SHEET) · `faceDoc/withFace/foldLine/newFoldedDoc` · ตัวออกแบบ `CardDesignerAny` (สลับด้านนอก/ใน) · แม่แบบในตัว "วันเกิด พับ A6"
 - พิมพ์การ์ดพับ: ด้านนอกทุกใบก่อน แล้วด้านในทุกใบ (กลับปึกกระดาษ) · ตัวเลือก "หมุนด้านใน 180°" · A4 = วางแผ่น A5 มุมบนมีเส้นตัด
+
+## ป๊อปคำสั่งพิเศษ: กล่องตั้งค่าต่อคำสั่ง + สถานะพิมพ์ + คำสั่งจากแชท (2026-11-25 · widget ข้อ 1-5)
+
+- "ส่งไปสั่งสลัก" (งานเข้า › สลักชื่อ) = เปิดป๊อป InstructionForm ทันที `prefill` ออเดอร์/ช่องทาง/ลูกค้า/SKU/ชื่อจากหมายเหตุ/รูปแบบ-ตำแหน่งจากรหัสท้าย · บันทึกเมื่อกด "บันทึก"
+- กดชิปคำสั่ง → กล่องตั้งค่า (ทะเบียน `commandBoxOf` ใน lib/order-ops): choice = ตัวเลือก (`order_ops_options` kind `command_choice` value `<คำสั่ง>|<กลุ่ม>`) · card = ข้อความ + ลิงก์ตัวเขียนการ์ด · swap = SkuPicker กลาง · text = ช่องข้อความ · ชนิดกล่องตั้งได้ใน "จัดการคำสั่ง" (instruction_command.value) · ค่าเก็บ `order_instructions.command_details`
+- สถานะพิมพ์: ใบสลัก = `print_logs` doc_type `engrave_sheet` (usePrintLog ในหน้า /print/engrave-sheets · PrintHistoryBadge ในป๊อป) · การ์ด = order_gift_cards ของออเดอร์ · API ส่ง `print_state` + ตัวกรอง `?print=printed|unprinted`
+- ปุ่ม "+ คำสั่งพิเศษ" หัวหน้ารวม = ป๊อปเปล่า ติ๊ก "ลูกค้าแจ้งทางแชท" (`via_chat` + `chat_note`) · ป้าย "แจ้งทางแชท" ในตาราง
+- migration 202612251100 (command_details · via_chat · chat_note · kind command_choice + unique ตามคำสั่ง)

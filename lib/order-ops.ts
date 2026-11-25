@@ -195,6 +195,71 @@ export const DEFAULT_INSTRUCTION_COMMANDS = [
   "อื่นๆ",
 ];
 
+/* ───────────── กล่องตั้งค่าต่อคำสั่ง (เจ้าของเลือก widget 2026-11-25 ข้อ 2) ─────────────
+ * ทะเบียนชนิดกล่องที่เดียว — คำสั่งใหม่เลือกชนิดกล่องได้ (order_ops_options.value ของ instruction_command) · ว่าง = เดาจากชื่อ
+ *   choice = เลือกจากรายการ (ตัวเลือก kind command_choice · value "<คำสั่ง>" หรือ "<คำสั่ง>|<กลุ่ม>" เช่น ห่อ|กระดาษ)
+ *   card = ข้อความการ์ด + ไปตัวเขียนการ์ด · swap = เปลี่ยนสินค้า (SkuPicker กลาง) · text = ช่องข้อความ · none = ไม่มีกล่อง
+ * ค่าที่กรอกเก็บที่ order_instructions.command_details { "<คำสั่ง>": CommandDetail }
+ */
+export type CommandBox = "choice" | "card" | "swap" | "text" | "none";
+export const COMMAND_BOX_LABEL: Record<CommandBox, string> = { choice: "เลือกจากรายการ", card: "การ์ด (ข้อความ + แม่แบบ)", swap: "เปลี่ยนสินค้า (เลือก SKU)", text: "ช่องข้อความ", none: "ไม่มีกล่อง" };
+export const isCommandBox = (v: unknown): v is CommandBox => typeof v === "string" && v in COMMAND_BOX_LABEL;
+export function guessCommandBox(label: string): CommandBox {
+  const s = label.trim();
+  if (/เปลี่ยนสินค้า|เปลี่ยนรุ่น|เปลี่ยนสี/.test(s)) return "swap";
+  if (/ห่อ|การ์ดแทรก|สติ[กิ๊]?เกอร์/.test(s)) return "choice";
+  if (/การ์ด/.test(s)) return "card";
+  return "text";
+}
+export const commandBoxOf = (label: string, value?: string | null): CommandBox => (isCommandBox(value) ? value : guessCommandBox(label));
+
+export type CommandDetail = { choice?: Record<string, string>; text?: string; sku_id?: string; sku_code?: string; message?: string };
+
+/** ตัวเลือกของคำสั่ง แยกกลุ่ม (ห่อ › กระดาษ / ริบบิ้น) — กลุ่มว่าง = "แบบ" */
+export function choiceGroups(options: { kind: string; label: string; value?: string | null; is_active: boolean }[], command: string, keep: Record<string, string> = {}): { group: string; items: string[] }[] {
+  const map = new Map<string, string[]>();
+  for (const o of options) {
+    if (o.kind !== "command_choice") continue;
+    const [cmd, grp] = String(o.value ?? "").split("|");
+    if ((cmd ?? "").trim() !== command) continue;
+    const g = (grp ?? "").trim() || "แบบ";
+    if (!o.is_active && keep[g] !== o.label) continue;
+    map.set(g, [...(map.get(g) ?? []), o.label]);
+  }
+  return [...map.entries()].map(([group, items]) => ({ group, items }));
+}
+
+const str300 = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 300) : undefined);
+/** ทำความสะอาดค่ากล่อง — เก็บเฉพาะคำสั่งที่เลือกอยู่ */
+export function cleanCommandDetails(raw: unknown, commands: string[]): Record<string, CommandDetail> {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out: Record<string, CommandDetail> = {};
+  for (const c of commands.slice(0, 20)) {
+    const d = (r[c] && typeof r[c] === "object" ? r[c] : null) as Record<string, unknown> | null;
+    if (!d) continue;
+    const x: CommandDetail = {};
+    if (d.choice && typeof d.choice === "object") {
+      const ch: Record<string, string> = {};
+      for (const [k, v] of Object.entries(d.choice as Record<string, unknown>).slice(0, 6)) { const s = str300(v); if (s) ch[k.slice(0, 40)] = s; }
+      if (Object.keys(ch).length) x.choice = ch;
+    }
+    for (const k of ["text", "sku_id", "sku_code", "message"] as const) { const s = str300(d[k]); if (s) x[k] = s; }
+    if (Object.keys(x).length) out[c] = x;
+  }
+  return out;
+}
+
+/** ข้อความสั้นของคำสั่ง 1 ข้อ (ชิปในตาราง/ใบงาน) เช่น "ห่อ: คราฟท์ · แดง" · "เปลี่ยนสินค้า → WK41-03" */
+export function commandSummary(command: string, d: CommandDetail | null | undefined): string {
+  if (!d) return command;
+  const parts: string[] = [];
+  if (d.choice) parts.push(Object.values(d.choice).join(" · "));
+  if (d.sku_code) return `${command} → ${d.sku_code}`;
+  if (d.message) parts.push(`"${d.message.slice(0, 30)}${d.message.length > 30 ? "…" : ""}"`);
+  if (d.text) parts.push(d.text.slice(0, 40) + (d.text.length > 40 ? "…" : ""));
+  return parts.length ? `${command}: ${parts.join(" · ")}` : command;
+}
+
 /** แอปเก่าเก็บคำสั่งรวมเป็นข้อความเดียว เช่น "ห่อ + การ์ดธรรมดา" → แยกเป็นรายการ */
 export function splitLegacyCommand(cmd: string | null | undefined): string[] {
   const s = (cmd || "").trim();

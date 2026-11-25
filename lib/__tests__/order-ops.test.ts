@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   canMoveCase,
+  choiceGroups,
+  cleanCommandDetails,
+  commandBoxOf,
+  commandSummary,
   engraveOfOrder,
   cleanOrderNo,
   engraveTextError,
@@ -119,5 +123,37 @@ describe("engraveOfOrder — สินค้าสลักชื่อในอ
     expect(engraveOfOrder({ items: [{ sku_code: "TTM130-01D/1" }], modes, note: "", noteEngrave: false, status: "shipped" }).needsName).toBe(false);
     expect(engraveOfOrder({ items: [{ sku_code: "TTM130-01D/1" }], modes, note: "", noteEngrave: false, status: "cancelled" }).needsName).toBe(false);
     expect(engraveOfOrder({ items: [{ sku_code: "BAG-01", parent_id: "pNone" }], modes, note: null, noteEngrave: false }).engrave).toBe(false);
+  });
+});
+
+describe("กล่องตั้งค่าต่อคำสั่ง (2026-11-25)", () => {
+  it("เดาชนิดกล่องจากชื่อคำสั่ง · ตั้งเองทับได้", () => {
+    expect(commandBoxOf("ห่อ")).toBe("choice");
+    expect(commandBoxOf("การ์ดแทรก")).toBe("choice");
+    expect(commandBoxOf("ติดสติกเกอร์")).toBe("choice");
+    expect(commandBoxOf("การ์ดของขวัญ")).toBe("card");
+    expect(commandBoxOf("เปลี่ยนสินค้า")).toBe("swap");
+    expect(commandBoxOf("อื่นๆ")).toBe("text");
+    expect(commandBoxOf("ห่อ", "none")).toBe("none");
+  });
+  it("ตัวเลือกแยกกลุ่ม (ห่อ › กระดาษ/ริบบิ้น) · ซ่อนแล้วไม่โผล่ ยกเว้นค่าที่เลือกไว้", () => {
+    const opts = [
+      { kind: "command_choice", label: "คราฟท์", value: "ห่อ|กระดาษ", is_active: true },
+      { kind: "command_choice", label: "แดง", value: "ห่อ|ริบบิ้น", is_active: true },
+      { kind: "command_choice", label: "ทอง", value: "ห่อ|ริบบิ้น", is_active: false },
+      { kind: "command_choice", label: "Thank you", value: "ติดสติกเกอร์", is_active: true },
+    ];
+    expect(choiceGroups(opts, "ห่อ")).toEqual([{ group: "กระดาษ", items: ["คราฟท์"] }, { group: "ริบบิ้น", items: ["แดง"] }]);
+    expect(choiceGroups(opts, "ห่อ", { ริบบิ้น: "ทอง" })[1].items).toEqual(["แดง", "ทอง"]);
+    expect(choiceGroups(opts, "ติดสติกเกอร์")).toEqual([{ group: "แบบ", items: ["Thank you"] }]);
+  });
+  it("ทำความสะอาดค่า: เก็บเฉพาะคำสั่งที่เลือก · ตัดค่าว่าง", () => {
+    const d = cleanCommandDetails({ ห่อ: { choice: { กระดาษ: "คราฟท์", ริบบิ้น: "" } }, อื่นๆ: { text: "  " }, เปลี่ยนสินค้า: { sku_code: "WK41-03", sku_id: "x" } }, ["ห่อ", "อื่นๆ"]);
+    expect(d).toEqual({ ห่อ: { choice: { กระดาษ: "คราฟท์" } } });
+  });
+  it("ข้อความสั้นของคำสั่ง", () => {
+    expect(commandSummary("ห่อ", { choice: { กระดาษ: "คราฟท์", ริบบิ้น: "แดง" } })).toBe("ห่อ: คราฟท์ · แดง");
+    expect(commandSummary("เปลี่ยนสินค้า", { sku_code: "WK41-03" })).toBe("เปลี่ยนสินค้า → WK41-03");
+    expect(commandSummary("อื่นๆ", null)).toBe("อื่นๆ");
   });
 });

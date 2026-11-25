@@ -7,6 +7,9 @@
 // - ออเดอร์หลายชิ้น: ติ๊ก SKU ที่ต้องทำ → สร้าง 1 คำสั่งต่อ SKU (สลักคนละชื่อได้)
 // - ชื่อสลัก: A-Z a-z 0-9 + ตัวพิเศษที่ตั้งไว้เท่านั้น — มีตัวสลักไม่ได้ = บันทึกไม่ได้ (เจ้าของเลือก 2026-11-24)
 // - เดาชื่อสลักจากหมายเหตุลูกค้า (กดรับเอง) · เลือกฟอนต์
+// - กดชิปคำสั่ง → กล่องตั้งค่าของคำสั่งนั้น (ทะเบียนชนิดกล่อง lib/order-ops commandBoxOf · ค่าเก็บ command_details) — เจ้าของเลือก 2026-11-25
+// - ลูกค้าแจ้งทางแชท (via_chat + โน้ต) · สถานะพิมพ์ใบสลัก = ประวัติพิมพ์กลาง (PrintHistoryBadge doc_type engrave_sheet)
+// - prefill = เปิดจากปุ่ม "ส่งไปสั่งสลัก" / "+ คำสั่งพิเศษ" ในหน้ารวม (ยังไม่บันทึกจนกด "บันทึก")
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
@@ -14,8 +17,12 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { PlatformOrderPicker, type PickedOrder } from "@/components/platform-order-picker";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { PrintHistoryBadge } from "@/components/print-history";
+import Link from "next/link";
 import {
   DEFAULT_ENGRAVE_FONT, ENGRAVE_MAX_CHARS, ENGRAVE_POSITIONS, ENGRAVE_TYPES, INSTRUCTION_STATUS,
+  choiceGroups, commandBoxOf, type CommandDetail,
   decodeEngraveSku, engraveSkuMaps, engraveTextError, guessEngraveFromNote, invalidEngraveChars, splitEngraveChars,
 } from "@/lib/order-ops";
 import { Field, HistoryList, OrderNoField, SkuField, inputCls, opsJson, type OptionRow, type OrderHit } from "./shared";
@@ -25,7 +32,12 @@ export type Ins = {
   commands: string[]; engrave: boolean; engrave_text: string | null; engrave_type: string | null; engrave_position: string | null; engrave_font: string | null;
   note: string | null; status: "todo" | "done"; done_at: string | null; done_by_name: string | null;
   print_count: number; is_trial: boolean; platform_order_id: string | null; created_at: string; created_by_name: string | null; deleted_at: string | null;
+  command_details?: Record<string, CommandDetail> | null; via_chat?: boolean; chat_note?: string | null;
+  /** สถานะพิมพ์ (API คำนวณจาก print_logs + การ์ดของออเดอร์) */
+  print_state?: { state: "none" | "todo" | "done"; engrave: { n: number; last: string | null } | null; card: { total: number; printed: number; last: string | null; by: string | null } | null };
 };
+/** ค่าตั้งต้นตอนเปิดป๊อปจากที่อื่น (ส่งไปสั่งสลัก / คำสั่งจากแชท) */
+export type InsPrefill = Partial<Pick<Ins, "order_no" | "platform" | "customer_name" | "sku" | "engrave" | "engrave_text" | "engrave_type" | "engrave_position" | "note" | "platform_order_id" | "via_chat" | "chat_note">>;
 
 const PLATFORMS = ["Shopee", "Lazada", "TikTok", "LINE", "Facebook", "IG", "เว็บไซต์", "อื่นๆ"];
 type Item = OrderHit["items"][number];
@@ -68,8 +80,8 @@ function EngraveNameInput({ value, onChange, specials, label, onManage }: { valu
   );
 }
 
-export function InstructionForm({ row, options, readOnly, canDelete, onManageEngrave, onClose, onSaved }: {
-  row: Ins | null; options: OptionRow[]; readOnly: boolean; canDelete: boolean;
+export function InstructionForm({ row, prefill, options, readOnly, canDelete, onManageEngrave, onClose, onSaved }: {
+  row: Ins | null; prefill?: InsPrefill | null; options: OptionRow[]; readOnly: boolean; canDelete: boolean;
   /** เปิดหน้าตั้งค่าตัวพิเศษ/ฟอนต์ (หัวหน้า/แอดมิน) — ไม่ส่ง = ไม่มีปุ่ม */
   onManageEngrave?: () => void;
   onClose: () => void; onSaved: () => void;
@@ -84,12 +96,19 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
   const dec = (sku: string | null | undefined) => decodeEngraveSku(sku, maps.types, maps.positions);
   const decLabel = (sku: string | null) => { const d = dec(sku); return d ? [d.type, d.position].filter(Boolean).join(" · ") || null : null; };
 
-  const init = useMemo(() => ({
-    order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "",
-    commands: row?.commands ?? [], engrave: row?.engrave ?? false, engrave_text: row?.engrave_text ?? "",
-    engrave_type: row?.engrave_type ?? "พิมพ์จม", engrave_position: row?.engrave_position ?? "มุมขวา", engrave_font: row?.engrave_font ?? "",
-    note: row?.note ?? "", status: row?.status ?? "todo", platform_order_id: row?.platform_order_id ?? null as string | null,
-  }), [row]);
+  const init = useMemo(() => {
+    const pf = row ? {} : (prefill ?? {});
+    return {
+      order_no: row?.order_no ?? pf.order_no ?? "", platform: row?.platform ?? pf.platform ?? "", customer_name: row?.customer_name ?? pf.customer_name ?? "", sku: row?.sku ?? pf.sku ?? "",
+      commands: row?.commands ?? [], engrave: row?.engrave ?? pf.engrave ?? false, engrave_text: row?.engrave_text ?? pf.engrave_text ?? "",
+      engrave_type: row?.engrave_type ?? pf.engrave_type ?? "พิมพ์จม", engrave_position: row?.engrave_position ?? pf.engrave_position ?? "มุมขวา", engrave_font: row?.engrave_font ?? "",
+      note: row?.note ?? pf.note ?? "", status: row?.status ?? "todo", platform_order_id: row?.platform_order_id ?? pf.platform_order_id ?? null as string | null,
+      command_details: (row?.command_details ?? {}) as Record<string, CommandDetail>,
+      via_chat: row?.via_chat ?? pf.via_chat ?? false, chat_note: row?.chat_note ?? pf.chat_note ?? "",
+    };
+  }, [row, prefill]);
+  // เปิดจากที่อื่นพร้อมค่าตั้งต้น = ยังไม่บันทึก → ถือว่ามีของค้าง (ปิดแล้วถามก่อน)
+  const prefilled = !row && !!prefill?.order_no;
   const [f, setF] = useState(init);
   const [items, setItems] = useState<Item[]>([]);
   const [lines, setLines] = useState<Line[]>([]);            // สร้างใหม่ + ออเดอร์หลายชิ้น: SKU ที่ติ๊ก
@@ -100,7 +119,8 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
   const font = f.engrave_font || fonts[0];
   const multi = !row && items.length > 1;
-  const dirty = JSON.stringify(f) !== JSON.stringify(init) || lines.length > 0;
+  const dirty = prefilled || JSON.stringify(f) !== JSON.stringify(init) || lines.length > 0;
+  const setDetail = (cmd: string, patch: Partial<CommandDetail>) => setF((p) => ({ ...p, command_details: { ...p.command_details, [cmd]: { ...(p.command_details[cmd] ?? {}), ...patch } } }));
 
   useEffect(() => {
     if (!row) return;
@@ -174,6 +194,8 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
       const ids: string[] = [];
       const base = {
         ...f, engrave_font: f.engrave ? font : null,
+        command_details: Object.fromEntries(Object.entries(f.command_details).filter(([k]) => f.commands.includes(k))),
+        chat_note: f.via_chat ? f.chat_note : null,
         engrave_text: f.engrave ? f.engrave_text.trim() : null, engrave_type: f.engrave ? f.engrave_type : null, engrave_position: f.engrave ? f.engrave_position : null,
       };
       if (row) { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "instructions", id: row.id, patch: base }) }); ids.push(row.id); }
@@ -272,6 +294,46 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
             ))}
           </div>
         </Field>
+        {f.commands.map((c) => {
+          const box = commandBoxOf(c, commands.find((o) => o.label === c)?.value);
+          if (box === "none") return null;
+          const d = f.command_details[c] ?? {};
+          return (
+            <div key={c} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700"><Icon name={box === "swap" ? "exchange" : box === "card" || box === "choice" ? "gift" : "edit"} className="h-4 w-4" /> {c}</div>
+              {box === "choice" && (() => {
+                const groups = choiceGroups(options, c, d.choice ?? {});
+                return groups.length ? (
+                  <div className="flex flex-wrap gap-3">
+                    {groups.map((g) => (
+                      <Field key={g.group} label={g.group}>
+                        <div className="flex flex-wrap gap-1">
+                          {g.items.map((it) => <button key={it} type="button" onClick={() => setDetail(c, { choice: { ...(d.choice ?? {}), [g.group]: d.choice?.[g.group] === it ? "" : it } })} className={`rounded-md border px-2.5 py-1 text-xs ${d.choice?.[g.group] === it ? "border-sky-400 bg-sky-50 text-sky-700" : "border-slate-200 bg-white text-slate-600"}`}>{it}</button>)}
+                        </div>
+                      </Field>
+                    ))}
+                  </div>
+                ) : <p className="text-xs text-slate-500">ยังไม่มีตัวเลือกของคำสั่งนี้ — หัวหน้าเพิ่มได้ที่ &quot;จัดการคำสั่ง&quot; › ตัวเลือก · พิมพ์รายละเอียดด้านล่างได้</p>;
+              })()}
+              {box === "swap" && (
+                <div className="space-y-1">
+                  <div className="text-xs text-slate-500">จาก <span className="font-mono">{f.sku || "-"}</span> → เปลี่ยนเป็น</div>
+                  <SkuPicker value={d.sku_id ? ({ id: d.sku_id, code: d.sku_code ?? "", name: d.sku_code ?? "" } as SkuPickerValue) : null} onChange={(v) => setDetail(c, { sku_id: v?.id ?? "", sku_code: v?.code ?? "" })} placeholder="เลือก SKU ใหม่..." />
+                </div>
+              )}
+              {box === "card" && (
+                <div className="space-y-1.5">
+                  <textarea value={d.message ?? ""} onChange={(e) => setDetail(c, { message: e.target.value })} rows={2} placeholder="ข้อความบนการ์ด (ว่างได้ ไปเขียนในตัวเขียนการ์ดทีหลัง)" className={inputCls} />
+                  {f.platform_order_id
+                    ? <Link href={`/order-ops/gift-cards/edit?order=${f.platform_order_id}`} target="_blank" className="inline-flex items-center gap-1 text-xs text-sky-700 hover:underline"><Icon name="open" className="h-3.5 w-3.5" /> เปิดตัวเขียนการ์ด (เลือกแม่แบบ/พิมพ์)</Link>
+                    : <span className="text-xs text-slate-400">เลือกออเดอร์ก่อน แล้วเปิดตัวเขียนการ์ดได้</span>}
+                  {row?.print_state?.card && <p className="text-xs text-slate-600">การ์ดของออเดอร์นี้: พิมพ์/เขียนแล้ว {row.print_state.card.printed}/{row.print_state.card.total} ใบ{row.print_state.card.last ? ` · ล่าสุด ${new Date(row.print_state.card.last).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}` : ""}{row.print_state.card.by ? ` · ${row.print_state.card.by}` : ""}</p>}
+                </div>
+              )}
+              {(box === "text" || box === "choice") && <input value={d.text ?? ""} onChange={(e) => setDetail(c, { text: e.target.value })} placeholder={box === "text" ? "รายละเอียดคำสั่ง เช่น ตัดสายให้สั้นลง 2 ซม." : "รายละเอียดเพิ่ม (ว่างได้)"} className={`${inputCls} ${box === "choice" ? "mt-2" : ""}`} />}
+            </div>
+          );
+        })}
 
         {guess.text && !readOnly && (f.engrave_text.trim() !== guess.text) && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
@@ -284,6 +346,7 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
         <div className="rounded-lg border border-slate-200 p-3">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={f.engrave} onChange={(e) => set("engrave", e.target.checked)} /> สลักชื่อ
+            {row && f.engrave && <span className="ml-auto font-normal"><PrintHistoryBadge docType="engrave_sheet" docId={row.id} label="ใบสลัก" /></span>}
           </label>
           {f.engrave && (
             <div className="mt-2 space-y-2">
@@ -309,6 +372,10 @@ export function InstructionForm({ row, options, readOnly, canDelete, onManageEng
               {!multi && f.engrave_text.trim() && <p className="text-[11px] text-slate-400">ตัวอย่างใช้ฟอนต์ {font} · ช่องแดง = สลักไม่ได้ · กดพิมพ์ได้จากหน้ารายการ</p>}
             </div>
           )}
+        </div>
+        <div className="rounded-lg border border-slate-200 p-3">
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.via_chat} onChange={(e) => set("via_chat", e.target.checked)} /> ลูกค้าแจ้งทางแชท <span className="text-xs text-slate-400">(ไม่ได้ลงหมายเหตุในออเดอร์)</span></label>
+          {f.via_chat && <input value={f.chat_note} onChange={(e) => set("chat_note", e.target.value)} maxLength={300} placeholder="โน้ต เช่น แจ้งใน Shopee chat 25/11 · ขอห่อสีแดง" className={`${inputCls} mt-2`} />}
         </div>
         <Field label="หมายเหตุ"><textarea value={f.note} onChange={(e) => set("note", e.target.value)} rows={2} className={inputCls} /></Field>
         {row && (

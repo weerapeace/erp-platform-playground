@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
 import {
   canMoveCase,
+  cleanCommandDetails,
   cleanOrderNo,
   defaultCaseStatus,
   engraveTextError,
@@ -25,6 +26,7 @@ import {
   parseMoney,
   type CaseKind,
 } from "@/lib/order-ops";
+import { printSummaryOf } from "@/lib/print-log-server";
 import { findPlatformOrder, listPickerOrders, loadEngraveSpecials, OPS_ENTITY, OPS_TABLES, pickFields, str, whoAmI, type OpsTableKey } from "@/lib/order-ops-server";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +34,7 @@ export const dynamic = "force-dynamic";
 type Row = Record<string, unknown>;
 
 const FIELDS: Record<OpsTableKey, readonly string[]> = {
-  instructions: ["order_no", "platform", "customer_name", "sku", "commands", "engrave", "engrave_text", "engrave_type", "engrave_position", "engrave_font", "note", "status", "platform_order_id", "is_trial"],
+  instructions: ["order_no", "platform", "customer_name", "sku", "commands", "command_details", "engrave", "engrave_text", "engrave_type", "engrave_position", "engrave_font", "note", "status", "platform_order_id", "is_trial", "via_chat", "chat_note"],
   waitlist: ["order_no", "platform", "customer_name", "sku", "note", "informed", "platform_order_id", "is_trial"],
   cases: ["kind", "order_no", "customer_name", "sku", "qty", "topic", "detail", "resolution", "status", "replacement_sku", "shipping_charge", "shipping_refund", "bank_info", "shipping_address", "return_date", "images", "note", "platform_order_id", "is_trial"],
 };
@@ -45,7 +47,7 @@ const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
 /** ติ๊กของงานซ่อม/คืน → ช่องเวลา */
 const CASE_FLAGS = { checked: "checked_at", stock_received: "stock_received_at", zort_cancelled: "zort_cancelled_at", packed: "packed_at" } as const;
 
-const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos"];
+const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos", "command_choice"];
 const isTable = (t: string | null): t is OpsTableKey => t === "instructions" || t === "waitlist" || t === "cases";
 const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
 const uuidRe = /^[0-9a-f-]{36}$/i;
@@ -65,6 +67,9 @@ function normalize(t: OpsTableKey, row: Row, before: Row | null): string | null 
   if (t === "instructions") {
     if ("commands" in row) row.commands = Array.isArray(row.commands) ? [...new Set((row.commands as unknown[]).map((c) => String(c).trim()).filter(Boolean))].slice(0, 20) : [];
     if ("engrave" in row) row.engrave = row.engrave === true;
+    if ("command_details" in row) row.command_details = cleanCommandDetails(row.command_details, (row.commands ?? before?.commands ?? []) as string[]);
+    if ("via_chat" in row) row.via_chat = row.via_chat === true;
+    if ("chat_note" in row) row.chat_note = typeof row.chat_note === "string" && row.chat_note.trim() ? row.chat_note.trim().slice(0, 300) : null;
     if (row.engrave_type && !(ENGRAVE_TYPES as readonly string[]).includes(String(row.engrave_type))) return "รูปแบบสลักไม่ถูกต้อง";
     if (row.engrave_position && !(ENGRAVE_POSITIONS as readonly string[]).includes(String(row.engrave_position))) return "ตำแหน่งสลักไม่ถูกต้อง";
     if ("status" in row && !["todo", "done"].includes(String(row.status))) return "สถานะไม่ถูกต้อง";
@@ -163,9 +168,23 @@ export async function GET(request: Request) {
     const cols = t === "instructions" ? ["order_no", "customer_name", "sku", "engrave_text", "note"] : t === "waitlist" ? ["order_no", "customer_name", "sku", "note"] : ["order_no", "customer_name", "sku", "topic", "detail", "note"];
     q = q.or(cols.map((c) => `${c}.ilike.*${s}*`).join(","));
   }
-  q = q.order(trash ? "deleted_at" : "created_at", { ascending: false }).range((page - 1) * size, page * size - 1);
-  const { data, count, error } = await q;
-  if (error) return bad("โหลดรายการไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+  // กรองสถานะพิมพ์ (ข้อ 3) ต้องรู้สถานะทุกใบก่อน → ดึงสูงสุด 1000 แล้วแบ่งหน้าเอง
+  const printFilter = t === "instructions" ? sp.get("print") : null;
+  q = q.order(trash ? "deleted_at" : "created_at", { ascending: false });
+  q = printFilter === "printed" || printFilter === "unprinted" ? q.limit(1000) : q.range((page - 1) * size, page * size - 1);
+  const res0 = await q;
+  if (res0.error) return bad("โหลดรายการไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+  let data = (res0.data ?? []) as Row[];
+  let count = res0.count ?? 0;
+  if (t === "instructions" && data.length) {
+    data = await withPrintState(admin, data);
+    if (printFilter === "printed" || printFilter === "unprinted") {
+      const want = printFilter === "printed" ? "done" : "todo";
+      const all = data.filter((r) => (r.print_state as { state: string }).state === want);
+      count = all.length;
+      data = all.slice((page - 1) * size, page * size);
+    }
+  }
 
   // ตัวเลขการ์ด (ไม่นับถังขยะ)
   const summary: Record<string, number> = {};
@@ -194,6 +213,33 @@ export async function GET(request: Request) {
     summary.trial = tr.count ?? 0;
   }
   return NextResponse.json({ rows: data ?? [], total: count ?? 0, summary });
+}
+
+/**
+ * สถานะพิมพ์ของคำสั่ง (ข้อ 3 · จากประวัติพิมพ์กลาง print_logs — ไม่มีตารางใหม่)
+ *   ใบสลัก = print_logs doc_type engrave_sheet (doc_id = id คำสั่ง) · การ์ด = order_gift_cards ของออเดอร์ (printed_at / เขียนมือ)
+ *   state: none = ไม่มีอะไรต้องพิมพ์ · todo = ยังพิมพ์ไม่ครบ · done = พิมพ์ครบ
+ */
+async function withPrintState(admin: ReturnType<typeof supabaseAdmin>, rows: Row[]): Promise<Row[]> {
+  const ids = rows.map((r) => String(r.id));
+  const poIds = [...new Set(rows.map((r) => str(r.platform_order_id)).filter((x): x is string => !!x))];
+  const [eng, cardsRes] = await Promise.all([
+    printSummaryOf(admin, "engrave_sheet", ids),
+    poIds.length ? admin.from("order_gift_cards").select("id, platform_order_id, printed_at, printed_by_name, print_count, hand_written_at").in("platform_order_id", poIds.slice(0, 500)).is("deleted_at", null) : Promise.resolve({ data: [] }),
+  ]);
+  const cardsBy = new Map<string, Row[]>();
+  for (const c of (cardsRes.data ?? []) as Row[]) { const k = String(c.platform_order_id); cardsBy.set(k, [...(cardsBy.get(k) ?? []), c]); }
+  return rows.map((r) => {
+    const needEngrave = r.engrave === true && !!str(r.engrave_text);
+    const e = eng.get(String(r.id)) ?? null;
+    const cards = r.platform_order_id ? cardsBy.get(String(r.platform_order_id)) ?? [] : [];
+    const done = cards.filter((c) => c.printed_at || c.hand_written_at);
+    const lastCard = [...done].sort((a, b) => String(b.printed_at ?? b.hand_written_at).localeCompare(String(a.printed_at ?? a.hand_written_at)))[0];
+    const card = cards.length ? { total: cards.length, printed: done.length, last: str(lastCard?.printed_at) ?? str(lastCard?.hand_written_at), by: str(lastCard?.printed_by_name) } : null;
+    const needs = (needEngrave ? 1 : 0) + (cards.length ? 1 : 0);
+    const ok = (needEngrave && e ? 1 : 0) + (card && card.printed === card.total ? 1 : 0);
+    return { ...r, print_state: { state: needs === 0 ? "none" : ok >= needs ? "done" : "todo", engrave: needEngrave ? (e ? { n: e.n, last: e.last } : { n: 0, last: null }) : null, card } };
+  });
 }
 
 export async function POST(request: Request) {

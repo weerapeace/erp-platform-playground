@@ -21,12 +21,12 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { INSTRUCTION_STATUS, invalidEngraveChars } from "@/lib/order-ops";
+import { INSTRUCTION_STATUS, commandSummary, invalidEngraveChars } from "@/lib/order-ops";
 import {
   Field, HistoryList, OptionsManager, OrderNoField, Pill, SkuField, TrashToggle, TrialBanner, TrialPill,
   fmtDate, inputCls, opsJson, useOpsOptions, type OrderHit,
 } from "../shared";
-import { EngraveSettings, InstructionForm, type Ins } from "../instruction-form";
+import { EngraveSettings, InstructionForm, type Ins, type InsPrefill } from "../instruction-form";
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
 import Link from "next/link";
 import { ScrollTabs } from "@/components/scroll-tabs";
@@ -74,6 +74,11 @@ function Body() {
   const [summary, setSummary] = useState<Summary>({});
   const [gift, setGift] = useState<GiftCounts>({});
   const [bump, setBump] = useState(0);
+  // "+ คำสั่งพิเศษ" = ลูกค้าแจ้งทางแชท (ไม่ได้ลงหมายเหตุ) → เลือกออเดอร์ในป๊อป (เจ้าของเลือก 2026-11-25 ข้อ 4)
+  const [chatNew, setChatNew] = useState(false);
+  const canEditIns = usePermission("order_ops.edit");
+  const canDeleteIns = usePermission("order_ops.delete");
+  const { options: hubOptions } = useOpsOptions();
   const refresh = () => setBump((b) => b + 1);
 
   // ตัวเลขบนปุ่มส่วน — โหลดครั้งแรก (ส่วนที่เปิดอยู่อัปเดตต่อเองตอนโหลดรายการ)
@@ -98,10 +103,17 @@ function Body() {
           <h1 className="text-xl font-bold text-slate-900">คำสั่งพิเศษ &amp; การ์ด</h1>
           <p className="text-sm text-slate-500">ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก → สร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        {canEditIns && <button type="button" onClick={() => setChatNew(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" title="ลูกค้าแจ้งทางแชท ไม่ได้ลงหมายเหตุในออเดอร์"><Icon value="i:plus" /> คำสั่งพิเศษ</button>}
         {(section === "inbox" || section === "cards") && (
           <Link href="/order-ops/gift-cards/edit?new=1" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:plus" /> การ์ดใหม่ (ไม่ผูกออเดอร์)</Link>
         )}
+        </div>
       </div>
+      {chatNew && (
+        <InstructionForm row={null} prefill={{ via_chat: true }} options={hubOptions} readOnly={!canEditIns} canDelete={canDeleteIns}
+          onClose={() => setChatNew(false)} onSaved={() => { setChatNew(false); refresh(); go("orders"); }} />
+      )}
       <ScrollTabs activeKey={section} className="mb-3 border-b border-slate-200">
         {tabs.map((t) => (
           <button key={t.key} type="button" data-tab-key={t.key} onClick={() => go(t.key)}
@@ -134,6 +146,7 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
   const [q, setQ] = useState(initialQ);
   const pendingOpen = useRef<string | null>(openId);
   const [trash, setTrash] = useState(false);
+  const [printF, setPrintF] = useState<"" | "unprinted" | "printed">("");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Ins[]>([]);
   const [total, setTotal] = useState(0);
@@ -154,6 +167,7 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
     else if (filter === "engrave") { p.set("status", "todo"); p.set("engrave", "1"); }
     else if (filter === "done") p.set("status", "done");
     if (q.trim()) p.set("q", q.trim());
+    if (printF && !trash) p.set("print", printF);
     try {
       const r = await opsJson<{ rows: Ins[]; total: number; summary: Summary }>(`/api/order-ops?${p}`);
       setRows(r.rows); setTotal(r.total);
@@ -161,10 +175,10 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
       if (pendingOpen.current) { const hit = r.rows.find((x) => x.id === pendingOpen.current); pendingOpen.current = null; if (hit) setEditing(hit); }
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
-  }, [page, trash, filter, q, onSummary]);
+  }, [page, trash, filter, q, printF, onSummary]);
 
   useEffect(() => { const t = setTimeout(() => void load(), q ? 300 : 0); return () => clearTimeout(t); }, [load, bump, q]);
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [filter, trash, q]);
+  useEffect(() => { setPage(1); setSelected(new Set()); }, [filter, trash, q, printF]);
   // กลับมาจากแท็บใบสลัก → โหลดใหม่ ให้จำนวนครั้งที่พิมพ์อัปเดต
   useEffect(() => { const on = () => void load(); window.addEventListener("focus", on); return () => window.removeEventListener("focus", on); }, [load]);
 
@@ -215,13 +229,31 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
 
   const cmdChips = (r: Ins) => (
     <div className="flex flex-wrap gap-1">
-      {r.commands.map((c) => <Pill key={c}>{c}</Pill>)}
+      {r.via_chat && <Pill tone="warning">แจ้งทางแชท</Pill>}
+      {r.commands.map((c) => <Pill key={c}>{commandSummary(c, r.command_details?.[c])}</Pill>)}
       {r.engrave && r.engrave_text && <Pill tone="accent">สลัก: {r.engrave_text} · {r.engrave_type ?? "-"} · {r.engrave_position ?? "-"}{r.engrave_font ? ` · ${r.engrave_font}` : ""}</Pill>}
       {r.engrave && r.engrave_text && invalidEngraveChars(r.engrave_text, specials).length > 0 && <Pill tone="danger">มีตัวที่สลักไม่ได้</Pill>}
       {!r.commands.length && !(r.engrave && r.engrave_text) && <span className="text-xs text-slate-400">-</span>}
       {r.note && <span className="w-full text-xs text-slate-500">หมายเหตุ: {r.note}</span>}
+      {r.via_chat && r.chat_note && <span className="w-full text-xs text-amber-700">แชท: {r.chat_note}</span>}
     </div>
   );
+  // สถานะพิมพ์ (ใบสลัก + การ์ด) — จากประวัติพิมพ์กลาง
+  const printPill = (r: Ins) => {
+    const ps = r.print_state;
+    if (!ps || ps.state === "none") return <span className="text-xs text-slate-300">-</span>;
+    const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : "");
+    return (
+      <div className="space-y-0.5 text-[11px] leading-tight">
+        {ps.engrave && (ps.engrave.n > 0
+          ? <div className="text-emerald-700">ใบสลัก พิมพ์แล้ว {ps.engrave.n} ครั้ง<br /><span className="text-slate-400">{when(ps.engrave.last)}</span></div>
+          : <div className="text-rose-600">ใบสลัก ยังไม่พิมพ์</div>)}
+        {ps.card && (ps.card.printed >= ps.card.total
+          ? <div className="text-emerald-700">การ์ด พิมพ์แล้ว{ps.card.total > 1 ? ` ${ps.card.printed}/${ps.card.total}` : ""}<br /><span className="text-slate-400">{when(ps.card.last)}{ps.card.by ? ` · ${ps.card.by}` : ""}</span></div>
+          : <div className="text-rose-600">การ์ด ยังไม่พิมพ์ {ps.card.printed}/{ps.card.total}</div>)}
+      </div>
+    );
+  };
   const statusPill = (r: Ins) => <Pill tone={INSTRUCTION_STATUS[r.status].tone}>{INSTRUCTION_STATUS[r.status].label}</Pill>;
 
   const columns: MiniColumn<Ins>[] = [
@@ -234,10 +266,10 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
     { key: "cmd", header: "คำสั่ง / สลัก", width: "2fr", cell: cmdChips },
     { key: "status", header: "สถานะ", width: "6.5rem", sortValue: (r) => r.status, cell: (r) => (
       <button disabled={!canEdit || trash} onClick={(e) => { e.stopPropagation(); void toggleDone(r); }} title={canEdit ? "กดสลับ เสร็จ / ยังไม่ทำ" : ""}>{statusPill(r)}</button>) },
-    { key: "print", header: "พิมพ์", width: "6rem", align: "center", cell: (r) => r.engrave && r.engrave_text ? (
+    { key: "printst", header: "สถานะพิมพ์", width: "9rem", cell: printPill },
+    { key: "print", header: "พิมพ์", width: "5rem", align: "center", cell: (r) => r.engrave && r.engrave_text ? (
       <div onClick={(e) => e.stopPropagation()}>
         <button onClick={() => printSheets([r])} disabled={trash} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-40"><Icon name="printer" className="h-3.5 w-3.5" /> พิมพ์</button>
-        {r.print_count > 0 && <div className="mt-0.5 text-[11px] text-slate-400">พิมพ์แล้ว {r.print_count} ครั้ง</div>}
       </div>) : <span className="text-xs text-slate-300">-</span> },
     { key: "created", header: "บันทึกเมื่อ", width: "7.5rem", sortValue: (r) => r.created_at, cell: (r) => <span className="text-xs text-slate-500">{fmtDate(r.created_at)}<br />{r.created_by_name ?? ""}</span> },
   ];
@@ -258,6 +290,11 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
       />
       <div className="my-2 flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขออเดอร์ / ชื่อลูกค้า / SKU / ชื่อสลัก" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
+        {!trash && (
+          <select value={printF} onChange={(e) => setPrintF(e.target.value as typeof printF)} aria-label="สถานะพิมพ์" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+            <option value="">สถานะพิมพ์: ทั้งหมด</option><option value="unprinted">ยังพิมพ์ไม่ครบ</option><option value="printed">พิมพ์ครบแล้ว</option>
+          </select>
+        )}
         <TrashToggle on={trash} onChange={setTrash} />
         {canManage && <button onClick={() => setOptOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> จัดการคำสั่ง</button>}
         {canManage && <button onClick={() => setEngraveOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="settings" className="h-3.5 w-3.5" /> ตั้งค่าเครื่องสลัก</button>}
@@ -302,6 +339,7 @@ function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: {
                 </div>
                 <div className="text-xs text-slate-500">{r.platform ?? "-"} · {r.customer_name ?? "-"} · <span className="font-mono">{r.sku ?? "-"}</span></div>
                 {cmdChips(r)}
+                {printPill(r)}
                 {!trash && (
                   <div className="flex gap-2 pt-1" onClick={(e) => e.stopPropagation()}>
                     {r.engrave && r.engrave_text && <button onClick={() => printSheets([r])} className="flex-1 rounded-md border border-slate-200 py-1.5 text-xs"><Icon name="printer" className="mr-1 inline h-3.5 w-3.5" />พิมพ์{r.print_count ? ` (${r.print_count})` : ""}</button>}
