@@ -110,3 +110,34 @@ describe("เอฟเฟกต์ต่อจุด (รอบ 2)", () => {
     expect(e.attrs["tm-fx-menu"]).toBe("accentBar");
   });
 });
+
+describe("การ์ด รอบ 3", () => {
+  it("ค่าเริ่มของธีม = ไม่แตะการ์ด (ไม่มี attr ขอบ/เงา)", () => {
+    const e = themeEffects(DEFAULT_THEME_CONFIG, pc);
+    for (const k of ["tm-card-border", "tm-card-shadow", "tm-card-bar", "tm-card-hglow", "tm-inset", "tm-stagger"]) expect(e.attrs[k]).toBeUndefined();
+  });
+  it("ขอบ/เงา/เรือง/เงาใน/โผล่ทีละใบ ตามค่าตั้ง", () => {
+    const cfg = mergeThemeConfig(DEFAULT_THEME_CONFIG, {
+      outline: { width: 2, color: "theme", style: "dashed", accentBar: true },
+      elevation: { depth: "float", color: "theme", hoverGlow: true, inset: true },
+      effects: { stagger: true, targets: { card: { fx: ["lift", "glow"] } } },
+    });
+    const e = themeEffects(cfg, pc);
+    expect(e.attrs).toMatchObject({ "tm-card-border": "1", "tm-card-bar": "1", "tm-card-shadow": "1", "tm-card-hglow": "1", "tm-inset": "1", "tm-stagger": "1", "tm-fx-card": "lift glow" });
+    expect(e.vars["--tm-card-bw"]).toBe("2px");
+    expect(e.vars["--tm-card-bs"]).toBe("dashed");
+    expect(e.vars["--tm-anim-card"]).toContain("tmGlow");
+  });
+  it("ขอบไล่สีวิ่ง: หยุดเมื่อปิดแอนิเมชัน", () => {
+    const cfg = mergeThemeConfig(DEFAULT_THEME_CONFIG, { outline: { gradient: true, running: true, width: 0 } });
+    expect(themeEffects(cfg, pc).attrs).toMatchObject({ "tm-card-border": "grad", "tm-card-run": "1" });
+    expect(themeEffects(cfg, pc).vars["--tm-card-bw"]).toBe("1px");
+    expect(themeEffects(cfg, { mobile: false, motionOff: true }).attrs["tm-card-run"]).toBeUndefined();
+  });
+  it("CSS ใน globals ใช้ตัวเลือกการ์ดตัวเดียวกับ CARD_SELECTOR", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { CARD_SELECTOR } = await import("../erp-theme-effects");
+    const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+    expect(css).toContain(CARD_SELECTOR);
+  });
+});

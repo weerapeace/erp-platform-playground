@@ -271,3 +271,31 @@ html[data-tm-underline] .border-b-2.border-blue-600 { animation: tmUnderTab .45s
 /* ไอคอนขยับตอนชี้ (ไอคอนแรกในปุ่ม/ลิงก์) */
 html[data-tm-wiggle] :is(a, button):hover > svg:first-child,
 html[data-tm-wiggle] :is(a, button):hover > span:first-child > svg { animation: tmWig .5s ease-in-out; }
+
+/* ================================================================
+   ธีมกลาง — การ์ด รอบ 3 (ขอบ · เงา · ยกตัว · เรือง · แถบเน้น · การ์ดโผล่ทีละใบ · เงาในช่องกรอก)
+   "การ์ด" = CARD_SELECTOR ใน lib/erp-theme-effects (ต้องตรงกัน — เทสต์เช็ก) · กล่องไหนไม่อยากโดน ใส่ data-tm-skip
+   ค่าเริ่มของธีม (ขอบเทา 1px · เงาบาง) ไม่ตั้ง attr = การ์ดหน้าตาเดิม
+   ================================================================ */
+html[data-tm-card-border="1"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) { border-width: var(--tm-card-bw); border-color: var(--tm-card-bc); border-style: var(--tm-card-bs); }
+html[data-tm-card-border="grad"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) {
+  border: var(--tm-card-bw) solid transparent;
+  background: linear-gradient(#fff, #fff) padding-box, var(--tm-flow) border-box;
+}
+html[data-tm-card-run] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) { background-size: 100% 100%, 300% 300%; animation: tmCardRun calc(4s * var(--tm-speed, 1)) linear infinite; }
+@keyframes tmCardRun { 0% { background-position: 0 0, 0% 50%; } 50% { background-position: 0 0, 100% 50%; } 100% { background-position: 0 0, 0% 50%; } }
+html[data-tm-card-bar] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) { border-left: 4px solid rgb(var(--tm-primary-600)); }
+html[data-tm-card-shadow] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) { box-shadow: var(--tm-card-shadow); }
+/* เอฟเฟกต์จุด "การ์ด": ยกตัว · เรืองแสงหายใจ (ไม่ทำกับการ์ดที่มีตาราง) */
+html[data-tm-fx-card~="lift"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):not(:has(table)) { transition: transform .15s ease, box-shadow .15s ease; }
+html[data-tm-fx-card~="lift"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):not(:has(table)):hover { transform: translateY(-3px); box-shadow: 0 12px 22px -12px rgba(15, 23, 42, .35); }
+html[data-tm-fx-card~="glow"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):not(:has(table)) { --tm-ring: var(--tm-ring-card); --tm-spread: var(--tm-spread-card); animation: var(--tm-anim-card); }
+html[data-tm-card-hglow] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *) { transition: box-shadow .15s ease, transform .15s ease; }
+html[data-tm-card-hglow] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):hover { box-shadow: 0 0 0 3px var(--tm-hring), 0 10px 20px -8px var(--tm-hring); }
+/* เงาด้านในช่องกรอก */
+html[data-tm-inset] [data-tm-page] :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]), textarea, select) { box-shadow: inset 0 2px 4px rgba(15, 23, 42, .1); }
+/* การ์ดโผล่ทีละใบ — ThemeApplier ใส่ .tm-stagger-in + animation-delay ตอนเปลี่ยนหน้า */
+html[data-tm-stagger] .tm-stagger-in { animation: tmStaggerIn calc(.45s * var(--tm-speed, 1)) cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes tmStaggerIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* เรือง + ขอบวิ่ง พร้อมกัน — รวมเป็นรายการเดียว (animation ทับกันไม่ได้) */
+html[data-tm-card-run][data-tm-fx-card~="glow"] [data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *):not(:has(table)) { animation: var(--tm-anim-card), tmCardRun calc(4s * var(--tm-speed, 1)) linear infinite; }

@@ -10,7 +10,16 @@ import { SPEED_FACTOR, effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpTh
 import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
 
 /** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
-export const ROUND2_TARGETS: EffectTarget[] = ["button", "topbar", "menu", "number", "bell"];
+export const ROUND2_TARGETS: EffectTarget[] = ["button", "topbar", "menu", "number", "bell", "card"];
+
+/**
+ * "การ์ด" ในหน้าจริง (รอบ 3) = กล่องขาว มีเส้นขอบ มุมมน ในเนื้อหาของหน้า ([data-tm-page])
+ *   - ไม่นับกล่องที่ซ้อนอยู่ในการ์ดอีกที (นับแค่ชั้นนอก) · ไม่นับกล่อง/โซนที่ใส่ data-tm-skip
+ *   - ⚠️ ต้องตรงกับ CSS ใน app/globals.css หัวข้อ "การ์ด รอบ 3" (เทสต์เช็กให้)
+ *   - ยกตัว/เรือง ไม่ทำกับการ์ดที่มีตารางข้างใน (CARD_MOTION_SELECTOR) — ตารางใหญ่ขยับแล้วเวียนหัว
+ */
+export const CARD_SELECTOR = "[data-tm-page] :is(div, section, article, li, a).bg-white:is(.border, .border-2):is(.rounded-lg, .rounded-xl, .rounded-2xl):not([data-tm-skip]):not(:is(.bg-white.border, [data-tm-skip]) *)";
+export const CARD_MOTION_SELECTOR = `${CARD_SELECTOR}:not(:has(table))`;
 const MOTION_FX = new Set<EffectKey>(EFFECTS.filter((e) => e.motion).map((e) => e.key));
 const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`; };
 
@@ -102,6 +111,29 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
       vars["--tm-anim-bell-icon"] = anims(list.filter((e) => e === "shake")).join(", ") || "none";
     } else vars[`--tm-anim-${t}`] = anims(list).join(", ") || "none";
   }
+  // ── การ์ด: เส้นขอบ · เงา (รอบ 3) — ค่าเริ่ม (ขอบเทา 1px ทึบ · เงาบางสีเทา) = ไม่แตะ ปล่อยหน้าตาเดิม ──
+  const o = c.outline, el = c.elevation;
+  const bdColor = o.color === "theme" ? p[500] : o.color === "soft" ? p[200] : "#e2e8f0";
+  if (o.width !== 1 || o.color !== "gray" || o.style !== "solid" || o.gradient) {
+    attrs["tm-card-border"] = o.gradient ? "grad" : "1";
+    vars["--tm-card-bw"] = `${o.gradient ? Math.max(1, o.width) : o.width}px`;
+    vars["--tm-card-bc"] = bdColor;
+    vars["--tm-card-bs"] = o.style;
+    if (o.gradient && o.running && motion) attrs["tm-card-run"] = "1";
+  }
+  if (o.accentBar || c.effects.targets.card.fx.includes("accentBar")) attrs["tm-card-bar"] = "1";
+  if (el.depth !== "soft" || el.color !== "gray") {
+    const sh = el.color === "theme" ? p[600] : el.color === "black" ? "#000000" : "#0f172a";
+    vars["--tm-card-shadow"] = el.depth === "none" ? "none"
+      : el.depth === "soft" ? `0 1px 3px ${rgba(sh, 0.12)}`
+      : el.depth === "medium" ? `0 6px 16px -4px ${rgba(sh, el.color === "black" ? 0.35 : 0.22)}`
+      : `0 18px 30px -10px ${rgba(sh, el.color === "black" ? 0.45 : 0.3)}`;
+    attrs["tm-card-shadow"] = "1";
+  }
+  if (el.hoverGlow) { attrs["tm-card-hglow"] = "1"; vars["--tm-hring"] = rgba(p[500], 0.35); }
+  if (el.inset) attrs["tm-inset"] = "1";
+  if (motion && c.effects.stagger) attrs["tm-stagger"] = "1";
+
   // ชี้/กด
   if (motion) {
     if (c.effects.scaleHover) attrs["tm-scale"] = "1";
@@ -137,4 +169,5 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
 export const EFFECT_ATTRS = [
   "tm-btn", "tm-shine", "tm-topbar", "tm-sidebar", "tm-sidegrad", "tm-enter", "tm-ganim", "tm-hover", "tm-count",
   "tm-fx-button", "tm-fx-topbar", "tm-fx-menu", "tm-fx-number", "tm-fx-bell", "tm-scale", "tm-ripple", "tm-underline", "tm-wiggle",
+  "tm-fx-card", "tm-card-border", "tm-card-run", "tm-card-bar", "tm-card-shadow", "tm-card-hglow", "tm-inset", "tm-stagger",
 ] as const;

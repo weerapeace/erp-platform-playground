@@ -13,7 +13,7 @@ import { useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { themeCssVars, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { themeForApp } from "@/lib/erp-theme-assign";
-import { EFFECT_ATTRS, themeEffects, type ThemeEffects, type ThemeLayer } from "@/lib/erp-theme-effects";
+import { CARD_SELECTOR, EFFECT_ATTRS, themeEffects, type ThemeEffects, type ThemeLayer } from "@/lib/erp-theme-effects";
 import { ensureThemeFont, useActiveThemes } from "./active-themes";
 import { useIsMobileScreen, useMotionPref } from "./motion-pref";
 
@@ -70,6 +70,30 @@ export function ThemeApplier({ appKey, decor = true }: { appKey: string | null |
     const t = setTimeout(() => el.classList.remove("tm-enter"), 900);
     return () => clearTimeout(t);
   }, [pathname, fx.attrs]);
+
+  // การ์ดโผล่ทีละใบ (รอบ 3) — หลังเปลี่ยนหน้า ไล่ใส่ .tm-stagger-in ให้การ์ดที่เห็นบนจอ (ข้อมูลมาช้าก็ตามเก็บอีก 2 รอบ)
+  const staggerOn = !!fx.attrs["tm-stagger"];
+  useEffect(() => {
+    if (!staggerOn || !decor) return;
+    let n = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const run = () => {
+      let cards: HTMLElement[] = [];
+      try { cards = Array.from(document.querySelectorAll<HTMLElement>(CARD_SELECTOR)); } catch { return; }
+      for (const el of cards) {
+        if (el.dataset.tmSt === pathname || n >= 30) continue;
+        const r = el.getBoundingClientRect();
+        if (r.top > window.innerHeight || r.bottom < 0) continue;
+        el.dataset.tmSt = pathname;
+        el.style.animationDelay = `${n * 60}ms`;
+        el.classList.add("tm-stagger-in");
+        n++;
+        timers.push(setTimeout(() => { el.classList.remove("tm-stagger-in"); el.style.animationDelay = ""; }, 1500 + n * 60));
+      }
+    };
+    for (const ms of [40, 400, 1000]) timers.push(setTimeout(run, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [pathname, staggerOn, decor]);
 
   // คลื่นน้ำตอนกดปุ่มหลัก (เอฟเฟกต์ "ripple") — จุดขาวขยายจากจุดที่กด แล้วหายเอง
   const rippleOn = !!fx.attrs["tm-ripple"];
