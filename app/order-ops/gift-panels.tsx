@@ -20,7 +20,7 @@ import { Popover } from "@/components/popover";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Drawer, ERPModal } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
-import { OrderDetailView } from "@/app/master/platform-orders/order-detail-view";
+import dynamic from "next/dynamic";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { CardPreview, useCardFonts, type UploadedFont } from "@/components/card-designer";
@@ -29,6 +29,9 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
 import { cardStatus, extractEngraveText, type CardDoc } from "@/lib/gift-card-design";
 import { ENGRAVE_MODE_LABEL, ENGRAVE_SOURCE_LABEL, type EngraveMode, type EngraveSource } from "@/lib/order-ops";
+
+// ลิ้นชักรายละเอียดออเดอร์ (ของศูนย์ออเดอร์) หนัก — โหลดเฉพาะตอนกดเปิดแถว
+const OrderDetailView = dynamic(() => import("@/app/master/platform-orders/order-detail-view").then((m) => m.OrderDetailView), { ssr: false, loading: () => <LoadingState /> });
 
 type CardMini = { id: string; message: string | null; printed_at: string | null; hand_written_at: string | null; updated_at: string };
 type NoteRow = {
