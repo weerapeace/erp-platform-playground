@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  isChatPermissionError, lazadaMessageOf, lazadaSessionOf, nsGreater, parseJsonContent, shopeeConvOf, shopeeImageUrl,
+  anyTsToMs, isChatPermissionError, lazadaMessageOf, lazadaSessionOf, nsGreater, parseJsonContent, shopeeConvOf, shopeeImageUrl,
   shopeeMessageOf, tiktokConvOf, tiktokMessageOf, toInbound, toIso,
 } from "@/lib/chat/shop-parse";
 
@@ -18,6 +18,14 @@ describe("เวลา", () => {
     expect(toIso("abc", "s")).toBeNull();
     expect(toIso(12, "s")).toBeNull();
   });
+  it("เวลาไม่รู้หน่วย → มิลลิวินาที (ดูจากจำนวนหลัก)", () => {
+    expect(anyTsToMs(1764064800)).toBe(1764064800000);
+    expect(anyTsToMs("1764064800123")).toBe(1764064800123);
+    expect(anyTsToMs("1764064800123456")).toBe(1764064800123);
+    expect(anyTsToMs("1764064800123456789")).toBe(1764064800123);
+    expect(anyTsToMs("")).toBe(0);
+    expect(anyTsToMs("12")).toBe(0);
+  });
   it("เทียบนาโนวินาทีแบบข้อความ (เกิน Number)", () => {
     expect(nsGreater("1764064800123456790", "1764064800123456789")).toBe(true);
     expect(nsGreater("1764064800123456789", "1764064800123456789")).toBe(false);
@@ -28,7 +36,7 @@ describe("เวลา", () => {
 describe("Shopee", () => {
   it("แถวห้อง: เก็บรหัสเป็นข้อความ (64 บิต)", () => {
     const c = shopeeConvOf({ conversation_id: "2442096651766497650", to_id: 123456789, to_name: "nong_mai88", to_avatar: "abcdEF12_avatar", last_message_timestamp: "1764064800123456789", unread_count: 2 });
-    expect(c).toEqual({ id: "2442096651766497650", buyerId: "123456789", name: "nong_mai88", avatar: "https://cf.shopee.co.th/file/abcdEF12_avatar", lastNs: "1764064800123456789", unread: 2 });
+    expect(c).toEqual({ id: "2442096651766497650", buyerId: "123456789", name: "nong_mai88", avatar: "https://cf.shopee.co.th/file/abcdEF12_avatar", lastMs: 1764064800123, lastRaw: "1764064800123456789", unread: 2 });
     expect(shopeeConvOf({ conversation_id: "x", to_id: 1 })).toBeNull();
   });
   it("ข้อความลูกค้า / ร้านตอบเอง / ตอบอัตโนมัติ", () => {

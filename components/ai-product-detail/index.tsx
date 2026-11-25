@@ -18,12 +18,12 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { useFormDraft } from "@/components/form/use-form-draft";
 import { DRAFT_PREFIX, decodeDraft } from "@/lib/form-draft";
 import { parseFits, type FitPick } from "@/lib/product-fits";
-import { isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
+import { isPhrase, isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
 import {
-  MANUAL_FIELDS, fitsFromSize, mergeExtras, missingManual, missingTopics, pickParcelBox, templateFor,
+  MANUAL_FIELDS, fitsFromSize, highlightChoices, mergeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
   type FitCatalogRow, type ParcelBox,
 } from "@/lib/ai-draft-setup";
-import { ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, useDraftSetup, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
+import { CreateTagModal, ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
@@ -131,7 +131,14 @@ function ModelPicker() {
  * แท็กมีผลกับ AI 2 ทาง: ① ใช้จับ "กฎตามประเภทสินค้า"  ② ส่งเข้า prompt ให้ AI รู้ว่าสินค้าเป็นของประเภทไหน
  * แสดง 2 ภาษา (ไทย · EN) — แท็กไหนยังไม่มีชื่ออังกฤษ เติมได้ในที่เดียวกัน
  */
-function TagPicker({ parentId, onChanged, onCount }: { parentId: string; onChanged?: () => void; onCount?: (n: number) => void }) {
+function TagPicker({ parentId, onChanged, onCount, onPicked, canRule = false }: {
+  parentId: string; onChanged?: () => void; onCount?: (n: number) => void;
+  /** แท็กที่ติดอยู่ (ไว้สร้างกฎประเภทจากแท็ก) */
+  onPicked?: (tags: { id: string; name: string }[]) => void;
+  /** สร้างกฎประเภทไปพร้อมแท็กใหม่ได้ (tasks.approve) */
+  canRule?: boolean;
+}) {
+  const [createName, setCreateName] = useState<string | null>(null);
   const [all, setAll] = useState<TagRow[] | null>(null);
   const [groups, setGroups] = useState<TagGroupLike[]>([]);
   const [mine, setMine] = useState<Set<string>>(new Set());
@@ -150,7 +157,11 @@ function TagPicker({ parentId, onChanged, onCount }: { parentId: string; onChang
     } catch { setAll([]); }
   }, [parentId]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (all !== null) onCount?.(mine.size); }, [all, mine, onCount]);
+  useEffect(() => {
+    if (all === null) return;
+    onCount?.(mine.size);
+    onPicked?.(all.filter((t) => mine.has(t.id)).map((t) => ({ id: t.id, name: t.name })));
+  }, [all, mine, onCount, onPicked]);
 
   const setTag = async (tagId: string, on: boolean) => {
     const j = await apiFetch("/api/product-tags", {
@@ -225,6 +236,13 @@ function TagPicker({ parentId, onChanged, onCount }: { parentId: string; onChang
                 ))}
                 {options.length === 0 && <p className="px-2 py-3 text-[12px] text-slate-400 text-center">ไม่พบแท็กที่ค้นหา</p>}
               </div>
+              {/* ค้นไม่เจอ/ไม่ตรงเป๊ะ → สร้างแท็กใหม่ได้เลย (ป๊อปใส่ชื่ออังกฤษ/กลุ่ม + สร้างกฎประเภทไปด้วย) */}
+              {q && !all.some((t) => t.name.trim().toLowerCase() === q) && (
+                <button type="button" onClick={() => { setCreateName(search.trim()); setOpen(false); }}
+                  className="mt-1 w-full h-8 px-2 text-[12.5px] font-medium rounded-md border border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50 text-left">
+                  ＋ สร้างแท็ก “{search.trim()}”
+                </button>
+              )}
               <p className="mt-1 pt-1 border-t border-slate-100 text-[11px] text-slate-400">
                 ตั้งชื่ออังกฤษของแท็กได้ที่หน้า SKU → แท็บ Tags Manager
               </p>
@@ -234,6 +252,10 @@ function TagPicker({ parentId, onChanged, onCount }: { parentId: string; onChang
       </div>
       {msg && <p className="mt-1 text-[12px] text-rose-600">{msg}</p>}
       {info && !msg && <p className="mt-1 text-[12px] text-emerald-600">✓ {info}</p>}
+      {createName !== null && (
+        <CreateTagModal parentId={parentId} initialName={createName} groups={groups} canRule={canRule}
+          onDone={() => { setSearch(""); void load(); onChanged?.(); }} onClose={() => setCreateName(null)} />
+      )}
     </div>
   );
 }
@@ -577,6 +599,8 @@ export function AiProductDetailModal({
   const [rulesTick, setRulesTick] = useState(0);      // แก้กฎในขั้น 2 แล้ว → โหลดใหม่
   const [rulesMatched, setRulesMatched] = useState<MatchedRule[]>([]);
   const [ruleEditOpen, setRuleEditOpen] = useState(false);
+  const [pickedTags, setPickedTags] = useState<{ id: string; name: string }[]>([]);
+  const [newRuleOpen, setNewRuleOpen] = useState(false);
   useEffect(() => {
     let off = false;
     apiFetch(`/api/ai/product-rules?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
@@ -629,21 +653,30 @@ export function AiProductDetailModal({
 
   // ── จำนวนช่อง (คลังกลางเดียวกับป๊อปแทรกรายละเอียด: product_highlight_items ชนิด slot) ──
   const [slotItems, setSlotItems] = useState<SnippetItem[] | null>(null);
+  const [phraseItems, setPhraseItems] = useState<SnippetItem[]>([]);   // คลังประโยคกลาง = จุดเด่นให้เลือกเมื่อประเภทยังไม่ได้ตั้ง
   const [slots, setSlots] = useState<Record<string, number>>({});
+  const [showAllSlots, setShowAllSlots] = useState(false);
   useEffect(() => {
     apiFetch("/api/master-v2/product_highlight_items?limit=1000").then((r) => r.json())
-      .then((j) => setSlotItems(((j.data ?? []) as SnippetItem[]).filter((x) => isSlot(x) && x.is_active !== false)
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))))
+      .then((j) => {
+        const all = ((j.data ?? []) as SnippetItem[]).filter((x) => x.is_active !== false).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        setSlotItems(all.filter((x) => isSlot(x)));
+        setPhraseItems(all.filter((x) => isPhrase(x)));
+      })
       .catch(() => setSlotItems([]));
   }, []);
 
+  // จุดเด่นให้เลือก: ชุดของประเภท · ไม่ได้ตั้ง = คลังประโยคกลาง
+  const hlChoices = highlightChoices(extras, phraseItems.map((x) => x.name));
+
   // ── รูปที่ AI จะดู ──
   const [imgKeys, setImgKeys] = useState<string[] | null>(null);
+  const [imgGroups, setImgGroups] = useState<Record<string, ImageGroupKey> | undefined>(undefined);
   const [imgMax, setImgMax] = useState(10);
   const [skip, setSkip] = useState<string[]>([]);
   useEffect(() => {
     apiFetch(`/api/ai/product-detail?parent_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
-      .then((j) => { setImgKeys((j.data?.keys ?? []) as string[]); if (j.data?.max) setImgMax(Number(j.data.max)); })
+      .then((j) => { setImgKeys((j.data?.keys ?? []) as string[]); if (j.data?.groups) setImgGroups(j.data.groups as Record<string, ImageGroupKey>); if (j.data?.max) setImgMax(Number(j.data.max)); })
       .catch(() => setImgKeys([]));
   }, [parentId]);
 
@@ -1131,7 +1164,7 @@ export function AiProductDetailModal({
         <div className="flex flex-col sm:flex-row gap-3">
           {/* รูปที่ AI จะดู — ข้างซ้ายทุกขั้น (มือถือ = แถบเลื่อนด้านบน) */}
           <div className="sm:w-[168px] shrink-0">
-            <ImageStrip keys={imgKeys} max={imgMax} skip={skip} onToggleSkip={(k) => setSkip((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))} />
+            <ImageStrip keys={imgKeys} groups={imgGroups} max={imgMax} skip={skip} onToggleSkip={(k) => setSkip((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))} />
           </div>
 
           <div className="flex-1 min-w-0 space-y-3">
@@ -1163,7 +1196,7 @@ export function AiProductDetailModal({
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-2.5">
-                  <TagPicker key={tagTick} parentId={parentId} onChanged={() => setRulesTick((x) => x + 1)} onCount={setTagCount} />
+                  <TagPicker key={tagTick} parentId={parentId} onChanged={() => setRulesTick((x) => x + 1)} onCount={setTagCount} onPicked={setPickedTags} canRule={canRule} />
                   {tagCount === 0 && <p className="mt-1 text-[11.5px] text-rose-600">{t("● จำเป็น: ติดแท็กประเภทสินค้าอย่างน้อย 1 แท็ก — AI จะรู้ว่าเป็นสินค้าอะไรและเข้ากฎที่ตั้งไว้", "● Required: add at least one product-type tag")}</p>}
                   {rulesMatched.length > 0 && (
                     <p className="mt-1.5 text-[12px] text-emerald-700">
@@ -1204,16 +1237,27 @@ export function AiProductDetailModal({
                   </span>
                   {canRule && rulesMatched.length > 0 && !ruleEditOpen && (
                     <button type="button" onClick={() => setRuleEditOpen(true)} className="h-7 px-2.5 text-[12px] rounded-lg border border-violet-200 text-violet-700 bg-white hover:bg-violet-50">
-                      {t("⚙ ตั้งค่าหัวข้อ", "⚙ Edit questions")}
+                      {t("⚙ ตั้งค่าประเภทนี้", "⚙ Set up this type")}
+                    </button>
+                  )}
+                  {/* ยังไม่เข้ากฎใด → สร้างกฎประเภทจากแท็กที่ติดอยู่ได้เลย */}
+                  {canRule && rulesMatched.length === 0 && pickedTags.length > 0 && !newRuleOpen && (
+                    <button type="button" onClick={() => setNewRuleOpen(true)} className="h-7 px-2.5 text-[12px] rounded-lg border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100">
+                      {t(`＋ สร้างกฎประเภท “${pickedTags[pickedTags.length - 1].name}”`, `＋ Create a rule for “${pickedTags[pickedTags.length - 1].name}”`)}
                     </button>
                   )}
                 </div>
-                {ruleEditOpen ? (
-                  <RuleQuickEditor rules={rulesMatched} onSaved={() => setRulesTick((x) => x + 1)} onClose={() => setRuleEditOpen(false)} />
+                {ruleEditOpen || newRuleOpen ? (
+                  <RuleQuickEditor rules={rulesMatched}
+                    newRule={newRuleOpen ? { name: pickedTags[pickedTags.length - 1]?.name ?? "", tag_ids: pickedTags.map((x) => x.id) } : null}
+                    slotItems={(slotItems ?? []).map((x) => ({ id: x.id, name: x.name }))} centralHighlights={phraseItems.map((x) => x.name)}
+                    onSaved={() => setRulesTick((x) => x + 1)} onClose={() => { setRuleEditOpen(false); setNewRuleOpen(false); }} />
                 ) : topics.length === 0 ? (
                   <p className="text-[12px] text-slate-400">
                     {rulesMatched.length === 0
-                      ? t("สินค้านี้ยังไม่เข้ากฎประเภทสินค้าใด — ติดแท็กในขั้นแรก หรือสร้างกฎที่ ⚙ คำสั่ง AI → กฎตามประเภทสินค้า", "No product-type rule matches — tag it in step 1 or create a rule under ⚙ AI prompt")
+                      ? pickedTags.length
+                        ? t("สินค้านี้ยังไม่เข้ากฎประเภทใด — กด “สร้างกฎประเภท” ด้านบนเพื่อตั้งหัวข้อ/จุดเด่น/ชนิดช่อง", "No type rule yet — press “Create a rule” above")
+                        : t("ยังไม่ได้ติดแท็กประเภทสินค้า — ติดแท็กในขั้นแรกก่อน", "No product-type tag yet — add one in step 1")
                       : t("กฎนี้ยังไม่มีหัวข้อที่ต้องตอบ", "This rule has no questions yet")}
                   </p>
                 ) : (
@@ -1243,11 +1287,14 @@ export function AiProductDetailModal({
                 )}
 
                 <div>
-                  <span className={label}>{t("จุดเด่น (ติ๊กเลือก)", "Highlights (tick)")}</span>
+                  <span className={label}>
+                    {t("จุดเด่น (ติ๊กเลือก)", "Highlights (tick)")}
+                    <span className="ml-1.5 text-[11px] font-normal text-slate-400">{hlChoices.fromType ? t("· ชุดของประเภทนี้", "· this type's set") : t("· จากคลังกลาง (ตั้งชุดของประเภทได้ที่ ⚙)", "· from the shared library (set per type via ⚙)")}</span>
+                  </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {[...new Set([...extras.highlights, ...aiHl, ...hl])].map((h) => (
+                    {[...new Set([...hlChoices.list, ...aiHl, ...hl])].map((h) => (
                       <button key={h} type="button" onClick={() => toggleHl(h)} className={chip(hl.includes(h))}>
-                        {hl.includes(h) ? "✓ " : ""}{aiHl.includes(h) && !extras.highlights.includes(h) ? "✨ " : ""}{h}
+                        {hl.includes(h) ? "✓ " : ""}{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{h}
                       </button>
                     ))}
                     {aiHlAllowed && (
@@ -1264,12 +1311,19 @@ export function AiProductDetailModal({
                 </div>
 
                 <div>
-                  <span className={label}>{t("จำนวนช่อง", "Compartments")}</span>
+                  <span className={label}>
+                    {t("จำนวนช่อง", "Compartments")}
+                    {extras.slot_ids.length > 0 && slotItems && (
+                      <button type="button" onClick={() => setShowAllSlots((v) => !v)} className="ml-2 text-[11px] font-normal text-indigo-600 underline">
+                        {showAllSlots ? t("โชว์เฉพาะของประเภทนี้", "Show this type only") : t(`ดูทั้งหมด (${slotItems.length} ชนิด)`, `Show all (${slotItems.length})`)}
+                      </button>
+                    )}
+                  </span>
                   {slotItems === null ? <p className="text-[12px] text-slate-400"><Spinner /></p>
                     : slotItems.length === 0 ? <p className="text-[12px] text-slate-400">{t("ยังไม่มีชนิดช่องในคลังกลาง (ตั้งได้ที่ป๊อปแทรกรายละเอียด)", "No compartment types yet")}</p>
                     : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {slotItems.map((s) => {
+                        {visibleSlots(slotItems, extras.slot_ids, slots, showAllSlots).map((s) => {
                           const n = slots[s.id] ?? 0;
                           const set = (v: number) => setSlots((p) => { const c = { ...p }; if (v > 0) c[s.id] = v; else delete c[s.id]; return c; });
                           return (
@@ -1491,6 +1545,12 @@ export function AiProductDetailModal({
                   {MANUAL_FIELDS.map((f) => {
                     const req = extras.manual_required.includes(f.key);
                     const miss = req && isBlank(manual[f.key]);
+                    if (f.key === "warranty") return (
+                      <div key={f.key}>
+                        <span className={`text-[12.5px] ${miss ? "text-rose-600" : "text-slate-600"}`}>{t(f.label, f.en)}{req && <span className="text-rose-500"> *</span>}</span>
+                        <WarrantySelect value={manual.warranty ?? ""} onChange={(v) => setManual((p) => ({ ...p, warranty: v }))} setup={setup} save={saveSetup} canEdit={canTpl} invalid={miss} />
+                      </div>
+                    );
                     return (
                       <label key={f.key} className="block">
                         <span className={`text-[12.5px] ${miss ? "text-rose-600" : "text-slate-600"}`}>{t(f.label, f.en)}{req && <span className="text-rose-500"> *</span>}</span>

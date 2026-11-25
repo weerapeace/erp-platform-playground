@@ -118,7 +118,8 @@ export type ShopChatChannel = (typeof SHOP_CHAT_CHANNELS)[number];
 export const isShopChatChannel = (v: unknown): v is ShopChatChannel => typeof v === "string" && (SHOP_CHAT_CHANNELS as readonly string[]).includes(v);
 
 /** สถานะการรับแชทของร้าน 1 ร้าน (หน้าตั้งค่า + ป้ายในหน้าแชท) */
-export type ShopChatState = "ready" | "off" | "no_permission" | "not_connected" | "expired" | "error";
+/** manual_only = ต่อได้แต่ระบบดึงเองไม่ได้ ต้องกดดึงเอง (Lazada — กติกาห้ามดึงเป็นรอบ) */
+export type ShopChatState = "ready" | "manual_only" | "off" | "no_permission" | "not_connected" | "expired" | "error";
 export type ShopChatStatus = {
   key: string; channel: ShopChatChannel; brand_id: string; brand_name: string | null; shop_name: string | null;
   enabled: boolean; state: ShopChatState; note: string | null; last_ok_at: string | null;

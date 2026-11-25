@@ -46,8 +46,9 @@ export const pullLazadaChats: ShopPuller = async (admin, shop, cursor, ctx) => {
   const lastManual = Number(cursor.manual_at) || 0;
   // รอบอัตโนมัติ = ไม่เรียก Lazada (กติกา) · สถานะคงตามผลการกดครั้งล่าสุด
   if (!ctx.force || Date.now() - lastManual < MANUAL_GAP_MS) {
-    const prev = cursor.state === "no_permission" ? "no_permission" : "ready";
-    return { ...keep, state: prev, note: prev === "no_permission" ? LAZ_NO_IM : ctx.force ? "เพิ่งดึงไปไม่ถึง 15 นาที — ลองใหม่ทีหลัง (กติกา Lazada)" : LAZ_NO_AUTO };
+    const prev = cursor.state === "no_permission" ? "no_permission" : "manual_only";
+    const last = lastManual ? ` · กดดึงล่าสุด ${new Date(lastManual).toLocaleString("th-TH", { timeZone: "Asia/Bangkok", hour12: false })}` : " · ยังไม่เคยกดดึง";
+    return { ...keep, state: prev, note: prev === "no_permission" ? LAZ_NO_IM : ctx.force ? "เพิ่งดึงไปไม่ถึง 15 นาที — ลองใหม่ทีหลัง (กติกา Lazada)" : `${LAZ_NO_AUTO}${last}` };
   }
   const t = await tokenFor(admin, shop.brandId);
   if (!t.ok) return { ...keep, state: /หมดอายุ/.test(t.reason) ? "expired" : "error", note: t.reason };
@@ -84,7 +85,7 @@ export const pullLazadaChats: ShopPuller = async (admin, shop, cursor, ctx) => {
     } catch { break; }
     if (s.lastMs > doneMs) doneMs = s.lastMs;
   }
-  return { events, cursor: { ...mark, ms: doneMs, state: "ready" }, state: "ready", note: `ดึงล่าสุดเมื่อกดดึงเอง · ${LAZ_NO_AUTO}` };
+  return { events, cursor: { ...mark, ms: doneMs, state: "manual_only" }, state: "ready", note: `กดดึงเองสำเร็จ (${sessions.length} ห้องมีข้อความใหม่) · ${LAZ_NO_AUTO}` };
 };
 
 export const lazadaChatAdapter: ChatChannelAdapter = {

@@ -65,6 +65,7 @@ export type ChatDetail = {
 /** ป้ายสถานะการรับแชทของร้าน (ภาษาคน + สี) */
 export const SHOP_STATE_VIEW: Record<ShopChatState, { label: string; cls: string }> = {
   ready: { label: "รับแชทอยู่", cls: "bg-emerald-50 text-emerald-800" },
+  manual_only: { label: "กดดึงเอง", cls: "bg-sky-50 text-sky-800" },
   off: { label: "ยังไม่เปิดรับ", cls: "bg-slate-100 text-slate-600" },
   no_permission: { label: "รอสิทธิ์แชท", cls: "bg-amber-50 text-amber-800" },
   not_connected: { label: "ยังไม่เชื่อมร้าน", cls: "bg-slate-100 text-slate-600" },

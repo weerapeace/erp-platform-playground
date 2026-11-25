@@ -12,7 +12,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { shopeeErrorText, shopeeFetch } from "@/lib/shopee";
 import { shopeeTokenOrReason } from "@/app/api/shopee/shared";
-import { isChatPermissionError, nsGreater, shopeeConvOf, shopeeMessageOf, toInbound, type ShopeeConvRow } from "./shop-parse";
+import { isChatPermissionError, shopeeConvOf, shopeeMessageOf, toInbound, type ShopeeConvRow } from "./shop-parse";
 import { platformIdOf, r2ImageFile, storeRemoteImage } from "./shop-common";
 import type { PullResult, ShopPuller } from "./shop-sync";
 import type { ChatChannelAdapter } from "./registry";
@@ -38,36 +38,55 @@ const failState = (e: unknown): Pick<PullResult, "state" | "note"> => {
   return { state: "error", note: shopeeErrorText(e) };
 };
 
-/** ดึงแชทใหม่ของร้าน 1 ร้าน (cursor.ns = เวลาข้อความล่าสุดที่ดึงแล้ว แบบนาโนวินาที) */
+/**
+ * ดึงแชทใหม่ของร้าน 1 ร้าน (cursor.ms = เวลาข้อความล่าสุดที่ดึงแล้ว แบบมิลลิวินาที)
+ * cursor.diag = ข้อมูลวินิจฉัยรอบล่าสุด (ชื่อช่องที่ Shopee ส่งมา · จำนวนห้อง · ค่าเวลาดิบของห้องแรก) — ไม่มีข้อมูลลูกค้า
+ *   เพิ่ม 2026-11-25: เปิดรับครั้งแรกได้ 0 ห้องทั้งที่ร้านมีแชท → ต้องเห็นของจริงที่ Shopee ตอบมา
+ */
 export const pullShopeeChats: ShopPuller = async (admin, shop, cursor, ctx) => {
-  const keep = { events: [] as ChatInbound[], cursor };
   const t = await tokenFor(admin, shop.brandId);
-  if (!t.ok) return { ...keep, state: /หมดอายุ/.test(t.reason) ? "expired" : "error", note: t.reason };
+  if (!t.ok) return { events: [], cursor, state: /หมดอายุ/.test(t.reason) ? "expired" : "error", note: t.reason };
   const auth = { accessToken: t.accessToken, shopId: t.shopId };
-  const sinceNs = typeof cursor.ns === "string" && /^\d+$/.test(cursor.ns) ? cursor.ns : `${Date.now() - BACKFILL_MS}000000`;
+  const sinceMs = Number(cursor.ms) > 0 ? Number(cursor.ms) : Date.now() - BACKFILL_MS;
 
-  // 1) ห้องที่มีข้อความใหม่กว่า sinceNs (เรียงใหม่ → เก่า · หยุดเมื่อเจอห้องที่เก่ากว่า)
+  // 1) ห้องที่มีข้อความใหม่กว่า sinceMs (เรียงใหม่ → เก่า · หยุดเมื่อเจอห้องที่เก่ากว่า)
   const changed: ShopeeConvRow[] = [];
+  const diag: Record<string, unknown> = { at: new Date().toISOString(), pages: 0, raw: 0, parsed: 0 };
   let next = "";
   try {
     for (let page = 0; page < 5 && changed.length < MAX_CONVS_PER_RUN; page++) {
       const q: Record<string, string | number> = { direction: "latest", type: "all", page_size: 20 };
       if (next) q.next_timestamp_nano = next;
       const r = resp(await shopeeFetch("/api/v2/sellerchat/get_conversation_list", { query: q, ...auth }));
-      const rows = (Array.isArray(r.conversations) ? r.conversations : []).map((c) => shopeeConvOf(c as Obj)).filter((c): c is ShopeeConvRow => !!c);
+      const rawList = Array.isArray(r.conversations) ? r.conversations as Obj[] : [];
+      const rows = rawList.map((c) => shopeeConvOf(c)).filter((c): c is ShopeeConvRow => !!c);
+      if (page === 0) {
+        diag.resp_keys = Object.keys(r).slice(0, 20);
+        diag.conv_keys = rawList[0] ? Object.keys(rawList[0]).slice(0, 40) : [];
+        diag.first_ts_raw = rawList[0] ? String(rawList[0].last_message_timestamp ?? "") : null;
+        diag.newest = rows[0]?.lastMs ? new Date(rows[0].lastMs).toISOString() : null;
+      }
+      diag.pages = page + 1; diag.raw = Number(diag.raw) + rawList.length; diag.parsed = Number(diag.parsed) + rows.length;
       let older = false;
-      for (const c of rows) { if (nsGreater(c.lastNs, sinceNs)) changed.push(c); else older = true; }
+      for (const c of rows) { if (c.lastMs > sinceMs) changed.push(c); else older = true; }
       const pr = (r.page_result ?? {}) as Obj;
       next = String(((pr.next_cursor ?? {}) as Obj).next_message_time_nano ?? "");
       if (older || pr.more !== true || !next) break;
     }
-  } catch (e) { return { ...keep, ...failState(e) }; }
-  if (changed.length === 0) return { ...keep, state: "ready", note: null };
+  } catch (e) { return { events: [], cursor: { ...cursor, diag: { ...diag, error: String((e as Error)?.message ?? e).slice(0, 200) } }, ...failState(e) }; }
+  if (changed.length === 0) {
+    // ไม่มีห้องใหม่ — บอกเหตุผลที่ตรวจได้ (ร้านไม่มีแชทเลย / อ่านห้องไม่ออก / ทุกห้องเก่ากว่าที่ดึงแล้ว)
+    const note = Number(diag.raw) === 0 ? "Shopee ตอบว่าร้านยังไม่มีห้องแชท"
+      : Number(diag.parsed) === 0 ? `อ่านห้องแชทจาก Shopee ไม่ออก (${diag.raw} ห้อง) — แจ้งผู้ดูแลระบบ`
+        : null;
+    return { events: [], cursor: { ...cursor, diag }, state: note && Number(diag.raw) > 0 ? "error" : "ready", note };
+  }
 
   // 2) ข้อความของแต่ละห้อง (เก่า → ใหม่) · เวลาไม่พอ = ห้องที่เหลือรอบหน้า (cursor ขยับเท่าห้องที่ทำครบ)
+  const keep = { events: [] as ChatInbound[], cursor: { ...cursor, diag } };
   const todo = changed.slice(0, MAX_CONVS_PER_RUN).reverse();
   const events: ChatInbound[] = [];
-  let doneNs = sinceNs;
+  let doneMs = sinceMs;
   let allDone = true;
   for (const c of todo) {
     if (Date.now() > ctx.deadline - 4_000) { allDone = false; break; }
@@ -79,17 +98,19 @@ export const pullShopeeChats: ShopPuller = async (admin, shop, cursor, ctx) => {
       if (events.length === 0) return { ...keep, ...failState(e) };
       allDone = false; break;
     }
-    const sinceMs = Number(sinceNs.slice(0, -6) || 0);
+    if (msgs.length === 0 && !diag.msg_keys) diag.msg_resp_empty = true;
+    if (msgs[0] && !diag.msg_keys) { diag.msg_keys = Object.keys(msgs[0]).slice(0, 40); diag.msg_ts_raw = String(msgs[0].created_timestamp ?? ""); }
     for (const m of msgs) {
       const p = shopeeMessageOf(m, { id: c.id, shopId: t.shopId });
       if (!p || p.skip || Date.parse(p.sentAt) < sinceMs - 60_000) continue;   // เก่ากว่าที่ดึงแล้ว (เผื่อ 1 นาที — ซ้ำได้ ระบบกันซ้ำด้วยรหัสข้อความ)
       const imageKey = p.remoteImage ? await storeRemoteImage("shopee", p.remoteImage) : null;
       events.push(toInbound(p, shop.brandId, { imageKey, profile: { name: c.name, avatar: c.avatar }, convMeta: { buyer_id: c.buyerId } }));
     }
-    if (nsGreater(c.lastNs, doneNs)) doneNs = c.lastNs;
+    if (c.lastMs > doneMs) doneMs = c.lastMs;
   }
-  // ทำไม่ครบทุกห้อง: ห้องที่ข้ามมีเวลาใหม่กว่า doneNs อยู่แล้ว (ทำจากเก่า→ใหม่) → รอบหน้าดึงต่อได้ถูก
-  return { events, cursor: { ...cursor, ns: doneNs }, state: "ready", note: allDone ? null : "ห้องเยอะ — ดึงต่อรอบหน้า" };
+  diag.events = events.length;
+  // ทำไม่ครบทุกห้อง: ห้องที่ข้ามมีเวลาใหม่กว่า doneMs อยู่แล้ว (ทำจากเก่า→ใหม่) → รอบหน้าดึงต่อได้ถูก
+  return { events, cursor: { ...cursor, ms: doneMs, diag }, state: "ready", note: allDone ? null : "ห้องเยอะ — ดึงต่อรอบหน้า" };
 };
 
 // ---------------------------------------------------------------- ส่ง / อ่านแล้ว
