@@ -38,6 +38,18 @@ export function toIso(v: unknown, unit: "s" | "ms" | "ns"): string | null {
   return new Date(ms).toISOString();
 }
 
+/**
+ * เวลาแบบไม่รู้หน่วย → มิลลิวินาที (ดูจากจำนวนหลัก: 10 = วินาที · 13 = มิลลิ · 16 = ไมโคร · 19 = นาโน)
+ * ใช้กับ last_message_timestamp ของ Shopee — SDK บอกว่าเป็นนาโนวินาที แต่ร้านจริงอาจส่งหน่วยอื่น (เจอ 2026-11-25: ดึงได้ 0 ห้อง)
+ */
+export function anyTsToMs(v: unknown): number {
+  const s = str(v).replace(/^0+/, "");
+  if (!/^\d{9,22}$/.test(s)) return 0;
+  const n = s.length;
+  const ms = n <= 11 ? Number(s) * 1000 : n <= 14 ? Number(s) : n <= 17 ? Number(s.slice(0, -3)) : Number(s.slice(0, -6));
+  return Number.isFinite(ms) && ms > 946684800000 ? ms : 0;
+}
+
 /** Shopee บางทีให้แค่รหัสรูป (ไม่ใช่ลิงก์) → ลิงก์ CDN ไทย */
 export function shopeeImageUrl(v: unknown): string | null {
   const s = str(v);
@@ -52,14 +64,16 @@ const media = (kind: "video" | "audio" | "file" | "location", label?: string | n
 // ---------------------------------------------------------------- Shopee
 
 /** แถวห้องจาก get_conversation_list */
-export type ShopeeConvRow = { id: string; buyerId: string; name: string | null; avatar: string | null; lastNs: string; unread: number };
+/** lastMs = เวลาข้อความล่าสุดของห้อง (มิลลิวินาที · แปลงจากหน่วยใดก็ได้) · lastRaw = ค่าดิบ (ไว้ใช้เป็นตัวชี้หน้าถัดไป/วินิจฉัย) */
+export type ShopeeConvRow = { id: string; buyerId: string; name: string | null; avatar: string | null; lastMs: number; lastRaw: string; unread: number };
 
 export function shopeeConvOf(c: Obj): ShopeeConvRow | null {
   const id = str(c.conversation_id);
   const buyerId = str(c.to_id);
   if (!/^\d{1,22}$/.test(id) || !/^\d{1,22}$/.test(buyerId)) return null;
   const avatar = shopeeImageUrl(c.to_avatar);
-  return { id, buyerId, name: str(c.to_name).slice(0, 120) || null, avatar, lastNs: str(c.last_message_timestamp) || "0", unread: Number(c.unread_count) || 0 };
+  const lastRaw = str(c.last_message_timestamp) || "0";
+  return { id, buyerId, name: str(c.to_name).slice(0, 120) || null, avatar, lastMs: anyTsToMs(lastRaw), lastRaw, unread: Number(c.unread_count) || 0 };
 }
 
 /** เทียบเวลานาโนวินาทีแบบข้อความ (ยาวเกิน Number) */
@@ -70,7 +84,8 @@ export function nsGreater(a: string, b: string): boolean {
 
 export function shopeeMessageOf(m: Obj, conv: { id: string; shopId: string }): ParsedShopMessage | null {
   const id = str(m.message_id);
-  const sentAt = toIso(m.created_timestamp, "s");
+  const ms = anyTsToMs(m.created_timestamp);
+  const sentAt = ms ? new Date(ms).toISOString() : null;
   if (!id || !sentAt) return null;
   const type = str(m.message_type);
   const c = obj(m.content);

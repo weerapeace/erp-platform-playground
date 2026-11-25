@@ -95,11 +95,12 @@ export async function runShopChatSync(admin: Admin, opts: { budgetMs: number; fo
         .catch((e) => { console.error("[chat/shop-sync] ingest", shop.channel, e instanceof Error ? e.message : e); savedAll = false; return null; });
       if (res?.inserted) out.saved++;
     }
-    if (r.state !== "ready" && r.note) out.errors.push(`${shop.channel}: ${r.note}`);
+    if (r.state !== "ready" && r.state !== "manual_only" && r.note) out.errors.push(`${shop.channel}: ${r.note}`);
     // บันทึกไม่ครบ = ไม่ขยับตำแหน่ง (รอบหน้าดึงซ้ำ · ข้อความที่บันทึกแล้วไม่ซ้ำเพราะรหัสข้อความ)
     await saveState(admin, shop, {
       cursor: savedAll ? r.cursor : (st.cursor ?? {}),
       last_run_at: new Date().toISOString(),
+      // manual_only (Lazada รอบอัตโนมัติ) ไม่ได้ดึงจริง → ไม่นับเป็น "ดึงสำเร็จล่าสุด"
       last_ok_at: r.state === "ready" ? new Date().toISOString() : (st.last_ok_at ?? null),
       state: r.state, note: r.note,
     });
