@@ -147,6 +147,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
   },
   {
+    id: "marketing-promos", zone: "marketing", kind: "auto", icon: "🏷️",
+    title: "ผู้เก็บรายการโปร", titleEn: "Promotions collector",
+    does: "ทุกเช้าดึงรายการโค้ดส่วนลด โปรลดราคา และแฟลชเซลจาก Shopee (ใช้ไปกี่ครั้ง ช่วงเวลา คนกดเตือน) มาไว้ในแท็บโปรโมชั่น เพื่อดูว่าโปรไหนได้ผล",
+    trigger: `${DAILY} 08:50`, cron: "/api/cron/marketing-promos", everyHours: 24,
+    can: ["อ่านรายการโปรจากร้าน", "จดรายการโปรในระบบ"], cannot: ["สร้าง/แก้/ปิดโปร", "แก้ราคา"],
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_promotions", href: "/marketing/dashboard?tab=promos",
+    files: ["app/api/cron/marketing-promos/route.ts", "lib/marketing-promos-server.ts", "lib/shopee-promos.ts"],
+  },
+  {
     id: "marketing-traffic", zone: "marketing", kind: "auto", icon: "👀",
     title: "ผู้นับคนดูสินค้า", titleEn: "Product views counter",
     does: "ทุกเที่ยงคืนจดยอดคนดู กดถูกใจ ดาว และรีวิวของสินค้าทุกตัวบน Shopee แล้วลบกับเมื่อวานเป็นยอดรายวัน ให้แท็บคนเข้าร้านและเตือนดาวตก/คนดูพุ่ง",

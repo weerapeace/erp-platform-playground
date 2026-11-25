@@ -12,9 +12,10 @@ import { bkkStartIso, shiftYmd, type ItemLite } from "@/lib/platform-dashboard-c
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-export type SalesOrderLite = { id: string; platform_id: string | null; status: string; platform_status: string | null; source: string | null; total: number | null; ordered_at?: string | null };
+export type SalesOrderLite = { id: string; platform_id: string | null; status: string; platform_status: string | null; source: string | null; total: number | null; ordered_at?: string | null; brand_id?: string | null };
 
-const ORDER_COLS = "id, platform_id, status, platform_status, source, total, ordered_at";
+// ➕ brand_id (2026-11-25 แท็บโปรโมชั่น — แยกยอดรายวันต่อร้าน · เดิมถามแยกทีละ 500 ใบ ช้า 37 วินาที)
+const ORDER_COLS = "id, platform_id, brand_id, status, platform_status, source, total, ordered_at";
 const ITEM_COLS = "id, order_id, matched_sku_id, sku_code, name, qty, price";
 const ITEM_CHUNK = 200;   // id ออเดอร์ต่อคำขอรายการสินค้า (URL ไม่ยาวเกิน · แถวไม่ถึงเพดาน 1,000)
 
