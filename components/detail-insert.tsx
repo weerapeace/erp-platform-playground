@@ -83,7 +83,8 @@ import {
   type LineKind,
   type SnippetItem,
 } from "@/lib/detail-snippets";
-import { hasMaterialPage, suggestMaterials, type MaterialRow } from "@/lib/product-materials";
+import { hasMaterialPage, type MaterialRow } from "@/lib/product-materials";
+import { MaterialQuickPick } from "@/components/material-quick-pick";
 import { fitSizeOptions, parseFits, parseSizeDims, sizeDimsFor, type FitItem, type FitPick } from "@/lib/product-fits";
 import { translateContent } from "@/lib/content-translate";
 import { bestFit, findCompartment, fitTargetOf, isWindowName, parseCompartments, upsertCompartments, type Compartment } from "@/lib/fit-check";
@@ -842,7 +843,6 @@ function DetailInsertModal({
   const compactMat = stepMode && tab === "material" && !matAll;
   const reviewing = stepMode && step === "review";
   const matHint = typeof values.materials === "string" ? values.materials.replace(/\s+/g, " ").trim() : "";
-  const matSuggest = suggestMaterials(matHint, visMats).filter((m) => !matIds.includes(m.id));
   const stepCount = (s: InsertStep) => STEP_TABS[s].reduce((n, k) => n + (tabs.some((x) => x.key === k) ? tabCount(k) : 0), 0);
 
   // ─── ตัวอย่าง: ไทย = ลาก ⠿ สลับได้ทุกบรรทัด · คลิกช่องระหว่างบรรทัด = ย้ายบรรทัดใหม่ทั้งก้อน · อังกฤษ = ดูอย่างเดียว (เรียงตามไทย) ───
@@ -1309,76 +1309,9 @@ function DetailInsertModal({
               )}
 
               {compactMat && (
-                <div className="space-y-2.5" data-insert-mat-compact>
-                  {/* ที่เลือกแล้ว (กด ✕ เอาออก · เลขลำดับ = ลำดับในบรรทัด) */}
-                  <div className="flex flex-wrap items-center gap-1.5" data-mat-picked>
-                    {byClick(matIds, visMats).map((m, i) => (
-                      <span key={m.id} className="inline-flex items-center gap-1 rounded-full border border-orange-300 bg-orange-50 px-2.5 py-1 text-[12.5px] font-medium text-orange-800" data-mat-chip={m.id}>
-                        {matIds.length > 1 && <span className="text-[10.5px] text-orange-500">{i + 1}.</span>}
-                        {nm(m)}
-                        <button type="button" onClick={() => setMatIds((p) => p.filter((x) => x !== m.id))} aria-label={`${t("เอาออก", "Remove")} ${nm(m)}`} className="ml-0.5 text-orange-400 hover:text-rose-600">
-                          <Icon name="cancel" />
-                        </button>
-                      </span>
-                    ))}
-                    {!matIds.length && <span className="text-[12px] text-slate-400">{t("ยังไม่ได้เลือกวัสดุ", "No material picked yet")}</span>}
-                  </div>
-                  {/* แนะนำจากข้อมูลวัสดุของฝ่ายผลิต (parent.materials) — คนกดเลือกเอง */}
-                  {matHint && (
-                    <div className="rounded-lg bg-slate-50 px-2.5 py-2 text-[12px] text-slate-600" data-mat-suggest>
-                      <div className="flex flex-wrap items-center gap-1">
-                        <Icon name="factory" />
-                        <span>{t("ข้อมูลวัสดุจากฝ่ายผลิต:", "Production material note:")}</span>
-                        <span className="font-medium text-slate-700">“{matHint.slice(0, 120)}”</span>
-                      </div>
-                      {matSuggest.length ? (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11.5px] text-slate-500">{t("แนะนำ:", "Suggested:")}</span>
-                          {matSuggest.map((m) => (
-                            <button key={m.id} type="button" onClick={() => setMatIds((p) => (p.includes(m.id) ? p : [...p, m.id]))} data-mat-suggest-pick={m.id}
-                              className="rounded-full border border-orange-300 bg-white px-2.5 py-0.5 text-[12px] text-orange-700 hover:bg-orange-50">＋ {nm(m)}</button>
-                          ))}
-                          {matSuggest.length > 1 && (
-                            <button type="button" onClick={() => setMatIds((p) => [...p, ...matSuggest.map((m) => m.id).filter((id) => !p.includes(id))])} className="text-[11.5px] text-orange-600 hover:underline">
-                              {t("เลือกทั้งหมด", "Pick all")}
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="mt-1 text-[11px] text-slate-400">{t("ไม่ตรงกับวัสดุในคลัง — ค้นหาด้านล่าง หรือเพิ่มวัสดุใหม่", "No match in the material list — search below or add a new one")}</p>
-                      )}
-                    </div>
-                  )}
-                  {/* ค้นหา → รายการสั้น ๆ (ไม่เกิน 6) */}
-                  <div className="space-y-1">
-                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาวัสดุ เช่น หนัง, ไนล่อน, canvas", "Search material, e.g. leather, nylon")} aria-label={t("ค้นหาวัสดุ", "Search material")} data-mat-search
-                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-orange-400" />
-                    {needle && (
-                      <div className="overflow-hidden rounded-lg border border-slate-200" data-mat-results>
-                        {visMats.filter((m) => match(m) && !matIds.includes(m.id)).slice(0, 6).map((m) => (
-                          <button key={m.id} type="button" onClick={() => { setMatIds((p) => [...p, m.id]); setQ(""); }} data-mat-result={m.id}
-                            className="flex w-full items-center justify-between gap-2 border-b border-slate-100 px-2.5 py-1.5 text-left text-[13px] last:border-b-0 hover:bg-orange-50">
-                            <span className="text-slate-800">{nm(m)}</span>
-                            <span className="truncate text-[11px] text-slate-400">{isEn ? m.name : m.name_en}</span>
-                          </button>
-                        ))}
-                        {!visMats.some((m) => match(m) && !matIds.includes(m.id)) && <p className="px-2.5 py-2 text-[12px] text-slate-400">{t("ไม่พบวัสดุ", "No material found")}</p>}
-                      </div>
-                    )}
-                  </div>
-                  {/* ใช้บ่อย (ลำดับตามรายการกลาง) · ดูทั้งหมด = รายการเต็มแบบเดิม (มีหน้าวัสดุ / แก้รายการ / ลากจัดลำดับ) */}
-                  <div className="flex flex-wrap items-center gap-1.5" data-mat-often>
-                    <span className="text-[11.5px] text-slate-500">{t("ใช้บ่อย:", "Common:")}</span>
-                    {visMats.filter((m) => !matIds.includes(m.id) && !matSuggest.some((x) => x.id === m.id)).slice(0, 6).map((m) => (
-                      <button key={m.id} type="button" onClick={() => setMatIds((p) => [...p, m.id])} data-mat-often-pick={m.id}
-                        className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[12px] text-slate-700 hover:border-orange-300 hover:bg-orange-50">＋ {nm(m)}</button>
-                    ))}
-                    <button type="button" onClick={() => setMatAll(true)} data-mat-all className="text-[11.5px] text-orange-600 hover:underline">
-                      {t(`ดูทั้งหมด (${visMats.length})`, `See all (${visMats.length})`)}
-                    </button>
-                  </div>
-                  {addBtn("material", "วัสดุ", "material")}
-                </div>
+                // ของกลาง MaterialQuickPick (ใช้ร่วมกับป๊อป "ให้ AI คิดรายละเอียด")
+                <MaterialQuickPick items={visMats} value={matIds} onChange={setMatIds} lang={isEn ? "en" : "th"} hint={matHint || null}
+                  onSeeAll={() => setMatAll(true)} footer={addBtn("material", "วัสดุ", "material")} />
               )}
 
               {tab === "material" && !compactMat && (

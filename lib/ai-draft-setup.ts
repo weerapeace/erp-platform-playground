@@ -23,6 +23,8 @@ export type DescTemplate = {
   headings: string[];
   /** รูปแบบการเขียน เช่น "ใช้ • นำหน้าแต่ละข้อ · หัวข้อตัวหนา" */
   format: string;
+  /** Introduction เน้นแบบไหน (เลือก Theme แล้วโชว์ใต้ตัวเลือก + ส่งให้ AI) — เจ้าของขอ 2026-11-25 "กดแล้วจะเน้นตั้ง Introduction" */
+  intro?: string;
   /** ลบแบบเก็บไว้ก่อน (ถังขยะ) — ไม่โชว์ให้เลือก แต่กู้คืนได้ */
   archived?: boolean;
 };
@@ -31,15 +33,22 @@ export type DraftSetup = {
   brand_default: Record<string, string>;
   /** ตัวเลือกประกันใน dropdown ขั้นกรอกมือ (ตั้งได้ · ยังไม่ตั้ง = ค่าที่ใช้จริงในระบบ) */
   warranty_options: string[];
+  /** กติกา "เลือกวัสดุนี้ → ติ๊กจุดเด่นนี้ให้" (คำค้นคั่นด้วย | เทียบชื่อไทย/อังกฤษ/ชื่อเรียกอื่นของวัสดุ) — แก้/ลบได้ในป๊อป */
+  material_rules: MaterialRule[];
 };
+export type MaterialRule = { match: string; highlight: string; highlight_en?: string };
+/** ค่าเริ่ม (ยังไม่เคยตั้ง) — หนังวัวทุกแบบ → "ผลิตจากหนังวัวแท้ 100%" (เจ้าของขอ 2026-11-25) */
+export const DEFAULT_MATERIAL_RULES: MaterialRule[] = [
+  { match: "หนังวัว|cowhide|cow leather", highlight: "ผลิตจากหนังวัวแท้ 100%", highlight_en: "Made from 100% genuine cowhide leather" },
+];
 
 /** ค่าประกันที่ใช้จริงในระบบ (นับจาก parent_skus_v2 · 2026-11-25) เรียงจากใช้บ่อย */
 export const DEFAULT_WARRANTY_OPTIONS = ["1 เดือน", "2 ปี", "ไม่มีรับประกัน", "1 ปี", "6 เดือน", "7 วัน", "3 ปี", "3 เดือน"];
 
 export const DEFAULT_TEMPLATES: DescTemplate[] = [
-  { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'" },
-  { id: "short", name: "สั้น ขายไว", headings: ["จุดเด่น 3 ข้อ", "ประกัน"], format: "สั้นที่สุด บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' ไม่เกิน 6 บรรทัด" },
-  { id: "story", name: "เล่าเรื่อง", headings: ["ย่อหน้าเปิด", "จุดเด่น", "สเปค"], format: "เปิดด้วยย่อหน้าสั้น 1-2 ประโยค แล้วตามด้วยรายการ '- '" },
+  { id: "bag", name: "แม่แบบกระเป๋า", headings: ["จุดเด่น", "วัสดุ", "ช่อง", "ใส่อะไรได้", "การดูแล"], format: "บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' · ขึ้นต้นบรรทัดด้วยชื่อหัวข้อตามด้วย ':'", intro: "บอกการใช้งานหลัก + ความรู้สึกของวัสดุ 2 ประโยค" },
+  { id: "short", name: "สั้น ขายไว", headings: ["จุดเด่น 3 ข้อ", "ประกัน"], format: "สั้นที่สุด บรรทัดละ 1 ข้อ ขึ้นต้นด้วย '- ' ไม่เกิน 6 บรรทัด", intro: "ประโยคเดียว ตรงประเด็น บอกว่าเหมาะกับใคร" },
+  { id: "story", name: "เล่าเรื่อง", headings: ["ย่อหน้าเปิด", "จุดเด่น", "สเปค"], format: "เปิดด้วยย่อหน้าสั้น 1-2 ประโยค แล้วตามด้วยรายการ '- '", intro: "เล่าไลฟ์สไตล์/โอกาสที่ใช้ 2-3 ประโยค ชวนนึกภาพ" },
 ];
 
 const str = (v: unknown, max = 200) => String(v ?? "").trim().slice(0, max);
@@ -53,7 +62,8 @@ export function cleanTemplate(raw: unknown): DescTemplate | null {
   const name = str(r.name, 80);
   const headings = strList(r.headings, 15, 80);
   if (!name || headings.length === 0) return null;
-  return { id: str(r.id, 60) || name, name, headings, format: str(r.format, 400), ...(r.archived === true ? { archived: true } : {}) };
+  const intro = str(r.intro, 300);
+  return { id: str(r.id, 60) || name, name, headings, format: str(r.format, 400), ...(intro ? { intro } : {}), ...(r.archived === true ? { archived: true } : {}) };
 }
 
 export function normalizeSetup(raw: unknown): DraftSetup {
@@ -65,7 +75,8 @@ export function normalizeSetup(raw: unknown): DraftSetup {
   const brand_default: Record<string, string> = {};
   for (const [k, v] of Object.entries(bd)) if (k && typeof v === "string" && templates.some((t) => t.id === v)) brand_default[k] = v;
   const wo = strList(r.warranty_options, 30, 80);
-  return { templates, brand_default, warranty_options: wo.length ? wo : DEFAULT_WARRANTY_OPTIONS };
+  const material_rules = Array.isArray(r.material_rules) ? cleanMaterialRules(r.material_rules) : DEFAULT_MATERIAL_RULES;
+  return { templates, brand_default, warranty_options: wo.length ? wo : DEFAULT_WARRANTY_OPTIONS, material_rules };
 }
 
 /** แม่แบบที่ใช้ได้ (ไม่อยู่ถังขยะ) */
@@ -84,8 +95,29 @@ export function templateInstruction(t: DescTemplate): string {
     `ชุดแม่แบบ "${t.name}" — Description ต้องเรียงหัวข้อตามลำดับนี้เท่านั้น (หัวข้อที่ไม่มีข้อมูลให้ตัดทิ้ง ห้ามแต่ง):`,
     ...t.headings.map((h, i) => `${i + 1}. ${h}`),
     t.format ? `รูปแบบการเขียน: ${t.format}` : "",
+    t.intro ? `Introduction: ${t.intro} (English Introduction แนวเดียวกัน)` : "",
     "English Description ต้องเรียงหัวข้อแบบเดียวกัน (แปลชื่อหัวข้อเป็นอังกฤษ)",
   ].filter(Boolean).join("\n");
+}
+
+/** ทำความสะอาดกติกาวัสดุ → จุดเด่น (ตัดแถวว่าง/ซ้ำ · สูงสุด 30) */
+export function cleanMaterialRules(list: unknown[]): MaterialRule[] {
+  const out: MaterialRule[] = [];
+  for (const x of list) {
+    if (!x || typeof x !== "object") continue;
+    const o = x as Record<string, unknown>;
+    const match = str(o.match, 200), highlight = str(o.highlight, 120), en = str(o.highlight_en, 160);
+    if (!match || !highlight || out.some((y) => y.match === match && y.highlight === highlight)) continue;
+    out.push({ match, highlight, ...(en ? { highlight_en: en } : {}) });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+/** วัสดุที่เลือก → จุดเด่นที่ต้องติ๊กให้ (เทียบคำค้นกับชื่อไทย/อังกฤษ/ชื่อเรียกอื่น ไม่สนตัวพิมพ์) */
+export function materialHighlights(rules: MaterialRule[], mats: { name: string; name_en?: string | null; aliases?: string | null }[]): MaterialRule[] {
+  const hay = mats.map((m) => `${m.name} ${m.name_en ?? ""} ${m.aliases ?? ""}`.toLowerCase());
+  return rules.filter((r) => r.match.split("|").map((k) => k.trim().toLowerCase()).filter(Boolean).some((k) => hay.some((h) => h.includes(k))));
 }
 
 // ── ② ค่าตั้งเพิ่มของกฎ ─────────────────────────────────────

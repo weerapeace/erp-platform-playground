@@ -17,11 +17,12 @@ import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { Spinner } from "@/components/spinner";
+import { Popover } from "@/components/popover";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
   DRAFT_SETUP_KEY, MANUAL_FIELDS, normalizeExtras, normalizeSetup, topicsToText,
-  type DescTemplate, type DraftSetup, type RuleExtras, type TagSetup,
+  type DescTemplate, type DraftSetup, type MaterialRule, type RuleExtras, type TagSetup,
 } from "@/lib/ai-draft-setup";
 
 /** ✨ ให้ AI ช่วยคิดการตั้งค่าประเภทสินค้า (/api/ai/tag-setup · รุ่นถูก gpt-4o-mini · ~0.02 บาท/ครั้ง) */
@@ -116,7 +117,7 @@ export function useDraftSetup() {
   return { setup, save };
 }
 
-const EMPTY_TPL: DescTemplate = { id: "", name: "", headings: [], format: "" };
+const EMPTY_TPL: DescTemplate = { id: "", name: "", headings: [], format: "", intro: "" };
 
 export function TemplatePicker({ setup, save, value, onChange, brandId, canEdit }: {
   setup: DraftSetup; save: (s: DraftSetup) => Promise<void>;
@@ -147,7 +148,8 @@ export function TemplatePicker({ setup, save, value, onChange, brandId, canEdit 
     const headings = headText.split("\n").map((x) => x.trim()).filter(Boolean);
     if (!edit.name.trim() || headings.length === 0) { toast.warning(t("ใส่ชื่อแม่แบบและหัวข้ออย่างน้อย 1 บรรทัด", "Enter a name and at least one heading")); return; }
     const id = edit.id || `tpl_${Date.now().toString(36)}`;
-    const row: DescTemplate = { id, name: edit.name.trim(), headings, format: edit.format.trim() };
+    const intro = (edit.intro ?? "").trim();
+    const row: DescTemplate = { id, name: edit.name.trim(), headings, format: edit.format.trim(), ...(intro ? { intro } : {}) };
     const exists = setup.templates.some((x) => x.id === id);
     await commit({ ...setup, templates: exists ? setup.templates.map((x) => (x.id === id ? row : x)) : [...setup.templates, row] },
       exists ? t(`แก้แม่แบบ "${row.name}" แล้ว`, `Template "${row.name}" updated`) : t(`เพิ่มแม่แบบ "${row.name}" แล้ว`, `Template "${row.name}" added`));
@@ -180,6 +182,9 @@ export function TemplatePicker({ setup, save, value, onChange, brandId, canEdit 
         <input value={edit.format} onChange={(e) => setEdit({ ...edit, format: e.target.value })}
           placeholder={t("รูปแบบ เช่น บรรทัดละข้อ ขึ้นต้นด้วย - · ขึ้นต้นด้วยชื่อหัวข้อ", "Format, e.g. one point per line starting with -")}
           className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
+        <input value={edit.intro ?? ""} onChange={(e) => setEdit({ ...edit, intro: e.target.value })}
+          placeholder={t("Introduction เน้นแบบไหน เช่น บอกการใช้งานหลัก 2 ประโยค", "Introduction focus, e.g. main use in 2 sentences")}
+          className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" />
         <div className="flex gap-2 flex-wrap">
           <button type="button" onClick={() => void saveEdit()} disabled={busy} className="h-8 px-3 text-[12.5px] font-medium bg-slate-700 text-white rounded-lg disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกแม่แบบ", "Save template")}</button>
           <button type="button" onClick={() => setEdit(null)} className="h-8 px-3 text-[12.5px] border border-slate-200 rounded-lg hover:bg-white">{t("ยกเลิก", "Cancel")}</button>
@@ -188,31 +193,49 @@ export function TemplatePicker({ setup, save, value, onChange, brandId, canEdit 
     );
   }
 
+  // เลือก Theme = ปุ่มเดียวกดแล้วเลือก (เจ้าของขอ 2026-11-25 "ไม่ต้องโชว์หลายอัน") · ใต้ปุ่มบอกว่า Introduction เน้นแบบไหน
+  const cur = live.find((x) => x.id === value) ?? null;
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
-        {live.map((tp) => {
-          const on = value === tp.id;
-          return (
-            <div key={tp.id} role="button" tabIndex={0} onClick={() => onChange(tp.id)} onKeyDown={(e) => { if (e.key === "Enter") onChange(tp.id); }}
-              className={`text-left rounded-lg border p-2 cursor-pointer ${on ? "border-fuchsia-400 bg-fuchsia-50/70 ring-1 ring-fuchsia-200" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
-              <div className="flex items-center gap-1">
-                <b className="text-[12.5px] font-semibold text-slate-700 flex-1 min-w-0 truncate">{tp.name}</b>
-                {brandDefault === tp.id && <span className="text-[10px] px-1.5 rounded-full bg-emerald-50 text-emerald-700">{t("ค่าเริ่มแบรนด์", "brand default")}</span>}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{tp.headings.join(" → ")}</p>
-              {canEdit && on && (
-                <div className="mt-1.5 flex gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                  <button type="button" onClick={() => { setEdit(tp); setHeadText(tp.headings.join("\n")); }} className="h-6 px-2 text-[11px] rounded border border-slate-200 bg-white hover:bg-slate-50">{t("แก้", "Edit")}</button>
-                  {brandId && brandDefault !== tp.id && <button type="button" disabled={busy} onClick={() => void setBrandDefault(tp.id)} className="h-6 px-2 text-[11px] rounded border border-slate-200 bg-white hover:bg-slate-50">{t("ตั้งเป็นค่าเริ่มแบรนด์", "Brand default")}</button>}
-                  <button type="button" disabled={busy} onClick={() => void setArchived(tp, true)} className="h-6 px-2 text-[11px] rounded border border-rose-200 text-rose-600 bg-white hover:bg-rose-50">{t("ลบ", "Delete")}</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {(() => { const cur = live.find((x) => x.id === value); return cur?.format ? <p className="mt-1 text-[11px] text-slate-400">{t("รูปแบบ", "Format")}: {cur.format}</p> : null; })()}
+      <Popover align="left" panelClassName="w-[min(28rem,92vw)] p-1 rounded-xl border border-slate-200 bg-white shadow-lg overflow-y-auto"
+        trigger={(toggle, open) => (
+          <button type="button" onClick={toggle} aria-expanded={open}
+            className={`w-full text-left rounded-lg border px-2.5 py-2 flex items-center gap-2 ${open ? "border-fuchsia-400 ring-1 ring-fuchsia-200" : "border-slate-200 hover:bg-slate-50"} bg-white`}>
+            <span className="flex-1 min-w-0">
+              <span className="flex items-center gap-1">
+                <b className="text-[13px] font-semibold text-slate-700 truncate">{cur?.name ?? t("เลือก Theme", "Pick a theme")}</b>
+                {cur && brandDefault === cur.id && <span className="text-[10px] px-1.5 rounded-full bg-emerald-50 text-emerald-700">{t("ค่าเริ่มแบรนด์", "brand default")}</span>}
+              </span>
+              {cur && <span className="block text-[11px] text-slate-500 truncate">{cur.headings.join(" → ")}</span>}
+            </span>
+            <span className="text-slate-400 text-[11px]">{open ? "▴" : "▾"}</span>
+          </button>
+        )}>
+        {(close) => (
+          <div>
+            {live.map((tp) => (
+              <button key={tp.id} type="button" onClick={() => { onChange(tp.id); close(); }}
+                className={`w-full text-left rounded-lg px-2.5 py-2 ${value === tp.id ? "bg-fuchsia-50" : "hover:bg-slate-50"}`}>
+                <span className="flex items-center gap-1">
+                  <b className="text-[12.5px] font-semibold text-slate-700 flex-1 min-w-0 truncate">{value === tp.id ? "✓ " : ""}{tp.name}</b>
+                  {brandDefault === tp.id && <span className="text-[10px] px-1.5 rounded-full bg-emerald-50 text-emerald-700">{t("ค่าเริ่มแบรนด์", "brand default")}</span>}
+                </span>
+                <span className="block text-[11px] text-slate-500 leading-snug">{tp.headings.join(" → ")}</span>
+                {tp.intro && <span className="block text-[11px] text-fuchsia-600 leading-snug">Intro: {tp.intro}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </Popover>
+      {cur?.intro && <p className="mt-1 px-2 py-1 rounded-md bg-fuchsia-50 text-[11.5px] text-fuchsia-700">{t("เน้น Introduction:", "Introduction focus:")} {cur.intro}</p>}
+      {cur?.format && <p className="mt-1 text-[11px] text-slate-400">{t("รูปแบบ", "Format")}: {cur.format}</p>}
+      {canEdit && cur && (
+        <div className="mt-1 flex gap-1 flex-wrap">
+          <button type="button" onClick={() => { setEdit(cur); setHeadText(cur.headings.join("\n")); }} className="h-6 px-2 text-[11px] rounded border border-slate-200 bg-white hover:bg-slate-50">{t("แก้", "Edit")}</button>
+          {brandId && brandDefault !== cur.id && <button type="button" disabled={busy} onClick={() => void setBrandDefault(cur.id)} className="h-6 px-2 text-[11px] rounded border border-slate-200 bg-white hover:bg-slate-50">{t("ตั้งเป็นค่าเริ่มแบรนด์", "Brand default")}</button>}
+          <button type="button" disabled={busy} onClick={() => void setArchived(cur, true)} className="h-6 px-2 text-[11px] rounded border border-rose-200 text-rose-600 bg-white hover:bg-rose-50">{t("ลบ", "Delete")}</button>
+        </div>
+      )}
       {canEdit && (
         <div className="mt-1.5 flex gap-2 flex-wrap items-center">
           <button type="button" onClick={() => { setEdit(EMPTY_TPL); setHeadText(""); }} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-slate-300 text-slate-600 hover:bg-slate-50">＋ {t("เพิ่มแม่แบบ", "Add template")}</button>
@@ -835,5 +858,33 @@ export function EditTagModal({ tag, groups, canRule, onDone, onEditRule, onClose
         )}
       </div>
     </ERPModal>
+  );
+}
+
+// ── กติกา "วัสดุ → จุดเด่น" (เจ้าของขอ 2026-11-25 · เลือกวัสดุนี้ → ติ๊กจุดเด่นนี้ให้) ─────────────
+//    คำค้นคั่นด้วย | เทียบกับชื่อไทย/อังกฤษ/ชื่อเรียกอื่นของวัสดุ เช่น "หนังวัว|cowhide" · แก้/ลบได้ · บันทึกแล้วย้อนกลับได้ (toast)
+export function MaterialRuleEditor({ rules, onSave }: { rules: MaterialRule[]; onSave: (rules: MaterialRule[]) => Promise<void> }) {
+  const t = useT();
+  const [rows, setRows] = useState<MaterialRule[]>(() => rules.map((r) => ({ ...r })));
+  const [busy, setBusy] = useState(false);
+  const set = (i: number, patch: Partial<MaterialRule>) => setRows((p) => p.map((r, k) => (k === i ? { ...r, ...patch } : r)));
+  const inp = "h-8 px-2 text-[12px] border border-slate-200 rounded-md bg-white min-w-0";
+  return (
+    <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5 space-y-1.5">
+      <p className="text-[11.5px] text-slate-600">{t("เลือกวัสดุที่มีคำนี้ → ติ๊กจุดเด่นนี้ให้ (คั่นหลายคำด้วย |)", "Material containing this word → auto-tick this highlight (separate words with |)")}</p>
+      {rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1.3fr_1.3fr_auto] gap-1.5 items-center">
+          <input value={r.match} onChange={(e) => set(i, { match: e.target.value })} placeholder={t("คำในชื่อวัสดุ เช่น หนังวัว|cowhide", "Material word, e.g. cowhide")} className={inp} />
+          <input value={r.highlight} onChange={(e) => set(i, { highlight: e.target.value })} placeholder={t("จุดเด่น (ไทย)", "Highlight (Thai)")} className={inp} />
+          <input value={r.highlight_en ?? ""} onChange={(e) => set(i, { highlight_en: e.target.value })} placeholder={t("จุดเด่น (อังกฤษ)", "Highlight (English)")} className={inp} />
+          <button type="button" onClick={() => setRows((p) => p.filter((_, k) => k !== i))} className="h-8 px-2 text-[11.5px] rounded-md border border-rose-200 text-rose-600 bg-white hover:bg-rose-50">{t("ลบ", "Delete")}</button>
+        </div>
+      ))}
+      <div className="flex gap-2 flex-wrap">
+        <button type="button" onClick={() => setRows((p) => [...p, { match: "", highlight: "", highlight_en: "" }])} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-slate-300 text-slate-600 hover:bg-white">＋ {t("เพิ่มกติกา", "Add rule")}</button>
+        <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { await onSave(rows); } finally { setBusy(false); } }}
+          className="h-7 px-3 text-[12px] font-medium rounded-lg bg-slate-700 text-white disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกกติกา", "Save rules")}</button>
+      </div>
+    </div>
   );
 }

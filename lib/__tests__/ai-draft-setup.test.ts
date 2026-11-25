@@ -139,3 +139,26 @@ describe("รอบ 6: อังกฤษ + กติกาการเขีย
     expect(POPUP_WRITING_RULES).toContain("ห้ามใส่ขนาด");
   });
 });
+
+import { DEFAULT_MATERIAL_RULES, cleanMaterialRules, materialHighlights } from "@/lib/ai-draft-setup";
+describe("กติกาวัสดุ → จุดเด่น + intro ของ Theme", () => {
+  it("ยังไม่เคยตั้ง = ค่าเริ่ม (หนังวัว) · ตั้งเป็น [] = ไม่มีกติกา", () => {
+    expect(normalizeSetup(null).material_rules).toEqual(DEFAULT_MATERIAL_RULES);
+    expect(normalizeSetup({ material_rules: [] }).material_rules).toEqual([]);
+  });
+  it("cleanMaterialRules ตัดแถวว่าง/ซ้ำ", () => {
+    expect(cleanMaterialRules([{ match: "a", highlight: "x" }, { match: "a", highlight: "x" }, { match: "", highlight: "y" }, null])).toEqual([{ match: "a", highlight: "x" }]);
+  });
+  it("materialHighlights เทียบชื่อไทย/อังกฤษ/ชื่อเรียกอื่น ไม่สนตัวพิมพ์", () => {
+    const r = DEFAULT_MATERIAL_RULES;
+    expect(materialHighlights(r, [{ name: "หนังวัว Saffiano" }]).length).toBe(1);
+    expect(materialHighlights(r, [{ name: "Saffiano", name_en: "Saffiano Cowhide Leather" }]).length).toBe(1);
+    expect(materialHighlights(r, [{ name: "ผ้าแคนวาส", name_en: "Canvas" }]).length).toBe(0);
+    expect(materialHighlights(r, []).length).toBe(0);
+  });
+  it("Theme เก็บ intro และส่งเข้าคำสั่ง AI", () => {
+    const tp = normalizeSetup({ templates: [{ id: "a", name: "A", headings: ["x"], intro: "สั้น ๆ" }] }).templates[0];
+    expect(tp.intro).toBe("สั้น ๆ");
+    expect(templateInstruction(tp)).toContain("Introduction: สั้น ๆ");
+  });
+});

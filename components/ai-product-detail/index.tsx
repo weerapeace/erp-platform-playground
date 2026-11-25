@@ -20,14 +20,17 @@ import { DRAFT_PREFIX, decodeDraft } from "@/lib/form-draft";
 import { parseFits, type FitPick } from "@/lib/product-fits";
 import { isPhrase, isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
 import {
-  MANUAL_FIELDS, fitsFromSize, highlightChoices, isNegativeAnswer, mergeExtras, normalizeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
-  type FitCatalogRow, type ParcelBox,
+  MANUAL_FIELDS, cleanMaterialRules, fitsFromSize, materialHighlights, highlightChoices, isNegativeAnswer, mergeExtras, normalizeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
+  type FitCatalogRow, type MaterialRule, type ParcelBox,
 } from "@/lib/ai-draft-setup";
-import { CreateTagModal, EditTagModal, ImageStrip, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
+import { CreateTagModal, EditTagModal, ImageStrip, MaterialRuleEditor, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
 import { Spinner } from "@/components/spinner";
+import { useTickCatalog } from "@/components/tick-list-field";
+import { MaterialQuickPick } from "@/components/material-quick-pick";
+import type { MaterialRow } from "@/lib/product-materials";
 
 /** ช่องข้อความสูงตามเนื้อหา — ผลจาก AI อ่านได้ทั้งก้อน ไม่ต้องเลื่อนในช่อง (เจ้าของขอ 2026-11-25) */
 function AutoTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -660,7 +663,12 @@ export function AiProductDetailModal({
   useEffect(() => {
     apiFetch("/api/ai/desc-highlights?check=1").then((r) => r.json()).then((j) => setAiHlAllowed(j?.data?.allowed !== false)).catch(() => { /* ให้หลังบ้านตัดสินตอนกด */ });
   }, []);
-  const toggleHl = (h: string) => setHl((p) => (p.includes(h) ? p.filter((x) => x !== h) : [...p, h]));
+  const toggleHl = (h: string) => {
+    // เอาติ๊กจุดเด่นที่ระบบติ๊กให้จากวัสดุออก = จำไว้ ไม่ติ๊กให้ซ้ำ (ติ๊กกลับได้)
+    if (hl.includes(h) && matAutoHl.some((x) => x.highlight === h)) setHlOff((p) => [...new Set([...p, h])]);
+    if (!hl.includes(h)) setHlOff((p) => p.filter((x) => x !== h));
+    setHl((p) => (p.includes(h) ? p.filter((x) => x !== h) : [...p, h]));
+  };
   const askAiHl = async () => {
     setAiHlBusy(true);
     try {
@@ -694,6 +702,33 @@ export function AiProductDetailModal({
   // จุดเด่นให้เลือก: ชุดของประเภท · ไม่ได้ตั้ง = คลังประโยคกลาง
   const hlChoices = highlightChoices(extras, phraseItems.map((x) => x.name));
 
+  // ── วัสดุ (ของกลาง MaterialQuickPick · ตาราง product_materials เดียวกับป๊อปแทรกรายละเอียด) — เจ้าของขอ 2026-11-25 ──
+  const { data: matRows } = useTickCatalog("product_materials");
+  const matList = useMemo(() => ((matRows ?? []) as unknown as MaterialRow[]).filter((m) => m.is_active !== false), [matRows]);
+  const [mats, setMats] = useState<string[]>([]);
+  const [hlOff, setHlOff] = useState<string[]>([]);   // จุดเด่นจากวัสดุที่คนเอาติ๊กออกเอง — ไม่ติ๊กให้ซ้ำ
+  const [matRuleOpen, setMatRuleOpen] = useState(false);
+  const [typeTopic, setTypeTopic] = useState<string | null>(null);   // หัวข้อ Yes/No ที่กำลังพิมพ์คำตอบเอง
+  /** บันทึกกติกาวัสดุ → จุดเด่น (ui_config ai_desc_templates · audit ที่ API) + ย้อนกลับได้ */
+  const saveMatRules = async (rules: MaterialRule[]) => {
+    if (!setup) return;
+    const prev = setup;
+    try {
+      await saveSetup({ ...setup, material_rules: cleanMaterialRules(rules) });
+      toast.undo(t("บันทึกกติกาวัสดุแล้ว", "Material rules saved"), async () => { try { await saveSetup(prev); } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); } });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
+  };
+  const pickedMats = useMemo(() => mats.flatMap((id) => matList.filter((m) => m.id === id)), [mats, matList]);
+  const matAutoHl = useMemo(() => materialHighlights(setup?.material_rules ?? [], pickedMats), [setup?.material_rules, pickedMats]);
+  // เลือกวัสดุที่เข้ากติกา → ติ๊กจุดเด่นให้ (เช่น หนังวัว → ผลิตจากหนังวัวแท้ 100%)
+  useEffect(() => {
+    const add = matAutoHl.map((x) => x.highlight).filter((h) => !hlOff.includes(h));
+    if (add.some((h) => !hl.includes(h))) setHl((p) => [...new Set([...p, ...add])]);
+  }, [matAutoHl, hlOff]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /** ชื่อจุดเด่นภาษาอังกฤษ (กฎประเภท → คลังกลาง → AI → กติกาวัสดุ) */
+  const hlEn = (h: string) => extras.highlights_en[h] || phraseItems.find((x) => x.name === h)?.name_en || aiHlEn[h] || (setup?.material_rules ?? []).find((x) => x.highlight === h)?.highlight_en || "";
+  const matName = (m: MaterialRow) => t(m.name, m.name_en?.trim() || m.name);
+
   // ── รูปที่ AI จะดู ──
   const [imgKeys, setImgKeys] = useState<string[] | null>(null);
   const [imgGroups, setImgGroups] = useState<Record<string, ImageGroupKey> | undefined>(undefined);
@@ -725,6 +760,15 @@ export function AiProductDetailModal({
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       const sz = (j.data?.sizes ?? null) as Record<string, number | null> | null;
+      const st = (j.data?.strap ?? null) as { has_strap?: boolean | null; has_handle?: boolean | null; strap_drop_cm?: number | null; strap_drop_max_cm?: number | null; handle_drop_cm?: number | null } | null;
+      if (st) setStrap((p) => ({
+        ...p, byAi: true,
+        has: typeof st.has_strap === "boolean" ? st.has_strap : p.has,
+        handle: typeof st.has_handle === "boolean" ? st.has_handle : p.handle,
+        drop: st.strap_drop_cm ? String(st.strap_drop_cm) : p.drop,
+        max: st.strap_drop_max_cm ? String(st.strap_drop_max_cm) : p.max,
+        handleDrop: st.handle_drop_cm ? String(st.handle_drop_cm) : p.handleDrop,
+      }));
       if (!sz) { setSizeMsg(t("ไม่พบตัวเลขขนาดเขียนอยู่ในรูป — กรอกเองได้เลย", "No size numbers in the images — type them in")); return; }
       setSizes((p) => { const n = { ...p }; for (const f of SIZE_INPUTS) if (sz[f.key] !== null && sz[f.key] !== undefined) n[f.key] = String(sz[f.key]); return n; });
       setSizeMsg(t(`อ่านจาก: ${j.data?.size_source || "รูปสินค้า"} — ตรวจกับของจริงก่อนใช้`, `Read from: ${j.data?.size_source || "images"} — check against the real product`));
@@ -732,6 +776,28 @@ export function AiProductDetailModal({
     finally { setSizeBusy(false); }
   };
   const dims = { w: sizes.size_length_cm, h: sizes.size_height_cm, d: sizes.size_thickness_cm };
+
+  // ── สาย / หูกระเป๋า (ช่องของสินค้าเดิม: strap_drop_cm · strap_drop_max_cm · handle_drop_cm) — เจ้าของขอ 2026-11-25 ──
+  //    มีสาย/มีหู = ติ๊ก (AI ดูรูปติ๊กให้ก่อนได้) · ความยาว = ตัวเลขที่เขียนในรูป หรือพิมพ์เอง · ไม่ติ๊ก = ไม่เขียนเรื่องนี้
+  const [strap, setStrap] = useState(() => ({
+    has: Number(current.strap_drop_cm) > 0, drop: curStr("strap_drop_cm"), max: curStr("strap_drop_max_cm"),
+    handle: Number(current.handle_drop_cm) > 0, handleDrop: curStr("handle_drop_cm"), byAi: false,
+  }));
+  /** บรรทัดข้อมูลสาย/หูหิ้วที่ส่งให้ AI */
+  const strapFacts = (): string => {
+    const parts: string[] = [];
+    if (strap.has) parts.push(`มีสายสะพาย/สายคล้อง${Number(strap.drop) > 0 ? ` ยาว ${strap.drop} ซม.` : ""}${Number(strap.max) > 0 ? ` ปรับได้ถึง ${strap.max} ซม.` : ""}`);
+    if (strap.handle) parts.push(`มีหูหิ้ว${Number(strap.handleDrop) > 0 ? ` สูง ${strap.handleDrop} ซม.` : ""}`);
+    return parts.length ? `สาย/หูกระเป๋า: ${parts.join(" · ")}` : "สินค้านี้ไม่มีสายสะพายและไม่มีหูหิ้ว — ห้ามเขียนเรื่องสาย";
+  };
+  // เข้าขั้นขนาดครั้งแรก + สินค้ายังไม่เคยตั้งสาย/หู → ให้ AI ดูรูปติ๊กให้ก่อน 1 ครั้ง (ข้อเสนอ 3 · คนแก้ได้)
+  const autoStrapRef = useRef(false);
+  useEffect(() => {
+    if (step !== 2 || autoStrapRef.current || strap.byAi || !imgKeys?.length) return;
+    if (Number(current.strap_drop_cm) > 0 || Number(current.handle_drop_cm) > 0) return;
+    autoStrapRef.current = true;
+    void readSizes();
+  }, [step, imgKeys]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── ใส่อะไรได้ (คิดจากขนาด) ──
   const [fitRows, setFitRows] = useState<FitCatalogRow[] | null>(null);
@@ -779,12 +845,13 @@ export function AiProductDetailModal({
   const [copySrc, setCopySrc] = useState<ParentSkuPickerValue | null>(null);
   const [copyGroups, setCopyGroups] = useState<string[]>(["tags", "answers", "manual", "text"]);
   const [copyBusy, setCopyBusy] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [refText, setRefText] = useState("");
   const [refFrom, setRefFrom] = useState("");
 
   // ── จำร่างค้างไว้ต่อสินค้า (ของกลาง useFormDraft · เก็บในเครื่องนี้ 7 วัน) ──
-  const snapshot = { step, tplId, pickFields, answers, hl, aiHl, slots, extra, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, skip, res, picked, refText, refFrom };
-  const dirty = step > 0 || Object.values(answers).some((v) => v.trim()) || hl.length > 0 || !!extra.trim() || res !== null || Object.keys(slots).length > 0;
+  const snapshot = { step, tplId, pickFields, answers, hl, aiHl, mats, hlOff, strap, slots, extra, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, skip, res, picked, refText, refFrom };
+  const dirty = step > 0 || Object.values(answers).some((v) => v.trim()) || hl.length > 0 || mats.length > 0 || !!extra.trim() || res !== null || Object.keys(slots).length > 0;
   const draft = useFormDraft({ key: `ai-draft:${parentId}`, values: snapshot as unknown as Record<string, unknown>, dirty, active: true });
   const restore = (v: Record<string, unknown> | null) => {
     if (!v) return;
@@ -795,6 +862,9 @@ export function AiProductDetailModal({
     if (s.answers) setAnswers(s.answers);
     if (Array.isArray(s.hl)) setHl(s.hl);
     if (Array.isArray(s.aiHl)) setAiHl(s.aiHl);
+    if (Array.isArray(s.mats)) setMats(s.mats);
+    if (Array.isArray(s.hlOff)) setHlOff(s.hlOff);
+    if (s.strap && typeof s.strap === "object") setStrap((p) => ({ ...p, ...s.strap }));
     if (s.slots) setSlots(s.slots);
     if (typeof s.extra === "string") setExtra(s.extra);
     if (s.sizes) setSizes((p) => ({ ...p, ...s.sizes }));
@@ -810,11 +880,11 @@ export function AiProductDetailModal({
     if (typeof s.refFrom === "string") setRefFrom(s.refFrom);
   };
 
-  const doCopy = async () => {
-    if (!copySrc) return;
-    if (copySrc.id === parentId) { toast.warning(t("นี่คือรุ่นที่เปิดอยู่ — เลือกรุ่นอื่น", "This is the open product — pick another")); return; }
+  const doCopy = async (): Promise<boolean> => {
+    if (!copySrc) return false;
+    if (copySrc.id === parentId) { toast.warning(t("นี่คือรุ่นที่เปิดอยู่ — เลือกรุ่นอื่น", "This is the open product — pick another")); return false; }
     setCopyBusy(true);
-    const before = { sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, refText, refFrom, answers, hl, slots, tplId };
+    const before = { mats, strap, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, refText, refFrom, answers, hl, slots, tplId };
     const addedTags: string[] = [];
     const done: string[] = [];
     try {
@@ -841,6 +911,7 @@ export function AiProductDetailModal({
           const s = d as Partial<typeof snapshot>;
           if (s.answers) setAnswers((p) => ({ ...s.answers, ...Object.fromEntries(Object.entries(p).filter(([, v]) => v.trim())) }));
           if (Array.isArray(s.hl)) setHl((p) => [...new Set([...p, ...(s.hl ?? [])])]);
+          if (Array.isArray(s.mats)) setMats((p) => [...new Set([...p, ...(s.mats ?? [])])]);
           if (s.slots) setSlots((p) => ({ ...s.slots, ...p }));
           if (s.tplId) setTplId(s.tplId);
           done.push(t("คำตอบ/จุดเด่น", "answers/highlights"));
@@ -851,6 +922,7 @@ export function AiProductDetailModal({
         const f = parseFits(rec.fits);
         if (f.length) { setFitPicks(f); setFitTouched(true); }
         if (rec.parcel_size_id) { setParcelId(String(rec.parcel_size_id)); setParcelManual(true); }
+        if (Number(rec.strap_drop_cm) > 0 || Number(rec.handle_drop_cm) > 0) setStrap((p) => ({ ...p, has: Number(rec.strap_drop_cm) > 0, drop: Number(rec.strap_drop_cm) > 0 ? String(rec.strap_drop_cm) : p.drop, max: Number(rec.strap_drop_max_cm) > 0 ? String(rec.strap_drop_max_cm) : p.max, handle: Number(rec.handle_drop_cm) > 0, handleDrop: Number(rec.handle_drop_cm) > 0 ? String(rec.handle_drop_cm) : p.handleDrop }));
         done.push(t("ขนาด", "size"));
       }
       if (copyGroups.includes("manual")) {
@@ -865,10 +937,12 @@ export function AiProductDetailModal({
       toast.undo(t(`คัดลอกจาก ${copySrc.code} แล้ว: ${done.join(" · ")}`, `Copied from ${copySrc.code}: ${done.join(" · ")}`), async () => {
         for (const id of addedTags) await apiFetch("/api/product-tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parent_id: parentId, tag_id: id, on: false }) }).catch(() => null);
         setSizes(before.sizes); setFitPicks(before.fitPicks); setFitTouched(before.fitTouched); setParcelId(before.parcelId); setParcelManual(before.parcelManual);
+        setMats(before.mats); setStrap(before.strap);
         setManual(before.manual); setRefText(before.refText); setRefFrom(before.refFrom); setAnswers(before.answers); setHl(before.hl); setSlots(before.slots); setTplId(before.tplId);
         setTagTick((x) => x + 1);
       }, { ms: 8000 });
-    } catch (e) { toast.error(e instanceof Error ? e.message : t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("คัดลอกไม่สำเร็จ", "Copy failed")); return false; }
     finally { setCopyBusy(false); }
   };
 
@@ -931,7 +1005,10 @@ export function AiProductDetailModal({
   /** ข้อมูลจากทุกขั้นที่ส่งให้ AI (บรรทัดละเรื่อง) */
   const facts = (): string[] => {
     const out: string[] = [];
+    if (pickedMats.length) out.push(`วัสดุ (ผู้ใช้เลือก ใช้ตามนี้): ${pickedMats.map((m) => (m.name_en ? `${m.name} (${m.name_en})` : m.name)).join(", ")}`);
     if (hl.length) out.push(`จุดเด่นที่ผู้ใช้เลือก (ต้องใส่ทุกข้อ): ${hl.join(", ")}`);
+    const sf = strapFacts();
+    if (sf) out.push(sf);
     const slotPicks = (slotItems ?? []).filter((x) => (slots[x.id] ?? 0) > 0);
     if (slotPicks.length) out.push(`ช่องใส่ของ: ${slotPicks.map((x) => slotText(x, slots[x.id], "th") ?? `${x.name} ${slots[x.id]} ช่อง`).join(", ")}`);
     const sz = SIZE_INPUTS.filter((f) => Number(sizes[f.key]) > 0).map((f) => `${f.label} ${sizes[f.key]}`);
@@ -973,7 +1050,7 @@ export function AiProductDetailModal({
     } catch (e) { setErr(e instanceof Error ? e.message : t("เรียก AI ไม่สำเร็จ", "Could not reach AI")); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentId, extra, current, answers, topics, pickFields, tpl, skip, hl, slots, sizes, fitPicks, manual, refText]);
+  }, [parentId, extra, current, answers, topics, pickFields, tpl, skip, hl, slots, sizes, fitPicks, manual, refText, pickedMats, strap]);
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
   const missingEn = res
@@ -988,6 +1065,9 @@ export function AiProductDetailModal({
     for (const f of SIZE_INPUTS) if (sizes[f.key].trim() !== curStr(f.key)) out[f.key] = sizes[f.key].trim();
     if (JSON.stringify(fitPicks) !== JSON.stringify(parseFits(current.fits))) out.fits = fitPicks.length ? fitPicks : null;
     if (parcelId !== curStr("parcel_size_id")) out.parcel_size_id = parcelId || null;
+    // สาย/หู: ไม่ติ๊ก = ล้างค่า (ถ้าเดิมมี) · ติ๊ก = ค่าที่กรอก
+    const sv = { strap_drop_cm: strap.has ? strap.drop.trim() : "", strap_drop_max_cm: strap.has ? strap.max.trim() : "", handle_drop_cm: strap.handle ? strap.handleDrop.trim() : "" };
+    for (const [k, v] of Object.entries(sv)) if (v !== curStr(k)) out[k] = v || null;
     for (const m of MANUAL_FIELDS) if ((manual[m.key] ?? "").trim() !== curStr(m.key)) out[m.key] = (manual[m.key] ?? "").trim() || null;
     return out;
   };
@@ -1010,6 +1090,24 @@ export function AiProductDetailModal({
   };
   const nextLabel = step === 2 ? t("✨ ให้ AI ร่าง", "✨ Let AI draft") : step === 4 ? t(`ใส่ลงฟอร์ม (${outCount})`, `Put into form (${outCount})`) : t("ถัดไป", "Next");
 
+  // ตัวอย่าง Description แบบบรรทัด (คร่าว ๆ จากที่เลือกในขั้นนี้ — AI จะเรียบเรียงตาม Theme อีกที)
+  const uiEn = t("th", "en") === "en";
+  const previewLines: string[] = [
+    ...(pickedMats.length ? [`${t("วัสดุ", "Material")}: ${pickedMats.map(matName).join(", ")}`] : []),
+    ...hl.map((h) => t(h, hlEn(h) || h)),
+    ...(slotItems ?? []).filter((x) => (slots[x.id] ?? 0) > 0).map((x) => slotText(x, slots[x.id], uiEn ? "en" : "th") ?? `${t(x.name, x.name_en || x.name)} × ${slots[x.id]}`),
+    ...(strap.has ? [t(`สายสะพาย${Number(strap.drop) > 0 ? ` ยาว ${strap.drop} ซม.` : ""}${Number(strap.max) > 0 ? ` (ปรับได้ถึง ${strap.max} ซม.)` : ""}`, `Strap${Number(strap.drop) > 0 ? ` ${strap.drop} cm` : ""}${Number(strap.max) > 0 ? ` (adjustable to ${strap.max} cm)` : ""}`)] : []),
+    ...(strap.handle ? [t(`หูหิ้ว${Number(strap.handleDrop) > 0 ? ` สูง ${strap.handleDrop} ซม.` : ""}`, `Handle${Number(strap.handleDrop) > 0 ? ` ${strap.handleDrop} cm drop` : ""}`)] : []),
+  ];
+  const descPreview = (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5">
+      <p className="text-[11.5px] font-medium text-slate-500 mb-1">{t("ตัวอย่าง Description", "Description preview")}</p>
+      {previewLines.length
+        ? previewLines.map((l, i) => <p key={i} className="text-[12.5px] text-slate-700 leading-relaxed">- {l}</p>)
+        : <p className="text-[12px] text-slate-400">{t("เลือกวัสดุ / จุดเด่น / ช่อง แล้วจะเห็นตัวอย่างตรงนี้", "Pick material / highlights / compartments to see a preview")}</p>}
+      <p className="mt-1.5 text-[10.5px] text-slate-400">{t("ตัวอย่างคร่าว ๆ — AI จะเรียบเรียงตาม Theme ที่เลือก", "Rough preview — AI will arrange it by the chosen theme")}</p>
+    </div>
+  );
   const chip = (on: boolean) => `h-7 px-2.5 text-[12px] rounded-full border ${on ? "bg-fuchsia-50 border-fuchsia-300 text-fuchsia-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`;
   const label = "block text-[12.5px] font-medium text-slate-600 mb-1";
 
@@ -1198,21 +1296,37 @@ export function AiProductDetailModal({
             {step === 0 && (
               <>
                 <div>
-                  <span className={label}>{t("คัดลอกจากรุ่นเก่า (ไม่บังคับ)", "Copy from an older model (optional)")}</span>
-                  <div className="flex gap-2 items-start flex-wrap sm:flex-nowrap">
-                    <div className="flex-1 min-w-[200px]"><ParentSkuPicker value={copySrc} onChange={setCopySrc} disableCreate placeholder={t("ค้นรหัส/ชื่อรุ่น…", "Search code/name…")} /></div>
-                    <button type="button" onClick={() => void doCopy()} disabled={!copySrc || copyBusy || copyGroups.length === 0}
-                      className="h-9 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40 inline-flex items-center gap-1.5">
-                      {copyBusy && <Spinner />}{t("⧉ คัดลอก", "⧉ Copy")}
-                    </button>
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[11.5px] text-slate-400">{t("เอามาบ้าง:", "Bring over:")}</span>
-                    {COPY_GROUPS.map((g) => {
-                      const on = copyGroups.includes(g.key);
-                      return <button key={g.key} type="button" onClick={() => setCopyGroups((p) => (on ? p.filter((x) => x !== g.key) : [...p, g.key]))} className={chip(on)}>{on ? "✓ " : ""}{g.label}</button>;
-                    })}
-                  </div>
+                  {/* คัดลอกจากรุ่นเก่า = ปุ่มเล็ก กดแล้วเด้งป๊อปเลือกรุ่น + เลือกว่าจะดึงอะไร (เจ้าของขอ 2026-11-25) */}
+                  <button type="button" onClick={() => setCopyOpen(true)}
+                    className="h-8 px-3 text-[12.5px] font-medium rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1.5">
+                    ⧉ {t("คัดลอกจากรุ่นเก่า", "Copy from an older model")}
+                  </button>
+                  <ERPModal open={copyOpen} onClose={() => { if (!copyBusy) setCopyOpen(false); }} size="sm" title={t("คัดลอกจากรุ่นเก่า", "Copy from an older model")}
+                    footer={
+                      <div className="flex justify-end gap-2 w-full">
+                        <button type="button" onClick={() => setCopyOpen(false)} disabled={copyBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+                        <button type="button" onClick={() => void doCopy().then((ok) => { if (ok) setCopyOpen(false); })} disabled={!copySrc || copyBusy || copyGroups.length === 0}
+                          className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 inline-flex items-center gap-1.5">
+                          {copyBusy && <Spinner />}{t("คัดลอก", "Copy")}
+                        </button>
+                      </div>
+                    }>
+                    <p className="text-[12px] text-slate-500 mb-1">{t("รุ่นต้นแบบ", "Source model")}</p>
+                    <ParentSkuPicker value={copySrc} onChange={setCopySrc} disableCreate placeholder={t("ค้นรหัส/ชื่อรุ่น…", "Search code/name…")} />
+                    <p className="text-[12px] text-slate-500 mt-3 mb-1">{t("เลือกว่าจะดึงอะไรมา", "What to bring over")}</p>
+                    <div className="space-y-1">
+                      {COPY_GROUPS.map((g) => {
+                        const on = copyGroups.includes(g.key);
+                        return (
+                          <label key={g.key} className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer">
+                            <input type="checkbox" checked={on} onChange={() => setCopyGroups((p) => (on ? p.filter((x) => x !== g.key) : [...p, g.key]))} className="h-4 w-4 accent-indigo-600" />
+                            {g.label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-400">{t("แค่เติมลงป๊อปนี้ ยังไม่บันทึก · กด \"ย้อนกลับ\" ในแจ้งผลได้", "Only fills this popup — nothing is saved · Undo from the notice")}</p>
+                  </ERPModal>
                   {refText && (
                     <p className="mt-1 text-[11.5px] text-slate-500">
                       {t(`ใช้ Description ของ ${refFrom} เป็นตัวอย่างการเขียน`, `Using ${refFrom}'s description as a writing example`)} ·{" "}
@@ -1293,6 +1407,27 @@ export function AiProductDetailModal({
                       const cur = answers[x.th] ?? "";
                       const req = !extras.optional_topics.includes(x.th);
                       const miss = req && isBlank(cur);
+                      // มี 2 ตัวเลือก (Yes/No · กันน้ำ/ไม่กันน้ำ) = บรรทัดเดียวสั้น ๆ · พิมพ์เองได้ที่ ✎ (เจ้าของขอ 2026-11-25)
+                      if (x.options.length === 2 && typeTopic !== x.th) {
+                        const custom = cur.trim() && !x.options.includes(cur.trim());
+                        return (
+                          <div key={x.th} className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
+                            <span className="flex-1 min-w-0 text-[12.5px] text-slate-700 leading-snug">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}
+                              {custom && <span className="block text-[11px] text-violet-700 truncate">“{cur}”</span>}
+                            </span>
+                            <span className="inline-flex shrink-0 overflow-hidden rounded-md border border-violet-200">
+                              {x.options.map((op, oi) => {
+                                const on = cur.trim() === op;
+                                const shown = t("th", "en") === "en" && x.optionsEn[oi] ? x.optionsEn[oi] : op;
+                                return <button key={op} type="button" onClick={() => setAnswers((p) => ({ ...p, [x.th]: on ? "" : op }))}
+                                  className={`h-7 px-2.5 text-[12px] ${oi > 0 ? "border-l border-violet-200" : ""} ${on ? "bg-violet-600 text-white" : "bg-white text-violet-700 hover:bg-violet-50"}`}>{shown}</button>;
+                              })}
+                            </span>
+                            <button type="button" onClick={() => setTypeTopic(x.th)} title={t("พิมพ์คำตอบเอง", "Type an answer")} aria-label={t("พิมพ์คำตอบเอง", "Type an answer")}
+                              className="shrink-0 h-7 w-7 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600">✎</button>
+                          </div>
+                        );
+                      }
                       return (
                         <div key={x.th} className={`rounded-lg border p-2 ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
                           <p className="text-[12px] text-slate-600 mb-1">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}</p>
@@ -1307,6 +1442,7 @@ export function AiProductDetailModal({
                             </div>
                           )}
                           <input value={cur} onChange={(e) => setAnswers((p) => ({ ...p, [x.th]: e.target.value }))} placeholder={t("หรือพิมพ์คำตอบ…", "or type an answer…")}
+                            autoFocus={typeTopic === x.th} onBlur={() => { if (typeTopic === x.th) setTimeout(() => setTypeTopic((v) => (v === x.th ? null : v)), 200); }}
                             className="w-full h-8 px-2 text-[12.5px] border border-slate-200 rounded-md bg-white" />
                         </div>
                       );
@@ -1314,22 +1450,38 @@ export function AiProductDetailModal({
                   </div>
                 )}
 
+                {/* วัสดุ (ของกลาง MaterialQuickPick — เหมือนป๊อปแทรกรายละเอียด) · เลือกวัสดุที่เข้ากติกา = ติ๊กจุดเด่นให้เอง */}
+                <div>
+                  <span className={label}>
+                    {t("วัสดุ", "Material")}
+                    {canTpl && <button type="button" onClick={() => setMatRuleOpen((v) => !v)} className="ml-2 text-[11px] font-normal text-indigo-600 underline">{t("⚙ กติกาวัสดุ → จุดเด่น", "⚙ Material → highlight rules")}</button>}
+                  </span>
+                  <MaterialQuickPick items={matList} value={mats} onChange={setMats} lang={t("th", "en") === "en" ? "en" : "th"}
+                    hint={typeof current.materials === "string" && current.materials.trim() ? current.materials.replace(/s+/g, " ").trim() : null} />
+                  {matAutoHl.length > 0 && (
+                    <p className="mt-1 text-[11.5px] text-emerald-700">✓ {t("ติ๊กจุดเด่นให้จากวัสดุ:", "Auto-ticked from material:")} {matAutoHl.map((x) => t(x.highlight, x.highlight_en || x.highlight)).join(", ")}</p>
+                  )}
+                  {matRuleOpen && setup && <MaterialRuleEditor rules={setup.material_rules} onSave={saveMatRules} />}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-3 items-start">
                 <div>
                   <span className={label}>
                     {t("จุดเด่น (ติ๊กเลือก)", "Highlights (tick)")}
                     <span className="ml-1.5 text-[11px] font-normal text-slate-400">{hlChoices.fromType ? t("· ชุดของประเภทนี้", "· this type's set") : t("· จากคลังกลาง (ตั้งชุดของประเภทได้ที่ ⚙)", "· from the shared library (set per type via ⚙)")}</span>
                   </span>
-                  {/* checklist ไทย + EN ใต้แต่ละข้อ (EN จากกฎ / คลังกลาง / AI แนะนำ) */}
+                  {/* checklist โชว์ภาษาที่ใช้อยู่ภาษาเดียว (เจ้าของขอ 2026-11-25) · EN จากกฎ / คลังกลาง / AI / กติกาวัสดุ — ไม่มี EN = โชว์ไทย */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 rounded-lg border border-slate-200 px-2.5 py-1.5">
                     {[...new Set([...hlChoices.list, ...aiHl, ...hl])].map((h) => {
-                      const en = extras.highlights_en[h] || phraseItems.find((x) => x.name === h)?.name_en || aiHlEn[h] || "";
+                      const shown = t(h, hlEn(h) || h);
                       const on = hl.includes(h);
+                      const auto = on && matAutoHl.some((x) => x.highlight === h);
                       return (
                         <label key={h} className="flex items-start gap-2 py-1 cursor-pointer">
                           <input type="checkbox" checked={on} onChange={() => toggleHl(h)} className="mt-0.5 h-4 w-4 accent-fuchsia-600 shrink-0" />
                           <span className="min-w-0">
-                            <span className={`block text-[12.5px] ${on ? "text-slate-800 font-medium" : "text-slate-600"}`}>{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{h}</span>
-                            {en && <span className="block text-[11px] text-slate-400">{en}</span>}
+                            <span className={`block text-[12.5px] ${on ? "text-slate-800 font-medium" : "text-slate-600"}`}>{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{shown}</span>
+                            {auto && <span className="inline-block mt-0.5 text-[10px] px-1.5 rounded bg-emerald-50 text-emerald-700">{t("อัตโนมัติจากวัสดุ", "auto from material")}</span>}
                           </span>
                         </label>
                       );
@@ -1347,6 +1499,13 @@ export function AiProductDetailModal({
                       onKeyDown={(e) => { if (e.key === "Enter" && hlInput.trim()) { e.preventDefault(); setHl((p) => [...new Set([...p, hlInput.trim()])]); setHlInput(""); } }}
                       className="flex-1 h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg" />
                   </div>
+                </div>
+                {/* ตัวอย่าง Description แบบบรรทัด — PC ข้างขวา · มือถือพับไว้ (เจ้าของเลือก 2026-11-25) */}
+                <div className="hidden lg:block lg:sticky lg:top-0">{descPreview}</div>
+                <details className="lg:hidden rounded-lg border border-slate-200 px-2.5 py-1.5">
+                  <summary className="text-[12px] text-slate-600 cursor-pointer">{t("ดูตัวอย่าง Description", "Show Description preview")}</summary>
+                  <div className="mt-1.5">{descPreview}</div>
+                </details>
                 </div>
 
                 <div>
@@ -1399,7 +1558,7 @@ export function AiProductDetailModal({
                     <span className="text-[12.5px] font-medium text-slate-600 flex-1">{t("ขนาดสินค้า", "Product size")}</span>
                     <button type="button" onClick={() => void readSizes()} disabled={sizeBusy || !imgKeys?.length}
                       className="h-7 px-2.5 text-[12px] rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-40 inline-flex items-center gap-1">
-                      {sizeBusy && <Spinner />}{t("✨ ให้ AI อ่านขนาดจากรูป", "✨ AI reads sizes from images")}
+                      {sizeBusy && <Spinner />}{t("✨ ให้ AI อ่านขนาด + ดูสายจากรูป", "✨ AI reads sizes + strap from images")}
                     </button>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1413,6 +1572,34 @@ export function AiProductDetailModal({
                   </div>
                   {sizeMsg && <p className="mt-1 text-[11.5px] text-slate-500">{sizeMsg}</p>}
                   <p className="mt-0.5 text-[11px] text-slate-400">{t("AI อ่านเฉพาะตัวเลขที่เขียนอยู่ในรูป ไม่กะจากสายตา · ช่องสีฟ้า = เปลี่ยนจากเดิม", "AI only reads numbers written in images · blue = changed")}</p>
+                </div>
+
+                {/* สาย / หูกระเป๋า — AI ดูรูปแล้วติ๊กให้ก่อน (ปุ่ม ✨ ด้านบน) · ความยาวเอาเฉพาะตัวเลขที่เขียนในรูป · แก้ได้ */}
+                <div>
+                  <span className={label}>
+                    {t("สาย / หูกระเป๋า", "Strap / handle")}
+                    {strap.byAi && <span className="ml-1.5 text-[10.5px] font-normal px-1.5 rounded bg-emerald-50 text-emerald-700">{t("AI ดูจากรูปแล้ว — ตรวจอีกที", "AI checked the images — please verify")}</span>}
+                  </span>
+                  <label className="flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={strap.has} onChange={(e) => setStrap((p) => ({ ...p, has: e.target.checked }))} className="h-4 w-4 accent-fuchsia-600" />
+                    {t("มีสายสะพาย / สายคล้อง", "Has a shoulder / neck strap")}
+                  </label>
+                  {strap.has && (
+                    <div className="grid grid-cols-2 gap-2 mt-1 ml-6 max-w-sm">
+                      <label className="block"><span className="text-[11.5px] text-slate-500">{t("ความยาวสาย (ซม.)", "Strap drop (cm)")}</span>
+                        <input value={strap.drop} inputMode="decimal" onChange={(e) => setStrap((p) => ({ ...p, drop: e.target.value.replace(/[^d.]/g, "") }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg tabular-nums" /></label>
+                      <label className="block"><span className="text-[11.5px] text-slate-500">{t("ปรับยาวได้ถึง (ซม.)", "Adjustable to (cm)")}</span>
+                        <input value={strap.max} inputMode="decimal" placeholder="—" onChange={(e) => setStrap((p) => ({ ...p, max: e.target.value.replace(/[^d.]/g, "") }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg tabular-nums" /></label>
+                    </div>
+                  )}
+                  <label className="mt-1.5 flex items-center gap-2 text-[12.5px] text-slate-700 cursor-pointer">
+                    <input type="checkbox" checked={strap.handle} onChange={(e) => setStrap((p) => ({ ...p, handle: e.target.checked }))} className="h-4 w-4 accent-fuchsia-600" />
+                    {t("มีหูหิ้ว", "Has a handle")}
+                  </label>
+                  {strap.handle && (
+                    <label className="block mt-1 ml-6 max-w-[11rem]"><span className="text-[11.5px] text-slate-500">{t("ความสูงหูหิ้ว (ซม.)", "Handle drop (cm)")}</span>
+                      <input value={strap.handleDrop} inputMode="decimal" placeholder="—" onChange={(e) => setStrap((p) => ({ ...p, handleDrop: e.target.value.replace(/[^d.]/g, "") }))} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg tabular-nums" /></label>
+                  )}
                 </div>
 
                 <div>

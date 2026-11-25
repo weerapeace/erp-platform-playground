@@ -440,6 +440,13 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "BOM ขอซื้อวัตถุดิบ · ป๊อปเลือกวัสดุ Design Library (แท็บรายการ/ค้นทั้งหมด)",
   },
   {
+    key: "material-quick-pick", label: "เลือกวัสดุสินค้าแบบย่อ (ชิป + ค้น + ใช้บ่อย)", code: "MaterialQuickPick", category: "pick",
+    source: { path: "components/material-quick-pick" },
+    what: "เลือกวัสดุของสินค้า (ตาราง product_materials) แบบย่อ: ที่เลือกแล้วเป็นชิป ✕ + แนะนำจากข้อมูลฝ่ายผลิต + ค้นหา + ใช้บ่อย + ดูทั้งหมด · คืน id ตามลำดับที่กด ไม่บันทึกเอง",
+    when: "ป๊อปแทรกรายละเอียด (ขั้นวัสดุ) · ป๊อปให้ AI คิดรายละเอียด (ขั้นประเภท & จุดเด่น)",
+    notWhen: "วัตถุดิบผลิต/ชิ้นส่วนที่มีสต๊อก ใช้ MaterialPicker · วัสดุตีราคา (design_price_items) ใช้ MaterialAddSelect",
+  },
+  {
     key: "material-quick-create", label: "เลือก + เพิ่มวัสดุตีราคาด่วน", code: "MaterialAddSelect · MaterialQuickCreate", category: "pick",
     source: { path: "components/material-quick-create", names: ["MaterialAddSelect", "MaterialQuickCreate", "useCanCreateMaterial"] },
     what: "ช่องค้นหาวัสดุตีราคา (design_price_items) ค้นไม่เจอ → \"＋ เพิ่มวัสดุใหม่\" เลือกชนิดวัสดุ + เตือนชื่อคล้ายที่มีอยู่แล้ว → สร้างแล้วเลือกให้ทันที · ไม่มีสิทธิ์ products.create = ค้นเลือกอย่างเดียว · ส่วนไม่ใช่หน้าจอ lib/material-quick-create (similarMaterials · createDesignMaterial ใบงานออกแบบใช้ด้วย)",
