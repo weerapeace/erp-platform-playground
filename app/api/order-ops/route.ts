@@ -37,8 +37,9 @@ type Row = Record<string, unknown>;
 
 const FIELDS: Record<OpsTableKey, readonly string[]> = {
   instructions: ["order_no", "platform", "customer_name", "sku", "commands", "command_details", "engrave", "engrave_text", "engrave_type", "engrave_position", "engrave_font", "note", "status", "platform_order_id", "is_trial", "via_chat", "chat_note"],
-  waitlist: ["order_no", "platform", "customer_name", "sku", "note", "informed", "platform_order_id", "is_trial"],
-  cases: ["kind", "order_no", "customer_name", "sku", "qty", "topic", "detail", "resolution", "status", "replacement_sku", "shipping_charge", "shipping_refund", "bank_info", "shipping_address", "return_date", "images", "note", "platform_order_id", "is_trial"],
+  waitlist: ["order_no", "platform", "customer_name", "sku", "note", "informed", "platform_order_id", "is_trial", "expected_at"],
+  cases: ["kind", "order_no", "platform", "customer_name", "sku", "qty", "topic", "detail", "resolution", "status", "replacement_sku", "shipping_charge", "shipping_refund", "bank_info", "shipping_address", "return_date", "images", "note", "platform_order_id", "is_trial",
+    "return_type", "return_reason", "refund_amount", "refund_bank", "refund_account", "refund_account_name"],
 };
 /** ช่องที่แก้หลายรายการพร้อมกันได้ */
 const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
@@ -49,7 +50,7 @@ const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
 /** ติ๊กของงานซ่อม/คืน → ช่องเวลา */
 const CASE_FLAGS = { checked: "checked_at", stock_received: "stock_received_at", zort_cancelled: "zort_cancelled_at", packed: "packed_at" } as const;
 
-const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos", "command_choice", "command_phrase", "special_wrap", "card_phrase"];
+const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos", "command_choice", "command_phrase", "special_wrap", "card_phrase", "repair_resolution", "return_type", "return_reason", "wait_phrase"];
 const isTable = (t: string | null): t is OpsTableKey => t === "instructions" || t === "waitlist" || t === "cases";
 const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
 const uuidRe = /^[0-9a-f-]{36}$/i;
@@ -90,9 +91,12 @@ function normalize(t: OpsTableKey, row: Row, before: Row | null): string | null 
       if (!Number.isFinite(q) || q < 1) return "จำนวนต้องมากกว่า 0";
       row.qty = q;
     }
-    for (const k of ["shipping_charge", "shipping_refund"]) if (k in row) row[k] = parseMoney(row[k]);
+    for (const k of ["shipping_charge", "shipping_refund", "refund_amount"]) if (k in row) row[k] = parseMoney(row[k]);
     if ("images" in row) row.images = Array.isArray(row.images) ? (row.images as unknown[]).map(String).slice(0, 20) : [];
     if ("return_date" in row && row.return_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(row.return_date))) row.return_date = null;
+  }
+  if (t === "waitlist") {
+    if ("expected_at" in row && row.expected_at && !/^\d{4}-\d{2}-\d{2}$/.test(String(row.expected_at))) row.expected_at = null;
   }
   return null;
 }
@@ -143,9 +147,13 @@ export async function GET(request: Request) {
 
   const t = sp.get("t");
   if (t === "options") {
-    const { data, error } = await admin.from("order_ops_options").select("*").order("kind").order("sort_order").order("label");
+    const [{ data, error }, { data: plats }] = await Promise.all([
+      admin.from("order_ops_options").select("*").order("kind").order("sort_order").order("label"),
+      admin.from("erp_platforms").select("code, name_th").eq("is_active", true).order("sort_order"),
+    ]);
     if (error) return bad("โหลดตัวเลือกไม่สำเร็จ", 500);
-    return NextResponse.json({ options: data ?? [] });
+    // ช่องทางขาย (ร้านในระบบ) — ฟอร์มที่ไม่มีออเดอร์เลือกจากรายการนี้แทนพิมพ์เอง
+    return NextResponse.json({ options: data ?? [], platforms: ((plats ?? []) as { code: string; name_th: string | null }[]).map((p) => p.name_th || p.code) });
   }
   if (!isTable(t)) return bad("ไม่รู้จักชนิดข้อมูล");
   const table = OPS_TABLES[t];

@@ -46,7 +46,17 @@ export type OrderHit = {
   /** หมายเหตุที่ลูกค้าเขียนตอนสั่ง (Shopee message_to_seller / buyer_message / note) */
   note: string | null;
   items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
+  /** ที่อยู่ผู้รับ (platform_orders.ship_to) เป็นข้อความเดียว · ไม่มี = null */
+  ship_to?: string | null;
 };
+
+/** ที่อยู่ผู้รับ → ข้อความ (ชื่อ เบอร์ ที่อยู่ ตำบล อำเภอ จังหวัด รหัสไปรษณีย์) */
+function shipToLine(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const s = ["name", "phone", "address", "subdistrict", "district", "province", "postal"].map((k) => String(o[k] ?? "").trim()).filter(Boolean).join(" ");
+  return s || null;
+}
 
 /** หาออเดอร์จากศูนย์ออเดอร์ด้วยเลขออเดอร์ (ตรงตัว) — ไม่เจอ = null (ใบเก่า/ยังไม่ดึง ก็ยังพิมพ์เองได้) */
 export async function findPlatformOrder(admin: Admin, raw: string): Promise<OrderHit | null> {
@@ -56,7 +66,7 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
   const ors = variants.flatMap((c) => [`order_no.eq."${c.replace(/"/g, "")}"`, `external_order_id.eq."${c.replace(/"/g, "")}"`]).join(",");
   const { data } = await admin
     .from("platform_orders")
-    .select(`id, order_no, external_order_id, customer_name, status, ordered_at, platform_id, source, ${NOTE_COLS}`)
+    .select(`id, order_no, external_order_id, customer_name, status, ordered_at, platform_id, source, ship_to, ${NOTE_COLS}`)
     .or(ors)
     .order("created_at", { ascending: false })
     .limit(5);
@@ -85,6 +95,7 @@ export async function findPlatformOrder(admin: Admin, raw: string): Promise<Orde
     status: (o.status as string) ?? null,
     note: noteOf(o),
     items: its,
+    ship_to: shipToLine(o.ship_to),
   };
 }
 

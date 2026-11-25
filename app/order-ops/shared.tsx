@@ -13,7 +13,9 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
-import { SkuPicker } from "@/components/pickers";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { PlatformOrderPicker } from "@/components/platform-order-picker";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { COMMAND_BOX_LABEL, commandBoxOf, guessCommandBox, isCommandBox, type CommandBox } from "@/lib/order-ops";
 
 export type Tone = "neutral" | "accent" | "warning" | "success" | "danger";
@@ -84,6 +86,7 @@ export function TrialBanner({ trialCount, onChanged }: { trialCount: number; onC
 export type OrderHit = {
   id: string; order_no: string; platform: string | null; customer_name: string | null; ordered_at: string | null; status: string | null; note: string | null;
   items: { sku: string | null; name: string | null; qty: number; sku_id: string | null; image_key?: string | null }[];
+  ship_to?: string | null;
 };
 type Existing = { instructions: { id: string; status: string }[]; cases: { id: string; kind: string; status: string }[] };
 
@@ -171,15 +174,136 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
 
-export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice" | "command_phrase" | "special_wrap" | "card_phrase"; label: string; value?: string | null; sort_order: number; is_active: boolean; extra?: { sku_id?: string; sku_code?: string | null; template_group?: string } | null };
+export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice" | "command_phrase" | "special_wrap" | "card_phrase" | "repair_resolution" | "return_type" | "return_reason" | "wait_phrase"; label: string; value?: string | null; sort_order: number; is_active: boolean; extra?: { sku_id?: string; sku_code?: string | null; template_group?: string } | null };
 
 export function useOpsOptions() {
   const [options, setOptions] = useState<OptionRow[]>([]);
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const load = useCallback(async () => {
-    try { const r = await opsJson<{ options: OptionRow[] }>("/api/order-ops?t=options"); setOptions(r.options); } catch { /* ใช้ค่าว่าง */ }
+    try { const r = await opsJson<{ options: OptionRow[]; platforms?: string[] }>("/api/order-ops?t=options"); setOptions(r.options); setPlatforms(r.platforms ?? []); } catch { /* ใช้ค่าว่าง */ }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  return { options, reload: load };
+  return { options, platforms, reload: load };
+}
+
+/** ชื่อป๊อปจัดการตัวเลือกต่อชนิด */
+const OPTION_TITLE: Partial<Record<OptionRow["kind"], string>> = {
+  instruction_command: "จัดการคำสั่ง", repair_topic: "จัดการหัวข้อซ่อม", repair_resolution: "จัดการวิธีแก้",
+  return_type: "จัดการชนิดของคืน", return_reason: "จัดการเหตุผลคืน", wait_phrase: "จัดการข้อความลัดรอของ",
+};
+
+/**
+ * ปุ่มตัวเลือก (แทนดรอปดาวน์) จากตัวเลือกที่ตั้งค่าได้ — กดซ้ำ = เอาออก · หัวหน้ามีปุ่ม "ตั้งค่า" เพิ่ม/แก้/เรียง/ซ่อน (เจ้าของสั่ง 2026-11-25 ข้อ 4)
+ * multi = ปุ่มลัดเติมข้อความ (onPick) แทนการเลือกค่าเดียว
+ */
+export function OptionChips({ kind, options, value, onChange, onChanged, label, required, emptyLabel }: {
+  kind: OptionRow["kind"]; options: OptionRow[]; value: string; onChange: (v: string) => void; onChanged: () => void;
+  label: string; required?: boolean; emptyLabel?: string;
+}) {
+  const canManage = usePermission("order_ops.manage");
+  const [manage, setManage] = useState(false);
+  const list = options.filter((o) => o.kind === kind && (o.is_active || o.label === value)).map((o) => o.label);
+  if (value && !list.includes(value)) list.push(value);   // ค่าเก่าที่ไม่มีในรายการแล้ว ยังโชว์
+  return (
+    <div>
+      <div className="mb-1 flex items-center gap-2 text-xs font-medium text-slate-600">
+        <span>{label}{required ? " *" : ""}</span>
+        {canManage && <button type="button" onClick={() => setManage(true)} className="inline-flex items-center gap-0.5 text-[11px] font-normal text-sky-700 hover:underline"><Icon name="settings" className="h-3 w-3" /> ตั้งค่า</button>}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {list.map((l) => (
+          <button key={l} type="button" onClick={() => onChange(value === l && !required ? "" : l)}
+            className={`rounded-full border px-3 py-1 text-xs ${value === l ? "border-sky-400 bg-sky-50 font-medium text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+        ))}
+        {!list.length && <span className="text-[11px] text-slate-400">{emptyLabel ?? "ยังไม่มีตัวเลือก"}{canManage ? " — กด ตั้งค่า เพื่อเพิ่ม" : ""}</span>}
+      </div>
+      {manage && <OptionsManager open onClose={() => setManage(false)} kind={kind} options={options} onChanged={onChanged} />}
+    </div>
+  );
+}
+
+export type OrderEntryValue = { order_no: string; platform: string; customer_name: string; sku: string; platform_order_id: string | null };
+/**
+ * ออเดอร์ก่อน (ฟอร์มรอของ/ซ่อม/คืน · เจ้าของสั่ง 2026-11-25 ข้อ 1-3)
+ *   พิมพ์/สแกน หรือ "เลือกออเดอร์" → เจอในศูนย์ออเดอร์ = ช่องทาง/ลูกค้าอ่านอย่างเดียว + กดเลือกสินค้าจากรูปในออเดอร์
+ *   ไม่มีออเดอร์ = ช่องทางเลือกจากร้านในระบบ · ลูกค้าพิมพ์เอง · สินค้าใช้ตัวเลือกสินค้ากลาง (SkuPicker)
+ */
+export function OrderEntry({ value, onChange, platforms, required, autoFocus, existingLabel, onOrder, skuLabel = "สินค้า" }: {
+  value: OrderEntryValue; onChange: (p: Partial<OrderEntryValue>) => void; platforms: string[];
+  required?: boolean; autoFocus?: boolean; existingLabel?: string; skuLabel?: string;
+  /** เจอ/ไม่เจอออเดอร์ (ไว้เติมหมายเหตุ/ที่อยู่) */
+  onOrder?: (o: OrderHit | null) => void;
+}) {
+  const [items, setItems] = useState<OrderHit["items"]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const vRef = useRef(value); vRef.current = value;
+  const linked = !!value.platform_order_id && items.length > 0;
+  const found = (o: OrderHit | null) => {
+    setItems(o?.items ?? []);
+    onOrder?.(o);
+    if (!o) { if (vRef.current.platform_order_id) onChange({ platform_order_id: null }); return; }
+    const cur = vRef.current;
+    onChange({
+      platform_order_id: o.id, platform: o.platform || cur.platform, customer_name: o.customer_name || cur.customer_name,
+      sku: cur.sku && o.items.some((i) => i.sku === cur.sku) ? cur.sku : o.items.length === 1 ? o.items[0].sku ?? "" : cur.sku,
+    });
+  };
+  const plats = [...new Set([...platforms, ...(value.platform ? [value.platform] : [])])];
+  return (
+    <div className="space-y-3">
+      <Field label={`เลขออเดอร์${required ? " *" : " (ถ้ามี)"}`}>
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1"><OrderNoField value={value.order_no} onChange={(v) => onChange({ order_no: v })} onFound={(o) => found(o)} autoFocus={autoFocus} /></div>
+          <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
+        </div>
+      </Field>
+      {linked ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {([["ช่องทาง", value.platform], ["ลูกค้า", value.customer_name]] as const).map(([l, v]) => (
+              <div key={l}>
+                <div className="mb-1 text-xs text-slate-500">{l}</div>
+                <div title="มาจากศูนย์ออเดอร์ — แก้ไม่ได้" className="flex h-9 items-center gap-1.5 truncate rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"><Icon name="lock" className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{v || "-"}</span></div>
+              </div>
+            ))}
+          </div>
+          <div>
+            <div className="mb-1 text-xs text-slate-500">{skuLabel} — กดเลือกจากออเดอร์</div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {items.map((it, i) => {
+                const on = !!it.sku && value.sku === it.sku;
+                const url = r2ImageUrl(it.image_key ?? null, 200);
+                return (
+                  <button key={i} type="button" onClick={() => onChange({ sku: on ? "" : it.sku ?? "" })} className={`flex items-center gap-2 rounded-lg border p-1.5 text-left ${on ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    {url ? <img src={url} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-400"><Icon name="photo" className="h-4 w-4" /></span>}
+                    <span className="min-w-0 flex-1"><span className="block font-mono text-xs font-medium">{it.sku ?? "?"} <span className="font-sans text-slate-500">×{it.qty}</span></span>{it.name && <span className="block truncate text-[11px] text-slate-500">{it.name}</span>}</span>
+                    {on && <Icon name="check" className="h-4 w-4 shrink-0 text-sky-600" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="ช่องทาง">
+              <select value={value.platform} onChange={(e) => onChange({ platform: e.target.value })} className={inputCls}>
+                <option value="">-</option>{plats.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </Field>
+            <Field label="ชื่อลูกค้า"><input value={value.customer_name} onChange={(e) => onChange({ customer_name: e.target.value })} className={inputCls} /></Field>
+          </div>
+          <Field label={skuLabel}>
+            <SkuPicker value={value.sku ? ({ id: value.sku, code: value.sku, name: value.sku } as SkuPickerValue) : null} onChange={(v) => onChange({ sku: v?.code ?? "" })} placeholder="ค้นรหัส / ชื่อสินค้า" />
+          </Field>
+        </>
+      )}
+      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} existingLabel={existingLabel}
+        onPick={(o) => onChange({ order_no: o.order_no, platform_order_id: null, sku: "" })} />
+    </div>
+  );
 }
 
 /** ป๊อปจัดการตัวเลือก (เพิ่ม · แก้ชื่อ · เรียง · ซ่อน/เปิด) — ไม่มีลบจริง กันรายการเก่าที่ใช้อยู่พัง */
@@ -197,7 +321,7 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
     opsJson<{ templates: { group?: string | null }[] }>("/api/order-gift-cards?view=templates").then((r) => setTplGroups([...new Set(r.templates.map((t) => (t.group ?? "").trim()).filter(Boolean))])).catch(() => {});
   }, [open, kind]);
   const rows = options.filter((o) => o.kind === kind);
-  const title = kind === "instruction_command" ? "จัดการคำสั่ง" : "จัดการหัวข้อซ่อม";
+  const title = OPTION_TITLE[kind] ?? "จัดการตัวเลือก";
 
   const add = async () => {
     if (!label.trim()) return;

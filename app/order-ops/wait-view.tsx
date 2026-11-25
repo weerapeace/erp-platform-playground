@@ -16,11 +16,14 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
-import { Field, HistoryList, OrderNoField, Pill, SkuField, TrashToggle, TrialPill, fmtDate, inputCls, opsJson, type OrderHit } from "./shared";
+import { Field, HistoryList, OptionChips, OrderEntry, Pill, TrashToggle, TrialPill, fmtDate, inputCls, opsJson, useOpsOptions } from "./shared";
+import { DateInput } from "@/components/date-input";
 
 type Wait = {
   id: string; order_no: string | null; platform: string | null; customer_name: string | null; sku: string | null; note: string | null;
   informed: boolean; informed_at: string | null; informed_by_name: string | null; is_trial: boolean; created_at: string; deleted_at: string | null;
+  /** คาดว่าของเข้า */
+  expected_at?: string | null; platform_order_id?: string | null;
 };
 type Summary = { waiting?: number };
 
@@ -90,6 +93,7 @@ export function WaitView({ bump, onSummary }: { bump: number; onSummary: (s: Sum
     { key: "sku", header: "SKU", width: "8rem", sortValue: (r) => r.sku ?? "", cell: (r) => <span className="font-mono text-xs">{r.sku ?? "-"}</span> },
     { key: "note", header: "หมายเหตุ", width: "1.5fr", cell: (r) => <span className="text-xs text-slate-600">{r.note ?? "-"}</span> },
     { key: "informed", header: "แจ้งลูกค้า", width: "6.5rem", cell: (r) => <button disabled={!canEdit || trash} onClick={(e) => { e.stopPropagation(); void setInformed([r.id], !r.informed, new Map([[r.id, r.informed]])); }}>{informedPill(r)}</button> },
+    { key: "expected", header: "คาดว่าของเข้า", width: "7rem", sortValue: (r) => r.expected_at ?? "9999", cell: (r) => r.expected_at ? <span className={`text-xs ${!r.informed && r.expected_at <= new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10) ? "font-medium text-rose-600" : "text-slate-600"}`}>{new Date(`${r.expected_at}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span> : <span className="text-xs text-slate-300">-</span> },
     { key: "created", header: "บันทึกเมื่อ", width: "7.5rem", sortValue: (r) => r.created_at, cell: (r) => <span className="text-xs text-slate-500">{fmtDate(r.created_at)}</span> },
   ];
 
@@ -132,10 +136,9 @@ export function WaitView({ bump, onSummary }: { bump: number; onSummary: (s: Sum
 
 function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | null; readOnly: boolean; canDelete: boolean; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
-  const init = useMemo(() => ({ order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "", note: row?.note ?? "", informed: row?.informed ?? false, platform_order_id: null as string | null }), [row]);
+  const { options, platforms, reload } = useOpsOptions();
+  const init = useMemo(() => ({ order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "", note: row?.note ?? "", informed: row?.informed ?? false, expected_at: row?.expected_at ?? "", platform_order_id: row?.platform_order_id ?? null as string | null }), [row]);
   const [f, setF] = useState(init);
-  const [items, setItems] = useState<OrderHit["items"]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<{ id: string; action: string; metadata: Record<string, unknown> | null; created_at: string }[]>([]);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
@@ -145,7 +148,7 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
     if (!f.customer_name.trim() && !f.order_no.trim()) { toast.error("กรุณาใส่ชื่อลูกค้าหรือเลขออเดอร์"); return; }
     setSaving(true);
     try {
-      const body = { ...f, platform_order_id: f.platform_order_id ?? undefined };
+      const body = { ...f, platform_order_id: f.platform_order_id ?? undefined, expected_at: f.expected_at || null };
       if (row) await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "waitlist", id: row.id, patch: body }) });
       else await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "waitlist", ...body, is_trial: true }) });
       toast.success("บันทึกแล้ว"); onSaved();
@@ -160,6 +163,8 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
       toast.undo("ย้ายลงถังขยะแล้ว", async () => { await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "waitlist", ids: [row.id], restore: true }) }); onSaved(); });
     } catch (e) { toast.error((e as Error).message); }
   };
+  // ข้อความลัด → เติมท้ายหมายเหตุ (ไม่ทับที่พิมพ์ไว้)
+  const addPhrase = (p: string) => { if (!p) return; setF((x) => ({ ...x, note: x.note.includes(p) ? x.note : [x.note.trim(), p].filter(Boolean).join(" · ") })); };
 
   return (
     <ERPModal open onClose={onClose} title={row ? "รายการรอของ" : "เพิ่มรายการรอของ"} size="md" defaultExpanded={false} storageKey="order-ops-wait-form"
@@ -173,27 +178,18 @@ function WaitForm({ row, readOnly, canDelete, onClose, onSaved }: { row: Wait | 
         </div>
       )}>
       <fieldset disabled={readOnly} className="space-y-3">
-        <Field label="เลขออเดอร์ (ถ้ามี)">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1"><OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, platform: p.platform || o.platform || "", customer_name: p.customer_name || o.customer_name || "", note: p.note || o.note || "" })); }} /></div>
-            <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
-          </div>
-        </Field>
+        <OrderEntry autoFocus={!row} platforms={platforms} existingLabel="มีคำสั่งแล้ว" skuLabel="สินค้าที่รอ"
+          value={{ order_no: f.order_no, platform: f.platform, customer_name: f.customer_name, sku: f.sku, platform_order_id: f.platform_order_id }}
+          onChange={(p) => setF((x) => ({ ...x, ...p }))}
+          onOrder={(o) => { if (o?.note) setF((p) => ({ ...p, note: p.note || o.note || "" })); }} />
+        <OptionChips kind="wait_phrase" label="ข้อความลัด (กด = เติมในหมายเหตุ)" options={options} value="" onChange={addPhrase} onChanged={reload} />
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="ช่องทาง">
-            <select value={f.platform} onChange={(e) => set("platform", e.target.value)} className={inputCls}>
-              <option value="">-</option>{[...new Set([...PLATFORMS, ...(f.platform ? [f.platform] : [])])].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </Field>
-          <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
+          <Field label="คาดว่าของเข้า"><DateInput value={f.expected_at} onChange={(v) => set("expected_at", v)} /></Field>
+          <Field label="หมายเหตุ"><input value={f.note} onChange={(e) => set("note", e.target.value)} placeholder="เช่น สีน้ำตาล" className={inputCls} /></Field>
         </div>
-        <Field label="สินค้าที่รอ (SKU)"><SkuField value={f.sku} onChange={(v) => set("sku", v)} items={items} /></Field>
-        <Field label="หมายเหตุ"><input value={f.note} onChange={(e) => set("note", e.target.value)} placeholder="เช่น สีน้ำตาล" className={inputCls} /></Field>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.informed} onChange={(e) => set("informed", e.target.checked)} /> แจ้งลูกค้าแล้ว</label>
       </fieldset>
       {row && <div className="mt-4 border-t border-slate-100 pt-3"><div className="mb-1 text-xs font-medium text-slate-600">ประวัติ</div><HistoryList logs={history} /></div>}
-      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} existingLabel="มีคำสั่งแล้ว"
-        onPick={(o) => setF((p) => ({ ...p, order_no: o.order_no, platform: "", customer_name: "" }))} />
     </ERPModal>
   );
 }

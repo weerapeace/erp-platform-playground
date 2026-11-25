@@ -21,20 +21,25 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ImageAttachKeys } from "@/components/image-attach";
-import { PlatformOrderPicker } from "@/components/platform-order-picker";
+import { MoneyInput } from "@/components/money-input";
+import { DateInput } from "@/components/date-input";
+import { BankPicker } from "@/components/bank-picker";
+import { SwapBox } from "../command-boxes";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { WaitView } from "../wait-view";
-import { caseStatusInfo, caseStatusList, defaultCaseStatus, nextCaseStatuses, REPAIR_RESOLUTIONS, type CaseKind } from "@/lib/order-ops";
+import { caseStatusInfo, caseStatusList, defaultCaseStatus, nextCaseStatuses, type CaseKind } from "@/lib/order-ops";
 import {
-  Field, HistoryList, OptionsManager, OrderNoField, Pill, SkuField, TrashToggle, TrialBanner, TrialPill,
-  fmtDate, inputCls, opsJson, useOpsOptions, type OrderHit,
+  Field, HistoryList, OptionChips, OptionsManager, OrderEntry, Pill, TrashToggle, TrialBanner, TrialPill,
+  fmtDate, inputCls, opsJson, useOpsOptions, type OptionRow, type OrderHit,
 } from "../shared";
 
 type Case = {
   id: string; kind: CaseKind; order_no: string; customer_name: string | null; sku: string | null; qty: number;
   topic: string | null; detail: string | null; resolution: string | null; status: string; replacement_sku: string | null;
   shipping_charge: number | null; shipping_refund: number | null; bank_info: string | null; shipping_address: string | null;
+  platform?: string | null; return_type?: string | null; return_reason?: string | null; refund_amount?: number | null;
+  refund_bank?: string | null; refund_account?: string | null; refund_account_name?: string | null;
   return_date: string | null; images: string[]; packed_at: string | null; shipped_back_at: string | null; checked_at: string | null;
   stock_received_at: string | null; stock_received_by_name: string | null; zort_cancelled_at: string | null; note: string | null;
   is_trial: boolean; platform_order_id: string | null; created_at: string; created_by_name: string | null;
@@ -103,7 +108,7 @@ function CasesView({ onSummary }: { onSummary: (s: Summary) => void }) {
   const canEdit = usePermission("order_ops.edit");
   const canDelete = usePermission("order_ops.delete");
   const canManage = usePermission("order_ops.manage");
-  const { options, reload: reloadOptions } = useOpsOptions();
+  const { options, platforms, reload: reloadOptions } = useOpsOptions();
   const [filter, setFilter] = useState("open");
   const [q, setQ] = useState("");
   const [trash, setTrash] = useState(false);
@@ -258,7 +263,7 @@ function CasesView({ onSummary }: { onSummary: (s: Summary) => void }) {
       <Pager page={page - 1} pageSize={50} total={total} onPage={(p) => setPage(p + 1)} unitLabel="รายการ" hideWhenSingle />
 
       {editing && (
-        <CaseForm kind={kind} row={editing === "new" ? null : editing} topics={options.filter((o) => o.kind === "repair_topic")}
+        <CaseForm kind={kind} row={editing === "new" ? null : editing} options={options} platforms={platforms} onOptionsChanged={reloadOptions}
           readOnly={!canEdit || trash} canDelete={canDelete && !trash} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); void load(); }} />
       )}
       <OptionsManager open={optOpen} onClose={() => setOptOpen(false)} kind="repair_topic" options={options} onChanged={reloadOptions} />
@@ -269,29 +274,33 @@ function CasesView({ onSummary }: { onSummary: (s: Summary) => void }) {
 
 /* ───────────── ฟอร์มงานซ่อม / ของคืน ───────────── */
 
-function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: {
-  kind: CaseKind; row: Case | null; topics: { label: string; is_active: boolean }[]; readOnly: boolean; canDelete: boolean; onClose: () => void; onSaved: () => void;
+function CaseForm({ kind, row, options, platforms, onOptionsChanged, readOnly, canDelete, onClose, onSaved }: {
+  kind: CaseKind; row: Case | null; options: OptionRow[]; platforms: string[]; onOptionsChanged: () => void; readOnly: boolean; canDelete: boolean; onClose: () => void; onSaved: () => void;
 }) {
   const toast = useToast();
   const k: CaseKind = row?.kind ?? kind;
   const init = useMemo(() => ({
-    order_no: row?.order_no ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "", qty: row?.qty ?? 1,
+    order_no: row?.order_no ?? "", platform: row?.platform ?? "", customer_name: row?.customer_name ?? "", sku: row?.sku ?? "", qty: row?.qty ?? 1,
     topic: row?.topic ?? "", detail: row?.detail ?? "", resolution: row?.resolution ?? "", status: row?.status ?? defaultCaseStatus(k),
     replacement_sku: row?.replacement_sku ?? "", shipping_charge: row?.shipping_charge != null ? String(row.shipping_charge) : "",
     shipping_refund: row?.shipping_refund != null ? String(row.shipping_refund) : "", bank_info: row?.bank_info ?? "",
     shipping_address: row?.shipping_address ?? "", return_date: row?.return_date ?? "", images: row?.images ?? [], note: row?.note ?? "",
+    return_type: row?.return_type ?? "", return_reason: row?.return_reason ?? "", refund_amount: row?.refund_amount != null ? String(row.refund_amount) : "",
+    refund_bank: row?.refund_bank ?? "", refund_account: row?.refund_account ?? "", refund_account_name: row?.refund_account_name ?? "",
     checked: !!row?.checked_at, stock_received: !!row?.stock_received_at, zort_cancelled: !!row?.zort_cancelled_at, packed: !!row?.packed_at,
     platform_order_id: row?.platform_order_id ?? null as string | null,
   }), [row, k]);
   const [f, setF] = useState(init);
-  const [items, setItems] = useState<OrderHit["items"]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [hit, setHit] = useState<OrderHit | null>(null);
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState<{ id: string; action: string; metadata: Record<string, unknown> | null; created_at: string }[]>([]);
   const set = <K extends keyof typeof f>(key: K, v: (typeof f)[K]) => setF((p) => ({ ...p, [key]: v }));
   useEffect(() => { if (row) opsJson<{ history: typeof history }>(`/api/order-ops?t=cases&id=${row.id}`).then((r) => setHistory(r.history)).catch(() => {}); }, [row]);
 
   const allowed = row ? [row.status, ...nextCaseStatuses(k, row.status)] : caseStatusList(k);
+  // ส่งของแทน (ซ่อม: วิธีแก้ไม่ใช่ "ซ่อม") / เปลี่ยนเป็น (ของคืน: ชนิด "เปลี่ยน…")
+  const needReplace = k === "repair" ? !!f.resolution && f.resolution !== "ซ่อม" : /เปลี่ยน/.test(f.return_type);
+  const needRefund = k === "return" && /คืนเงิน/.test(f.return_type);
 
   const save = async () => {
     if (!f.order_no.trim()) { toast.error("กรุณาใส่เลขออเดอร์"); return; }
@@ -320,10 +329,9 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
       toast.undo("ย้ายลงถังขยะแล้ว", async () => { await opsJson("/api/order-ops", { method: "DELETE", body: JSON.stringify({ t: "cases", ids: [row.id], restore: true }) }); onSaved(); });
     } catch (e) { toast.error((e as Error).message); }
   };
-  const activeTopics = topics.filter((t) => t.is_active || t.label === f.topic).map((t) => t.label);
 
   return (
-    <ERPModal open onClose={onClose} title={row ? `${k === "repair" ? "งานซ่อม" : "ของคืน"} — ${row.order_no}` : k === "repair" ? "รับงานซ่อม" : "รับของคืน / ตีกลับ"}
+    <ERPModal open onClose={onClose} title={row ? `${k === "repair" ? "งานซ่อม" : "ของคืน / เปลี่ยน"} — ${row.order_no}` : k === "repair" ? "รับงานซ่อม" : "รับของคืน / เปลี่ยน / ตีกลับ"}
       size="lg" defaultExpanded={false} storageKey="order-ops-case-form" hasUnsavedChanges={!readOnly && JSON.stringify(f) !== JSON.stringify(init)}
       footer={readOnly ? undefined : (
         <div className="flex w-full items-center gap-2">
@@ -334,38 +342,29 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
         </div>
       )}>
       <fieldset disabled={readOnly} className="space-y-3">
-        <Field label="เลขออเดอร์ *">
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <OrderNoField value={f.order_no} onChange={(v) => set("order_no", v)} autoFocus={!row}
-                onFound={(o) => { setItems(o?.items ?? []); if (o) setF((p) => ({ ...p, platform_order_id: o.id, customer_name: p.customer_name || o.customer_name || "", sku: p.sku || (o.items.length === 1 ? o.items[0].sku ?? "" : ""), note: p.note || (o.note ? `ลูกค้าเขียน: ${o.note}` : "") })); }} />
-            </div>
-            <button type="button" onClick={() => setPickerOpen(true)} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"><Icon name="list" className="h-4 w-4" /> เลือกออเดอร์</button>
-          </div>
-        </Field>
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_6rem]">
-          <Field label="ชื่อลูกค้า"><input value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} className={inputCls} /></Field>
-          <Field label="สินค้า (SKU)"><SkuField value={f.sku} onChange={(v) => set("sku", v)} items={items} /></Field>
-          <Field label="จำนวน"><input type="number" min={1} value={f.qty} onChange={(e) => set("qty", Math.max(1, Number(e.target.value) || 1))} className={inputCls} /></Field>
-        </div>
+        <OrderEntry required autoFocus={!row} platforms={platforms} existingLabel="มีคำสั่งพิเศษ"
+          value={{ order_no: f.order_no, platform: f.platform, customer_name: f.customer_name, sku: f.sku, platform_order_id: f.platform_order_id }}
+          onChange={(p) => setF((x) => ({ ...x, ...p }))}
+          onOrder={(o) => { setHit(o); if (o?.note) setF((p) => ({ ...p, note: p.note || `ลูกค้าเขียน: ${o.note}` })); }} />
+        <div className="w-28"><Field label="จำนวน"><input type="number" min={1} value={f.qty} onChange={(e) => set("qty", Math.max(1, Number(e.target.value) || 1))} className={inputCls} /></Field></div>
 
-        {k === "repair" && (
+        {k === "repair" ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="หัวข้อซ่อม *">
-                <select value={f.topic} onChange={(e) => set("topic", e.target.value)} className={inputCls}>
-                  <option value="">เลือกหัวข้อ</option>{activeTopics.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </Field>
-              <Field label="วิธีแก้">
-                <select value={f.resolution} onChange={(e) => set("resolution", e.target.value)} className={inputCls}>
-                  <option value="">ยังไม่ตัดสิน</option>{REPAIR_RESOLUTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </Field>
-            </div>
+            <OptionChips kind="repair_topic" label="หัวข้อซ่อม" required options={options} value={f.topic} onChange={(v) => set("topic", v)} onChanged={onOptionsChanged} />
+            <OptionChips kind="repair_resolution" label="วิธีแก้" options={options} value={f.resolution} onChange={(v) => set("resolution", v)} onChanged={onOptionsChanged} />
             <Field label="รายละเอียด"><textarea value={f.detail} onChange={(e) => set("detail", e.target.value)} rows={2} className={inputCls} /></Field>
-            {f.resolution && f.resolution !== "ซ่อม" && <Field label="สินค้าที่ส่งให้แทน (SKU)"><input value={f.replacement_sku} onChange={(e) => set("replacement_sku", e.target.value)} className={`${inputCls} font-mono`} /></Field>}
           </>
+        ) : (
+          <>
+            <OptionChips kind="return_type" label="ชนิด" options={options} value={f.return_type} onChange={(v) => set("return_type", v)} onChanged={onOptionsChanged} />
+            <OptionChips kind="return_reason" label="เหตุผล" options={options} value={f.return_reason} onChange={(v) => set("return_reason", v)} onChanged={onOptionsChanged} />
+          </>
+        )}
+        {needReplace && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <div className="mb-1 text-xs font-medium text-slate-600">{k === "repair" ? "ส่งตัวไหนให้แทน" : "เปลี่ยนเป็น"}</div>
+            <SwapBox fromSku={f.sku} detail={{ sku_id: f.replacement_sku || undefined, sku_code: f.replacement_sku || undefined }} onChange={(p) => set("replacement_sku", p.sku_code ?? "")} />
+          </div>
         )}
 
         <Field label="สถานะ">
@@ -386,16 +385,29 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
 
         {k === "repair" && (
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="เก็บค่าส่ง (บาท)"><input inputMode="decimal" value={f.shipping_charge} onChange={(e) => set("shipping_charge", e.target.value)} className={inputCls} /></Field>
-            <Field label="คืนค่าส่ง (บาท)"><input inputMode="decimal" value={f.shipping_refund} onChange={(e) => set("shipping_refund", e.target.value)} className={inputCls} /></Field>
-            <Field label="วันที่ส่งกลับ"><input type="date" value={f.return_date} onChange={(e) => set("return_date", e.target.value)} className={inputCls} /></Field>
+            <Field label="เก็บค่าส่ง (บาท)"><MoneyInput value={f.shipping_charge} onChange={(v) => set("shipping_charge", v)} className={inputCls} placeholder="0.00" /></Field>
+            <Field label="คืนค่าส่ง (บาท)"><MoneyInput value={f.shipping_refund} onChange={(v) => set("shipping_refund", v)} className={inputCls} placeholder="0.00" /></Field>
+            <Field label="วันที่ส่งกลับ"><DateInput value={f.return_date} onChange={(v) => set("return_date", v)} /></Field>
+          </div>
+        )}
+        {(k === "repair" || needRefund) && (
+          <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+            <div className="text-xs font-medium text-slate-600">คืนเงินลูกค้า</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {needRefund && <Field label="ยอดคืน (บาท)"><MoneyInput value={f.refund_amount} onChange={(v) => set("refund_amount", v)} className={inputCls} placeholder="0.00" /></Field>}
+              <Field label="ธนาคาร"><BankPicker value={f.refund_bank} onChange={(name) => set("refund_bank", name)} disabled={readOnly} /></Field>
+              <Field label="เลขบัญชี"><input value={f.refund_account} onChange={(e) => set("refund_account", e.target.value.replace(/[^\d-]/g, ""))} inputMode="numeric" className={`${inputCls} font-mono`} /></Field>
+              <Field label="ชื่อบัญชี"><input value={f.refund_account_name} onChange={(e) => set("refund_account_name", e.target.value)} className={inputCls} /></Field>
+            </div>
+            {f.bank_info && <p className="text-[11px] text-slate-500">ข้อมูลบัญชีเดิม (พิมพ์ไว้ก่อนหน้า): {f.bank_info}</p>}
           </div>
         )}
         {k === "repair" && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="บัญชีธนาคาร (คืนเงิน)"><textarea value={f.bank_info} onChange={(e) => set("bank_info", e.target.value)} rows={2} className={inputCls} /></Field>
-            <Field label="ที่อยู่ส่งกลับ"><textarea value={f.shipping_address} onChange={(e) => set("shipping_address", e.target.value)} rows={2} className={inputCls} /></Field>
-          </div>
+          <Field label="ที่อยู่ส่งกลับ">
+            <textarea value={f.shipping_address} onChange={(e) => set("shipping_address", e.target.value)} rows={2} className={inputCls} />
+            {hit?.ship_to ? <button type="button" onClick={() => set("shipping_address", hit.ship_to ?? "")} className="mt-1 text-[12px] text-sky-700 hover:underline">ใช้ที่อยู่ในออเดอร์</button>
+              : f.platform_order_id ? <p className="mt-1 text-[11px] text-slate-400">ออเดอร์นี้ไม่มีที่อยู่ผู้รับในระบบ — พิมพ์เอง</p> : null}
+          </Field>
         )}
         <Field label={k === "repair" ? "รูปตำหนิ / สลิปโอน" : "รูปสินค้าที่รับคืน"}>
           <ImageAttachKeys value={f.images} onChange={(v) => set("images", v)} folder="after-sales" disabled={readOnly} />
@@ -404,8 +416,6 @@ function CaseForm({ kind, row, topics, readOnly, canDelete, onClose, onSaved }: 
       </fieldset>
       {!row && <p className="mt-3 text-[11px] text-amber-700">ช่วงทดลอง: รายการใหม่จะติดป้าย "ทดลอง" และล้างทิ้งได้ทีเดียวตอนเริ่มใช้จริง</p>}
       {row && <div className="mt-4 border-t border-slate-100 pt-3"><div className="mb-1 text-xs font-medium text-slate-600">ประวัติ</div><HistoryList logs={history} /></div>}
-      <PlatformOrderPicker open={pickerOpen} onClose={() => setPickerOpen(false)} existingLabel="มีคำสั่งพิเศษ"
-        onPick={(o) => setF((p) => ({ ...p, order_no: o.order_no, customer_name: "", sku: "" }))} />
     </ERPModal>
   );
 }
