@@ -666,7 +666,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "erp-theme-config", label: "ค่าตั้งธีม 9 หมวด + ธีมสำเร็จรูป + เช็กสีอ่านยาก", code: "lib/erp-theme-config", category: "system",
     source: { path: "lib/erp-theme-config" },
-    what: "normalizeThemeConfig (กรองค่าธีมให้ครบ/อยู่ในช่วง) · THEME_PRESETS 8 ชุด · themeIssues + autoFixContrast (เตือน/แก้สีอ่านยาก) · paletteFromPixels (ดูดสีจากรูป) · mobileLiteConfig (โหมดเบามือถือ) · themeCssVars (ตัวแปร CSS ทั้งชุด) · ข้อมูลอยู่ตาราง erp_themes / erp_theme_versions ผ่าน /api/themes",
+    what: "normalizeThemeConfig (กรองค่าธีมให้ครบ/อยู่ในช่วง · รวมเอฟเฟกต์/ขอบ/เงาจาก lib/erp-theme-fx) · THEME_PRESETS 8 ชุด · themeIssues + autoFixContrast (เตือน/แก้สีอ่านยาก) · paletteFromPixels (ดูดสีจากรูป) · mobileLiteConfig (โหมดเบามือถือ) · themeCssVars (ตัวแปร CSS ทั้งชุด) · ข้อมูลอยู่ตาราง erp_themes / erp_theme_versions ผ่าน /api/themes",
     when: "ทุกที่ที่อ่าน/เขียน/วาดธีมกลาง ERP (คลังธีม · ธีมของโมดูลเฟส 3 · ค่าส่วนตัวเฟส 5)",
     notWhen: "ธีมแบรนด์บนแดชบอร์ดออกแบบ (lib/brand-theme — จะรวมเข้ามาเฟส 6) · ธีมเว็บร้าน (lib/website-theme)",
   },

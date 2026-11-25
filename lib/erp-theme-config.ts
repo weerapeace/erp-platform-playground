@@ -6,6 +6,10 @@
 //   paletteFromPixels = ดูดสีจากรูป · themeCssVars = ตัวแปร CSS ทั้งชุด
 // ไฟล์ pure (ไม่มี "use client") — เทสต์ lib/__tests__/erp-theme-config.test.ts
 // ============================================================
+import {
+  DEFAULT_ELEVATION, DEFAULT_FX, DEFAULT_OUTLINE, hasFx, normalizeElevation, normalizeFx, normalizeOutline,
+  type ThemeElevation, type ThemeFx, type ThemeOutline,
+} from "./erp-theme-fx";
 import { ORANGE_SCALE, VIOLET_SCALE, hexToChannels, isHexColor, scaleFromHex, themeVars, type ColorScale } from "./erp-theme";
 
 export type BgWhere = "page" | "top" | "banner";
@@ -31,6 +35,12 @@ export type ErpThemeConfig = {
     sidebar: "light" | "dark" | "brand";
   };
   mode: { allowDark: boolean };
+  /** เอฟเฟกต์ต่อจุด + ชี้/กด + เข้าหน้า + อนุภาค (lib/erp-theme-fx) — แหล่งจริงของ shine/hover/countUp/enter/gradient.animate */
+  effects: ThemeFx;
+  /** เส้นขอบการ์ด/กล่อง */
+  outline: ThemeOutline;
+  /** เงา (แทน shape.shadow เดิม — shape.shadow คำนวณตามให้) */
+  elevation: ThemeElevation;
 };
 
 export const FONT_OPTIONS: { key: FontKey; label: string; family: string; google: string | null }[] = [
@@ -53,6 +63,9 @@ export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
   density: "normal",
   components: { button: "solid", table: "plain", input: "outline", tabs: "underline", badge: "soft", sidebar: "light" },
   mode: { allowDark: true },
+  effects: DEFAULT_FX,
+  outline: DEFAULT_OUTLINE,
+  elevation: DEFAULT_ELEVATION,
 };
 
 /** ตัวกันอ่านยาก: รูปพื้นหลังทั้งหน้าชัดได้ไม่เกินเท่านี้ (เมื่อเปิด veil) */
@@ -82,6 +95,13 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
   const s = isObj(r.shape) ? r.shape : {};
   const k = isObj(r.components) ? r.components : {};
   const m = isObj(r.mode) ? r.mode : {};
+  const legacyShadow = pick(s.shadow, ["none", "soft", "strong"] as const, D.shape.shadow);
+  const effects = normalizeFx(r.effects, {
+    shine: bool(a.shine, false), hover: bool(a.hover, false), countUp: bool(a.countUp, D.animation.countUp), enter: bool(a.enter, false),
+    gradientAnimate: bool(g.animate, false), gradientTop: bool(gs.top, false), gradientButton: bool(gs.button, false),
+  });
+  const elevation = normalizeElevation(r.elevation, legacyShadow);
+  const anyFlow = Object.values(effects.targets).some((t) => t.fx.includes("flow"));
   return {
     v: 1,
     colors: { primary: hex(c.primary, D.colors.primary), accent: hex(c.accent, D.colors.accent) },
@@ -96,11 +116,12 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
         top: bool(gs.top, false), button: bool(gs.button, false), sidebar: bool(gs.sidebar, false),
         banner: bool(gs.banner, false), page: bool(gs.page, false),
       },
-      animate: bool(g.animate, false),
+      animate: anyFlow,   // คำนวณจากตารางเอฟเฟกต์ (ไล่สีวิ่ง)
     },
     animation: {
-      enter: bool(a.enter, false), hover: bool(a.hover, false), shine: bool(a.shine, false),
-      countUp: bool(a.countUp, D.animation.countUp), mascot: bool(a.mascot, false), mascotImage: key(a.mascotImage),
+      // 4 ช่องนี้คำนวณจากตารางเอฟเฟกต์ (ให้โค้ดเฟส 4 อ่านได้เหมือนเดิม)
+      enter: effects.enter !== "none", hover: hasFx(effects, "card", "lift"), shine: hasFx(effects, "button", "shine"),
+      countUp: hasFx(effects, "number", "countUp"), mascot: bool(a.mascot, false), mascotImage: key(a.mascotImage),
       speed: pick(a.speed, ["slow", "normal", "fast"] as const, "normal"),
     },
     typography: {
@@ -108,7 +129,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
       baseSize: num(t.baseSize, D.typography.baseSize, 12, 16),
       headingWeight: pick(t.headingWeight as never, [500, 600, 700] as never[], D.typography.headingWeight as never),
     },
-    shape: { radius: num(s.radius, D.shape.radius, 0, 20), shadow: pick(s.shadow, ["none", "soft", "strong"] as const, D.shape.shadow) },
+    shape: { radius: num(s.radius, D.shape.radius, 0, 20), shadow: elevation.depth === "none" ? "none" : elevation.depth === "soft" ? "soft" : "strong" },
     density: pick(r.density, ["compact", "normal", "spacious"] as const, D.density),
     components: {
       button: pick(k.button, ["solid", "soft", "outline"] as const, D.components.button),
@@ -119,6 +140,9 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
       sidebar: pick(k.sidebar, ["light", "dark", "brand"] as const, D.components.sidebar),
     },
     mode: { allowDark: bool(m.allowDark, D.mode.allowDark) },
+    effects,
+    outline: normalizeOutline(r.outline),
+    elevation,
   };
 }
 
@@ -132,7 +156,32 @@ export function mergeThemeConfig(base: ErpThemeConfig, patch: Record<string, unk
     }
   };
   deep(out, patch);
+  applyLegacyAnimPatch(out, patch);
   return normalizeThemeConfig(out);
+}
+
+/** patch แบบเก่า (animation.shine/hover/countUp/enter · gradient.animate) → แปลงเข้าตารางเอฟเฟกต์ (ธีมสำเร็จรูปเดิมยังใช้รูปแบบนี้) */
+function applyLegacyAnimPatch(out: Obj, patch: Record<string, unknown>) {
+  if (isObj(patch.effects)) return;
+  const pa = isObj(patch.animation) ? patch.animation : {};
+  const pg = isObj(patch.gradient) ? patch.gradient : {};
+  if (!("shine" in pa || "hover" in pa || "countUp" in pa || "enter" in pa || "animate" in pg)) return;
+  const ef = (isObj(out.effects) ? out.effects : (out.effects = JSON.parse(JSON.stringify(DEFAULT_FX)))) as Obj;
+  const tg = (isObj(ef.targets) ? ef.targets : (ef.targets = {})) as Record<string, { fx?: string[] }>;
+  const toggle = (t: string, e: string, on: boolean) => {
+    const cur = new Set(tg[t]?.fx ?? []);
+    if (on) cur.add(e); else cur.delete(e);
+    tg[t] = { ...(tg[t] ?? {}), fx: [...cur] };
+  };
+  if (typeof pa.shine === "boolean") toggle("button", "shine", pa.shine);
+  if (typeof pa.hover === "boolean") toggle("card", "lift", pa.hover);
+  if (typeof pa.countUp === "boolean") toggle("number", "countUp", pa.countUp);
+  if (typeof pa.enter === "boolean") ef.enter = pa.enter ? (ef.enter && ef.enter !== "none" ? ef.enter : "fade") : "none";
+  if (typeof pg.animate === "boolean") {
+    const spots = isObj((out.gradient as Obj)?.spots) ? ((out.gradient as Obj).spots as Obj) : {};
+    if (pg.animate) { if (spots.top) toggle("topbar", "flow", true); if (spots.button) toggle("button", "flow", true); if (!spots.top && !spots.button) toggle("topbar", "flow", true); }
+    else for (const t of Object.keys(tg)) toggle(t, "flow", false);
+  }
 }
 
 // ── ชุดสี ────────────────────────────────────────────────
@@ -218,6 +267,11 @@ export function mobileLiteConfig(cfg: ErpThemeConfig): ErpThemeConfig {
   n.gradient.animate = false;
   n.animation.shine = false;
   n.animation.mascot = false;
+  // เอฟเฟกต์ที่เล่นวนตลอด/หนักเครื่อง ปิดบนมือถือ — เหลือ ยกตัว แถบเน้น นับขึ้น สั่น (เกิดครั้งเดียว)
+  const LOOP = new Set(["pulse", "blink", "colorShift", "flow", "glow", "shine"]);
+  for (const t of Object.values(n.effects.targets)) t.fx = t.fx.filter((e) => !LOOP.has(e));
+  n.effects.particles = "none";
+  n.outline.running = false;
   return n;
 }
 
