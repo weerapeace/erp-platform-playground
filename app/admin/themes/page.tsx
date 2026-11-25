@@ -1,7 +1,7 @@
 "use client";
 /**
  * /admin/themes — คลังธีม (ธีมกลาง ERP เฟส 2 · เจ้าของเลือกตัวแก้แบบ A หน้าเต็ม + ข้อ 1,2,3,5 · 2026-11-24)
- *   การ์ดธีม: พรีวิวย่อ · ป้ายเผยแพร่/ร่าง · แก้ / ทำสำเนา / ลบ (ลงถังขยะ + ปุ่มย้อนกลับ)
+ *   การ์ดธีม (เรียบ · 2026-11-25 ข้อ 13): พรีวิวใหญ่ + ชื่อ + ป้ายสถานะ · แก้ / ทำสำเนา / ประวัติ / ลบ อยู่ในปุ่ม ⋯ (ลบ = ลงถังขยะ + ปุ่มย้อนกลับ)
  *   ธีมใหม่: จากธีมสำเร็จรูป 8 ชุด · สร้างจากรูป (ดูดสี) · เริ่มจากค่าเริ่ม
  *   ถังขยะ: กู้คืน · ลบถาวร (ยืนยันพิมพ์ชื่อ)
  *   ข้อมูล /api/themes · สิทธิ์ theme.view / theme.edit / theme.publish · docs/erp-theme.md
@@ -20,6 +20,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { ThemePreview } from "@/components/erp-theme/preview";
 import { paletteFromImageKey } from "@/components/erp-theme/palette-from-image";
 import { ThemeAssignPanel } from "@/components/erp-theme/assign-panel";
+import { Popover } from "@/components/popover";
 import {
   DEFAULT_THEME_CONFIG, THEME_PRESETS, mergeThemeConfig, normalizeThemeConfig, presetConfig, type ErpThemeConfig,
 } from "@/lib/erp-theme-config";
@@ -110,6 +111,7 @@ export default function ThemesPage() {
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
 
+  const menuItem = "w-full h-8 px-2.5 rounded-md text-left text-sm text-slate-700 hover:bg-slate-100 inline-flex items-center gap-2";
   const shown = useMemo(() => (rows ?? []).filter((t) => !q.trim() || t.name.toLowerCase().includes(q.trim().toLowerCase())), [rows, q]);
 
   if (!canView) return <PlaygroundShell><AccessDenied message="ต้องมีสิทธิ์ดูคลังธีม (theme.view)" /></PlaygroundShell>;
@@ -154,44 +156,43 @@ export default function ThemesPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {shown.map((t) => {
                 const cfg = normalizeThemeConfig(t.draft_config);
+                const badge = trash ? { text: "ในถังขยะ", cls: "bg-slate-100 text-slate-500" }
+                  : t.published_version > 0 && t.has_unpublished ? { text: "มีร่างใหม่", cls: "bg-amber-50 text-amber-800" }
+                  : t.published_version > 0 ? { text: `เผยแพร่ v${t.published_version}`, cls: "bg-emerald-50 text-emerald-700" }
+                  : { text: "ร่าง", cls: "bg-slate-100 text-slate-600" };
+                const used = [t.usage?.company ? "ธีมบริษัท" : "", t.usage?.apps.length ? `${t.usage.apps.length} แอป` : ""].filter(Boolean).join(" + ");
                 return (
-                  <div key={t.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col">
-                    <Link href={trash ? "#" : `/admin/themes/${t.id}`} className="block p-2 bg-slate-50 pointer-events-auto" aria-label={`แก้ธีม ${t.name}`} onClick={(e) => { if (trash) e.preventDefault(); }}>
+                  <div key={t.id} className="group rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-slate-300 hover:shadow-sm transition">
+                    <Link href={trash ? "#" : `/admin/themes/${t.id}`} className="block p-2 bg-slate-50" aria-label={`แก้ธีม ${t.name}`} onClick={(e) => { if (trash) e.preventDefault(); }}>
                       <div className="pointer-events-none"><ThemePreview config={cfg} compact /></div>
                     </Link>
-                    <div className="p-3 flex-1 flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-slate-900 truncate">{t.name}</span>
-                        <span className="ml-auto shrink-0">
-                          {t.published_version > 0
-                            ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">เผยแพร่ v{t.published_version}</span>
-                            : <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">ร่าง</span>}
-                        </span>
+                    <div className="px-3 py-2.5 flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-slate-900 truncate">{t.name}</div>
+                        {!trash && used && <div className="text-[11px] text-slate-500 truncate">ใช้อยู่: {used}</div>}
                       </div>
-                      {t.published_version > 0 && t.has_unpublished && <div className="text-[11px] text-amber-700">มีร่างที่ยังไม่เผยแพร่</div>}
-                      {!trash && (
-                        <div className="text-[11px] text-slate-500">
-                          {t.usage?.company || t.usage?.apps.length
-                            ? `ใช้อยู่: ${[t.usage.company ? "ธีมบริษัท" : "", t.usage.apps.length ? `${t.usage.apps.length} แอป` : ""].filter(Boolean).join(" + ")}`
-                            : "ยังไม่มีแอปใช้"}
-                        </div>
-                      )}
-                      <div className="text-[11px] text-slate-400">{t.deleted_at ? `ลบเมื่อ ${when(t.deleted_at)}` : `แก้ล่าสุด ${when(t.updated_at)}${t.updated_by_name ? ` · ${t.updated_by_name}` : ""}`}</div>
-                      <div className="flex gap-1.5 mt-2">
-                        {trash ? (
-                          <>
-                            {canEdit && <button type="button" onClick={() => void restore(t)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">กู้คืน</button>}
-                            {canPublish && <button type="button" onClick={() => setPurge(t)} className="h-8 px-3 rounded-lg border border-red-200 text-red-700 text-xs hover:bg-red-50 ml-auto">ลบถาวร</button>}
-                          </>
-                        ) : (
-                          <>
-                            <Link href={`/admin/themes/${t.id}`} className="h-8 px-3 rounded-lg border border-slate-200 text-xs hover:bg-slate-50 inline-flex items-center">{canEdit ? "แก้" : "ดู"}</Link>
-                            {canEdit && <button type="button" onClick={() => void duplicate(t)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs hover:bg-slate-50">ทำสำเนา</button>}
-                            <Link href={`/admin/themes/${t.id}?history=1`} className="h-8 px-3 rounded-lg border border-slate-200 text-xs hover:bg-slate-50 inline-flex items-center">ประวัติ</Link>
-                            {canEdit && <button type="button" onClick={() => void toTrash(t)} className="h-8 px-3 rounded-lg border border-slate-200 text-xs text-red-700 hover:bg-red-50 ml-auto">ลบ</button>}
-                          </>
+                      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>
+                      <Popover align="right" panelClassName="w-52 p-1.5"
+                        trigger={(toggle, open) => <button type="button" onClick={toggle} aria-expanded={open} aria-label={`เมนูของ ${t.name}`} className="shrink-0 w-8 h-8 rounded-lg text-slate-500 hover:bg-slate-100 inline-flex items-center justify-center"><Icon value="i:dots-vertical" /></button>}>
+                        {(close) => (
+                          <div>
+                            <div className="px-2.5 pb-1 text-[11px] text-slate-400">{t.deleted_at ? `ลบเมื่อ ${when(t.deleted_at)}` : `แก้ล่าสุด ${when(t.updated_at)}${t.updated_by_name ? ` · ${t.updated_by_name}` : ""}`}{!trash && !used ? " · ยังไม่มีแอปใช้" : ""}</div>
+                            {trash ? (
+                              <>
+                                {canEdit && <button type="button" className={menuItem} onClick={() => { close(); void restore(t); }}><Icon name="back" /> กู้คืน</button>}
+                                {canPublish && <button type="button" className={`${menuItem} text-red-700`} onClick={() => { close(); setPurge(t); }}><Icon name="delete" /> ลบถาวร</button>}
+                              </>
+                            ) : (
+                              <>
+                                <Link href={`/admin/themes/${t.id}`} className={menuItem} onClick={close}><Icon name="edit" /> {canEdit ? "แก้" : "ดู"}</Link>
+                                {canEdit && <button type="button" className={menuItem} onClick={() => { close(); void duplicate(t); }}><Icon value="i:copy" /> ทำสำเนา</button>}
+                                <Link href={`/admin/themes/${t.id}?history=1`} className={menuItem} onClick={close}><Icon name="history" /> ประวัติเวอร์ชัน</Link>
+                                {canEdit && <button type="button" className={`${menuItem} text-red-700`} onClick={() => { close(); void toTrash(t); }}><Icon name="delete" /> ลบ (ลงถังขยะ)</button>}
+                              </>
+                            )}
+                          </div>
                         )}
-                      </div>
+                      </Popover>
                     </div>
                   </div>
                 );

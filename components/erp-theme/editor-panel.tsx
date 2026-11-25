@@ -3,6 +3,7 @@
  * ThemeEditorPanel — แผงปรับธีม 9 หมวด (ธีมกลาง ERP เฟส 2)
  *   รับ config + onPatch(patch แบบลึก) · ใช้ของกลาง ColorInput / RangeInput / ImageInput
  *   หมวด: สี · พื้นหลัง · ไล่สี · เอฟเฟกต์ · ขอบและเงา · มาสคอต · ตัวอักษร · รูปทรง · ความแน่น · ชิ้นส่วน · สว่าง/มืด
+ *   ตัวแก้แบบเรียบ (2026-11-25 · แบบ D): แถบล่าง สี / สไตล์ / พื้นหลัง (ThemeColorSheet · ThemeStyleSheet · ThemeBgSheet) + "เพิ่มเติม" = ThemeAdvancedPanel · คำอธิบายย่อเป็น ⓘ (InfoTip)
  *   เอฟเฟกต์ = ตาราง "จุด × เอฟเฟกต์ (เลือกได้ 2) × ความแรง" + ชุดสำเร็จรูป (lib/erp-theme-fx · รอบเอฟเฟกต์เพิ่ม)
  */
 import { ColorInput } from "@/components/color-picker";
@@ -10,8 +11,9 @@ import { RangeInput } from "@/components/range-input";
 import { ImageInput } from "@/components/image-input";
 import { FONT_OPTIONS, VEIL_MAX_OPACITY, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { EFFECTS, EFFECT_TARGETS, FX_PRESETS, MAX_FX_PER_TARGET, TARGET_EFFECTS, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ADV_GROUPS, currentFxPreset, motionLevel, withMotionLevel, type AdvGroupKey, type EditorCategory } from "@/lib/erp-theme-easy";
+import { ThemeParticles } from "@/components/erp-theme/particles";
 import { Icon } from "@/components/icon";
 
 export type ThemeCategory = "colors" | "background" | "gradient" | "effects" | "outline" | "animation" | "typography" | "shape" | "density" | "components" | "mode";
@@ -37,23 +39,41 @@ function Seg<T extends string | number>({ value, options, onChange }: { value: T
   );
 }
 
+/** ⓘ คำอธิบาย (ตัวแก้แบบเรียบ ข้อ 3) — ชี้เมาส์เห็น · มือถือแตะเพื่อเปิด/ปิด · ไม่กินที่บนจอ */
+export function InfoTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex align-middle">
+      <button type="button" title={text} aria-label={text} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
+        className="w-4 h-4 inline-flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 text-[11px]">
+        <Icon value="i:info-circle" />
+      </button>
+      {open && <span className="absolute z-40 left-1/2 -translate-x-1/2 top-5 w-52 rounded-lg bg-slate-800 text-white text-[11px] leading-snug font-normal px-2.5 py-1.5 shadow-lg" onClick={() => setOpen(false)}>{text}</span>}
+    </span>
+  );
+}
+
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="py-2.5 border-b border-slate-100 last:border-0">
-      <div className="text-xs font-medium text-slate-700 mb-1.5">{label}</div>
+      <div className="text-xs font-medium text-slate-700 mb-1.5 flex items-center gap-1">{label}{hint && <InfoTip text={hint} />}</div>
       {children}
-      {hint && <div className="text-[11px] text-slate-400 mt-1">{hint}</div>}
     </div>
   );
 }
 
 function Check({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
-    <label className="flex items-start gap-2 py-1 text-sm text-slate-700 cursor-pointer">
-      <input type="checkbox" className="mt-0.5" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}{hint && <span className="block text-[11px] text-slate-400">{hint}</span>}</span>
+    <label className="flex items-center gap-2 py-1 text-sm text-slate-700 cursor-pointer">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>{hint && <InfoTip text={hint} />}
     </label>
   );
+}
+
+/** หมายเหตุท้ายหมวด — ย่อเป็น ⓘ บรรทัดเดียว */
+function Note({ text }: { text: string }) {
+  return <div className="mt-1.5 text-[11px] text-slate-400 flex items-center gap-1">หมายเหตุ <InfoTip text={text} /></div>;
 }
 
 export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
@@ -66,7 +86,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
         <>
           <Row label="สีหลัก" hint="ปุ่ม ลิงก์ แถบบน · ระบบสร้างเฉดอ่อน-เข้ม 11 ระดับให้เอง"><ColorInput value={c.colors.primary} onChange={(v) => set("colors", { primary: v })} /></Row>
           <Row label="สีเน้นรอง" hint="แท็บที่เลือก ป้ายเน้น (คลาส violet เดิม)"><ColorInput value={c.colors.accent} onChange={(v) => set("colors", { accent: v })} /></Row>
-          <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] text-slate-500">สีสถานะ (ร่าง / รออนุมัติ / อนุมัติ / ไม่อนุมัติ) ล็อกไว้เหมือนกันทุกธีม เพื่อไม่ให้สับสนความหมาย</div>
+          <Note text="สีสถานะ (ร่าง / รออนุมัติ / อนุมัติ / ไม่อนุมัติ) ล็อกไว้เหมือนกันทุกธีม เพื่อไม่ให้สับสนความหมาย" />
         </>
       );
       case "background": return (
@@ -76,7 +96,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
           <Row label="ความชัด"><RangeInput value={c.background.opacity} min={0} max={100} unit="%" onChange={(v) => set("background", { opacity: v })} /></Row>
           <Row label="เบลอ" hint="บนมือถือไม่เบลอ (โหมดเบา)"><RangeInput value={c.background.blur} min={0} max={10} unit="px" onChange={(v) => set("background", { blur: v })} /></Row>
           <Check checked={c.background.veil} onChange={(v) => set("background", { veil: v })} label="กันอ่านยาก" hint={`รูปทั้งหน้าชัดไม่เกิน ${VEIL_MAX_OPACITY}% · แถบบน/แบนเนอร์ใส่ฝ้าดำบาง ๆ`} />
-          <div className="mt-2 text-[11px] text-slate-400">ตาราง การ์ด และฟอร์มพื้นทึบเสมอ รูปอยู่ข้างหลังเท่านั้น</div>
+          <Note text={"ตาราง การ์ด และฟอร์มพื้นทึบเสมอ รูปอยู่ข้างหลังเท่านั้น"} />
         </>
       );
       case "gradient": return (
@@ -90,7 +110,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
               ))}
             </div>
           </Row>
-          <div className="text-[11px] text-slate-400 mt-1">ให้ไล่สีวิ่ง: ตั้งที่แท็บ "เอฟเฟกต์" (เลือก "ไล่สีวิ่ง" ให้จุดที่ต้องการ)</div>
+          <Note text={"ให้ไล่สีวิ่ง: ตั้งที่แท็บ \"เอฟเฟกต์\" (เลือก \"ไล่สีวิ่ง\" ให้จุดที่ต้องการ)"} />
         </>
       );
       case "animation": return (
@@ -98,7 +118,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
           <Check checked={c.animation.mascot} onChange={(v) => set("animation", { mascot: v })} label="ของตกแต่งขยับ (มาสคอต)" hint="มุมขวาล่าง · มือถือปิดให้" />
           {c.animation.mascot && <Row label="รูปมาสคอต (GIF/PNG/WebP)"><ImageInput value={c.animation.mascotImage} onChange={(k) => set("animation", { mascotImage: k })} folder="themes" compact /></Row>}
           <Row label="ความเร็วแอนิเมชันทั้งธีม"><Seg value={c.animation.speed} options={[["slow", "ช้า"], ["normal", "ปกติ"], ["fast", "เร็ว"]]} onChange={(v) => set("animation", { speed: v })} /></Row>
-          <div className="text-[11px] text-slate-400">แสงวิ่ง ยกตัว นับขึ้น เข้าหน้า → ย้ายไปแท็บ "เอฟเฟกต์" แล้ว · ผู้ใช้ปิดแอนิเมชันเองได้ · เครื่องที่ตั้ง "ลดการเคลื่อนไหว" ปิดให้อัตโนมัติ</div>
+          <Note text={"แสงวิ่ง ยกตัว นับขึ้น เข้าหน้า → ย้ายไปแท็บ \"เอฟเฟกต์\" แล้ว · ผู้ใช้ปิดแอนิเมชันเองได้ · เครื่องที่ตั้ง \"ลดการเคลื่อนไหว\" ปิดให้อัตโนมัติ"} />
         </>
       );
       case "effects": return <EffectsTab c={c} onPatch={onPatch} />;
@@ -117,7 +137,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
       case "shape": return (
         <>
           <Row label="ขอบมน"><RangeInput value={c.shape.radius} min={0} max={20} unit="px" onChange={(v) => set("shape", { radius: v })} /></Row>
-          <div className="text-[11px] text-slate-400">เงา → ตั้งที่แท็บ "ขอบและเงา"</div>
+          <Note text={"เงา → ตั้งที่แท็บ \"ขอบและเงา\""} />
         </>
       );
       case "density": return (
@@ -174,7 +194,7 @@ function EffectsTab({ c, onPatch }: { c: ErpThemeConfig; onPatch: (p: Patch) => 
             </div>
           ))}
         </div>
-        <div className="text-[11px] text-slate-400 mt-1.5">กระพริบ/เปลี่ยนสีวน ล็อกไม่ให้เร็วเกิน (ปลอดภัยต่อคนไวแสง) · มือถือ/ผู้ใช้ปิดแอนิเมชัน = หยุดหมด</div>
+        <Note text={"กระพริบ/เปลี่ยนสีวน ล็อกไม่ให้เร็วเกิน (ปลอดภัยต่อคนไวแสง) · มือถือ/ผู้ใช้ปิดแอนิเมชัน = หยุดหมด"} />
       </div>
       <Row label="ชี้เมาส์ / กด">
         <Check checked={fx.scaleHover} onChange={(v) => onPatch({ effects: { scaleHover: v } })} label="ปุ่มขยายเล็กน้อยตอนชี้" />
@@ -270,54 +290,140 @@ export function TargetFxEditor({ config: c, target, onPatch, readOnly }: { confi
   );
 }
 
-// ── โหมดง่าย (B): 5 อย่าง ─────────────────────────────────
+// ── แถบล่างของตัวแก้แบบเรียบ (แบบ D): สี · สไตล์ · พื้นหลัง ─────────────
 const EASY_SWATCHES = ["#ea580c", "#7c3aed", "#0e7490", "#15803d", "#db2777", "#1d4ed8", "#a16207", "#334155"];
+/** ความเคลื่อนไหว 3 ระดับ (ข้อ 7) → ระดับ 0 / 2 / 3 ของ withMotionLevel */
+export const MOTION_STEPS: { key: "still" | "normal" | "fun"; label: string; level: 0 | 2 | 3; hint: string }[] = [
+  { key: "still", label: "นิ่ง", level: 0, hint: "ไม่มีอะไรขยับ เหมาะกับงานจริงจัง" },
+  { key: "normal", label: "พอดี", level: 2, hint: "ขยับเบา ๆ ตรงที่ควรสังเกต" },
+  { key: "fun", label: "สนุก", level: 3, hint: "ขยับเยอะ เหมาะช่วงเทศกาล" },
+];
+export function motionStepOf(c: ErpThemeConfig): "still" | "normal" | "fun" {
+  const l = motionLevel(c);
+  return l === 0 ? "still" : l === 3 ? "fun" : "normal";
+}
 
-export function ThemeEasyPanel({ config: c, onPatch, onReplace, readOnly }: {
-  config: ErpThemeConfig; onPatch: (p: Patch) => void; onReplace: (next: ErpThemeConfig) => void; readOnly?: boolean;
-}) {
-  const preset = currentFxPreset(c);
-  const lvl = motionLevel(c);
+function SheetLabel({ children, hint }: { children: React.ReactNode; hint?: string }) {
+  return <div className="text-xs font-medium text-slate-700 mb-1.5 flex items-center gap-1">{children}{hint && <InfoTip text={hint} />}</div>;
+}
+
+export function ThemeColorSheet({ config: c, onPatch, readOnly }: { config: ErpThemeConfig; onPatch: (p: Patch) => void; readOnly?: boolean }) {
   return (
     <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70 space-y-3">
       <div>
-        <div className="text-xs font-medium text-slate-700 mb-1.5">สีหลัก</div>
+        <SheetLabel hint="ปุ่ม ลิงก์ แถบบน · ระบบสร้างเฉดอ่อน-เข้มให้เอง">สีหลัก</SheetLabel>
         <div className="flex flex-wrap items-center gap-1.5">
           {EASY_SWATCHES.map((x) => (
             <button key={x} type="button" aria-label={`สี ${x}`} onClick={() => onPatch({ colors: { primary: x } })}
-              className="w-7 h-7 rounded-full" style={{ background: x, outline: c.colors.primary.toLowerCase() === x ? "2px solid #0f172a" : "none", outlineOffset: 2 }} />
+              className="w-8 h-8 rounded-full" style={{ background: x, outline: c.colors.primary.toLowerCase() === x ? "2px solid #0f172a" : "none", outlineOffset: 2 }} />
           ))}
-          <div className="w-28"><ColorInput value={c.colors.primary} onChange={(v) => onPatch({ colors: { primary: v } })} /></div>
         </div>
+        <div className="mt-2"><ColorInput value={c.colors.primary} onChange={(v) => onPatch({ colors: { primary: v } })} /></div>
       </div>
       <div>
-        <div className="text-xs font-medium text-slate-700 mb-1.5">สไตล์ {preset === null && <span className="text-[10px] font-normal text-slate-400">(กำหนดเอง)</span>}</div>
-        <div className="grid grid-cols-2 gap-1.5">
+        <SheetLabel hint="แท็บที่เลือก ป้ายเน้น">สีรอง</SheetLabel>
+        <ColorInput value={c.colors.accent} onChange={(v) => onPatch({ colors: { accent: v } })} />
+      </div>
+    </fieldset>
+  );
+}
+
+// ── รูปตัวอย่างสไตล์แบบขยับ (ข้อ 6) — เห็นความต่างของชุดทันที: ขอบ เงา ปุ่มเรือง/แสงวิ่ง/ไล่สีวิ่ง การ์ดยก อนุภาค ──
+const ST_CSS = `
+@keyframes stPulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--st) 60%,transparent)}100%{box-shadow:0 0 0 7px transparent}}
+@keyframes stGlow{0%,100%{box-shadow:0 0 1px color-mix(in srgb,var(--st) 40%,transparent)}50%{box-shadow:0 0 9px var(--st)}}
+@keyframes stBlink{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes stFlow{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+@keyframes stShine{0%{left:-60%}60%,100%{left:130%}}
+@keyframes stLift{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@media (prefers-reduced-motion: reduce){.st-root *{animation:none!important}}
+`;
+const ST_ANIM: Partial<Record<EffectKey, string>> = { pulse: "stPulse 1.6s infinite", glow: "stGlow 2s ease-in-out infinite", blink: "stBlink 1.6s infinite", flow: "stFlow 2.4s ease-in-out infinite", lift: "stLift 2.4s ease-in-out infinite" };
+const anims = (fx: EffectKey[]) => fx.map((e) => ST_ANIM[e]).filter(Boolean).join(", ") || undefined;
+
+export function StyleThumb({ preset: p, primary, color2 }: { preset: (typeof FX_PRESETS)[number]; primary: string; color2: string }) {
+  const t = p.fx.targets, o = p.outline, e = p.elevation;
+  const grad = `linear-gradient(90deg, ${primary}, ${color2}, ${primary})`;
+  const shadowColor = e.color === "theme" ? `color-mix(in srgb, ${primary} 45%, transparent)` : e.color === "black" ? "rgba(0,0,0,.35)" : "rgba(15,23,42,.18)";
+  const shadow = { none: "none", soft: `0 1px 3px ${shadowColor}`, medium: `0 4px 10px -2px ${shadowColor}`, float: `0 10px 18px -6px ${shadowColor}` }[e.depth];
+  const bw = Math.max(o.width, o.gradient ? 1 : 0);
+  const borderColor = o.color === "theme" ? primary : o.color === "soft" ? `color-mix(in srgb, ${primary} 35%, white)` : "#e2e8f0";
+  const card: React.CSSProperties = o.gradient
+    ? { border: `${bw}px solid transparent`, backgroundImage: `linear-gradient(#fff,#fff), ${grad}`, backgroundOrigin: "border-box", backgroundClip: "padding-box, border-box", backgroundSize: o.running ? "100% 100%, 200% 100%" : undefined, animation: [o.running ? "stFlow 2.4s ease-in-out infinite" : "", anims(t.card.fx) ?? ""].filter(Boolean).join(", ") || undefined }
+    : { border: bw ? `${bw}px ${o.style} ${borderColor}` : "none", backgroundColor: "#fff", animation: anims(t.card.fx) };
+  const btnFlow = t.button.fx.includes("flow");
+  return (
+    <div className="st-root relative h-[76px] rounded-md overflow-hidden bg-slate-50" style={{ ["--st" as string]: primary }}>
+      <style>{ST_CSS}</style>
+      <div className="h-2.5" style={t.topbar.fx.includes("flow") ? { backgroundImage: grad, backgroundSize: "200% 100%", animation: "stFlow 2.4s ease-in-out infinite" } : { backgroundColor: primary }} />
+      {p.fx.particles !== "none" && <ThemeParticles kind={p.fx.particles} color={primary} count={6} speed={0.5} />}
+      <div className="absolute left-2 right-2 top-[18px] rounded-md px-2 py-1.5" style={{ ...card, boxShadow: [shadow !== "none" ? shadow : "", o.accentBar ? `inset 3px 0 0 ${primary}` : ""].filter(Boolean).join(", ") || undefined }}>
+        <div className="h-1.5 w-12 rounded bg-slate-200" />
+        <div className="h-1.5 w-8 rounded bg-slate-100 mt-1" />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-10 rounded overflow-hidden"
+          style={{ ...(btnFlow ? { backgroundImage: grad, backgroundSize: "200% 100%" } : { backgroundColor: primary }), animation: anims(t.button.fx) }}>
+          {t.button.fx.includes("shine") && <span className="absolute top-0 h-full w-1/3 bg-white/60 -skew-x-12" style={{ left: "-60%", animation: "stShine 1.8s infinite" }} />}
+        </div>
+      </div>
+      {t.badge.fx.length > 0 && <span className="absolute right-2 top-[5px] w-1.5 h-1.5 rounded-full bg-amber-400" style={{ ["--st" as string]: "#f59e0b", animation: anims(t.badge.fx) }} />}
+    </div>
+  );
+}
+
+/** สไตล์มีรูปตัวอย่าง (ข้อ 6) + ความเคลื่อนไหว 3 ปุ่ม (ข้อ 7) + ความมน */
+export function ThemeStyleSheet({ config: c, onPatch, onReplace, readOnly }: {
+  config: ErpThemeConfig; onPatch: (p: Patch) => void; onReplace: (next: ErpThemeConfig) => void; readOnly?: boolean;
+}) {
+  const preset = currentFxPreset(c);
+  const step = motionStepOf(c);
+  return (
+    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70 space-y-3">
+      <div>
+        <SheetLabel hint="ตั้งเอฟเฟกต์ ขอบ และเงาให้ทั้งชุด · ปรับต่อเองได้ที่ เพิ่มเติม">สไตล์ {preset === null && <span className="text-[10px] font-normal text-slate-400">(กำหนดเอง)</span>}</SheetLabel>
+        <div className="grid grid-cols-2 gap-2">
           {FX_PRESETS.map((p) => (
-            <button key={p.key} type="button" onClick={() => onPatch({ effects: p.fx, outline: p.outline, elevation: p.elevation })}
-              className={`text-left rounded-lg border px-2 py-1.5 ${preset === p.key ? "bg-blue-50 border-blue-300" : "bg-white border-slate-200 hover:border-slate-300"}`}>
-              <div className="text-xs font-medium text-slate-800">{p.name}</div>
-              <div className="text-[10px] text-slate-500 leading-tight">{p.description}</div>
+            <button key={p.key} type="button" onClick={() => onPatch({ effects: p.fx, outline: p.outline, elevation: p.elevation })} title={p.description}
+              className={`text-left rounded-lg border p-1.5 ${preset === p.key ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
+              <div className="pointer-events-none"><StyleThumb preset={p} primary={c.colors.primary} color2={c.gradient.color2} /></div>
+              <div className="mt-1 text-xs font-medium text-slate-800">{p.name}</div>
             </button>
           ))}
         </div>
       </div>
       <div>
-        <div className="flex items-center text-xs font-medium text-slate-700 mb-1">ความเคลื่อนไหว<span className="ml-auto text-[11px] font-normal text-slate-500">{["นิ่ง", "น้อย", "ปกติ", "มาก"][lvl]}</span></div>
-        <input type="range" min={0} max={3} step={1} value={lvl} onChange={(e) => onReplace(withMotionLevel(c, Number(e.target.value) as 0 | 1 | 2 | 3))} className="w-full" aria-label="ความเคลื่อนไหว" />
-        <div className="flex justify-between text-[10px] text-slate-400"><span>นิ่ง</span><span>มาก</span></div>
+        <SheetLabel hint="ผู้ใช้ปิดแอนิเมชันเองได้ · มือถือเบาลงให้อัตโนมัติ">ความเคลื่อนไหว</SheetLabel>
+        <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+          {MOTION_STEPS.map((m) => (
+            <button key={m.key} type="button" title={m.hint} aria-pressed={step === m.key} onClick={() => onReplace(withMotionLevel(c, m.level))}
+              className={`h-8 rounded-md text-xs ${step === m.key ? "bg-white shadow-sm text-slate-900 font-medium" : "text-slate-600 hover:text-slate-900"}`}>{m.label}</button>
+          ))}
+        </div>
       </div>
       <div>
         <div className="flex items-center text-xs font-medium text-slate-700 mb-1">ความมน<span className="ml-auto text-[11px] font-normal text-slate-500">{c.shape.radius}px</span></div>
         <input type="range" min={0} max={20} step={1} value={c.shape.radius} onChange={(e) => onPatch({ shape: { radius: Number(e.target.value) } })} className="w-full" aria-label="ความมน" />
-        <div className="flex justify-between text-[10px] text-slate-400"><span>เหลี่ยม</span><span>มน</span></div>
       </div>
+    </fieldset>
+  );
+}
+
+export function ThemeBgSheet({ config: c, onPatch, readOnly }: { config: ErpThemeConfig; onPatch: (p: Patch) => void; readOnly?: boolean }) {
+  return (
+    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70 space-y-3">
       <div>
-        <div className="text-xs font-medium text-slate-700 mb-1.5">รูปพื้นหลัง</div>
+        <SheetLabel hint="ตาราง การ์ด ฟอร์ม พื้นทึบเสมอ รูปอยู่ข้างหลังเท่านั้น">รูปพื้นหลัง</SheetLabel>
         <ImageInput value={c.background.image} onChange={(k) => onPatch({ background: { image: k } })} folder="themes" />
-        {c.background.image && <div className="mt-1.5"><Seg value={c.background.where} options={[["page", "ทั้งหน้า"], ["top", "แถบบน"], ["banner", "แบนเนอร์"]]} onChange={(v) => onPatch({ background: { where: v } })} /></div>}
       </div>
-      <div className="text-[11px] text-slate-400">อยากปรับลึกกว่านี้ → กด "ละเอียด" ด้านบน หรือคลิกชิ้นในพรีวิว</div>
+      {c.background.image && (
+        <>
+          <div><SheetLabel>วางที่</SheetLabel><Seg value={c.background.where} options={[["page", "ทั้งหน้า"], ["top", "แถบบน"], ["banner", "แบนเนอร์"]]} onChange={(v) => onPatch({ background: { where: v } })} /></div>
+          <div>
+            <div className="flex items-center text-xs font-medium text-slate-700 mb-1">ความชัด<span className="ml-auto text-[11px] font-normal text-slate-500">{c.background.opacity}%</span></div>
+            <input type="range" min={0} max={100} step={5} value={c.background.opacity} onChange={(e) => onPatch({ background: { opacity: Number(e.target.value) } })} className="w-full" aria-label="ความชัดของรูป" />
+          </div>
+        </>
+      )}
+      <Check checked={c.gradient.spots.top} onChange={(v) => onPatch({ gradient: { spots: { top: v } } })} label="แถบบนไล่สี" hint="ไล่จากสีหลักไปสีที่ 2 (ตั้งสีที่ 2 ที่ เพิ่มเติม › ไล่สี)" />
     </fieldset>
   );
 }
