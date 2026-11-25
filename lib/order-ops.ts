@@ -247,7 +247,7 @@ export function specialWrapCodes(itemCodes: (string | null | undefined)[], wrapC
   return [...out];
 }
 
-export type CommandDetail = { choice?: Record<string, string>; text?: string; sku_id?: string; sku_code?: string; message?: string; card_id?: string; template_id?: string };
+export type CommandDetail = { choice?: Record<string, string>; text?: string; sku_id?: string; sku_code?: string; message?: string; card_id?: string; template_id?: string; /** การ์ดสำเร็จรูป (ข้อความพิมพ์มาในตัว ไม่มีช่องกรอก) */ ready?: boolean };
 
 /** ตัวเลือกของคำสั่ง แยกกลุ่ม (ห่อ › กระดาษ / ริบบิ้น) — กลุ่มว่าง = "แบบ" */
 export function choiceGroups(options: { kind: string; label: string; value?: string | null; is_active: boolean }[], command: string, keep: Record<string, string> = {}): { group: string; items: string[] }[] {

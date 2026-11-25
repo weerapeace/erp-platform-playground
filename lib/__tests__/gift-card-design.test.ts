@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isSpecialTemplate, newFoldedDoc as nfdSpecial,
   acceptsMessage, buyerNoteOf, faceDoc, foldLine, groupTemplates, isFolded, newFoldedDoc, withFace, builtinTemplates, cardHtml, cardStatus, cardsPrintHtml, classifyNote, cleanDoc, docFonts, extractEngraveText,
-  fillTexts, fontStack, googleFontsHref, resizeDoc, resolveSrc, roleTexts, suggestMessage, uploadFontFaces, type CardDoc,
+  fillTexts, fontStack, googleFontsHref, resizeDoc, resolveSrc, roleTexts, suggestMessage, suggestMessages, uploadFontFaces, type CardDoc,
 } from "@/lib/gift-card-design";
 
 const r2 = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
@@ -213,5 +213,16 @@ describe("isSpecialTemplate", () => {
     expect(isSpecialTemplate({ is_special: true, doc: flat })).toBe(true);
     expect(isSpecialTemplate({ is_special: false, doc: nfdSpecial("top") })).toBe(false);
     expect(isSpecialTemplate({ is_special: null, doc: flat })).toBe(false);
+  });
+});
+
+describe("suggestMessages — หลายแบบจากหมายเหตุ (รอบ ข้อความการ์ด)", () => {
+  it("หลังคำว่าการ์ด + วันเกิด", () => expect(suggestMessages("รบกวนห่อของขวัญเขียนการ์ด Happy Birthday ให้ด้วยนะคะ")).toEqual(["Happy Birthday", "สุขสันต์วันเกิดนะ"]));
+  it("วันเกิดไม่มีข้อความ → คำอวยพร 2 แบบ", () => expect(suggestMessages("กรุณาห่อเป็นของขวัญวันเกิดให้ทีนะคะ ขอบคุณมากค่ะ")).toEqual(["Happy Birthday", "สุขสันต์วันเกิดนะ"]));
+  it("ข้ามชื่อสลักในเครื่องหมายคำพูด เอาข้อความการ์ด", () => expect(suggestMessages('สลัก "KEROLS" + การ์ดเขียนว่า "รักนะ ดูแลตัวเองด้วย" ค่ะ')).toEqual(["รักนะ ดูแลตัวเองด้วย"]));
+  it("ปักชื่อในคำพูด = ไม่ใช่ข้อความการ์ด", () => expect(suggestMessages("ปักชื่อ “ pattarawee ”")).toEqual([]));
+  it("ห่อเฉย ๆ / คำสุภาพ → ว่าง", () => {
+    expect(suggestMessages("รบกวนทางร้านห่อของขวัญให้หน่อยนะคะ")).toEqual([]);
+    expect(suggestMessages("ขอเป็นแบบผ้าลายค่ะ ขอบคุณค่ะ")).toEqual([]);
   });
 });

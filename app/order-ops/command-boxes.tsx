@@ -15,12 +15,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { CardQuickEdit, useCardFonts } from "@/components/card-designer/preview";
+import { CardPreview, CardQuickEdit, useCardFonts } from "@/components/card-designer/preview";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { PHRASE_UNITS, choiceGroups, fillPhrase, phraseNeeds, phrasesOf, type CommandDetail } from "@/lib/order-ops";
-import { fillTexts, groupTemplates, hasRole, isFolded, isSpecialTemplate, roleTexts, suggestMessage, type CardDoc } from "@/lib/gift-card-design";
+import { acceptsMessage, fillTexts, foldLine, groupTemplates, hasRole, isFolded, isSpecialTemplate, roleTexts, suggestMessages, type CardDoc } from "@/lib/gift-card-design";
 import { inputCls, opsJson, type OptionRow } from "./shared";
 import dynamic from "next/dynamic";
 // Set บรรจุภัณฑ์ต่อรุ่น (ของกลางหน้าแพ็ก) หนัก — โหลดเฉพาะตอนกด "ตั้งวัสดุ + วิธีห่อ"
@@ -165,12 +165,19 @@ export function SwapBox({ fromSku, detail, onChange }: { fromSku: string; detail
 
 type Tpl = { id: string; name: string; doc: CardDoc; builtin: boolean; is_special?: boolean | null; group?: string | null; sort_order?: number; replaces_builtin?: string | null };
 /** ที่ป๊อปใช้ตอนบันทึก: การ์ดของคำสั่งนี้ (สร้าง/อัปเดต) */
-export type CardDraft = { cardId: string | null; baseDoc: CardDoc | null; templateId: string | null; message: string };
+export type CardDraft = { cardId: string | null; baseDoc: CardDoc | null; templateId: string | null; message: string; /** การ์ดสำเร็จรูป = บันทึกหน้าตาแม่แบบตามเดิม ไม่ต้องมีข้อความ */ ready?: boolean };
 
-export function CardBox({ command, option, orderId, index, detail, onChange, draftRef }: {
-  command: string; option?: OptionRow; orderId: string | null; index: number; detail: CommandDetail; onChange: (p: Partial<CommandDetail>) => void;
+export function CardBox({ command, option, options = [], orderId, index, detail, onChange, draftRef }: {
+  command: string; option?: OptionRow; options?: OptionRow[]; orderId: string | null; index: number; detail: CommandDetail; onChange: (p: Partial<CommandDetail>) => void;
   draftRef: React.MutableRefObject<Record<string, CardDraft>>;
 }) {
+  const ready = detail.ready === true;
+  const [aiOpts, setAiOpts] = useState<string[]>([]);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiErr, setAiErr] = useState<string | null>(null);
+  const phrases = options.filter((o) => o.kind === "card_phrase" && o.is_active).sort((a, b) => a.sort_order - b.sort_order);
+  const phraseGroups = [...new Set(phrases.map((o) => o.value || "ทั่วไป"))];
+  const [phraseTab, setPhraseTab] = useState<string>("");
   const [tpls, setTpls] = useState<Tpl[]>([]);
   const [card, setCard] = useState<{ id: string; doc: CardDoc; template_id: string | null; printed_at: string | null; hand_written_at: string | null } | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -207,38 +214,61 @@ export function CardBox({ command, option, orderId, index, detail, onChange, dra
   // ข้อความเริ่มต้น: ที่เคยกรอก → ในการ์ดเดิม → เดาจากหมายเหตุลูกค้า
   useEffect(() => {
     if (!loaded || detail.message !== undefined) return;
-    const m = card ? roleTexts(card.doc).message : suggestMessage(note);
+    const m = card ? roleTexts(card.doc).message : suggestMessages(note)[0] ?? "";
     if (m) onChange({ message: m });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded]);
 
   // การ์ดธรรมดา = แม่แบบธรรมดาเท่านั้น · การ์ดพิเศษ = แม่แบบที่ติ๊กพิเศษเท่านั้น (ติ๊กที่หน้าแม่แบบ · รอบ 5 ข้อ 3)
-  const pool = useMemo(() => tpls.filter((t) => isSpecialTemplate(t) === special), [tpls, special]);
+  // ใส่ข้อความ = แม่แบบที่มีช่องข้อความลูกค้า · การ์ดสำเร็จรูป = แม่แบบข้อความตายตัว (เจ้าของเลือก AB 2026-11-25)
+  const pool = useMemo(() => tpls.filter((t) => isSpecialTemplate(t) === special && acceptsMessage(t.doc) !== ready), [tpls, special, ready]);
   const groups = useMemo(() => groupTemplates(pool.filter((t) => !t.builtin), pool.filter((t) => t.builtin)), [pool]);
   const defaultTpl = useMemo(() => {
     const inGroup = groupHint ? groups.find((g) => g.group === groupHint)?.items ?? [] : [];
     return (inGroup.length ? inGroup : groups.flatMap((g) => g.items))[0] ?? null;
   }, [groups, groupHint]);
-  const tplId = detail.template_id || card?.template_id || defaultTpl?.id || "";
+  const wantId = detail.template_id || card?.template_id || "";
+  const tplId = (wantId && pool.some((t) => t.id === wantId) ? wantId : "") || defaultTpl?.id || "";
   const tpl = tpls.find((t) => t.id === tplId) ?? null;
   const message = detail.message ?? "";
   // การ์ดเดิมและไม่ได้เปลี่ยนแม่แบบ → ใช้หน้าตาเดิม (แก้ทั้งใบไว้ก็ไม่หาย) · เปลี่ยนแม่แบบ → ใช้แม่แบบใหม่
-  const baseDoc = card && (!detail.template_id || detail.template_id === card.template_id) ? card.doc : tpl?.doc ?? null;
+  const baseDoc = card && (!detail.template_id || detail.template_id === card.template_id) && acceptsMessage(card.doc) !== ready ? card.doc : tpl?.doc ?? null;
   // แม่แบบไม่มีช่องข้อความลูกค้า → เพิ่มช่องให้ครั้งเดียว (กันรหัสชิ้นเปลี่ยนทุกครั้งที่วาด = ลากไม่ได้)
-  const base = useMemo(() => { const b0 = edited ?? baseDoc; return b0 && !hasRole(b0, "message") ? fillTexts(b0, { message: "" }) : b0; }, [edited, baseDoc]);
-  const working = useMemo(() => (base ? fillTexts(base, { message }) : null), [base, message]);
+  const base = useMemo(() => { const b0 = edited ?? baseDoc; return b0 && !ready && !hasRole(b0, "message") ? fillTexts(b0, { message: "" }) : b0; }, [edited, baseDoc, ready]);
+  const working = useMemo(() => (base ? (ready ? base : fillTexts(base, { message })) : null), [base, message, ready]);
+  const setMode = (r: boolean) => { if (r === ready) return; setEdited(null); onChange({ ready: r, template_id: "" }); };
+  const fromNote = useMemo(() => suggestMessages(note), [note]);
+  const askAi = async () => {
+    setAiBusy(true); setAiErr(null);
+    try {
+      const res = await apiFetch("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "ai", note: note ?? "", message }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "AI ตอบไม่ได้ ลองใหม่อีกครั้ง");
+      setAiOpts((j.options ?? []) as string[]);
+    } catch (e) { setAiErr((e as Error).message); }
+    finally { setAiBusy(false); }
+  };
+  const chip = (on: boolean) => `rounded-full border px-2.5 py-0.5 text-[11px] ${on ? "border-sky-400 bg-sky-50 font-medium text-sky-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+  const sug = "rounded-full border border-violet-200 bg-violet-50 px-2.5 py-0.5 text-[11px] text-violet-800 hover:bg-violet-100";
+  const tab = phraseTab && phraseGroups.includes(phraseTab) ? phraseTab : phraseGroups[0] ?? "";
   const pickTpl = (id: string) => { setEdited(null); onChange({ template_id: id }); };
 
   useEffect(() => {
-    draftRef.current[command] = { cardId: card?.id ?? null, baseDoc: base, templateId: tpl && !tpl.builtin ? tpl.id : null, message };
-  }, [command, card, base, tpl, message, draftRef]);
+    draftRef.current[command] = { cardId: card?.id ?? null, baseDoc: base, templateId: tpl && !tpl.builtin ? tpl.id : null, message: ready ? "" : message, ready };
+  }, [command, card, base, tpl, message, draftRef, ready]);
 
-  const noPool = loaded && !pool.length && !card;
+  const noPool = loaded && !pool.length;
   return (
     <div className="space-y-2">
+      <div className="flex justify-end">
+        <span className="inline-flex overflow-hidden rounded-md border border-slate-200 text-[11px]">
+          {([[false, "ใส่ข้อความ"], [true, "การ์ดสำเร็จรูป"]] as const).map(([r, l]) => <button key={l} type="button" onClick={() => setMode(r)} className={`px-2.5 py-1 ${ready === r ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{l}</button>)}
+        </span>
+      </div>
       {noPool ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[12px] text-amber-800">
-          ยังไม่มีแม่แบบ{special ? "การ์ดพิเศษ" : "การ์ดธรรมดา"} — ติ๊ก &quot;การ์ดพิเศษ&quot; ที่หน้าแม่แบบการ์ด (ตั้งค่า › แม่แบบการ์ด) · ตอนนี้พิมพ์ข้อความไว้ก่อนได้
+          {ready ? `ยังไม่มีแม่แบบ${special ? "การ์ดพิเศษ" : "การ์ดธรรมดา"}แบบสำเร็จรูป (ข้อความตายตัว) — ออกแบบได้ที่ ตั้งค่า › แม่แบบการ์ด (แม่แบบที่ไม่มีช่อง "ข้อความจากลูกค้า")`
+            : `ยังไม่มีแม่แบบ${special ? "การ์ดพิเศษ" : "การ์ดธรรมดา"} — ติ๊ก "การ์ดพิเศษ" ที่หน้าแม่แบบการ์ด (ตั้งค่า › แม่แบบการ์ด) · ตอนนี้พิมพ์ข้อความไว้ก่อนได้`}
         </p>
       ) : (
         <div className="flex flex-wrap gap-1">
@@ -251,13 +281,38 @@ export function CardBox({ command, option, orderId, index, detail, onChange, dra
           {card && detail.template_id && detail.template_id !== card.template_id && <span className="self-center text-[10px] text-amber-700">เปลี่ยนแม่แบบ = ใช้หน้าตาแม่แบบใหม่แทนการ์ดเดิม</span>}
         </div>
       )}
-      {working ? (
+      {ready ? (working && (
+        <div>
+          <CardPreview doc={working} maxHeight={200} fold={foldLine(working)} />
+          <p className="mt-1 text-center text-[11px] text-slate-500">การ์ดสำเร็จรูป — ข้อความพิมพ์มาในตัว ไม่ต้องกรอก</p>
+        </div>
+      )) : working ? (
         <CardQuickEdit doc={working} onChange={setEdited} message={message} onMessage={(v) => onChange({ message: v })} maxHeight={200}
           onFull={() => setFull(true)} onReset={edited ? () => setEdited(null) : undefined} />
       ) : (
         <textarea value={message} onChange={(e) => onChange({ message: e.target.value })} rows={3} placeholder="ข้อความบนการ์ด" className={inputCls} />
       )}
-      {!card && note && <p className="text-[11px] text-slate-400">ข้อความดึงจากหมายเหตุลูกค้าให้แล้ว · แก้ได้</p>}
+      {!ready && (
+        <div className="space-y-1.5 rounded-md bg-slate-50 p-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] text-slate-500">จากหมายเหตุ:</span>
+            {fromNote.length ? fromNote.map((s) => <button key={s} type="button" onClick={() => onChange({ message: s })} className={sug}>{s}</button>)
+              : <span className="text-[11px] text-slate-400">{note ? "หมายเหตุไม่ได้บอกข้อความ" : "ไม่มีหมายเหตุ"}</span>}
+            <button type="button" onClick={() => void askAi()} disabled={aiBusy} className="ml-auto inline-flex h-6 items-center gap-1 rounded-md border border-violet-200 bg-white px-2 text-[11px] text-violet-700 hover:bg-violet-50 disabled:opacity-60"><Icon name="sparkles" className="h-3.5 w-3.5" />{aiBusy ? "AI กำลังคิด…" : "ให้ AI คิดให้ 3 แบบ"}</button>
+          </div>
+          {aiErr && <p className="text-[11px] text-rose-600">{aiErr}</p>}
+          {aiOpts.length > 0 && <div className="flex flex-wrap gap-1">{aiOpts.map((s) => <button key={s} type="button" onClick={() => onChange({ message: s })} className={sug}>{s}</button>)}</div>}
+          {phraseGroups.length > 0 && (
+            <div>
+              <div className="mb-1 flex flex-wrap items-center gap-1">
+                <span className="text-[11px] text-slate-500">ข้อความสำเร็จรูป:</span>
+                {phraseGroups.map((g) => <button key={g} type="button" onClick={() => setPhraseTab(g)} className={`rounded px-1.5 py-0.5 text-[11px] ${tab === g ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-200"}`}>{g}</button>)}
+              </div>
+              <div className="flex flex-wrap gap-1">{phrases.filter((o) => (o.value || "ทั่วไป") === tab).map((o) => <button key={o.id} type="button" onClick={() => onChange({ message: o.label })} className={chip(message === o.label)}>{o.label}</button>)}</div>
+            </div>
+          )}
+        </div>
+      )}
       <p className="text-[11px] text-slate-500">
         {card ? <>การ์ดของออเดอร์นี้: {card.printed_at ? <span className="text-emerald-700">พิมพ์แล้ว</span> : card.hand_written_at ? <span className="text-emerald-700">เขียนมือแล้ว</span> : <span className="text-rose-600">ยังไม่พิมพ์</span>} · บันทึกคำสั่ง = อัปเดตการ์ดใบนี้</> : orderId ? "บันทึกคำสั่ง = สร้างการ์ดของออเดอร์นี้ให้เลย (อยู่ใน การ์ดทั้งหมด พิมพ์ได้ทันที)" : "ยังไม่ผูกออเดอร์ — บันทึกแล้วสร้างการ์ดไม่ผูกออเดอร์"}
         {card && <a href={`/order-ops/gift-cards/edit?id=${card.id}`} target="_blank" rel="noopener noreferrer" className="ml-2 text-sky-700 hover:underline">เปิดหน้าการ์ด ↗</a>}
@@ -277,8 +332,8 @@ export async function saveCards(drafts: Record<string, CardDraft>, commands: str
   const out: Record<string, string> = {};
   for (const c of commands) {
     const d = drafts[c];
-    if (!d || !d.baseDoc || (!d.message.trim() && !d.cardId)) continue;
-    const doc = fillTexts(d.baseDoc, { message: d.message });
+    if (!d || !d.baseDoc || (!d.message.trim() && !d.cardId && !d.ready)) continue;
+    const doc = d.ready ? d.baseDoc : fillTexts(d.baseDoc, { message: d.message });
     const res = await apiFetch("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "save_card", id: d.cardId ?? undefined, doc, template_id: d.templateId, ...(d.cardId ? {} : orderId ? { platform_order_id: orderId } : { order_no: orderNo }) }) });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(j.error || "บันทึกการ์ดไม่สำเร็จ");

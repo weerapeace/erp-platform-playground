@@ -437,6 +437,24 @@ export function builtinTemplates(): { id: string; name: string; group: string; d
       ] },
     },
     { id: `${BUILTIN_PREFIX}bday-fold`, name: "วันเกิด พับ A6", group: GROUP_BDAY, doc: foldBday },
+    // การ์ดสำเร็จรูป (ข้อความตายตัว ไม่มีช่องข้อความลูกค้า) — โหมด "การ์ดสำเร็จรูป" ในป๊อปคำสั่งพิเศษ (2026-11-25)
+    {
+      id: `${BUILTIN_PREFIX}ready-bday`, name: "สำเร็จรูป · Happy Birthday", group: GROUP_BDAY,
+      doc: { v: 1, w: 148, h: 105, bg: { color: "#fff4f1", image: null, fit: "cover" }, els: [
+        I({ x: 10, y: 8, w: 24, h: 28, rot: -10, src: "sticker:balloons" }),
+        I({ x: 116, y: 70, w: 22, h: 22, src: "sticker:cake" }),
+        T({ x: 14, y: 34, w: 120, h: 30, text: "Happy Birthday", style: { font: "Great Vibes", size: 40, color: "#9b2c4a" } }),
+        T({ x: 24, y: 66, w: 100, h: 12, text: "wishing you all the best", style: { font: "Cormorant Garamond", size: 12, color: "#5f5e5a" } }),
+      ] },
+    },
+    {
+      id: `${BUILTIN_PREFIX}ready-thanks`, name: "สำเร็จรูป · Thank You", group: GROUP_GENERAL,
+      doc: { v: 1, w: 148, h: 105, bg: { color: "#fffdf8", image: null, fit: "cover" }, els: [
+        T({ x: 14, y: 30, w: 120, h: 30, text: "Thank you", style: { font: "Great Vibes", size: 40, color: "#444441" } }),
+        T({ x: 24, y: 62, w: 100, h: 12, text: "for your love and support", style: { font: "Cormorant Garamond", size: 12, color: "#5f5e5a" } }),
+        I({ x: 66, y: 80, w: 16, h: 14, src: "sticker:heart" }),
+      ] },
+    },
   ].map((t) => ({ ...t, doc: cleanDoc(t.doc) }));
 }
 /** แม่แบบนี้เป็น "การ์ดพิเศษ" ไหม — ติ๊กไว้ใช้ค่านั้น · ยังไม่ตั้ง = การ์ดพับถือเป็นพิเศษ (เจ้าของเลือก 2026-11-25 รอบ 5 ข้อ 3) */
@@ -490,17 +508,36 @@ export function classifyNote(note: string | null | undefined): { card: boolean; 
 
 /** เดาข้อความบนการ์ดจากหมายเหตุ (คนแก้ต่อได้เสมอ) · "รบกวนเขียนการ์ด Happy Birthday ให้ด้วยนะคะ" → "Happy Birthday" */
 export function suggestMessage(note: string | null | undefined): string {
-  const s = (note ?? "").trim();
-  if (!s) return "";
-  const quoted = s.match(/["“”'‘’「]([^"“”'‘’」]{2,200})["“”'‘’」]/);
-  if (quoted) return quoted[1].trim();
-  const after = s.match(/(?:การ์ด|card|ข้อความ)\s*(?:ว่า|คำว่า|เขียนว่า|:|：)?\s*(.+?)(?:\s*(?:ให้(?:ด้วย|หน่อย|ที)?|ด้วย(?:นะ)?|หน่อย|นะ(?:คะ|ครับ|ค่ะ)?|ค่ะ|คะ|ครับ|จ้า|ขอบคุณ)[\s\S]*)?$/i);
-  if (after && after[1].trim().length >= 2 && !/^(ห่อ|ด้วย|ให้)/.test(after[1].trim())) return after[1].trim().replace(/[\s,.!]+$/, "");
-  if (/วันเกิด|birthday|hbd/i.test(s)) return "Happy Birthday";
-  if (/ครบรอบ|anniversary/i.test(s)) return "Happy Anniversary";
-  if (/วาเลนไทน์|valentine/i.test(s)) return "Happy Valentine's Day";
-  return "";   // "ขอบคุณค่ะ" เป็นคำสุภาพ ไม่เดาเป็นการ์ดขอบคุณ
+  return suggestMessages(note)[0] ?? "";
 }
+
+/**
+ * ข้อความการ์ดที่น่าจะใช่ จากหมายเหตุลูกค้า (หลายแบบ เรียงจากน่าจะใช่สุด) — ชิปให้กดในป๊อปคำสั่งพิเศษ (เจ้าของเลือก 2026-11-25 ข้อ 1)
+ *   ① ข้อความในเครื่องหมายคำพูด (ข้ามชื่อที่จะสลัก/ปัก เช่น ปักชื่อ “pattarawee”) ② คำหลัง "การ์ด…ว่า" ③ คำอวยพรตามโอกาส (วันเกิด/ครบรอบ/…)
+ *   คำสุภาพ "ขอบคุณค่ะ" ไม่นับเป็นการ์ดขอบคุณ
+ */
+export function suggestMessages(note: string | null | undefined): string[] {
+  const s = (note ?? "").trim();
+  if (!s) return [];
+  const out: string[] = [];
+  const push = (v: string) => { const t = v.trim().replace(/[\s,.!]+$/, ""); if (t.length >= 2 && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t); };
+  for (const m of s.matchAll(/["“”'‘’「]([^"“”'‘’」]{2,200})["“”'‘’」]/g)) {
+    const before = s.slice(Math.max(0, (m.index ?? 0) - 14), m.index ?? 0);
+    if (/(สลัก|สลีก|ปัก|พิมพ์|ปั๊ม|ชื่อ)\s*(คำว่า|ว่า)?\s*[:：]?\s*$/.test(before)) continue;   // ชื่อที่จะสลัก ไม่ใช่ข้อความการ์ด
+    push(m[1]);
+  }
+  const card = s.match(/(?:การ์ด|card|ข้อความ)\s*(?:ว่า|คำว่า|เขียนว่า|:|：)?\s*([^"“”]+?)(?:\s*(?:ให้(?:ด้วย|หน่อย|ที)?|ด้วย(?:นะ)?|หน่อย|นะ(?:คะ|ครับ|ค่ะ)?|ค่ะ|คะ|ครับ|จ้า|ขอบคุณ)[\s\S]*)?$/i);
+  if (card && card[1].trim().length >= 2 && !/^(ห่อ|ด้วย|ให้|เขียน)/.test(card[1].trim()) && !/["“”]/.test(card[0])) push(card[1]);
+  if (/วันเกิด|birthday|hbd/i.test(s)) { push("Happy Birthday"); push("สุขสันต์วันเกิดนะ"); }
+  if (/ครบรอบ|anniversary/i.test(s)) { push("Happy Anniversary"); push("สุขสันต์วันครบรอบ"); }
+  if (/วาเลนไทน์|valentine/i.test(s)) push("Happy Valentine's Day");
+  if (/รับปริญญา|จบการศึกษา|graduat/i.test(s)) { push("Congratulations"); push("ยินดีด้วยกับความสำเร็จ"); }
+  if (/แต่งงาน|wedding/i.test(s)) push("Happy Wedding");
+  if (/ปีใหม่|new year/i.test(s)) push("Happy New Year");
+  if (/คริสต์มาส|christmas|xmas/i.test(s)) push("Merry Christmas");
+  return out.slice(0, 5);
+}
+
 
 /** ชื่อที่จะสลัก (ส่งต่อไปคำสั่งสลักชื่อ) — "สลักชื่อ : KORN" → "KORN" · ชื่อล้วน → ทั้งบรรทัด */
 export function extractEngraveText(note: string | null | undefined): string {

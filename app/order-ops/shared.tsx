@@ -171,7 +171,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 
 export const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none";
 
-export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice" | "command_phrase" | "special_wrap"; label: string; value?: string | null; sort_order: number; is_active: boolean; extra?: { sku_id?: string; sku_code?: string | null; template_group?: string } | null };
+export type OptionRow = { id: string; kind: "instruction_command" | "repair_topic" | "engrave_special" | "engrave_font" | "engrave_sku_type" | "engrave_sku_pos" | "command_choice" | "command_phrase" | "special_wrap" | "card_phrase"; label: string; value?: string | null; sort_order: number; is_active: boolean; extra?: { sku_id?: string; sku_code?: string | null; template_group?: string } | null };
 
 export function useOpsOptions() {
   const [options, setOptions] = useState<OptionRow[]>([]);
@@ -190,6 +190,7 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
   const [label, setLabel] = useState("");
   const [choiceFor, setChoiceFor] = useState<string | null>(null);
   const [phraseFor, setPhraseFor] = useState<string | null>(null);
+  const [cardPhrases, setCardPhrases] = useState(false);
   const [tplGroups, setTplGroups] = useState<string[]>([]);
   useEffect(() => {
     if (!open || kind !== "instruction_command") return;
@@ -236,6 +237,7 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
                     {(Object.keys(COMMAND_BOX_LABEL) as CommandBox[]).map((b) => <option key={b} value={b}>กล่อง: {COMMAND_BOX_LABEL[b]}</option>)}
                   </select>
                   {commandBoxOf(o.label, o.value) === "phrase" && <button onClick={() => setPhraseFor(o.label)} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-slate-50">ข้อความลัด ({options.filter((x) => x.kind === "command_phrase" && x.value === o.label).length})</button>}
+                  {commandBoxOf(o.label, o.value) === "card" && <button onClick={() => setCardPhrases(true)} title="ข้อความการ์ดสำเร็จรูป (ใช้ร่วมทุกคำสั่งการ์ด)" className="rounded border border-slate-200 px-2 py-0.5 text-xs text-sky-700 hover:bg-slate-50">ข้อความสำเร็จรูป ({options.filter((x) => x.kind === "card_phrase").length})</button>}
                   {commandBoxOf(o.label, o.value) === "card" && (
                     <input defaultValue={o.extra?.template_group ?? ""} list="cmd-tpl-groups" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.extra?.template_group ?? "")) void patch(o, { extra: { ...(o.extra ?? {}), template_group: v } } as Partial<OptionRow>); }}
                       placeholder="กลุ่มแม่แบบ (ว่าง = เดา)" title="การ์ดของคำสั่งนี้เปิดกลุ่มแม่แบบไหนก่อน" className="h-7 w-36 rounded border border-slate-200 px-1.5 text-xs" />
@@ -255,12 +257,71 @@ export function OptionsManager({ open, onClose, kind, options, onChanged }: {
       </div>
       {choiceFor && <CommandChoiceManager command={choiceFor} options={options} onChanged={onChanged} onClose={() => setChoiceFor(null)} />}
       {phraseFor && <CommandChoiceManager command={phraseFor} options={options} onChanged={onChanged} onClose={() => setPhraseFor(null)} phrase />}
+      {cardPhrases && <CardPhraseManager options={options} onChanged={onChanged} onClose={() => setCardPhrases(false)} />}
       <datalist id="cmd-tpl-groups">{tplGroups.map((g) => <option key={g} value={g} />)}</datalist>
     </ERPModal>
   );
 }
 
 /** ตัวเลือกของคำสั่ง 1 ข้อ (เช่น ห่อ › กระดาษ / ริบบิ้น) — เพิ่ม · แก้ชื่อ · ซ่อน/เปิด (ไม่ลบจริง) · kind command_choice value "<คำสั่ง>|<กลุ่ม>" */
+/** ข้อความการ์ดสำเร็จรูป (kind card_phrase · value = กลุ่ม) — เพิ่ม · แก้ · เปลี่ยนกลุ่ม · เรียง · ซ่อน/เปิด (ไม่ลบจริง) */
+function CardPhraseManager({ options, onChanged, onClose }: { options: OptionRow[]; onChanged: () => void; onClose: () => void }) {
+  const toast = useToast();
+  const rows = options.filter((o) => o.kind === "card_phrase").sort((a, b) => a.sort_order - b.sort_order);
+  const groups = [...new Set(rows.map((o) => o.value || "ทั่วไป"))];
+  const [group, setGroup] = useState("");
+  const [label, setLabel] = useState("");
+  const add = async () => {
+    if (!label.trim()) return;
+    try { await opsJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "options", kind: "card_phrase", label: label.trim(), value: group.trim() || groups[0] || "ทั่วไป", sort_order: (rows.at(-1)?.sort_order ?? 0) + 1 }) }); setLabel(""); onChanged(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const patch = async (o: OptionRow, p: Partial<OptionRow>) => {
+    try { await opsJson("/api/order-ops", { method: "PATCH", body: JSON.stringify({ t: "options", id: o.id, patch: p }) }); onChanged(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+  const move = async (list: OptionRow[], i: number, d: -1 | 1) => {
+    const a = list[i], b = list[i + d];
+    if (!a || !b) return;
+    await patch(a, { sort_order: b.sort_order });
+    await patch(b, { sort_order: a.sort_order === b.sort_order ? a.sort_order + d : a.sort_order });
+  };
+  return (
+    <ERPModal open onClose={onClose} title="ข้อความการ์ดสำเร็จรูป" size="sm" defaultExpanded={false} storageKey="order-ops-card-phrases" zIndex={70}>
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          <input value={group} onChange={(e) => setGroup(e.target.value)} list="card-phrase-groups" placeholder={groups[0] ? `กลุ่ม (เช่น ${groups[0]})` : "กลุ่ม"} className={`${inputCls} w-32`} />
+          <datalist id="card-phrase-groups">{groups.map((g) => <option key={g} value={g} />)}</datalist>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} placeholder="ข้อความใหม่ เช่น Happy Birthday" className={inputCls} />
+          <button onClick={add} className="shrink-0 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700">เพิ่ม</button>
+        </div>
+        {groups.map((g) => {
+          const list = rows.filter((o) => (o.value || "ทั่วไป") === g);
+          return (
+            <div key={g}>
+              <div className="mb-1 text-xs font-medium text-slate-500">{g}</div>
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {list.map((o, i) => (
+                  <li key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                    <span className={`flex-1 ${o.is_active ? "" : "text-slate-400 line-through"}`}>{o.label}</span>
+                    <button title="เลื่อนขึ้น" onClick={() => void move(list, i, -1)} className="text-slate-400 hover:text-slate-700"><Icon name="chevron-up" className="h-4 w-4" /></button>
+                    <button title="เลื่อนลง" onClick={() => void move(list, i, 1)} className="text-slate-400 hover:text-slate-700"><Icon name="chevron-down" className="h-4 w-4" /></button>
+                    <button title="แก้ข้อความ" onClick={() => { const v = window.prompt("แก้ข้อความ", o.label); if (v && v.trim() && v.trim() !== o.label) void patch(o, { label: v.trim() }); }} className="text-slate-400 hover:text-slate-700"><Icon name="edit" className="h-4 w-4" /></button>
+                    <button title="ย้ายกลุ่ม" onClick={() => { const v = window.prompt("ย้ายไปกลุ่ม", o.value ?? ""); if (v && v.trim() && v.trim() !== o.value) void patch(o, { value: v.trim() }); }} className="text-slate-400 hover:text-slate-700"><Icon name="folder" className="h-4 w-4" /></button>
+                    <button onClick={() => void patch(o, { is_active: !o.is_active })} className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50">{o.is_active ? "ซ่อน" : "เปิดใช้"}</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+        {!rows.length && <p className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">ยังไม่มีข้อความสำเร็จรูป</p>}
+        <p className="text-[11px] text-slate-400">ใช้ร่วมทุกคำสั่งการ์ด · ซ่อน = ไม่โผล่ในป๊อป (การ์ดเก่าไม่เปลี่ยน) · ทุกการแก้ลงประวัติ</p>
+      </div>
+    </ERPModal>
+  );
+}
+
 function CommandChoiceManager({ command, options, onChanged, onClose, phrase = false }: { command: string; options: OptionRow[]; onChanged: () => void; onClose: () => void; /** ข้อความลัด (kind command_phrase) แทนตัวเลือก */ phrase?: boolean }) {
   const toast = useToast();
   const [group, setGroup] = useState("");

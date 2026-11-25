@@ -451,7 +451,7 @@ export function InstructionForm({ row, prefill, options, readOnly, canDelete, on
                 {box === "choice" && <ChoiceBox command={c} options={options} detail={d} onChange={(pp) => setDetail(c, pp)} />}
                 {box === "swap" && <SwapBox fromSku={f.sku} detail={d} onChange={(pp) => setDetail(c, pp)} />}
                 {box === "phrase" && <PhraseBox command={c} options={options} detail={d} onChange={(pp) => setDetail(c, pp)} />}
-                {box === "card" && <CardBox command={c} option={opt} orderId={f.platform_order_id} index={cardCmds.indexOf(c)} detail={d} onChange={(pp) => setDetail(c, pp)} draftRef={cardDrafts} />}
+                {box === "card" && <CardBox command={c} option={opt} options={options} orderId={f.platform_order_id} index={cardCmds.indexOf(c)} detail={d} onChange={(pp) => setDetail(c, pp)} draftRef={cardDrafts} />}
                 {(box === "text" || box === "choice") && <input value={d.text ?? ""} onChange={(e) => setDetail(c, { text: e.target.value })} placeholder={box === "text" ? "รายละเอียดคำสั่ง" : "รายละเอียดเพิ่ม (ว่างได้)"} className={`${inputCls} ${box === "choice" ? "mt-2" : ""}`} />}
               </div>
             );

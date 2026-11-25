@@ -49,7 +49,7 @@ const BULK_FIELDS: Record<OpsTableKey, readonly string[]> = {
 /** ติ๊กของงานซ่อม/คืน → ช่องเวลา */
 const CASE_FLAGS = { checked: "checked_at", stock_received: "stock_received_at", zort_cancelled: "zort_cancelled_at", packed: "packed_at" } as const;
 
-const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos", "command_choice"];
+const OPTION_KINDS = ["instruction_command", "repair_topic", "engrave_special", "engrave_font", "engrave_sku_type", "engrave_sku_pos", "command_choice", "command_phrase", "special_wrap", "card_phrase"];
 const isTable = (t: string | null): t is OpsTableKey => t === "instructions" || t === "waitlist" || t === "cases";
 const bad = (msg: string, status = 400) => NextResponse.json({ error: msg }, { status });
 const uuidRe = /^[0-9a-f-]{36}$/i;
