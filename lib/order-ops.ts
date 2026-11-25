@@ -121,6 +121,60 @@ export function decodeEngraveSku(
   };
 }
 
+/* ───────────── สินค้าสลักชื่อในออเดอร์ (เจ้าของเลือก widget รอบ 2 แบบ B · 2026-11-25) ─────────────
+ * รู้ได้ 3 ทาง: รหัสท้าย SKU (decodeEngraveSku) · รุ่นสินค้าตั้ง "สินค้าสลักชื่อ" (parent_skus_v2.engrave_mode) · หมายเหตุลูกค้า (classifyNote)
+ *   optional = สลักได้ ไม่บังคับ → นับเป็นงานสลักเมื่อมีรหัสท้าย/หมายเหตุเท่านั้น · ไม่เตือน
+ *   required = ต้องสลักทุกชิ้น → นับเป็นงานสลักเสมอ · เตือนเมื่อไม่มีหมายเหตุ
+ */
+export type EngraveMode = "none" | "optional" | "required";
+export const ENGRAVE_MODE_LABEL: Record<EngraveMode, string> = { none: "ไม่ใช่สินค้าสลักชื่อ", optional: "สลักได้ ไม่บังคับ", required: "ต้องสลักทุกชิ้น" };
+export const isEngraveMode = (v: unknown): v is EngraveMode => v === "none" || v === "optional" || v === "required";
+
+export type EngraveSource = "sku_code" | "required" | "note";
+export const ENGRAVE_SOURCE_LABEL: Record<EngraveSource, string> = { sku_code: "รหัสท้าย SKU", required: "รุ่นต้องสลักทุกชิ้น", note: "หมายเหตุลูกค้า" };
+
+export type EngraveItemIn = { sku_code: string | null; name?: string | null; qty?: number | null; parent_id?: string | null; parent_code?: string | null };
+export type EngraveItemOut = { sku_code: string | null; name: string | null; qty: number; parent_id: string | null; parent_code: string | null; mode: EngraveMode | null; decoded: EngraveSkuDecoded | null; engrave: boolean };
+
+/** ส่งไปแล้ว/ยกเลิกแล้ว = ไม่ต้องเตือนให้ทักลูกค้า (สถานะกลาง lib/platform-order-status) */
+export const ENGRAVE_NO_WARN_STATUSES = ["shipped", "cancelled"] as const;
+
+/**
+ * ตัดสินว่าออเดอร์นี้เป็นงานสลักชื่อไหม + ต้องเตือน "ลูกค้าไม่บอกชื่อ" ไหม
+ * modes = รุ่นสินค้า (parent id) → engrave_mode · noteEngrave = classifyNote(note).engrave
+ */
+export function engraveOfOrder(input: {
+  items: EngraveItemIn[];
+  modes: Record<string, EngraveMode | null | undefined>;
+  note: string | null | undefined;
+  noteEngrave: boolean;
+  status?: string | null;
+  maps?: { types: Record<string, string>; positions: Record<string, string> };
+}): { engrave: boolean; sources: EngraveSource[]; items: EngraveItemOut[]; needsName: boolean; hasOptional: boolean } {
+  const hasNote = !!(input.note ?? "").trim();
+  const noteSays = hasNote && input.noteEngrave;
+  const sources = new Set<EngraveSource>();
+  let hasOptional = false;
+  const items: EngraveItemOut[] = input.items.map((it) => {
+    const decoded = decodeEngraveSku(it.sku_code, input.maps?.types, input.maps?.positions);
+    const raw = it.parent_id ? input.modes[it.parent_id] : null;
+    const mode = isEngraveMode(raw) ? raw : null;
+    if (decoded) sources.add("sku_code");
+    if (mode === "required") sources.add("required");
+    if (mode === "optional") hasOptional = true;
+    return {
+      sku_code: it.sku_code ?? null, name: it.name ?? null, qty: Math.max(1, Number(it.qty) || 1),
+      parent_id: it.parent_id ?? null, parent_code: it.parent_code ?? null, mode, decoded,
+      engrave: !!decoded || mode === "required" || (mode === "optional" && noteSays),
+    };
+  });
+  if (noteSays) sources.add("note");
+  const engrave = sources.size > 0;
+  const mustHaveName = sources.has("sku_code") || sources.has("required");
+  const done = (ENGRAVE_NO_WARN_STATUSES as readonly string[]).includes(String(input.status ?? ""));
+  return { engrave, sources: [...sources], items, needsName: engrave && mustHaveName && !hasNote && !done, hasOptional };
+}
+
 /** สร้างตารางรหัสจากตัวเลือกที่ตั้งไว้ (ไม่มีเลย = ใช้ค่าเริ่มต้น) */
 export function engraveSkuMaps(options: { kind: string; label: string; value?: string | null; is_active: boolean }[]): { types: Record<string, string>; positions: Record<string, string> } {
   const pick = (kind: string) => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canMoveCase,
+  engraveOfOrder,
   cleanOrderNo,
   engraveTextError,
   guessEngraveFromNote,
@@ -87,5 +88,36 @@ describe("ถอดรหัสท้าย SKU สลัก", () => {
     expect(decodeEngraveSku(null)).toBeNull();
     const maps = engraveSkuMaps([{ kind: "engrave_sku_type", label: "s", value: "ฟอยเงิน", is_active: true }]);
     expect(decodeEngraveSku("X-01S/1", maps.types, maps.positions)).toMatchObject({ type: "ฟอยเงิน", position: "มุมขวา" });
+  });
+});
+
+describe("engraveOfOrder — สินค้าสลักชื่อในออเดอร์", () => {
+  const modes = { pReq: "required", pOpt: "optional", pNone: "none" } as const;
+  it("รหัสท้าย SKU = งานสลัก + ถอดรูปแบบ/ตำแหน่ง · ไม่มีหมายเหตุ = เตือน", () => {
+    const r = engraveOfOrder({ items: [{ sku_code: "TTM130-01D/1" }], modes, note: null, noteEngrave: false, status: "new" });
+    expect(r.engrave).toBe(true);
+    expect(r.sources).toEqual(["sku_code"]);
+    expect(r.items[0].decoded?.type).toBe("พิมพ์จม");
+    expect(r.needsName).toBe(true);
+  });
+  it("รุ่นต้องสลักทุกชิ้น = งานสลักเสมอ · มีหมายเหตุ = ไม่เตือน", () => {
+    expect(engraveOfOrder({ items: [{ sku_code: "WK45-01", parent_id: "pReq" }], modes, note: null, noteEngrave: false }).needsName).toBe(true);
+    const r = engraveOfOrder({ items: [{ sku_code: "WK45-01", parent_id: "pReq" }], modes, note: "Pasit", noteEngrave: true });
+    expect(r.engrave).toBe(true);
+    expect(r.needsName).toBe(false);
+  });
+  it("รุ่นสลักได้ไม่บังคับ: ไม่มีรหัสท้าย/หมายเหตุ = ไม่ใช่งานสลัก · หมายเหตุบอกสลัก = งานสลัก ไม่เตือน", () => {
+    const a = engraveOfOrder({ items: [{ sku_code: "WK41-01", parent_id: "pOpt" }], modes, note: null, noteEngrave: false });
+    expect(a.engrave).toBe(false);
+    expect(a.hasOptional).toBe(true);
+    const b = engraveOfOrder({ items: [{ sku_code: "WK41-01", parent_id: "pOpt" }], modes, note: "สลัก Lillyz", noteEngrave: true });
+    expect(b.engrave).toBe(true);
+    expect(b.items[0].engrave).toBe(true);
+    expect(b.needsName).toBe(false);
+  });
+  it("ส่งแล้ว/ยกเลิกแล้ว = ไม่เตือน · สินค้าทั่วไปไม่มีหมายเหตุ = ไม่ใช่งานสลัก", () => {
+    expect(engraveOfOrder({ items: [{ sku_code: "TTM130-01D/1" }], modes, note: "", noteEngrave: false, status: "shipped" }).needsName).toBe(false);
+    expect(engraveOfOrder({ items: [{ sku_code: "TTM130-01D/1" }], modes, note: "", noteEngrave: false, status: "cancelled" }).needsName).toBe(false);
+    expect(engraveOfOrder({ items: [{ sku_code: "BAG-01", parent_id: "pNone" }], modes, note: null, noteEngrave: false }).engrave).toBe(false);
   });
 });

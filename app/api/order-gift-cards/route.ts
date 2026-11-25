@@ -1,12 +1,12 @@
 /**
  * 💌 API การ์ดของขวัญจากหมายเหตุออเดอร์ — หน้า /order-ops/gift-cards · กติกา lib/gift-card-design · คู่มือ docs/order-gift-cards.md
  *
- * GET  ?view=notes&tab=card|engrave|other|all&q=&days=   ออเดอร์ที่ลูกค้าเขียนหมายเหตุ (ทุกร้านในศูนย์ออเดอร์) + การ์ด + คำสั่งสลัก
+ * GET  ?view=notes&tab=card|engrave|engrave_missing|other|all&q=&days=   ออเดอร์ที่ลูกค้าเขียนหมายเหตุ + ออเดอร์สินค้าสลักชื่อ (ทุกร้านในศูนย์ออเดอร์) + การ์ด + คำสั่งสลัก
  *      ?view=cards&q=&status=                           การ์ดทั้งหมด (รวมการ์ดไม่ผูกออเดอร์)
  *      ?view=templates                                  แม่แบบ (ในตัว + ที่ออกแบบเอง) · ?view=fonts ฟอนต์ที่อัปโหลด
  *      ?id=<การ์ด> · ?order=<platform_order_id>          ข้อมูลหน้าเขียนการ์ด · ?template=<id> แม่แบบ 1 ใบ · ?ids=a,b การ์ดหลายใบ (หน้าพิมพ์)
  * POST {action:"save_card"} สร้าง/แก้การ์ด · "printed"/"unprint" ติ๊กพิมพ์แล้ว · "written" ติ๊กเขียนมือแล้ว · "revert" ย้อนการบันทึกครั้งก่อน
- *      "kind" แก้การคัดแยก · "template_save" / "template_copy" แม่แบบ · "ai" ให้ AI เสนอข้อความ 3 แบบ
+ *      "kind" แก้การคัดแยก · "engrave_mode" ตั้งสินค้าสลักชื่อของรุ่น (order_ops.manage) · "template_save" / "template_copy" แม่แบบ · "ai" ให้ AI เสนอข้อความ 3 แบบ
  * DELETE {kind:"card"|"template"|"font", ids, restore?} ย้ายลงถังขยะ / กู้คืน (ลบแบบเก็บไว้ก่อน)
  *
  * สิทธิ์: order_ops.view ดู · order_ops.edit เขียน/พิมพ์ · order_ops.delete ลบการ์ด · order_ops.manage แม่แบบ+ฟอนต์
@@ -19,6 +19,9 @@ import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
 import { aiChat, featureAccess } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { whoAmI } from "@/lib/order-ops-server";
+import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, isEngraveMode, type EngraveMode } from "@/lib/order-ops";
+import { chatAdapter } from "@/lib/chat/registry";
+import { CHAT_CHANNELS, type ChatChannel } from "@/lib/chat/types";
 import {
   builtinTemplates, buyerNoteOf, classifyNote, cleanDoc, fillTexts, isBuiltinId, roleTexts, suggestMessage, type CardDoc,
 } from "@/lib/gift-card-design";
@@ -172,53 +175,116 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json({ cards: rows.map((r) => ({ ...r, brand_name: r.brand_id ? lk.brand.get(String(r.brand_id)) ?? null : null })) });
   }
 
-  // ── รายการออเดอร์ที่มีหมายเหตุ (ค่าเริ่ม) ──
+  // ── รายการออเดอร์ที่มีหมายเหตุ + ออเดอร์ที่มีสินค้าสลักชื่อ (ค่าเริ่ม) ──
+  const res = await notesView(admin, sp);
+  return res instanceof NextResponse ? res : NextResponse.json(res);
+}
+
+const chunkOf = <T,>(arr: T[], n = 200): T[][] => { const out: T[][] = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+
+/**
+ * ออเดอร์ที่ลูกค้าเขียนหมายเหตุ + ออเดอร์ที่มีสินค้าสลักชื่อ (แม้ไม่มีหมายเหตุ)
+ * สินค้าสลักชื่อรู้ได้จาก รหัสท้าย SKU · รุ่นที่ตั้ง "สินค้าสลักชื่อ" (parent_skus_v2.engrave_mode) · หมายเหตุ — กติกากลาง lib/order-ops engraveOfOrder
+ */
+async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchParams) {
   const days = Math.min(365, Math.max(7, Number(sp.get("days")) || 90));
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const { data: orders, error } = await admin.from("platform_orders").select(ORDER_COLS)
-    .or("raw->shopee->>message_to_seller.not.is.null,raw->tiktok->>buyer_message.not.is.null,raw->lazada->>remarks.not.is.null,raw->lazada->>gift_message.not.is.null,raw->>note.not.is.null")
-    .or("source.is.null,source.neq.email")
-    .gte("ordered_at", since)
-    .order("ordered_at", { ascending: false })
-    .limit(1500);
-  if (error) return bad("โหลดออเดอร์ไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
-  const withNote = ((orders ?? []) as Row[]).filter((o) => noteOfRow(o));
-  const ids = withNote.map((o) => String(o.id));
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
-  const [cardsRes, kindsRes, insRes, lk] = await Promise.all([
+  const [notesRes, modeRes, optRes] = await Promise.all([
+    admin.from("platform_orders").select(ORDER_COLS)
+      .or("raw->shopee->>message_to_seller.not.is.null,raw->tiktok->>buyer_message.not.is.null,raw->lazada->>remarks.not.is.null,raw->lazada->>gift_message.not.is.null,raw->>note.not.is.null")
+      .or("source.is.null,source.neq.email")
+      .gte("ordered_at", since)
+      .order("ordered_at", { ascending: false })
+      .limit(1500),
+    admin.from("parent_skus_v2").select("id, engrave_mode").in("engrave_mode", ["optional", "required"]),
+    admin.from("order_ops_options").select("kind, label, value, is_active").in("kind", ["engrave_sku_type", "engrave_sku_pos"]),
+  ]);
+  if (notesRes.error) return bad("โหลดออเดอร์ไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+  const maps = engraveSkuMaps(((optRes.data ?? []) as Row[]).map((o) => ({ kind: String(o.kind), label: String(o.label), value: str(o.value), is_active: o.is_active !== false })));
+  const modes: Record<string, EngraveMode> = {};
+  for (const p of (modeRes.data ?? []) as Row[]) if (isEngraveMode(p.engrave_mode)) modes[String(p.id)] = p.engrave_mode;
+  const requiredIds = Object.keys(modes).filter((k) => modes[k] === "required");
+
+  // ออเดอร์ที่ไม่มีหมายเหตุแต่มีสินค้าสลัก: รายการที่มีรหัสท้าย SKU หรือเป็นรุ่น "ต้องสลักทุกชิ้น"
+  const requiredSkuIds = requiredIds.length
+    ? ((await admin.from("skus_v2").select("id").in("parent_sku_id", requiredIds).limit(2000)).data ?? []).map((r) => String((r as Row).id))
+    : [];
+  const itemOr = ["sku_code.imatch.[A-Za-z]/[0-9]+$"];
+  for (const c of chunkOf(requiredIds, 100)) itemOr.push(`matched_parent_sku_id.in.(${c.join(",")})`);
+  for (const c of chunkOf(requiredSkuIds, 100)) itemOr.push(`matched_sku_id.in.(${c.join(",")})`);
+  const { data: engHits, error: hitErr } = await admin.from("platform_order_items").select("order_id, platform_orders!inner(ordered_at)")
+    .or(itemOr.join(",")).gte("platform_orders.ordered_at", since).limit(3000);
+  if (hitErr) console.error("[order-gift-cards] หาออเดอร์สินค้าสลักไม่สำเร็จ:", hitErr.message);
+  const withNote = ((notesRes.data ?? []) as Row[]).filter((o) => noteOfRow(o));
+  const noteIds = new Set(withNote.map((o) => String(o.id)));
+  const extraIds = [...new Set(((engHits ?? []) as Row[]).map((r) => String(r.order_id)))].filter((id) => !noteIds.has(id));
+  const extraRes = await Promise.all(chunkOf(extraIds).map((c) => admin.from("platform_orders").select(ORDER_COLS).in("id", c).or("source.is.null,source.neq.email")));
+  const allOrders = [...withNote, ...extraRes.flatMap((r) => (r.data ?? []) as Row[])];
+  const chunks = chunkOf(allOrders.map((o) => String(o.id)));
+  const [cardsRes, kindsRes, insRes, itemsRes, lk] = await Promise.all([
     Promise.all(chunks.map((c) => admin.from("order_gift_cards").select("id, platform_order_id, message, printed_at, hand_written_at, updated_at").in("platform_order_id", c).is("deleted_at", null))),
     Promise.all(chunks.map((c) => admin.from("order_note_kinds").select("platform_order_id, card, engrave").in("platform_order_id", c))),
     Promise.all(chunks.map((c) => admin.from("order_instructions").select("id, platform_order_id, status, engrave").in("platform_order_id", c).is("deleted_at", null))),
-    lookups(admin, [...new Set(withNote.map((o) => str(o.platform_id)).filter((x): x is string => !!x))], [...new Set(withNote.map((o) => str(o.brand_id)).filter((x): x is string => !!x))]),
+    Promise.all(chunks.map((c) => admin.from("platform_order_items").select("order_id, sku_code, name, qty, matched_sku_id, matched_parent_sku_id").in("order_id", c))),
+    lookups(admin, [...new Set(allOrders.map((o) => str(o.platform_id)).filter((x): x is string => !!x))], [...new Set(allOrders.map((o) => str(o.brand_id)).filter((x): x is string => !!x))]),
   ]);
-  const group = <T extends Row>(res: { data: unknown }[]) => {
-    const m = new Map<string, T[]>();
-    for (const r of res) for (const x of (r.data ?? []) as T[]) { const k = String(x.platform_order_id); m.set(k, [...(m.get(k) ?? []), x]); }
+  const itemRows = itemsRes.flatMap((r) => (r.data ?? []) as Row[]);
+  // SKU ลูก → รุ่น (parent) · รหัสรุ่น + ค่าที่ตั้งไว้ (ใช้โชว์ + เมนู "ตั้งรุ่นนี้เป็นสินค้าสลักชื่อ")
+  const skuIds = [...new Set(itemRows.map((r) => str(r.matched_sku_id)).filter((x): x is string => !!x))];
+  const skuParent = new Map<string, string>();
+  for (const r2 of await Promise.all(chunkOf(skuIds).map((c) => admin.from("skus_v2").select("id, parent_sku_id").in("id", c))))
+    for (const r of (r2.data ?? []) as Row[]) if (r.parent_sku_id) skuParent.set(String(r.id), String(r.parent_sku_id));
+  const parentOf = (r: Row) => str(r.matched_parent_sku_id) ?? (r.matched_sku_id ? skuParent.get(String(r.matched_sku_id)) ?? null : null);
+  const parentIds = [...new Set(itemRows.map(parentOf).filter((x): x is string => !!x))];
+  const parentInfo = new Map<string, { code: string | null; mode: EngraveMode | null }>();
+  for (const r2 of await Promise.all(chunkOf(parentIds).map((c) => admin.from("parent_skus_v2").select("id, code, engrave_mode").in("id", c))))
+    for (const r of (r2.data ?? []) as Row[]) parentInfo.set(String(r.id), { code: str(r.code), mode: isEngraveMode(r.engrave_mode) ? r.engrave_mode : null });
+  for (const [id, p] of parentInfo) if (p.mode && !modes[id]) modes[id] = p.mode;
+
+  const group = (res: { data: unknown }[]) => {
+    const m = new Map<string, Row[]>();
+    for (const r of res) for (const x of (r.data ?? []) as Row[]) { const k = String(x.platform_order_id ?? x.order_id); m.set(k, [...(m.get(k) ?? []), x]); }
     return m;
   };
-  const cards = group<Row>(cardsRes), kinds = group<Row>(kindsRes), ins = group<Row>(insRes);
-  let rows = withNote.map((o) => {
+  const cards = group(cardsRes), kinds = group(kindsRes), ins = group(insRes), items = group(itemsRes);
+  let rows = allOrders.map((o) => {
     const info = orderInfo(o, lk);
     const auto = classifyNote(info.note);
+    const its = (items.get(info.id) ?? []).map((r) => { const pid = parentOf(r); return { sku_code: str(r.sku_code), name: str(r.name), qty: Number(r.qty) || 1, parent_id: pid, parent_code: pid ? parentInfo.get(pid)?.code ?? null : null }; });
+    const eg = engraveOfOrder({ items: its, modes, note: info.note, noteEngrave: auto.engrave, status: info.status, maps });
+    const kindAuto = { card: auto.card, engrave: eg.engrave };
     const k = kinds.get(info.id)?.[0];
-    const kind = k ? { card: k.card === true, engrave: k.engrave === true } : auto;
-    return { ...info, kind, kind_auto: auto, overridden: !!k, cards: cards.get(info.id) ?? [], instructions: ins.get(info.id) ?? [] };
-  });
+    const kind = k ? { card: k.card === true, engrave: k.engrave === true } : kindAuto;
+    const parents = [...new Map(eg.items.filter((i) => i.parent_id).map((i) => [i.parent_id as string, { id: i.parent_id as string, code: i.parent_code, mode: i.mode }])).values()];
+    return {
+      ...info, kind, kind_auto: kindAuto, overridden: !!k, cards: cards.get(info.id) ?? [], instructions: ins.get(info.id) ?? [],
+      engrave: { sources: eg.sources, items: eg.items.filter((i) => i.engrave), needs_name: kind.engrave && eg.needsName },
+      parents,
+      chat_ready: !!(info.platform_code && (CHAT_CHANNELS as readonly string[]).includes(info.platform_code) && chatAdapter(info.platform_code as ChatChannel)),
+    };
+  }).filter((r) => r.note || r.kind.engrave);
   const counts = {
     card: rows.filter((r) => r.kind.card).length,
     card_todo: rows.filter((r) => r.kind.card && !r.cards.some((c) => c.printed_at || c.hand_written_at)).length,
     engrave: rows.filter((r) => r.kind.engrave).length,
-    other: rows.filter((r) => !r.kind.card && !r.kind.engrave).length,
+    engrave_missing: rows.filter((r) => r.engrave.needs_name).length,
+    other: rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave).length,
     all: rows.length,
   };
   const tab = sp.get("tab") ?? "card";
   if (tab === "card") rows = rows.filter((r) => r.kind.card);
   else if (tab === "engrave") rows = rows.filter((r) => r.kind.engrave);
-  else if (tab === "other") rows = rows.filter((r) => !r.kind.card && !r.kind.engrave);
+  else if (tab === "engrave_missing") rows = rows.filter((r) => r.engrave.needs_name);
+  else if (tab === "other") rows = rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave);
   const qq = cleanQ(sp.get("q") ?? "").toLowerCase();
   if (qq) rows = rows.filter((r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""}`.toLowerCase().includes(qq));
-  return NextResponse.json({ rows, counts, days });
+  // รุ่นที่ชื่อมีคำว่า "สลัก" แต่ยังไม่ได้ตั้ง "สินค้าสลักชื่อ" — แค่แนะนำ ไม่ตั้งให้เอง
+  let suggest: { id: string; code: string | null; name: string | null }[] = [];
+  if (tab === "engrave" || tab === "engrave_missing") {
+    const { data: sg } = await admin.from("parent_skus_v2").select("id, code, name_th").ilike("name_th", "%สลัก%").is("engrave_mode", null).eq("is_active", true).order("code").limit(30);
+    suggest = ((sg ?? []) as Row[]).map((r) => ({ id: String(r.id), code: str(r.code), name: str(r.name_th) }));
+  }
+  return { rows, counts, days, suggest };
 }
 
 // ───────────────────────── POST ─────────────────────────
@@ -385,6 +451,22 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (error) return bad("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
     await writeAudit(admin, { action: "note_kind", entityType: "order_note_kinds", entityId: poId, actorId: me.id, actorName: me.name, metadata: { ...auditChangeMeta((before as Row | null) ?? { card: null, engrave: null }, next) } });
     return NextResponse.json({ ok: true });
+  }
+
+  // ตั้ง "สินค้าสลักชื่อ" ของรุ่น (ช่องเดียวกับ Parent SKU › รายละเอียด Platform) — ผู้จัดการเท่านั้น · mode null = ล้างค่า (ใช้ย้อนกลับ)
+  if (action === "engrave_mode") {
+    if (!(await apiCan(request, "order_ops.manage"))) return bad("ตั้งสินค้าสลักชื่อต้องมีสิทธิ์จัดการงานหลังขาย (order_ops.manage)", 403);
+    const pid = String(body.parent_id ?? "");
+    if (!uuidRe.test(pid)) return bad("ไม่พบรุ่นสินค้า", 404);
+    const mode = body.mode == null ? null : isEngraveMode(body.mode) ? body.mode : undefined;
+    if (mode === undefined) return bad("ค่าสินค้าสลักชื่อไม่ถูกต้อง");
+    const { data: before } = await admin.from("parent_skus_v2").select("code, engrave_mode").eq("id", pid).maybeSingle();
+    if (!before) return bad("ไม่พบรุ่นสินค้า", 404);
+    const { error } = await admin.from("parent_skus_v2").update({ engrave_mode: mode }).eq("id", pid);
+    if (error) return bad("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", 500);
+    await writeAudit(admin, { action: "update", entityType: "parent_skus_v2", entityId: pid, actorId: me.id, actorName: me.name,
+      metadata: { name: str((before as Row).code), via: "order-gift-cards", label: mode ? ENGRAVE_MODE_LABEL[mode] : "ล้างค่า", ...auditChangeMeta({ engrave_mode: (before as Row).engrave_mode ?? null }, { engrave_mode: mode }) } });
+    return NextResponse.json({ ok: true, before: (before as Row).engrave_mode ?? null });
   }
 
   return bad("ไม่รู้จักคำสั่งนี้");

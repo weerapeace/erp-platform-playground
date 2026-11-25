@@ -2,6 +2,8 @@
 
 // ============================================================
 // 💌 เขียนการ์ดของขวัญ — /order-ops/gift-cards (แอป ออเดอร์ออนไลน์)
+// รอบ 2 (เจ้าของเลือก widget 2026-11-25 แบบ B): แท็บสลักชื่อดูจากสินค้า (รหัสท้าย SKU · รุ่นที่ตั้ง "สินค้าสลักชื่อ" · หมายเหตุ — lib/order-ops engraveOfOrder)
+//   การ์ด "สลัก แต่ไม่มีชื่อ" + ปุ่มทักแชทลูกค้า · กดแถวเปิดลิ้นชักรายละเอียดออเดอร์ของศูนย์ออเดอร์ (OrderDetailView) · เมนู ⋮ ตั้งรุ่นเป็นสินค้าสลักชื่อ
 // ออเดอร์ทุกร้านที่ลูกค้าเขียนหมายเหตุ (จากศูนย์ออเดอร์) คัดแยกเป็น การ์ด/ห่อ · สลักชื่อ · อื่น ๆ (ข้อ 1 · แก้เองได้)
 // กด "เขียนการ์ด" → หน้าเขียน (ข้อความจากหมายเหตุใส่ให้แล้ว) · พิมพ์หลายใบพร้อมกัน + ติ๊กพิมพ์แล้ว (ข้อ 3) · การ์ดไม่ผูกออเดอร์ (ข้อ 6)
 // แม่แบบ + ฟอนต์แบรนด์ (ข้อ 2 · 8) · เจ้าของเลือก widget 2026-11-24 แบบ A
@@ -19,6 +21,9 @@ import { StatFilterCards } from "@/components/stat-filter-cards";
 import { PlatformBadge } from "@/components/platform-icon";
 import { Popover } from "@/components/popover";
 import { askConfirm } from "@/components/modal/ask-dialog";
+import { Drawer, ERPModal } from "@/components/modal";
+import { CopyButton } from "@/components/copy-button";
+import { OrderDetailView } from "@/app/master/platform-orders/order-detail-view";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { CardPreview, useCardFonts, type UploadedFont } from "@/components/card-designer";
@@ -26,6 +31,7 @@ import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { formatDateTime } from "@/lib/date";
 import { cardStatus, extractEngraveText, type CardDoc } from "@/lib/gift-card-design";
+import { ENGRAVE_MODE_LABEL, ENGRAVE_SOURCE_LABEL, type EngraveMode, type EngraveSource } from "@/lib/order-ops";
 
 type CardMini = { id: string; message: string | null; printed_at: string | null; hand_written_at: string | null; updated_at: string };
 type NoteRow = {
@@ -33,10 +39,15 @@ type NoteRow = {
   platform: string | null; platform_code: string | null; brand_id: string | null; brand_name: string | null; note: string | null;
   kind: { card: boolean; engrave: boolean }; kind_auto: { card: boolean; engrave: boolean }; overridden: boolean;
   cards: CardMini[]; instructions: { id: string; status: string; engrave: boolean }[];
+  /** สินค้าสลักชื่อในออเดอร์ (กติกากลาง lib/order-ops engraveOfOrder) */
+  engrave: { sources: EngraveSource[]; items: { sku_code: string | null; name: string | null; qty: number; parent_code: string | null; mode: EngraveMode | null; decoded: { type: string | null; position: string | null } | null }[]; needs_name: boolean };
+  parents: { id: string; code: string | null; mode: EngraveMode | null }[];
+  chat_ready: boolean;
 };
+type Counts = { card: number; card_todo: number; engrave: number; engrave_missing: number; other: number; cards: number };
 type CardRow = { id: string; platform_order_id: string | null; order_no: string | null; platform: string | null; brand_name: string | null; customer_note: string | null; message: string | null; note: string | null; print_count: number; printed_at: string | null; printed_by_name: string | null; hand_written_at: string | null; updated_at: string; updated_by_name: string | null; deleted_at: string | null };
 type Tpl = { id: string; name: string; brand_id: string | null; doc: CardDoc; is_default: boolean; builtin: boolean; updated_at: string | null; updated_by_name: string | null; deleted_at: string | null };
-type Tab = "card" | "engrave" | "other" | "cards" | "templates";
+type Tab = "card" | "engrave" | "engrave_missing" | "other" | "cards" | "templates";
 
 async function gcJson<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<T> {
   const res = await apiFetch(url, init);
@@ -69,9 +80,9 @@ function Body() {
   const router = useRouter();
   const sp = useSearchParams();
   const canManage = usePermission("order_ops.manage");
-  const tab = (["card", "engrave", "other", "cards", "templates"].includes(sp.get("tab") ?? "") ? sp.get("tab") : "card") as Tab;
+  const tab = (["card", "engrave", "engrave_missing", "other", "cards", "templates"].includes(sp.get("tab") ?? "") ? sp.get("tab") : "card") as Tab;
   const setTab = (t: string) => router.replace(t === "card" ? "/order-ops/gift-cards" : `/order-ops/gift-cards?tab=${t}`);
-  const [counts, setCounts] = useState<{ card?: number; card_todo?: number; engrave?: number; other?: number; cards?: number }>({});
+  const [counts, setCounts] = useState<Partial<Counts>>({});
 
   return (
     <>
@@ -91,7 +102,8 @@ function Body() {
         showZero
         cards={[
           { key: "card", label: "การ์ด / ห่อของขวัญ", value: counts.card ?? null, tone: "danger", icon: <Icon value="i:gift-card" />, hint: counts.card_todo != null ? `ยังไม่ทำ ${counts.card_todo}` : undefined, keep: true },
-          { key: "engrave", label: "สลักชื่อ", value: counts.engrave ?? null, icon: <Icon value="i:pencil" />, hint: "ส่งต่อไปคำสั่งสลักชื่อ", keep: true },
+          { key: "engrave", label: "สลักชื่อ", value: counts.engrave ?? null, icon: <Icon value="i:pencil" />, hint: "ดูจากสินค้า + หมายเหตุ", keep: true },
+          { key: "engrave_missing", label: "สลัก แต่ไม่มีชื่อ", value: counts.engrave_missing ?? null, tone: "danger", icon: <Icon value="i:alert-triangle" />, hint: "ต้องทักลูกค้า", keep: true },
           { key: "other", label: "หมายเหตุอื่น ๆ", value: counts.other ?? null, icon: <Icon value="i:message-circle" />, keep: true },
           { key: "cards", label: "การ์ดทั้งหมด", value: counts.cards ?? null, icon: <Icon value="i:printer" />, hint: "รวมการ์ดไม่ผูกออเดอร์", keep: true },
           ...(canManage ? [{ key: "templates", label: "แม่แบบ + ฟอนต์", value: null, icon: <Icon value="i:palette" />, keep: true }] : []),
@@ -104,24 +116,62 @@ function Body() {
   );
 }
 
-// ───────────── ออเดอร์ที่มีหมายเหตุ ─────────────
+// ───────────── ออเดอร์ที่มีหมายเหตุ / สินค้าสลักชื่อ ─────────────
 
-function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "other"; onCounts: (c: { card: number; card_todo: number; engrave: number; other: number }) => void }) {
+const SELLER_CHAT: Record<string, { label: string; href: string }> = {
+  shopee: { label: "เปิดแชทใน Shopee Seller Centre", href: "https://seller.shopee.co.th/webchat/conversations" },
+  tiktok: { label: "เปิด TikTok Seller Center", href: "https://seller-th.tiktok.com/" },
+  lazada: { label: "เปิด Lazada Seller Center", href: "https://sellercenter.lazada.co.th/" },
+};
+
+function EngraveItems({ r, compact = false }: { r: NoteRow; compact?: boolean }) {
+  const its = r.engrave.items;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {its.length === 0 && <span className="text-[12px] text-slate-400">ดูจากหมายเหตุ</span>}
+      {its.slice(0, compact ? 2 : 4).map((it, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1">
+          <span className="inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+            {it.decoded ? ["สลัก", it.decoded.type, it.decoded.position].filter(Boolean).join(" · ") : "สลักชื่อ"}
+          </span>
+          <span className="font-mono text-[11px] text-slate-500">{it.sku_code ?? it.parent_code ?? ""}{it.qty > 1 ? ` ×${it.qty}` : ""}</span>
+        </div>
+      ))}
+      {its.length > (compact ? 2 : 4) && <span className="text-[11px] text-slate-400">+{its.length - (compact ? 2 : 4)} รายการ</span>}
+      <div className="flex flex-wrap gap-1">
+        {r.engrave.sources.map((s) => <span key={s} className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-500">{ENGRAVE_SOURCE_LABEL[s]}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function NoteCell({ r, isEng }: { r: NoteRow; isEng: boolean }) {
+  if (isEng && r.engrave.needs_name) return <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[12px] font-medium text-rose-700"><Icon value="i:alert-triangle" /> ลูกค้าไม่บอกชื่อที่จะสลัก</span>;
+  if (!r.note) return <span className="text-[12px] text-slate-400">ไม่มีหมายเหตุ{r.status === "shipped" ? " (ส่งแล้ว)" : r.status === "cancelled" ? " (ยกเลิก)" : ""}</span>;
+  return <span className="whitespace-pre-line text-[13px] text-amber-900">{r.note}</span>;
+}
+
+function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "engrave_missing" | "other"; onCounts: (c: Partial<Counts>) => void }) {
   const toast = useToast();
   const router = useRouter();
   const canEdit = usePermission("order_ops.edit");
+  const canManage = usePermission("order_ops.manage");
   const isMobile = useMediaQuery("(max-width: 767px)");
+  const isEng = tab === "engrave" || tab === "engrave_missing";
   const [rows, setRows] = useState<NoteRow[] | null>(null);
+  const [suggest, setSuggest] = useState<{ id: string; code: string | null; name: string | null }[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [days, setDays] = useState(90);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [chatFor, setChatFor] = useState<NoteRow | null>(null);
   const onCountsRef = useRef(onCounts); onCountsRef.current = onCounts;
 
   const load = useCallback(async () => {
     setErr(null);
     try {
-      const j = await gcJson<{ rows: NoteRow[]; counts: { card: number; card_todo: number; engrave: number; other: number } }>(`/api/order-gift-cards?view=notes&tab=${tab}&days=${days}`);
-      setRows(j.rows); onCountsRef.current(j.counts);
+      const j = await gcJson<{ rows: NoteRow[]; counts: Counts; suggest?: { id: string; code: string | null; name: string | null }[] }>(`/api/order-gift-cards?view=notes&tab=${tab}&days=${days}`);
+      setRows(j.rows); setSuggest(j.suggest ?? []); onCountsRef.current(j.counts);
     } catch (e) { setErr((e as Error).message); }
   }, [tab, days]);
   useEffect(() => { setRows(null); setSel(new Set()); void load(); }, [load]);
@@ -133,9 +183,20 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "other"; onCou
       void load();
     } catch (e) { toast.error((e as Error).message); }
   };
+  // ตั้ง "สินค้าสลักชื่อ" ของรุ่น (ช่องเดียวกับ Parent SKU › รายละเอียด Platform) + ย้อนกลับได้จากแจ้งผลมุมจอ
+  const setEngraveMode = async (p: { id: string; code: string | null }, mode: EngraveMode | null) => {
+    try {
+      const j = await gcJson<{ before: EngraveMode | null }>("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "engrave_mode", parent_id: p.id, mode }) });
+      void load();
+      toast.undo(`ตั้งรุ่น ${p.code ?? ""} เป็น "${mode ? ENGRAVE_MODE_LABEL[mode] : "ยังไม่ตั้ง"}" แล้ว`, async () => {
+        await gcJson("/api/order-gift-cards", { method: "POST", body: JSON.stringify({ action: "engrave_mode", parent_id: p.id, mode: j.before }) });
+        void load();
+      });
+    } catch (e) { toast.error((e as Error).message); }
+  };
   const sendEngrave = async (r: NoteRow) => {
     const text = extractEngraveText(r.note);
-    const ok = await askConfirm({ title: "ส่งไปคำสั่งสลักชื่อ?", message: `สร้างคำสั่งสลักชื่อของออเดอร์ ${r.order_no ?? ""}${text ? ` · ชื่อที่จะสลัก: "${text}"` : ""} · ไปแก้รูปแบบ/ตำแหน่ง/ลบได้ที่หน้าคำสั่งพิเศษ`, confirmText: "ส่งไปคำสั่งสลักชื่อ" });
+    const ok = await askConfirm({ title: "ส่งไปคำสั่งสลักชื่อ?", message: `สร้างคำสั่งสลักชื่อของออเดอร์ ${r.order_no ?? ""}${text ? ` · ชื่อที่จะสลัก: "${text}"` : " · ยังไม่มีชื่อที่จะสลัก (ไปใส่ทีหลังได้)"} · ไปแก้รูปแบบ/ตำแหน่ง/ลบได้ที่หน้าคำสั่งพิเศษ`, confirmText: "ส่งไปคำสั่งสลักชื่อ" });
     if (!ok) return;
     try {
       await gcJson("/api/order-ops", { method: "POST", body: JSON.stringify({ t: "instructions", order_no: r.order_no, platform: r.platform, customer_name: r.customer_name, platform_order_id: r.id, engrave: true, engrave_text: text || null, note: r.note?.slice(0, 500) ?? null, commands: [] }) });
@@ -151,7 +212,7 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "other"; onCou
   const writeHref = (r: NoteRow) => (r.cards[0] ? `/order-ops/gift-cards/edit?id=${r.cards[0].id}` : `/order-ops/gift-cards/edit?order=${r.id}`);
 
   const kindMenu = (r: NoteRow) => (
-    <Popover align="right" panelClassName="w-60 p-2 text-[13px]" trigger={(toggle) => <button type="button" onClick={toggle} title="ย้ายแท็บ" className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"><Icon value="i:dots-vertical" /></button>}>
+    <Popover align="right" panelClassName="w-72 p-2 text-[13px]" trigger={(toggle) => <button type="button" onClick={toggle} title="ย้ายแท็บ / ตั้งสินค้าสลักชื่อ" className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50"><Icon value="i:dots-vertical" /></button>}>
       {(close) => (
         <div className="space-y-1">
           <div className="px-1 text-[11px] text-slate-400">ออเดอร์นี้อยู่แท็บไหน {r.overridden ? "(แก้เองแล้ว)" : "(ระบบเดา)"}</div>
@@ -160,16 +221,31 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "other"; onCou
               <input type="checkbox" checked={r.kind[k]} disabled={!canEdit} onChange={(e) => { void setKind(r, { ...r.kind, [k]: e.target.checked }); close(); }} /> {l}
             </label>))}
           {r.overridden && canEdit && <button type="button" onClick={() => { void setKind(r, null); close(); }} className="w-full rounded px-1 py-1 text-left text-sky-700 hover:bg-slate-50">ให้ระบบเดาเหมือนเดิม</button>}
+          {canManage && r.parents.length > 0 && (
+            <div className="mt-1 border-t border-slate-100 pt-1.5">
+              <div className="px-1 pb-1 text-[11px] text-slate-400">ตั้งรุ่นสินค้าเป็นสินค้าสลักชื่อ (มีผลทุกออเดอร์ของรุ่นนี้)</div>
+              {r.parents.map((p) => (
+                <div key={p.id} className="flex items-center gap-1.5 px-1 py-0.5">
+                  <a href={`/master/parent-skus?open=${encodeURIComponent(p.id)}`} target="_blank" rel="noopener noreferrer" className="w-16 shrink-0 truncate font-mono text-[12px] text-slate-700 hover:underline" title="เปิด Parent SKU">{p.code ?? "รุ่น"}</a>
+                  <select value={p.mode ?? ""} onChange={(e) => { void setEngraveMode(p, (e.target.value || null) as EngraveMode | null); close(); }} className="h-7 min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 text-[12px]" aria-label={`สินค้าสลักชื่อ ${p.code ?? ""}`}>
+                    <option value="">ยังไม่ตั้ง</option>
+                    {(Object.keys(ENGRAVE_MODE_LABEL) as EngraveMode[]).map((m) => <option key={m} value={m}>{ENGRAVE_MODE_LABEL[m]}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </Popover>
   );
   const actions = (r: NoteRow) => (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
-      {tab === "engrave" ? (
+    <div className="flex flex-wrap items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {isEng && r.engrave.needs_name && <button type="button" onClick={() => setChatFor(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-rose-200 bg-white px-2 text-[12px] font-medium text-rose-700 hover:bg-rose-50"><Icon value="i:message-circle" /> ทักแชทลูกค้า</button>}
+      {isEng ? (
         r.instructions.some((i) => i.engrave)
           ? <Link href="/order-ops/instructions" className="text-[12px] text-emerald-700 hover:underline">มีคำสั่งสลักแล้ว ({r.instructions.find((i) => i.engrave)?.status === "done" ? "เสร็จ" : "ยังไม่ทำ"})</Link>
-          : canEdit && <button type="button" onClick={() => void sendEngrave(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100"><Icon value="i:send" /> ส่งไปคำสั่งสลัก</button>
+          : canEdit && <button type="button" onClick={() => void sendEngrave(r)} className="inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100"><Icon value="i:send" /> ส่งไปสั่งสลัก</button>
       ) : canEdit && (
         <Link href={writeHref(r)} className="inline-flex h-7 items-center gap-1 rounded-md bg-violet-600 px-2.5 text-[12px] font-medium text-white hover:bg-violet-700"><Icon value="i:pencil" /> {r.cards.length ? "ดู / แก้การ์ด" : "เขียนการ์ด"}</Link>
       )}
@@ -177,45 +253,94 @@ function NotesList({ tab, onCounts }: { tab: "card" | "engrave" | "other"; onCou
     </div>
   );
 
-  const cols: MiniColumn<NoteRow>[] = [
-    { key: "platform", header: "ร้าน", width: "7rem", cell: (r) => <div className="flex flex-col items-start gap-0.5"><PlatformBadge code={r.platform_code} name={r.platform} size="xs" />{r.brand_name && <span className="text-[11px] text-slate-400">{r.brand_name}</span>}</div>, sortValue: (r) => r.platform ?? "" },
-    { key: "order", header: "ออเดอร์", width: "11rem", cell: (r) => <div><Link href={`/master/platform-orders?q=${encodeURIComponent(r.order_no ?? "")}`} className="font-mono text-[12px] text-slate-800 hover:underline">{r.order_no}</Link><div className="text-[11px] text-slate-400">{fmt(r.ordered_at)}{r.packed_at ? " · แพ็กแล้ว" : ""}</div></div>, sortValue: (r) => r.ordered_at ?? "" },
-    { key: "note", header: "ข้อความลูกค้า", width: "minmax(14rem,2fr)", cell: (r) => <span className="whitespace-pre-line text-[13px] text-amber-900">{r.note}</span> },
-    { key: "status", header: "สถานะ", width: "7rem", cell: (r) => (tab === "engrave" ? (r.instructions.some((i) => i.engrave) ? <span className="text-[12px] text-emerald-700">ส่งแล้ว</span> : <span className="text-[12px] text-slate-400">ยังไม่ส่ง</span>) : <div className="flex flex-col items-start gap-0.5"><StatusPill c={r.cards[0] ?? null} />{r.cards.length > 1 && <span className="text-[11px] text-slate-400">{r.cards.length} ใบ</span>}</div>), sortValue: (r) => cardStatus(r.cards[0] ?? null).key },
+  const shopCol: MiniColumn<NoteRow> = { key: "platform", header: "ร้าน", width: "7rem", cell: (r) => <div className="flex flex-col items-start gap-0.5"><PlatformBadge code={r.platform_code} name={r.platform} size="xs" />{r.brand_name && <span className="text-[11px] text-slate-400">{r.brand_name}</span>}</div>, sortValue: (r) => r.platform ?? "" };
+  const orderCol: MiniColumn<NoteRow> = { key: "order", header: "ออเดอร์", width: "11rem", cell: (r) => <div><span className="font-mono text-[12px] text-slate-800">{r.order_no}</span><div className="text-[11px] text-slate-400">{fmt(r.ordered_at)}{r.packed_at ? " · แพ็กแล้ว" : ""}</div></div>, sortValue: (r) => r.ordered_at ?? "" };
+  const cols: MiniColumn<NoteRow>[] = isEng ? [
+    shopCol, orderCol,
+    { key: "items", header: "สินค้าสลัก", width: "minmax(11rem,1.3fr)", cell: (r) => <EngraveItems r={r} /> },
+    { key: "note", header: "ชื่อที่จะสลัก (หมายเหตุ)", width: "minmax(12rem,1.6fr)", cell: (r) => <NoteCell r={r} isEng />, sortValue: (r) => (r.engrave.needs_name ? "0" : "1") },
+    { key: "status", header: "สถานะ", width: "6rem", cell: (r) => (r.instructions.some((i) => i.engrave) ? <span className="text-[12px] text-emerald-700">ส่งแล้ว</span> : <span className="text-[12px] text-slate-400">ยังไม่ส่ง</span>) },
+    { key: "act", header: "", width: "15rem", align: "right", cell: actions, noExport: true },
+  ] : [
+    shopCol, orderCol,
+    { key: "note", header: "ข้อความลูกค้า", width: "minmax(14rem,2fr)", cell: (r) => <NoteCell r={r} isEng={false} /> },
+    { key: "status", header: "สถานะ", width: "7rem", cell: (r) => <div className="flex flex-col items-start gap-0.5"><StatusPill c={r.cards[0] ?? null} />{r.cards.length > 1 && <span className="text-[11px] text-slate-400">{r.cards.length} ใบ</span>}</div>, sortValue: (r) => cardStatus(r.cards[0] ?? null).key },
     { key: "act", header: "", width: "13rem", align: "right", cell: actions, noExport: true },
   ];
 
   if (err) return <ErrorState title={err} onRetry={load} />;
   if (!rows) return <LoadingState />;
+  const openRow = openId ? rows.find((r) => r.id === openId) : null;
   return (
-    <MiniTable
-      rows={rows}
-      rowKey={(r) => r.id}
-      columns={cols}
-      searchText={(r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""} ${r.platform ?? ""}`}
-      searchPlaceholder="ค้นเลขออเดอร์ / ข้อความลูกค้า"
-      selectable={tab === "card"}
-      selected={sel}
-      onSelectedChange={setSel}
-      countUnit="ออเดอร์"
-      layout={isMobile ? "cards" : "table"}
-      renderCard={(r) => (
-        <div className="space-y-1.5 p-3">
-          <div className="flex items-center gap-2"><PlatformBadge code={r.platform_code} name={r.platform} size="xs" /><span className="font-mono text-[12px] text-slate-700">{r.order_no}</span><span className="flex-1" />{tab !== "engrave" && <StatusPill c={r.cards[0] ?? null} />}</div>
-          <p className="whitespace-pre-line text-[13px] text-amber-900">{r.note}</p>
-          <div className="flex items-center justify-between gap-2"><span className="text-[11px] text-slate-400">{fmt(r.ordered_at)}</span>{actions(r)}</div>
+    <>
+      {isEng && suggest.length > 0 && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-[13px] text-amber-900">
+          <div className="flex items-start gap-1.5"><Icon value="i:bulb" /><span>พบ {suggest.length} รุ่นที่ชื่อมีคำว่า &quot;สลัก&quot; แต่ยังไม่ได้ตั้งเป็นสินค้าสลักชื่อ — ตั้งที่ Parent SKU › รายละเอียด Platform › <b>สินค้าสลักชื่อ</b> (ระบบไม่ตั้งให้เอง)</span></div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {suggest.map((s) => <a key={s.id} href={`/master/parent-skus?open=${encodeURIComponent(s.id)}`} target="_blank" rel="noopener noreferrer" title={s.name ?? ""} className="rounded-md border border-amber-300 bg-white px-2 py-0.5 font-mono text-[12px] text-amber-800 hover:bg-amber-100">{s.code ?? "รุ่น"}</a>)}
+          </div>
         </div>
       )}
-      actions={
-        <div className="flex items-center gap-2">
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px]" aria-label="ช่วงเวลา">
-            {[30, 90, 180, 365].map((d) => <option key={d} value={d}>{d} วันล่าสุด</option>)}
-          </select>
-          {tab === "card" && sel.size > 0 && <button type="button" onClick={printSelected} className="inline-flex h-8 items-center gap-1 rounded-md bg-slate-900 px-3 text-[12px] font-medium text-white"><Icon value="i:printer" /> พิมพ์การ์ดที่เลือก ({sel.size})</button>}
-        </div>
-      }
-      emptyText={tab === "card" ? "ยังไม่มีออเดอร์ที่ลูกค้าขอการ์ดหรือห่อของขวัญในช่วงนี้" : tab === "engrave" ? "ยังไม่มีออเดอร์ที่ขอสลักชื่อในช่วงนี้" : "ไม่มีหมายเหตุอื่นในช่วงนี้"}
-    />
+      <MiniTable
+        rows={rows}
+        rowKey={(r) => r.id}
+        columns={cols}
+        searchText={(r) => `${r.order_no ?? ""} ${r.note ?? ""} ${r.customer_name ?? ""} ${r.platform ?? ""} ${r.engrave.items.map((i) => i.sku_code ?? "").join(" ")}`}
+        searchPlaceholder={isEng ? "ค้นเลขออเดอร์ / ชื่อที่จะสลัก / รหัสสินค้า" : "ค้นเลขออเดอร์ / ข้อความลูกค้า"}
+        selectable={tab === "card"}
+        selected={sel}
+        onSelectedChange={setSel}
+        onRowClick={(r) => setOpenId(r.id)}
+        countUnit="ออเดอร์"
+        layout={isMobile ? "cards" : "table"}
+        renderCard={(r) => (
+          <div className={`space-y-1.5 p-3 ${isEng && r.engrave.needs_name ? "bg-rose-50/40" : ""}`} onClick={() => setOpenId(r.id)}>
+            <div className="flex items-center gap-2"><PlatformBadge code={r.platform_code} name={r.platform} size="xs" /><span className="font-mono text-[12px] text-slate-700">{r.order_no}</span><span className="flex-1" />{!isEng && <StatusPill c={r.cards[0] ?? null} />}</div>
+            {isEng && <EngraveItems r={r} compact />}
+            <NoteCell r={r} isEng={isEng} />
+            <div className="flex items-center justify-between gap-2"><span className="text-[11px] text-slate-400">{fmt(r.ordered_at)}</span>{actions(r)}</div>
+          </div>
+        )}
+        actions={
+          <div className="flex items-center gap-2">
+            <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px]" aria-label="ช่วงเวลา">
+              {[30, 90, 180, 365].map((d) => <option key={d} value={d}>{d} วันล่าสุด</option>)}
+            </select>
+            {tab === "card" && sel.size > 0 && <button type="button" onClick={printSelected} className="inline-flex h-8 items-center gap-1 rounded-md bg-slate-900 px-3 text-[12px] font-medium text-white"><Icon value="i:printer" /> พิมพ์การ์ดที่เลือก ({sel.size})</button>}
+          </div>
+        }
+        emptyText={tab === "card" ? "ยังไม่มีออเดอร์ที่ลูกค้าขอการ์ดหรือห่อของขวัญในช่วงนี้" : tab === "engrave" ? "ยังไม่มีออเดอร์สลักชื่อในช่วงนี้" : tab === "engrave_missing" ? "ไม่มีออเดอร์สลักชื่อที่ลูกค้ายังไม่บอกชื่อ" : "ไม่มีหมายเหตุอื่นในช่วงนี้"}
+      />
+
+      {openId && (
+        <Drawer open onClose={() => setOpenId(null)} size="xl" storageKey="platform-order-detail"
+          title={openRow?.order_no ?? "รายละเอียดออเดอร์"}
+          headerActions={() => <a href={`/master/platform-orders/${encodeURIComponent(openId)}`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-600 hover:bg-slate-50" title="เปิดเต็มหน้าในแท็บใหม่"><Icon value="i:external-link" />เต็มหน้า</a>}>
+          <OrderDetailView key={openId} id={openId} layout="drawer" onChanged={() => void load()} />
+        </Drawer>
+      )}
+
+      <ERPModal open={!!chatFor} onClose={() => setChatFor(null)} title="ทักแชทลูกค้า" size="sm"
+        footer={<button type="button" onClick={() => setChatFor(null)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">ปิด</button>}>
+        {chatFor && (
+          <div className="space-y-3 text-sm text-slate-700">
+            <p>ออเดอร์ <span className="font-mono">{chatFor.order_no}</span>{chatFor.customer_name ? ` · ${chatFor.customer_name}` : ""} ซื้อสินค้าสลักชื่อ แต่ยังไม่บอกชื่อที่จะสลัก</p>
+            {chatFor.chat_ready ? (
+              <Link href="/chat" className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon value="i:messages" /> เปิดห้องแชทรวม</Link>
+            ) : (
+              <>
+                <p className="rounded-lg bg-amber-50 p-2.5 text-[13px] text-amber-900">แชท {chatFor.platform ?? "ของร้านนี้"} ยังไม่ได้เชื่อมกับระบบ (ห้องแชทรวมตอนนี้ต่อได้แค่ LINE) จึงเปิดห้องแชทของลูกค้าคนนี้ในระบบให้ไม่ได้ — คัดลอกเลขออเดอร์แล้วไปค้นในแชทของแพลตฟอร์ม</p>
+                <div className="flex flex-wrap gap-2">
+                  <CopyButton value={chatFor.order_no ?? ""} label="คัดลอกเลขออเดอร์" />
+                  {chatFor.platform_code && SELLER_CHAT[chatFor.platform_code] && <a href={SELLER_CHAT[chatFor.platform_code].href} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-50"><Icon value="i:external-link" /> {SELLER_CHAT[chatFor.platform_code].label}</a>}
+                </div>
+                <p className="text-[12px] text-slate-400">ได้ชื่อจากลูกค้าแล้ว กด &quot;ส่งไปสั่งสลัก&quot; แล้วใส่ชื่อที่หน้าคำสั่งพิเศษ · ถ้าวันหลังต่อแชทแพลตฟอร์มนี้แล้ว ปุ่มนี้จะพาเข้าห้องแชทในระบบเลย</p>
+              </>
+            )}
+          </div>
+        )}
+      </ERPModal>
+    </>
   );
 }
 
