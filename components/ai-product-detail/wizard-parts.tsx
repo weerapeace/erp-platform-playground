@@ -21,8 +21,8 @@ import { Popover } from "@/components/popover";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
-  DRAFT_SETUP_KEY, MANUAL_FIELDS, normalizeExtras, normalizeSetup, topicsToText,
-  type DescTemplate, type DraftSetup, type MaterialRule, type RuleExtras, type TagSetup,
+  DRAFT_SETUP_KEY, MANUAL_FIELDS, normalizeExtras, normalizeSetup, subPhrase, topicsToText,
+  type DescTemplate, type DraftSetup, type MaterialRule, type RuleExtras, type TagSetup, type TopicSub,
 } from "@/lib/ai-draft-setup";
 
 /** ✨ ให้ AI ช่วยคิดการตั้งค่าประเภทสินค้า (/api/ai/tag-setup · รุ่นถูก gpt-4o-mini · ~0.02 บาท/ครั้ง) */
@@ -258,7 +258,7 @@ export type MatchedRule = {
   instruction: string; required_topics: string[]; required_topics_en?: string[]; topic_options?: Record<string, string[]>;
   hint: string | null; is_active?: boolean; sort_order?: number; extras?: unknown;
 };
-type TopicRow = { th: string; en: string; options: string; optionsEn: string; required: boolean };
+type TopicRow = { th: string; en: string; options: string; optionsEn: string; required: boolean; sub?: TopicSub };
 const splitC = (s: string) => s.split(",").map((x) => x.trim());
 
 /** แปลหลายข้อความไทย → อังกฤษครั้งเดียว (/api/ai/translate แบบชุด) · แปลไม่ได้ = คืนค่าว่าง */
@@ -316,7 +316,7 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
     const ex = normalizeExtras(rule.extras);
     setSlotIds(ex.slot_ids);
     setRows((rule.required_topics ?? []).map((th, i) => ({
-      th, en: (rule.required_topics_en ?? [])[i] ?? "", options: ((rule.topic_options ?? {})[th] ?? []).join(", "), optionsEn: (ex.topic_options_en[th] ?? []).join(", "), required: !ex.optional_topics.includes(th),
+      th, en: (rule.required_topics_en ?? [])[i] ?? "", options: ((rule.topic_options ?? {})[th] ?? []).join(", "), optionsEn: (ex.topic_options_en[th] ?? []).join(", "), required: !ex.optional_topics.includes(th), sub: ex.topic_subs[th],
     })));
     setHighlights(ex.highlights.join(", "));
     setHighlightsEn(ex.highlights.map((h) => ex.highlights_en[h] ?? "").join(", "));
@@ -360,6 +360,7 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
         const en = splitC(highlightsEn);
         return Object.fromEntries(th.map((h, i) => [h, en[i] ?? ""]).filter(([, v]) => v));
       })(),
+      topic_subs: Object.fromEntries(clean.filter((x) => x.sub && x.sub.items.some((y) => y.label.trim())).map((x) => [x.th, x.sub as TopicSub])),
     };
     const prevBody = rule.id ? payloadOf(rule, normalizeExtras(rule.extras)) : null;
     setBusy(true);
@@ -414,6 +415,7 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
 
   const move = (i: number, d: -1 | 1) => setRows((p) => { const n = [...p]; const j = i + d; if (j < 0 || j >= n.length) return p; [n[i], n[j]] = [n[j], n[i]]; return n; });
   const upd = (i: number, patch: Partial<TopicRow>) => setRows((p) => p.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const [subOpen, setSubOpen] = useState<number | null>(null);
 
   if (!rule) return null;
   return (
@@ -455,6 +457,13 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
               <input value={x.optionsEn} onChange={(e) => upd(i, { optionsEn: e.target.value })} placeholder={t("คำตอบ EN (เรียงตรงกับไทย)", "Answers in English (same order)")}
                 className="w-full h-7 px-2 text-[12px] border border-slate-200 rounded bg-sky-50/40" />
             </div>
+            {/* รายการย่อย เช่น มีสาย → ปรับระดับ, ถอดสายได้ (เจ้าของขอ 2026-11-25) */}
+            <button type="button" onClick={() => setSubOpen((v) => (v === i ? null : i))} className="mt-1 text-[11.5px] text-indigo-600 hover:underline">
+              {subOpen === i ? "▾" : "▸"} {t("รายการย่อย", "Sub-items")}{x.sub?.items.length ? ` (${x.sub.items.length})` : ""}
+            </button>
+            {subOpen === i && (
+              <TopicSubEditor value={x.sub} options={x.options.split(",").map((o) => o.trim()).filter(Boolean)} onChange={(sub) => upd(i, { sub })} />
+            )}
           </div>
         ))}
         <button type="button" onClick={() => setRows((p) => [...p, { th: "", en: "", options: "", optionsEn: "", required: true }])} className="h-7 px-2.5 text-[12px] rounded-full border border-dashed border-slate-300 text-slate-600 bg-white hover:bg-slate-50">＋ {t("เพิ่มหัวข้อ", "Add heading")}</button>
@@ -863,6 +872,105 @@ export function EditTagModal({ tag, groups, canRule, onDone, onEditRule, onClose
 
 // ── กติกา "วัสดุ → จุดเด่น" (เจ้าของขอ 2026-11-25 · เลือกวัสดุนี้ → ติ๊กจุดเด่นนี้ให้) ─────────────
 //    คำค้นคั่นด้วย | เทียบกับชื่อไทย/อังกฤษ/ชื่อเรียกอื่นของวัสดุ เช่น "หนังวัว|cowhide" · แก้/ลบได้ · บันทึกแล้วย้อนกลับได้ (toast)
+const blankSub = (): TopicSub => ({ when: "", prefix: "", prefix_en: "", items: [{ label: "", phrase: "", phrase_en: "", on: true }] });
+
+/** แก้รายการย่อยของหัวข้อ 1 ข้อ (ค่าควบคุมจากข้างนอก · ไม่บันทึกเอง) — ใช้ใน RuleQuickEditor และปุ่ม ⚙ ท้ายแถวหัวข้อในป๊อป AI */
+export function TopicSubEditor({ value, options, onChange }: { value: TopicSub | undefined; options: string[]; onChange: (sub: TopicSub | undefined) => void }) {
+  const t = useT();
+  const toast = useToast();
+  const sub = value ?? blankSub();
+  const [busy, setBusy] = useState(false);
+  const put = (patch: Partial<TopicSub>) => onChange({ ...sub, ...patch });
+  const putItem = (i: number, patch: Partial<TopicSub["items"][number]>) => put({ items: sub.items.map((x, k) => (k === i ? { ...x, ...patch } : x)) });
+  const move = (i: number, d: -1 | 1) => { const n = [...sub.items]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; put({ items: n }); };
+  const remove = (i: number) => { const items = sub.items.filter((_, k) => k !== i); onChange(items.length ? { ...sub, items } : undefined); };
+  const all = sub.items.filter((x) => x.label.trim()).map((x) => x.label);
+  const def = sub.items.filter((x) => x.on && x.label.trim()).map((x) => x.label);
+  const prevTh = subPhrase(sub, def.length ? def : all, "th");
+  const prevEn = subPhrase(sub, def.length ? def : all, "en");
+  /** แปลช่อง EN ที่ยังว่าง (คำขึ้นต้น + คำในประโยค) */
+  const translate = async () => {
+    const jobs: { text: string; put: (v: string, s: TopicSub) => void }[] = [];
+    if (sub.prefix.trim() && !sub.prefix_en.trim()) jobs.push({ text: sub.prefix.trim(), put: (v, s) => { s.prefix_en = v.toLowerCase(); } });
+    sub.items.forEach((x, k) => { const th = x.phrase.trim() || x.label.trim(); if (th && !x.phrase_en.trim()) jobs.push({ text: th, put: (v, s) => { s.items[k].phrase_en = v.toLowerCase(); } }); });
+    if (!jobs.length) { toast.info(t("ช่อง EN กรอกครบแล้ว", "English is already filled")); return; }
+    setBusy(true);
+    try {
+      const out = await translateToEn(jobs.map((j) => j.text));
+      const next: TopicSub = { ...sub, items: sub.items.map((x) => ({ ...x })) };
+      jobs.forEach((j, i) => { if (out[i]) j.put(out[i], next); });
+      onChange(next);
+    } catch { toast.error(t("แปลไม่สำเร็จ", "Translate failed")); }
+    finally { setBusy(false); }
+  };
+  const inp = "h-7 px-2 text-[12px] border border-slate-200 rounded bg-white min-w-0";
+  return (
+    <div className="mt-1.5 rounded-md border border-indigo-200 bg-indigo-50/40 p-2 space-y-1.5" data-topic-sub-editor>
+      <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-600">
+        {options.length > 0 && (
+          <label className="inline-flex items-center gap-1">{t("กางเมื่อตอบ", "Show when")}
+            <select value={sub.when || options[0]} onChange={(e) => put({ when: e.target.value === options[0] ? "" : e.target.value })} className="h-7 px-1 text-[12px] border border-slate-200 rounded bg-white">
+              {options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="inline-flex items-center gap-1">{t("คำขึ้นต้นประโยค", "Sentence start")}
+          <input value={sub.prefix} onChange={(e) => put({ prefix: e.target.value })} placeholder={t("เช่น สายสะพาย", "e.g. สายสะพาย")} className={`${inp} w-28`} />
+        </label>
+        <input value={sub.prefix_en} onChange={(e) => put({ prefix_en: e.target.value })} placeholder="EN e.g. strap" className={`${inp} w-24 bg-sky-50/40`} />
+      </div>
+      <div className="hidden sm:grid grid-cols-[18px_1fr_1fr_1fr_auto_auto] gap-1 text-[10.5px] text-slate-400 px-0.5">
+        <span /><span>{t("รายการย่อย (ที่ติ๊ก)", "Sub-item (tick label)")}</span><span>{t("คำในประโยค", "Word in sentence")}</span><span>EN</span><span>{t("ติ๊กไว้ก่อน", "Default")}</span><span />
+      </div>
+      {sub.items.map((x, i) => (
+        <div key={i} className="grid grid-cols-[18px_1fr_auto] sm:grid-cols-[18px_1fr_1fr_1fr_auto_auto] gap-1 items-center">
+          <div className="flex flex-col">
+            <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-[9px] leading-none text-slate-400 disabled:opacity-30" aria-label={t("เลื่อนขึ้น", "Move up")}>▲</button>
+            <button type="button" onClick={() => move(i, 1)} disabled={i === sub.items.length - 1} className="text-[9px] leading-none text-slate-400 disabled:opacity-30" aria-label={t("เลื่อนลง", "Move down")}>▼</button>
+          </div>
+          <input value={x.label} onChange={(e) => putItem(i, { label: e.target.value })} placeholder={t("เช่น ถอดสายได้", "e.g. ถอดสายได้")} className={inp} />
+          <button type="button" onClick={() => remove(i)} className="sm:hidden h-7 px-1.5 text-[12px] text-rose-500 hover:bg-rose-50 rounded" aria-label={t("ลบ", "Delete")}>✕</button>
+          <input value={x.phrase} onChange={(e) => putItem(i, { phrase: e.target.value })} placeholder={t("ว่าง = ใช้ชื่อรายการ", "blank = same as label")} className={`${inp} col-start-2 sm:col-start-auto`} />
+          <input value={x.phrase_en} onChange={(e) => putItem(i, { phrase_en: e.target.value })} placeholder="EN e.g. detachable" className={`${inp} col-start-2 sm:col-start-auto bg-sky-50/40`} />
+          <label className="col-start-2 sm:col-start-auto inline-flex items-center gap-1 text-[11.5px] text-slate-600 whitespace-nowrap">
+            <input type="checkbox" checked={x.on} onChange={(e) => putItem(i, { on: e.target.checked })} className="accent-violet-600" /><span className="sm:hidden">{t("ติ๊กไว้ก่อน", "Default")}</span>
+          </label>
+          <button type="button" onClick={() => remove(i)} className="hidden sm:block h-7 px-1.5 text-[12px] text-rose-500 hover:bg-rose-50 rounded" aria-label={t("ลบ", "Delete")}>✕</button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => put({ items: [...sub.items, { label: "", phrase: "", phrase_en: "", on: false }] })} className="text-[11.5px] text-indigo-600 hover:underline">＋ {t("เพิ่มรายการย่อย", "Add sub-item")}</button>
+        <button type="button" onClick={translate} disabled={busy} className="text-[11.5px] text-sky-700 hover:underline disabled:opacity-50">{busy ? t("กำลังแปล…", "Translating…") : t("แปล EN ที่ว่าง", "Fill English")}</button>
+      </div>
+      {prevTh && (
+        <p className="text-[11.5px] text-emerald-700">→ “{prevTh}”{prevEn && <span className="text-slate-500"> · “{prevEn}”</span>}</p>
+      )}
+    </div>
+  );
+}
+
+/** ปุ่ม ⚙ ท้ายแถวหัวข้อ: แก้รายการย่อยแล้วบันทึกลงกฎประเภท (ย้อนกลับได้ที่ผู้เรียก) */
+export function TopicSubInline({ value, options, onSave, onClose }: { value: TopicSub | undefined; options: string[]; onSave: (sub: TopicSub | undefined) => Promise<void>; onClose: () => void }) {
+  const t = useT();
+  const [draft, setDraft] = useState<TopicSub | undefined>(value ?? blankSub());
+  const [busy, setBusy] = useState(false);
+  const clean = (s: TopicSub | undefined) => {
+    if (!s) return undefined;
+    const items = s.items.map((x) => ({ ...x, label: x.label.trim(), phrase: x.phrase.trim(), phrase_en: x.phrase_en.trim() })).filter((x) => x.label);
+    return items.length ? { ...s, prefix: s.prefix.trim(), prefix_en: s.prefix_en.trim(), items } : undefined;
+  };
+  return (
+    <div className="px-2 pb-2">
+      <TopicSubEditor value={draft} options={options} onChange={setDraft} />
+      <div className="mt-1.5 flex justify-end gap-1.5">
+        <button type="button" onClick={onClose} className="h-7 px-3 text-[12px] rounded-md border border-slate-200 bg-white text-slate-600">{t("ยกเลิก", "Cancel")}</button>
+        <button type="button" disabled={busy} onClick={async () => { setBusy(true); try { await onSave(clean(draft)); onClose(); } catch { /* แจ้งเตือนที่ผู้เรียก */ } finally { setBusy(false); } }}
+          className="h-7 px-3 text-[12px] rounded-md bg-indigo-600 text-white disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึกลงประเภทนี้", "Save to this type")}</button>
+      </div>
+    </div>
+  );
+}
+
 export function MaterialRuleEditor({ rules, onSave }: { rules: MaterialRule[]; onSave: (rules: MaterialRule[]) => Promise<void> }) {
   const t = useT();
   const [rows, setRows] = useState<MaterialRule[]>(() => rules.map((r) => ({ ...r })));

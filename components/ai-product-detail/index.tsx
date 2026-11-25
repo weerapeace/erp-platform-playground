@@ -21,9 +21,10 @@ import { parseFits, type FitPick } from "@/lib/product-fits";
 import { isPhrase, isSlot, slotText, type SnippetItem } from "@/lib/detail-snippets";
 import {
   MANUAL_FIELDS, cleanMaterialRules, fitsFromSize, materialHighlights, highlightChoices, isNegativeAnswer, mergeExtras, normalizeExtras, visibleSlots, missingManual, missingTopics, pickParcelBox, templateFor,
-  type FitCatalogRow, type MaterialRule, type ParcelBox,
+  subActive, subDefaults, subPhrase,
+  type FitCatalogRow, type MaterialRule, type ParcelBox, type TopicSub,
 } from "@/lib/ai-draft-setup";
-import { CreateTagModal, EditTagModal, ImageStrip, MaterialRuleEditor, RefSelect, RuleQuickEditor, TemplatePicker, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
+import { CreateTagModal, EditTagModal, ImageStrip, MaterialRuleEditor, RefSelect, RuleQuickEditor, TemplatePicker, TopicSubInline, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
 import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
@@ -664,8 +665,8 @@ export function AiProductDetailModal({
     apiFetch("/api/ai/desc-highlights?check=1").then((r) => r.json()).then((j) => setAiHlAllowed(j?.data?.allowed !== false)).catch(() => { /* ให้หลังบ้านตัดสินตอนกด */ });
   }, []);
   const toggleHl = (h: string) => {
-    // เอาติ๊กจุดเด่นที่ระบบติ๊กให้จากวัสดุออก = จำไว้ ไม่ติ๊กให้ซ้ำ (ติ๊กกลับได้)
-    if (hl.includes(h) && matAutoHl.some((x) => x.highlight === h)) setHlOff((p) => [...new Set([...p, h])]);
+    // เอาติ๊กจุดเด่นที่ระบบติ๊กให้ (จากวัสดุ / รายการย่อย) ออก = จำไว้ ไม่ติ๊กให้ซ้ำ (ติ๊กกลับได้)
+    if (hl.includes(h) && (matAutoHl.some((x) => x.highlight === h) || subAutoHl.some((x) => x.th === h))) setHlOff((p) => [...new Set([...p, h])]);
     if (!hl.includes(h)) setHlOff((p) => p.filter((x) => x !== h));
     setHl((p) => (p.includes(h) ? p.filter((x) => x !== h) : [...p, h]));
   };
@@ -725,8 +726,58 @@ export function AiProductDetailModal({
     const add = matAutoHl.map((x) => x.highlight).filter((h) => !hlOff.includes(h));
     if (add.some((h) => !hl.includes(h))) setHl((p) => [...new Set([...p, ...add])]);
   }, [matAutoHl, hlOff]);   // eslint-disable-line react-hooks/exhaustive-deps
-  /** ชื่อจุดเด่นภาษาอังกฤษ (กฎประเภท → คลังกลาง → AI → กติกาวัสดุ) */
-  const hlEn = (h: string) => extras.highlights_en[h] || phraseItems.find((x) => x.name === h)?.name_en || aiHlEn[h] || (setup?.material_rules ?? []).find((x) => x.highlight === h)?.highlight_en || "";
+  // ── รายการย่อยของหัวข้อ (เช่น มีสาย → ปรับระดับ, ถอดสายได้) → ต่อเป็นประโยค + ติ๊กจุดเด่นให้ (เจ้าของขอ 2026-11-25) ──
+  const [subPick, setSubPick] = useState<Record<string, string[]>>({});
+  const [subEdit, setSubEdit] = useState<string | null>(null);   // หัวข้อที่กำลังแก้รายการย่อย (ปุ่ม ⚙ ท้ายแถว)
+  const subOf = (topic: string): TopicSub | undefined => extras.topic_subs[topic];
+  // กางรายการย่อยครั้งแรก = ติ๊กรายการที่ตั้ง "ติ๊กไว้ก่อน" ให้
+  useEffect(() => {
+    const add: Record<string, string[]> = {};
+    for (const x of topics) { const sub = subOf(x.th); if (sub && subPick[x.th] === undefined && subActive(sub, x.options, answers[x.th])) add[x.th] = subDefaults(sub); }
+    if (Object.keys(add).length) setSubPick((p) => ({ ...p, ...add }));
+  }, [topics, answers, extras.topic_subs]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const subAutoHl = useMemo(() => topics.flatMap((x) => {
+    const sub = extras.topic_subs[x.th];
+    if (!sub || !subActive(sub, x.options, answers[x.th])) return [];
+    const th = subPhrase(sub, subPick[x.th] ?? [], "th");
+    return th ? [{ topic: x.th, th, en: subPhrase(sub, subPick[x.th] ?? [], "en") }] : [];
+  }), [topics, answers, subPick, extras.topic_subs]);
+  // ประโยคเปลี่ยน (ติ๊กรายการย่อยเพิ่ม/ออก · เปลี่ยนคำตอบ) → เอาประโยคเก่าออก ใส่ประโยคใหม่ในจุดเด่น
+  const subAutoPrev = useRef<string[]>([]);
+  useEffect(() => {
+    const now = subAutoHl.map((x) => x.th);
+    const gone = subAutoPrev.current.filter((h) => !now.includes(h));
+    subAutoPrev.current = now;
+    const add = now.filter((h) => !hlOff.includes(h));
+    setHl((p) => { const n = [...new Set([...p.filter((h) => !gone.includes(h)), ...add])]; return n.length === p.length && n.every((h, i) => h === p[i]) ? p : n; });
+  }, [subAutoHl, hlOff]);
+  /** บันทึกรายการย่อยของหัวข้อลงกฎประเภท (ปุ่ม ⚙ ท้ายแถว) + ย้อนกลับได้ */
+  const saveTopicSub = async (topic: string, ruleName: string, sub: TopicSub | undefined) => {
+    const r = rulesMatched.find((x) => x.name === ruleName);
+    if (!r) return;
+    const body = (ex: unknown) => ({
+      id: r.id, name: r.name, tag_ids: r.tag_ids ?? [], name_keywords: r.name_keywords ?? [], brand_id: r.brand_id ?? null,
+      instruction: r.instruction ?? "", hint: r.hint ?? "", is_active: r.is_active !== false, sort_order: r.sort_order ?? 0,
+      required_topics: r.required_topics ?? [], required_topics_en: r.required_topics_en ?? [], topic_options: r.topic_options ?? {}, extras: ex,
+    });
+    const prev = normalizeExtras(r.extras);
+    const subs = { ...prev.topic_subs };
+    if (sub) subs[topic] = sub; else delete subs[topic];
+    const post = async (ex: unknown) => {
+      const j = await apiFetch("/api/ai/product-rules", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body(ex)) }).then((x) => x.json());
+      if (j.error) throw new Error(j.error);
+    };
+    try {
+      await post({ ...prev, topic_subs: subs });
+      setSubPick((p) => { const n = { ...p }; delete n[topic]; return n; });   // ติ๊กตามค่าเริ่มต้นใหม่
+      setRulesTick((x) => x + 1);
+      toast.undo(t(`บันทึกรายการย่อย "${topic}" แล้ว`, `Sub-items for "${topic}" saved`), async () => {
+        try { await post(prev); setRulesTick((x) => x + 1); } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้อนกลับไม่สำเร็จ", "Undo failed")); }
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); throw e; }
+  };
+  /** ชื่อจุดเด่นภาษาอังกฤษ (กฎประเภท → คลังกลาง → AI → กติกาวัสดุ → รายการย่อย) */
+  const hlEn = (h: string) => extras.highlights_en[h] || phraseItems.find((x) => x.name === h)?.name_en || aiHlEn[h] || (setup?.material_rules ?? []).find((x) => x.highlight === h)?.highlight_en || subAutoHl.find((x) => x.th === h)?.en || "";
   const matName = (m: MaterialRow) => t(m.name, m.name_en?.trim() || m.name);
 
   // ── รูปที่ AI จะดู ──
@@ -850,7 +901,7 @@ export function AiProductDetailModal({
   const [refFrom, setRefFrom] = useState("");
 
   // ── จำร่างค้างไว้ต่อสินค้า (ของกลาง useFormDraft · เก็บในเครื่องนี้ 7 วัน) ──
-  const snapshot = { step, tplId, pickFields, answers, hl, aiHl, mats, hlOff, strap, slots, extra, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, skip, res, picked, refText, refFrom };
+  const snapshot = { step, tplId, pickFields, answers, subPick, hl, aiHl, mats, hlOff, strap, slots, extra, sizes, fitPicks, fitTouched, parcelId, parcelManual, manual, skip, res, picked, refText, refFrom };
   const dirty = step > 0 || Object.values(answers).some((v) => v.trim()) || hl.length > 0 || mats.length > 0 || !!extra.trim() || res !== null || Object.keys(slots).length > 0;
   const draft = useFormDraft({ key: `ai-draft:${parentId}`, values: snapshot as unknown as Record<string, unknown>, dirty, active: true });
   const restore = (v: Record<string, unknown> | null) => {
@@ -864,6 +915,7 @@ export function AiProductDetailModal({
     if (Array.isArray(s.aiHl)) setAiHl(s.aiHl);
     if (Array.isArray(s.mats)) setMats(s.mats);
     if (Array.isArray(s.hlOff)) setHlOff(s.hlOff);
+    if (s.subPick && typeof s.subPick === "object") setSubPick(s.subPick);
     if (s.strap && typeof s.strap === "object") setStrap((p) => ({ ...p, ...s.strap }));
     if (s.slots) setSlots(s.slots);
     if (typeof s.extra === "string") setExtra(s.extra);
@@ -1022,7 +1074,12 @@ export function AiProductDetailModal({
 
   const run = useCallback(async (opts?: { withAnswers?: boolean }) => {
     setLoading(true); setErr(null);
-    const topicQa = topics.map((x) => ({ q: topicLabel(x), a: (answers[x.th] ?? "").trim() })).filter((x) => x.a)
+    const topicQa = topics.map((x) => {
+      const a = (answers[x.th] ?? "").trim();
+      const sub = subOf(x.th);
+      const ph = sub && subActive(sub, x.options, a) ? subPhrase(sub, subPick[x.th] ?? [], "th") : "";
+      return { q: topicLabel(x), a: ph ? `${a} — ${ph}` : a };
+    }).filter((x) => x.a)
       .map((x) => (isNegativeAnswer(x.a) ? { ...x, a: `${x.a} (คำตอบปฏิเสธ — ห้ามเขียนลงรายละเอียด)` } : x));
     const qa = [
       ...topicQa,
@@ -1050,7 +1107,7 @@ export function AiProductDetailModal({
     } catch (e) { setErr(e instanceof Error ? e.message : t("เรียก AI ไม่สำเร็จ", "Could not reach AI")); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentId, extra, current, answers, topics, pickFields, tpl, skip, hl, slots, sizes, fitPicks, manual, refText, pickedMats, strap]);
+  }, [parentId, extra, current, answers, topics, pickFields, tpl, skip, hl, slots, sizes, fitPicks, manual, refText, pickedMats, strap, subPick]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = res ? FIELDS.filter((f) => String(res[f.key] ?? "").trim()) : [];
   const missingEn = res
@@ -1402,16 +1459,47 @@ export function AiProductDetailModal({
                       : t("กฎนี้ยังไม่มีหัวข้อที่ต้องตอบ", "This rule has no questions yet")}
                   </p>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1.5" data-topic-rows>
                     {topics.map((x) => {
                       const cur = answers[x.th] ?? "";
                       const req = !extras.optional_topics.includes(x.th);
                       const miss = req && isBlank(cur);
+                      // รายการย่อย (กางเมื่อตอบตรงเงื่อนไข) + ปุ่ม ⚙ แก้รายการย่อย — เจ้าของขอ 2026-11-25
+                      const sub = subOf(x.th);
+                      const subOn = sub && subActive(sub, x.options, cur);
+                      const picks = subPick[x.th] ?? [];
+                      const ph = subOn ? subPhrase(sub, picks, t("th", "en") === "en" ? "en" : "th") || subPhrase(sub, picks, "th") : "";
+                      const gear = canRule ? (
+                        <button type="button" onClick={() => setSubEdit((v) => (v === x.th ? null : x.th))} title={t("ตั้งรายการย่อย", "Set sub-items")} aria-label={t("ตั้งรายการย่อย", "Set sub-items")}
+                          className={`shrink-0 h-7 w-7 rounded-md hover:bg-slate-100 ${subEdit === x.th ? "text-indigo-600" : "text-slate-400 hover:text-slate-600"}`}>⚙</button>
+                      ) : null;
+                      const below = (
+                        <>
+                          {subOn && (
+                            <div className="border-t border-dashed border-slate-200 px-2.5 pt-1 pb-1.5 sm:pl-6" data-topic-subs>
+                              <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                                {sub.items.map((it) => (
+                                  <label key={it.label} className="inline-flex items-center gap-1.5 py-0.5 text-[12.5px] text-slate-700 cursor-pointer">
+                                    <input type="checkbox" checked={picks.includes(it.label)} className="h-4 w-4 accent-violet-600"
+                                      onChange={() => setSubPick((p) => { const c = p[x.th] ?? []; return { ...p, [x.th]: c.includes(it.label) ? c.filter((y) => y !== it.label) : sub.items.map((y) => y.label).filter((y) => y === it.label || c.includes(y)) }; })} />
+                                    {it.label}
+                                  </label>
+                                ))}
+                              </div>
+                              {ph && <p className="mt-0.5 text-[11.5px] text-emerald-700">→ “{ph}” <span className="ml-1 text-[10px] px-1.5 rounded bg-emerald-50">{t("ใส่จุดเด่นให้", "added to highlights")}</span></p>}
+                            </div>
+                          )}
+                          {subEdit === x.th && (
+                            <TopicSubInline value={sub} options={x.options} onSave={(s) => saveTopicSub(x.th, x.rule, s)} onClose={() => setSubEdit(null)} />
+                          )}
+                        </>
+                      );
                       // มี 2 ตัวเลือก (Yes/No · กันน้ำ/ไม่กันน้ำ) = บรรทัดเดียวสั้น ๆ · พิมพ์เองได้ที่ ✎ (เจ้าของขอ 2026-11-25)
                       if (x.options.length === 2 && typeTopic !== x.th) {
                         const custom = cur.trim() && !x.options.includes(cur.trim());
                         return (
-                          <div key={x.th} className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
+                          <div key={x.th} className={`rounded-lg border ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
+                          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 px-2 py-1.5">
                             <span className="flex-1 min-w-0 text-[12.5px] text-slate-700 leading-snug">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}
                               {custom && <span className="block text-[11px] text-violet-700 truncate">“{cur}”</span>}
                             </span>
@@ -1425,12 +1513,16 @@ export function AiProductDetailModal({
                             </span>
                             <button type="button" onClick={() => setTypeTopic(x.th)} title={t("พิมพ์คำตอบเอง", "Type an answer")} aria-label={t("พิมพ์คำตอบเอง", "Type an answer")}
                               className="shrink-0 h-7 w-7 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600">✎</button>
+                            {gear}
+                          </div>
+                          {below}
                           </div>
                         );
                       }
                       return (
-                        <div key={x.th} className={`rounded-lg border p-2 ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
-                          <p className="text-[12px] text-slate-600 mb-1">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}</p>
+                        <div key={x.th} className={`rounded-lg border ${miss ? "border-rose-200 bg-rose-50/30" : "border-slate-200"}`}>
+                        <div className="p-2">
+                          <p className="text-[12px] text-slate-600 mb-1 flex items-center">{topicLabel(x)}{req && <span className="text-rose-500"> *</span>}<span className="flex-1" />{gear}</p>
                           {x.options.length > 0 && (
                             <div className="flex flex-wrap gap-1 mb-1">
                               {x.options.map((op, oi) => {
@@ -1445,6 +1537,8 @@ export function AiProductDetailModal({
                             autoFocus={typeTopic === x.th} onBlur={() => { if (typeTopic === x.th) setTimeout(() => setTypeTopic((v) => (v === x.th ? null : v)), 200); }}
                             className="w-full h-8 px-2 text-[12.5px] border border-slate-200 rounded-md bg-white" />
                         </div>
+                        {below}
+                        </div>
                       );
                     })}
                   </div>
@@ -1457,7 +1551,7 @@ export function AiProductDetailModal({
                     {canTpl && <button type="button" onClick={() => setMatRuleOpen((v) => !v)} className="ml-2 text-[11px] font-normal text-indigo-600 underline">{t("⚙ กติกาวัสดุ → จุดเด่น", "⚙ Material → highlight rules")}</button>}
                   </span>
                   <MaterialQuickPick items={matList} value={mats} onChange={setMats} lang={t("th", "en") === "en" ? "en" : "th"}
-                    hint={typeof current.materials === "string" && current.materials.trim() ? current.materials.replace(/s+/g, " ").trim() : null} />
+                    hint={typeof current.materials === "string" && current.materials.trim() ? current.materials.replace(/\s+/g, " ").trim() : null} />
                   {matAutoHl.length > 0 && (
                     <p className="mt-1 text-[11.5px] text-emerald-700">✓ {t("ติ๊กจุดเด่นให้จากวัสดุ:", "Auto-ticked from material:")} {matAutoHl.map((x) => t(x.highlight, x.highlight_en || x.highlight)).join(", ")}</p>
                   )}
@@ -1476,12 +1570,14 @@ export function AiProductDetailModal({
                       const shown = t(h, hlEn(h) || h);
                       const on = hl.includes(h);
                       const auto = on && matAutoHl.some((x) => x.highlight === h);
+                      const autoSub = on && subAutoHl.some((x) => x.th === h);
                       return (
                         <label key={h} className="flex items-start gap-2 py-1 cursor-pointer">
                           <input type="checkbox" checked={on} onChange={() => toggleHl(h)} className="mt-0.5 h-4 w-4 accent-fuchsia-600 shrink-0" />
                           <span className="min-w-0">
                             <span className={`block text-[12.5px] ${on ? "text-slate-800 font-medium" : "text-slate-600"}`}>{aiHl.includes(h) && !hlChoices.list.includes(h) ? "✨ " : ""}{shown}</span>
                             {auto && <span className="inline-block mt-0.5 text-[10px] px-1.5 rounded bg-emerald-50 text-emerald-700">{t("อัตโนมัติจากวัสดุ", "auto from material")}</span>}
+                            {autoSub && <span className="inline-block mt-0.5 text-[10px] px-1.5 rounded bg-emerald-50 text-emerald-700">{t("อัตโนมัติจากรายการย่อย", "auto from sub-items")}</span>}
                           </span>
                         </label>
                       );

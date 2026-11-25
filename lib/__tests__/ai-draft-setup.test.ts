@@ -162,3 +162,26 @@ describe("กติกาวัสดุ → จุดเด่น + intro ข�
     expect(templateInstruction(tp)).toContain("Introduction: สั้น ๆ");
   });
 });
+
+import { normalizeTopicSubs, subActive, subDefaults, subPhrase } from "@/lib/ai-draft-setup";
+describe("รายการย่อยของหัวข้อ (topic_subs)", () => {
+  const sub = normalizeTopicSubs({ "มีสายไหม": { prefix: "สายสะพาย", prefix_en: "strap", items: [
+    { label: "ปรับระดับ", phrase_en: "adjustable", on: true }, { label: "ถอดสายได้", phrase_en: "detachable", on: true }, { label: "สายโซ่", phrase: "เป็นสายโซ่", on: false }, { label: "" },
+  ] } })["มีสายไหม"];
+  it("ต่อประโยคไทย/อังกฤษ", () => {
+    expect(subPhrase(sub, ["ปรับระดับ", "ถอดสายได้"])).toBe("สายสะพายปรับระดับและถอดสายได้");
+    expect(subPhrase(sub, ["ปรับระดับ", "ถอดสายได้"], "en")).toBe("Adjustable and detachable strap");
+    expect(subPhrase(sub, ["ถอดสายได้"])).toBe("สายสะพายถอดสายได้");
+    expect(subPhrase(sub, [])).toBe("");
+    expect(subPhrase(sub, ["สายโซ่"], "en")).toBe("");   // ไม่มีคำ EN = ไม่ต่อ
+  });
+  it("ติ๊กไว้ก่อน + กางเมื่อตอบคำแรก", () => {
+    expect(sub.items).toHaveLength(3);
+    expect(subDefaults(sub)).toEqual(["ปรับระดับ", "ถอดสายได้"]);
+    expect(subActive(sub, ["มี", "ไม่มี"], "มี")).toBe(true);
+    expect(subActive(sub, ["มี", "ไม่มี"], "ไม่มี")).toBe(false);
+    expect(subActive({ ...sub, when: "ไม่มี" }, ["มี", "ไม่มี"], "ไม่มี")).toBe(true);
+    expect(subActive(sub, [], "อะไรก็ได้")).toBe(true);
+    expect(subActive(sub, [], "")).toBe(false);
+  });
+});

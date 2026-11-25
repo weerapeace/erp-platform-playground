@@ -138,7 +138,56 @@ export type RuleExtras = {
   topic_options_en: Record<string, string[]>;
   /** จุดเด่นภาษาอังกฤษ { จุดเด่นไทย: EN } */
   highlights_en: Record<string, string>;
+  /** รายการย่อยต่อหัวข้อ { หัวข้อไทย: TopicSub } — เช่น มีสาย → ปรับระดับ, ถอดสายได้ (เจ้าของขอ 2026-11-25) */
+  topic_subs: Record<string, TopicSub>;
 };
+
+/** รายการย่อย 1 ข้อ: label = ชื่อที่ติ๊ก · phrase = คำที่ใช้ต่อประโยค (ว่าง = ใช้ label) · on = ติ๊กไว้ก่อน */
+export type TopicSubItem = { label: string; phrase: string; phrase_en: string; on: boolean };
+/** when = คำตอบที่ทำให้รายการย่อยกางออก (ว่าง = คำตอบแรกของหัวข้อ · หัวข้อไม่มีตัวเลือก = ตอบอะไรก็ได้) · prefix = คำขึ้นต้นประโยค */
+export type TopicSub = { when: string; prefix: string; prefix_en: string; items: TopicSubItem[] };
+
+export function normalizeTopicSubs(v: unknown): Record<string, TopicSub> {
+  const out: Record<string, TopicSub> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, x] of Object.entries(v as Record<string, unknown>).slice(0, 30)) {
+    const kk = k.trim().slice(0, 200);
+    const r = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+    const items = (Array.isArray(r.items) ? r.items : []).map((y) => {
+      const o = (y && typeof y === "object" ? y : {}) as Record<string, unknown>;
+      return { label: str(o.label, 60), phrase: str(o.phrase, 80), phrase_en: str(o.phrase_en, 80), on: o.on === true };
+    }).filter((y) => y.label).filter((y, i, a) => a.findIndex((z) => z.label === y.label) === i).slice(0, 12);
+    if (kk && items.length) out[kk] = { when: str(r.when, 60), prefix: str(r.prefix, 60), prefix_en: str(r.prefix_en, 60), items };
+  }
+  return out;
+}
+
+/** รายการย่อยกางออกไหม (ตามคำตอบของหัวข้อ) */
+export function subActive(sub: TopicSub | undefined, options: string[], answer: string | undefined): boolean {
+  const a = String(answer ?? "").trim();
+  if (!sub || !a) return false;
+  const w = sub.when.trim() || options[0] || "";
+  return w ? a === w : true;
+}
+
+/** ต่อประโยคจากรายการที่ติ๊ก — TH: "สายสะพาย" + ปรับระดับ, ถอดสายได้ → "สายสะพายปรับระดับและถอดสายได้" · EN: "Adjustable and detachable strap" */
+export function subPhrase(sub: TopicSub, picked: string[], lang: "th" | "en" = "th"): string {
+  const items = sub.items.filter((x) => picked.includes(x.label));
+  if (!items.length) return "";
+  if (lang === "en") {
+    const ws = items.map((x) => x.phrase_en.trim()).filter(Boolean);
+    if (ws.length !== items.length) return "";
+    const j = ws.length === 1 ? ws[0] : `${ws.slice(0, -1).join(", ")} and ${ws[ws.length - 1]}`;
+    const out = `${j} ${sub.prefix_en.trim()}`.trim();
+    return out.charAt(0).toUpperCase() + out.slice(1);
+  }
+  const ws = items.map((x) => x.phrase.trim() || x.label);
+  const j = ws.length === 1 ? ws[0] : `${ws.slice(0, -1).join(" ")}และ${ws[ws.length - 1]}`;
+  return `${sub.prefix.trim()}${j}`;
+}
+
+/** รายการที่ติ๊กไว้ก่อน */
+export const subDefaults = (sub: TopicSub): string[] => sub.items.filter((x) => x.on).map((x) => x.label);
 
 const strMap = (v: unknown, maxKeys = 40): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -166,17 +215,19 @@ export function normalizeExtras(raw: unknown): RuleExtras {
     slot_ids: strList(r.slot_ids, 60, 60),
     topic_options_en: listMap(r.topic_options_en),
     highlights_en: strMap(r.highlights_en, 60),
+    topic_subs: normalizeTopicSubs(r.topic_subs),
   };
 }
 
 /** รวมค่าตั้งของหลายกฎที่สินค้าเข้า (ไม่ซ้ำ) */
 export function mergeExtras(list: unknown[]): RuleExtras {
-  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [], slot_ids: [], topic_options_en: {}, highlights_en: {} };
+  const out: RuleExtras = { highlights: [], manual_required: [], optional_topics: [], slot_ids: [], topic_options_en: {}, highlights_en: {}, topic_subs: {} };
   for (const x of list.map(normalizeExtras)) {
     for (const k of ["highlights", "manual_required", "optional_topics", "slot_ids"] as const)
       for (const v of x[k]) if (!out[k].includes(v)) out[k].push(v);
     out.topic_options_en = { ...x.topic_options_en, ...out.topic_options_en };
     out.highlights_en = { ...x.highlights_en, ...out.highlights_en };
+    out.topic_subs = { ...x.topic_subs, ...out.topic_subs };
   }
   return out;
 }
