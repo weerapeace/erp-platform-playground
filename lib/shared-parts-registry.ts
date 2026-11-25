@@ -529,7 +529,15 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "image-manager", label: "จัดการรูปสินค้า", code: "ImageManager", category: "file",
     source: { path: "components/image-manager" },
     what: "อัปโหลด จัดเรียง ตั้งรูปหลัก ซูมเมื่อชี้",
+    notWhen: "ต้องการแค่รูปย่อ (ตาราง/ตัวเลือก) → ใช้ ImageThumbnail จาก components/image-manager/thumbnail (เบา) · ตัวนี้หนัก ถ้าใช้ในหน้า/ลิ้นชักที่ไม่ได้เปิดตลอด ให้โหลดด้วย dynamic()",
     legacyKey: "image_manager",
+  },
+  {
+    key: "image-thumbnail", label: "รูปย่อ + ชี้ขยาย", code: "ImageThumbnail", category: "file",
+    source: { path: "components/image-manager/thumbnail" },
+    what: "รูปเล็กในตาราง/ตัวเลือก · ชี้แล้วขยาย · enlargeable = คลิกดูเต็มจอ + พิมพ์รูป (printImageWindow)",
+    when: "ทุกที่ที่โชว์รูปย่อ (DataTable · ตัวเลือก SKU/Parent · รายการขาย) — แยกไฟล์ 2026-11-25 ลดไซส์หน้า (เดิม import จาก image-manager ดึงตัวจัดการรูปทั้งก้อน)",
+    notWhen: "ห้ามเพิ่ม import ของหนักในไฟล์นี้ · อัปโหลด/จัดการรูป → ImageManager",
   },
   {
     key: "upload-progress", label: "แถบกำลังอัปโหลด", code: "UploadProgress", category: "file",

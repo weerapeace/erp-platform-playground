@@ -18,7 +18,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { MoneyInput } from "@/components/money-input";

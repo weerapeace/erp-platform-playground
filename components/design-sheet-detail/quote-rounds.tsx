@@ -36,7 +36,7 @@ import { priceFromCost, tierPrice, quoteQtyMode, quoteCellTotal, sumQuoteLines, 
 import { usePermission } from "@/components/auth";
 import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import { QUOTE_COLOR_PALETTE, cleanQuoteColors, colorQtyStatus, colorUnitPrice, paletteHex, percentsToQty, qtyToPercent, splitEvenly, type QuoteColor } from "@/lib/quote-colors";
 

@@ -11,7 +11,7 @@ import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR, invalidateSWR } from "@/lib/swr-lite";
 import { subscribeRefresh } from "@/lib/refresh-bus";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
 import { formatDate } from "@/lib/date";

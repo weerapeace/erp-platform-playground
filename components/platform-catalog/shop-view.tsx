@@ -37,7 +37,9 @@ import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
 import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
 import { useLineDisplay } from "./use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
-import { AddToPlatformWizard, type AddWizardParent, type CopySourceRef } from "@/components/platform-listing/add-to-platform-wizard";
+import type { AddWizardParent, CopySourceRef } from "@/components/platform-listing/add-to-platform-wizard";
+// ตัวช่วยลงสินค้า (ใหญ่ · รวมจำลองหน้าร้าน LINE / ตารางคัดลอก) — โหลดตอนกดลงสินค้าเท่านั้น (เจ้าของ "ลดไซส์" 2026-11-25)
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 import { copySourceName, isCopySourcePlatform } from "@/lib/listing-copy-source";
 import { COPY_MAX_ITEMS } from "@/lib/listing-copy-map";
 import { useUserPref } from "@/lib/use-user-pref";

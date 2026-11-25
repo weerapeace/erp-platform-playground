@@ -11,7 +11,7 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { useAuth } from "@/components/auth";
 import { usePushToast } from "@/components/toast";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, LoadingState } from "@/components/state-views";
 import { albumMatches, sortAlbums, type SampleAlbum } from "@/lib/sample-images";

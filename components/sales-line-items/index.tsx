@@ -5,7 +5,7 @@ import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 // หน่วยนับ = ทะเบียนหน่วยจริง (uoms — ตัวเดียวกับหน่วยของสินค้า) · เดิม UnitPicker อ่านตารางทดลอง 12 หน่วย เลือก หลา/Units/pcs. ไม่ได้ · ค่ายังเก็บเป็นชื่อหน่วยเหมือนเดิม
 import { UomPicker } from "@/components/uom-picker";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import type { PickerDesignSheet } from "@/components/asset-picker/design-sheet-images-panel";
 import { AssetPicker } from "@/components/asset-picker";
 import { calculateDocument, type DocumentResult } from "@/lib/tax";

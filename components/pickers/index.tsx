@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import { FloatingDropdown, PICKER_PANEL, PICKER_PANEL_WIDE, PICKER_NAME_CLASS } from "@/components/floating-dropdown";
 import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";   // "เคยใช้ล่าสุด" (ของกลาง)
 import { useScanInBox } from "@/components/scan-input/use-scan-in-box";   // ยิงบาร์โค้ดเข้าช่องค้น (แป้นไทยก็ถูก)

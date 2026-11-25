@@ -25,16 +25,13 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
-import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
 import { IgnoreDialog, IGNORE_REASON_DUP, IGNORE_REASON_DISCONTINUED } from "@/components/platform-catalog/ignore-dialog";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } from "@/lib/platform-match-suggest";
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
-import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
-import { NotListedPicker } from "@/components/platform-catalog/not-listed-picker";
 import { useLineDisplay } from "@/components/platform-catalog/use-line-display";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -50,6 +47,10 @@ const ProductPlatformManager = dynamic(() => import("@/components/product-platfo
 // ลิ้นชักสินค้าบนร้าน (LINE/Lazada แก้ได้ · หนัก) — เปิดเมื่อกดแถว/การ์ด → โหลดแยกจากหน้า (perf-check: หน้าโต 423→476KB เมื่อรวมไว้)
 const ShopCategoryPlanner = dynamic(() => import("@/components/platform-catalog/shop-category-planner").then((m) => m.ShopCategoryPlanner), { ssr: false, loading: () => <LoadingState label="กำลังเปิดหมวดในร้าน…" /> });
 const ListingDrawer = dynamic(() => import("@/components/platform-catalog/listing-drawer").then((m) => m.ListingDrawer), { ssr: false });
+// ใช้นาน ๆ ครั้ง → โหลดตอนเปิด (เจ้าของ "ลดไซส์" 2026-11-25): จับคู่ทีละตัว · ตั้งค่ารูปแบบไฟล์นำเข้า · เลือกสินค้าที่ยังไม่ลง
+const MatchWorkbench = dynamic(() => import("@/components/platform-catalog/match-workbench").then((m) => m.MatchWorkbench), { ssr: false });
+const PlatformImportProfileManager = dynamic(() => import("@/components/platform-import-profile-manager"), { ssr: false });
+const NotListedPicker = dynamic(() => import("@/components/platform-catalog/not-listed-picker").then((m) => m.NotListedPicker), { ssr: false });
 // เช็กข้ามร้าน (สินค้าในระบบ × ทุกร้าน · สลับเรื่องตรวจ ราคา/ชื่อ/รายละเอียด/สต๊อก/ตัวเลือก) — โหลดเมื่อเปิดมุมมองนี้
 // สินค้าซ้ำบนร้าน (?view=dupes · เจ้าของเลือก 2026-11-23 วิธี B) — components/platform-catalog/duplicates-view
 const PlatformDuplicatesView = dynamic(() => import("@/components/platform-catalog/duplicates-view").then((m) => m.PlatformDuplicatesView), { ssr: false, loading: () => <LoadingState label="กำลังเปิดสินค้าซ้ำ…" /> });
@@ -1553,14 +1554,14 @@ export default function PlatformCatalogPage() {
 
       {managerParent && <ProductPlatformManager parentSkuId={managerParent} initialPlatformId={platformId} canEdit={canEdit} canPublish={can("products.platforms.publish")} onClose={() => { setManagerParent(null); load(); }} />}
 
-      <MatchWorkbench
-        open={workbench} onClose={() => setWorkbench(false)}
+      {workbench && <MatchWorkbench
+        open onClose={() => setWorkbench(false)}
         title={`จับคู่ทีละตัว — ${where}`}
         items={unmatchedRows} suggestions={suggestions} suggestLoading={suggestLoading} canEdit={canEdit}
         total={needMatch} matchedBefore={counts.ok}
         onMatch={(listingId, p) => saveMatch(listingId, p, true)}
         onIgnore={(listingId, reason) => saveIgnore([listingId], true, reason, true)}
-      />
+      />}
 
       <IgnoreDialog
         open={!!ignoreTarget && ignoreTargetRows.length > 0} count={ignoreTargetRows.length} busy={ignoreBusy} defaultReason={ignoreDefault}
@@ -1616,9 +1617,9 @@ export default function PlatformCatalogPage() {
       />
 
       {disp.dialog}
-      <NotListedPicker open={addPick} onClose={() => setAddPick(false)} platformId={platformId} brandId={brandId} where={where}
+      {addPick && <NotListedPicker open onClose={() => setAddPick(false)} platformId={platformId} brandId={brandId} where={where}
         onPick={(ps) => { setAddPick(false); setAddFor(ps); }}
-        onGoMatch={(listingId) => { setAddPick(false); setFilter("all"); setPendingOpen(listingId); if (view !== "match") setView("match"); }} />
+        onGoMatch={(listingId) => { setAddPick(false); setFilter("all"); setPendingOpen(listingId); if (view !== "match") setView("match"); }} />}
       {addFor && (
         <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : undefined}
           onClose={() => setAddFor(null)} onDone={() => { void reloadCurrent(); }} />

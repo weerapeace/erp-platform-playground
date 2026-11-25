@@ -44,7 +44,6 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { registryFieldType } from "@/lib/registry-fields";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { PngSlot } from "@/components/png-slot";
-import { ImageManager } from "@/components/image-manager";
 import { RecordFilesField } from "@/components/record-files";
 import { ProductDriveFiles } from "@/components/product-drive-files";
 import { FieldCreatorModal } from "@/components/field-creator";
@@ -76,6 +75,8 @@ import { CODE_RULE_MODULES } from "@/lib/code-rules";
 // 📝 โหมดลงรายละเอียด (ของกลาง) — ปุ่มเลือกโหมด + หน้าจอในโหมด · ตั้งค่าโหมดโหลดเฉพาะตอนเปิด
 import { EntryModeExitButton, EntryModeMenu, EntryModePanel, fetchEntryModeStats, lastEntryMode, rememberEntryMode, type EntryModeField } from "@/components/entry-modes";
 import { computeModeProgress, entryModeListHref, isModeIncomplete, modeAppliesTo, modeVisibleTo, resolveEntryModes, type EntryMode, type EntryModeStat } from "@/lib/entry-modes";
+// ตัวจัดการรูปเต็ม (คลังรูป · วาดกำกับ · ตรวจรูปซ้ำ) หนัก — ใช้แค่ตอนเปิดแก้รายการ → โหลดตอนเปิดลิ้นชัก (เจ้าของ "ลดไซส์" 2026-11-25)
+const ImageManager = dynamic(() => import("@/components/image-manager").then((m) => m.ImageManager), { ssr: false, loading: () => <div className="h-40 animate-pulse rounded-lg bg-slate-50" /> });
 const EntryModeSettings = dynamic(() => import("@/components/entry-modes/settings").then((m) => m.EntryModeSettings), { ssr: false });
 // ปุ่ม "📝 ความครบตามโหมด" หัวตาราง (นับทั้งระบบ + กรอง + รายงาน/พิมพ์) — โหลดเฉพาะหน้าที่มีโหมด
 const EntryModeStatusButton = dynamic(() => import("@/components/entry-modes/status").then((m) => m.EntryModeStatusButton), { ssr: false });

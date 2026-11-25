@@ -26,6 +26,10 @@ describe("ตัวช่วย", () => {
       "/_next/static/chunks/8172-9a.js", "/_next/static/chunks/app/purchasing/page-1f.js", "/_next/static/chunks/webpack-abc.js",
     ]);
   });
+  it("ไม่นับไฟล์ <script noModule> (polyfills เบราว์เซอร์เก่า — เบราว์เซอร์ปัจจุบันไม่โหลด · 2026-11-25)", () => {
+    const html = `<script src="/_next/static/chunks/polyfills-42.js?dpl=x" noModule=""></script><script src="/_next/static/chunks/webpack-abc.js"></script>`;
+    expect(extractChunkPaths(html)).toEqual(["/_next/static/chunks/webpack-abc.js"]);
+  });
   it("หน้าที่มีช่องพารามิเตอร์วัดตรงไม่ได้", () => {
     expect(isMeasurablePath("/purchasing")).toBe(true);
     expect(isMeasurablePath("/master/skus/[id]")).toBe(false);

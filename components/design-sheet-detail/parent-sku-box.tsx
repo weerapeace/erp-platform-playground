@@ -13,7 +13,7 @@
  * สถานะช่องพิมพ์รหัส/ผลเช็ก อยู่ที่หน้าแม่ (index.tsx) เพราะตอนบันทึกใบงานต้องรวมรหัสที่ค้างพิมพ์ด้วย
  */
 import { useEffect, useMemo, useState } from "react";
-import { ImageThumbnail } from "@/components/image-manager";
+import { ImageThumbnail } from "@/components/image-manager/thumbnail";   // รูปย่อแบบเบา (ไม่ดึงตัวจัดการรูปทั้งก้อน)
 import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";

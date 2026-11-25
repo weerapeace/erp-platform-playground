@@ -94,10 +94,18 @@ const pct = (now: number, base: number) => `${now >= base ? "+" : ""}${Math.roun
 /** path ของหน้า/API ที่วัดได้ตรง ๆ (ไม่มีช่องพารามิเตอร์ [id]) */
 export const isMeasurablePath = (p: string) => p.startsWith("/") && !/[[\]:]/.test(p) && !p.includes("?");
 
-/** รายการ chunk JS ที่ HTML ของหน้าอ้างถึง (script tag + ข้อมูลหน้าที่ฝังใน HTML) ไม่ซ้ำ */
+/**
+ * รายการ chunk JS ที่ HTML ของหน้าอ้างถึง (script tag + ข้อมูลหน้าที่ฝังใน HTML) ไม่ซ้ำ
+ * ไม่นับไฟล์ที่ติด <script noModule> (polyfills ~34KB สำหรับเบราว์เซอร์เก่ามาก — เบราว์เซอร์ปัจจุบันไม่โหลด · เจ้าของ "ลดไซส์" 2026-11-25 ข้อ 4)
+ */
 export function extractChunkPaths(html: string): string[] {
   const out = new Set<string>();
-  for (const m of html.matchAll(/\/_next\/static\/chunks\/[A-Za-z0-9_\-./%~@[\]()]+?\.js/g)) out.add(m[0]);
+  const noModule = new Set<string>();
+  for (const tag of html.matchAll(/<script\b[^>]*\bnomodule\b[^>]*>/gi)) {
+    const src = tag[0].match(/\/_next\/static\/chunks\/[A-Za-z0-9_\-./%~@[\]()]+?\.js/);
+    if (src) noModule.add(src[0]);
+  }
+  for (const m of html.matchAll(/\/_next\/static\/chunks\/[A-Za-z0-9_\-./%~@[\]()]+?\.js/g)) if (!noModule.has(m[0])) out.add(m[0]);
   return [...out];
 }
 
