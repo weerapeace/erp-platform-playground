@@ -206,3 +206,43 @@ export function fitsFromSize(dims: { w: unknown; h: unknown; d: unknown }, rows:
   }
   return out;
 }
+
+// ── ⑤ AI ช่วยคิดการตั้งค่าประเภทสินค้า (/api/ai/tag-setup) ───────────────
+export type TagSetupTopic = { th: string; en: string; options: string[] };
+export type TagSetup = { name_en: string; group_id: string; topics: TagSetupTopic[]; highlights: string[]; slot_ids: string[]; manual_required: string[] };
+
+/** ผลจาก AI → เก็บเฉพาะค่าที่ใช้ได้ (id ต้องอยู่ในรายการจริง · ตัดซ้ำ · จำกัดจำนวน) */
+export function sanitizeTagSetup(raw: unknown, allow: { groupIds: string[]; slotIds: string[] }): TagSetup {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const topics = (Array.isArray(r.topics) ? r.topics : []).map((x) => {
+    const t = (x && typeof x === "object" ? x : {}) as Record<string, unknown>;
+    return { th: str(t.th, 120), en: str(t.en, 120), options: strList(t.options, 6, 40) };
+  }).filter((t) => t.th).filter((t, i, a) => a.findIndex((y) => y.th === t.th) === i).slice(0, 8);
+  const gid = str(r.group_id, 60);
+  return {
+    name_en: str(r.name_en, 80),
+    group_id: allow.groupIds.includes(gid) ? gid : "",
+    topics,
+    highlights: strList(r.highlights, 12, 60),
+    slot_ids: strList(r.slot_ids, 30, 60).filter((id) => allow.slotIds.includes(id)),
+    manual_required: strList(r.manual_required, 10, 60).filter((k) => MANUAL_KEYS.includes(k)),
+  };
+}
+
+/** หัวข้อ ⇄ ข้อความในช่อง "หัวข้อ: ตัวเลือก1, ตัวเลือก2" (บรรทัดละข้อ) */
+export const topicsToText = (topics: TagSetupTopic[]): string =>
+  topics.map((t) => (t.options.length ? `${t.th}: ${t.options.join(", ")}` : t.th)).join("\n");
+
+/** เติมเฉพาะช่องที่ยังว่าง (ช่องที่ผู้ใช้กรอกเองแล้ว AI ไม่ทับ) · หัวข้อ/จุดเด่น = ต่อท้ายของเดิมแบบไม่ซ้ำ */
+export function fillEmpty<T extends Record<string, unknown>>(cur: T, ai: Partial<T>): { next: T; filled: (keyof T)[] } {
+  const next = { ...cur };
+  const filled: (keyof T)[] = [];
+  for (const k of Object.keys(ai) as (keyof T)[]) {
+    const v = ai[k];
+    const c = cur[k];
+    const empty = c === undefined || c === null || (typeof c === "string" && !c.trim()) || (Array.isArray(c) && c.length === 0);
+    const has = v !== undefined && v !== null && !(typeof v === "string" && !v.trim()) && !(Array.isArray(v) && v.length === 0);
+    if (empty && has) { next[k] = v as T[keyof T]; filled.push(k); }
+  }
+  return { next, filled };
+}

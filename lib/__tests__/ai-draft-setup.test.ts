@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_TEMPLATES, DEFAULT_WARRANTY_OPTIONS, cleanTemplate, highlightChoices, visibleSlots, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
+  DEFAULT_TEMPLATES, DEFAULT_WARRANTY_OPTIONS, cleanTemplate, fillEmpty, sanitizeTagSetup, topicsToText, highlightChoices, visibleSlots, fitsFromSize, liveTemplates, mergeExtras, missingManual, missingTopics,
   normalizeExtras, normalizeSetup, pickParcelBox, templateFor, templateInstruction,
 } from "@/lib/ai-draft-setup";
 
@@ -101,5 +101,23 @@ describe("รอบ 3: ประกัน · จุดเด่น · ชนิ�
   });
   it("รวมชนิดช่องจากหลายกฎ", () => {
     expect(mergeExtras([{ slot_ids: ["a"] }, { slot_ids: ["a", "b"] }]).slot_ids).toEqual(["a", "b"]);
+  });
+});
+
+describe("AI ช่วยตั้งค่าประเภท", () => {
+  it("กรอง id ที่ไม่มีจริง + ตัดหัวข้อซ้ำ", () => {
+    const r = sanitizeTagSetup({ name_en: "Neck pouch", group_id: "fake", topics: [{ th: "ถอดสายได้ไหม", options: ["ได้", "ไม่ได้"] }, { th: "ถอดสายได้ไหม" }, { th: "" }],
+      highlights: ["บางเบา", "บางเบา"], slot_ids: ["s1", "s9"], manual_required: ["warranty", "hack"] }, { groupIds: ["g1"], slotIds: ["s1"] });
+    expect(r.group_id).toBe("");
+    expect(r.topics).toHaveLength(1);
+    expect(r.highlights).toEqual(["บางเบา"]);
+    expect(r.slot_ids).toEqual(["s1"]);
+    expect(r.manual_required).toEqual(["warranty"]);
+    expect(topicsToText(r.topics)).toBe("ถอดสายได้ไหม: ได้, ไม่ได้");
+  });
+  it("เติมเฉพาะช่องว่าง ไม่ทับที่กรอกเอง", () => {
+    const { next, filled } = fillEmpty({ name_en: "Mine", topics: "", hl: [] as string[] }, { name_en: "AI", topics: "x", hl: ["a"] });
+    expect(next).toEqual({ name_en: "Mine", topics: "x", hl: ["a"] });
+    expect(filled).toEqual(["topics", "hl"]);
   });
 });

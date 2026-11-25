@@ -20,9 +20,29 @@ import { Spinner } from "@/components/spinner";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
-  DRAFT_SETUP_KEY, MANUAL_FIELDS, normalizeExtras, normalizeSetup,
-  type DescTemplate, type DraftSetup, type RuleExtras,
+  DRAFT_SETUP_KEY, MANUAL_FIELDS, normalizeExtras, normalizeSetup, topicsToText,
+  type DescTemplate, type DraftSetup, type RuleExtras, type TagSetup,
 } from "@/lib/ai-draft-setup";
+
+/** ✨ ให้ AI ช่วยคิดการตั้งค่าประเภทสินค้า (/api/ai/tag-setup · รุ่นถูก gpt-4o-mini · ~0.02 บาท/ครั้ง) */
+function useTagSetupAi() {
+  const t = useT();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const run = async (body: { name: string; name_en?: string; groups?: { id: string; name: string }[]; slots?: { id: string; name: string }[] }): Promise<TagSetup | null> => {
+    if (!body.name.trim()) { toast.warning(t("ใส่ชื่อไทยของประเภทสินค้าก่อน", "Enter the Thai name first")); return null; }
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/ai/tag-setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      return j.data as TagSetup;
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("AI ช่วยคิดไม่สำเร็จ", "AI helper failed")); return null; }
+    finally { setBusy(false); }
+  };
+  return { busy, run };
+}
+const AI_BTN = "h-7 px-2.5 text-[12px] rounded-lg border border-fuchsia-200 text-fuchsia-700 bg-fuchsia-50 hover:bg-fuchsia-100 disabled:opacity-50 inline-flex items-center gap-1";
+const aiMark = (on: boolean) => (on ? " bg-fuchsia-50/60 border-fuchsia-200" : "");
 
 export type ImageGroupKey = "parent" | "desc" | "sku";
 const GROUP_LABEL: Record<ImageGroupKey, [string, string]> = { parent: ["รูป Parent SKU", "Parent SKU images"], desc: ["รูป Description", "Description images"], sku: ["รูป SKU ลูก", "Child SKU images"] };
@@ -237,6 +257,19 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
   const [ruleName, setRuleName] = useState(newRule?.name ?? "");
   const [slotIds, setSlotIds] = useState<string[]>([]);
   const [hlNew, setHlNew] = useState("");
+  const ai = useTagSetupAi();
+  const askAi = async () => {
+    if (!rule) return;
+    const d = await ai.run({ name: rule.id ? rule.name : (ruleName.trim() || rule.name), slots: slotItems });
+    if (!d) return;
+    const done: string[] = [];
+    if (rows.length === 0 && d.topics.length) { setRows(d.topics.map((x) => ({ th: x.th, en: x.en, options: x.options.join(", "), required: true }))); done.push(t("หัวข้อ", "questions")); }
+    if (!highlights.trim() && d.highlights.length) { setHighlights(d.highlights.join(", ")); done.push(t("จุดเด่น", "highlights")); }
+    if (slotIds.length === 0 && d.slot_ids.length) { setSlotIds(d.slot_ids); done.push(t("ชนิดช่อง", "compartments")); }
+    if (manual.length === 0 && d.manual_required.length) { setManual(d.manual_required); done.push(t("ช่องกรอกมือ", "manual fields")); }
+    if (done.length) toast.success(t(`AI เติมให้: ${done.join(" · ")} — ตรวจแล้วกดบันทึก`, `AI filled: ${done.join(" · ")} — review then save`));
+    else toast.info(t("ทุกช่องกรอกไว้แล้ว — AI ไม่ทับของเดิม (ล้างช่องที่อยากให้คิดใหม่ก่อน)", "Everything is filled — AI doesn't overwrite"));
+  };
   const [rows, setRows] = useState<TopicRow[]>([]);
   const [highlights, setHighlights] = useState("");
   const [manual, setManual] = useState<string[]>([]);
@@ -316,7 +349,10 @@ export function RuleQuickEditor({ rules, newRule, slotItems = [], centralHighlig
             {rules.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         ) : <b className="text-[12px] text-violet-800">“{rule.name}”</b>}
-        <span className="text-[11px] text-violet-600">{t("มีผลกับสินค้าทุกตัวในประเภทนี้ · ลงประวัติ · ย้อนได้", "Affects every product of this type · logged · undoable")}</span>
+        <span className="text-[11px] text-violet-600 flex-1 min-w-0">{t("มีผลกับสินค้าทุกตัวในประเภทนี้ · ลงประวัติ · ย้อนได้", "Affects every product of this type · logged · undoable")}</span>
+        <button type="button" onClick={() => void askAi()} disabled={ai.busy} className={AI_BTN} title={t("เติมเฉพาะช่องที่ยังว่าง · รุ่นถูก ~0.02 บาท/ครั้ง", "Fills empty fields only · cheap model")}>
+          {ai.busy && <Spinner />}{t("✨ ให้ AI ช่วยคิด", "✨ AI helps")}
+        </button>
       </div>
 
       <div className="space-y-1.5">
@@ -482,7 +518,45 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
   const [withRule, setWithRule] = useState(canRule);
   const [topics, setTopics] = useState("");
   const [hls, setHls] = useState("");
+  const [slotIds, setSlotIds] = useState<string[]>([]);
+  const [manualReq, setManualReq] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  // ชนิดช่องทั้งหมด (คลังกลาง) — ให้ AI เลือก + ติ๊กเองได้
+  const [slotOpts, setSlotOpts] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    apiFetch("/api/master-v2/product_highlight_items?limit=1000").then((r) => r.json())
+      .then((j) => setSlotOpts(((j.data ?? []) as { id: string; name: string; kind?: string | null; is_active?: boolean | null }[])
+        .filter((x) => x.kind === "slot" && x.is_active !== false).map((x) => ({ id: x.id, name: x.name }))))
+      .catch(() => setSlotOpts([]));
+  }, []);
+  const ai = useTagSetupAi();
+  const [aiFilled, setAiFilled] = useState<string[]>([]);
+  const [beforeAi, setBeforeAi] = useState<{ nameEn: string; groupId: string; topics: string; hls: string; slotIds: string[]; manualReq: string[] } | null>(null);
+  const askAi = async () => {
+    const d = await ai.run({ name, name_en: nameEn, groups, slots: slotOpts });
+    if (!d) return;
+    setBeforeAi({ nameEn, groupId, topics, hls, slotIds, manualReq });
+    const f: string[] = [];
+    // เติมเฉพาะช่องที่ยังว่าง — ที่กรอกเองแล้วไม่ทับ
+    if (!nameEn.trim() && d.name_en) { setNameEn(d.name_en); f.push("nameEn"); }
+    if (!groupId && d.group_id) { setGroupId(d.group_id); f.push("groupId"); }
+    if (d.topics.length) {
+      const have = topics.split("\n").map((l) => l.split(":")[0].trim()).filter(Boolean);
+      const add = d.topics.filter((x) => !have.includes(x.th));
+      if (add.length) { setTopics((p) => [p.trim(), topicsToText(add)].filter(Boolean).join("\n")); f.push("topics"); }
+    }
+    if (!hls.trim() && d.highlights.length) { setHls(d.highlights.join(", ")); f.push("hls"); }
+    if (slotIds.length === 0 && d.slot_ids.length) { setSlotIds(d.slot_ids); f.push("slots"); }
+    if (manualReq.length === 0 && d.manual_required.length) { setManualReq(d.manual_required); f.push("manual"); }
+    setAiFilled(f);
+    if (f.length && canRule) setWithRule(true);
+    if (!f.length) toast.info(t("ทุกช่องกรอกไว้แล้ว — AI ไม่ทับของเดิม", "Everything is filled — AI doesn't overwrite"));
+  };
+  const undoAi = () => {
+    if (!beforeAi) return;
+    setNameEn(beforeAi.nameEn); setGroupId(beforeAi.groupId); setTopics(beforeAi.topics); setHls(beforeAi.hls); setSlotIds(beforeAi.slotIds); setManualReq(beforeAi.manualReq);
+    setAiFilled([]); setBeforeAi(null);
+  };
   const post = async (url: string, body: unknown) => {
     const j = await apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
     if (j.error) throw new Error(j.error);
@@ -496,7 +570,7 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
       return i > 0 ? { th: l.slice(0, i).trim(), opts: l.slice(i + 1).split(",").map((x) => x.trim()).filter(Boolean) } : { th: l, opts: [] as string[] };
     }).filter((x) => x.th);
     const highlights = hls.split(",").map((x) => x.trim()).filter(Boolean);
-    if (withRule && !rows.length && !highlights.length) { toast.warning(t("ใส่หัวข้อหรือจุดเด่นอย่างน้อย 1 อย่าง หรือเอาติ๊ก “สร้างกฎ” ออก", "Add a question or highlight, or untick “create rule”")); return; }
+    if (withRule && !rows.length && !highlights.length && !slotIds.length && !manualReq.length) { toast.warning(t("ใส่หัวข้อหรือจุดเด่นอย่างน้อย 1 อย่าง หรือเอาติ๊ก “สร้างกฎ” ออก", "Add a question or highlight, or untick “create rule”")); return; }
     setBusy(true);
     let tagId = ""; let existed = false; let ruleId = "";
     try {
@@ -508,7 +582,7 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
           name: name.trim(), tag_ids: [tagId], name_keywords: [], brand_id: null, instruction: "", hint: "",
           required_topics: rows.map((x) => x.th), required_topics_en: [],
           topic_options: Object.fromEntries(rows.filter((x) => x.opts.length).map((x) => [x.th, x.opts])),
-          extras: { highlights, manual_required: [], optional_topics: [], slot_ids: [] },
+          extras: { highlights, manual_required: manualReq, optional_topics: [], slot_ids: slotIds },
         });
         ruleId = String(r.data?.id ?? "");
       }
@@ -527,7 +601,8 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
       if (tagId) onDone();
     } finally { setBusy(false); }
   };
-  const dirty = name !== initialName || !!nameEn || !!topics || !!hls;
+  const dirty = name !== initialName || !!nameEn || !!topics || !!hls || slotIds.length > 0 || manualReq.length > 0;
+  const chipCls = (on: boolean) => `h-7 px-2.5 text-[12px] rounded-full border ${on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`;
   return (
     <ERPModal open onClose={onClose} size="md" hasUnsavedChanges={dirty} title={t("สร้างแท็กประเภทสินค้า", "New product-type tag")}
       footer={<div className="flex justify-end gap-2 w-full">
@@ -535,14 +610,26 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
         <button onClick={() => void save()} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 inline-flex items-center gap-2">{busy && <Spinner />}{t("สร้างแล้วติดแท็ก", "Create & tag")}</button>
       </div>}>
       <div className="space-y-2.5">
+        {/* ✨ AI ช่วยคิดทั้งหมด — รุ่นถูก ส่งแค่ข้อความ · เติมเฉพาะช่องที่ยังว่าง */}
+        {canRule && (
+          <div className="flex items-center gap-2 flex-wrap rounded-lg bg-fuchsia-50/50 border border-fuchsia-100 px-2.5 py-1.5">
+            <span className="text-[11.5px] text-fuchsia-800 flex-1 min-w-0">
+              {aiFilled.length
+                ? t(`AI เติมให้ ${aiFilled.length} ช่อง (สีชมพู) — แก้ได้ทุกช่อง`, `AI filled ${aiFilled.length} fields (pink) — all editable`)
+                : t("ใส่ชื่อไทยแล้วให้ AI คิดที่เหลือให้ · ~0.02 บาท/ครั้ง · ช่องที่กรอกเองแล้ว AI ไม่ทับ", "Enter the Thai name and let AI fill the rest · ~0.02 THB · never overwrites")}
+            </span>
+            {beforeAi && <button type="button" onClick={undoAi} className="text-[11.5px] text-slate-500 underline">{t("ล้างที่ AI เติม", "Undo AI fill")}</button>}
+            <button type="button" onClick={() => void askAi()} disabled={ai.busy} className={AI_BTN}>{ai.busy && <Spinner />}{t("✨ ให้ AI ช่วยคิดทั้งหมด", "✨ Let AI fill it all")}</button>
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่อไทย", "Thai name")} *</span>
             <input value={name} onChange={(e) => setName(e.target.value)} className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" /></label>
           <label className="block"><span className="text-[12px] text-slate-600">{t("ชื่ออังกฤษ", "English name")}</span>
-            <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} placeholder="Neck pouch" className="w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg" /></label>
+            <input value={nameEn} onChange={(e) => setNameEn(e.target.value)} placeholder="Neck pouch" className={`w-full h-9 px-2.5 text-[13px] border border-slate-200 rounded-lg${aiMark(aiFilled.includes("nameEn"))}`} /></label>
         </div>
         <label className="block"><span className="text-[12px] text-slate-600">{t("อยู่ในกลุ่ม", "Group")}</span>
-          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="w-full h-9 px-2 text-[13px] border border-slate-200 rounded-lg bg-white">
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className={`w-full h-9 px-2 text-[13px] border border-slate-200 rounded-lg bg-white${aiMark(aiFilled.includes("groupId"))}`}>
             <option value="">{t("— ไม่ระบุกลุ่ม —", "— no group —")}</option>
             {groups.slice().sort((a, b) => a.name.localeCompare(b.name, "th")).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select></label>
@@ -554,10 +641,23 @@ export function CreateTagModal({ parentId, initialName, groups, canRule, onDone,
             </label>
             {withRule && (<>
               <label className="block"><span className="text-[11.5px] text-slate-600">{t("หัวข้อที่ต้องตอบ — บรรทัดละข้อ “หัวข้อ: ตัวเลือก1, ตัวเลือก2”", "Questions — one per line “question: choice1, choice2”")}</span>
-                <textarea value={topics} onChange={(e) => setTopics(e.target.value)} rows={3} placeholder={"สายคล้องถอดได้ไหม: ได้, ไม่ได้\nจำนวนช่องใส่บัตร: 1, 2, 3"} className="w-full px-2.5 py-1.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" /></label>
+                <textarea value={topics} onChange={(e) => setTopics(e.target.value)} rows={4} placeholder={"สายคล้องถอดได้ไหม: ได้, ไม่ได้\nจำนวนช่องใส่บัตร: 1, 2, 3"} className={`w-full px-2.5 py-1.5 text-[12.5px] border border-slate-200 rounded-lg bg-white${aiMark(aiFilled.includes("topics"))}`} /></label>
               <label className="block"><span className="text-[11.5px] text-slate-600">{t("จุดเด่นให้เลือก (คั่นด้วยลูกน้ำ)", "Highlight choices (comma-separated)")}</span>
-                <input value={hls} onChange={(e) => setHls(e.target.value)} placeholder={t("เช่น หนังแท้, สายปรับยาวได้, สลักชื่อได้", "e.g. genuine leather, adjustable strap")} className="w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg bg-white" /></label>
-              <p className="text-[11px] text-violet-600">{t("ชนิดช่องที่โชว์ · ช่องกรอกมือที่บังคับ → ตั้งต่อได้ที่ปุ่ม “ตั้งค่าประเภทนี้” ในขั้น 2", "Compartment types · required manual fields → set later in step 2")}</p>
+                <input value={hls} onChange={(e) => setHls(e.target.value)} placeholder={t("เช่น หนังแท้, สายปรับยาวได้, สลักชื่อได้", "e.g. genuine leather, adjustable strap")} className={`w-full h-8 px-2.5 text-[12.5px] border border-slate-200 rounded-lg bg-white${aiMark(aiFilled.includes("hls"))}`} /></label>
+              {slotOpts.length > 0 && (
+                <div className={`rounded-md p-1 ${aiFilled.includes("slots") ? "bg-fuchsia-50/60" : ""}`}>
+                  <p className="text-[11.5px] text-slate-600 mb-1">{t("ชนิดช่องที่โชว์ (ไม่ติ๊ก = ทุกชนิด)", "Compartment types (none = all)")}</p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {slotOpts.map((x) => { const on = slotIds.includes(x.id); return <button key={x.id} type="button" onClick={() => setSlotIds((p) => (on ? p.filter((k) => k !== x.id) : [...p, x.id]))} className={chipCls(on)}>{x.name}</button>; })}
+                  </div>
+                </div>
+              )}
+              <div className={`rounded-md p-1 ${aiFilled.includes("manual") ? "bg-fuchsia-50/60" : ""}`}>
+                <p className="text-[11.5px] text-slate-600 mb-1">{t("ช่องที่ต้องกรอกเองในขั้นสุดท้าย (บังคับ)", "Required manual fields")}</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {MANUAL_FIELDS.map((f) => { const on = manualReq.includes(f.key); return <button key={f.key} type="button" onClick={() => setManualReq((p) => (on ? p.filter((k) => k !== f.key) : [...p, f.key]))} className={chipCls(on)}>{t(f.label, f.en)}</button>; })}
+                </div>
+              </div>
             </>)}
           </div>
         )}
