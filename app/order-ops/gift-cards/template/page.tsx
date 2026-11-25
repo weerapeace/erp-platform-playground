@@ -95,7 +95,7 @@ function Body() {
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Link href="/order-ops/gift-cards?tab=templates" className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="กลับ"><Icon value="i:arrow-left" /></Link>
+        <Link href="/order-ops/instructions?s=settings" className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="กลับ"><Icon value="i:arrow-left" /></Link>
         <h1 className="text-lg font-bold text-slate-900">{id ? "แก้แม่แบบการ์ด" : "ออกแบบแม่แบบใหม่"}</h1>
       </div>
       <div className="mb-3 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">

@@ -165,7 +165,7 @@ function Editor() {
       await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind: "card", ids: [card.id] }) });
       const cid = card.id;
       toast.undo("ย้ายการ์ดลงถังขยะแล้ว", async () => { await gcJson("/api/order-gift-cards", { method: "DELETE", body: JSON.stringify({ kind: "card", ids: [cid], restore: true }) }); router.push(`/order-ops/gift-cards/edit?id=${cid}`); });
-      router.push("/order-ops/gift-cards");
+      router.push("/order-ops/instructions");
     } catch (e) { toast.error((e as Error).message); }
   };
   const askAi = async () => {
@@ -186,7 +186,7 @@ function Editor() {
     <>
       {/* หัว: ออเดอร์ + หมายเหตุลูกค้า */}
       <div className="mb-3 flex flex-wrap items-start gap-3">
-        <Link href="/order-ops/gift-cards" className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="กลับ"><Icon value="i:arrow-left" /></Link>
+        <Link href="/order-ops/instructions" className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="กลับ"><Icon value="i:arrow-left" /></Link>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-lg font-bold text-slate-900">{card ? "การ์ด" : "เขียนการ์ด"} {card?.order_no ?? order?.order_no ?? (isNew ? "(ไม่ผูกออเดอร์)" : "")}</h1>

@@ -1,13 +1,14 @@
 "use client";
 
 // ============================================================
-// 🎁 คำสั่งพิเศษออเดอร์ — /order-ops/instructions (แอป ช่องทางขาย/ออเดอร์ออนไลน์)
+// 🎁 คำสั่งพิเศษ & การ์ด — /order-ops/instructions (แอป ช่องทางขาย/ออเดอร์ออนไลน์)
+// รวมกับหน้าเขียนการ์ดของขวัญแล้ว (2026-11-25) — ส่วนงานเข้า/การ์ด/แม่แบบ มาจาก ../gift-panels
 // ห่อของขวัญ · การ์ด · สลักชื่อ (พิมพ์ใบสลัก) · แก้ไซส์ · แท็บ "รอของ"
 // ย้ายจากแอปเก่า order-instruction-manager (2026-11-24 · ช่วงทดลอง ยังไม่ย้ายข้อมูลจริง)
 // API /api/order-ops · กติกา lib/order-ops · ชิ้นส่วนร่วม ./shared
 // ============================================================
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -27,6 +28,9 @@ import {
 } from "../shared";
 import { EngraveSettings, InstructionForm, type Ins } from "../instruction-form";
 import { PlatformOrderPicker } from "@/components/platform-order-picker";
+import Link from "next/link";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { GIFT_INBOX_TABS, GiftCardsList, GiftInbox, GiftTemplates, type GiftCounts, type GiftInboxTab } from "../gift-panels";
 
 type Wait = {
   id: string; order_no: string | null; platform: string | null; customer_name: string | null; sku: string | null; note: string | null;
@@ -50,46 +54,85 @@ export default function InstructionsPage() {
   );
 }
 
+// หน้ารวม "คำสั่งพิเศษ & การ์ด" (เจ้าของเลือก widget 2026-11-25 ข้อ 1-5) — 5 ส่วน ?s=
+//   inbox งานเข้า (ออเดอร์มีหมายเหตุ/สินค้าสลัก ?tab=card|engrave|engrave_missing|other) · orders คำสั่งพิเศษ · wait รอของ · cards การ์ดทั้งหมด · settings แม่แบบ+ฟอนต์
+//   ลิงก์เก่า ?view=wait และ /order-ops/gift-cards พามาส่วนที่ถูกต้อง · ตัวเลขบนปุ่มส่วน = งานค้าง
+type Section = "inbox" | "orders" | "wait" | "cards" | "settings";
+const SECTIONS: Section[] = ["inbox", "orders", "wait", "cards", "settings"];
+
 function Body() {
   const router = useRouter();
   const sp = useSearchParams();
-  const view = sp.get("view") === "wait" ? "wait" : "orders";
-  const setView = (v: "orders" | "wait") => router.replace(v === "wait" ? "/order-ops/instructions?view=wait" : "/order-ops/instructions");
+  const canManage = usePermission("order_ops.manage");
+  const raw = sp.get("s") ?? (sp.get("view") === "wait" ? "wait" : null);
+  const section: Section = SECTIONS.includes(raw as Section) ? (raw as Section) : "inbox";
+  const inboxTab: GiftInboxTab = GIFT_INBOX_TABS.includes(sp.get("tab") as GiftInboxTab) ? (sp.get("tab") as GiftInboxTab) : "card";
+  const go = (s: Section, extra: Record<string, string> = {}) => {
+    const p = new URLSearchParams({ ...(s === "inbox" ? {} : { s }), ...extra });
+    router.replace(`/order-ops/instructions${p.toString() ? `?${p}` : ""}`);
+  };
   const [summary, setSummary] = useState<Summary>({});
+  const [gift, setGift] = useState<GiftCounts>({});
   const [bump, setBump] = useState(0);
   const refresh = () => setBump((b) => b + 1);
 
+  // ตัวเลขบนปุ่มส่วน — โหลดครั้งแรก (ส่วนที่เปิดอยู่อัปเดตต่อเองตอนโหลดรายการ)
+  useEffect(() => {
+    void opsJson<{ summary: Summary }>("/api/order-ops?t=instructions&page=1&page_size=1&status=todo").then((r) => setSummary(r.summary)).catch(() => {});
+    void opsJson<{ counts: GiftCounts }>("/api/order-gift-cards?view=notes&counts=1").then((r) => setGift(r.counts)).catch(() => {});
+  }, [bump]);
+
+  const inboxTodo = (gift.card_todo ?? 0) + (gift.engrave_todo ?? 0);
+  const tabs: { key: Section; label: string; badge?: number; danger?: boolean; icon: string }[] = [
+    { key: "inbox", label: "งานเข้า", badge: inboxTodo, danger: (gift.engrave_missing ?? 0) > 0, icon: "i:inbox" },
+    { key: "orders", label: "คำสั่งพิเศษ", badge: summary.todo, icon: "i:gift" },
+    { key: "wait", label: "รอของ", badge: summary.waiting, icon: "i:clock" },
+    { key: "cards", label: "การ์ดทั้งหมด", icon: "i:printer" },
+    ...(canManage ? [{ key: "settings" as Section, label: "ตั้งค่า (แม่แบบ/ฟอนต์)", icon: "i:palette" }] : []),
+  ];
+
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">คำสั่งพิเศษออเดอร์</h1>
-          <p className="text-sm text-slate-500">ห่อของขวัญ · การ์ด · สลักชื่อ · แก้ไซส์ · รายการรอของ — เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
+          <h1 className="text-xl font-bold text-slate-900">คำสั่งพิเศษ &amp; การ์ด</h1>
+          <p className="text-sm text-slate-500">ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก → สร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
         </div>
-        <div className="flex rounded-lg border border-slate-200 p-0.5 text-sm">
-          <button onClick={() => setView("orders")} className={`rounded-md px-3 py-1 ${view === "orders" ? "bg-sky-50 font-medium text-sky-700" : "text-slate-600"}`}>คำสั่งพิเศษ</button>
-          <button onClick={() => setView("wait")} className={`rounded-md px-3 py-1 ${view === "wait" ? "bg-sky-50 font-medium text-sky-700" : "text-slate-600"}`}>รอของ {summary.waiting ? <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[11px] text-amber-700">{summary.waiting}</span> : null}</button>
-        </div>
+        {(section === "inbox" || section === "cards") && (
+          <Link href="/order-ops/gift-cards/edit?new=1" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:plus" /> การ์ดใหม่ (ไม่ผูกออเดอร์)</Link>
+        )}
       </div>
-      <TrialBanner trialCount={summary.trial ?? 0} onChanged={refresh} />
-      {view === "orders"
-        ? <OrdersView bump={bump} onSummary={setSummary} onWait={() => setView("wait")} />
-        : <WaitView bump={bump} onSummary={setSummary} />}
+      <ScrollTabs activeKey={section} className="mb-3 border-b border-slate-200">
+        {tabs.map((t) => (
+          <button key={t.key} type="button" data-tab-key={t.key} onClick={() => go(t.key)}
+            className={`-mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm ${section === t.key ? "border-sky-600 font-medium text-sky-700" : "border-transparent text-slate-600 hover:text-slate-800"}`}>
+            <Icon value={t.icon} /> {t.label}
+            {!!t.badge && <span className={`rounded-full px-1.5 text-[11px] ${t.danger ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{t.badge}</span>}
+          </button>
+        ))}
+      </ScrollTabs>
+      {(section === "orders" || section === "wait") && <TrialBanner trialCount={summary.trial ?? 0} onChanged={refresh} />}
+      {section === "inbox" ? <GiftInbox tab={inboxTab} onTab={(t) => go("inbox", t === "card" ? {} : { tab: t })} onCounts={(c) => setGift((x) => ({ ...x, ...c }))} />
+        : section === "orders" ? <OrdersView bump={bump} onSummary={setSummary} onWait={() => go("wait")} initialQ={sp.get("q") ?? ""} openId={sp.get("open")} />
+        : section === "wait" ? <WaitView bump={bump} onSummary={setSummary} />
+        : section === "cards" ? <GiftCardsList onCount={() => {}} />
+        : canManage ? <GiftTemplates /> : <AccessDenied message="จัดการแม่แบบต้องมีสิทธิ์ order_ops.manage" />}
     </>
   );
 }
 
 /* ───────────── แท็บคำสั่งพิเศษ ───────────── */
 
-function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: Summary) => void; onWait: () => void }) {
+function OrdersView({ bump, onSummary, onWait, initialQ = "", openId = null }: { bump: number; onSummary: (s: Summary) => void; onWait: () => void; /** มาจากปุ่ม "มีคำสั่งสลักแล้ว" ในงานเข้า */ initialQ?: string; openId?: string | null }) {
   const toast = useToast();
   const isPhone = !useMediaQuery("(min-width: 768px)");
   const canEdit = usePermission("order_ops.edit");
   const canDelete = usePermission("order_ops.delete");
   const canManage = usePermission("order_ops.manage");
   const { options, reload: reloadOptions } = useOpsOptions();
-  const [filter, setFilter] = useState("todo");
-  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState(initialQ ? "all" : "todo");
+  const [q, setQ] = useState(initialQ);
+  const pendingOpen = useRef<string | null>(openId);
   const [trash, setTrash] = useState(false);
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Ins[]>([]);
@@ -115,6 +158,7 @@ function OrdersView({ bump, onSummary, onWait }: { bump: number; onSummary: (s: 
       const r = await opsJson<{ rows: Ins[]; total: number; summary: Summary }>(`/api/order-ops?${p}`);
       setRows(r.rows); setTotal(r.total);
       if (!trash) { setSummary(r.summary); onSummary(r.summary); }
+      if (pendingOpen.current) { const hit = r.rows.find((x) => x.id === pendingOpen.current); pendingOpen.current = null; if (hit) setEditing(hit); }
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }, [page, trash, filter, q, onSummary]);

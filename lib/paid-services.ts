@@ -127,7 +127,7 @@ export const PAID_SERVICES: PaidService[] = [
     offBehavior: "คำสั่งซื้อยังเข้าระบบ แต่ต้องกรอกรายการเอง", costHint: GPT_COST, files: ["lib/order-capture.ts"] },
   // ── ออเดอร์ออนไลน์
   { key: "ai.gift_card", th: "AI เรียบเรียงข้อความการ์ดของขวัญ", en: "AI gift card message", group: "ออเดอร์ออนไลน์",
-    usedAt: "หน้าเขียนการ์ดของขวัญ (/order-ops/gift-cards)", provider: "openai", kind: "ai_chat",
+    usedAt: "หน้าคำสั่งพิเศษ & การ์ด › เขียนการ์ด (/order-ops/gift-cards/edit)", provider: "openai", kind: "ai_chat",
     offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/order-gift-cards/route.ts"] },
   // ── ผลิต / งานทีม
   { key: "ai.work_log", th: "อ่านใบจดผลงาน", en: "Work log reader", group: "ผลิต / งานทีม",

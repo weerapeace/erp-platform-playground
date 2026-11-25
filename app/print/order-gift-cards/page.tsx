@@ -73,7 +73,7 @@ function Inner() {
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6">
-        <button onClick={() => (window.history.length > 1 ? router.back() : router.push("/order-ops/gift-cards"))} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
+        <button onClick={() => (window.history.length > 1 ? router.back() : router.push("/order-ops/instructions?s=cards"))} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">การ์ดของขวัญ · {cards ? `${cards.length} ใบ` : "กำลังโหลด…"}{first ? ` · ${first.w / 10} × ${first.h / 10} ซม.` : ""}{already ? ` · เคยพิมพ์แล้ว ${already} ใบ` : ""}</span>
         <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
           {([["sheet", g && g.cols * g.rows > 0 ? `A4 แผ่นละ ${g.cols * g.rows} ใบ (มีเส้นตัด)` : "A4 (การ์ดใหญ่เกิน — ใบละแผ่น)"], ["single", "1 ใบต่อแผ่น (กระดาษขนาดการ์ด)"]] as const).map(([k, l]) => (

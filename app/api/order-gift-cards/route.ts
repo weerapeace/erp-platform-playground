@@ -19,7 +19,7 @@ import { auditChangeMeta, writeAudit, writeAuditMany } from "@/lib/audit";
 import { aiChat, featureAccess } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { whoAmI } from "@/lib/order-ops-server";
-import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, isEngraveMode, type EngraveMode } from "@/lib/order-ops";
+import { engraveOfOrder, engraveSkuMaps, ENGRAVE_MODE_LABEL, ENGRAVE_NO_WARN_STATUSES, isEngraveMode, type EngraveMode } from "@/lib/order-ops";
 import { chatAdapter } from "@/lib/chat/registry";
 import { CHAT_CHANNELS, type ChatChannel } from "@/lib/chat/types";
 import {
@@ -268,9 +268,12 @@ async function notesView(admin: ReturnType<typeof supabaseAdmin>, sp: URLSearchP
     card_todo: rows.filter((r) => r.kind.card && !r.cards.some((c) => c.printed_at || c.hand_written_at)).length,
     engrave: rows.filter((r) => r.kind.engrave).length,
     engrave_missing: rows.filter((r) => r.engrave.needs_name).length,
+    // ยังไม่ส่งไปคำสั่งสลัก (ไม่นับที่ส่งแล้ว/ยกเลิก) — ตัวเลขบนปุ่มส่วน "งานเข้า"
+    engrave_todo: rows.filter((r) => r.kind.engrave && !r.instructions.some((i) => i.engrave) && !(ENGRAVE_NO_WARN_STATUSES as readonly string[]).includes(String(r.status ?? ""))).length,
     other: rows.filter((r) => r.note && !r.kind.card && !r.kind.engrave).length,
     all: rows.length,
   };
+  if (sp.get("counts") === "1") return { counts, days };
   const tab = sp.get("tab") ?? "card";
   if (tab === "card") rows = rows.filter((r) => r.kind.card);
   else if (tab === "engrave") rows = rows.filter((r) => r.kind.engrave);
