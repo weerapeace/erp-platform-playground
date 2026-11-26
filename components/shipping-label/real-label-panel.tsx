@@ -3,8 +3,8 @@
 /**
  * 🏷 แผงพิมพ์ใบปะหน้าจริงจากแพลตฟอร์ม (ของกลาง · 2026-11-26) — ใช้ในหน้าพิมพ์ /print/platform-orders?kind=label
  *   1) ตรวจก่อน (GET /api/shipping-labels): ใบไหนดึงได้ · ใบไหนพิมพ์ไปแล้ว (เมื่อไร โดยใคร)
- *   2) มีใบที่พิมพ์แล้ว → ป๊อปยืนยัน (ConfirmDialog กลาง) เลือกพิมพ์ซ้ำหรือข้าม
- *   3) ขอไฟล์ทีละ 10 ใบ (POST) → รวมเป็น PDF เดียวตามขนาดกระดาษ (จำต่อเครื่อง) → เปิดแท็บใหม่ + พรีวิวในหน้า
+ *   2) ดึงเองทันทีที่เปิดหน้า (เจ้าของถาม 2026-11-26 "ทำไมต้องกดดึง") · มีใบที่พิมพ์แล้ว → ป๊อปยืนยัน (ConfirmDialog กลาง) ก่อน เลือกพิมพ์ซ้ำหรือข้าม
+ *   3) ขอไฟล์ทีละ 10 ใบ (POST) → รวมเป็น PDF เดียวตามขนาดกระดาษ (จำต่อเครื่อง) → แสดงในหน้า + ปุ่ม "พิมพ์" (ไม่เปิดแท็บเอง — เบราว์เซอร์กัน)
  *   4) บันทึก "พิมพ์แล้ว" เฉพาะใบที่ได้ไฟล์ (usePrintLog po_label · track("pdf"))
  *   ใบที่ดึงไม่ได้ = รายชื่อ + เหตุผลภาษาคน + ปุ่มเปิด Seller Centre · ลองใหม่เฉพาะใบที่พลาดได้
  *   กติกา = lib/shipping-label · วางใบลงกระดาษ = ./build-label-pdf
@@ -39,8 +39,9 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
   const [fetched, setFetched] = useState<Fetched[]>([]);
   const [failed, setFailed] = useState<LabelFetchResult[]>([]);
   const [pdf, setPdf] = useState<{ url: string; pages: number; minScale: number } | null>(null);
-  const [blocked, setBlocked] = useState(false);
   const openedFor = useRef<string>("");
+  const autoStarted = useRef(false);
+  const frameRef = useRef<HTMLIFrameElement>(null);
 
   const logItems = useMemo(() => fetched.map((f) => ({ doc_id: f.id, doc_no: f.order_no })), [fetched]);
   const track = usePrintLog("po_label", logItems);
@@ -69,16 +70,18 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
   }, [fetched, paper]);
 
-  // ได้ไฟล์ชุดใหม่ → เปิดแท็บใหม่ (ครั้งเดียวต่อชุด) + บันทึกว่าพิมพ์แล้ว
+  // ได้ไฟล์ชุดใหม่ → บันทึกว่าพิมพ์แล้ว (ครั้งเดียวต่อชุด · ได้ไฟล์มาแสดง = นับว่าพิมพ์ กันพิมพ์ซ้ำ)
   useEffect(() => {
     if (!pdf) return;
     const key = fetched.map((f) => f.id).join(",");
     if (openedFor.current === key) return;
     openedFor.current = key;
     track("pdf");
-    const w = window.open(pdf.url, "_blank");
-    setBlocked(!w);
   }, [pdf, fetched, track]);
+  const printNow = () => {
+    try { frameRef.current?.contentWindow?.focus(); frameRef.current?.contentWindow?.print(); }
+    catch { if (pdf) window.open(pdf.url, "_blank"); }
+  };
 
   /** merge = ลองใหม่เฉพาะใบที่พลาด (เก็บใบที่ได้แล้วไว้ แล้วรวมไฟล์ใหม่ทั้งชุด) */
   const run = useCallback(async (list: LabelCheckRow[] | { id: string }[], merge = false) => {
@@ -110,6 +113,12 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
     const skip = new Set(includeReprint ? [] : printedRows.map((r) => r.id));
     void run(ready.filter((r) => !skip.has(r.id)));
   };
+  // เปิดหน้า = ดึงเลย (ครั้งเดียว) — มีใบที่พิมพ์แล้วจะขึ้นป๊อปถามก่อน
+  useEffect(() => {
+    if (!check || autoStarted.current || !ready.length) return;
+    autoStarted.current = true;
+    if (printedRows.length) setAskReprint(true); else void run(ready);
+  }, [check, ready, printedRows, run]);
   const pickPaper = (code: string) => { setPaperCode(code); safeSet(PAPER_KEY, code); openedFor.current = fetched.map((f) => f.id).join(","); };
 
   if (checkErr && !check) return <div className="mx-auto mt-6 max-w-xl rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{checkErr}</div>;
@@ -132,7 +141,7 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
             </select>
           </label>
           <button onClick={start} disabled={!!busy || !ready.length} className="h-10 w-full rounded-lg bg-slate-900 px-5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 sm:w-auto">
-            {busy ? `กำลังดึง ${busy.done}/${busy.total}…` : fetched.length ? "ดึงใหม่ทั้งหมด" : `ดึงใบปะหน้า ${ready.length} ใบ`}
+            {busy ? `กำลังดึง ${busy.done}/${busy.total}…` : fetched.length ? "ดึงใหม่อีกครั้ง" : `ดึงใบปะหน้า ${ready.length} ใบ`}
           </button>
         </div>
         <p className="mt-2 text-xs text-slate-500">ดึงได้เฉพาะออเดอร์ที่กด “นัดส่ง” ใน Seller Centre แล้ว · การดึงไม่เปลี่ยนสถานะออเดอร์บน Shopee · ไฟล์ไม่ถูกเก็บในระบบ (มีข้อมูลลูกค้า)</p>
@@ -143,9 +152,9 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium"><Icon value="i:circle-check" className="mr-1" />ได้ใบปะหน้า {fetched.length} ใบ ({pdf.pages} หน้า)</span>
             <div className="flex-1" />
-            <a href={pdf.url} target="_blank" rel="noopener noreferrer" onClick={() => track("pdf")} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-700 px-4 font-medium text-white hover:bg-emerald-800"><Icon value="i:external-link" />เปิดไฟล์ PDF เพื่อพิมพ์</a>
+            <a href={pdf.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 text-emerald-800 hover:bg-emerald-100"><Icon value="i:external-link" />เปิดแท็บใหม่</a>
+            <button type="button" onClick={printNow} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-700 px-4 font-medium text-white hover:bg-emerald-800"><Icon value="i:printer" />พิมพ์</button>
           </div>
-          {blocked && <p className="mt-2 text-xs">เบราว์เซอร์กันแท็บใหม่ไว้ — กดปุ่ม “เปิดไฟล์ PDF เพื่อพิมพ์”</p>}
           {pdf.minScale < SMALL_SCALE && <p className="mt-2 text-xs text-amber-700">ใบถูกย่อเหลือ {Math.round(pdf.minScale * 100)}% — ลองสแกนบาร์โค้ดก่อนส่ง ถ้าไม่ติดให้เลือกกระดาษใหญ่ขึ้น</p>}
           <p className="mt-1 text-xs text-emerald-700">ตอนพิมพ์ตั้ง “ขนาดจริง (100%)” · กระดาษ {paper.label}</p>
         </div>
@@ -170,7 +179,8 @@ export function RealLabelPanel({ orders }: { orders: OrderLite[] }) {
         </div>
       )}
 
-      {pdf && <iframe title="ตัวอย่างใบปะหน้า" src={pdf.url} className="h-[70vh] w-full rounded-xl border border-slate-200 bg-white" />}
+      {busy && !pdf && <p className="text-center text-sm text-slate-500">กำลังขอใบปะหน้าจาก Shopee {busy.done}/{busy.total} ใบ… (ใบละไม่กี่วินาที)</p>}
+      {pdf && <iframe ref={frameRef} title="ตัวอย่างใบปะหน้า" src={pdf.url} className="h-[70vh] w-full rounded-xl border border-slate-200 bg-white" />}
 
       <ConfirmDialog
         open={askReprint}

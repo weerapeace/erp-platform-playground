@@ -24,8 +24,9 @@ describe("shipping-label rules", () => {
     expect(labelFailureText("", "")).toBe("ดึงใบปะหน้าไม่สำเร็จ");
   });
 
-  it("default paper is the shop's 9x15 sticker", () => {
-    expect(labelPaperOf(undefined).code).toBe("s90x150");
+  it("default paper is the shop's 10x15 sticker (old 9x15 setting falls back)", () => {
+    expect(labelPaperOf(undefined).code).toBe("s100x150");
+    expect(labelPaperOf("s90x150").code).toBe("s100x150");
     expect(labelPaperOf("a4x4").perPage).toBe(4);
     expect(LABEL_PAPERS.some((p) => p.code === "original")).toBe(true);
   });
@@ -38,7 +39,7 @@ describe("shipping-label rules", () => {
   });
 
   it("fits a 100x150 label onto 90x150 by shrinking (no rotation)", () => {
-    const box = paperSlots(labelPaperOf("s90x150"))[0];
+    const box = { x: 0, y: 0, w: mmToPt(90), h: mmToPt(150) };
     const f = fitPage(mmToPt(100), mmToPt(150), box);
     expect(f.rotate).toBe(0);
     expect(f.scale).toBeCloseTo(0.9, 2);

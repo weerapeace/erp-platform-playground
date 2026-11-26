@@ -54,14 +54,13 @@ export function labelFailureText(code: string | null | undefined, message?: stri
 
 /* ───────── กระดาษ ───────── */
 export type LabelPaper = { code: string; label: string; hint: string; w: number; h: number; perPage: 1 | 4 } | { code: "original"; label: string; hint: string; w: 0; h: 0; perPage: 1 };
-/** ขนาดกระดาษ (มม.) — ค่าเริ่ม = สติกเกอร์ 9×15 ซม. (เครื่องของร้าน · เจ้าของบอก 2026-11-26) */
+/** ขนาดกระดาษ (มม.) — ค่าเริ่ม = สติกเกอร์ 10×15 ซม. (ที่ร้านใช้จริง · เจ้าของแก้ 2026-11-26 จากที่บอก 9×15 ตอนแรก) */
 export const LABEL_PAPERS: LabelPaper[] = [
-  { code: "s90x150", label: "สติกเกอร์ 9×15 ซม.", hint: "เครื่องพิมพ์ความร้อนของร้าน", w: 90, h: 150, perPage: 1 },
   { code: "s100x150", label: "สติกเกอร์ 10×15 ซม. (4×6 นิ้ว)", hint: "ขนาดมาตรฐาน Shopee", w: 100, h: 150, perPage: 1 },
   { code: "a4x4", label: "A4 ใบละ 4", hint: "เครื่องพิมพ์ทั่วไป ตัดเป็น 4 ส่วน", w: 210, h: 297, perPage: 4 },
   { code: "original", label: "ขนาดเดิมจาก Shopee", hint: "ไม่ย่อ/ไม่หมุน", w: 0, h: 0, perPage: 1 },
 ];
-export const DEFAULT_LABEL_PAPER = "s90x150";
+export const DEFAULT_LABEL_PAPER = "s100x150";
 export const labelPaperOf = (code: unknown): LabelPaper => LABEL_PAPERS.find((p) => p.code === code) ?? LABEL_PAPERS[0];
 export const MM_PT = 72 / 25.4;
 export const mmToPt = (mm: number) => mm * MM_PT;
