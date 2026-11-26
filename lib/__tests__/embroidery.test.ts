@@ -300,3 +300,53 @@ describe("รอบ 3: ซิกแซกเลี้ยวตามเส้น
     expect(() => readShopFile(new Uint8Array(10))).toThrow();
   });
 });
+
+describe("รอบ 4: จุดต่อ · ลำดับปัก · ตั้งค่ารายชิ้น · เส้นทิศ", async () => {
+  const { turningSatin, dirAt } = await import("@/lib/embroidery-satin");
+  const { pieceAngle } = await import("@/lib/embroidery");
+  type P = [number, number];
+  it("ตัว T: ขาตั้งตัดปลายตรงที่ขอบคานบน (ฝีของขาไม่ขึ้นไปทับคานเกิน ~0.5 มม.)", () => {
+    // คานบน y 0..3 กว้าง 20 · ขา x 8.5..11.5 ลงไปถึง y 20
+    const T: P[][] = [[[0, 0], [20, 0], [20, 3], [11.5, 3], [11.5, 20], [8.5, 20], [8.5, 3], [0, 3]]];
+    const t = turningSatin(T, "nonzero", { spacing: 0.4, comp: 0, underlay: false, meanWidth: meanWidth(T) })!;
+    expect(t).not.toBeNull();
+    // บล็อกที่เป็นขา = ฝีส่วนใหญ่อยู่ช่วง x 8..12 และ y > 3
+    const stem = t.top.find((b) => b.filter(([x, y]) => x > 8 && x < 12 && y > 4).length > b.length * 0.7);
+    expect(stem).toBeTruthy();
+    expect(Math.min(...stem!.map((p) => p[1]))).toBeGreaterThan(2.4);
+  });
+  it("dirAt: เส้นเดียว = ทิศของเส้นนั้น · 2 เส้นตั้งฉาก จุดใกล้เส้นไหนได้ทิศเส้นนั้น", () => {
+    const d = dirAt([[0, 0, 10, 0]], [5, 5])!;
+    expect(Math.abs(d[1])).toBeLessThan(1e-6);
+    const near = dirAt([[0, 0, 10, 0], [20, 0, 20, 10]], [19, 5])!;
+    expect(Math.abs(near[0])).toBeLessThan(0.3);
+  });
+  it("มุมถมเต็ม: ตั้งรายชิ้น > เส้นทิศ > ตามรูปทรง > มุมสี", () => {
+    const bar: P[][] = [[[0, 0], [40, 0], [40, 5], [0, 5]]];
+    const st = defaultSettings([rect("a", 0, 0, 40, 5)], 40);
+    expect(pieceAngle(bar, "fill", st, 45, { angle: 10 }, [])).toBe(10);
+    expect(pieceAngle(bar, "fill", st, 45, {}, [[0, 0, 0, 5]])).toBeCloseTo(90, 0);
+    expect(pieceAngle(bar, "fill", st, 45, {}, [])).toBe(45);   // แนวยาว 0° + 45
+    expect(pieceAngle(bar, "fill", { ...st, fill_auto_angle: false }, 30, {}, [])).toBe(30);
+  });
+  it("ลำดับปักตั้งเอง: ปักตามลำดับ เปลี่ยนสีทุกครั้งที่สีต่างจากชิ้นก่อน", () => {
+    const ps = [rect("a", 0, 0, 10, 10, "#000000"), rect("b", 20, 0, 10, 10, "#ff0000"), rect("c", 40, 0, 10, 10, "#000000")];
+    const auto = buildPlan(ps, defaultSettings(ps, 50));
+    expect(auto.colorChanges).toBe(1);   // ดำ (a,c) → แดง (b)
+    const seq = buildPlan(ps, { ...defaultSettings(ps, 50), sequence: ["a", "b", "c"] });
+    expect(seq.colorChanges).toBe(2);
+    expect(seq.pieces.map((p) => p.id)).toEqual(["a", "b", "c"]);
+  });
+  it("cleanSettings: ตั้งค่ารายชิ้น/ลำดับ ตัดชิ้นที่ไม่มีและค่าเพี้ยน", () => {
+    const ps = [rect("a", 0, 0, 10, 10)];
+    const s = cleanSettings({ sequence: ["a", "zz", "a"], piece_opts: { a: { angle: 200, spacing: 9, lines: [[0, 0, 5, 5], [1, 1, 1, 1], "x"] }, zz: { angle: 1 } } }, ps);
+    expect(s.sequence).toEqual(["a"]);
+    expect(s.piece_opts).toEqual({ a: { angle: 20, spacing: 2, lines: [[0, 0, 5, 5]] } });
+  });
+  it("ความแน่นรายชิ้น: ห่างขึ้น = ฝีน้อยลง", () => {
+    const ps = [rect("a", 0, 0, 20, 20)];
+    const base = buildPlan(ps, defaultSettings(ps, 20));
+    const loose = buildPlan(ps, { ...defaultSettings(ps, 20), piece_opts: { a: { spacing: 1 } } });
+    expect(loose.stitches).toBeLessThan(base.stitches);
+  });
+});

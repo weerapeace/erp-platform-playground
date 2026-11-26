@@ -18,7 +18,7 @@
  *   คู่มือ docs/embroidery.md
  */
 import { autoGroup, eachOp, OP, pieceShapes, type BlockPiece, type FillRule } from "@/lib/block-print";
-import { satinBorder, turningSatin } from "@/lib/embroidery-satin";
+import { dirAt, satinBorder, turningSatin, type DirLine } from "@/lib/embroidery-satin";
 
 export type Pt = [number, number];
 export type StitchType = "auto" | "fill" | "satin" | "run" | "skip";
@@ -49,7 +49,12 @@ export type EmbSettings = {
   /** สีพื้นผ้า (ภาพตัวอย่าง/ใบสั่งปัก) */ fabric: string;
   /** ซิกแซกเลี้ยวตามเส้น (false = ทิศเดียวทั้งชิ้นแบบเดิม) */ satin_follow: boolean;
   /** ขอบซิกแซกรอบพื้นถม กว้าง (มม.) · 0 = ไม่ใส่ */ border_mm: number;
+  /** ถมเต็ม: ชิ้นยาวตั้งมุมแถวตามรูปทรงเอง (ไม่ใช้มุมของสี) */ fill_auto_angle: boolean;
+  /** ตั้งค่ารายชิ้น (ทับค่าของสี/ทั้งงาน) — key = id ชิ้น */ piece_opts: Record<string, PieceOpt>;
+  /** ลำดับปักที่ตั้งเอง (id ชิ้น) · ว่าง = อัตโนมัติ (ตามลำดับสี แล้วใกล้สุดก่อน) */ sequence: string[];
 };
+/** ตั้งค่ารายชิ้น · lines = เส้นทิศฝีเข็มที่ลากเอง (มม. พิกัดในไฟล์ เหมือน ax/ay ของชิ้น — ย่อขยายงานแล้วยังตรง) */
+export type PieceOpt = { angle?: number; spacing?: number; underlay?: boolean; lines?: DirLine[] };
 
 export const DEFAULTS = { fill_spacing: 0.45, satin_spacing: 0.4, fill_len: 3.5, run_len: 2.5, pull_comp: 0.2, angle: 45, trim_at: 4, fabric: "#ffffff", border_mm: 1.2 };
 export const LIMITS = { width_min: 5, width_max: 400, spacing_min: 0.2, spacing_max: 2, len_min: 1, len_max: 7, comp_max: 1, trim_min: 2, trim_max: 12, border_max: 4 };
@@ -92,6 +97,7 @@ export function defaultSettings(pieces: BlockPiece[], widthMm: number): EmbSetti
     fill_spacing: DEFAULTS.fill_spacing, satin_spacing: DEFAULTS.satin_spacing, fill_len: DEFAULTS.fill_len,
     run_len: DEFAULTS.run_len, pull_comp: DEFAULTS.pull_comp, colors, color_order: colorsOf(pieces), piece_types: {},
     underlay: true, trim_at: DEFAULTS.trim_at, fabric: DEFAULTS.fabric, satin_follow: true, border_mm: DEFAULTS.border_mm,
+    fill_auto_angle: true, piece_opts: {}, sequence: [],
   };
 }
 
@@ -128,7 +134,51 @@ export function cleanSettings(raw: unknown, pieces: BlockPiece[]): EmbSettings {
     fabric: typeof o.fabric === "string" && /^#[0-9a-f]{6}$/i.test(o.fabric) ? o.fabric.toLowerCase() : DEFAULTS.fabric,
     satin_follow: o.satin_follow !== false,
     border_mm: r2(clamp(num(o.border_mm, DEFAULTS.border_mm), 0, LIMITS.border_max)),
+    fill_auto_angle: o.fill_auto_angle !== false,
+    piece_opts: cleanPieceOpts(o.piece_opts, ids),
+    sequence: Array.isArray(o.sequence) ? [...new Set((o.sequence as unknown[]).map(String).filter((id) => ids.has(id)))] : [],
   };
+}
+
+/** ตั้งค่ารายชิ้น: ตัดชิ้นที่ไม่มีแล้ว · ตัวเลขอยู่ในช่วง · เส้นทิศไม่เกิน 20 เส้นต่อชิ้น · ชิ้นที่ไม่มีค่าอะไรเลยไม่เก็บ */
+function cleanPieceOpts(raw: unknown, ids: Set<string>): Record<string, PieceOpt> {
+  const out: Record<string, PieceOpt> = {};
+  for (const [id, v] of Object.entries((raw ?? {}) as Record<string, Record<string, unknown>>)) {
+    if (!ids.has(id) || !v || typeof v !== "object") continue;
+    const o: PieceOpt = {};
+    if (v.angle != null && Number.isFinite(Number(v.angle))) o.angle = ((Math.round(Number(v.angle)) % 180) + 180) % 180;
+    if (v.spacing != null && Number.isFinite(Number(v.spacing))) o.spacing = r2(clamp(Number(v.spacing), LIMITS.spacing_min, LIMITS.spacing_max));
+    if (typeof v.underlay === "boolean") o.underlay = v.underlay;
+    if (Array.isArray(v.lines)) {
+      const ls = (v.lines as unknown[]).filter((l): l is number[] => Array.isArray(l) && l.length === 4 && l.every((n) => Number.isFinite(Number(n))))
+        .map((l) => l.map((n) => Math.round(Number(n) * 1000) / 1000) as DirLine).filter(([a, b, c, d]) => Math.hypot(c - a, d - b) > 0.01).slice(0, 20);
+      if (ls.length) o.lines = ls;
+    }
+    if (Object.keys(o).length) out[id] = o;
+  }
+  return out;
+}
+
+/**
+ * มุมแถวของชิ้น (ถมเต็ม/ซิกแซกทิศเดียว): ตั้งเองรายชิ้น > เส้นทิศที่ลาก (ทิศฝีเข็มตรงกลางชิ้น) > ชิ้นยาว + ตั้งมุมตามรูปทรง > มุมของสี
+ *   ถมเต็มตามรูปทรง = แนวยาวของชิ้น + 45° (แถวเฉียงข้ามชิ้นสม่ำเสมอทุกชิ้น ไม่ใช่ 45° ของหน้ากระดาษ)
+ */
+export function pieceAngle(rings: Pt[][], type: ResolvedType, st: EmbSettings, colorAngle: number, po: PieceOpt, lines: DirLine[]): number {
+  if (po.angle != null) return po.angle;
+  if (lines.length) {
+    let n = 0, mx = 0, my = 0;
+    for (const r of rings) for (const p of r) { n++; mx += p[0]; my += p[1]; }
+    const d = dirAt(lines, n ? [mx / n, my / n] : [0, 0]);
+    // ทิศฝีเข็ม = ทิศเส้นที่ลาก → แถวถมเต็มวิ่งตามเส้นนั้น
+    if (d) return ((Math.atan2(d[1], d[0]) * 180) / Math.PI + 180) % 180;
+  }
+  if (type === "fill" && st.fill_auto_angle !== false) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    const ax = mainAxisDeg(rings), t = (-ax * Math.PI) / 180;
+    for (const r of rings) for (const [x, y] of r) { const u = x * Math.cos(t) - y * Math.sin(t), v = x * Math.sin(t) + y * Math.cos(t); x0 = Math.min(x0, u); x1 = Math.max(x1, u); y0 = Math.min(y0, v); y1 = Math.max(y1, v); }
+    if (y1 - y0 > 0 && (x1 - x0) / (y1 - y0) >= 1.6) return Math.round(ax + 45) % 180;
+  }
+  return colorAngle;
 }
 
 // ───────── เรขาคณิต ─────────
@@ -317,13 +367,15 @@ function rowBlocks(rings: Pt[][], fill: FillRule, deg: number, spacing: number, 
  *   ฝีรองพื้น (underlay): ถมเต็ม = แถวห่าง 2.5 มม. ตั้งฉากกับแถวจริง หดจากขอบ 0.5 มม. · ซิกแซก = ซิกแซกห่าง 1.6 มม. หดจากขอบ 0.4 มม.
  *   ส่วนแคบกว่า ~1.2 มม. ไม่ใส่ฝีรองพื้น (หดแล้วไม่เหลือ)
  */
-export function pieceBlocks(rings: Pt[][], fill: FillRule, type: ResolvedType, st: EmbSettings, angleDeg: number): { under: Pt[][]; top: Pt[][]; edge: Pt[][] } {
+export function pieceBlocks(rings: Pt[][], fill: FillRule, type: ResolvedType, stIn: EmbSettings, angleDeg: number, po: { lines?: DirLine[]; spacing?: number; underlay?: boolean } = {}): { under: Pt[][]; top: Pt[][]; edge: Pt[][] } {
   if (type === "skip" || !rings.length) return { under: [], top: [], edge: [] };
+  // ค่ารายชิ้นทับค่าทั้งงาน (ความแน่น · ฝีรองพื้น)
+  const st: EmbSettings = { ...stIn, ...(po.spacing != null ? (type === "satin" ? { satin_spacing: po.spacing } : { fill_spacing: po.spacing }) : {}), ...(po.underlay != null ? { underlay: po.underlay } : {}) };
   if (type === "run") return { under: [], top: rings.map((r) => runRing(r, st.run_len)), edge: [] };
   const satin = type === "satin";
   const width = meanWidth(rings);
   if (satin && st.satin_follow !== false) {
-    const t = turningSatin(rings, fill, { spacing: st.satin_spacing, comp: st.pull_comp, underlay: st.underlay, meanWidth: width });
+    const t = turningSatin(rings, fill, { spacing: st.satin_spacing, comp: st.pull_comp, underlay: st.underlay, meanWidth: width, lines: po.lines });
     if (t) return { ...t, edge: [] };
   }
   // ขอบซิกแซกรอบพื้นถม: เฉพาะชิ้นที่กว้างพอ (≥ 3 เท่าของขอบ) ไม่งั้นขอบกินทั้งชิ้น
@@ -433,26 +485,46 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
 
   const order = st.color_order.filter((c) => st.colors[c]);
   for (const c of colorsOf(active)) if (!order.includes(c)) order.push(c);
-  let first = true;
-  for (const color of order) {
+  // เตรียมฝีเข็มทุกชิ้นก่อน (เส้นทิศ/มุม/ความแน่นรายชิ้นแปลงจากพิกัดไฟล์ → พิกัดงาน)
+  const toPlan = (x: number, y: number): Pt => [(x - box.x) * scale - cx, (y - box.y) * scale - cy];
+  const prepAll = active.map((p) => {
+    const color = pieceColor(p);
     const cs = st.colors[color];
-    // เตรียมฝีเข็มทุกชิ้นของสีนี้ก่อน แล้วเลือกชิ้นที่ใกล้เข็มที่สุดไปเรื่อย ๆ (ลดการกระโดด/ตัดด้าย)
-    const prepared = active.filter((p) => pieceColor(p) === color).map((p) => {
-      const rings = pieceRings(p, scale, box).map((r) => r.map(([x, y]) => [x - cx, y - cy] as Pt));
-      const width = meanWidth(rings);
-      const type: ResolvedType = cs && cs.on === false ? "skip" : resolveType(p, st, width);
-      const blocks = pieceBlocks(rings, p.fill, type, st, cs?.angle ?? DEFAULTS.angle);
-      const pb: BoxMm = { x: (p.ax - box.x) * scale - cx, y: (p.ay - box.y) * scale - cy, w: p.ow * scale, h: p.oh * scale };
-      return { p, rings, width, type, blocks, pb };
-    });
+    const po = st.piece_opts?.[p.id] ?? {};
+    const rings = pieceRings(p, scale, box).map((r) => r.map(([x, y]) => [x - cx, y - cy] as Pt));
+    const width = meanWidth(rings);
+    const type: ResolvedType = cs && cs.on === false ? "skip" : resolveType(p, st, width);
+    const lines = (po.lines ?? []).map(([x1, y1, x2, y2]) => [...toPlan(x1, y1), ...toPlan(x2, y2)] as DirLine);
+    const blocks = pieceBlocks(rings, p.fill, type, st, pieceAngle(rings, type, st, cs?.angle ?? DEFAULTS.angle, po, lines), { lines, spacing: po.spacing, underlay: po.underlay });
+    const pb: BoxMm = { x: (p.ax - box.x) * scale - cx, y: (p.ay - box.y) * scale - cy, w: p.ow * scale, h: p.oh * scale };
+    return { p, color, rings, width, type, blocks, pb };
+  });
+  type Prep = (typeof prepAll)[number];
+  // ลำดับปัก: ตั้งเอง (sequence) = ปักตามนั้นเป๊ะ เปลี่ยนสีเมื่อสีต่างจากชิ้นก่อน · ไม่ตั้ง = ตามลำดับสี แล้วใกล้สุดก่อน
+  const runs: { color: string; items: Prep[]; fixed: boolean }[] = [];
+  const seq = (st.sequence ?? []).filter((id) => prepAll.some((t) => t.p.id === id));
+  if (seq.length) {
+    const byId = new Map(prepAll.map((t) => [t.p.id, t]));
+    const ordered = [...seq.map((id) => byId.get(id)!), ...prepAll.filter((t) => !seq.includes(t.p.id))];
+    for (const t of ordered) {
+      const lastRun = runs[runs.length - 1];
+      if (lastRun && lastRun.color === t.color) lastRun.items.push(t); else runs.push({ color: t.color, items: [t], fixed: true });
+    }
+  } else for (const color of order) runs.push({ color, items: prepAll.filter((t) => t.color === color), fixed: false });
+
+  let first = true;
+  for (const run of runs) {
+    const color = run.color;
+    const cs = st.colors[color];
     const block: ColorBlock = { color, thread: cs?.thread ?? "", stitches: 0, pieces: 0 };
     const before = stitches;
     let colorStarted = false;
-    const todo = [...prepared];
+    const todo = [...run.items];
     while (todo.length) {
       let bi = 0, bd = Infinity;
       // ชิ้นแรกของสี = มุมซ้ายบนสุด (เริ่มจากกลางงานแล้วต้องย้อนกลับ = ตัดด้ายเพิ่ม) · ชิ้นต่อไป = ใกล้เข็มที่สุด
-      if (!colorStarted) todo.forEach((t, i) => { const d = t.pb.x + t.pb.y; if (d < bd) { bd = d; bi = i; } });
+      if (run.fixed) bi = 0;
+      else if (!colorStarted) todo.forEach((t, i) => { const d = t.pb.x + t.pb.y; if (d < bd) { bd = d; bi = i; } });
       else todo.forEach((t, i) => {
         const all = [...t.blocks.under, ...t.blocks.top, ...t.blocks.edge];
         if (!all.length) { if (bd > 1e9) { bd = 1e9; bi = i; } return; }

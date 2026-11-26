@@ -173,8 +173,17 @@ function prune(sk: Uint8Array, w: number, dist: Float32Array) {
   }
 }
 
+/** เส้นยาวที่ต่อแล้ว + ปลายแต่ละด้านไปจบที่จุดแยกไหม (จุดแยก = ไปชนเส้นอื่น → ตัดปลายตรง ไม่ปักทับเส้นนั้น) */
+type Chained = { pts: number[]; startJ: boolean; endJ: boolean };
+
 /** ต่อเส้นเชื่อมเป็นเส้นยาว (ที่จุดแยกเลือกทางที่ตรงที่สุด ไม่หักเกิน 90°) */
-function chain(edges: Edge[], w: number): number[][] {
+function chain(edges: Edge[], w: number): Chained[] {
+  const raw = chainRaw(edges, w);
+  const deg = new Map<number, number>();
+  for (const e of edges) { if (e.a === e.b) continue; deg.set(e.a, (deg.get(e.a) ?? 0) + 1); deg.set(e.b, (deg.get(e.b) ?? 0) + 1); }
+  return raw.map((pts) => ({ pts, startJ: (deg.get(pts[0]) ?? 0) >= 3, endJ: (deg.get(pts[pts.length - 1]) ?? 0) >= 3 }));
+}
+function chainRaw(edges: Edge[], w: number): number[][] {
   const at = new Map<number, Edge[]>();
   for (const e of edges) { if (e.a === e.b && e.pts.length > 2) continue; for (const n of [e.a, e.b]) at.set(n, [...(at.get(n) ?? []), e]); }
   const xy = (i: number): Pt => [i % w, Math.floor(i / w)];
@@ -281,11 +290,36 @@ function pushLeg(out: Pt[], q: Pt) {
   out.push(q);
 }
 
+/** เส้นทิศฝีเข็ม [x1, y1, x2, y2] (มม. พิกัดเดียวกับ rings) */
+export type DirLine = [number, number, number, number];
+
+/** ทิศฝีเข็มที่จุด p จากเส้นทิศที่ลากไว้ (เฉลี่ยแบบมุมคู่ ถ่วงตามระยะ — เส้นใกล้มีผลมาก) → เวกเตอร์หนึ่งหน่วย */
+export function dirAt(lines: DirLine[], p: Pt): Pt | null {
+  if (!lines.length) return null;
+  let sx = 0, sy = 0;
+  for (const [x1, y1, x2, y2] of lines) {
+    const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy;
+    if (L2 < 1e-9) continue;
+    const t = Math.max(0, Math.min(1, ((p[0] - x1) * dx + (p[1] - y1) * dy) / L2));
+    const d = Math.hypot(p[0] - (x1 + t * dx), p[1] - (y1 + t * dy));
+    const wgt = 1 / (d * d + 0.25);
+    const a = Math.atan2(dy, dx) * 2;
+    sx += Math.cos(a) * wgt; sy += Math.sin(a) * wgt;
+  }
+  if (Math.hypot(sx, sy) < 1e-12) return null;
+  const a = Math.atan2(sy, sx) / 2;
+  return [Math.cos(a), Math.sin(a)];
+}
+
 /**
- * ซิกแซกเลี้ยวตามเส้น · spacing = ระยะฝีซิกแซก (มม.) · comp = ชดเชยผ้าหด (มม. ต่อข้าง) · underlay = ใส่ฝีเดินเส้นกลางก่อน
+ * ซิกแซกเลี้ยวตามเส้น · spacing = ระยะฝีซิกแซก (มม.) · comp = ชดเชยผ้าหด (มม. ต่อข้าง)
+ *   ฝีสั้นด้านในโค้ง: ฝั่งที่ฝีเบียดกัน ปักสั้นสลับยาว (ด้ายไม่กองเป็นก้อน)
+ *   แยกเส้นที่จุดต่อ: เส้นที่ไปชนเส้นอื่น ตัดปลายตรงตรงขอบเส้นนั้น (ไม่ปักทับ)
+ *   ฝีรองพื้นตามความกว้าง: < 1 มม. ไม่มี · < 2.5 เดินเส้นกลาง · < 4.5 เดินรอบขอบ · กว้างกว่า = เดินรอบขอบ + ซิกแซกห่าง
+ *   lines = เส้นทิศฝีเข็มที่ลากเอง (ฝีวางตามเส้น แทนตั้งฉากกับเส้นกลาง)
  * คืน null = ทำไม่ได้ (ให้ใช้ซิกแซกทิศเดียวแทน)
  */
-export function turningSatin(rings: Pt[][], fill: FillRule, opts: { spacing: number; comp: number; underlay: boolean; meanWidth: number }): { under: Pt[][]; top: Pt[][] } | null {
+export function turningSatin(rings: Pt[][], fill: FillRule, opts: { spacing: number; comp: number; underlay: boolean; meanWidth: number; lines?: DirLine[] }): { under: Pt[][]; top: Pt[][] } | null {
   const mw = Math.max(0.3, opts.meanWidth);
   const g = rasterize(rings, fill, Math.min(0.25, Math.max(0.03, mw / 7)));
   if (!g) return null;
@@ -297,7 +331,7 @@ export function turningSatin(rings: Pt[][], fill: FillRule, opts: { spacing: num
   const paths = chain(edges, g.w);
   // ชิ้นทรงก้อน (วงกลม/จุด) ไม่มีแนวเส้นให้เลี้ยวตาม → ฝีจะแผ่เป็นดาว · ให้ใช้ซิกแซกทิศเดียวแทน
   let maxD = 0; for (let i = 0; i < dist.length; i++) if (dist[i] > maxD) maxD = dist[i];
-  const skelLen = paths.reduce((s, p) => s + p.length, 0) * g.cell;
+  const skelLen = paths.reduce((s, p) => s + p.pts.length, 0) * g.cell;
   if (skelLen < maxD * g.cell * 2 * 2.2) return null;
   const toMm = (i: number): Pt => [g.x0 + ((i % g.w) + 0.5) * g.cell, g.y0 + (Math.floor(i / g.w) + 0.5) * g.cell];
   const dAt = (p: Pt) => {
@@ -307,45 +341,100 @@ export function turningSatin(rings: Pt[][], fill: FillRule, opts: { spacing: num
   };
   const top: Pt[][] = [], under: Pt[][] = [];
   const half = opts.spacing / 2;
+  const lines = opts.lines ?? [];
   for (const path of paths) {
-    const closed = path.length > 3 && path[0] === path[path.length - 1];
-    let pts = path.map(toMm);
+    const closed = path.pts.length > 3 && path.pts[0] === path.pts[path.pts.length - 1];
+    let pts = path.pts.map(toMm);
     if (closed) pts = pts.slice(0, -1);
     const lenMm = pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
     if (lenMm < Math.max(0.3, mw * 0.3) && paths.length > 1) continue;   // เศษสั้น (ส่วนอื่นปักทับแล้ว)
+    // จุดแยกที่ปลายเส้น (ไว้ตัดปลายตรง) — รัศมี = ความกว้างครึ่งหนึ่งของจุดแยก
+    const jStart = !closed && path.startJ ? { p: toMm(path.pts[0]), r: dist[path.pts[0]] * g.cell * 0.85 } : null;
+    const jEnd = !closed && path.endJ ? { p: toMm(path.pts[path.pts.length - 1]), r: dist[path.pts[path.pts.length - 1]] * g.cell * 0.85 } : null;
     pts = smooth(pts, Math.max(1, Math.min(10, Math.round(mw / (2 * g.cell)))), closed);
-    // ปลายเปิด: ยืดออกตามทิศเส้นเกือบถึงปลายจริง (เส้นกลางสั้นกว่าเส้นจริงราวครึ่งความกว้าง)
+    // ปลายเปิดที่ไม่ใช่จุดแยก: ยืดออกตามทิศเส้นเกือบถึงปลายจริง (เส้นกลางสั้นกว่าเส้นจริงราวครึ่งความกว้าง)
     if (!closed && pts.length >= 2) {
       const ext = (a: Pt, b: Pt) => { const L = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, d = dAt(a) * 0.8; return [a[0] + ((a[0] - b[0]) / L) * d, a[1] + ((a[1] - b[1]) / L) * d] as Pt; };
       const k = Math.min(pts.length - 1, 3);
-      pts = [ext(pts[0], pts[k]), ...pts, ext(pts[pts.length - 1], pts[pts.length - 1 - k])];
+      pts = [...(jStart ? [] : [ext(pts[0], pts[k])]), ...pts, ...(jEnd ? [] : [ext(pts[pts.length - 1], pts[pts.length - 1 - k])])];
     }
-    // เดินทีละช่วงสั้น ๆ แล้ว "ปักเมื่อขอบด้านใดด้านหนึ่งขยับครบ ½ ระยะฝี" — ทางโค้งด้านนอกยังแน่นเท่าทางตรง (ด้านในซ้อนกันได้ ปกติของซิกแซก)
+    // เดินทีละช่วงสั้น ๆ แล้ว "ปักเมื่อขอบด้านใดด้านหนึ่งขยับครบ ½ ระยะฝี" — ทางโค้งด้านนอกยังแน่นเท่าทางตรง
     const fine = half / 4;
-    const samples = resample(pts, fine, closed);
-    if (samples.length < 2) continue;
-    const tan = tangents(samples, Math.max(1, Math.round(mw / fine / 2)), closed);
+    let samples = resample(pts, fine, closed);
+    // ตัดปลายที่จมอยู่ในเส้นอื่น (จุดแยก) → ปลายตรงชนขอบเส้นนั้นพอดี
+    const near = (p: Pt, j: { p: Pt; r: number } | null) => !!j && Math.hypot(p[0] - j.p[0], p[1] - j.p[1]) < j.r;
+    let s0 = 0, s1 = samples.length;
+    while (s0 < s1 && near(samples[s0], jStart)) s0++;
+    while (s1 > s0 && near(samples[s1 - 1], jEnd)) s1--;
+    if (s1 - s0 < 3) continue;   // ทั้งเส้นอยู่ในจุดแยก (เส้นอื่นปักทับแล้ว)
+    samples = samples.slice(s0, s1);
+    const tan = tangents(samples, Math.max(1, Math.round(mw / fine / 2)), closed && s0 === 0);
     const blk: Pt[] = [];
+    const edgeA: Pt[] = [], edgeB: Pt[] = [], widths: number[] = [];
     let side = 0;
     let lastA: Pt | null = null, lastB: Pt | null = null;
-    samples.forEach((p, i) => {
-      const n: Pt = [-tan[i][1], tan[i][0]];
-      const cap = Math.max(dAt(p) * 1.6 + g.cell, 0.3);
+    const lastOn: (Pt | null)[] = [null, null];
+    const shortNext = [false, false];
+    // รอบแรก: ยิงเส้นหาขอบทุกจุด → ความกว้างกลาง ๆ ของเส้นนี้ (ไว้ตัดฝีพาดยาวผิดปกติตรงจุดต่อ)
+    const hits = samples.map((p, i) => {
+      let n: Pt = [-tan[i][1], tan[i][0]];
+      const dl = dirAt(lines, p);
+      if (dl) n = dl[0] * n[0] + dl[1] * n[1] >= 0 ? dl : [-dl[0], -dl[1]];
+      const cap = Math.max(dAt(p) * 1.6 + g.cell, 0.3) * (dl ? 2.5 : 1);
       const sp = rayHit(rings, p, n, cap * 2), sm = rayHit(rings, p, [-n[0], -n[1]], cap * 2);
-      if (sp == null || sm == null) return;
-      const a = Math.min(sp, cap), b = Math.min(sm, cap);
+      if (sp == null || sm == null) return null;
+      return { n, a: Math.min(sp, cap), b: Math.min(sm, cap), dl: !!dl };
+    });
+    const ws = hits.filter((h): h is NonNullable<typeof h> => !!h).map((h) => h.a + h.b).sort((x, y) => x - y);
+    const wMid = ws[Math.floor(ws.length / 2)] ?? 0;
+    samples.forEach((p, i) => {
+      const h = hits[i];
+      if (!h) return;
+      const { n } = h;
+      let { a, b } = h;
+      // ฝั่งที่ยาวเกินเส้นปกติมาก = กำลังพาดเข้าเส้นอื่นตรงจุดต่อ (เส้นนั้นปักคลุมเอง) → หดเหลือครึ่งความกว้างปกติ
+      if (!h.dl && wMid > 0) { const lim = wMid * 0.6; if (a > lim && a > b * 1.5) a = Math.max(b, lim); if (b > lim && b > a * 1.5) b = Math.max(a, lim); }
       if (a + b < 0.25) return;
       const A: Pt = [p[0] + n[0] * (a + opts.comp), p[1] + n[1] * (a + opts.comp)];
       const B: Pt = [p[0] - n[0] * (b + opts.comp), p[1] - n[1] * (b + opts.comp)];
+      // เก็บขอบด้านใน (หดเข้า 0.4 มม.) ไว้ทำฝีรองพื้นทุก ~1.5 มม.
+      {
+        const lastE = edgeA.length ? edgeA[edgeA.length - 1] : null;
+        const inA: Pt = [p[0] + n[0] * Math.max(0, a - 0.4), p[1] + n[1] * Math.max(0, a - 0.4)];
+        if (!lastE || Math.hypot(inA[0] - lastE[0], inA[1] - lastE[1]) >= 1.5) { edgeA.push(inA); edgeB.push([p[0] - n[0] * Math.max(0, b - 0.4), p[1] - n[1] * Math.max(0, b - 0.4)]); }
+      }
+      widths.push(a + b);
       const moved = lastA && lastB ? Math.max(Math.hypot(A[0] - lastA[0], A[1] - lastA[1]), Math.hypot(B[0] - lastB[0], B[1] - lastB[1])) : Infinity;
       if (moved < half && i !== samples.length - 1) return;
-      pushLeg(blk, side === 0 ? A : B);
+      let q = side === 0 ? A : B;
+      const other = side === 0 ? B : A;
+      // ฝีสั้นด้านในโค้ง: ฝั่งนี้ขยับไปน้อยกว่าครึ่งระยะฝี (ด้ายเบียดกัน) → สลับฝีสั้น/ยาว
+      const prev = lastOn[side];
+      if (prev && Math.hypot(q[0] - prev[0], q[1] - prev[1]) < opts.spacing * 0.6 && a + b > 1.2) {
+        if (shortNext[side]) q = [q[0] + (other[0] - q[0]) * 0.35, q[1] + (other[1] - q[1]) * 0.35];
+        shortNext[side] = !shortNext[side];
+      } else shortNext[side] = false;
+      pushLeg(blk, q);
+      lastOn[side] = side === 0 ? A : B;
       lastA = A; lastB = B;
       side ^= 1;
     });
     if (blk.length < 2) continue;
     top.push(blk);
-    if (opts.underlay && mw >= 1.2 && lenMm >= 1) under.push(resample(pts, 2, closed).concat(closed ? [pts[0]] : []));
+    if (!opts.underlay || lenMm < 1) continue;
+    const wMed = [...widths].sort((x, y) => x - y)[Math.floor(widths.length / 2)] ?? 0;
+    if (wMed < 1) continue;
+    const center = samples.filter((_, i) => i % Math.max(1, Math.round(2 / fine)) === 0);
+    if (wMed < 2.5 || edgeA.length < 2) under.push(center);
+    else {
+      // เดินรอบขอบ: ไปตามขอบ A แล้วกลับตามขอบ B
+      under.push([...edgeA, ...[...edgeB].reverse()]);
+      if (wMed >= 4.5) {
+        const zz: Pt[] = [];
+        for (let i = 0; i < edgeA.length; i++) zz.push(i % 2 ? edgeA[i] : edgeB[i]);
+        if (zz.length >= 2) under.push(zz);
+      }
+    }
   }
   if (!top.length) return null;
   return { under, top };
