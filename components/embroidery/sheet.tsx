@@ -10,8 +10,10 @@ import { usePrintLog } from "@/components/report/use-print-log";
 import { Icon } from "@/components/icon";
 import { docFileName } from "@/lib/print-filename";
 import { buildPlan, cleanSettings, dstFileName, STITCH_TYPES, type EmbPlan } from "@/lib/embroidery";
-import { API, api, downloadDst, downloadPes, fmtNum, thaiDate, type Design } from "./shared";
+import { API, api, downloadDst, downloadPes, downloadShopFile, fmtNum, thaiDate, type Design } from "./shared";
 import { nearestPec, PEC_THREADS } from "@/lib/embroidery-pes";
+import { b64ToBytes, readShopFile } from "@/lib/embroidery-shop";
+import { drawPlan } from "./stitch-preview";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 
@@ -23,18 +25,9 @@ function planImage(plan: EmbPlan, fabric = "#ffffff", px = 1400): string {
   const g = cv.getContext("2d");
   if (!g) return "";
   g.fillStyle = fabric; g.fillRect(0, 0, cv.width, cv.height);
-  const pad = 30, k = Math.min((cv.width - pad * 2) / plan.width, (cv.height - pad * 2) / plan.height);
-  const ox = cv.width / 2, oy = cv.height / 2;
-  g.lineWidth = Math.max(1, 0.35 * k); g.lineCap = "round";
-  let ci = 0, px0 = 0, py0 = 0;
-  g.strokeStyle = plan.colors[0]?.color ?? "#000"; g.beginPath();
-  for (const c of plan.cmds) {
-    const x = ox + c.x * k, y = oy + c.y * k;
-    if (c.t === "stitch") { g.moveTo(px0, py0); g.lineTo(x, y); }
-    else if (c.t === "color") { g.stroke(); ci++; g.strokeStyle = plan.colors[ci]?.color ?? "#000"; g.beginPath(); }
-    px0 = x; py0 = y;
-  }
-  g.stroke();
+  const pad = 30, k = Math.min((cv.width - pad * 2) / Math.max(plan.width, 0.01), (cv.height - pad * 2) / Math.max(plan.height, 0.01));
+  // วาดแบบเหมือนด้ายจริง (ตัวเดียวกับภาพตัวอย่างหน้าทำงาน)
+  drawPlan(g, plan, k, cv.width / 2, cv.height / 2, plan.cmds.length, false, Math.max(1, 0.42 * k), true);
   return cv.toDataURL("image/png");
 }
 
@@ -59,7 +52,7 @@ export function renderSheetHtml(d: Design, plan: EmbPlan, img: string, fileName:
   </style></head><body><div class="doc">
   <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:4mm">
     <div><h1>ใบสั่งปัก ${esc(d.code)}</h1><div style="font-size:12pt;margin-top:1mm">${esc(d.name)}</div></div>
-    <div class="muted" style="text-align:right">ไฟล์เครื่องปัก: <b>${esc(dstFileName(d.code, d.name))}</b> / .pes<br>พิมพ์ ${esc(thaiDate(new Date().toISOString()))}</div>
+    <div class="muted" style="text-align:right">ไฟล์เครื่องปัก: <b>${esc(!d.pieces.length && d.shop_file_name ? d.shop_file_name : `${dstFileName(d.code, d.name)} / .pes`)}</b><br>พิมพ์ ${esc(thaiDate(new Date().toISOString()))}</div>
   </div>
   ${d.parent ? `<div class="muted" style="margin-top:1mm">สินค้า: ${esc(d.parent.code)} ${esc(d.parent.name)}</div>` : ""}
   <div class="grid">
@@ -72,7 +65,7 @@ export function renderSheetHtml(d: Design, plan: EmbPlan, img: string, fileName:
   <table><thead><tr><th class="c">ลำดับ</th><th>สี</th><th>รหัสด้าย</th><th>ชนิดฝีเข็ม (ชิ้น)</th><th class="r">ฝีเข็ม</th></tr></thead><tbody>${rows}</tbody></table>
   ${d.note ? `<div class="box" style="margin-top:3mm"><span class="muted">หมายเหตุ</span><div>${esc(d.note).replace(/\n/g, "<br>")}</div></div>` : ""}
   ${warns.length ? `<div class="warn">ส่วนที่อาจปักไม่ชัด ${warns.length} จุด: ${warns.slice(0, 8).map((w) => esc(`${w.name} (${w.warn})`)).join(" · ")}</div>` : ""}
-  <p class="muted" style="margin-top:4mm">ไฟล์แปลงอัตโนมัติจากลายเวกเตอร์ (ฝีรองพื้น: ${d.settings?.underlay === false ? "ไม่มี" : "มี"} · สีผ้าในภาพ ${esc(d.settings?.fabric ?? "#ffffff")}) — รบกวนปักทดสอบ 1 ชิ้นก่อนผลิตจริง · ไฟล์ .DST ไม่เก็บสี ใช้ลำดับสีตามตารางนี้</p>
+  <p class="muted" style="margin-top:4mm">${!d.pieces.length ? "ไฟล์ที่ร้านตีบล็อกให้ (ไม่ได้แปลงโดยระบบ)" : `ไฟล์แปลงอัตโนมัติจากลายเวกเตอร์ (ฝีรองพื้น: ${d.settings?.underlay === false ? "ไม่มี" : "มี"} · ซิกแซก${d.settings?.satin_follow === false ? "ทิศเดียว" : "เลี้ยวตามเส้น"} · ขอบรอบพื้นถม ${d.settings?.border_mm ? `${d.settings.border_mm} มม.` : "ไม่มี"} · สีผ้าในภาพ ${esc(d.settings?.fabric ?? "#ffffff")}) — รบกวนปักทดสอบ 1 ชิ้นก่อนผลิตจริง`} · ไฟล์ .DST ไม่เก็บสี ใช้ลำดับสีตามตารางนี้</p>
   </div></body></html>`;
 }
 
@@ -84,7 +77,13 @@ export function EmbroiderySheet({ id, onBack }: { id: string; onBack: () => void
     api<Design>(`${API}/${id}`).then((x) => { if (alive) setD(x); }).catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); });
     return () => { alive = false; };
   }, [id]);
-  const plan = useMemo(() => (d ? buildPlan(d.pieces, cleanSettings(d.settings, d.pieces)) : null), [d]);
+  // งานที่มีแต่ไฟล์จากร้าน → ใบสั่งปักใช้ฝีเข็มจากไฟล์ร้าน
+  const shopOnly = !!d && !d.pieces.length && !!d.shop_file_b64;
+  const plan = useMemo(() => {
+    if (!d) return null;
+    if (!d.pieces.length && d.shop_file_b64) { try { return readShopFile(b64ToBytes(d.shop_file_b64)).plan; } catch { return null; } }
+    return buildPlan(d.pieces, cleanSettings(d.settings, d.pieces));
+  }, [d]);
   const fileName = d ? docFileName("ใบสั่งปัก", d.code) : "ใบสั่งปัก";
   const html = useMemo(() => (d && plan ? renderSheetHtml(d, plan, planImage(plan, cleanSettings(d.settings, d.pieces).fabric), fileName) : ""), [d, plan, fileName]);
   const logItems = useMemo(() => (d ? [{ doc_id: d.id, doc_no: d.code }] : []), [d]);
@@ -96,12 +95,17 @@ export function EmbroiderySheet({ id, onBack }: { id: string; onBack: () => void
         <button onClick={onBack} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600"><Icon name="print" /> ใบสั่งปัก {d && <b>{d.code}</b>}</span>
         <div className="flex-1" />
-        {d && plan && (
+        {d && shopOnly && (
+          <button type="button" onClick={() => downloadShopFile(d)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">
+            <Icon name="download" /> ไฟล์จากร้าน
+          </button>
+        )}
+        {d && plan && !shopOnly && (
           <button type="button" onClick={() => downloadDst(plan, d.code, d.name)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">
             <Icon name="download" /> .DST
           </button>
         )}
-        {d && plan && (
+        {d && plan && !shopOnly && (
           <button type="button" onClick={() => downloadPes(plan, d.code, d.name)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">
             <Icon name="download" /> .PES
           </button>

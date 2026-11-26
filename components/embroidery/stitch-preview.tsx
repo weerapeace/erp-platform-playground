@@ -5,6 +5,7 @@
  *   คลิกชิ้น → onPick(id) (หาชิ้นด้วย pieceAt) · selectedId = ไฮไลต์ขอบชิ้น · focus = ซูมไปกรอบนั้น (เปลี่ยน focus.key = ซูมใหม่)
  *   ไม่ใช้ useCanvasZoom ของบล็อกพิมพ์: ตัวนั้นขยายกล่อง SVG ให้เลื่อนดู — ฝีเข็มหลายหมื่นเส้นต้องวาดแคนวาสเท่าจอแล้วแปลงพิกัดเอง (แคนวาสขยาย 8 เท่ากินหน่วยความจำ)
  *   upto = วาดถึงคำสั่งที่เท่าไร (แถบเล่นลำดับการปัก) · ไม่ใส่ = ทั้งหมด
+ *   real = ภาพเหมือนด้ายจริง (ด้ายหนา + เงามัน + เงาตก) · false = เส้นบางดูโครงฝีเข็ม
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { pieceAt, type BoxMm, type EmbPlan } from "@/lib/embroidery";
@@ -12,21 +13,50 @@ import { pieceAt, type BoxMm, type EmbPlan } from "@/lib/embroidery";
 const MIN_Z = 0.5, MAX_Z = 40;
 const PX_PER_MM = 96 / 25.4;
 
-function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, ox: number, oy: number, end: number, showJumps: boolean, lw: number) {
+/** สีอ่อน/เข้มลง (t > 0 = ไปทางขาว · t < 0 = ไปทางดำ) */
+function shade(hex: string, t: number): string {
+  const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
+  const f = (v: number) => Math.round(t >= 0 ? v + (255 - v) * t : v * (1 + t));
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
+/**
+ * วาดฝีเข็ม · real = ภาพเหมือนด้ายจริง: ด้ายหนา 0.4 มม. ขอบเข้ม + เงามันกลางเส้น + เงาตกบนผ้าบาง ๆ (ซูมเล็กมากจนด้ายบางกว่า ~1.5px ใช้เส้นธรรมดา)
+ */
+export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, ox: number, oy: number, end: number, showJumps: boolean, lw: number, real = false) {
   let ci = 0, px = ox, py = oy;
   let color = plan.colors[0]?.color ?? "#000";
   g.lineCap = "round"; g.lineJoin = "round";
-  g.beginPath(); g.strokeStyle = color; g.lineWidth = lw;
+  const thread = real && lw >= 1.5;
+  const segs: number[] = [];
+  const flush = () => {
+    if (!segs.length) return;
+    const path = () => { g.beginPath(); for (let i = 0; i < segs.length; i += 4) { g.moveTo(segs[i], segs[i + 1]); g.lineTo(segs[i + 2], segs[i + 3]); } };
+    if (thread) {
+      // เงาตกบนผ้า → ด้ายขอบเข้ม → ตัวด้าย → เงามัน (ช่วงกลางฝี เยื้องขึ้นนิด)
+      g.save(); g.translate(lw * 0.12, lw * 0.18); g.strokeStyle = "rgba(0,0,0,0.18)"; g.lineWidth = lw * 1.05; path(); g.stroke(); g.restore();
+      g.strokeStyle = shade(color, -0.35); g.lineWidth = lw; path(); g.stroke();
+      g.strokeStyle = color; g.lineWidth = lw * 0.72; path(); g.stroke();
+      g.save(); g.translate(-lw * 0.1, -lw * 0.12); g.strokeStyle = shade(color, 0.45); g.globalAlpha = 0.55; g.lineWidth = lw * 0.22; g.beginPath();
+      for (let i = 0; i < segs.length; i += 4) {
+        const [x0, y0, x1, y1] = [segs[i], segs[i + 1], segs[i + 2], segs[i + 3]];
+        if (Math.hypot(x1 - x0, y1 - y0) < lw * 1.2) continue;
+        g.moveTo(x0 + (x1 - x0) * 0.25, y0 + (y1 - y0) * 0.25); g.lineTo(x0 + (x1 - x0) * 0.7, y0 + (y1 - y0) * 0.7);
+      }
+      g.stroke(); g.restore();
+    } else { g.strokeStyle = color; g.lineWidth = lw; path(); g.stroke(); }
+    segs.length = 0;
+  };
   const jumps: number[] = [];
   for (let i = 0; i < end; i++) {
     const c = plan.cmds[i];
     const x = ox + c.x * k, y = oy + c.y * k;
-    if (c.t === "stitch") { g.moveTo(px, py); g.lineTo(x, y); }
+    if (c.t === "stitch") segs.push(px, py, x, y);
     else if (c.t === "jump" && showJumps) jumps.push(px, py, x, y);
-    else if (c.t === "color") { g.stroke(); ci++; color = plan.colors[ci]?.color ?? color; g.beginPath(); g.strokeStyle = color; }
+    else if (c.t === "color") { flush(); ci++; color = plan.colors[ci]?.color ?? color; }
     px = x; py = y;
   }
-  g.stroke();
+  flush();
   if (jumps.length) {
     g.save(); g.setLineDash([2, 3]); g.strokeStyle = "rgba(100,116,139,0.55)"; g.lineWidth = 0.7; g.beginPath();
     for (let i = 0; i < jumps.length; i += 4) { g.moveTo(jumps[i], jumps[i + 1]); g.lineTo(jumps[i + 2], jumps[i + 3]); }
@@ -35,8 +65,8 @@ function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, ox: num
   return { px, py };
 }
 
-export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, className = "" }: {
-  plan: EmbPlan; upto?: number; showJumps?: boolean; height?: number; fabric?: string;
+export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, className = "" }: {
+  plan: EmbPlan; upto?: number; showJumps?: boolean; height?: number; fabric?: string; real?: boolean;
   selectedId?: string | null; onPick?: (id: string | null) => void; focus?: { key: string; box: BoxMm } | null; className?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -83,7 +113,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
     const k = fitK() * view.z;
     const ox = W / 2 - view.cx * k, oy = H / 2 - view.cy * k;
     const end = Math.min(upto ?? plan.cmds.length, plan.cmds.length);
-    const { px, py } = drawPlan(g, plan, k, ox, oy, end, showJumps, Math.max(0.6, 0.35 * k));
+    const { px, py } = drawPlan(g, plan, k, ox, oy, end, showJumps, Math.max(0.6, (real ? 0.42 : 0.35) * k), real);
     const sel = selectedId ? plan.pieces.find((p) => p.id === selectedId) : null;
     if (sel) {
       g.save(); g.strokeStyle = "#4f46e5"; g.lineWidth = 2; g.setLineDash([5, 3]); g.beginPath();
@@ -91,7 +121,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
       g.stroke(); g.restore();
     }
     if (upto != null && upto < plan.cmds.length) { g.fillStyle = "#ef4444"; g.beginPath(); g.arc(px, py, 3.5, 0, Math.PI * 2); g.fill(); }
-  }, [plan, upto, showJumps, size, view, fabric, selectedId, fitK]);
+  }, [plan, upto, showJumps, size, view, fabric, selectedId, fitK, real]);
 
   // แผนที่ย่อ (วาดใหม่เมื่องานเปลี่ยน)
   const MW = 120, MH = 80;

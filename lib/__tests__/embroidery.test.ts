@@ -197,3 +197,106 @@ describe("รอบ 2: เลือกส่วน · ลดตัดด้า�
     expect(nearestPec("#ed171f")).toBe(5);
   });
 });
+
+describe("รอบ 3: ซิกแซกเลี้ยวตามเส้น · ขอบรอบพื้นถม · ไฟล์จากร้าน · ตรวจลาย", async () => {
+  const { turningSatin, satinBorder, sizeAdvice, insideShape } = await import("@/lib/embroidery-satin");
+  const { readPes } = await import("@/lib/embroidery-pes");
+  const { b64ToBytes, bytesToB64, planFromCmds, readShopFile, shopKind } = await import("@/lib/embroidery-shop");
+  type P = [number, number];
+  /** วงแหวน (วงนอกทวนเข็ม วงในตามเข็ม = รู) */
+  const ring = (r0: number, r1: number, n = 72): P[][] => {
+    const c = (r: number, dir: 1 | -1) => Array.from({ length: n }, (_, i) => { const t = (dir * i * 2 * Math.PI) / n; return [r * Math.cos(t), r * Math.sin(t)] as P; });
+    return [c(r1, 1), c(r0, -1)];
+  };
+
+  it("แท่งตรง 2×20 มม.: ฝีสลับฝั่งบน/ล่าง พาดเต็มความกว้าง ไม่ล้นขอบเกินชดเชย", () => {
+    const bar: P[][] = [[[0, 0], [20, 0], [20, 2], [0, 2]]];
+    const t = turningSatin(bar, "nonzero", { spacing: 0.4, comp: 0.2, underlay: true, meanWidth: meanWidth(bar) })!;
+    expect(t).not.toBeNull();
+    const pts = t.top.flat();
+    expect(pts.length).toBeGreaterThan(60);
+    for (const [x, y] of pts) { expect(y).toBeGreaterThanOrEqual(-0.25); expect(y).toBeLessThanOrEqual(2.25); expect(x).toBeGreaterThanOrEqual(-0.5); expect(x).toBeLessThanOrEqual(20.5); }
+    // ฝีส่วนใหญ่ข้ามความกว้างเกือบเต็ม (≥ 1.8 มม.)
+    const legs = pts.slice(1).map((p, i) => Math.abs(p[1] - pts[i][1]));
+    expect(legs.filter((d) => d >= 1.8).length / legs.length).toBeGreaterThan(0.8);
+    expect(t.under.length).toBeGreaterThan(0);
+  });
+
+  it("วงแหวน (ตัว o): ฝีเลี้ยวตามวง — ทุกฝีตั้งฉากกับวง (ปลายฝีอยู่ใกล้ขอบใน/นอก)", () => {
+    const rs = ring(4, 6);
+    const t = turningSatin(rs, "nonzero", { spacing: 0.4, comp: 0, underlay: false, meanWidth: meanWidth(rs) })!;
+    expect(t).not.toBeNull();
+    const radii = t.top.flat().map(([x, y]) => Math.hypot(x, y));
+    const nearEdge = radii.filter((r) => Math.abs(r - 4) < 0.35 || Math.abs(r - 6) < 0.35).length;
+    expect(nearEdge / radii.length).toBeGreaterThan(0.85);
+  });
+
+  it("ชิ้นทรงก้อน (วงกลมทึบ) → ใช้ซิกแซกทิศเดียวแทน (คืน null)", () => {
+    const disk = ring(0.001, 3).slice(0, 1);
+    expect(turningSatin(disk, "nonzero", { spacing: 0.4, comp: 0, underlay: false, meanWidth: meanWidth(disk) })).toBeNull();
+  });
+
+  it("buildPlan: ปิด satin_follow = แบบเดิม · เปิด = ฝีเลี้ยวตามเส้น (ได้ฝีต่างกัน)", () => {
+    const L: BlockPiece = { ...rect("L", 0, 0, 20, 20), d: [OP.M, 0, 0, OP.L, 3, 0, OP.L, 3, 17, OP.L, 20, 17, OP.L, 20, 20, OP.L, 0, 20, OP.Z] };
+    const on = buildPlan([L], { ...defaultSettings([L], 20) });
+    const off = buildPlan([L], { ...defaultSettings([L], 20), satin_follow: false });
+    expect(on.pieces[0].type).toBe("satin");
+    expect(on.stitches).not.toBe(off.stitches);
+  });
+
+  it("ขอบซิกแซกรอบพื้นถม: อยู่ในแถบกว้าง bw คร่อมขอบสี่เหลี่ยม", () => {
+    const sq: P[][] = [[[0, 0], [20, 0], [20, 20], [0, 20]]];
+    expect(insideShape(sq, "nonzero", 10, 10)).toBe(true);
+    const e = satinBorder(sq, "nonzero", { width: 1.5, spacing: 0.4, comp: 0.2 });
+    expect(e.length).toBe(1);
+    for (const [x, y] of e[0]) {
+      const dEdge = Math.min(x, y, 20 - x, 20 - y);
+      expect(dEdge).toBeGreaterThanOrEqual(-0.3);
+      expect(dEdge).toBeLessThanOrEqual(1.6);
+    }
+    const plan = buildPlan([rect("big", 0, 0, 20, 20)], defaultSettings([rect("big", 0, 0, 20, 20)], 20));
+    const noBorder = buildPlan([rect("big", 0, 0, 20, 20)], { ...defaultSettings([rect("big", 0, 0, 20, 20)], 20), border_mm: 0 });
+    expect(plan.stitches).toBeGreaterThan(noBorder.stitches);
+  });
+
+  it("cleanSettings: ค่าใหม่มีค่าเริ่มต้น + ตัดค่าเพี้ยน", () => {
+    const p = [rect("a", 0, 0, 10, 10)];
+    const s = cleanSettings({}, p);
+    expect(s.satin_follow).toBe(true);
+    expect(s.border_mm).toBe(1.2);
+    expect(cleanSettings({ border_mm: 99, satin_follow: false }, p)).toMatchObject({ border_mm: 4, satin_follow: false });
+  });
+
+  it("ตรวจลาย: เส้นบาง 0.5 มม. ในงานกว้าง 40 มม. → ต้องปักกว้าง ≥ 120 มม.", () => {
+    expect(sizeAdvice([0.5, 2, 2, 2, 2, 2, 2, 2, 2, 2], 40)).toEqual({ thinFile: 0.5, minWidthMm: 120 });
+    expect(sizeAdvice([], 40)).toBeNull();
+  });
+
+  it("ไฟล์จากร้าน .PES: เขียนแล้วอ่านฝีเข็มกลับ ตำแหน่ง/สีตรง", () => {
+    const pieces = [rect("a", 0, 0, 10, 4, "#000000"), rect("b", 0, 6, 10, 4, "#ff0000")];
+    const plan = buildPlan(pieces, defaultSettings(pieces, 30));
+    const bytes = buildPes(plan, "T");
+    expect(shopKind(bytes)).toBe("pes");
+    const r = readPes(bytes);
+    const st = r.cmds.filter((c) => c.t === "stitch").length;
+    expect(st).toBeGreaterThanOrEqual(plan.stitches);
+    expect(r.colors.length).toBe(2);
+    const p2 = planFromCmds(r.cmds, r.colors);
+    expect(Math.abs(p2.width - plan.width)).toBeLessThan(1);
+    expect(Math.abs(p2.height - plan.height)).toBeLessThan(1);
+    expect(p2.colorChanges).toBe(1);
+  });
+
+  it("ไฟล์จากร้าน .DST: base64 ไปกลับ + อ่านเป็นแผน", () => {
+    const pieces = [rect("a", 0, 0, 10, 4)];
+    const plan = buildPlan(pieces, defaultSettings(pieces, 30));
+    const bytes = buildDst(plan, "T");
+    const back = b64ToBytes(bytesToB64(bytes));
+    expect(back).toEqual(bytes);
+    const r = readShopFile(back, ["#123456"]);
+    expect(r.kind).toBe("dst");
+    expect(r.plan.stitches).toBe(readDst(bytes).stitches);
+    expect(r.plan.colors[0].color).toBe("#123456");
+    expect(() => readShopFile(new Uint8Array(10))).toThrow();
+  });
+});

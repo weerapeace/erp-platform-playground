@@ -17,6 +17,8 @@ import { skippedNote } from "@/components/block-print/shared";
 import { buildPlan, defaultSettings, startWidth, withSelection } from "@/lib/embroidery";
 import type { BlockPiece } from "@/lib/block-print";
 import { SelectStep, type PickResult } from "./select-step";
+import { readShopUpload } from "./shop-file";
+import { b64ToBytes, readShopFile, SHOP_ACCEPT } from "@/lib/embroidery-shop";
 import { API, api, designHref, fmtCm, fmtNum, nameFromFile, planStats, thaiDate, type Design, type DesignRow } from "./shared";
 
 export const SKIPPED_KEY = (id: string) => `embroidery-skipped:${id}`;
@@ -37,6 +39,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
   const toast = useToast();
   const canEdit = usePermission("embroidery.edit");
   const fileRef = useRef<HTMLInputElement>(null);
+  const shopRef = useRef<HTMLInputElement>(null);
   const [trash, setTrash] = useState(false);
   const [rows, setRows] = useState<DesignRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -66,6 +69,20 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
     }
   };
 
+  /** ไฟล์ที่ร้านตีบล็อกให้ (.DST/.PES) → สร้างงานที่มีแต่ไฟล์ร้าน (ไม่มีลายให้ระบบแปลง) */
+  const openShopFile = async (file: File) => {
+    setBusy(`กำลังอ่านไฟล์ ${file.name}…`);
+    try {
+      const f = await readShopUpload(file);
+      const plan = readShopFile(b64ToBytes(f.b64)).plan;
+      const d = await api<Design>(API, { json: { name: nameFromFile(file.name), source_file_name: file.name, parent_sku_id: parentId ?? null, pieces: [], shop_file: f, ...planStats(plan) } });
+      router.push(designHref(d.id));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ");
+      setBusy(null);
+    }
+  };
+
   /** หลังเลือกส่วน → สร้างงาน 1 งาน หรือแยกตามกลุ่ม */
   const createFrom = async (r: PickResult) => {
     const p = pending; if (!p) return;
@@ -77,7 +94,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
       for (let i = 0; i < sets.length; i++) {
         setBusy(`กำลังสร้างงาน ${sets.length > 1 ? `${i + 1}/${sets.length}` : ""}…`);
         const pieces = withSelection(p.pieces, sets[i].ids);
-        const settings = defaultSettings(pieces, startWidth(pieces));
+        const settings = defaultSettings(pieces, r.mode === "one" && r.widthMm ? r.widthMm : startWidth(pieces));
         const plan = buildPlan(pieces, settings);
         const name = sets.length > 1 ? `${base} – ${sets[i].label}` : base;
         const d = await api<Design>(API, { json: { name, source_file_name: p.file.name, parent_sku_id: parentId ?? null, pieces, settings, ...planStats(plan) } });
@@ -125,6 +142,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
     { id: "size", header: "ขนาด (ซม.)", size: 110, cell: ({ row }) => <span>{fmtCm(row.original.width_mm)} × {fmtCm(row.original.height_mm)}</span> },
     { accessorKey: "stitch_count", header: "ฝีเข็ม", size: 90, cell: ({ row }) => <span>{fmtNum(row.original.stitch_count)}</span> },
     { accessorKey: "color_count", header: "สี", size: 60 },
+    { id: "shop", header: "ไฟล์จากร้าน", size: 110, cell: ({ row }) => row.original.shop_file_name ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">มี .{row.original.shop_file_kind?.toUpperCase()}</span> : <span className="text-xs text-slate-300">—</span> },
     { id: "parent", header: "สินค้า", size: 180, cell: ({ row }) => <span className="text-xs text-slate-600">{row.original.parent ? `${row.original.parent.code} ${row.original.parent.name}` : "—"}</span> },
     { accessorKey: trash ? "deleted_at" : "updated_at", header: trash ? "ลบเมื่อ" : "แก้ล่าสุด", size: 150, cell: ({ row }) => <span className="text-xs text-slate-500">{thaiDate(trash ? row.original.deleted_at : row.original.updated_at)}</span> },
   ], [trash]);
@@ -145,7 +163,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
         {!parentId && (
           <div className="min-w-0 flex-1">
             <h1 className="flex items-center gap-2 text-xl font-semibold text-slate-900"><Icon name="thread" /> ไฟล์ปัก</h1>
-            <p className="mt-1 text-sm text-slate-500">เปิดโลโก้ .ai / .pdf / .svg → ตั้งชนิดฝีเข็มตามสี + ขนาดจริง → ดูตัวอย่างฝีเข็ม → ดาวน์โหลดไฟล์ .DST ส่งร้านปัก</p>
+            <p className="mt-1 text-sm text-slate-500">เปิดโลโก้ .ai / .pdf / .svg → ตั้งชนิดฝีเข็มตามสี + ขนาดจริง → ดูตัวอย่างฝีเข็ม → ดาวน์โหลดไฟล์ .DST ส่งร้านปัก · หรือเก็บไฟล์ที่ร้านตีบล็อกให้ ("ไฟล์จากร้าน")</p>
           </div>
         )}
         {parentId && <div className="min-w-0 flex-1 text-sm text-slate-500">ไฟล์ปักของสินค้านี้</div>}
@@ -159,8 +177,16 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
             <Icon name="upload" /> {busy ? "กำลังเปิด…" : "เปิดไฟล์โลโก้"}
           </button>
         )}
+        {canEdit && !trash && (
+          <button type="button" disabled={!!busy} onClick={() => shopRef.current?.click()} title="ไฟล์ .DST / .PES ที่ร้านปักทำให้"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-60">
+            <Icon name="upload" /> ไฟล์จากร้าน
+          </button>
+        )}
         <input ref={fileRef} type="file" accept={ART_ACCEPT} className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void openFile(f); }} />
+        <input ref={shopRef} type="file" accept={SHOP_ACCEPT} className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void openShopFile(f); }} />
       </div>
 
       {busy && <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700">{busy}</div>}

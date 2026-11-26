@@ -284,3 +284,43 @@ export function readPesSummary(bytes: Uint8Array): { pecAt: number; colors: numb
 
 /** ชื่อไฟล์ .pes (อังกฤษล้วน) */
 export const pesFileName = (dstName: string) => dstName.replace(/\.dst$/i, ".pes");
+
+/** สีด้าย Brother → "#rrggbb" */
+const pecHex = (t: Thread) => `#${[t.r, t.g, t.b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+
+/**
+ * อ่านฝีเข็มจากไฟล์ .PES (ส่วน PEC — ทุกเวอร์ชันมีเหมือนกัน) → คำสั่ง (มม. · แกน y ชี้ลง) + สีด้ายตามลำดับ
+ *   ใช้ดูภาพไฟล์ที่ร้านตีบล็อกให้ · ตัดด้าย/กระโดด อ่านเป็น "jump" ทั้งคู่
+ */
+export function readPes(bytes: Uint8Array): { label: string; cmds: Cmd[]; colors: string[] } {
+  if (bytes.length < 64 || String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) !== "#PES") throw new Error("ไม่ใช่ไฟล์ .PES");
+  const pecAt = bytes[8] | (bytes[9] << 8) | (bytes[10] << 16) | (bytes[11] << 24);
+  if (pecAt <= 0 || pecAt + 512 + 16 > bytes.length) throw new Error("ไฟล์ .PES ไม่ครบ");
+  const label = new TextDecoder("latin1").decode(bytes.slice(pecAt + 3, pecAt + 19)).trim();
+  const nColors = bytes[pecAt + 48] + 1;
+  const colors: string[] = [];
+  for (let k = 0; k < nColors; k++) { const t = PEC_THREADS[bytes[pecAt + 49 + k]] ?? null; colors.push(t ? pecHex(t) : "#333333"); }
+  const cmds: Cmd[] = [];
+  let i = pecAt + 512 + 16, x = 0, y = 0;
+  const readOne = (): { v: number; jump: boolean } => {
+    const b = bytes[i];
+    if (b & 0x80) {
+      let v = ((b & 0x0f) << 8) | bytes[i + 1];
+      if (v & 0x800) v -= 0x1000;
+      i += 2;
+      return { v, jump: (b & 0x30) !== 0 };
+    }
+    i += 1;
+    return { v: b & 0x40 ? b - 0x80 : b, jump: false };
+  };
+  while (i < bytes.length) {
+    const b = bytes[i];
+    if (b === 0xff && (bytes[i + 1] ?? 0) === 0x00) break;
+    if (b === 0xfe && bytes[i + 1] === 0xb0) { cmds.push({ t: "color", x: x / 10, y: y / 10 }); i += 3; continue; }
+    const dx = readOne(), dy = readOne();
+    x += dx.v; y += dy.v;
+    cmds.push({ t: dx.jump || dy.jump ? "jump" : "stitch", x: x / 10, y: y / 10 });
+  }
+  cmds.push({ t: "end", x: x / 10, y: y / 10 });
+  return { label, cmds, colors };
+}

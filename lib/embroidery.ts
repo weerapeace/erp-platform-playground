@@ -11,12 +11,14 @@
  *     skip  = ไม่ปัก
  *   ทุกบล็อกมีฝีล็อกด้ายต้น/ท้าย · ย้ายไกลเกิน 2 มม. = ล็อก → ตัดด้าย → กระโดด · เปลี่ยนสี = ล็อก → ตัดด้าย → เปลี่ยนสี
  *
- *   ⚠️ ข้อจำกัด (แปลงอัตโนมัติ ไม่ใช่คน digitize): ไม่มีฝีรองพื้น (underlay) · ซิกแซกทิศเดียวต่อชิ้น (ไม่เลี้ยวตามตัวอักษร)
+ *   ซิกแซกเลี้ยวตามเส้น + ขอบซิกแซกรอบพื้นถม = lib/embroidery-satin (ปิดได้ในค่าตั้ง satin_follow / border_mm)
+ *   ⚠️ ข้อจำกัด (แปลงอัตโนมัติ ไม่ใช่คน digitize): ฝีรองพื้นแบบง่าย
  *      · ไม่ตัดส่วนที่ซ้อนกันออก (สีที่ปักทีหลังทับสีก่อน) · ควรให้ร้านปักทดสอบก่อนทุกครั้ง
  *   หน่วยภายใน = มม. แกน y ชี้ลง (เหมือน lib/block-print) · DST = 0.1 มม. แกน y ชี้ขึ้น
  *   คู่มือ docs/embroidery.md
  */
 import { autoGroup, eachOp, OP, pieceShapes, type BlockPiece, type FillRule } from "@/lib/block-print";
+import { satinBorder, turningSatin } from "@/lib/embroidery-satin";
 
 export type Pt = [number, number];
 export type StitchType = "auto" | "fill" | "satin" | "run" | "skip";
@@ -45,10 +47,12 @@ export type EmbSettings = {
   /** ฝีรองพื้นอัตโนมัติ (ใต้ถมเต็ม/ซิกแซก) */ underlay: boolean;
   /** ย้ายไกลเกินนี้ (มม.) = ตัดด้าย · ใกล้กว่า = กระโดดไม่ตัด */ trim_at: number;
   /** สีพื้นผ้า (ภาพตัวอย่าง/ใบสั่งปัก) */ fabric: string;
+  /** ซิกแซกเลี้ยวตามเส้น (false = ทิศเดียวทั้งชิ้นแบบเดิม) */ satin_follow: boolean;
+  /** ขอบซิกแซกรอบพื้นถม กว้าง (มม.) · 0 = ไม่ใส่ */ border_mm: number;
 };
 
-export const DEFAULTS = { fill_spacing: 0.45, satin_spacing: 0.4, fill_len: 3.5, run_len: 2.5, pull_comp: 0.2, angle: 45, trim_at: 4, fabric: "#ffffff" };
-export const LIMITS = { width_min: 5, width_max: 400, spacing_min: 0.2, spacing_max: 2, len_min: 1, len_max: 7, comp_max: 1, trim_min: 2, trim_max: 12 };
+export const DEFAULTS = { fill_spacing: 0.45, satin_spacing: 0.4, fill_len: 3.5, run_len: 2.5, pull_comp: 0.2, angle: 45, trim_at: 4, fabric: "#ffffff", border_mm: 1.2 };
+export const LIMITS = { width_min: 5, width_max: 400, spacing_min: 0.2, spacing_max: 2, len_min: 1, len_max: 7, comp_max: 1, trim_min: 2, trim_max: 12, border_max: 4 };
 /** สีพื้นผ้าที่เลือกได้เร็ว */
 export const FABRICS: { hex: string; th: string }[] = [
   { hex: "#ffffff", th: "ขาว" }, { hex: "#f3ead8", th: "ครีม" }, { hex: "#c8a97e", th: "กากี" }, { hex: "#7a4a2a", th: "น้ำตาล" },
@@ -87,7 +91,7 @@ export function defaultSettings(pieces: BlockPiece[], widthMm: number): EmbSetti
     width_mm: clamp(r2(widthMm || 80), LIMITS.width_min, LIMITS.width_max),
     fill_spacing: DEFAULTS.fill_spacing, satin_spacing: DEFAULTS.satin_spacing, fill_len: DEFAULTS.fill_len,
     run_len: DEFAULTS.run_len, pull_comp: DEFAULTS.pull_comp, colors, color_order: colorsOf(pieces), piece_types: {},
-    underlay: true, trim_at: DEFAULTS.trim_at, fabric: DEFAULTS.fabric,
+    underlay: true, trim_at: DEFAULTS.trim_at, fabric: DEFAULTS.fabric, satin_follow: true, border_mm: DEFAULTS.border_mm,
   };
 }
 
@@ -122,6 +126,8 @@ export function cleanSettings(raw: unknown, pieces: BlockPiece[]): EmbSettings {
     underlay: o.underlay !== false,
     trim_at: clamp(num(o.trim_at, DEFAULTS.trim_at), LIMITS.trim_min, LIMITS.trim_max),
     fabric: typeof o.fabric === "string" && /^#[0-9a-f]{6}$/i.test(o.fabric) ? o.fabric.toLowerCase() : DEFAULTS.fabric,
+    satin_follow: o.satin_follow !== false,
+    border_mm: r2(clamp(num(o.border_mm, DEFAULTS.border_mm), 0, LIMITS.border_max)),
   };
 }
 
@@ -311,17 +317,24 @@ function rowBlocks(rings: Pt[][], fill: FillRule, deg: number, spacing: number, 
  *   ฝีรองพื้น (underlay): ถมเต็ม = แถวห่าง 2.5 มม. ตั้งฉากกับแถวจริง หดจากขอบ 0.5 มม. · ซิกแซก = ซิกแซกห่าง 1.6 มม. หดจากขอบ 0.4 มม.
  *   ส่วนแคบกว่า ~1.2 มม. ไม่ใส่ฝีรองพื้น (หดแล้วไม่เหลือ)
  */
-export function pieceBlocks(rings: Pt[][], fill: FillRule, type: ResolvedType, st: EmbSettings, angleDeg: number): { under: Pt[][]; top: Pt[][] } {
-  if (type === "skip" || !rings.length) return { under: [], top: [] };
-  if (type === "run") return { under: [], top: rings.map((r) => runRing(r, st.run_len)) };
+export function pieceBlocks(rings: Pt[][], fill: FillRule, type: ResolvedType, st: EmbSettings, angleDeg: number): { under: Pt[][]; top: Pt[][]; edge: Pt[][] } {
+  if (type === "skip" || !rings.length) return { under: [], top: [], edge: [] };
+  if (type === "run") return { under: [], top: rings.map((r) => runRing(r, st.run_len)), edge: [] };
   const satin = type === "satin";
+  const width = meanWidth(rings);
+  if (satin && st.satin_follow !== false) {
+    const t = turningSatin(rings, fill, { spacing: st.satin_spacing, comp: st.pull_comp, underlay: st.underlay, meanWidth: width });
+    if (t) return { ...t, edge: [] };
+  }
+  // ขอบซิกแซกรอบพื้นถม: เฉพาะชิ้นที่กว้างพอ (≥ 3 เท่าของขอบ) ไม่งั้นขอบกินทั้งชิ้น
+  const edge = !satin && (st.border_mm ?? 0) > 0 && width >= st.border_mm * 3 ? satinBorder(rings, fill, { width: st.border_mm, spacing: st.satin_spacing, comp: st.pull_comp }) : [];
   // satin: ฝีขวางแนวยาวของชิ้น = แถววางตั้งฉากกับแนวยาว
   const deg = satin ? mainAxisDeg(rings) + 90 : angleDeg;
   const top = rowBlocks(rings, fill, deg, satin ? st.satin_spacing : st.fill_spacing, satin ? SATIN_SPLIT : st.fill_len, st.pull_comp, !satin);
   const under = !st.underlay ? []
     : satin ? rowBlocks(rings, fill, deg, 1.6, SATIN_SPLIT, -0.4, false, 0.4)
     : rowBlocks(rings, fill, deg + 90, 2.5, st.fill_len, -0.5, false, 0.5);
-  return { under, top };
+  return { under, top, edge };
 }
 
 // ───────── แผนการปักทั้งงาน ─────────
@@ -441,7 +454,7 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
       // ชิ้นแรกของสี = มุมซ้ายบนสุด (เริ่มจากกลางงานแล้วต้องย้อนกลับ = ตัดด้ายเพิ่ม) · ชิ้นต่อไป = ใกล้เข็มที่สุด
       if (!colorStarted) todo.forEach((t, i) => { const d = t.pb.x + t.pb.y; if (d < bd) { bd = d; bi = i; } });
       else todo.forEach((t, i) => {
-        const all = [...t.blocks.under, ...t.blocks.top];
+        const all = [...t.blocks.under, ...t.blocks.top, ...t.blocks.edge];
         if (!all.length) { if (bd > 1e9) { bd = 1e9; bi = i; } return; }
         const d = Math.min(...all.map((b) => Math.min(dist(b[0]), dist(b[b.length - 1]))));
         if (d < bd) { bd = d; bi = i; }
@@ -449,8 +462,10 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
       const t = todo.splice(bi, 1)[0];
       const pStart = stitches, cFrom = cmds.length;
       const under = nearestOrder(t.blocks.under, pos);
-      const top = nearestOrder(t.blocks.top, under.length ? under[under.length - 1][under[under.length - 1].length - 1] : pos);
-      for (const blk of [...under, ...top]) {
+      const endOf = (bs: Pt[][], d: Pt) => (bs.length ? bs[bs.length - 1][bs[bs.length - 1].length - 1] : d);
+      const top = nearestOrder(t.blocks.top, endOf(under, pos));
+      const edge = nearestOrder(t.blocks.edge, endOf(top, endOf(under, pos)));
+      for (const blk of [...under, ...top, ...edge]) {
         travel(blk[0], blk[1] ?? blk[0], !colorStarted && !first);
         colorStarted = true;
         for (let i = 1; i < blk.length; i++) { last = pos; stitchTo(blk[i]); }

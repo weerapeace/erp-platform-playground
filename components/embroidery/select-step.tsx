@@ -10,9 +10,14 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useCanvasZoom, zoomLabel } from "@/components/block-print/use-zoom";
 import { opsToSvgPath, pieceShapes, type BlockPiece } from "@/lib/block-print";
-import { designBox, pickGroups, pieceColor, type PickGroup } from "@/lib/embroidery";
+import { designBox, meanWidth, pickGroups, pieceColor, pieceRings, type PickGroup } from "@/lib/embroidery";
+import { sizeAdvice } from "@/lib/embroidery-satin";
 
-export type PickResult = { mode: "one"; on: string[] } | { mode: "split"; sets: { ids: string[]; label: string }[] };
+/** widthMm = กว้างที่จะปัก (ติ๊ก "ตั้งขนาดตามที่แนะนำ") · ไม่ใส่ = ระบบตั้งเอง */
+export type PickResult = { mode: "one"; on: string[]; widthMm?: number } | { mode: "split"; sets: { ids: string[]; label: string }[] };
+/** ขนาดที่สร้างงานใช้เมื่อไม่ได้ตั้งเอง (เท่ากับ startWidth ของ lib/embroidery) */
+const autoWidth = (w: number) => Math.min(120, Math.max(30, w));
+const MAX_SENSIBLE = 300;
 
 const fmt = (mm: number) => (mm / 10).toFixed(1);
 
@@ -70,8 +75,21 @@ export function SelectStep({ open, pieces, initialOn, allowSplit = true, onCance
     setDrag(null);
   };
 
+  // ตรวจลายก่อนปัก: เส้นบางสุดในส่วนที่เลือก → ต้องปักกว้างอย่างน้อยเท่าไหร่
+  const advice = useMemo(() => {
+    if (!sel.length || selBox.w <= 0) return null;
+    const minSize = selBox.w * 0.015;
+    const widths = sel.filter((p) => Math.max(p.ow, p.oh) >= minSize).map((p) => meanWidth(pieceRings(p, 1, { x: 0, y: 0 })));
+    const a = sizeAdvice(widths, selBox.w);
+    if (!a) return null;
+    const planned = autoWidth(selBox.w);
+    return { ...a, planned, strokeAtPlanned: a.thinFile * (planned / selBox.w) };
+  }, [sel, selBox.w]);
+  const [useAdvice, setUseAdvice] = useState(false);
+  const canAdvise = !!advice && advice.minWidthMm > advice.planned && advice.minWidthMm <= MAX_SENSIBLE;
+
   const label = (g: PickGroup, i: number) => `กลุ่ม ${i + 1}`;
-  const finishOne = () => onDone({ mode: "one", on: [...on] });
+  const finishOne = () => onDone({ mode: "one", on: [...on], ...(useAdvice && canAdvise && advice ? { widthMm: advice.minWidthMm } : {}) });
   const finishSplit = () => onDone({ mode: "split", sets: pickedGroups.map((g) => ({ ids: g.ids.filter((id) => on.has(id)), label: label(g, groups.indexOf(g)) })) });
 
   return (
@@ -156,6 +174,22 @@ export function SelectStep({ open, pieces, initialOn, allowSplit = true, onCance
             <button type="button" onClick={() => setOn(new Set())} className="rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50">ล้าง</button>
             <button type="button" onClick={() => setOn(new Set(groups.filter((g) => g.on).flatMap((g) => g.ids)))} className="rounded border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50"><Icon name="refresh" /> ที่ระบบแนะนำ</button>
           </div>
+          {advice && (() => {
+            const s = advice.strokeAtPlanned;
+            const tone = s >= 1.5 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : s >= 0.8 ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800";
+            return (
+              <div className={`rounded-lg border p-2 text-[11px] leading-relaxed ${tone}`}>
+                <div className="font-medium">ตรวจลายก่อนปัก</div>
+                ถ้าปักกว้าง {fmt(advice.planned)} ซม. เส้นที่บางสุดจะหนา ~{s.toFixed(1)} มม. {s >= 1.5 ? "— ปักได้ชัด" : s >= 0.8 ? "— อาจไม่ชัด (ควร ≥ 1.5 มม.)" : "— บางเกิน ปักไม่ขึ้น"}
+                {s < 1.5 && (advice.minWidthMm <= MAX_SENSIBLE
+                  ? <> · ควรปักกว้างอย่างน้อย <b>{fmt(advice.minWidthMm)} ซม.</b></>
+                  : <> · ต้องขยายถึง {fmt(advice.minWidthMm)} ซม. ซึ่งใหญ่เกินจะปักจริง → ทำเส้น/ตัวหนังสือให้หนาขึ้นในไฟล์ หรือไม่ปักส่วนที่เล็ก</>)}
+                {canAdvise && pickedGroups.length < 2 && (
+                  <label className="mt-1 flex items-center gap-1.5 font-medium"><input type="checkbox" checked={useAdvice} onChange={(e) => setUseAdvice(e.target.checked)} /> ตั้งขนาดตามที่แนะนำ ({fmt(advice.minWidthMm)} ซม.)</label>
+                )}
+              </div>
+            );
+          })()}
           {allowSplit && pickedGroups.length >= 2 && (
             <p className="rounded-lg bg-slate-50 p-2 text-[11px] text-slate-600">เลือกไว้ {pickedGroups.length} กลุ่ม — ถ้าเป็นโลโก้คนละจุด (เช่น หน้า/หลัง) กด "แยกเป็น {pickedGroups.length} งาน" ร้านจะได้ไฟล์แยกกัน</p>
           )}

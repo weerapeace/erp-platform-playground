@@ -1,0 +1,394 @@
+/**
+ * 🧵 ไฟล์ปัก — ซิกแซกเลี้ยวตามเส้น + ขอบซิกแซกรอบพื้นถม (ใช้คู่กับ lib/embroidery.ts)
+ *
+ *   ซิกแซกเลี้ยวตามเส้น (turningSatin):
+ *     1) วาดชิ้นลงตารางจุดเล็ก ๆ (~1/6 ของความกว้างเส้น)
+ *     2) หาระยะถึงขอบของทุกจุด + บีบชิ้นให้เหลือ "เส้นกลาง" หนา 1 จุด (Zhang-Suen)
+ *     3) ตัดกิ่งสั้นที่งอกตามมุม · ต่อเส้นกลางเป็นเส้นยาวที่สุด (เลี้ยวไม่หักเกิน 90°)
+ *     4) เดินตามเส้นกลางทีละ ½ ระยะฝี ยิงเส้นตั้งฉากไปชนขอบทั้งสองข้าง → ฝีสลับซ้าย/ขวา
+ *     ฝีรองพื้น = เดินเส้นกลาง · ทำไม่ได้ (ชิ้นเล็กเกิน/รูปแปลก) → คืน null ให้ใช้ซิกแซกทิศเดียวแบบเดิม
+ *
+ *   ขอบซิกแซกรอบพื้นถม (satinBorder): เดินรอบขอบทุกวง ซิกแซกกว้าง bw มม. คร่อมขอบเข้าด้านใน (แบบอาร์มติดเสื้อ)
+ *
+ *   หน่วย = มม. · ไม่มีหน้าจอ (ใช้ได้ทั้งเบราว์เซอร์และเทสต์)
+ */
+import type { FillRule } from "@/lib/block-print";
+import type { Pt } from "@/lib/embroidery";
+
+/** ซิกแซกกว้างกว่านี้ แบ่งฝีกลางทาง (เหมือน SATIN_SPLIT ของ lib/embroidery) */
+const SPLIT = 8;
+const MAX_CELLS = 260_000;
+
+type Grid = { w: number; h: number; cell: number; x0: number; y0: number; on: Uint8Array };
+
+/** ช่วงที่อยู่ในชิ้นของเส้นแนวนอน y (ตามกฎเติมสี) */
+function spansAt(rings: Pt[][], fill: FillRule, y: number): [number, number][] {
+  const xs: { x: number; dir: number }[] = [];
+  for (const r of rings) for (let k = 0; k < r.length; k++) {
+    const a = r[k], b = r[(k + 1) % r.length];
+    if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) xs.push({ x: a[0] + ((y - a[1]) / (b[1] - a[1])) * (b[0] - a[0]), dir: b[1] > a[1] ? 1 : -1 });
+  }
+  xs.sort((p, q) => p.x - q.x);
+  const out: [number, number][] = [];
+  let w = 0, start = 0;
+  for (const e of xs) {
+    const was = fill === "evenodd" ? w % 2 !== 0 : w !== 0;
+    w += fill === "evenodd" ? 1 : e.dir;
+    const now = fill === "evenodd" ? w % 2 !== 0 : w !== 0;
+    if (!was && now) start = e.x;
+    else if (was && !now) out.push([start, e.x]);
+  }
+  return out;
+}
+
+/** จุด (x,y) อยู่ในชิ้นไหม (ตามกฎเติมสี) */
+export function insideShape(rings: Pt[][], fill: FillRule, x: number, y: number): boolean {
+  return spansAt(rings, fill, y).some(([a, b]) => x >= a && x <= b);
+}
+
+function rasterize(rings: Pt[][], fill: FillRule, cellWanted: number): Grid | null {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const r of rings) for (const p of r) { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); }
+  if (!Number.isFinite(x0)) return null;
+  let cell = cellWanted;
+  const cellsFor = (c: number) => (Math.ceil((x1 - x0) / c) + 4) * (Math.ceil((y1 - y0) / c) + 4);
+  while (cellsFor(cell) > MAX_CELLS) cell *= 1.25;
+  const w = Math.ceil((x1 - x0) / cell) + 4, h = Math.ceil((y1 - y0) / cell) + 4;
+  const gx = x0 - 2 * cell, gy = y0 - 2 * cell;
+  const on = new Uint8Array(w * h);
+  for (let j = 0; j < h; j++) {
+    const y = gy + (j + 0.5) * cell;
+    for (const [a, b] of spansAt(rings, fill, y)) {
+      const c0 = Math.max(0, Math.ceil((a - gx) / cell - 0.5)), c1 = Math.min(w - 1, Math.floor((b - gx) / cell - 0.5));
+      for (let i = c0; i <= c1; i++) on[j * w + i] = 1;
+    }
+  }
+  return { w, h, cell, x0: gx, y0: gy, on };
+}
+
+/** ระยะถึงจุดนอกชิ้นที่ใกล้สุด (หน่วยช่อง · ประมาณแบบ 2 รอบ) */
+function distanceField(g: Grid): Float32Array {
+  const { w, h, on } = g;
+  const d = new Float32Array(w * h);
+  const INF = 1e9, D = Math.SQRT2;
+  for (let i = 0; i < d.length; i++) d[i] = on[i] ? INF : 0;
+  for (let y = 1; y < h; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x; if (!d[i]) continue;
+    d[i] = Math.min(d[i], d[i - 1] + 1, d[i - w] + 1, d[i - w - 1] + D, d[i - w + 1] + D);
+  }
+  for (let y = h - 2; y >= 0; y--) for (let x = w - 2; x >= 1; x--) {
+    const i = y * w + x; if (!d[i]) continue;
+    d[i] = Math.min(d[i], d[i + 1] + 1, d[i + w] + 1, d[i + w + 1] + D, d[i + w - 1] + D);
+  }
+  return d;
+}
+
+/** บีบให้เหลือเส้นกลางหนา 1 ช่อง (Zhang-Suen) */
+function thin(g: Grid): Uint8Array {
+  const { w, h } = g;
+  const img = g.on.slice();
+  const del: number[] = [];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let step = 0; step < 2; step++) {
+      del.length = 0;
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x; if (!img[i]) continue;
+        const p2 = img[i - w], p3 = img[i - w + 1], p4 = img[i + 1], p5 = img[i + w + 1], p6 = img[i + w], p7 = img[i + w - 1], p8 = img[i - 1], p9 = img[i - w - 1];
+        const B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+        if (B < 2 || B > 6) continue;
+        const seq = [p2, p3, p4, p5, p6, p7, p8, p9, p2];
+        let A = 0; for (let k = 0; k < 8; k++) if (!seq[k] && seq[k + 1]) A++;
+        if (A !== 1) continue;
+        if (step === 0 ? (p2 * p4 * p6 || p4 * p6 * p8) : (p2 * p4 * p8 || p2 * p6 * p8)) continue;
+        del.push(i);
+      }
+      for (const i of del) img[i] = 0;
+      if (del.length) changed = true;
+    }
+  }
+  return img;
+}
+
+/** เพื่อนบ้านของจุดเส้นกลาง — แนวทแยงนับเฉพาะเมื่อไม่มีทางอ้อมผ่านแนวตรง (กันจุดแยกปลอมตรงขั้นบันได) */
+function neighbors(sk: Uint8Array, w: number, i: number): number[] {
+  const N = sk[i - w], S = sk[i + w], E = sk[i + 1], W = sk[i - 1];
+  const out: number[] = [];
+  if (N) out.push(i - w); if (S) out.push(i + w); if (E) out.push(i + 1); if (W) out.push(i - 1);
+  if (sk[i - w + 1] && !N && !E) out.push(i - w + 1);
+  if (sk[i - w - 1] && !N && !W) out.push(i - w - 1);
+  if (sk[i + w + 1] && !S && !E) out.push(i + w + 1);
+  if (sk[i + w - 1] && !S && !W) out.push(i + w - 1);
+  return out;
+}
+
+type Edge = { pts: number[]; a: number; b: number; used?: boolean };
+
+/** เส้นกลาง → เส้นเชื่อมระหว่างจุดปลาย/จุดแยก (วงปิดที่ไม่มีจุดแยก = 1 เส้น a = b) */
+function edgesOf(sk: Uint8Array, w: number): Edge[] {
+  const deg = new Map<number, number[]>();
+  for (let i = 0; i < sk.length; i++) if (sk[i]) deg.set(i, neighbors(sk, w, i));
+  const isNode = (i: number) => (deg.get(i)?.length ?? 0) !== 2;
+  const seen = new Set<string>();
+  const key = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+  const edges: Edge[] = [];
+  const walk = (start: number, next: number) => {
+    const pts = [start];
+    let prev = start, cur = next;
+    seen.add(key(prev, cur));
+    for (;;) {
+      pts.push(cur);
+      if (isNode(cur) || cur === start) break;
+      const nx = (deg.get(cur) ?? []).find((n) => n !== prev && !seen.has(key(cur, n)));
+      if (nx == null) break;
+      seen.add(key(cur, nx)); prev = cur; cur = nx;
+    }
+    edges.push({ pts, a: start, b: cur });
+  };
+  for (const [i, ns] of deg) if (isNode(i)) for (const n of ns) if (!seen.has(key(i, n))) walk(i, n);
+  // วงปิดล้วน (ไม่มีจุดแยกเลย)
+  for (const [i, ns] of deg) if (!isNode(i) && ns.some((n) => !seen.has(key(i, n)))) walk(i, ns.find((n) => !seen.has(key(i, n)))!);
+  // จุดเดี่ยว
+  for (const [i, ns] of deg) if (!ns.length) edges.push({ pts: [i], a: i, b: i });
+  return edges;
+}
+
+/** ตัดกิ่งสั้นที่งอกจากจุดแยก (เกิดตามมุมของตัวหนังสือ) */
+function prune(sk: Uint8Array, w: number, dist: Float32Array) {
+  for (let pass = 0; pass < 3; pass++) {
+    const edges = edgesOf(sk, w);
+    const degOf = (i: number) => neighbors(sk, w, i).length;
+    let removed = 0;
+    for (const e of edges) {
+      if (e.a === e.b) continue;
+      const da = degOf(e.a), db = degOf(e.b);
+      if (!((da === 1 && db >= 3) || (db === 1 && da >= 3))) continue;
+      const junction = da >= 3 ? e.a : e.b;
+      if (e.pts.length < Math.max(3, dist[junction] * 1.6)) {
+        for (const p of e.pts) if (p !== junction) sk[p] = 0;
+        removed++;
+      }
+    }
+    if (!removed) break;
+  }
+}
+
+/** ต่อเส้นเชื่อมเป็นเส้นยาว (ที่จุดแยกเลือกทางที่ตรงที่สุด ไม่หักเกิน 90°) */
+function chain(edges: Edge[], w: number): number[][] {
+  const at = new Map<number, Edge[]>();
+  for (const e of edges) { if (e.a === e.b && e.pts.length > 2) continue; for (const n of [e.a, e.b]) at.set(n, [...(at.get(n) ?? []), e]); }
+  const xy = (i: number): Pt => [i % w, Math.floor(i / w)];
+  const dir = (pts: number[], fromEnd: boolean): Pt => {
+    const k = Math.min(pts.length - 1, 6);
+    const [a, b] = fromEnd ? [xy(pts[pts.length - 1 - k]), xy(pts[pts.length - 1])] : [xy(pts[k]), xy(pts[0])];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    return [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
+  };
+  const paths: number[][] = [];
+  // เริ่มจากเส้นที่ปลายด้านหนึ่งเป็นปลายเปิด (ปักต่อเนื่องได้ยาวสุด) · ที่เหลือค่อยตามมา
+  const order = [...edges].sort((p, q) => Number((at.get(q.a)?.length ?? 0) === 1 || (at.get(q.b)?.length ?? 0) === 1) - Number((at.get(p.a)?.length ?? 0) === 1 || (at.get(p.b)?.length ?? 0) === 1) || q.pts.length - p.pts.length);
+  for (const e0 of order) {
+    if (e0.used) continue;
+    e0.used = true;
+    let path = (at.get(e0.b)?.length ?? 0) === 1 && (at.get(e0.a)?.length ?? 0) !== 1 ? [...e0.pts].reverse() : [...e0.pts];
+    if (e0.a === e0.b) { paths.push(path); continue; }
+    for (;;) {
+      const end = path[path.length - 1];
+      const d = dir(path, true);
+      let best: Edge | null = null, bestCos = 0;
+      for (const e of at.get(end) ?? []) {
+        if (e.used) continue;
+        const pts = e.a === end ? e.pts : [...e.pts].reverse();
+        // ทิศออกจากจุดแยก (ใช้จุดถัด ๆ ไปของเส้นใหม่)
+        const k = Math.min(pts.length - 1, 6);
+        const p0 = xy(pts[0]), pk = xy(pts[k]);
+        const L = Math.hypot(pk[0] - p0[0], pk[1] - p0[1]) || 1;
+        const c = (d[0] * (pk[0] - p0[0]) + d[1] * (pk[1] - p0[1])) / L;
+        if (c > bestCos) { bestCos = c; best = e; }
+      }
+      if (!best) break;
+      best.used = true;
+      const pts = best.a === end ? best.pts : [...best.pts].reverse();
+      path = path.concat(pts.slice(1));
+    }
+    paths.push(path);
+  }
+  return paths;
+}
+
+const smooth = (pts: Pt[], r: number, closed: boolean): Pt[] => {
+  if (r < 1 || pts.length < 3) return pts;
+  return pts.map((_, i) => {
+    let sx = 0, sy = 0, n = 0;
+    for (let k = -r; k <= r; k++) {
+      let j = i + k;
+      if (closed) j = (j + pts.length) % pts.length; else if (j < 0 || j >= pts.length) continue;
+      sx += pts[j][0]; sy += pts[j][1]; n++;
+    }
+    // ปลายเส้นเปิด: ค่อย ๆ ลดการเกลี่ย (ไม่ให้ปลายหดเข้า)
+    if (!closed && (i < r || i >= pts.length - r)) { const t = Math.min(i, pts.length - 1 - i) / r; return [pts[i][0] * (1 - t) + (sx / n) * t, pts[i][1] * (1 - t) + (sy / n) * t] as Pt; }
+    return [sx / n, sy / n] as Pt;
+  });
+};
+
+/** จุดทุก ๆ step มม. ตามแนวเส้น */
+function resample(pts: Pt[], step: number, closed: boolean): Pt[] {
+  const src = closed ? [...pts, pts[0]] : pts;
+  const out: Pt[] = [src[0]];
+  let carry = 0;
+  for (let i = 1; i < src.length; i++) {
+    const a = src[i - 1], b = src[i];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    let t = step - carry;
+    while (t <= L) { out.push([a[0] + ((b[0] - a[0]) * t) / L, a[1] + ((b[1] - a[1]) * t) / L]); t += step; }
+    carry = L - (t - step);
+  }
+  if (!closed) { const last = src[src.length - 1], o = out[out.length - 1]; if (Math.hypot(last[0] - o[0], last[1] - o[1]) > step * 0.3) out.push(last); }
+  return out;
+}
+
+/** ยิงเส้นจาก p ทิศ n ไปชนขอบใกล้สุด (ไม่เกิน max) → ระยะ หรือ null */
+function rayHit(rings: Pt[][], p: Pt, n: Pt, max: number): number | null {
+  let best: number | null = null;
+  for (const r of rings) for (let k = 0; k < r.length; k++) {
+    const a = r[k], b = r[(k + 1) % r.length];
+    const ex = b[0] - a[0], ey = b[1] - a[1];
+    const den = n[0] * ey - n[1] * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const ax = a[0] - p[0], ay = a[1] - p[1];
+    const t = (ax * ey - ay * ex) / den;
+    const u = (ax * n[1] - ay * n[0]) / den;
+    if (t > 1e-4 && t <= max && u >= 0 && u <= 1 && (best == null || t < best)) best = t;
+  }
+  return best;
+}
+
+const tangents = (pts: Pt[], reach: number, closed: boolean): Pt[] => pts.map((_, i) => {
+  const j0 = closed ? (i - reach + pts.length) % pts.length : Math.max(0, i - reach);
+  const j1 = closed ? (i + reach) % pts.length : Math.min(pts.length - 1, i + reach);
+  const dx = pts[j1][0] - pts[j0][0], dy = pts[j1][1] - pts[j0][1];
+  const L = Math.hypot(dx, dy) || 1;
+  return [dx / L, dy / L];
+});
+
+/** ขาซิกแซก A→B ยาวเกิน SPLIT → เพิ่มฝีกลางทาง */
+function pushLeg(out: Pt[], q: Pt) {
+  const last = out[out.length - 1];
+  if (last) {
+    const L = Math.hypot(q[0] - last[0], q[1] - last[1]);
+    if (L > SPLIT) { const n = Math.ceil(L / SPLIT); for (let k = 1; k < n; k++) out.push([last[0] + ((q[0] - last[0]) * k) / n, last[1] + ((q[1] - last[1]) * k) / n]); }
+  }
+  out.push(q);
+}
+
+/**
+ * ซิกแซกเลี้ยวตามเส้น · spacing = ระยะฝีซิกแซก (มม.) · comp = ชดเชยผ้าหด (มม. ต่อข้าง) · underlay = ใส่ฝีเดินเส้นกลางก่อน
+ * คืน null = ทำไม่ได้ (ให้ใช้ซิกแซกทิศเดียวแทน)
+ */
+export function turningSatin(rings: Pt[][], fill: FillRule, opts: { spacing: number; comp: number; underlay: boolean; meanWidth: number }): { under: Pt[][]; top: Pt[][] } | null {
+  const mw = Math.max(0.3, opts.meanWidth);
+  const g = rasterize(rings, fill, Math.min(0.25, Math.max(0.03, mw / 7)));
+  if (!g) return null;
+  const dist = distanceField(g);
+  const sk = thin(g);
+  prune(sk, g.w, dist);
+  const edges = edgesOf(sk, g.w);
+  if (!edges.length) return null;
+  const paths = chain(edges, g.w);
+  // ชิ้นทรงก้อน (วงกลม/จุด) ไม่มีแนวเส้นให้เลี้ยวตาม → ฝีจะแผ่เป็นดาว · ให้ใช้ซิกแซกทิศเดียวแทน
+  let maxD = 0; for (let i = 0; i < dist.length; i++) if (dist[i] > maxD) maxD = dist[i];
+  const skelLen = paths.reduce((s, p) => s + p.length, 0) * g.cell;
+  if (skelLen < maxD * g.cell * 2 * 2.2) return null;
+  const toMm = (i: number): Pt => [g.x0 + ((i % g.w) + 0.5) * g.cell, g.y0 + (Math.floor(i / g.w) + 0.5) * g.cell];
+  const dAt = (p: Pt) => {
+    const x = Math.floor((p[0] - g.x0) / g.cell), y = Math.floor((p[1] - g.y0) / g.cell);
+    if (x < 0 || y < 0 || x >= g.w || y >= g.h) return 0;
+    return dist[y * g.w + x] * g.cell;
+  };
+  const top: Pt[][] = [], under: Pt[][] = [];
+  const half = opts.spacing / 2;
+  for (const path of paths) {
+    const closed = path.length > 3 && path[0] === path[path.length - 1];
+    let pts = path.map(toMm);
+    if (closed) pts = pts.slice(0, -1);
+    const lenMm = pts.reduce((s, p, i) => (i ? s + Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0), 0);
+    if (lenMm < Math.max(0.3, mw * 0.3) && paths.length > 1) continue;   // เศษสั้น (ส่วนอื่นปักทับแล้ว)
+    pts = smooth(pts, Math.max(1, Math.min(10, Math.round(mw / (2 * g.cell)))), closed);
+    // ปลายเปิด: ยืดออกตามทิศเส้นเกือบถึงปลายจริง (เส้นกลางสั้นกว่าเส้นจริงราวครึ่งความกว้าง)
+    if (!closed && pts.length >= 2) {
+      const ext = (a: Pt, b: Pt) => { const L = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, d = dAt(a) * 0.8; return [a[0] + ((a[0] - b[0]) / L) * d, a[1] + ((a[1] - b[1]) / L) * d] as Pt; };
+      const k = Math.min(pts.length - 1, 3);
+      pts = [ext(pts[0], pts[k]), ...pts, ext(pts[pts.length - 1], pts[pts.length - 1 - k])];
+    }
+    // เดินทีละช่วงสั้น ๆ แล้ว "ปักเมื่อขอบด้านใดด้านหนึ่งขยับครบ ½ ระยะฝี" — ทางโค้งด้านนอกยังแน่นเท่าทางตรง (ด้านในซ้อนกันได้ ปกติของซิกแซก)
+    const fine = half / 4;
+    const samples = resample(pts, fine, closed);
+    if (samples.length < 2) continue;
+    const tan = tangents(samples, Math.max(1, Math.round(mw / fine / 2)), closed);
+    const blk: Pt[] = [];
+    let side = 0;
+    let lastA: Pt | null = null, lastB: Pt | null = null;
+    samples.forEach((p, i) => {
+      const n: Pt = [-tan[i][1], tan[i][0]];
+      const cap = Math.max(dAt(p) * 1.6 + g.cell, 0.3);
+      const sp = rayHit(rings, p, n, cap * 2), sm = rayHit(rings, p, [-n[0], -n[1]], cap * 2);
+      if (sp == null || sm == null) return;
+      const a = Math.min(sp, cap), b = Math.min(sm, cap);
+      if (a + b < 0.25) return;
+      const A: Pt = [p[0] + n[0] * (a + opts.comp), p[1] + n[1] * (a + opts.comp)];
+      const B: Pt = [p[0] - n[0] * (b + opts.comp), p[1] - n[1] * (b + opts.comp)];
+      const moved = lastA && lastB ? Math.max(Math.hypot(A[0] - lastA[0], A[1] - lastA[1]), Math.hypot(B[0] - lastB[0], B[1] - lastB[1])) : Infinity;
+      if (moved < half && i !== samples.length - 1) return;
+      pushLeg(blk, side === 0 ? A : B);
+      lastA = A; lastB = B;
+      side ^= 1;
+    });
+    if (blk.length < 2) continue;
+    top.push(blk);
+    if (opts.underlay && mw >= 1.2 && lenMm >= 1) under.push(resample(pts, 2, closed).concat(closed ? [pts[0]] : []));
+  }
+  if (!top.length) return null;
+  return { under, top };
+}
+
+/**
+ * ขอบซิกแซกรอบพื้นถม (แบบอาร์ม) · bw = ความกว้างขอบ (มม.) · ปักทับขอบเข้าด้านใน + เกินขอบออกไปนิด (comp) กันเห็นผ้า
+ * วงที่สั้น/แคบเกิน (ปักแล้วซิกแซกไขว้กัน) ข้าม
+ */
+export function satinBorder(rings: Pt[][], fill: FillRule, opts: { width: number; spacing: number; comp: number }): Pt[][] {
+  const bw = opts.width;
+  const out: Pt[][] = [];
+  const half = opts.spacing / 2;
+  for (const ring of rings) {
+    let per = 0; for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+    if (per < bw * 6) continue;
+    const pts = smooth(resample(ring, Math.min(0.5, bw / 3), true), 1, true);
+    const samples = resample(pts, half, true);
+    const tan = tangents(samples, Math.max(1, Math.round(bw / half / 2)), true);
+    // ด้านในของวงนี้: ลองจุดกลางวงสัก 2-3 จุด
+    let inSign = 1;
+    { let votes = 0; for (let k = 0; k < samples.length; k += Math.max(1, Math.floor(samples.length / 7))) { const n: Pt = [-tan[k][1], tan[k][0]]; const d = Math.min(0.3, bw / 2); votes += insideShape(rings, fill, samples[k][0] + n[0] * d, samples[k][1] + n[1] * d) ? 1 : -1; } inSign = votes >= 0 ? 1 : -1; }
+    const blk: Pt[] = [];
+    samples.forEach((p, i) => {
+      const n: Pt = [-tan[i][1] * inSign, tan[i][0] * inSign];
+      const depth = Math.min(bw, rayHit(rings, p, n, bw * 2) ?? bw);
+      const q: Pt = i % 2 === 0 ? [p[0] - n[0] * opts.comp, p[1] - n[1] * opts.comp] : [p[0] + n[0] * depth, p[1] + n[1] * depth];
+      blk.push(q);
+    });
+    if (blk.length > 2) { blk.push(blk[0]); out.push(blk); }
+  }
+  return out;
+}
+
+/**
+ * ตรวจลายก่อนปัก: เส้นบางสุดในไฟล์ (มม. ในไฟล์) → ต้องปักกว้างอย่างน้อยเท่าไหร่ ให้เส้นหนา ≥ minStroke
+ *   widths = ความกว้างเฉลี่ยของแต่ละชิ้น (มม. ในไฟล์) · designW = กว้างทั้งงานในไฟล์ (มม.)
+ *   ไม่นับชิ้นจิ๋ว (เศษ) — ใช้ค่าที่ 5% บางสุด (งานมีชิ้นเยอะ ข้ามชิ้นบางผิดปกติ 1-2 ชิ้น)
+ */
+export function sizeAdvice(widths: number[], designW: number, minStroke = 1.5): { thinFile: number; minWidthMm: number } | null {
+  const ws = widths.filter((w) => w > 0).sort((a, b) => a - b);
+  if (!ws.length || designW <= 0) return null;
+  const thinFile = ws[Math.floor((ws.length - 1) * 0.05)];
+  return { thinFile, minWidthMm: Math.ceil((designW * (minStroke / thinFile)) / 5) * 5 };
+}
+

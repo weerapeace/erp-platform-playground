@@ -39,7 +39,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return bad(friendlyDbError(error.message));
   await writeAuditFor(request, admin, {
     action: "create", entityType: ENTITY, entityId: data.id,
-    metadata: { code: data.code, name: data.name, file: data.source_file_name, pieces: v.patch.pieces?.length ?? 0, parent_sku_id: data.parent_sku_id },
+    metadata: { code: data.code, name: data.name, file: data.source_file_name, pieces: v.patch.pieces?.length ?? 0, parent_sku_id: data.parent_sku_id, shop_file: data.shop_file_name ?? null },
   });
   return NextResponse.json({ data, error: null });
 }

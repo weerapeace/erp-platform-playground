@@ -50,9 +50,10 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   const { data, error } = await admin.from(TABLE).update(out).eq("id", id).select("*, parent:parent_skus_v2(id, code, name:name_th)").single();
   if (error) return bad(friendlyDbError(error.message));
 
-  const { pieces, settings, stitch_count: _s, color_count: _c, width_mm: _w, height_mm: _h, ...plain } = v.patch;
+  const { pieces, settings, stitch_count: _s, color_count: _c, width_mm: _w, height_mm: _h, shop_file_b64: _b, shop_file_kind: _k, shop_file_at: _a, shop_file_name, ...plain } = v.patch;
   const meta = auditChangeMeta(before, plain);
   const extra = settings ? settingsAuditChanges(before.settings as Partial<EmbSettings>, settings) : [];
+  if ("shop_file" in body) extra.push({ field: "shop_file", label: "ไฟล์จากร้าน", old: before.shop_file_name ?? null, new: shop_file_name ?? null });
   if (pieces) extra.push({ field: "pieces", label: "ลาย (เปิดไฟล์ใหม่)", old: `${(before.pieces ?? []).length} ชิ้น`, new: `${pieces.length} ชิ้น` });
   const action = v.patch.is_active === true && before.is_active === false ? "restore" : v.patch.is_active === false && before.is_active ? "archive" : "update";
   if (action !== "update" || meta.changes?.length || extra.length) {
