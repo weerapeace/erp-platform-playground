@@ -14,12 +14,14 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ART_ACCEPT, readArtFile } from "@/lib/block-print-ai";
 import { skippedNote } from "@/components/block-print/shared";
-import { buildPlan, defaultSettings, designBox } from "@/lib/embroidery";
+import { buildPlan, defaultSettings, startWidth, withSelection } from "@/lib/embroidery";
+import type { BlockPiece } from "@/lib/block-print";
+import { SelectStep, type PickResult } from "./select-step";
 import { API, api, designHref, fmtCm, fmtNum, nameFromFile, planStats, thaiDate, type Design, type DesignRow } from "./shared";
 
 export const SKIPPED_KEY = (id: string) => `embroidery-skipped:${id}`;
 
-/** เปิดไฟล์ → ชิ้น + ค่าตั้งต้น (ใช้ทั้งสร้างงานใหม่และ "เปิดไฟล์ใหม่" ในหน้าทำงาน) */
+/** เปิดไฟล์ → ชิ้นทั้งหมด (ยังไม่เลือก — ไปขั้นเลือกส่วนที่จะปักต่อ) · ใช้ทั้งสร้างงานใหม่และ "เปิดไฟล์ใหม่" ในหน้าทำงาน */
 export async function readLogoFile(file: File) {
   const res = await readArtFile(file);
   const pieces = res.pieces.filter((p) => p.kind !== "background");
@@ -27,10 +29,7 @@ export async function readLogoFile(file: File) {
     const notes = skippedNote(res.skipped);
     throw new Error(`ไม่พบส่วนที่เติมสีในไฟล์นี้${notes.length ? ` · ${notes[0]}` : ""}`);
   }
-  // กว้างตั้งต้น = ขนาดในไฟล์ (ไม่ต่ำกว่า 3 ซม. ไม่เกิน 12 ซม. — ขนาดโลโก้ปักทั่วไป)
-  const box = designBox(pieces);
-  const settings = defaultSettings(pieces, Math.min(120, Math.max(30, box.w)));
-  return { pieces, settings, skipped: res.skipped, pages: res.pages };
+  return { pieces, skipped: res.skipped, pages: res.pages };
 }
 
 export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
@@ -43,6 +42,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [hardDel, setHardDel] = useState<DesignRow | null>(null);
+  const [pending, setPending] = useState<{ file: File; pieces: BlockPiece[]; skipped: unknown } | null>(null);
 
   const load = useCallback(async () => {
     setErr(null); setRows(null);
@@ -58,14 +58,37 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
     setBusy(`กำลังอ่านไฟล์ ${file.name}…`);
     try {
       const r = await readLogoFile(file);
-      setBusy("กำลังคำนวณฝีเข็ม…");
-      const plan = buildPlan(r.pieces, r.settings);
-      const d = await api<Design>(API, { json: { name: nameFromFile(file.name), source_file_name: file.name, parent_sku_id: parentId ?? null, pieces: r.pieces, settings: r.settings, ...planStats(plan) } });
-      try { sessionStorage.setItem(SKIPPED_KEY(d.id), JSON.stringify(r.skipped)); } catch { /* ไม่มีที่จำ */ }
-      router.push(designHref(d.id));
+      setPending({ file, pieces: r.pieces, skipped: r.skipped });
+      setBusy(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ");
       setBusy(null);
+    }
+  };
+
+  /** หลังเลือกส่วน → สร้างงาน 1 งาน หรือแยกตามกลุ่ม */
+  const createFrom = async (r: PickResult) => {
+    const p = pending; if (!p) return;
+    setPending(null);
+    const sets = r.mode === "one" ? [{ ids: r.on, label: "" }] : r.sets;
+    const base = nameFromFile(p.file.name);
+    try {
+      let firstId = "";
+      for (let i = 0; i < sets.length; i++) {
+        setBusy(`กำลังสร้างงาน ${sets.length > 1 ? `${i + 1}/${sets.length}` : ""}…`);
+        const pieces = withSelection(p.pieces, sets[i].ids);
+        const settings = defaultSettings(pieces, startWidth(pieces));
+        const plan = buildPlan(pieces, settings);
+        const name = sets.length > 1 ? `${base} – ${sets[i].label}` : base;
+        const d = await api<Design>(API, { json: { name, source_file_name: p.file.name, parent_sku_id: parentId ?? null, pieces, settings, ...planStats(plan) } });
+        if (!firstId) { firstId = d.id; try { sessionStorage.setItem(SKIPPED_KEY(d.id), JSON.stringify(p.skipped)); } catch { /* ไม่มีที่จำ */ } }
+      }
+      if (sets.length > 1) { toast.success(`สร้าง ${sets.length} งานแล้ว`); setBusy(null); await load(); }
+      else router.push(designHref(firstId));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "สร้างงานไม่สำเร็จ");
+      setBusy(null);
+      void load();
     }
   };
 
@@ -164,6 +187,8 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
         exportFilename="embroidery-designs"
         exportEntityType="embroidery_designs"
       />
+
+      {pending && <SelectStep key={pending.file.name + pending.pieces.length} open pieces={pending.pieces} onCancel={() => setPending(null)} onDone={(r) => void createFrom(r)} />}
 
       <ConfirmDialog
         open={!!hardDel}

@@ -10,18 +10,19 @@ import { usePrintLog } from "@/components/report/use-print-log";
 import { Icon } from "@/components/icon";
 import { docFileName } from "@/lib/print-filename";
 import { buildPlan, cleanSettings, dstFileName, STITCH_TYPES, type EmbPlan } from "@/lib/embroidery";
-import { API, api, downloadDst, fmtNum, thaiDate, type Design } from "./shared";
+import { API, api, downloadDst, downloadPes, fmtNum, thaiDate, type Design } from "./shared";
+import { nearestPec, PEC_THREADS } from "@/lib/embroidery-pes";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] ?? c);
 
 /** วาดฝีเข็มลงแคนวาสนอกจอ → รูป PNG (พื้นขาว) */
-function planImage(plan: EmbPlan, px = 1400): string {
+function planImage(plan: EmbPlan, fabric = "#ffffff", px = 1400): string {
   const cv = document.createElement("canvas");
   const r = plan.height / Math.max(plan.width, 0.01);
   cv.width = px; cv.height = Math.max(200, Math.round(px * Math.min(r, 1.4)));
   const g = cv.getContext("2d");
   if (!g) return "";
-  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = fabric; g.fillRect(0, 0, cv.width, cv.height);
   const pad = 30, k = Math.min((cv.width - pad * 2) / plan.width, (cv.height - pad * 2) / plan.height);
   const ox = cv.width / 2, oy = cv.height / 2;
   g.lineWidth = Math.max(1, 0.35 * k); g.lineCap = "round";
@@ -43,7 +44,8 @@ export function renderSheetHtml(d: Design, plan: EmbPlan, img: string, fileName:
     for (const p of plan.pieces) if (p.color === color && p.type !== "skip") by.set(p.type, (by.get(p.type) ?? 0) + 1);
     return [...by].map(([t, n]) => `${STITCH_TYPES.find((x) => x.key === t)?.th ?? t} ${n}`).join(", ");
   };
-  const rows = plan.colors.map((c, i) => `<tr><td class="c">${i + 1}</td><td><span class="sw" style="background:${c.color}"></span> ${esc(c.color)}</td><td>${esc(c.thread || "—")}</td><td>${esc(typeCount(c.color))}</td><td class="r">${fmtNum(c.stitches)}</td></tr>`).join("");
+  const brother = (hex: string) => { const i = nearestPec(hex); const t = i != null ? PEC_THREADS[i] : null; return t ? `${i} ${t.name}` : "—"; };
+  const rows = plan.colors.map((c, i) => `<tr><td class="c">${i + 1}</td><td><span class="sw" style="background:${c.color}"></span> ${esc(c.color)}</td><td>${esc(c.thread || "—")}<br><span class="muted">Brother ≈ ${esc(brother(c.color))}</span></td><td>${esc(typeCount(c.color))}</td><td class="r">${fmtNum(c.stitches)}</td></tr>`).join("");
   const warns = plan.pieces.filter((p) => p.warn);
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(fileName)}</title><style>
   @page{size:A4;margin:12mm} body{font-family:Sarabun,"Noto Sans Thai",sans-serif;color:#111;margin:0;background:#f1f5f9}
@@ -57,7 +59,7 @@ export function renderSheetHtml(d: Design, plan: EmbPlan, img: string, fileName:
   </style></head><body><div class="doc">
   <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:4mm">
     <div><h1>ใบสั่งปัก ${esc(d.code)}</h1><div style="font-size:12pt;margin-top:1mm">${esc(d.name)}</div></div>
-    <div class="muted" style="text-align:right">ไฟล์เครื่องปัก: <b>${esc(dstFileName(d.code, d.name))}</b><br>พิมพ์ ${esc(thaiDate(new Date().toISOString()))}</div>
+    <div class="muted" style="text-align:right">ไฟล์เครื่องปัก: <b>${esc(dstFileName(d.code, d.name))}</b> / .pes<br>พิมพ์ ${esc(thaiDate(new Date().toISOString()))}</div>
   </div>
   ${d.parent ? `<div class="muted" style="margin-top:1mm">สินค้า: ${esc(d.parent.code)} ${esc(d.parent.name)}</div>` : ""}
   <div class="grid">
@@ -70,7 +72,7 @@ export function renderSheetHtml(d: Design, plan: EmbPlan, img: string, fileName:
   <table><thead><tr><th class="c">ลำดับ</th><th>สี</th><th>รหัสด้าย</th><th>ชนิดฝีเข็ม (ชิ้น)</th><th class="r">ฝีเข็ม</th></tr></thead><tbody>${rows}</tbody></table>
   ${d.note ? `<div class="box" style="margin-top:3mm"><span class="muted">หมายเหตุ</span><div>${esc(d.note).replace(/\n/g, "<br>")}</div></div>` : ""}
   ${warns.length ? `<div class="warn">ส่วนที่อาจปักไม่ชัด ${warns.length} จุด: ${warns.slice(0, 8).map((w) => esc(`${w.name} (${w.warn})`)).join(" · ")}</div>` : ""}
-  <p class="muted" style="margin-top:4mm">ไฟล์แปลงอัตโนมัติจากลายเวกเตอร์ (ยังไม่มีฝีรองพื้น) — รบกวนปักทดสอบ 1 ชิ้นก่อนผลิตจริง · ไฟล์ .DST ไม่เก็บสี ใช้ลำดับสีตามตารางนี้</p>
+  <p class="muted" style="margin-top:4mm">ไฟล์แปลงอัตโนมัติจากลายเวกเตอร์ (ฝีรองพื้น: ${d.settings?.underlay === false ? "ไม่มี" : "มี"} · สีผ้าในภาพ ${esc(d.settings?.fabric ?? "#ffffff")}) — รบกวนปักทดสอบ 1 ชิ้นก่อนผลิตจริง · ไฟล์ .DST ไม่เก็บสี ใช้ลำดับสีตามตารางนี้</p>
   </div></body></html>`;
 }
 
@@ -84,7 +86,7 @@ export function EmbroiderySheet({ id, onBack }: { id: string; onBack: () => void
   }, [id]);
   const plan = useMemo(() => (d ? buildPlan(d.pieces, cleanSettings(d.settings, d.pieces)) : null), [d]);
   const fileName = d ? docFileName("ใบสั่งปัก", d.code) : "ใบสั่งปัก";
-  const html = useMemo(() => (d && plan ? renderSheetHtml(d, plan, planImage(plan), fileName) : ""), [d, plan, fileName]);
+  const html = useMemo(() => (d && plan ? renderSheetHtml(d, plan, planImage(plan, cleanSettings(d.settings, d.pieces).fabric), fileName) : ""), [d, plan, fileName]);
   const logItems = useMemo(() => (d ? [{ doc_id: d.id, doc_no: d.code }] : []), [d]);
   usePrintLog("emb_sheet", logItems);
 
@@ -97,6 +99,11 @@ export function EmbroiderySheet({ id, onBack }: { id: string; onBack: () => void
         {d && plan && (
           <button type="button" onClick={() => downloadDst(plan, d.code, d.name)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">
             <Icon name="download" /> .DST
+          </button>
+        )}
+        {d && plan && (
+          <button type="button" onClick={() => downloadPes(plan, d.code, d.name)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">
+            <Icon name="download" /> .PES
           </button>
         )}
         <PrintDocLinkButton html={html} fileName={fileName} className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">พิมพ์ / บันทึก PDF</PrintDocLinkButton>

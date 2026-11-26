@@ -18,10 +18,11 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { ART_ACCEPT } from "@/lib/block-print-ai";
 import { skippedNote } from "@/components/block-print/shared";
 import type { BlockPiece } from "@/lib/block-print";
-import { buildPlan, cleanSettings, designBox, LIMITS, STITCH_TYPES, type EmbSettings, type StitchType } from "@/lib/embroidery";
+import { buildPlan, cleanSettings, colorsOf, designBox, FABRICS, isActive, LIMITS, startWidth, STITCH_TYPES, warningGroups, withSelection, type BoxMm, type EmbSettings, type StitchType } from "@/lib/embroidery";
 import { StitchPreview } from "./stitch-preview";
 import { readLogoFile, SKIPPED_KEY } from "./list";
-import { API, api, DENSITY, downloadDst, fmtNum, LIST_HREF, planStats, sheetHref, type Design } from "./shared";
+import { SelectStep, type PickResult } from "./select-step";
+import { API, api, DENSITY, downloadDst, downloadPes, fmtNum, LIST_HREF, planStats, sheetHref, type Design } from "./shared";
 
 type Snap = { pieces: BlockPiece[]; settings: EmbSettings };
 type Meta = { name: string; note: string; parent: ParentSkuPickerValue | null };
@@ -46,8 +47,12 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const [advanced, setAdvanced] = useState(false);
   const [askTrash, setAskTrash] = useState(false);
   const [skipped, setSkipped] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ key: string; box: BoxMm } | null>(null);
+  /** ขั้นเลือกส่วน: pieces = ชิ้นที่จะให้เลือก (ของเดิม หรือจากไฟล์ใหม่) */
+  const [picking, setPicking] = useState<{ pieces: BlockPiece[]; fileName?: string; initialOn?: string[] } | null>(null);
 
-  const keyOf = (s: Snap | null, m: Meta) => JSON.stringify([s?.settings, s?.pieces.length, s?.pieces[0]?.d.length, m.name, m.note, m.parent?.id ?? null]);
+  const keyOf = (s: Snap | null, m: Meta) => JSON.stringify([s?.settings, s?.pieces.length, s?.pieces[0]?.d.length, s?.pieces.map((p) => (p.on === false ? 0 : 1)).join(""), m.name, m.note, m.parent?.id ?? null]);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -134,15 +139,31 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const replaceFile = async (file: File) => {
     try {
       const r = await readLogoFile(file);
-      setSnap((cur) => {
-        if (cur) setHistory((h) => [...h.slice(-49), cur]);
-        // เก็บขนาดเดิมไว้ · ค่าตามสีใช้ของเดิมถ้าสีตรงกัน
-        return { pieces: r.pieces, settings: cleanSettings({ ...(cur?.settings ?? {}), ...(cur ? { width_mm: cur.settings.width_mm } : r.settings), piece_types: {} }, r.pieces) };
-      });
-      if (design) setDesign({ ...design, source_file_name: file.name });
+      setPicking({ pieces: r.pieces, fileName: file.name });
       setSkipped(skippedNote(r.skipped).filter((t) => !t.startsWith("พื้นหลัง")));
-      toast.success(`เปิด ${file.name} แล้ว — กดบันทึกเพื่อใช้ไฟล์นี้ (ย้อนกลับได้)`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); }
+  };
+  /** ผลขั้นเลือกส่วน → ใช้กับงานนี้ (ย้อนกลับได้) · แยกหลายงาน: กลุ่มแรกอยู่งานนี้ กลุ่มอื่นสร้างงานใหม่ */
+  const applyPick = async (r: PickResult) => {
+    const pk = picking; if (!pk || !snap) return;
+    setPicking(null);
+    const sets = r.mode === "one" ? [{ ids: r.on, label: "" }] : r.sets;
+    const mine = withSelection(pk.pieces, sets[0].ids);
+    const isNewFile = !!pk.fileName;
+    setHistory((h) => [...h.slice(-49), snap]);
+    setSnap({ pieces: mine, settings: cleanSettings({ ...snap.settings, width_mm: isNewFile || r.mode === "split" ? startWidth(mine) : snap.settings.width_mm, piece_types: isNewFile ? {} : snap.settings.piece_types }, mine) });
+    if (isNewFile && design) setDesign({ ...design, source_file_name: pk.fileName ?? design.source_file_name });
+    setSelectedId(null); setUpto(null);
+    if (sets.length > 1) {
+      try {
+        for (const set of sets.slice(1)) {
+          const pieces = withSelection(pk.pieces, set.ids);
+          const settings = cleanSettings({ ...snap.settings, width_mm: startWidth(pieces), piece_types: {} }, pieces);
+          await api<Design>(API, { json: { name: `${meta.name} – ${set.label}`, source_file_name: pk.fileName ?? design?.source_file_name ?? null, parent_sku_id: meta.parent?.id ?? null, pieces, settings, ...planStats(buildPlan(pieces, settings)) } });
+        }
+        toast.success(`สร้างงานใหม่อีก ${sets.length - 1} งานจากกลุ่มที่เหลือแล้ว (ดูที่หน้ารายการ) · งานนี้ใช้ ${sets[0].label} — กดบันทึก`);
+      } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างงานไม่สำเร็จ"); }
+    } else toast.success("เปลี่ยนส่วนที่ปักแล้ว — กดบันทึกเพื่อใช้ (ย้อนกลับได้)");
   };
 
   const toTrash = async () => {
@@ -165,11 +186,17 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const ratio = box.w > 0 ? box.h / box.w : 1;
   const setWidth = (mm: number) => edit((s) => ({ ...s, width_mm: Math.min(LIMITS.width_max, Math.max(LIMITS.width_min, Math.round(mm * 10) / 10)) }));
   const density = DENSITY.find((d) => Math.abs(d.fill - st.fill_spacing) < 0.001 && Math.abs(d.satin - st.satin_spacing) < 0.001)?.key ?? "custom";
-  const warns = plan.pieces.filter((p) => p.warn);
+  const wgroups = warningGroups(plan, st.width_mm);
+  const sel = selectedId ? plan.pieces.find((p) => p.id === selectedId) ?? null : null;
+  const activeColors = colorsOf(snap.pieces, true);
+  const setTypeMany = (ids: string[], t: StitchType | null) => edit((s) => { const pt = { ...s.piece_types }; for (const i of ids) { if (t) pt[i] = t; else delete pt[i]; } return { ...s, piece_types: pt }; });
   const piecesOfColor = (c: string) => snap.pieces.filter((p) => (p.color ?? "#000000") === c).length;
   const moveColor = (c: string, dir: -1 | 1) => edit((s) => {
-    const o = [...s.color_order]; const i = o.indexOf(c); const j = i + dir;
-    if (i < 0 || j < 0 || j >= o.length) return s;
+    const o = [...s.color_order];
+    const vis = o.filter((x) => activeColors.includes(x));
+    const other = vis[vis.indexOf(c) + dir];
+    if (!other) return s;
+    const i = o.indexOf(c), j = o.indexOf(other);
     [o[i], o[j]] = [o[j], o[i]];
     return { ...s, color_order: o };
   });
@@ -199,7 +226,8 @@ export function EmbroideryEditor({ id }: { id: string }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         {/* ───── ภาพตัวอย่าง ───── */}
         <div className="space-y-3">
-          <StitchPreview plan={plan} upto={upto ?? undefined} showJumps={showJumps} height={typeof window !== "undefined" && window.innerWidth < 768 ? 280 : 460} />
+          <StitchPreview plan={plan} upto={upto ?? undefined} showJumps={showJumps} fabric={st.fabric} selectedId={selectedId} focus={focus}
+            onPick={canEdit ? setSelectedId : undefined} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 480} />
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <button type="button" onClick={() => { if (playing) setPlaying(false); else { setUpto(0); setPlaying(true); } }}
               className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 hover:bg-slate-50">
@@ -208,26 +236,50 @@ export function EmbroideryEditor({ id }: { id: string }) {
             <input type="range" min={0} max={plan.cmds.length} value={upto ?? plan.cmds.length} onChange={(e) => { setPlaying(false); const v = Number(e.target.value); setUpto(v >= plan.cmds.length ? null : v); }} className="min-w-[120px] flex-1" aria-label="ปักถึงฝีที่" />
             <label className="inline-flex items-center gap-1"><input type="checkbox" checked={showJumps} onChange={(e) => setShowJumps(e.target.checked)} /> เส้นกระโดด</label>
           </div>
+
+          {sel && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="h-4 w-4 rounded border border-black/10" style={{ background: sel.color }} />
+                <b className="font-medium text-slate-800">{sel.name}</b>
+                <span className="text-xs text-slate-500">กว้างเฉลี่ย {sel.width.toFixed(1)} มม. · {fmtNum(sel.stitches)} ฝี · ตอนนี้: {STITCH_TYPES.find((t) => t.key === sel.type)?.th}{st.piece_types[sel.id] ? " (ตั้งเอง)" : " (ตามสี)"}</span>
+                <button type="button" onClick={() => setSelectedId(null)} className="ml-auto text-xs text-slate-500 hover:text-slate-800">ปิด ×</button>
+              </div>
+              {sel.warn && <div className={`mt-1 text-xs ${sel.level === "danger" ? "text-red-700" : "text-amber-800"}`}>{sel.warn}</div>}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {STITCH_TYPES.filter((t) => t.key !== "auto").map((t) => (
+                  <button key={t.key} type="button" title={t.hint} onClick={() => setPieceType(sel.id, t.key)}
+                    className={`rounded-lg border px-2.5 py-1 text-xs ${st.piece_types[sel.id] === t.key ? "border-indigo-400 bg-white font-medium text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t.th}</button>
+                ))}
+                {st.piece_types[sel.id] && <button type="button" onClick={() => setPieceType(sel.id, null)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-50">ใช้ตามสี</button>}
+              </div>
+            </div>
+          )}
+          {!sel && canEdit && <p className="text-[11px] text-slate-400">คลิกชิ้นในภาพ เพื่อตั้งฝีเข็มเฉพาะชิ้นนั้น</p>}
+
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="ฝีเข็ม" value={fmtNum(plan.stitches)} />
             <Stat label="สีด้าย / เปลี่ยนด้าย" value={`${plan.colors.length} / ${plan.colorChanges}`} />
             <Stat label="ตัดด้าย" value={fmtNum(plan.trims)} />
             <Stat label="เวลาปักโดยประมาณ" value={`~${Math.max(1, Math.round(plan.minutes))} นาที`} />
           </div>
-          {warns.length > 0 && (
+
+          {wgroups.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-amber-900"><Icon name="warning" /> ส่วนที่อาจปักไม่สวย ({warns.length})</div>
-              <ul className="space-y-1.5">
-                {warns.slice(0, 30).map((w) => (
-                  <li key={w.id} className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="h-3 w-3 shrink-0 rounded-sm border border-black/10" style={{ background: w.color }} />
-                    <span className={w.level === "danger" ? "text-red-700" : "text-amber-800"}>{w.name}: {w.warn}</span>
-                    {canEdit && (
-                      <span className="ml-auto flex gap-1">
-                        {w.type !== "run" && <button type="button" onClick={() => setPieceType(w.id, "run")} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">เดินเส้นแทน</button>}
-                        <button type="button" onClick={() => setPieceType(w.id, "skip")} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">ไม่ปัก</button>
-                      </span>
-                    )}
+              <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-amber-900"><Icon name="warning" /> ส่วนที่อาจปักไม่สวย ({wgroups.length} จุด · {wgroups.reduce((n, g) => n + g.ids.length, 0)} ชิ้น)</div>
+              <ul className="space-y-2">
+                {wgroups.slice(0, 20).map((g) => (
+                  <li key={g.key} className="rounded-md bg-white/70 p-2 text-xs">
+                    <div className={g.level === "danger" ? "text-red-700" : "text-amber-800"}>{g.text}</div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setFocus({ key: `${g.key}:${Date.now()}`, box: g.box })} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">ดูในภาพ</button>
+                      {canEdit && g.kind !== "wide" && <button type="button" onClick={() => setTypeMany(g.ids, "run")} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">เดินเส้นทั้งกลุ่ม</button>}
+                      {canEdit && g.kind === "wide" && <button type="button" onClick={() => setTypeMany(g.ids, "fill")} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">ถมเต็มทั้งกลุ่ม</button>}
+                      {canEdit && <button type="button" onClick={() => setTypeMany(g.ids, "skip")} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">ไม่ปักทั้งกลุ่ม</button>}
+                      {canEdit && g.fixWidthMm && g.fixWidthMm > st.width_mm && (
+                        <button type="button" onClick={() => setWidth(g.fixWidthMm!)} className="rounded border border-amber-300 bg-white px-1.5 py-0.5 hover:bg-amber-100">ขยายงานเป็น {(g.fixWidthMm / 10).toFixed(1)} ซม.</button>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -236,11 +288,13 @@ export function EmbroideryEditor({ id }: { id: string }) {
           )}
           {Object.keys(st.piece_types).length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
-              <div className="mb-1.5 font-medium text-slate-700">ชิ้นที่ตั้งฝีเข็มเอง</div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="mb-1.5 flex items-center font-medium text-slate-700">ชิ้นที่ตั้งฝีเข็มเอง ({Object.keys(st.piece_types).length})
+                {canEdit && <button type="button" onClick={() => edit((s) => ({ ...s, piece_types: {} }))} className="ml-auto font-normal text-slate-500 underline">ล้างทั้งหมด</button>}
+              </div>
+              <div className="flex max-h-28 flex-wrap gap-1.5 overflow-auto">
                 {Object.entries(st.piece_types).map(([pid, t]) => (
                   <span key={pid} className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2 py-0.5">
-                    {snap.pieces.find((p) => p.id === pid)?.name ?? pid}: {STITCH_TYPES.find((x) => x.key === t)?.th}
+                    <button type="button" onClick={() => setSelectedId(pid)} className="hover:underline">{snap.pieces.find((p) => p.id === pid)?.name ?? pid}</button>: {STITCH_TYPES.find((x) => x.key === t)?.th}
                     {canEdit && <button type="button" onClick={() => setPieceType(pid, null)} className="text-slate-400 hover:text-red-600" aria-label="ใช้ตามสี">×</button>}
                   </span>
                 ))}
@@ -276,14 +330,27 @@ export function EmbroideryEditor({ id }: { id: string }) {
                 <NumField label="ความยาวฝีถม (มม.)" value={st.fill_len} step={0.5} disabled={!canEdit} onChange={(v) => edit((s) => ({ ...s, fill_len: v }))} />
                 <NumField label="ความยาวฝีเดินเส้น (มม.)" value={st.run_len} step={0.5} disabled={!canEdit} onChange={(v) => edit((s) => ({ ...s, run_len: v }))} />
                 <NumField label="ชดเชยผ้าหด (มม.)" value={st.pull_comp} step={0.05} disabled={!canEdit} onChange={(v) => edit((s) => ({ ...s, pull_comp: v }))} />
+                <NumField label="ตัดด้ายเมื่อย้ายไกลเกิน (มม.)" value={st.trim_at} step={0.5} disabled={!canEdit} onChange={(v) => edit((s) => ({ ...s, trim_at: v }))} />
               </div>
             )}
+            <label className="mt-3 flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" disabled={!canEdit} checked={st.underlay} onChange={(e) => edit((s) => ({ ...s, underlay: e.target.checked }))} />
+              ฝีรองพื้นอัตโนมัติ <span className="text-slate-400">(ผ้าเรียบขึ้น ตัวหนังสือนูนชัด · เพิ่มฝีเข็ม)</span>
+            </label>
+            <div className="mt-3 mb-1.5 text-xs font-medium text-slate-500">สีพื้นผ้า (ภาพตัวอย่าง + ใบสั่งปัก)</div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {FABRICS.map((fb) => (
+                <button key={fb.hex} type="button" disabled={!canEdit} title={fb.th} aria-label={`ผ้าสี${fb.th}`} onClick={() => edit((s) => ({ ...s, fabric: fb.hex }))}
+                  className={`h-7 w-7 rounded-full border ${st.fabric === fb.hex ? "ring-2 ring-indigo-500 ring-offset-1" : "border-slate-300"}`} style={{ background: fb.hex }} />
+              ))}
+              <input type="color" disabled={!canEdit} value={st.fabric} onChange={(e) => edit((s) => ({ ...s, fabric: e.target.value }))} className="h-7 w-9 cursor-pointer rounded border border-slate-200" aria-label="สีผ้าอื่น" />
+            </div>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-3">
             <div className="mb-2 text-xs font-medium text-slate-500">สีด้าย → ชนิดฝีเข็ม (เรียงตามลำดับที่ปัก)</div>
             <ul className="divide-y divide-slate-100">
-              {st.color_order.map((c, i) => {
+              {st.color_order.filter((c) => activeColors.includes(c)).map((c, i, vis) => {
                 const cs = st.colors[c];
                 if (!cs) return null;
                 const cb = plan.colors.find((x) => x.color === c);
@@ -298,7 +365,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
                       {canEdit && (
                         <span className="flex shrink-0">
                           <button type="button" disabled={i === 0} onClick={() => moveColor(c, -1)} className="px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30" aria-label="ปักก่อน">▲</button>
-                          <button type="button" disabled={i === st.color_order.length - 1} onClick={() => moveColor(c, 1)} className="px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30" aria-label="ปักทีหลัง">▼</button>
+                          <button type="button" disabled={i === vis.length - 1} onClick={() => moveColor(c, 1)} className="px-1 text-slate-400 hover:text-slate-800 disabled:opacity-30" aria-label="ปักทีหลัง">▼</button>
                         </span>
                       )}
                     </div>
@@ -333,6 +400,9 @@ export function EmbroideryEditor({ id }: { id: string }) {
               className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700">
               <Icon name="download" /> ดาวน์โหลด .DST
             </button>
+            <button type="button" onClick={() => downloadPes(plan, design.code, meta.name)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50" title="Brother">
+              <Icon name="download" /> .PES
+            </button>
             <button type="button" onClick={() => void openSheet()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
               <Icon name="printer" /> ใบสั่งปัก
             </button>
@@ -343,6 +413,9 @@ export function EmbroideryEditor({ id }: { id: string }) {
                 </button>
                 <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
                   <Icon name="refresh" /> เปิดไฟล์ใหม่
+                </button>
+                <button type="button" onClick={() => setPicking({ pieces: snap.pieces, initialOn: snap.pieces.filter(isActive).map((p) => p.id) })} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50">
+                  <Icon name="link" /> เลือกส่วนที่ปัก
                 </button>
                 <button type="button" onClick={() => setAskTrash(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-sm text-red-600 hover:bg-red-50">
                   <Icon name="trash" /> ลบ
@@ -358,6 +431,8 @@ export function EmbroideryEditor({ id }: { id: string }) {
         </div>
       </div>
 
+      {picking && <SelectStep key={(picking.fileName ?? "") + picking.pieces.length} open pieces={picking.pieces} initialOn={picking.initialOn ?? null}
+        onCancel={() => setPicking(null)} onDone={(r) => void applyPick(r)} title={picking.fileName ? `เลือกส่วนที่จะปัก — ${picking.fileName}` : "เลือกส่วนที่จะปัก"} />}
       {canEdit && <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onDiscard={discard} />}
       <ConfirmDialog open={askTrash} onClose={() => setAskTrash(false)} onConfirm={() => void toTrash()} variant="danger"
         title="ย้ายงานนี้เข้าถังขยะ?" message={<>ย้าย <b>{design.code} {meta.name}</b> เข้าถังขยะ — กู้คืนได้ที่ถังขยะหน้ารายการ</>} confirmText="ย้ายเข้าถังขยะ" />

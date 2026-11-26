@@ -848,9 +848,9 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "block-print.md",
   },
   {
-    key: "embroidery", label: "ไฟล์ปัก (โลโก้เวกเตอร์ → ฝีเข็ม → .DST ส่งร้านปัก)", code: "EmbroideryList · EmbroideryEditor · StitchPreview · EmbroiderySheet · lib/embroidery", category: "feature",
+    key: "embroidery", label: "ไฟล์ปัก (โลโก้เวกเตอร์ → ฝีเข็ม → .DST ส่งร้านปัก)", code: "EmbroideryList · EmbroideryEditor · SelectStep · StitchPreview · EmbroiderySheet · lib/embroidery · lib/embroidery-pes", category: "feature",
     source: { path: "components/embroidery" },
-    what: "เปิดโลโก้ .ai/.pdf/.svg (ตัวอ่านเดียวกับบล็อกพิมพ์ — ได้สีพื้นด้วย) → ตั้งขนาดจริง ความแน่นตามผ้า ชนิดฝีเข็มตามสี (อัตโนมัติ/ถมเต็ม/ซิกแซก/เดินเส้น) → คำนวณฝีเข็มในเบราว์เซอร์ ดูตัวอย่าง+เล่นลำดับ → ดาวน์โหลด .DST + ใบสั่งปัก · เตือนส่วนที่บาง/เล็กเกินปัก · ผูก Parent SKU",
+    what: "เปิดโลโก้ .ai/.pdf/.svg (ตัวอ่านเดียวกับบล็อกพิมพ์ — ได้สีพื้นด้วย) → ตั้งขนาดจริง ความแน่นตามผ้า ชนิดฝีเข็มตามสี (อัตโนมัติ/ถมเต็ม/ซิกแซก/เดินเส้น) → คำนวณฝีเข็มในเบราว์เซอร์ ดูตัวอย่าง+เล่นลำดับ → ดาวน์โหลด .DST / .PES + ใบสั่งปัก · ขั้นเลือกส่วนที่จะปัก (แยกหลายงานได้) · ซูม/คลิกชิ้นตั้งฝีเข็ม · เตือนแบบกลุ่ม · ผูก Parent SKU",
     when: "อยากได้ไฟล์เครื่องปัก (.DST) จากลายเวกเตอร์ · ที่อื่นที่ต้องการฝีเข็ม/เขียน-อ่านไฟล์ DST ให้เรียก buildPlan / buildDst / readDst ใน lib/embroidery ไม่เขียนใหม่",
     notWhen: "ลายจากรูปถ่าย/บิตแมป (ต้องวาดเวกเตอร์ก่อน) · งานพิมพ์บล็อก/สกรีน ใช้บล็อกพิมพ์ · ไฟล์ปักที่ต้องสวยระดับร้าน digitize (ตัวหนังสือเล็กมาก) ยังต้องให้คนทำ",
     doc: "embroidery.md",

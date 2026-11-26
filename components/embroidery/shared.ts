@@ -4,6 +4,7 @@
  */
 import type { BlockPiece } from "@/lib/block-print";
 import { buildDst, dstFileName, type EmbPlan, type EmbSettings } from "@/lib/embroidery";
+import { buildPes, pesFileName } from "@/lib/embroidery-pes";
 
 export { api, thaiDate } from "@/components/block-print/shared";
 
@@ -27,15 +28,17 @@ export const nameFromFile = (fileName: string) => fileName.replace(/\.(ai|pdf|sv
 /** ผลการคำนวณที่เก็บไว้โชว์หน้ารายการ */
 export const planStats = (plan: EmbPlan) => ({ stitch_count: plan.stitches, color_count: plan.colors.length, width_mm: plan.width, height_mm: plan.height });
 
-/** ดาวน์โหลดไฟล์ .DST (สร้างในเบราว์เซอร์) */
-export function downloadDst(plan: EmbPlan, code: string, name: string) {
-  const bytes = buildDst(plan, `${code} ${name}`);
+function saveBytes(bytes: Uint8Array, fileName: string) {
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" }));
   const a = document.createElement("a");
-  a.href = url; a.download = dstFileName(code, name);
+  a.href = url; a.download = fileName;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/** ดาวน์โหลดไฟล์ .DST (Tajima · สร้างในเบราว์เซอร์) */
+export const downloadDst = (plan: EmbPlan, code: string, name: string) => saveBytes(buildDst(plan, `${code} ${name}`), dstFileName(code, name));
+/** ดาวน์โหลดไฟล์ .PES (Brother · สร้างในเบราว์เซอร์) */
+export const downloadPes = (plan: EmbPlan, code: string, name: string) => saveBytes(buildPes(plan, code), pesFileName(dstFileName(code, name)));
 
 export const fmtNum = (n: number) => Math.round(n).toLocaleString("th-TH");
 export const fmtCm = (mm: number | null | undefined) => (mm ? (mm / 10).toFixed(1) : "—");
