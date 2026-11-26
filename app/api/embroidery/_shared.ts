@@ -12,7 +12,7 @@ export const EDIT_PERM = "embroidery.edit";
 export const TABLE = "embroidery_designs";
 export const ENTITY = "embroidery_designs";
 /** คอลัมน์หน้ารายการ (ไม่ดึงเส้นของชิ้น — ก้อนใหญ่) */
-export const LIST_COLS = "id, code, name, note, source_file_name, parent_sku_id, stitch_count, color_count, width_mm, height_mm, is_active, created_at, updated_at, deleted_at, parent:parent_skus_v2(id, code, name)";
+export const LIST_COLS = "id, code, name, note, source_file_name, parent_sku_id, stitch_count, color_count, width_mm, height_mm, is_active, created_at, updated_at, deleted_at, parent:parent_skus_v2(id, code, name:name_th)";
 
 export const bad = (error: string, status = 400) => NextResponse.json({ data: null, error }, { status });
 const UUID = /^[0-9a-f-]{36}$/i;

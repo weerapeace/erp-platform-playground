@@ -20,7 +20,7 @@ export const revalidate = 0;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-const load = (id: string) => supabaseAdmin().from(TABLE).select("*, parent:parent_skus_v2(id, code, name)").eq("id", id).maybeSingle();
+const load = (id: string) => supabaseAdmin().from(TABLE).select("*, parent:parent_skus_v2(id, code, name:name_th)").eq("id", id).maybeSingle();
 
 export async function GET(request: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const denied = await guardApi(request, VIEW_PERM); if (denied) return denied;
@@ -47,7 +47,7 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   if (v.patch.is_active === true) out.deleted_at = null;
   if (v.patch.is_active === false) out.deleted_at = new Date().toISOString();
   const admin = supabaseAdmin();
-  const { data, error } = await admin.from(TABLE).update(out).eq("id", id).select("*, parent:parent_skus_v2(id, code, name)").single();
+  const { data, error } = await admin.from(TABLE).update(out).eq("id", id).select("*, parent:parent_skus_v2(id, code, name:name_th)").single();
   if (error) return bad(friendlyDbError(error.message));
 
   const { pieces, settings, stitch_count: _s, color_count: _c, width_mm: _w, height_mm: _h, ...plain } = v.patch;
