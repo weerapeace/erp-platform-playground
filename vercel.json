@@ -59,6 +59,10 @@
       "schedule": "50 1 * * *"
     },
     {
+      "path": "/api/cron/marketing-content",
+      "schedule": "0 2,14 * * *"
+    },
+    {
       "path": "/api/cron/marketing-alert",
       "schedule": "20 2 * * *"
     },

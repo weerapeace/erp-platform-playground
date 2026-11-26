@@ -147,6 +147,15 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     files: ["app/api/cron/marketing-alert/route.ts", "lib/marketing-alerts-server.ts", "lib/marketing-overview-calc.ts"],
   },
   {
+    id: "marketing-content", zone: "marketing", kind: "auto", icon: "💬",
+    title: "ผู้เก็บรีวิวและโพสต์", titleEn: "Reviews & posts collector",
+    does: "วันละ 2 รอบดึงรีวิวสินค้าจาก Shopee (ดาว ข้อความ ร้านตอบแล้วหรือยัง) และยอดถูกใจ/คอมเมนต์/แชร์ของโพสต์ Facebook และ Instagram มาไว้ในแท็บรีวิวและคอนเทนต์",
+    trigger: `${DAILY} 09:00 + 21:00`, cron: "/api/cron/marketing-content", everyHours: 12,
+    can: ["อ่านรีวิวจาก Shopee", "อ่านโพสต์เพจ Facebook/Instagram", "จดในระบบ"], cannot: ["ตอบรีวิว", "โพสต์/ลบโพสต์"],
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_reviews / marketing_social_posts", href: "/marketing/dashboard?tab=reviews",
+    files: ["app/api/cron/marketing-content/route.ts", "lib/marketing-content-server.ts"],
+  },
+  {
     id: "marketing-promos", zone: "marketing", kind: "auto", icon: "🏷️",
     title: "ผู้เก็บรายการโปร", titleEn: "Promotions collector",
     does: "ทุกเช้าดึงรายการโค้ดส่วนลด โปรลดราคา และแฟลชเซลจาก Shopee (ใช้ไปกี่ครั้ง ช่วงเวลา คนกดเตือน) มาไว้ในแท็บโปรโมชั่น เพื่อดูว่าโปรไหนได้ผล",

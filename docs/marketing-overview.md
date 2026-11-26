@@ -158,3 +158,22 @@
 - ราคาเต็มบน Shopee ลดเฉลี่ย ~58% (ตั้งราคาเต็มสูงแล้วลดตลอด) → "ส่วนลดรวม" ใช้วัดต้นทุนโปรไม่ได้ ใช้ `seller_voucher` แทน
 - Shopee ช่วยออก = บรรทัด `shopee_discount` (โค้ด Shopee + Coins) — 1–25 พ.ย. ≈ 28% ของยอด
 - `lib/platform-sales-load` ส่ง `brand_id` ด้วยแล้ว (เดิมต้องถามแยก ช้า 37 วินาที)
+
+## รอบ 7 — รีวิว + คอนเทนต์ (2026-11-26)
+
+เจ้าของเลือก: แบบ A (2 แท็บ `?tab=reviews` · `?tab=content`) + ข้อ 1 รีวิว Shopee · 2 โพสต์ FB/IG · 3 แอฟฟิลิเอต · 5 คู่แข่ง (กรอกเอง) · 6 ลองดึงวิดีโอ Shopee
+
+| ส่วน | ไฟล์ |
+|---|---|
+| แท็บ | `app/marketing/dashboard/reviews-tab.tsx` · `content-tab.tsx` |
+| API | `GET /api/marketing/reviews` · `GET /api/marketing/content` · `POST/PATCH/DELETE /api/marketing/competitors` (products.platforms.edit · audit) |
+| ตัวดึง | `/api/cron/marketing-content` วันละ 2 รอบ 09:00 / 21:00 (`0 2,14 * * *`) · POST = ปุ่ม "ดึงตอนนี้" · สถานะ ui_config `marketing_content_sync` |
+| ดึง | `lib/marketing-content-server.ts` — Shopee get_comment (ทั้งร้าน ≤ 500 ล่าสุด) · FB `/{page}/posts` · IG `/{ig}/media` (token เพจเดิม) · วิดีโอ Shopee get_video_performance_list |
+| สูตร (pure + เทสต์) | `lib/marketing-content-calc.ts` |
+| ตาราง | `marketing_reviews` · `marketing_social_posts` · `marketing_competitors` (server เท่านั้น) |
+
+- รีวิว: ดาว/ข้อความ/รูป/ร้านตอบแล้วหรือยัง · "แย่ที่ยังไม่ตอบ" = 1–3 ดาว + ไม่มี reply · ชื่อผู้รีวิวเห็นเฉพาะ `platform_orders.view` · ตอบรีวิวต้องตอบใน Shopee
+- โพสต์: ถูกใจ/คอมเมนต์/แชร์ (ย้อน 90 วัน) · reach ต้องขอสิทธิ์ read_insights เพิ่ม
+- แอฟฟิลิเอต: ออเดอร์ที่มีบรรทัด `ams` ในรายได้ Shopee · ค่าคอมปันส่วนตามมูลค่าบรรทัด · พ.ย. 1–26 ≈ 463 ใบ ฿276K (~28% ของยอด Shopee) ค่าคอม ~3.8%
+- คู่แข่ง: เพิ่ม/แก้ทุกช่อง/ลบแบบเก็บไว้ (`is_active`) + ย้อนกลับ + กู้คืน · ราคา/ดาว/ยอดขายเปลี่ยน → `history` (50 ครั้งล่าสุด) · ราคาเรา = `parent_skus_v2.sale_price` → `final_price` · เลือกสินค้าเราด้วย ParentSkuPicker
+- วิดีโอ Shopee: เอกสารระบุเฉพาะแอปประเภท "Shopee Video Management" → แอปเรา (Seller In House System) น่าจะถูกปฏิเสธ · ระบบลองแล้วจดเหตุผลโชว์ในแท็บ
