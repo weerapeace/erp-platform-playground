@@ -105,3 +105,11 @@ export function scaleFromHex(hex: string): ColorScale {
   }
   return out;
 }
+
+/** เลื่อนเฉดทั้งชุด: k > 0 = เข้มขึ้น k ขั้น (ปุ่มใช้เฉด 600 → ได้เฉด 600+k×100) · k < 0 = อ่อนลง · ปลายชุดใช้เฉดสุดท้ายซ้ำ */
+export function shiftScale(scale: ColorScale, k: number): ColorScale {
+  if (!k) return scale;
+  const out = {} as ColorScale;
+  THEME_STOPS.forEach((s, i) => { out[s] = scale[THEME_STOPS[Math.min(THEME_STOPS.length - 1, Math.max(0, i + k))]]; });
+  return out;
+}

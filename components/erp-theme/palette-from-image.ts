@@ -2,8 +2,9 @@
 // ดูดสีจากรูปในคลัง (R2 key) — ย่อเหลือ 120px แล้วส่งพิกเซลให้ paletteFromPixels (lib/erp-theme-config)
 // ⚠️ รูปผ่าน /api/r2-image ถูก redirect ไปตัวเสิร์ฟรูปคนละโดเมน → ต้อง crossOrigin ไม่งั้นอ่านพิกเซลไม่ได้
 import { paletteFromPixels } from "@/lib/erp-theme-config";
+import { swatchesFromPixels } from "@/lib/erp-theme-palettes";
 
-export async function paletteFromImageKey(key: string): Promise<ReturnType<typeof paletteFromPixels>> {
+async function pixelsFromImageKey(key: string): Promise<Uint8ClampedArray | null> {
   const im = new Image();
   im.crossOrigin = "anonymous";
   im.src = `/api/r2-image?key=${encodeURIComponent(key)}&w=200`;
@@ -14,5 +15,16 @@ export async function paletteFromImageKey(key: string): Promise<ReturnType<typeo
   const ctx = cv.getContext("2d");
   if (!ctx) return null;
   ctx.drawImage(im, 0, 0, w, h);
-  return paletteFromPixels(ctx.getImageData(0, 0, w, h).data);
+  return ctx.getImageData(0, 0, w, h).data;
+}
+
+export async function paletteFromImageKey(key: string): Promise<ReturnType<typeof paletteFromPixels>> {
+  const d = await pixelsFromImageKey(key);
+  return d ? paletteFromPixels(d) : null;
+}
+
+/** ดูดสีเด่นจากรูป n สี (แผงสี › ชุดสี › ดูดสีจากรูป) */
+export async function swatchesFromImageKey(key: string, n = 5): Promise<string[]> {
+  const d = await pixelsFromImageKey(key);
+  return d ? swatchesFromPixels(d, n) : [];
 }

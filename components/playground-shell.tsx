@@ -709,7 +709,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   // embed mode (เปิดในกรอบแอปเดี่ยว) — โชว์แค่เนื้อหา ไม่มี sidebar/แถบ App (เมนูมาจากเชลล์แอปเดี่ยวแทน)
   if (embed) {
     return (
-      <div className="relative min-h-screen bg-slate-50" {...wideAttr}>
+      <div className="relative min-h-screen bg-slate-50" data-shell-root="" {...wideAttr}>
         <ThemeApplier appKey={activeApp} />
         <ThemeBanner appKey={activeApp} />
         <div className="relative" data-tm-page="">
@@ -724,7 +724,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-slate-50" data-shell-root="">
       {/* Skip to content (a11y) */}
       <a href="#main-content" className="skip-to-content">ข้ามไปยังเนื้อหาหลัก</a>
 

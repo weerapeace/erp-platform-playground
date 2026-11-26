@@ -10,7 +10,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  FONT_OPTIONS, DENSITY_SCALE, SPEED_FACTOR, effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpThemeConfig,
+  FONT_OPTIONS, DENSITY_SCALE, SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig,
 } from "@/lib/erp-theme-config";
 import { blinkMinOpacity, fxDuration, fxSpread, hasFx, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
 import { Icon } from "@/components/icon";
@@ -103,7 +103,8 @@ export function ThemePreview({
   const c = useMemo(() => (mob ? mobileLiteConfig(config) : config), [config, mob]);
   const font = FONT_OPTIONS.find((f) => f.key === c.typography.font) ?? FONT_OPTIONS[0];
   useEffect(() => { if (!compact) ensureThemeFont(c.typography.font); }, [compact, c.typography.font]);
-  const p = scaleOf(c.colors.primary), a = scaleOf(c.colors.accent);
+  const p = primaryScale(c), a = scaleOf(c.colors.accent);
+  const pt = c.colors.parts;
   const s = SAMPLES[sample];
   const g = c.gradient, sp = g.spots, fx = c.effects, o = c.outline, el = c.elevation;
   const grad = `linear-gradient(${g.angle}deg, ${p[600]}, ${g.color2})`;
@@ -114,7 +115,9 @@ export function ThemePreview({
   const fs = c.typography.baseSize - 1;
   const P = dark
     ? { page: "#0f172a", surf: "#1e293b", tx: "#f1f5f9", mut: "#94a3b8", bd: "#334155", ps: p[500] + "40" }
-    : { page: "#f8fafc", surf: "#ffffff", tx: "#0f172a", mut: "#64748b", bd: "#e2e8f0", ps: p[50] };
+    : { page: pt.page ?? "#f8fafc", surf: "#ffffff", tx: "#0f172a", mut: "#64748b", bd: pt.border ?? "#e2e8f0", ps: p[50] };
+  const headColor = !dark && pt.heading ? pt.heading : undefined;
+  const linkColor = pt.link ?? null;
   const anim = !compact;
   const bgOp = effectiveBgOpacity(c) / 100;
   const bgKey = dark && c.background.darkImage ? c.background.darkImage : c.background.image;
@@ -196,8 +199,9 @@ export function ThemePreview({
     return <span {...(urgent ? pp("badge") : {})} className={urgent ? badgeFx.cls : ""} style={{ display: "inline-block", fontSize: fs - 2, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", ...(c.components.badge === "solid" ? { background: solid, color: "#fff" } : { background: bg, color: tx }), ...(urgent ? badgeFx.style : {}) }}>{label}</span>;
   };
 
-  const sideBg = c.components.sidebar === "dark" ? "#1e293b" : c.components.sidebar === "brand" ? p[700] : P.surf;
-  const sideTx = c.components.sidebar === "light" ? P.mut : "#e2e8f0";
+  const sideLight = pt.sidebar ? isLightColor(pt.sidebar) : c.components.sidebar === "light";
+  const sideBg = pt.sidebar ?? (c.components.sidebar === "dark" ? "#1e293b" : c.components.sidebar === "brand" ? p[700] : P.surf);
+  const sideTx = sideLight ? P.mut : "#e2e8f0";
   const hasBanner = sp.banner || (bgKey && c.background.where === "banner");
 
   // ตัวเลขนับขึ้น (จุด "ตัวเลขสรุป" มี countUp)
@@ -243,7 +247,7 @@ export function ThemePreview({
   const topFx = fxStyle("topbar");
   const bellFx = fxStyle("bell");
   const top = (
-    <div {...pp("topbar")} className={topFx.cls} style={{ position: "relative", background: sp.top ? grad : p[600], color: "#fff", padding: mob ? "9px 12px" : "8px 12px", ...topFx.style, ...(topFx.style.animation?.toString().includes("tmpShift") ? { backgroundImage: "none" } : {}) }}>
+    <div {...pp("topbar")} className={topFx.cls} style={{ position: "relative", background: sp.top ? `linear-gradient(${g.angle}deg, ${pt.topbar ?? p[600]}, ${g.color2})` : pt.topbar ?? p[600], color: pt.topbar && !sp.top && isLightColor(pt.topbar) ? "#0f172a" : "#fff", padding: mob ? "9px 12px" : "8px 12px", ...topFx.style, ...(topFx.style.animation?.toString().includes("tmpShift") ? { backgroundImage: "none" } : {}) }}>
       {bgLayer("top")}
       <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontWeight: c.typography.headingWeight }}>{mob ? s.app : `ERP · ${s.app}`}</span>
@@ -270,7 +274,7 @@ export function ThemePreview({
   ) : (
     <div className="tmp-en" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: gap }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: fs + 4, fontWeight: c.typography.headingWeight }}>{s.title}</div>
+        <div style={{ fontSize: fs + 4, fontWeight: c.typography.headingWeight, color: headColor }}>{s.title}</div>
         <div style={{ fontSize: fs - 2, color: P.mut }}>อัปเดตล่าสุด 5 นาทีที่แล้ว</div>
       </div>
       {!mob && <button type="button" style={btn(false)}>ส่งออก</button>}
@@ -310,7 +314,7 @@ export function ThemePreview({
     <div>
       {s.rows.slice(0, compact ? 2 : 4).map((r, i) => (
         <div key={r[0]} {...pp("card")} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px`, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }), ...cardFx.style, ...hringVar, ...delay(i + 5) }}>
-          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: fs - 2, color: P.mut }}>{r[0]}</div><div>{r[1]}</div></div>
+          <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: fs - 2, color: linkColor ?? P.mut }}>{r[0]}</div><div>{r[1]}</div></div>
           {badge(r[3], r[4])}
         </div>
       ))}
@@ -322,7 +326,7 @@ export function ThemePreview({
         <tbody>
           {s.rows.slice(0, compact ? 2 : 4).map((r, i) => (
             <tr key={r[0]} className="tmp-row" style={{ background: c.components.table === "zebra" && i % 2 ? (dark ? "#172033" : "#f8fafc") : undefined }}>
-              {[r[0], r[1], r[2]].map((v, j) => <td key={j} style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined, borderRight: c.components.table === "lines" ? `1px solid ${P.bd}` : undefined, color: j === 0 ? P.mut : P.tx, whiteSpace: "nowrap" }}>{v}</td>)}
+              {[r[0], r[1], r[2]].map((v, j) => <td key={j} style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined, borderRight: c.components.table === "lines" ? `1px solid ${P.bd}` : undefined, color: j === 0 ? linkColor ?? P.mut : P.tx, whiteSpace: "nowrap" }}>{v}</td>)}
               <td style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined }}>{badge(r[3], r[4])}</td>
             </tr>
           ))}
@@ -339,7 +343,7 @@ export function ThemePreview({
         <div style={{ marginTop: 6, padding: "4px 8px", borderRadius: R, border: `2px solid ${p[500]}`, boxShadow: `0 0 0 3px ${p[500]}33` }}>กำลังพิมพ์…</div>
       </div>
       <div style={{ flex: 1, ...cardBox({ padding: 10, borderRadius: R + 2, boxShadow: el.depth === "none" ? "none" : `0 10px 24px -8px ${rgba(shColor, 0.3)}` }) }}>
-        <div style={{ fontWeight: c.typography.headingWeight }}>ยืนยันอนุมัติ?</div>
+        <div style={{ fontWeight: c.typography.headingWeight, color: headColor }}>ยืนยันอนุมัติ?</div>
         <div style={{ fontSize: fs - 2, color: P.mut, margin: "4px 0 8px" }}>ใบขอซื้อ PR-00118 ยอด 12,400 บาท</div>
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}><button type="button" style={btn(false)}>ยกเลิก</button><PrimaryBtn>อนุมัติ</PrimaryBtn></div>
       </div>
@@ -393,7 +397,7 @@ export function ThemePreview({
             {["หน้าแรก", s.app, "รายงาน", "ตั้งค่า"].map((t, i) => {
               const on = i === 1;
               const st: React.CSSProperties = on
-                ? sp.sidebar ? { background: grad, color: "#fff" } : c.components.sidebar === "light" ? { background: P.ps, color: p[700] } : { background: "rgba(255,255,255,.14)", color: "#fff" }
+                ? sp.sidebar ? { background: grad, color: "#fff" } : sideLight ? { background: P.ps, color: p[700] } : { background: "rgba(255,255,255,.14)", color: "#fff" }
                 : {};
               const icon = ["home", "file-text", "chart-bar", "settings"][i];
               return (

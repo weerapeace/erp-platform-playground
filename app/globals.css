@@ -183,9 +183,10 @@ html[data-tm-ganim] .tm-ganim, html[data-tm-ganim][data-tm-topbar] header[data-s
 }
 @keyframes tmGrad { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
 /* แถบบน: มือถือ = แถบบนเชลล์ · PC = หัวเมนูข้าง (ช่องโลโก้) */
-html[data-tm-topbar] header[data-shell-topbar], html[data-tm-topbar] [data-shell-sidehead] { background: var(--tm-topbar); border-color: transparent !important; color: #fff; }   /* ห้าม !important ที่ background — ไม่งั้นแอนิเมชันไล่สี/เปลี่ยนสีทับไม่ได้ */
-html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.text-slate-900, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
-html[data-tm-topbar] :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, .15) !important; }
+html[data-tm-topbar] header[data-shell-topbar], html[data-tm-topbar] [data-shell-sidehead] { background: var(--tm-topbar); border-color: transparent !important; }
+html[data-tm-topbar]:not([data-tm-topbar="light"]) :is(header[data-shell-topbar], [data-shell-sidehead]) { color: #fff; }   /* ห้าม !important ที่ background — ไม่งั้นแอนิเมชันไล่สี/เปลี่ยนสีทับไม่ได้ */
+html[data-tm-topbar]:not([data-tm-topbar="light"]) :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.text-slate-900, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
+html[data-tm-topbar]:not([data-tm-topbar="light"]) :is(header[data-shell-topbar], [data-shell-sidehead]) :is(.hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover) { background-color: rgba(255, 255, 255, .15) !important; }
 /* เมนูข้าง: เข้ม / สีธีม */
 html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] { background: #1e293b !important; border-color: rgba(255, 255, 255, .08) !important; }
 html[data-tm-sidebar="brand"] aside[aria-label="เมนูหลัก"] { background: var(--tm-sidebar-bg) !important; }
@@ -195,6 +196,13 @@ html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.hover\:b
 html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.bg-slate-50, .bg-slate-100, .bg-white) { background-color: rgba(255, 255, 255, .07) !important; }
 html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] :is(.border-slate-100, .border-slate-200) { border-color: rgba(255, 255, 255, .1) !important; }
 html[data-tm-sidebar] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { background-color: rgba(255, 255, 255, .16) !important; color: #fff !important; }
+/* สีแยกทีละส่วน (แผงสี "แต่ละส่วน" · 2026-11-26) — ไม่ตั้ง = ไม่แตะ */
+html[data-tm-sidetint] aside[aria-label="เมนูหลัก"] { background: var(--tm-sidebar-bg) !important; }
+html[data-tm-pagebg] [data-shell-root] { background-color: var(--tm-page-bg); }
+html[data-tm-heading] [data-tm-page] :is(h1, h2, h3):not(.text-white):not([data-tm-skip] *) { color: var(--tm-heading); }
+html[data-tm-link] [data-tm-page] a:is(.text-blue-600, .text-blue-700, .text-blue-800):not([data-tm-skip] *) { color: var(--tm-link); }
+html[data-tm-border] [data-tm-page] :is(.border-slate-100, .border-slate-200, .border-slate-300) { border-color: var(--tm-border); }
+html[data-tm-border] [data-tm-page] :is(.divide-slate-100, .divide-slate-200) > :not([hidden]) ~ :not([hidden]) { border-color: var(--tm-border); }
 /* เมนูที่เลือก = ไล่สี */
 html[data-tm-sidegrad] aside[aria-label="เมนูหลัก"] .bg-blue-50.text-blue-700 { background-image: var(--tm-gradient) !important; color: #fff !important; }
 /* แถวตารางกลาง (DataTable) ชี้แล้วเป็นสีอ่อนของธีม · การ์ดที่ติด .tm-card ยกตัว */

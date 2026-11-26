@@ -10,16 +10,22 @@ import {
   DEFAULT_ELEVATION, DEFAULT_FX, DEFAULT_OUTLINE, hasFx, normalizeElevation, normalizeFx, normalizeOutline,
   type ThemeElevation, type ThemeFx, type ThemeOutline,
 } from "./erp-theme-fx";
-import { ORANGE_SCALE, VIOLET_SCALE, hexToChannels, isHexColor, scaleFromHex, themeVars, type ColorScale } from "./erp-theme";
+import { ORANGE_SCALE, VIOLET_SCALE, hexToChannels, isHexColor, scaleFromHex, shiftScale, themeVars, type ColorScale } from "./erp-theme";
 
 export type BgWhere = "page" | "top" | "banner";
 export type AnimSpeed = "slow" | "normal" | "fast";
 export type Density = "compact" | "normal" | "spacious";
 export type FontKey = "inter-noto" | "sarabun" | "prompt" | "ibm-plex-thai" | "kanit";
 
+/** สีแยกทีละส่วน (null = ตามธีม/ค่าเดิม) — แผงสี แท็บ "แต่ละส่วน" · lib/erp-theme-palettes PART_COLORS */
+export type ColorParts = { topbar: string | null; sidebar: string | null; page: string | null; heading: string | null; link: string | null; border: string | null };
+export const NO_PARTS: ColorParts = { topbar: null, sidebar: null, page: null, heading: null, link: null, border: null };
+/** เลื่อนเฉดของสีหลัก -2…2 (ปุ่มใช้เฉด 600+shade×100) */
+export const SHADE_MIN = -2, SHADE_MAX = 2;
+
 export type ErpThemeConfig = {
   v: 1;
-  colors: { primary: string; accent: string };
+  colors: { primary: string; accent: string; shade: number; parts: ColorParts };
   background: { image: string | null; where: BgWhere; opacity: number; blur: number; veil: boolean; darkImage: string | null };
   gradient: { color2: string; angle: number; spots: { top: boolean; button: boolean; sidebar: boolean; banner: boolean; page: boolean }; animate: boolean };
   animation: { enter: boolean; hover: boolean; shine: boolean; countUp: boolean; mascot: boolean; mascotImage: string | null; speed: AnimSpeed };
@@ -54,7 +60,7 @@ export const FONT_OPTIONS: { key: FontKey; label: string; family: string; google
 /** หน้าตาเดิมของระบบ = ธีม "ส้มคลาสสิก" */
 export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
   v: 1,
-  colors: { primary: ORANGE_SCALE[500], accent: VIOLET_SCALE[500] },
+  colors: { primary: ORANGE_SCALE[500], accent: VIOLET_SCALE[500], shade: 0, parts: NO_PARTS },
   background: { image: null, where: "page", opacity: 30, blur: 0, veil: true, darkImage: null },
   gradient: { color2: "#f59e0b", angle: 90, spots: { top: false, button: false, sidebar: false, banner: false, page: false }, animate: false },
   animation: { enter: false, hover: false, shine: false, countUp: true,  mascot: false, mascotImage: null, speed: "normal" },
@@ -80,6 +86,7 @@ const num = (v: unknown, d: number, min: number, max: number) => {
 };
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
 const pick = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (opts.includes(v as T) ? (v as T) : d);
+const hexOrNull = (v: unknown) => (isHexColor(v) ? `#${v.trim().replace(/^#/, "").toLowerCase()}` : null);
 const key = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 500) : null);
 
 /** กรองค่าธีมจากที่ไหนก็ได้ (DB/ฟอร์ม/ไฟล์) ให้ครบทุกช่องและอยู่ในช่วง — ช่องที่ไม่มี = ค่าเริ่ม */
@@ -87,6 +94,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
   const r = isObj(raw) ? raw : {};
   const D = DEFAULT_THEME_CONFIG;
   const c = isObj(r.colors) ? r.colors : {};
+  const cp = isObj(c.parts) ? c.parts : {};
   const b = isObj(r.background) ? r.background : {};
   const g = isObj(r.gradient) ? r.gradient : {};
   const gs = isObj(g.spots) ? g.spots : {};
@@ -104,7 +112,11 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
   const anyFlow = Object.values(effects.targets).some((t) => t.fx.includes("flow"));
   return {
     v: 1,
-    colors: { primary: hex(c.primary, D.colors.primary), accent: hex(c.accent, D.colors.accent) },
+    colors: {
+      primary: hex(c.primary, D.colors.primary), accent: hex(c.accent, D.colors.accent),
+      shade: num(c.shade, 0, SHADE_MIN, SHADE_MAX),
+      parts: { topbar: hexOrNull(cp.topbar), sidebar: hexOrNull(cp.sidebar), page: hexOrNull(cp.page), heading: hexOrNull(cp.heading), link: hexOrNull(cp.link), border: hexOrNull(cp.border) },
+    },
     background: {
       image: key(b.image), where: pick(b.where, ["page", "top", "banner"] as const, D.background.where),
       opacity: num(b.opacity, D.background.opacity, 0, 100), blur: num(b.blur, D.background.blur, 0, 10),
@@ -193,7 +205,17 @@ export function scaleOf(color: string): ColorScale {
   return scaleFromHex(c);
 }
 
-function luminance(h: string): number {
+/** ชุดเฉดของสีหลักที่ใช้จริง (รวมการเลื่อนเฉดปุ่ม) — ใช้แทน scaleOf(colors.primary) ทุกที่ */
+export function primaryScale(cfg: ErpThemeConfig): ColorScale {
+  return shiftScale(scaleOf(cfg.colors.primary), cfg.colors.shade);
+}
+
+/** สีนี้อ่อนพอให้ตัวหนังสือดำ (true) หรือควรใช้ตัวหนังสือขาว (false) */
+export function isLightColor(h: string): boolean {
+  return contrastRatio(h, "#0f172a") >= contrastRatio(h, "#ffffff");
+}
+
+export function luminance(h: string): number {
   const [r, g, b] = hexToChannels(h).split(" ").map((x) => {
     const v = Number(x) / 255;
     return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -215,7 +237,7 @@ export const MIN_CONTRAST = 3;
 /** เตือนจุดที่อ่านยาก */
 export function themeIssues(cfg: ErpThemeConfig): ThemeIssue[] {
   const out: ThemeIssue[] = [];
-  const p = scaleOf(cfg.colors.primary), a = scaleOf(cfg.colors.accent);
+  const p = primaryScale(cfg), a = scaleOf(cfg.colors.accent);
   if (contrastRatio("#ffffff", p[600]) < MIN_CONTRAST)
     out.push({ key: "primary-button", level: "warn", message: "ตัวหนังสือขาวบนปุ่มสีหลักอ่านยาก (สีหลักอ่อนเกินไป)", fixable: true });
   if (contrastRatio("#ffffff", a[600]) < MIN_CONTRAST)
@@ -226,6 +248,13 @@ export function themeIssues(cfg: ErpThemeConfig): ThemeIssue[] {
   }
   if (cfg.background.image && cfg.background.where === "page" && !cfg.background.veil && cfg.background.opacity > VEIL_MAX_OPACITY)
     out.push({ key: "bg-veil", level: "warn", message: `รูปพื้นหลังชัดเกิน ${VEIL_MAX_OPACITY}% และปิดตัวกันอ่านยากอยู่`, fixable: true });
+  const pt = cfg.colors.parts, pageBg = pt.page ?? "#f8fafc";
+  if (pt.page && contrastRatio(pt.page, "#0f172a") < 7)
+    out.push({ key: "page-dark", level: "warn", message: "พื้นหลังหน้าเข้มเกินไป ตัวหนังสือในหน้าอ่านยาก", fixable: true });
+  if (pt.heading && contrastRatio(pt.heading, pageBg) < 4.5)
+    out.push({ key: "heading", level: "warn", message: "สีหัวข้ออ่อนเกินไปเมื่อเทียบกับพื้นหลัง", fixable: true });
+  if (pt.link && contrastRatio(pt.link, "#ffffff") < 4.5)
+    out.push({ key: "link", level: "warn", message: "สีลิงก์อ่อนเกินไป อ่านยากบนพื้นขาว", fixable: true });
   if (cfg.typography.baseSize < 13) out.push({ key: "font-small", level: "info", message: "ตัวอักษรเล็กกว่า 13px อาจอ่านยากบนมือถือ", fixable: false });
   return out;
 }
@@ -243,9 +272,15 @@ function darkenUntil(color: string, ok: (h: string) => boolean): string {
 /** แก้สีอ่านยากให้อัตโนมัติ (เข้มขึ้นทีละนิดจนผ่าน) — คืนค่าใหม่ ไม่แก้ของเดิม */
 export function autoFixContrast(cfg: ErpThemeConfig): ErpThemeConfig {
   const next: ErpThemeConfig = JSON.parse(JSON.stringify(cfg));
-  const okBtn = (base: string) => contrastRatio("#ffffff", scaleOf(base)[600]) >= MIN_CONTRAST;
+  const okBtn = (base: string) => contrastRatio("#ffffff", shiftScale(scaleOf(base), next.colors.shade)[600]) >= MIN_CONTRAST;
+  const okAcc = (base: string) => contrastRatio("#ffffff", scaleOf(base)[600]) >= MIN_CONTRAST;
   if (!okBtn(next.colors.primary)) next.colors.primary = darkenUntil(next.colors.primary, okBtn);
-  if (!okBtn(next.colors.accent)) next.colors.accent = darkenUntil(next.colors.accent, okBtn);
+  if (!okAcc(next.colors.accent)) next.colors.accent = darkenUntil(next.colors.accent, okAcc);
+  const pt = next.colors.parts;
+  if (pt.page && contrastRatio(pt.page, "#0f172a") < 7) pt.page = null;
+  const pageBg = pt.page ?? "#f8fafc";
+  if (pt.heading && contrastRatio(pt.heading, pageBg) < 4.5) pt.heading = darkenUntil(pt.heading, (h) => contrastRatio(h, pageBg) >= 4.5);
+  if (pt.link && contrastRatio(pt.link, "#ffffff") < 4.5) pt.link = darkenUntil(pt.link, (h) => contrastRatio(h, "#ffffff") >= 4.5);
   const okRaw = (h: string) => contrastRatio("#ffffff", h) >= MIN_CONTRAST;
   if ((next.gradient.spots.top || next.gradient.spots.banner || next.gradient.spots.button) && !okRaw(next.gradient.color2))
     next.gradient.color2 = darkenUntil(next.gradient.color2, okRaw);
@@ -287,8 +322,8 @@ export function themeCssVars(cfg: ErpThemeConfig): Record<string, string> {
   const font = FONT_OPTIONS.find((f) => f.key === cfg.typography.font) ?? FONT_OPTIONS[0];
   const d = DENSITY_SCALE[cfg.density];
   return {
-    ...themeVars({ primary: scaleOf(cfg.colors.primary), accent: scaleOf(cfg.colors.accent) }),
-    "--tm-gradient": `linear-gradient(${cfg.gradient.angle}deg, ${scaleOf(cfg.colors.primary)[600]}, ${cfg.gradient.color2})`,
+    ...themeVars({ primary: primaryScale(cfg), accent: scaleOf(cfg.colors.accent) }),
+    "--tm-gradient": `linear-gradient(${cfg.gradient.angle}deg, ${primaryScale(cfg)[600]}, ${cfg.gradient.color2})`,
     "--tm-radius": `${cfg.shape.radius}px`,
     "--tm-font": font.family,
     "--tm-font-size": `${cfg.typography.baseSize}px`,

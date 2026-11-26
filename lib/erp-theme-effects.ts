@@ -6,7 +6,7 @@
 //   มือถือ = โหมดเบา (mobileLiteConfig) · ปิดแอนิเมชัน (ผู้ใช้/เครื่องตั้งลดการเคลื่อนไหว) = ไม่ตั้ง attr แอนิเมชันเลย
 // เทสต์: lib/__tests__/erp-theme-effects.test.ts
 // ============================================================
-import { SPEED_FACTOR, effectiveBgOpacity, mobileLiteConfig, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
+import { SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
 import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
 
 /** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
@@ -48,7 +48,8 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   const none: ThemeEffects = { attrs: {}, vars: {}, page: null, banner: null, mascot: null, particles: null };
   if (!raw) return none;
   const c = env.mobile ? mobileLiteConfig(raw) : raw;
-  const p = scaleOf(c.colors.primary);
+  const p = primaryScale(c);
+  const pt = c.colors.parts;
   const g = c.gradient, sp = g.spots, b = c.background, a = c.animation;
   const grad = `linear-gradient(${g.angle}deg, ${p[600]}, ${g.color2})`;
   const motion = !env.motionOff;
@@ -65,13 +66,28 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   const topImg = b.image && b.where === "top" ? b.image : null;
   if (sp.top || topImg) {
     const veil = topImg && b.veil ? "linear-gradient(rgba(0,0,0,.28), rgba(0,0,0,.28)), " : "";
-    vars["--tm-topbar"] = topImg ? `${veil}url("${imgUrl(topImg, 800)}") center / cover` : grad;
+    vars["--tm-topbar"] = topImg ? `${veil}url("${imgUrl(topImg, 800)}") center / cover` : pt.topbar ? `linear-gradient(${g.angle}deg, ${pt.topbar}, ${g.color2})` : grad;
     attrs["tm-topbar"] = "1";
+  } else if (pt.topbar) {
+    // สีแถบบนแยก (แผงสี "แต่ละส่วน") — สีอ่อน = ตัวหนังสือเข้มเดิม
+    vars["--tm-topbar"] = pt.topbar;
+    attrs["tm-topbar"] = isLightColor(pt.topbar) ? "light" : "1";
   }
   // เมนูข้าง
   if (c.components.sidebar !== "light") attrs["tm-sidebar"] = c.components.sidebar;
   if (c.components.sidebar === "brand") vars["--tm-sidebar-bg"] = p[800];
   if (sp.sidebar) attrs["tm-sidegrad"] = "1";
+  if (pt.sidebar) {
+    // สีเมนูข้างแยก: เข้ม = ใช้แบบ "สีธีม" (ตัวหนังสือขาว) · อ่อน = เปลี่ยนแค่พื้น
+    vars["--tm-sidebar-bg"] = pt.sidebar;
+    if (isLightColor(pt.sidebar)) { delete attrs["tm-sidebar"]; attrs["tm-sidetint"] = "1"; }
+    else attrs["tm-sidebar"] = "brand";
+  }
+  // สีพื้นหลังหน้า · หัวข้อ · ลิงก์ · เส้นขอบ (CSS globals "สีแยกทีละส่วน")
+  if (pt.page) { attrs["tm-pagebg"] = "1"; vars["--tm-page-bg"] = pt.page; }
+  if (pt.heading) { attrs["tm-heading"] = "1"; vars["--tm-heading"] = pt.heading; }
+  if (pt.link) { attrs["tm-link"] = "1"; vars["--tm-link"] = pt.link; }
+  if (pt.border) { attrs["tm-border"] = "1"; vars["--tm-border"] = pt.border; }
   // แอนิเมชัน
   if (motion) {
     if (c.effects.enter !== "none") attrs["tm-enter"] = c.effects.enter;   // fade | up | zoom | blur (รอบ 4)
@@ -115,7 +131,7 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   }
   // ── การ์ด: เส้นขอบ · เงา (รอบ 3) — ค่าเริ่ม (ขอบเทา 1px ทึบ · เงาบางสีเทา) = ไม่แตะ ปล่อยหน้าตาเดิม ──
   const o = c.outline, el = c.elevation;
-  const bdColor = o.color === "theme" ? p[500] : o.color === "soft" ? p[200] : "#e2e8f0";
+  const bdColor = o.color === "theme" ? p[500] : o.color === "soft" ? p[200] : pt.border ?? "#e2e8f0";
   if (o.width !== 1 || o.color !== "gray" || o.style !== "solid" || o.gradient) {
     attrs["tm-card-border"] = o.gradient ? "grad" : "1";
     vars["--tm-card-bw"] = `${o.gradient ? Math.max(1, o.width) : o.width}px`;

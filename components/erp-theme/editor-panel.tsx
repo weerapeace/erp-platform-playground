@@ -3,13 +3,17 @@
  * ThemeEditorPanel — แผงปรับธีม 9 หมวด (ธีมกลาง ERP เฟส 2)
  *   รับ config + onPatch(patch แบบลึก) · ใช้ของกลาง ColorInput / RangeInput / ImageInput
  *   หมวด: สี · พื้นหลัง · ไล่สี · เอฟเฟกต์ · ขอบและเงา · มาสคอต · ตัวอักษร · รูปทรง · ความแน่น · ชิ้นส่วน · สว่าง/มืด
+ *   แผงสีแบบ A (2026-11-26): แท็บ ชุดสี (16 ชุด + ดูดสีจากรูป) / สีหลัก (เฉดปุ่ม · สีรองที่เข้ากัน · ไล่สี) / แต่ละส่วน (6 ส่วน)
  *   ตัวแก้แบบเรียบ (2026-11-25 · แบบ D): แถบล่าง สี / สไตล์ / พื้นหลัง (ThemeColorSheet · ThemeStyleSheet · ThemeBgSheet) + "เพิ่มเติม" = ThemeAdvancedPanel · คำอธิบายย่อเป็น ⓘ (InfoTip)
  *   เอฟเฟกต์ = ตาราง "จุด × เอฟเฟกต์ (เลือกได้ 2) × ความแรง" + ชุดสำเร็จรูป (lib/erp-theme-fx · รอบเอฟเฟกต์เพิ่ม)
  */
 import { ColorInput } from "@/components/color-picker";
 import { RangeInput } from "@/components/range-input";
 import { ImageInput } from "@/components/image-input";
-import { FONT_OPTIONS, VEIL_MAX_OPACITY, type ErpThemeConfig } from "@/lib/erp-theme-config";
+import { FONT_OPTIONS, SHADE_MAX, SHADE_MIN, VEIL_MAX_OPACITY, isLightColor, primaryScale, scaleOf, type ErpThemeConfig } from "@/lib/erp-theme-config";
+import { THEME_STOPS } from "@/lib/erp-theme";
+import { COLOR_SETS, PART_COLORS, currentColorSet, harmonyColors, type ColorPartKey } from "@/lib/erp-theme-palettes";
+import { swatchesFromImageKey } from "@/components/erp-theme/palette-from-image";
 import { EFFECTS, EFFECT_TARGETS, FX_PRESETS, MAX_FX_PER_TARGET, TARGET_EFFECTS, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
 import { useEffect, useRef, useState } from "react";
 import { ADV_GROUPS, currentFxPreset, motionLevel, withMotionLevel, type AdvGroupKey, type EditorCategory } from "@/lib/erp-theme-easy";
@@ -307,24 +311,174 @@ function SheetLabel({ children, hint }: { children: React.ReactNode; hint?: stri
   return <div className="text-xs font-medium text-slate-700 mb-1.5 flex items-center gap-1">{children}{hint && <InfoTip text={hint} />}</div>;
 }
 
+/** แผงสีแบบ A (2026-11-26 · ข้อ 1–6): แท็บ ชุดสี / สีหลัก / แต่ละส่วน */
+type ColorTab = "sets" | "main" | "parts";
+const GRAD_SPOTS: [keyof ErpThemeConfig["gradient"]["spots"], string][] = [["top", "แถบบน"], ["button", "ปุ่มหลัก"], ["sidebar", "เมนูที่เลือก"], ["banner", "แบนเนอร์"], ["page", "พื้นหลังหน้า"]];
+
 export function ThemeColorSheet({ config: c, onPatch, readOnly }: { config: ErpThemeConfig; onPatch: (p: Patch) => void; readOnly?: boolean }) {
+  const [tab, setTab] = useState<ColorTab>("sets");
+  const tabs: [ColorTab, string][] = [["sets", "ชุดสี"], ["main", "สีหลัก"], ["parts", "แต่ละส่วน"]];
+  const partsSet = Object.values(c.colors.parts).filter(Boolean).length;
   return (
-    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70 space-y-3">
+    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70">
+      <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-slate-100 p-0.5 mb-3" role="tablist">
+        {tabs.map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+            className={`h-8 rounded-md text-xs ${tab === k ? "bg-white shadow-sm text-slate-900 font-medium" : "text-slate-500 hover:text-slate-800"}`}>
+            {l}{k === "parts" && partsSet > 0 && <span className="ml-1 text-[10px] text-blue-700">{partsSet}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === "sets" && <ColorSetsTab c={c} onPatch={onPatch} />}
+      {tab === "main" && <ColorMainTab c={c} onPatch={onPatch} />}
+      {tab === "parts" && <ColorPartsTab c={c} onPatch={onPatch} />}
+    </fieldset>
+  );
+}
+
+function ColorSetsTab({ c, onPatch }: { c: ErpThemeConfig; onPatch: (p: Patch) => void }) {
+  const cur = currentColorSet(c.colors);
+  const [img, setImg] = useState<string | null>(null);
+  const [sw, setSw] = useState<string[] | null>(null);
+  const [reading, setReading] = useState(false);
+  useEffect(() => {
+    if (!img) { setSw(null); return; }
+    let alive = true;
+    setReading(true);
+    swatchesFromImageKey(img, 5).then((s) => { if (alive) setSw(s); }).catch(() => { if (alive) setSw([]); }).finally(() => { if (alive) setReading(false); });
+    return () => { alive = false; };
+  }, [img]);
+  return (
+    <div className="space-y-3">
+      <div>
+        <SheetLabel hint="กดทีเดียวได้ สีหลัก + สีรอง + สีไล่ ที่เข้ากันแล้ว · กดย้อนได้">ชุดสีสำเร็จรูป</SheetLabel>
+        <div className="grid grid-cols-4 gap-1.5">
+          {COLOR_SETS.map((s) => (
+            <button key={s.key} type="button" title={s.name} aria-pressed={cur === s.key}
+              onClick={() => onPatch({ colors: { primary: s.primary, accent: s.accent }, gradient: { color2: s.color2 } })}
+              className={`rounded-lg border p-1 text-left ${cur === s.key ? "border-blue-500 ring-2 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
+              <div className="flex h-4 rounded overflow-hidden"><span className="flex-[2]" style={{ background: s.primary }} /><span className="flex-1" style={{ background: s.accent }} /><span className="flex-1" style={{ background: s.color2 }} /></div>
+              <div className="mt-0.5 text-[10px] text-slate-600 truncate">{s.name}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <SheetLabel hint="เลือก/วางรูปที่ชอบ (รูปสินค้า โลโก้ บรรยากาศ) ระบบดึงสีเด่น 5 สี · รูปไม่ถูกบันทึกในธีม">ดูดสีจากรูป</SheetLabel>
+        <ImageInput value={img} onChange={setImg} folder="themes" compact />
+        {reading && <div className="mt-1.5 text-[11px] text-slate-400">กำลังอ่านสีจากรูป…</div>}
+        {sw && !reading && (sw.length === 0
+          ? <div className="mt-1.5 text-[11px] text-amber-700">รูปนี้ไม่มีสีสดพอ ลองรูปอื่น</div>
+          : (
+            <div className="mt-2">
+              <div className="flex items-center gap-1.5">
+                {sw.map((x) => (
+                  <button key={x} type="button" title={`ใช้ ${x} เป็นสีหลัก`} onClick={() => onPatch({ colors: { primary: x } })}
+                    className="w-8 h-8 rounded-full" style={{ background: x, outline: c.colors.primary === x ? "2px solid #0f172a" : "none", outlineOffset: 2 }} />
+                ))}
+                <button type="button" onClick={() => onPatch({ colors: { primary: sw[0], accent: sw[1] ?? sw[0] }, gradient: { color2: sw[2] ?? sw[1] ?? sw[0] } })}
+                  className="ml-auto h-8 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">ใช้ทั้งชุด</button>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">กดวงสี = ใช้เป็นสีหลัก</div>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function ColorMainTab({ c, onPatch }: { c: ErpThemeConfig; onPatch: (p: Patch) => void }) {
+  const base = scaleOf(c.colors.primary);
+  const btnIdx = 6 + c.colors.shade;   // THEME_STOPS[6] = 600
+  const g = c.gradient;
+  return (
+    <div className="space-y-3">
       <div>
         <SheetLabel hint="ปุ่ม ลิงก์ แถบบน · ระบบสร้างเฉดอ่อน-เข้มให้เอง">สีหลัก</SheetLabel>
         <div className="flex flex-wrap items-center gap-1.5">
           {EASY_SWATCHES.map((x) => (
             <button key={x} type="button" aria-label={`สี ${x}`} onClick={() => onPatch({ colors: { primary: x } })}
-              className="w-8 h-8 rounded-full" style={{ background: x, outline: c.colors.primary.toLowerCase() === x ? "2px solid #0f172a" : "none", outlineOffset: 2 }} />
+              className="w-7 h-7 rounded-full" style={{ background: x, outline: c.colors.primary.toLowerCase() === x ? "2px solid #0f172a" : "none", outlineOffset: 2 }} />
           ))}
         </div>
         <div className="mt-2"><ColorInput value={c.colors.primary} onChange={(v) => onPatch({ colors: { primary: v } })} /></div>
       </div>
       <div>
-        <SheetLabel hint="แท็บที่เลือก ป้ายเน้น">สีรอง</SheetLabel>
-        <ColorInput value={c.colors.accent} onChange={(v) => onPatch({ colors: { accent: v } })} />
+        <SheetLabel hint="เลือกว่าปุ่มหลักใช้เฉดไหน · ทั้งระบบเลื่อนตาม (เฉดอ่อน/เข้มรอบ ๆ เปลี่ยนด้วย)">เฉดปุ่ม อ่อน–เข้ม</SheetLabel>
+        <div className="flex rounded-lg overflow-hidden border border-slate-200">
+          {THEME_STOPS.map((s, i) => {
+            const ok = i - 6 >= SHADE_MIN && i - 6 <= SHADE_MAX, on = i === btnIdx;
+            return (
+              <button key={s} type="button" disabled={!ok} onClick={() => onPatch({ colors: { shade: i - 6 } })} title={ok ? `ปุ่มใช้เฉด ${s}` : `เฉด ${s}`} aria-pressed={on}
+                className={`flex-1 h-8 relative ${ok ? "cursor-pointer" : "cursor-default opacity-60"}`} style={{ background: base[s] }}>
+                {on && <span className="absolute inset-1 rounded border-2" style={{ borderColor: isLightColor(base[s]) ? "#0f172a" : "#fff" }} />}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex justify-between text-[10px] text-slate-400 mt-0.5"><span>อ่อน</span><span>ปุ่มใช้เฉด {THEME_STOPS[btnIdx]}{c.colors.shade === 0 ? " (ปกติ)" : ""}</span><span>เข้ม</span></div>
       </div>
-    </fieldset>
+      <div>
+        <SheetLabel hint="แท็บที่เลือก ป้ายเน้น · กดสีที่แนะนำเพื่อใช้">สีรอง</SheetLabel>
+        <ColorInput value={c.colors.accent} onChange={(v) => onPatch({ colors: { accent: v } })} />
+        <div className="flex flex-wrap gap-1.5 mt-1.5">
+          {harmonyColors(c.colors.primary).map((h) => (
+            <button key={h.key} type="button" onClick={() => onPatch({ colors: { accent: h.color } })} title={`ใช้ ${h.color} เป็นสีรอง`}
+              className={`h-7 pl-1 pr-2 rounded-md border text-[11px] inline-flex items-center gap-1.5 ${c.colors.accent === h.color ? "border-blue-400 bg-blue-50 text-blue-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              <span className="w-5 h-5 rounded" style={{ background: h.color }} />{h.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <SheetLabel hint="ไล่จากสีหลักไปสีที่ 2 · เลือกจุดที่จะใช้ไล่สีด้านล่าง">ไล่สี</SheetLabel>
+        <div className="h-3 rounded-full mb-2" style={{ backgroundImage: `linear-gradient(${g.angle}deg, ${primaryScale(c)[600]}, ${g.color2})` }} />
+        <div className="flex items-center gap-2">
+          <div className="flex-1 min-w-0"><ColorInput value={g.color2} onChange={(v) => onPatch({ gradient: { color2: v } })} /></div>
+        </div>
+        <div className="flex items-center text-[11px] text-slate-500 mt-2">มุม<span className="ml-auto">{g.angle}°</span></div>
+        <input type="range" min={0} max={360} step={15} value={g.angle} onChange={(e) => onPatch({ gradient: { angle: Number(e.target.value) } })} className="w-full" aria-label="มุมไล่สี" />
+        <div className="flex flex-wrap gap-1 mt-1">
+          {GRAD_SPOTS.map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={g.spots[k]} onClick={() => onPatch({ gradient: { spots: { [k]: !g.spots[k] } } })}
+              className={`h-7 px-2.5 rounded-full border text-[11px] ${g.spots[k] ? "bg-blue-50 border-blue-300 text-blue-800 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColorPartsTab({ c, onPatch }: { c: ErpThemeConfig; onPatch: (p: Patch) => void }) {
+  const parts = c.colors.parts;
+  const set = (k: ColorPartKey, v: string | null) => onPatch({ colors: { parts: { [k]: v } } });
+  return (
+    <div>
+      <div className="text-[11px] text-slate-500 mb-1">ไม่ตั้ง = ตามธีม (หน้าตาเดิม)</div>
+      <div className="divide-y divide-slate-100">
+        {PART_COLORS.map((p) => {
+          const v = parts[p.key];
+          return (
+            <div key={p.key} className="py-2 flex items-center gap-2 min-h-[44px]">
+              <span className="text-sm text-slate-700 flex items-center gap-1 w-28 shrink-0">{p.label}<InfoTip text={p.hint} /></span>
+              {v ? (
+                <>
+                  <div className="flex-1 min-w-0"><ColorInput value={v} onChange={(x) => set(p.key, x)} /></div>
+                  <button type="button" onClick={() => set(p.key, null)} title="กลับไปตามธีม" aria-label={`${p.label}: กลับไปตามธีม`}
+                    className="w-8 h-8 shrink-0 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 inline-flex items-center justify-center"><Icon value="i:x" /></button>
+                </>
+              ) : (
+                <>
+                  <span className="flex-1 text-[11px] text-slate-400">ตามธีม</span>
+                  <button type="button" onClick={() => set(p.key, p.suggest)} className="h-8 px-2.5 rounded-md border border-slate-200 text-xs text-slate-700 hover:bg-slate-50">ตั้งสี</button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <Note text="สีสถานะ (ร่าง / รออนุมัติ / อนุมัติ / ไม่อนุมัติ) ล็อกเหมือนกันทุกธีม เพื่อไม่ให้สับสนความหมาย · สีที่ทำให้อ่านยากจะขึ้นจุดเหลืองที่แถบบน กดแก้ให้อัตโนมัติได้" />
+    </div>
   );
 }
 
@@ -423,7 +577,6 @@ export function ThemeBgSheet({ config: c, onPatch, readOnly }: { config: ErpThem
           </div>
         </>
       )}
-      <Check checked={c.gradient.spots.top} onChange={(v) => onPatch({ gradient: { spots: { top: v } } })} label="แถบบนไล่สี" hint="ไล่จากสีหลักไปสีที่ 2 (ตั้งสีที่ 2 ที่ เพิ่มเติม › ไล่สี)" />
     </fieldset>
   );
 }

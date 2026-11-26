@@ -5,7 +5,7 @@
 // เทสต์: lib/__tests__/erp-theme-assign.test.ts
 // ============================================================
 import type { CSSProperties } from "react";
-import { scaleOf, type ErpThemeConfig } from "./erp-theme-config";
+import { isLightColor, primaryScale, type ErpThemeConfig } from "./erp-theme-config";
 
 export const COMPANY_SCOPE = "company";
 export const appScope = (appKey: string) => `app:${appKey}`;
@@ -42,10 +42,11 @@ export const CLEAR_HEADER: Required<AppHeaderFields> = { theme_color: null, them
 
 /** สไตล์แถบบนตามธีม (สีหลักเข้ม หรือไล่สีถ้าเปิดไว้ที่แถบบน) */
 export function themeTopbarStyle(cfg: ErpThemeConfig): CSSProperties {
-  const p = scaleOf(cfg.colors.primary);
+  const base = cfg.colors.parts.topbar ?? primaryScale(cfg)[600];
+  const color = isLightColor(base) && !cfg.gradient.spots.top ? "#0f172a" : undefined;
   return cfg.gradient.spots.top
-    ? { backgroundImage: `linear-gradient(${cfg.gradient.angle}deg, ${p[600]}, ${cfg.gradient.color2})` }
-    : { backgroundColor: p[600] };
+    ? { backgroundImage: `linear-gradient(${cfg.gradient.angle}deg, ${base}, ${cfg.gradient.color2})` }
+    : { backgroundColor: base, ...(color ? { color } : {}) };
 }
 
 export type AssignChange = { scope: string; theme_id: string | null };
