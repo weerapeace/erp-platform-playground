@@ -13,13 +13,13 @@ import {
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 
-export type PrintOrderItem = { sku_code: string | null; name: string | null; variant?: string | null; qty: number };
+export type PrintOrderItem = { sku_code: string | null; name: string | null; variant?: string | null; qty: number; /** รูปสินค้า (คีย์ R2) — ใบหยิบรวมโชว์ได้ (ตั้งค่า › รูปสินค้า) */ image_key?: string | null };
 export type PrintOrder = {
   id: string; order_no: string | null; customer_name: string | null; ordered_at: string | null; ship_by_at: string | null;
   carrier: string | null; tracking_no: string | null; note?: string | null; items: PrintOrderItem[];
   recipient?: { name: string; phone: string; address: string } | null;
 };
-export type PickRow = { key: string; sku: string; name: string; variant: string; qty: number; orders: string[] };
+export type PickRow = { key: string; sku: string; name: string; variant: string; qty: number; orders: string[]; image_key: string | null };
 
 const dateTh = (iso: string | null | undefined) => {
   if (!iso) return "";
@@ -35,7 +35,8 @@ export function pickRows(orders: PrintOrder[]): PickRow[] {
     const variant = (it.variant ?? "").trim();
     const name = (it.name ?? "").trim() || sku || "สินค้า";
     const key = `${sku || name}|${variant}`;
-    const row = m.get(key) ?? { key, sku, name, variant, qty: 0, orders: [] };
+    const row = m.get(key) ?? { key, sku, name, variant, qty: 0, orders: [], image_key: null };
+    if (!row.image_key && it.image_key) row.image_key = it.image_key;
     row.qty += Number(it.qty) || 0;
     const no = o.order_no ?? o.id;
     if (!row.orders.includes(no)) row.orders.push(no);
@@ -47,6 +48,7 @@ export function pickRows(orders: PrintOrder[]): PickRow[] {
 export function pickColumns(): ListPrintColumn[] {
   return [
     { key: "done", label: "หยิบแล้ว", blank: "box", widthMm: 13, align: "center" },
+    { key: "img", label: "รูป" },
     { key: "sku", label: "รหัส", mono: true, widthMm: 30, minMm: 20 },
     { key: "name", label: "สินค้า" },
     { key: "variant", label: "ตัวเลือก", widthMm: 28, minMm: 16 },
@@ -80,6 +82,7 @@ export function buildPickPrint(input: {
   const cols = fitListColumns(resolveListColumns(s, pickColumns()), s);
   const pieces = rows.reduce((a, r) => a + r.qty, 0);
   const table = renderListTable(cols, sorted.map((r) => ({
+    img: r.image_key && input.origin ? `<img class="thumb" src="${esc(`${input.origin}/api/r2-image?key=${encodeURIComponent(r.image_key)}&w=200`)}" alt="" />` : `<span class="no-img">—</span>`,
     sku: r.sku ? `<b class="mono">${esc(r.sku)}</b>` : `<span class="no-img">—</span>`,
     name: esc(r.name), variant: esc(r.variant), qty: `<b class="pk-q">${r.qty.toLocaleString("th-TH")}</b>`,
     orders: `<span class="sub">${esc(r.orders.join(", "))}</span>`,

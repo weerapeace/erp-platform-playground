@@ -21,9 +21,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { auditDiff, writeAudit } from "@/lib/audit";
 import { classifyNote } from "@/lib/gift-card-design";
+import { guessLooseItems } from "@/lib/platform-order-items-server";
 import { categorySetMap, cleanSetItems, resolveParentPackaging, type PackagingSet } from "@/lib/packaging";
 import {
-  cleanScanCode, packGate, shopCodeGuesses, bestGuess, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES, UNPAID_STATUSES,
+  cleanScanCode, packGate, suggestBox, canEditPackSession, packedFromSessions, PACK_FINISH_STATUSES, PACK_PROBLEMS, FINISH_METHODS, PACK_EDIT_STATUSES, PACK_LOCK_MINUTES, UNPAID_STATUSES,
   type BoxSize, type PackFinishStatus, type PackEditStatus,
 } from "@/lib/packing";
 
@@ -95,33 +96,7 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
   // 🔎 บรรทัดที่ยังจับคู่ไม่ได้ → เดาให้ (แสดงในหน้าแพ็กอย่างเดียว ไม่บันทึกการจับคู่)
   //    1) รหัสร้านที่มีของต่อท้าย เช่น ไซซ์ "MGN369-01XXL" → รหัสลูก/รหัสรุ่นที่ยาวที่สุดที่มีจริง (lib/packing shopCodeGuesses)
   //    2) listing ในร้านที่เคยจับคู่รุ่นไว้แล้ว (platform_catalog_listings) — ถ้ารหัสลูกที่เดาได้อยู่คนละรุ่นกับ listing เชื่อ listing
-  const guess = new Map<string, { skuId: string | null; parentId: string | null; by: "code" | "listing"; code: string | null }>();
-  const loose = rawItems.filter((i) => !i.matched_sku_id && !i.matched_parent_sku_id);
-  if (loose.length) {
-    const itemIdOf = (i: Row) => str((i.raw as Row | null)?.item_id);
-    const guessCodes = [...new Set(loose.flatMap((i) => shopCodeGuesses(str(i.sku_code))))].slice(0, 200);
-    const extIds = [...new Set(loose.map(itemIdOf).filter((x): x is string => !!x))];
-    const [{ data: gs }, { data: gp }, { data: gl }] = await Promise.all([
-      guessCodes.length ? admin.from("skus_v2").select("id, code, parent_sku_id").in("code", guessCodes) : Promise.resolve({ data: [] }),
-      guessCodes.length ? admin.from("parent_skus_v2").select("id, code").in("code", guessCodes) : Promise.resolve({ data: [] }),
-      extIds.length && order.platform_id
-        ? admin.from("platform_catalog_listings").select("external_product_id, matched_parent_sku_id").eq("platform_id", String(order.platform_id)).in("external_product_id", extIds).not("matched_parent_sku_id", "is", null)
-        : Promise.resolve({ data: [] }),
-    ]);
-    const skuByCode = new Map(((gs ?? []) as Row[]).map((r) => [String(r.code).toUpperCase(), r]));
-    const parByCode = new Map(((gp ?? []) as Row[]).map((r) => [String(r.code).toUpperCase(), r]));
-    const listParent = new Map(((gl ?? []) as Row[]).map((r) => [String(r.external_product_id), String(r.matched_parent_sku_id)]));
-    for (const i of loose) {
-      const lp = listParent.get(itemIdOf(i) ?? "") ?? null;
-      const sc = bestGuess(str(i.sku_code), (c) => skuByCode.has(c));
-      const sk = sc ? skuByCode.get(sc) : undefined;
-      if (sk && (!lp || str(sk.parent_sku_id) === lp)) { guess.set(String(i.id), { skuId: String(sk.id), parentId: str(sk.parent_sku_id), by: "code", code: String(sk.code) }); continue; }
-      if (lp) { guess.set(String(i.id), { skuId: null, parentId: lp, by: "listing", code: null }); continue; }
-      const pc = bestGuess(str(i.sku_code), (c) => parByCode.has(c));
-      const pr = pc ? parByCode.get(pc) : undefined;
-      if (pr) guess.set(String(i.id), { skuId: null, parentId: String(pr.id), by: "code", code: String(pr.code) });
-    }
-  }
+  const guess = await guessLooseItems(admin, rawItems.map((i) => ({ id: String(i.id), sku_code: str(i.sku_code), matched_sku_id: str(i.matched_sku_id), matched_parent_sku_id: str(i.matched_parent_sku_id), raw: i.raw, platform_id: str(order.platform_id) })));
   const items: Row[] = rawItems.map((i) => {
     const g = guess.get(String(i.id));
     return g ? { ...i, matched_sku_id: g.skuId, matched_parent_sku_id: g.skuId ? null : g.parentId } : i;

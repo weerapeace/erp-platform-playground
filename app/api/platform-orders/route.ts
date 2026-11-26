@@ -231,13 +231,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     const real = ids.filter((x) => !isDemoId(x));
     const admin = supabaseAdmin();
-    const [{ data: os }, { data: its }] = await Promise.all([
+    // หน้าพิมพ์ (ใบหยิบ/ใบแพ็ก): รายการพร้อมรูป — รหัสที่มีไซซ์/รหัสสลักต่อท้ายเดารูปด้วยตัวเดียวกับสถานีแพ็ก (orderItemsWithMedia)
+    const [{ data: os }, byOrder] = await Promise.all([
       admin.from("platform_orders").select(LIST_COLS).in("id", real),
-      admin.from("platform_order_items").select("order_id, sku_code, name, qty, price, matched_sku_id").in("order_id", real),
+      orderItemsWithMedia(admin, real),
     ]);
-    const byOrder = new Map<string, Record<string, unknown>[]>();
-    for (const it of (its ?? []) as Record<string, unknown>[]) { const k = String(it.order_id); (byOrder.get(k) ?? byOrder.set(k, []).get(k)!).push(it); }
-    const rows = ((os ?? []) as Record<string, unknown>[]).map((r) => ({ ...toRow(r), items: byOrder.get(String(r.id)) ?? [], recipient: null, note: null }));
+    const rows = ((os ?? []) as Record<string, unknown>[]).map((r) => ({ ...toRow(r), items: (byOrder.get(String(r.id)) ?? []).map((i) => ({ order_id: i.order_id, sku_code: i.sku_code, name: i.name, qty: i.qty, price: i.price, matched_sku_id: i.matched_sku_id, image_key: i.image_key, color: i.color })), recipient: null, note: null }));
     rows.sort((a, b) => real.indexOf(a.id) - real.indexOf(b.id));
     return NextResponse.json({ orders: rows, error: null });
   }
