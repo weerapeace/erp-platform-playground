@@ -151,6 +151,8 @@ function PlatformOrdersInner() {
   const importPlatform = useRef<string>("");   // อัปไฟล์ออเดอร์: แพลตฟอร์มที่เลือกจากเมนู ⋯
   const [view, setView] = useState<"todo" | "history">("todo");
   const [card, setCard] = useState<CardKey>("todo");
+  // ตัวกรองใบปะหน้า (2026-11-26): "" ทุกใบ · none ยังไม่พิมพ์ · done พิมพ์แล้ว (นับเฉพาะออเดอร์ที่ยังไม่ส่ง)
+  const [labelF, setLabelF] = useState<"" | "none" | "done">("");
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -197,16 +199,17 @@ function PlatformOrdersInner() {
       if (brandId) params.set("brand_id", brandId);
       if (off.length) params.set("off", off.join(","));
       if (q) params.set("q", q);
+      if (labelF && view === "todo") params.set("label", labelF);
       const j = await apiFetch(`/api/platform-orders?${params}`).then((r) => r.json());
       if (seq !== reqSeq.current) return;
       if (j.error) { setError(j.error); return; }
       setRows((j.orders ?? []) as PlatformOrderRow[]); setTotal(Number(j.total) || 0); setSummary(j.summary ?? null);
     } catch { if (seq === reqSeq.current) setError("โหลดออเดอร์ไม่สำเร็จ กรุณาลองใหม่"); }
     finally { if (seq === reqSeq.current) setLoading(false); }
-  }, [view, page, card, demo, brandId, off, q]);
+  }, [view, page, card, demo, brandId, off, q, labelF]);
   useEffect(() => { void load(); }, [load]);
   // เปลี่ยนตัวกรอง = กลับหน้าแรก + ล้างที่ติ๊กไว้
-  useEffect(() => { setPage(1); setSel(new Set()); }, [view, card, demo, brandId, off]);
+  useEffect(() => { setPage(1); setSel(new Set()); }, [view, card, demo, brandId, off, labelF]);
   const pull = usePullAll({ canManage: canManage && !demo, onDone: () => void load() });
 
   const toggleDemo = () => {
@@ -456,6 +459,19 @@ function PlatformOrdersInner() {
           </button>
         ))}
       </ScrollTabs>
+
+      {view === "todo" && !demo && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-slate-500"><Icon value="i:printer" className="mr-1" />ใบปะหน้า</span>
+          <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+            {([["", "ทุกใบ"], ["none", "ยังไม่พิมพ์"], ["done", "พิมพ์แล้ว"]] as const).map(([k, label]) => (
+              <button key={k || "all"} type="button" onClick={() => setLabelF(k)} aria-pressed={labelF === k}
+                className={`h-8 px-3 ${labelF === k ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+            ))}
+          </span>
+          {labelF && <span className="text-xs text-slate-500">นับเฉพาะออเดอร์ที่ยังไม่ส่ง</span>}
+        </div>
+      )}
 
       {view === "history" && <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600"><Icon value="i:mail" className="mr-1" />ยอดขายที่อ่านจากอีเมลแจ้งของ Shopee/Lazada — ร้านส่งของไปแล้วผ่าน Seller Centre จึงดูได้อย่างเดียว (ไม่นับเป็นงานที่ต้องจัดส่ง ไม่ตัดสต๊อกจากหน้านี้)</p>}
 

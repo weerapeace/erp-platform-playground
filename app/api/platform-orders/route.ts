@@ -58,6 +58,8 @@ type ListParams = {
   unpaid?: boolean; urgent?: boolean;
   /** ยอดขายจากเมล: ซ่อนคู่ แบรนด์×แพลตฟอร์ม ที่ดึงจาก API แล้ว (เจ้าของเลือก E2 — LM ไม่ใช้เมลแล้ว · IG Shopee ยังใช้) */
   apiPairs?: { brand_id: string; platform_id: string }[];
+  /** ใบปะหน้า (2026-11-26): none = ยังไม่พิมพ์ · done = พิมพ์แล้ว — นับจาก print_logs po_label ของออเดอร์ที่ยังไม่ส่ง (labelIds คำนวณก่อน query) */
+  label?: string; labelIds?: string[];
 };
 type OffPair = { brand: string; platform: string };
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -103,7 +105,20 @@ function applyFilters(q: any, p: ListParams) {
   if (p.due === "today") q = q.gte("ship_by_at", new Date().toISOString()).lt("ship_by_at", bangkokDayRange().end).in("status", OPEN_STATUSES);
   if (p.invoice === "requested") q = q.not("tax_invoice_request", "is", null).is("invoice_so_id", null).neq("status", "cancelled");
   if (p.invoice === "issued") q = q.not("invoice_so_id", "is", null);
+  if (p.labelIds) q = q.in("id", p.labelIds.length ? p.labelIds : ["00000000-0000-0000-0000-000000000000"]);
   return q;
+}
+
+/**
+ * ตัวกรองใบปะหน้า: ออเดอร์ที่ยังไม่ส่ง (ตามตัวกรองอื่น ≤ 1,000 ใบ) → แยกพิมพ์แล้ว/ยังไม่พิมพ์ จากประวัติพิมพ์กลาง
+ * ไม่เพิ่มคอลัมน์ในฐานข้อมูล — ออเดอร์ค้างส่งมีครั้งละไม่กี่ร้อยใบ
+ */
+async function labelFilterIds(admin: Admin, p: ListParams): Promise<string[]> {
+  const { data } = await applyFilters(admin.from("platform_orders").select("id"), { ...p, label: "", labelIds: undefined })
+    .in("status", OPEN_STATUSES).order("ordered_at", { ascending: false }).limit(1000);
+  const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  const printed = await printSummaryOf(admin, "po_label", ids);
+  return ids.filter((id) => (p.label === "done") === printed.has(id));
 }
 
 function toRow(r: Record<string, unknown>): PlatformOrderRow {
@@ -231,7 +246,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     platformId: (sp.get("platform_id") ?? "").trim(), brandId: (sp.get("brand_id") ?? "").trim(),
     view: (sp.get("view") ?? "todo").trim(), status: (sp.get("status") ?? "").trim(), q: (sp.get("q") ?? "").trim(),
     due: (sp.get("due") ?? "").trim(), invoice: (sp.get("invoice") ?? "").trim(), active: sp.get("active") === "1", booked: sp.get("booked") === "1", unpaid: sp.get("unpaid") === "1", urgent: sp.get("urgent") === "1",
-    off: parseOff(sp.get("off") ?? ""),
+    off: parseOff(sp.get("off") ?? ""), label: ["none", "done"].includes(sp.get("label") ?? "") ? String(sp.get("label")) : "",
   };
   const page = Math.max(1, Number(sp.get("page")) || 1);
   const size = Math.min(PAGE_MAX, Math.max(10, Number(sp.get("page_size")) || 50));
@@ -240,11 +255,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   if (cleanQ(p.q)) p.qIds = await orderIdsByProduct(admin, cleanQ(p.q));   // ค้นชื่อสินค้า/รหัส SKU ด้วย
   p.apiPairs = await apiConnectedPairs(admin);
+  if (p.label) p.labelIds = await labelFilterIds(admin, p);
   const count = (extra: Partial<ListParams>): Promise<number> =>
     applyFilters(admin.from("platform_orders").select("id", { count: "exact", head: true }), { ...p, ...extra })
       .then((r: { count: number | null }) => r.count ?? 0);
   // การ์ด = ทั้งร้าน/ทั้งมุมมอง ไม่ขึ้นกับตัวกรองย่อย (สถานะ/คำค้น/กำหนดส่ง/ใบกำกับ)
-  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false, unpaid: false, urgent: false };
+  const scope: Partial<ListParams> = { status: "", due: "", invoice: "", q: "", active: false, booked: false, unpaid: false, urgent: false, label: "", labelIds: undefined };
 
   // เรียง: ออเดอร์ล่าสุดก่อน (เจ้าของขอ 2026-11-22) · การ์ด "เลยกำหนดส่ง/ต้องส่งวันนี้" หรือ ?sort=due = ใกล้กำหนดส่งก่อน
   const byDue = sp.get("sort") === "due" || p.due === "late" || p.due === "today";

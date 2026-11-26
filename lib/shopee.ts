@@ -142,7 +142,10 @@ export async function shopeeFetch(path: string, opts: ShopeeCall = {}): Promise<
   try { j = text ? JSON.parse(text) as Record<string, unknown> : {}; } catch { /* ไม่ใช่ JSON */ }
   const err = String(j.error ?? "").trim();
   const reqId = typeof j.request_id === "string" ? j.request_id : null;
-  if (err || !res.ok) throw new ShopeeApiError(String(j.message ?? "").trim() || err || `HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`, err || `http_${res.status}`, reqId, res.status);
+  if (err || !res.ok) {
+    // แนบคำตอบเต็มไว้ (คำสั่งชุดของ logistics ตอบ error ทั้งก้อนเมื่อทุกใบพลาด แต่ยังมีเหตุผลรายใบใน result_list)
+    throw Object.assign(new ShopeeApiError(String(j.message ?? "").trim() || err || `HTTP ${res.status}${text ? `: ${text.slice(0, 160)}` : ""}`, err || `http_${res.status}`, reqId, res.status), { body: j });
+  }
   return j;
 }
 
@@ -456,6 +459,90 @@ export async function shopeeGetTrackingNumber(accessToken: string, shopId: strin
     query: { order_sn: orderSn, ...(packageNumber ? { package_number: packageNumber } : {}), response_optional_fields: "last_mile_tracking_number" },
   }));
 }
+
+// ───────── ใบปะหน้า (shipping document · 2026-11-26) ─────────
+// ลำดับ: get_shipping_document_parameter → create_shipping_document → get_shipping_document_result (รอ READY) → download_shipping_document
+// ⚠️ ใช้ได้เฉพาะออเดอร์ที่ "นัดส่งแล้ว" (มีเลขพัสดุ) · ไม่เปลี่ยนสถานะออเดอร์ (ตัวที่เปลี่ยนคือ ship_order — ยังไม่ทำ)
+// ทุกคำสั่งรับ order_list ≤ 50 · ดาวน์โหลด = ไฟล์ PDF (สำเร็จ) หรือ JSON error · ตัวเรียกรวม = lib/shipping-label + app/api/shipping-labels
+export type ShopeeDocOrder = { order_sn: string; package_number?: string | null; tracking_number?: string | null };
+export type ShopeeDocRow = { order_sn: string; package_number: string | null; fail_error: string | null; fail_message: string | null };
+
+/** order_list ที่ Shopee รับ — ห้ามส่ง package_number เป็นค่าว่าง (เอกสารเตือน) */
+export const shopeeDocOrderList = <T extends ShopeeDocOrder>(orders: T[], extra: (o: T) => Obj = () => ({})): Obj[] =>
+  orders.map((o) => ({ order_sn: o.order_sn, ...(o.package_number ? { package_number: o.package_number } : {}), ...extra(o) }));
+
+const docRows = (j: Obj): (ShopeeDocRow & Obj)[] => {
+  const list = respOf(j).result_list;
+  return (Array.isArray(list) ? list : []).map((x) => {
+    const r = (x && typeof x === "object" ? x : {}) as Obj;
+    return { ...r, order_sn: String(r.order_sn ?? ""), package_number: str(r.package_number), fail_error: str(r.fail_error), fail_message: str(r.fail_message) };
+  }).filter((r) => r.order_sn);
+};
+
+/** ชนิดใบที่จะใช้: ใบความร้อน (สติกเกอร์) ก่อน ถ้าเลือกได้ · ไม่งั้นตามที่ Shopee แนะนำ */
+export function shopeePickDocType(suggest: string | null, selectable: string[]): string {
+  if (selectable.includes("THERMAL_AIR_WAYBILL")) return "THERMAL_AIR_WAYBILL";
+  if (suggest) return suggest;
+  return selectable[0] ?? "THERMAL_AIR_WAYBILL";
+}
+
+/** อ่านคำตอบ get_shipping_document_parameter → ต่อออเดอร์: ชนิดที่จะใช้ / error */
+export function shopeeDocParamsOf(j: Obj): (ShopeeDocRow & { doc_type: string })[] {
+  return docRows(j).map((r) => {
+    const sel = Array.isArray(r.selectable_shipping_document_type) ? (r.selectable_shipping_document_type as unknown[]).map(String) : [];
+    return { order_sn: r.order_sn, package_number: r.package_number, fail_error: r.fail_error, fail_message: r.fail_message, doc_type: shopeePickDocType(str(r.suggest_shipping_document_type), sel) };
+  });
+}
+/** อ่านคำตอบ create_shipping_document → ต่อออเดอร์ (error ว่าง = สร้างงานแล้ว) */
+export const shopeeDocCreateOf = (j: Obj): ShopeeDocRow[] => docRows(j).map(({ order_sn, package_number, fail_error, fail_message }) => ({ order_sn, package_number, fail_error, fail_message }));
+/** อ่านคำตอบ get_shipping_document_result → ต่อออเดอร์ status READY / PROCESSING / FAILED */
+export const shopeeDocResultOf = (j: Obj): (ShopeeDocRow & { status: string })[] =>
+  docRows(j).map(({ order_sn, package_number, fail_error, fail_message, status }) => ({ order_sn, package_number, fail_error, fail_message, status: String(status ?? (fail_error ? "FAILED" : "")).toUpperCase() }));
+
+/** คำสั่งชุดตอบ error ทั้งก้อนเมื่อ "ทุกใบพลาด" (common.batch_api_all_failed) แต่ยังมี result_list รายใบ → อ่านรายใบต่อ ไม่โยน */
+async function shopeeDocCall(path: string, accessToken: string, shopId: string | number, body: Obj): Promise<Obj> {
+  try { return await shopeeFetch(path, { accessToken, shopId, body }); }
+  catch (e) {
+    const b = (e as { body?: Obj }).body;
+    if (b && Array.isArray(obj(b.response)?.result_list)) return b;
+    throw e;
+  }
+}
+export async function shopeeGetShippingDocParams(accessToken: string, shopId: string | number, orders: ShopeeDocOrder[]) {
+  return shopeeDocParamsOf(await shopeeDocCall("/api/v2/logistics/get_shipping_document_parameter", accessToken, shopId, { order_list: shopeeDocOrderList(orders) }));
+}
+type DocOrderTyped = ShopeeDocOrder & { doc_type: string };
+/** สร้างงานไฟล์ใบปะหน้า (ไม่เปลี่ยนสถานะออเดอร์) — tracking_number จำเป็น (ยกเว้นขนส่งที่พิมพ์ก่อนนัดส่งได้) */
+export async function shopeeCreateShippingDoc(accessToken: string, shopId: string | number, orders: DocOrderTyped[]) {
+  return shopeeDocCreateOf(await shopeeDocCall("/api/v2/logistics/create_shipping_document", accessToken, shopId, {
+    order_list: shopeeDocOrderList(orders, (o) => ({ ...(o.tracking_number ? { tracking_number: o.tracking_number } : {}), shipping_document_type: o.doc_type })),
+  }));
+}
+export async function shopeeGetShippingDocResult(accessToken: string, shopId: string | number, orders: DocOrderTyped[]) {
+  return shopeeDocResultOf(await shopeeDocCall("/api/v2/logistics/get_shipping_document_result", accessToken, shopId, {
+    order_list: shopeeDocOrderList(orders, (o) => ({ shipping_document_type: o.doc_type })),
+  }));
+}
+/** ดาวน์โหลดไฟล์ใบปะหน้า (ทีละออเดอร์ → ไฟล์แยกต่อใบ ต่อหน้าโน้ตท้ายใบได้) · สำเร็จ = ไบต์ PDF · ไม่สำเร็จ = โยน ShopeeApiError */
+export async function shopeeDownloadShippingDoc(accessToken: string, shopId: string | number, order: ShopeeDocOrder, docType: string): Promise<Uint8Array> {
+  if (!shopeeConfigured()) throw new ShopeeApiError("ยังไม่ได้ตั้ง SHOPEE_PARTNER_ID / SHOPEE_PARTNER_KEY ในระบบ (Vercel)", "not_configured");
+  const path = "/api/v2/logistics/download_shipping_document";
+  const pid = PARTNER_ID(), ts = nowSec();
+  const sign = await shopeeSign(shopeeSignBase(pid, path, ts, accessToken, shopId), PARTNER_KEY());
+  const q = new URLSearchParams({ partner_id: pid, timestamp: String(ts), sign, access_token: accessToken, shop_id: String(shopId) });
+  const res = await fetch(`${shopeeHost()}${path}?${q.toString()}`, {
+    method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shipping_document_type: docType, order_list: shopeeDocOrderList([order]) }),
+  });
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (res.ok && isPdfBytes(buf)) return buf;
+  let j: Obj = {};
+  try { j = JSON.parse(new TextDecoder().decode(buf)) as Obj; } catch { /* ไม่ใช่ JSON */ }
+  const err = String(j.error ?? "").trim();
+  throw new ShopeeApiError(String(j.message ?? "").trim() || err || `ไฟล์ที่ได้ไม่ใช่ PDF (HTTP ${res.status})`, err || (res.ok ? "not_pdf" : `http_${res.status}`), typeof j.request_id === "string" ? j.request_id : null, res.status);
+}
+/** ขึ้นต้นด้วย %PDF */
+export const isPdfBytes = (b: Uint8Array): boolean => b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
 
 // ───────── แก้สินค้าบนร้าน (เฟส 4 · ผู้เรียกต้องถามเจ้าของก่อน + ลงประวัติ) ─────────
 /**

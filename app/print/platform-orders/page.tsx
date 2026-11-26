@@ -4,7 +4,7 @@
  * 🖨 พิมพ์งานจากศูนย์ออเดอร์ออนไลน์ — /print/platform-orders?kind=pick|pack|label&ids=<id,...>
  *   pick  = ใบหยิบรวม (รวมรหัสทุกออเดอร์) · ตั้งค่าหน้าพิมพ์ด้วยของกลาง ListPrintPanel
  *   pack  = ใบแพ็ก ออเดอร์ละใบ 2 ใบ/แผ่น A4 + บาร์โค้ดเลขออเดอร์
- *   label = ใบปะหน้า: ออเดอร์ตัวอย่าง = ใบจำลองมีลายน้ำ · ออเดอร์จริง = ต้องใช้ไฟล์ของ Shopee (เฟส B หลังเชื่อมร้าน)
+ *   label = ใบปะหน้า: ออเดอร์ตัวอย่าง = ใบจำลองมีลายน้ำ · ออเดอร์ Shopee API = ใบจริงจาก Shopee (RealLabelPanel · docs/shipping-label.md · 2026-11-26)
  * ตัวสร้างใบ = lib/platform-order-print (มีเทสต์) · ข้อมูล = /api/platform-orders?ids=
  */
 import { LoadingState } from "@/components/state-views";
@@ -26,6 +26,8 @@ import {
   type PrintOrder, type ShipSimLabel,
 } from "@/lib/platform-order-print";
 import { LABEL_SIZES, labelSizeOf, type LabelSize } from "@/lib/shippop";
+import { labelSourceSupported } from "@/lib/shipping-label";
+import { RealLabelPanel } from "@/components/shipping-label/real-label-panel";
 
 type Kind = "pick" | "pack" | "label";
 type ApiOrder = PrintOrder & { source: string | null; platform_id: string | null; brand_id: string | null };
@@ -75,18 +77,20 @@ function Inner() {
   }, [ids]);
 
   const isDemo = !!orders?.length && orders.every((o) => o.source === "demo");
+  // ใบปะหน้าจริงจากแพลตฟอร์ม (Shopee API · 2026-11-26) → แผง RealLabelPanel (บันทึกพิมพ์เองเฉพาะใบที่ได้ไฟล์)
+  const realOrders = useMemo(() => (kind === "label" && !isDemo ? (orders ?? []).filter((o) => labelSourceSupported(o.source)) : []), [kind, isDemo, orders]);
   // บันทึกว่าพิมพ์แล้ว (ป้ายเอกสาร หยิบ/แพ็ก/ปะหน้า ใต้เลขออเดอร์ในศูนย์ออเดอร์ · 2026-11-23) — ออเดอร์ตัวอย่างไม่บันทึก
-  const logItems = useMemo(() => (isDemo ? [] : (orders ?? []).filter((o) => !String(o.id).startsWith("demo-")).map((o) => ({ doc_id: o.id, doc_no: o.order_no ?? null }))), [orders, isDemo]);
+  const logItems = useMemo(() => (isDemo ? [] : (orders ?? []).filter((o) => !String(o.id).startsWith("demo-") && !realOrders.includes(o)).map((o) => ({ doc_id: o.id, doc_no: o.order_no ?? null }))), [orders, isDemo, realOrders]);
   usePrintLog(kind === "pack" ? "po_pack" : kind === "label" ? "po_label" : "po_pick", logItems);
   // ใบปะหน้าของออเดอร์ที่จองขนส่งแล้ว (ศูนย์ออเดอร์ › จัดส่ง) — จองจำลอง = ใบของเรามีลายน้ำ · จองจริง = ไฟล์จาก SHIPPOP (ขั้น 2)
   const [ship, setShip] = useState<{ html: string | null; sims: ShipSimLabel[]; booked: string[] } | null>(null);
   // ขนาดใบปะหน้าจาก SHIPPOP (ใช้กับการจองจริง/ทดลอง) — จำต่อเครื่อง
   const [size, setSize] = useState<LabelSize>(() => labelSizeOf(sp.get("size") ?? (typeof window !== "undefined" ? safeGet(LABEL_SIZE_KEY) : null)));
   useEffect(() => {
-    if (kind !== "label" || isDemo || !orders?.length || ship) return;
+    if (kind !== "label" || isDemo || !orders?.length || ship || realOrders.length === orders.length) return;
     apiFetch(`/api/platform-orders/ship?ids=${encodeURIComponent(ids.join(","))}&size=${size}`).then((r) => r.json())
       .then((j) => setShip({ html: j.html ?? null, sims: (j.sims ?? []) as ShipSimLabel[], booked: (j.booked ?? []) as string[] })).catch(() => setShip({ html: null, sims: [], booked: [] }));
-  }, [kind, isDemo, orders, ids, ship, size]);
+  }, [kind, isDemo, orders, ids, ship, size, realOrders]);
   const pickSize = (s: LabelSize) => { setSize(s); safeSet(LABEL_SIZE_KEY, s); setShip(null); };
   const barcodes = useMemo(() => {
     const m: Record<string, string> = {};
@@ -118,6 +122,23 @@ function Inner() {
   if (err) return <div className="min-h-screen bg-slate-100 p-6"><div className="mb-4">{back}</div><div className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{err}</div></div>;
   if (!orders) return <LoadingState />;
   if (kind === "pick") return <PickView orders={orders} shop={shop} header={<>{back}{tabs}</>} />;
+  if (realOrders.length) {
+    const others = orders.filter((o) => !realOrders.includes(o));
+    return (
+      <div className="min-h-screen bg-slate-100">
+        <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:px-6">
+          {back}{tabs}<span className="text-sm text-slate-600">{orders.length} ออเดอร์ · {shop}</span>
+        </div>
+        <RealLabelPanel orders={realOrders} />
+        {others.length > 0 && (
+          <p className="mx-auto max-w-3xl px-4 pb-6 text-sm text-slate-600">
+            อีก {others.length} ออเดอร์เป็นช่องทางอื่น (ใบปะหน้าคนละแบบ) —{" "}
+            <a className="text-blue-700 underline" href={`/print/platform-orders?kind=label&ids=${encodeURIComponent(others.map((o) => o.id).join(","))}`} target="_blank" rel="noopener noreferrer">พิมพ์แยก</a>
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100">
