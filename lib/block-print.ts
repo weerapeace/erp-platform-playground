@@ -41,6 +41,7 @@ export type BlockPiece = {
   /** ติ๊ก = ส่งออก */ on: boolean;
   /** ชิ้นที่รวมจากหลายเส้น — เก็บเส้นเดิมไว้ให้แยกคืนได้ */ parts?: BlockPart[];
   kind?: PieceKind;
+  /** สีพื้นในไฟล์ "#rrggbb" (ไฟล์ปักใช้แยกสีด้าย · บล็อกพิมพ์ไม่ใช้) */ color?: string;
 };
 
 export const MIN_SIZE_MM = 0.5;
@@ -159,6 +160,20 @@ export function isWhiteFill(args: unknown[]): boolean {
   return nums.every((v) => (max > 1 ? v >= 250 : v >= 0.98));
 }
 
+/** สีพื้นจากคำสั่งตั้งสี → "#rrggbb" (pdf.js ส่ง "#rrggbb" หรือเลข เทา 1 ค่า / RGB 3 ค่า / CMYK 4 ค่า ช่วง 0-1 หรือ 0-255) · อ่านไม่ได้ = null */
+export function fillColorHex(args: unknown[]): string | null {
+  const a = args?.[0];
+  if (typeof a === "string") { const m = /^#?([0-9a-f]{6})$/i.exec(a.trim()); return m ? `#${m[1].toLowerCase()}` : null; }
+  const n = (Array.isArray(args) ? args : []).map(Number).filter(Number.isFinite);
+  if (!n.length) return null;
+  const max = Math.max(...n), k = max > 1 ? 255 : 1;
+  let rgb: number[];
+  if (n.length === 1) rgb = [n[0], n[0], n[0]].map((v) => v / k);
+  else if (n.length >= 4) { const [c, m, y, kk] = n.map((v) => v / k); rgb = [(1 - c) * (1 - kk), (1 - m) * (1 - kk), (1 - y) * (1 - kk)]; }
+  else rgb = n.slice(0, 3).map((v) => v / k);
+  return "#" + rgb.map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, "0")).join("");
+}
+
 /** เรียงตามที่วางในไฟล์: แถวบนก่อน แล้วซ้าย → ขวา (แนวตั้งซ้อนกันเกินครึ่งของชิ้นที่เตี้ยกว่า = แถวเดียวกัน เช่น เครื่องหมายคำพูดเล็ก ๆ ข้างตัวอักษร) */
 export function byPosition(a: { ax: number; ay: number; oh: number }, b: { ax: number; ay: number; oh: number }): number {
   const overlap = Math.min(a.ay + a.oh, b.ay + b.oh) - Math.max(a.ay, b.ay);
@@ -188,11 +203,11 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
   const IMAGE = new Set(["paintImageXObject", "paintInlineImageXObject", "paintImageMaskXObject", "paintInlineImageXObjectGroup", "paintImageXObjectRepeat", "paintImageMaskXObjectRepeat", "paintSolidColorImageMask"]);
   const FILLCOLOR = new Set(["setFillRGBColor", "setFillGray", "setFillCMYKColor", "setFillColor", "setFillColorN"]);
 
-  type St = { m: Mat; white: boolean };
-  let st: St = { m: IDENT, white: false };
+  type St = { m: Mat; white: boolean; color: string | null };
+  let st: St = { m: IDENT, white: false, color: "#000000" };
   const stack: St[] = [];
   const skipped: AiSkipped = { strokes: 0, texts: 0, images: 0, whites: 0 };
-  const raw: { d: DrawOps; fill: FillRule }[] = [];
+  const raw: RawPath[] = [];
   let points = 0;
 
   for (let i = 0; i < list.fnArray.length; i++) {
@@ -205,7 +220,7 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
     if (fn === "paintFormXObjectEnd") { st = stack.pop() ?? st; continue; }
     if (fn === "beginGroup") { stack.push(st); const m = asMat((args[0] as { matrix?: unknown } | undefined)?.matrix); st = { ...st, m: m ? mul(st.m, m) : st.m }; continue; }
     if (fn === "endGroup") { st = stack.pop() ?? st; continue; }
-    if (FILLCOLOR.has(fn)) { st = { ...st, white: isWhiteFill(args) }; continue; }
+    if (FILLCOLOR.has(fn)) { st = { ...st, white: isWhiteFill(args), color: fillColorHex(args) }; continue; }
     if (TEXT.has(fn)) { skipped.texts++; continue; }
     if (IMAGE.has(fn)) { skipped.images++; continue; }
     if (fn !== "constructPath") continue;
@@ -223,7 +238,7 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
     const d = mapOps(Array.from(data), toMm);
     points += d.length;
     if (points > MAX_POINTS) throw new Error("ไฟล์นี้มีจุดเส้นเยอะเกินไป (เกิน 300,000) — ลองลดจุดใน Illustrator (Object › Path › Simplify) แล้วเปิดใหม่");
-    raw.push({ d, fill: EO.has(paint) ? "evenodd" : "nonzero" });
+    raw.push({ d, fill: EO.has(paint) ? "evenodd" : "nonzero", ...(st.color ? { color: st.color } : {}) });
   }
 
   return piecesFromRaw(raw, pageW, pageH, skipped);
@@ -233,7 +248,9 @@ export function piecesFromOperatorList(list: OperatorList, ops: Record<string, n
  * เส้นดิบ (หน่วย มม. แกน y ชี้ลง) → ชิ้น: กรอบจริง · เลื่อนมุมซ้ายบนไป 0,0 · เรียงตามตำแหน่ง · ตั้งชื่อ · พื้นหลังเต็มหน้า = ไม่ติ๊ก
  *   ใช้ร่วม: ไฟล์ .ai/.pdf (piecesFromOperatorList) · ไฟล์ .svg (lib/block-print-svg)
  */
-export function piecesFromRaw(raw: { d: DrawOps; fill: FillRule }[], pageW: number, pageH: number, skipped: AiSkipped): AiParseResult {
+/** เส้นดิบ 1 เส้นที่เติมสี (color = สีพื้น ถ้าอ่านได้) */
+export type RawPath = { d: DrawOps; fill: FillRule; color?: string };
+export function piecesFromRaw(raw: RawPath[], pageW: number, pageH: number, skipped: AiSkipped): AiParseResult {
   const pieces: BlockPiece[] = [];
   for (const r of raw) {
     const b = opsBox(r.d);
@@ -242,6 +259,7 @@ export function piecesFromRaw(raw: { d: DrawOps; fill: FillRule }[], pageW: numb
       id: "", name: "", fill: r.fill, on: true,
       d: mapOps(r.d, (x, y) => [r3(x - b.x), r3(y - b.y)]),
       ow: r3(b.w), oh: r3(b.h), w: r3(b.w), h: r3(b.h), ax: r3(b.x), ay: r3(b.y),
+      ...(r.color ? { color: r.color } : {}),
     });
   }
   pieces.sort(byPosition);
@@ -504,6 +522,7 @@ export function cleanPieces(raw: unknown): { ok: true; pieces: BlockPiece[] } | 
       on: o.on !== false,
       ...(parts ? { parts } : {}),
       ...(o.kind === "background" || o.kind === "dust" || o.kind === "frame" ? { kind: o.kind as PieceKind } : {}),
+      ...(typeof o.color === "string" && /^#[0-9a-f]{6}$/.test(o.color) ? { color: o.color } : {}),
     });
   }
   return { ok: true, pieces: out };

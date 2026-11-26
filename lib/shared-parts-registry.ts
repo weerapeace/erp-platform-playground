@@ -848,6 +848,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "block-print.md",
   },
   {
+    key: "embroidery", label: "ไฟล์ปัก (โลโก้เวกเตอร์ → ฝีเข็ม → .DST ส่งร้านปัก)", code: "EmbroideryList · EmbroideryEditor · StitchPreview · EmbroiderySheet · lib/embroidery", category: "feature",
+    source: { path: "components/embroidery" },
+    what: "เปิดโลโก้ .ai/.pdf/.svg (ตัวอ่านเดียวกับบล็อกพิมพ์ — ได้สีพื้นด้วย) → ตั้งขนาดจริง ความแน่นตามผ้า ชนิดฝีเข็มตามสี (อัตโนมัติ/ถมเต็ม/ซิกแซก/เดินเส้น) → คำนวณฝีเข็มในเบราว์เซอร์ ดูตัวอย่าง+เล่นลำดับ → ดาวน์โหลด .DST + ใบสั่งปัก · เตือนส่วนที่บาง/เล็กเกินปัก · ผูก Parent SKU",
+    when: "อยากได้ไฟล์เครื่องปัก (.DST) จากลายเวกเตอร์ · ที่อื่นที่ต้องการฝีเข็ม/เขียน-อ่านไฟล์ DST ให้เรียก buildPlan / buildDst / readDst ใน lib/embroidery ไม่เขียนใหม่",
+    notWhen: "ลายจากรูปถ่าย/บิตแมป (ต้องวาดเวกเตอร์ก่อน) · งานพิมพ์บล็อก/สกรีน ใช้บล็อกพิมพ์ · ไฟล์ปักที่ต้องสวยระดับร้าน digitize (ตัวหนังสือเล็กมาก) ยังต้องให้คนทำ",
+    doc: "embroidery.md",
+  },
+  {
     key: "pattern-3d", label: "ตัวแสดงชิ้นแพทเทิร์นเป็นภาพ 3D", code: "Pattern3D · lib/three-loader", category: "feature",
     source: { path: "components/pattern-3d" },
     what: "วาดชิ้นแพทเทิร์นเป็นแผ่น 3D วางบนโต๊ะ (มีรูเจาะจริง เส้นเย็บ ป้ายชื่อ) หรือวาดกระเป๋าที่ประกอบแล้วจากแม่แบบทรง หรือกระเป๋าที่ประกอบจากชิ้นจริงกับตะเข็บ (mode assembly) หรือภาพจำลองวัสดุทิ้งตัวแบบทดลอง (mode sim · lib/pattern-sim) หมุน ซูม แยกชิ้นดู คลิกเลือกชิ้นได้ ไลบรารี 3D โหลดจาก public/vendor ตอนเปิดครั้งแรก ไม่ทำให้หน้าอื่นหนัก",

@@ -5,7 +5,7 @@
  *   หน่วย: width ที่มี mm/cm/in/pt ใช้ตามนั้น · px หรือไม่มีหน่วย = ไฟล์จาก Illustrator นับ 1px = 1pt (72 ต่อนิ้ว) ที่อื่น 96 ต่อนิ้ว
  *   ผลลัพธ์รูปแบบเดียวกับไฟล์ .ai (piecesFromRaw) → ใช้หน้าเลือกชิ้น/ตั้งขนาดต่อได้เลย
  */
-import { OP, PT_TO_MM, isWhiteFill, piecesFromRaw, type AiParseResult, type AiSkipped, type DrawOps, type FillRule } from "@/lib/block-print";
+import { OP, PT_TO_MM, isWhiteFill, piecesFromRaw, type AiParseResult, type AiSkipped, type DrawOps, type FillRule, type RawPath } from "@/lib/block-print";
 
 type Mat = [number, number, number, number, number, number];
 const K = 0.5522847498;
@@ -178,7 +178,7 @@ export async function readSvgFile(file: File): Promise<AiParseResult & { pages: 
   host.appendChild(svg);
   document.body.appendChild(host);
   const skipped: AiSkipped = { strokes: 0, texts: 0, images: 0, whites: 0 };
-  const raw: { d: DrawOps; fill: FillRule }[] = [];
+  const raw: RawPath[] = [];
   try {
     const rootM = svg.getScreenCTM()?.inverse();
     skipped.texts = svg.querySelectorAll("text").length;
@@ -214,7 +214,8 @@ export async function readSvgFile(file: File): Promise<AiParseResult & { pages: 
         }
         i += n;
       }
-      raw.push({ d: outOps, fill: st.fillRule === "evenodd" ? "evenodd" : "nonzero" });
+      const color = /^rgb/.test(fill) && rgb.length >= 3 ? "#" + rgb.slice(0, 3).map((v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0")).join("") : null;
+      raw.push({ d: outOps, fill: st.fillRule === "evenodd" ? "evenodd" : "nonzero", ...(color ? { color } : {}) });
     });
   } finally {
     host.remove();

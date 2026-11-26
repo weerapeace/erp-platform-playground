@@ -165,6 +165,14 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
     toItem: (r) => ({ id: s(r.id), title: join(r.ticket_no, r.title) || "(ไม่มีชื่อ)", sub: s(r.assignee_name) || null, status: s(r.status) || null,
       date: day(r.due_date, r.created_at), href: `/design/pattern-tickets?id=${encodeURIComponent(s(r.id))}` }),
   },
+  {
+    key: "embroidery_designs", group: "design", label: "ไฟล์ปัก", icon: "🧵",
+    table: "embroidery_designs", select: "id, code, name, stitch_count, color_count, updated_at, is_active",
+    match: [{ by: "parent_id", column: "parent_sku_id" }], notFalse: "is_active",
+    order: { column: "updated_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.code, r.name) || "(ไม่มีชื่อ)", sub: `${Number(r.stitch_count ?? 0).toLocaleString("th-TH")} ฝี · ${s(r.color_count)} สี`,
+      date: day(r.updated_at), href: `/master/embroidery/${encodeURIComponent(s(r.id))}` }),
+  },
 
   // ── ผลิต (ผูกผ่าน SKU ลูก) ──
   {
