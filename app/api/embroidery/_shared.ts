@@ -109,5 +109,9 @@ export function settingsAuditChanges(before: Partial<EmbSettings> | null | undef
   for (const id of new Set([...Object.keys(bp), ...Object.keys(after.piece_types)])) {
     if (bp[id] !== after.piece_types[id]) out.push({ field: `settings.piece_types.${id}`, label: `ฝีเข็มชิ้น ${id}`, old: bp[id] ? typeTh(bp[id]) : "ตามสี", new: after.piece_types[id] ? typeTh(after.piece_types[id]) : "ตามสี" });
   }
+  const po = (x: unknown) => Object.keys((x ?? {}) as object).length;
+  if (JSON.stringify(b.piece_opts ?? {}) !== JSON.stringify(after.piece_opts)) out.push({ field: "settings.piece_opts", label: "ตั้งค่ารายชิ้น (มุม/ความแน่น/เส้นทิศ)", old: `${po(b.piece_opts)} ชิ้น`, new: `${po(after.piece_opts)} ชิ้น` });
+  if ((b.sequence ?? []).join(",") !== after.sequence.join(",")) out.push({ field: "settings.sequence", label: "ลำดับปัก", old: b.sequence?.length ? `ตั้งเอง ${b.sequence.length} ชิ้น` : "อัตโนมัติ", new: after.sequence.length ? `ตั้งเอง ${after.sequence.length} ชิ้น` : "อัตโนมัติ" });
+  if ((b.fill_auto_angle !== false) !== after.fill_auto_angle) out.push({ field: "settings.fill_auto_angle", label: "มุมถมตามรูปทรง", old: b.fill_auto_angle !== false ? "เปิด" : "ปิด", new: after.fill_auto_angle ? "เปิด" : "ปิด" });
   return out.slice(0, 60);
 }

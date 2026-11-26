@@ -17,15 +17,31 @@ import { ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { ART_ACCEPT } from "@/lib/block-print-ai";
 import { skippedNote } from "@/components/block-print/shared";
-import type { BlockPiece } from "@/lib/block-print";
-import { buildPlan, cleanSettings, colorsOf, designBox, FABRICS, isActive, LIMITS, startWidth, STITCH_TYPES, warningGroups, withSelection, type BoxMm, type EmbSettings, type StitchType } from "@/lib/embroidery";
-import { StitchPreview } from "./stitch-preview";
+import { opsToSvgPath, pieceShapes, type BlockPiece } from "@/lib/block-print";
+import { buildPlan, cleanSettings, colorsOf, designBox, FABRICS, isActive, LIMITS, startWidth, STITCH_TYPES, warningGroups, withSelection, type BoxMm, type EmbSettings, type PieceOpt, type StitchType } from "@/lib/embroidery";
+import { moveHandle, pieceHandles, planFrame, reorderSequence, textPiece, type Handle } from "@/lib/embroidery-edit";
+import type { DirLine } from "@/lib/embroidery-satin";
+import { StitchPreview, type PreviewView } from "./stitch-preview";
+import { SequenceList } from "./sequence-list";
+import { PiecePanel, type EditTool } from "./piece-panel";
+import { TextPieceModal, type TextResult } from "./text-modal";
 import { readLogoFile, SKIPPED_KEY } from "./list";
 import { SelectStep, type PickResult } from "./select-step";
 import { ShopFilePanel, useShopPlan } from "./shop-file";
 import { API, api, DENSITY, downloadDst, downloadPes, fmtNum, LIST_HREF, planStats, sheetHref, type Design } from "./shared";
 
-type Snap = { pieces: BlockPiece[]; settings: EmbSettings };
+/** rev = นับการแก้ชิ้น (แก้จุด/เพิ่มตัวหนังสือ) ไว้รู้ว่ามีอะไรเปลี่ยนต้องบันทึก */
+type Snap = { pieces: BlockPiece[]; settings: EmbSettings; rev?: number };
+/** ชิ้นใหม่ทำให้กรอบงานเปลี่ยน → ปรับกว้างที่ปักให้ "ขนาดจริงของลายเดิม" เท่าเดิม */
+/** หัวลูกศรที่ปลายเส้นทิศ (จุดบนจอ) */
+const arrow = (x1: number, y1: number, x2: number, y2: number) => {
+  const a = Math.atan2(y2 - y1, x2 - x1), L = 9, w = 0.45;
+  return [[x2, y2], [x2 - L * Math.cos(a - w), y2 - L * Math.sin(a - w)], [x2 - L * Math.cos(a + w), y2 - L * Math.sin(a + w)]].map((p) => p.join(",")).join(" ");
+};
+const keepScale = (oldPieces: BlockPiece[], newPieces: BlockPiece[], st: EmbSettings): number => {
+  const ob = designBox(oldPieces.filter(isActive)), nb = designBox(newPieces.filter(isActive));
+  return ob.w > 0 && nb.w > 0 ? Math.min(LIMITS.width_max, Math.max(LIMITS.width_min, Math.round(nb.w * (st.width_mm / ob.w) * 10) / 10)) : st.width_mm;
+};
 type Meta = { name: string; note: string; parent: ParentSkuPickerValue | null };
 
 const inputCls = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-indigo-400 focus:outline-none disabled:bg-slate-50";
@@ -52,10 +68,16 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const [skipped, setSkipped] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ key: string; box: BoxMm } | null>(null);
+  const [tool, setTool] = useState<EditTool>("select");
+  const [compare, setCompare] = useState(false);
+  const [textOpen, setTextOpen] = useState(false);
+  /** เส้นทิศที่กำลังลาก (พิกัดงาน) · จุดที่กำลังลากแก้ (ชิ้นตัวอย่างระหว่างลาก) */
+  const [draft, setDraft] = useState<DirLine | null>(null);
+  const [nodeDrag, setNodeDrag] = useState<{ h: Handle; start: [number, number]; orig: BlockPiece; piece: BlockPiece } | null>(null);
   /** ขั้นเลือกส่วน: pieces = ชิ้นที่จะให้เลือก (ของเดิม หรือจากไฟล์ใหม่) */
   const [picking, setPicking] = useState<{ pieces: BlockPiece[]; fileName?: string; initialOn?: string[] } | null>(null);
 
-  const keyOf = (s: Snap | null, m: Meta) => JSON.stringify([s?.settings, s?.pieces.length, s?.pieces[0]?.d.length, s?.pieces.map((p) => (p.on === false ? 0 : 1)).join(""), m.name, m.note, m.parent?.id ?? null]);
+  const keyOf = (s: Snap | null, m: Meta) => JSON.stringify([s?.settings, s?.rev ?? 0, s?.pieces.length, s?.pieces[0]?.d.length, s?.pieces.map((p) => (p.on === false ? 0 : 1)).join(""), m.name, m.note, m.parent?.id ?? null]);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -89,6 +111,17 @@ export function EmbroideryEditor({ id }: { id: string }) {
       setHistory((h) => [...h.slice(-49), cur]);
       // ผ่านตัวตรวจทุกครั้ง (กันค่า 0/ติดลบทำให้คำนวณค้าง)
       return { ...cur, settings: cleanSettings(fn(cur.settings), cur.pieces) };
+    });
+    setUpto(null);
+  }, []);
+  /** แก้ชิ้น (แก้จุด/เพิ่มตัวหนังสือ) + ค่าตั้งที่ต้องเปลี่ยนตาม · จดประวัติไว้ย้อนกลับ */
+  const editPieces = useCallback((fn: (p: BlockPiece[]) => BlockPiece[], stFn?: (s: EmbSettings, oldP: BlockPiece[], newP: BlockPiece[]) => EmbSettings) => {
+    setSnap((cur) => {
+      if (!cur) return cur;
+      setHistory((h) => [...h.slice(-49), cur]);
+      const pieces = fn(cur.pieces);
+      const settings = cleanSettings(stFn ? stFn(cur.settings, cur.pieces, pieces) : cur.settings, pieces);
+      return { pieces, settings, rev: (cur.rev ?? 0) + 1 };
     });
     setUpto(null);
   }, []);
@@ -214,6 +247,77 @@ export function EmbroideryEditor({ id }: { id: string }) {
     if (t) pt[pid] = t; else delete pt[pid];
     return { ...s, piece_types: pt };
   });
+  // ───── หน้าจอแก้ลาย (รอบ 4) ─────
+  const frame = planFrame(snap.pieces, st);
+  const selPiece = sel ? snap.pieces.find((p) => p.id === sel.id) ?? null : null;
+  const selOpt: PieceOpt = sel ? st.piece_opts[sel.id] ?? {} : {};
+  const setPieceOpt = (pid: string, patch: Partial<Record<keyof PieceOpt, unknown>>) => edit((s) => {
+    const po: Record<string, unknown> = { ...(s.piece_opts[pid] ?? {}) };
+    for (const [k, v] of Object.entries(patch)) { if (v == null || (typeof v === "number" && !Number.isFinite(v))) delete po[k]; else po[k] = v; }
+    return { ...s, piece_opts: { ...s.piece_opts, [pid]: po as PieceOpt } };
+  });
+  const resetPiece = (pid: string) => edit((s) => {
+    const po = { ...s.piece_opts }, pt = { ...s.piece_types };
+    delete po[pid]; delete pt[pid];
+    return { ...s, piece_opts: po, piece_types: pt };
+  });
+  const pickTool = (t: EditTool) => { if (t !== "select" && !sel) { toast.error("คลิกเลือกชิ้นในภาพ หรือในรายการลำดับปักก่อน"); return; } setTool(t); setDraft(null); };
+  /** ลากเส้นทิศฝีเข็มบนชิ้นที่เลือก (พิกัดงาน → เก็บเป็นพิกัดไฟล์) */
+  const onDraw = (e: { phase: "down" | "move" | "up"; x: number; y: number }) => {
+    if (!sel) return;
+    if (e.phase === "down") setDraft([e.x, e.y, e.x, e.y]);
+    else if (e.phase === "move") setDraft((d) => (d ? [d[0], d[1], e.x, e.y] : d));
+    else {
+      const d = draft;
+      setDraft(null);
+      if (!d || Math.hypot(e.x - d[0], e.y - d[1]) < 0.8) return;
+      const a = frame.toFile(d[0], d[1]), b = frame.toFile(e.x, e.y);
+      setPieceOpt(sel.id, { lines: [...(selOpt.lines ?? []), [a[0], a[1], b[0], b[1]]] });
+    }
+  };
+  const fileAt = (v: PreviewView, cx: number, cy: number) => { const [px, py] = v.toPlan(cx, cy); return frame.toFile(px, py); };
+  const overlay = (v: PreviewView) => {
+    const S = (fx: number, fy: number) => { const [px, py] = frame.toPlan(fx, fy); return v.toScreen(px, py); };
+    const out: React.ReactNode[] = [];
+    // เส้นทิศของชิ้นที่เลือก
+    if (sel && !viewing) (selOpt.lines ?? []).forEach((l, i) => {
+      const [x1, y1] = S(l[0], l[1]), [x2, y2] = S(l[2], l[3]);
+      out.push(<g key={`l${i}`}><line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ea580c" strokeWidth={2.5} /><circle cx={x1} cy={y1} r={3.5} fill="#ea580c" /><polygon points={arrow(x1, y1, x2, y2)} fill="#ea580c" /></g>);
+    });
+    if (draft) { const [x1, y1] = v.toScreen(draft[0], draft[1]), [x2, y2] = v.toScreen(draft[2], draft[3]); out.push(<line key="draft" x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ea580c" strokeWidth={2.5} strokeDasharray="6 4" />); }
+    // แก้จุด: เส้นขอบ (ชิ้นตัวอย่างระหว่างลาก) + จุดลากได้
+    if (tool === "node" && selPiece && !viewing) {
+      const p = nodeDrag?.piece ?? selPiece;
+      const a = frame.scale * v.k, [ox, oy] = S(p.ax, p.ay);
+      out.push(<path key="outline" d={pieceShapes(p).map((sh) => opsToSvgPath(sh.d, a, a, ox, oy)).join(" ")} fill="rgba(79,70,229,0.08)" stroke="#4f46e5" strokeWidth={1.2} />);
+      const hs = pieceHandles(p);
+      hs.forEach((h, i) => {
+        const [x, y] = S(h.x, h.y);
+        out.push(<circle key={`h${i}`} cx={x} cy={y} r={nodeDrag?.h.i === h.i && nodeDrag.h.s === h.s ? 6 : 4.5} fill="#fff" stroke="#4f46e5" strokeWidth={1.5} style={{ pointerEvents: "auto", cursor: "move", touchAction: "none" }}
+          onPointerDown={(e) => { e.stopPropagation(); (e.target as Element).setPointerCapture(e.pointerId); setNodeDrag({ h, start: fileAt(v, e.clientX, e.clientY), orig: p, piece: p }); }}
+          onPointerMove={(e) => { if (!nodeDrag) return; const [fx, fy] = fileAt(v, e.clientX, e.clientY); setNodeDrag({ ...nodeDrag, piece: moveHandle(nodeDrag.orig, nodeDrag.h, fx - nodeDrag.start[0], fy - nodeDrag.start[1]) }); }}
+          onPointerUp={() => {
+            const nd = nodeDrag; setNodeDrag(null);
+            if (!nd || nd.piece === nd.orig) return;
+            editPieces((ps) => ps.map((q) => (q.id === nd.piece.id ? nd.piece : q)), (s0, oldP, newP) => ({ ...s0, width_mm: keepScale(oldP, newP, s0) }));
+          }} />);
+      });
+      if (hs.length >= 600) out.push(<text key="many" x={8} y={v.h - 10} fontSize={11} fill="#b45309">ชิ้นนี้มีจุดเยอะ แสดงแค่ 600 จุดแรก</text>);
+    }
+    return out.length ? <>{out}</> : null;
+  };
+  /** พิมพ์ตัวหนังสือ → ชิ้นใหม่ วางใต้ลายเดิม (ขนาดจริงตามที่ตั้ง · ลายเดิมขนาดเท่าเดิม) */
+  const addText = (r: TextResult) => {
+    setTextOpen(false);
+    const active = snap.pieces.filter(isActive);
+    const b = designBox(active);
+    const sc = active.length && b.w > 0 ? frame.scale : 1;
+    const hf = r.heightMm / sc;
+    const piece = textPiece(r.ops, { id: `t${Date.now().toString(36)}`, name: r.text.slice(0, 40), color: r.color, heightFile: hf, at: active.length ? [b.x, b.y + b.h + hf * 0.5] : [0, 0] });
+    editPieces((ps) => [...ps, piece], (s0, oldP, newP) => ({ ...s0, width_mm: active.length ? keepScale(oldP, newP, s0) : Math.max(LIMITS.width_min, Math.round(piece.ow * sc * 10) / 10) }));
+    setSelectedId(piece.id);
+    toast.success("เพิ่มตัวหนังสือแล้ว — ลากทิศฝี/ตั้งค่าได้ที่แผงชิ้น · กดบันทึกเพื่อใช้");
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-4 p-3 pb-24 md:p-6 md:pb-24">
@@ -231,16 +335,48 @@ export function EmbroideryEditor({ id }: { id: string }) {
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className={`grid gap-4 ${shopOnly ? "lg:grid-cols-[minmax(0,1fr)_340px]" : "lg:grid-cols-[220px_minmax(0,1fr)_340px]"}`}>
+        {/* ───── รายการชิ้นตามลำดับปัก (แถบซ้าย · จอแคบอยู่ใต้ภาพ) ───── */}
+        {!shopOnly && (
+          <div className="order-2 lg:order-none">
+            <SequenceList plan={plan} custom={st.sequence.length > 0} selectedId={selectedId} canEdit={canEdit}
+              onSelect={(pid) => { setSelectedId(pid); const p = plan.pieces.find((x) => x.id === pid); if (p) setFocus({ key: `${pid}:${Date.now()}`, box: p.box }); }}
+              onReorder={(from, to) => edit((s) => ({ ...s, sequence: reorderSequence(s.sequence, plan.pieces.map((p) => p.id), from, to) }))}
+              onAuto={() => edit((s) => ({ ...s, sequence: [] }))} />
+          </div>
+        )}
         {/* ───── ภาพตัวอย่าง ───── */}
-        <div className="space-y-3">
+        <div className="order-1 space-y-3 lg:order-none">
+          {!shopOnly && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {canEdit && ([["select", "เลือกชิ้น"], ["dir", "ลากทิศฝีเข็ม"], ["node", "แก้จุดรูปทรง"]] as [EditTool, string][]).map(([k, th]) => (
+                <button key={k} type="button" onClick={() => pickTool(k)}
+                  className={`h-8 rounded-lg border px-3 ${tool === k ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>{th}</button>
+              ))}
+              {canEdit && <button type="button" onClick={() => setTextOpen(true)} className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-slate-700 hover:bg-slate-50">+ ตัวหนังสือ</button>}
+              {shopPlan && (
+                <button type="button" onClick={() => { setCompare((c) => !c); setShowShop(false); }}
+                  className={`ml-auto h-8 rounded-lg border px-3 ${compare ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>เทียบ 2 ฝั่ง (ระบบ / ร้าน)</button>
+              )}
+            </div>
+          )}
           {viewing && !shopOnly && (
             <div className="flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-800">
               กำลังดูไฟล์จากร้าน ({design.shop_file_name}) <button type="button" onClick={() => setShowShop(false)} className="ml-auto underline">กลับไปดูที่ระบบแปลง</button>
             </div>
           )}
-          <StitchPreview plan={vplan} upto={upto ?? undefined} showJumps={showJumps} real={real} fabric={st.fabric} selectedId={viewing ? null : selectedId} focus={viewing ? null : focus}
-            onPick={canEdit && !viewing ? setSelectedId : undefined} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 480} />
+          {compare && shopPlan && !shopOnly ? (
+            <div className="grid gap-2 md:grid-cols-2">
+              <div><div className="mb-1 text-xs font-medium text-slate-500">ระบบแปลง · {fmtNum(plan.stitches)} ฝี · {(plan.width / 10).toFixed(1)} × {(plan.height / 10).toFixed(1)} ซม.</div>
+                <StitchPreview plan={plan} showJumps={showJumps} real={real} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
+              <div><div className="mb-1 text-xs font-medium text-slate-500">ไฟล์จากร้าน · {fmtNum(shopPlan.stitches)} ฝี · {(shopPlan.width / 10).toFixed(1)} × {(shopPlan.height / 10).toFixed(1)} ซม.</div>
+                <StitchPreview plan={shopPlan} showJumps={showJumps} real={real} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
+            </div>
+          ) : (
+            <StitchPreview plan={vplan} upto={upto ?? undefined} showJumps={showJumps} real={real} fabric={st.fabric} selectedId={viewing ? null : selectedId} focus={viewing ? null : focus}
+              onPick={canEdit && !viewing ? setSelectedId : undefined} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 480}
+              drawMode={tool === "dir" && !!sel && !viewing} onDraw={onDraw} overlay={overlay} />
+          )}
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <button type="button" onClick={() => { if (playing) setPlaying(false); else { setUpto(0); setPlaying(true); } }}
               className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 hover:bg-slate-50">
@@ -251,25 +387,12 @@ export function EmbroideryEditor({ id }: { id: string }) {
             <label className="inline-flex items-center gap-1"><input type="checkbox" checked={showJumps} onChange={(e) => setShowJumps(e.target.checked)} /> เส้นกระโดด</label>
           </div>
 
-          {sel && (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="h-4 w-4 rounded border border-black/10" style={{ background: sel.color }} />
-                <b className="font-medium text-slate-800">{sel.name}</b>
-                <span className="text-xs text-slate-500">กว้างเฉลี่ย {sel.width.toFixed(1)} มม. · {fmtNum(sel.stitches)} ฝี · ตอนนี้: {STITCH_TYPES.find((t) => t.key === sel.type)?.th}{st.piece_types[sel.id] ? " (ตั้งเอง)" : " (ตามสี)"}</span>
-                <button type="button" onClick={() => setSelectedId(null)} className="ml-auto text-xs text-slate-500 hover:text-slate-800">ปิด ×</button>
-              </div>
-              {sel.warn && <div className={`mt-1 text-xs ${sel.level === "danger" ? "text-red-700" : "text-amber-800"}`}>{sel.warn}</div>}
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {STITCH_TYPES.filter((t) => t.key !== "auto").map((t) => (
-                  <button key={t.key} type="button" title={t.hint} onClick={() => setPieceType(sel.id, t.key)}
-                    className={`rounded-lg border px-2.5 py-1 text-xs ${st.piece_types[sel.id] === t.key ? "border-indigo-400 bg-white font-medium text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t.th}</button>
-                ))}
-                {st.piece_types[sel.id] && <button type="button" onClick={() => setPieceType(sel.id, null)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-50">ใช้ตามสี</button>}
-              </div>
-            </div>
+          {sel && !viewing && (
+            <PiecePanel info={sel} opt={selOpt} typeSet={st.piece_types[sel.id]} canEdit={canEdit} tool={tool} setTool={pickTool}
+              onType={(t) => setPieceType(sel.id, t)} onOpt={(patch) => setPieceOpt(sel.id, patch)} onReset={() => resetPiece(sel.id)}
+              onClose={() => { setSelectedId(null); setTool("select"); }} />
           )}
-          {!sel && canEdit && <p className="text-[11px] text-slate-400">คลิกชิ้นในภาพ เพื่อตั้งฝีเข็มเฉพาะชิ้นนั้น</p>}
+          {!sel && canEdit && !shopOnly && <p className="text-[11px] text-slate-400">คลิกชิ้นในภาพ (หรือในรายการลำดับปัก) เพื่อตั้งค่ารายชิ้น · ลากทิศฝีเข็ม · แก้จุด</p>}
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="ฝีเข็ม" value={fmtNum(vplan.stitches)} />
@@ -318,7 +441,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
         </div>
 
         {/* ───── แผงตั้งค่า ───── */}
-        <div className="space-y-4">
+        <div className="order-3 space-y-4 lg:order-none">
           <ShopFilePanel design={design} canEdit={canEdit} showing={viewing} onShow={setShowShop} onChange={(d) => { setDesign(d); setUpto(null); }} />
           {!shopOnly && (<>
           <section className="rounded-xl border border-slate-200 bg-white p-3">
@@ -356,6 +479,10 @@ export function EmbroideryEditor({ id }: { id: string }) {
             <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
               <input type="checkbox" disabled={!canEdit} checked={st.satin_follow} onChange={(e) => edit((s) => ({ ...s, satin_follow: e.target.checked }))} />
               ซิกแซกเลี้ยวตามเส้น <span className="text-slate-400">(ตัวหนังสือ/เส้นโค้งเนียนขึ้น · ปิด = ทิศเดียวทั้งชิ้น)</span>
+            </label>
+            <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" disabled={!canEdit} checked={st.fill_auto_angle} onChange={(e) => edit((s) => ({ ...s, fill_auto_angle: e.target.checked }))} />
+              มุมถมเต็มตามรูปทรง <span className="text-slate-400">(ชิ้นยาวเอียงแถวตามชิ้นเอง · ปิด = ใช้มุมของสี)</span>
             </label>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
               <label className="flex items-center gap-2">
@@ -471,6 +598,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
 
       {picking && <SelectStep key={(picking.fileName ?? "") + picking.pieces.length} open pieces={picking.pieces} initialOn={picking.initialOn ?? null}
         onCancel={() => setPicking(null)} onDone={(r) => void applyPick(r)} title={picking.fileName ? `เลือกส่วนที่จะปัก — ${picking.fileName}` : "เลือกส่วนที่จะปัก"} />}
+      {textOpen && <TextPieceModal open onClose={() => setTextOpen(false)} onAdd={addText} colors={activeColors} />}
       {canEdit && <SaveBar dirty={dirty} saving={saving} onSave={() => void save()} onDiscard={discard} />}
       <ConfirmDialog open={askTrash} onClose={() => setAskTrash(false)} onConfirm={() => void toTrash()} variant="danger"
         title="ย้ายงานนี้เข้าถังขยะ?" message={<>ย้าย <b>{design.code} {meta.name}</b> เข้าถังขยะ — กู้คืนได้ที่ถังขยะหน้ารายการ</>} confirmText="ย้ายเข้าถังขยะ" />

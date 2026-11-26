@@ -350,3 +350,38 @@ describe("รอบ 4: จุดต่อ · ลำดับปัก · ตั�
     expect(loose.stitches).toBeLessThan(base.stitches);
   });
 });
+
+describe("รอบ 4: ตัวช่วยหน้าจอแก้ลาย", async () => {
+  const { planFrame, pieceHandles, moveHandle, textPiece, reorderSequence } = await import("@/lib/embroidery-edit");
+  it("planFrame: แปลงพิกัดไฟล์ → งาน → ไฟล์ ได้ค่าเดิม · ตรงกับกรอบของ buildPlan", () => {
+    const ps = [rect("a", 10, 20, 40, 10), rect("b", 10, 40, 40, 10)];
+    const st = defaultSettings(ps, 80);
+    const f = planFrame(ps, st);
+    const [px, py] = f.toPlan(30, 35);
+    expect(px).toBeCloseTo(0, 6); expect(py).toBeCloseTo(0, 6);   // กึ่งกลางงาน
+    const [fx, fy] = f.toFile(...f.toPlan(12.5, 47));
+    expect(fx).toBeCloseTo(12.5, 6); expect(fy).toBeCloseTo(47, 6);
+    expect(f.scale).toBeCloseTo(2, 6);
+  });
+  it("แก้จุด: ลากมุมขวาล่างของสี่เหลี่ยมออก 5 มม. → ขนาดชิ้นโตตาม (กรอบคิดใหม่)", () => {
+    const p = rect("a", 10, 10, 20, 10);
+    const hs = pieceHandles(p);
+    expect(hs.length).toBe(4);
+    const br = hs.find((h) => h.x === 30 && h.y === 20)!;
+    const q = moveHandle(p, br, 5, 5);
+    expect(q.ow).toBeCloseTo(25, 6); expect(q.oh).toBeCloseTo(15, 6);
+    expect(q.ax).toBe(10); expect(q.ay).toBe(10);
+    // ลากมุมซ้ายบนเข้าไปข้างใน → ax/ay เลื่อนตาม
+    const q2 = moveHandle(p, hs[0], 2, 3);
+    expect(q2.ax).toBeCloseTo(10, 6); expect(q2.ow).toBeCloseTo(20, 6);
+  });
+  it("ตัวหนังสือ: ย่อขยายเส้นให้สูงตามที่ตั้ง วางตำแหน่งที่ขอ", () => {
+    const t = { d: [OP.M, 0, 0, OP.L, 20, 0, OP.L, 20, 10, OP.L, 0, 10, OP.Z], w: 20, h: 10 };
+    const p = textPiece(t, { id: "t", name: "AB", color: "#ff0000", heightFile: 5, at: [3, 4] });
+    expect(p.oh).toBe(5); expect(p.ow).toBe(10); expect(p.ax).toBe(3); expect(p.color).toBe("#ff0000");
+  });
+  it("ลากเปลี่ยนลำดับปัก: ว่าง = เริ่มจากลำดับปัจจุบัน", () => {
+    expect(reorderSequence([], ["a", "b", "c"], 2, 0)).toEqual(["c", "a", "b"]);
+    expect(reorderSequence(["b", "a"], ["a", "b", "c"], 0, 2)).toEqual(["a", "c", "b"]);
+  });
+});

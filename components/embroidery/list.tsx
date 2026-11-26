@@ -18,6 +18,8 @@ import { buildPlan, defaultSettings, startWidth, withSelection } from "@/lib/emb
 import type { BlockPiece } from "@/lib/block-print";
 import { SelectStep, type PickResult } from "./select-step";
 import { readShopUpload } from "./shop-file";
+import { TextPieceModal, type TextResult } from "./text-modal";
+import { textPiece } from "@/lib/embroidery-edit";
 import { b64ToBytes, readShopFile, SHOP_ACCEPT } from "@/lib/embroidery-shop";
 import { API, api, designHref, fmtCm, fmtNum, nameFromFile, planStats, thaiDate, type Design, type DesignRow } from "./shared";
 
@@ -40,6 +42,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
   const canEdit = usePermission("embroidery.edit");
   const fileRef = useRef<HTMLInputElement>(null);
   const shopRef = useRef<HTMLInputElement>(null);
+  const [textOpen, setTextOpen] = useState(false);
   const [trash, setTrash] = useState(false);
   const [rows, setRows] = useState<DesignRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -81,6 +84,19 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
       toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ");
       setBusy(null);
     }
+  };
+
+  /** พิมพ์ตัวหนังสือ → สร้างงานใหม่ (ขนาดจริงตามที่ตั้ง) */
+  const createFromText = async (r: TextResult) => {
+    setTextOpen(false);
+    setBusy("กำลังสร้างงานจากตัวหนังสือ…");
+    try {
+      const piece = textPiece(r.ops, { id: "t1", name: r.text.slice(0, 40), color: r.color, heightFile: r.heightMm, at: [0, 0] });
+      const settings = defaultSettings([piece], piece.ow);
+      const plan = buildPlan([piece], settings);
+      const d = await api<Design>(API, { json: { name: r.text.replace(/s+/g, " ").slice(0, 120), source_file_name: null, parent_sku_id: parentId ?? null, pieces: [piece], settings, ...planStats(plan) } });
+      router.push(designHref(d.id));
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างงานไม่สำเร็จ"); setBusy(null); }
   };
 
   /** หลังเลือกส่วน → สร้างงาน 1 งาน หรือแยกตามกลุ่ม */
@@ -178,6 +194,12 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
           </button>
         )}
         {canEdit && !trash && (
+          <button type="button" disabled={!!busy} onClick={() => setTextOpen(true)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+            + ตัวหนังสือ
+          </button>
+        )}
+        {canEdit && !trash && (
           <button type="button" disabled={!!busy} onClick={() => shopRef.current?.click()} title="ไฟล์ .DST / .PES ที่ร้านปักทำให้"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-60">
             <Icon name="upload" /> ไฟล์จากร้าน
@@ -214,6 +236,7 @@ export function EmbroideryList({ parentId }: { parentId?: string } = {}) {
         exportEntityType="embroidery_designs"
       />
 
+      {textOpen && <TextPieceModal open onClose={() => setTextOpen(false)} onAdd={(r) => void createFromText(r)} />}
       {pending && <SelectStep key={pending.file.name + pending.pieces.length} open pieces={pending.pieces} onCancel={() => setPending(null)} onDone={(r) => void createFrom(r)} />}
 
       <ConfirmDialog

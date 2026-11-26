@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, ctx: Ctx): Promise<NextRespons
   const meta = auditChangeMeta(before, plain);
   const extra = settings ? settingsAuditChanges(before.settings as Partial<EmbSettings>, settings) : [];
   if ("shop_file" in body) extra.push({ field: "shop_file", label: "ไฟล์จากร้าน", old: before.shop_file_name ?? null, new: shop_file_name ?? null });
-  if (pieces) extra.push({ field: "pieces", label: "ลาย (เปิดไฟล์ใหม่)", old: `${(before.pieces ?? []).length} ชิ้น`, new: `${pieces.length} ชิ้น` });
+  if (pieces) extra.push({ field: "pieces", label: "ลาย (เปิดไฟล์ใหม่ / แก้จุด / เพิ่มตัวหนังสือ)", old: `${(before.pieces ?? []).length} ชิ้น`, new: `${pieces.length} ชิ้น` });
   const action = v.patch.is_active === true && before.is_active === false ? "restore" : v.patch.is_active === false && before.is_active ? "archive" : "update";
   if (action !== "update" || meta.changes?.length || extra.length) {
     await writeAuditFor(request, admin, {

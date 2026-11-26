@@ -3,10 +3,10 @@
  * GET /api/block-print/font?family=Sarabun&weight=700 → ไฟล์ .ttf
  *   รับเฉพาะฟอนต์ในรายการ BLOCK_FONTS (lib/block-print-layout) · ดึงจาก Google Fonts ด้วย User-Agent เก่า (ได้ TTF ไฟล์เดียว ไม่แบ่งชุดอักษร)
  *   เหมือนวิธีของ lib/email-report/image.ts · จำไว้ในเครื่องเซิร์ฟเวอร์ + ให้เบราว์เซอร์จำ 30 วัน
- *   สิทธิ์ block_print.view
+ *   สิทธิ์ block_print.view หรือ embroidery.view (ไฟล์ปัก: พิมพ์ตัวหนังสือ)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { findBlockFont } from "@/lib/block-print-layout";
 import { bad, VIEW_PERM } from "../_shared";
 
@@ -26,7 +26,8 @@ async function fetchTtf(family: string, weight: number): Promise<ArrayBuffer> {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, VIEW_PERM); if (denied) return denied;
+  // ไฟล์ปักใช้ฟอนต์ชุดเดียวกัน (พิมพ์ตัวหนังสือ → ฝีปัก) → สิทธิ์ embroidery.view ก็โหลดได้
+  const denied = await guardApi(request, VIEW_PERM); if (denied && !(await apiCan(request, "embroidery.view"))) return denied;
   const q = new URL(request.url).searchParams;
   const font = findBlockFont(q.get("family") ?? "");
   if (!font) return bad("ไม่มีฟอนต์นี้ในรายการ", 404);

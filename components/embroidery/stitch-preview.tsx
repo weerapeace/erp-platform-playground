@@ -7,8 +7,11 @@
  *   upto = วาดถึงคำสั่งที่เท่าไร (แถบเล่นลำดับการปัก) · ไม่ใส่ = ทั้งหมด
  *   real = ภาพเหมือนด้ายจริง (ด้ายหนา + เงามัน + เงาตก) · false = เส้นบางดูโครงฝีเข็ม
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { pieceAt, type BoxMm, type EmbPlan } from "@/lib/embroidery";
+
+/** ตัวแปลงพิกัดที่ส่งให้ชั้นวาดทับ · toScreen = มม. งาน → px ในกล่อง · toPlan = จุดเมาส์ (clientX/Y) → มม. งาน · k = px ต่อ มม. */
+export type PreviewView = { toScreen: (x: number, y: number) => [number, number]; toPlan: (clientX: number, clientY: number) => [number, number]; k: number; w: number; h: number };
 
 const MIN_Z = 0.5, MAX_Z = 40;
 const PX_PER_MM = 96 / 25.4;
@@ -65,9 +68,13 @@ export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, 
   return { px, py };
 }
 
-export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, className = "" }: {
+export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, className = "", drawMode = false, onDraw, overlay }: {
   plan: EmbPlan; upto?: number; showJumps?: boolean; height?: number; fabric?: string; real?: boolean;
   selectedId?: string | null; onPick?: (id: string | null) => void; focus?: { key: string; box: BoxMm } | null; className?: string;
+  /** โหมดวาด (เช่น ลากเส้นทิศฝีเข็ม): กด/ลาก/ปล่อย ส่งพิกัดงาน (มม.) แทนการเลื่อนภาพ · ล้อเมาส์ยังซูมได้ */
+  drawMode?: boolean; onDraw?: (e: { phase: "down" | "move" | "up"; x: number; y: number }) => void;
+  /** ชั้นวาดทับ (เส้นทิศ · จุดแก้รูปทรง) — ได้ตัวแปลงพิกัดงาน ↔ จอ */
+  overlay?: (v: PreviewView) => ReactNode;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -88,8 +95,12 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
     return () => ro.disconnect();
   }, [height]);
 
-  // งานเปลี่ยนขนาด → กลับพอดีจอ
-  useEffect(() => { setView({ z: 1, cx: 0, cy: 0 }); }, [plan.width, plan.height]);
+  // งานเปลี่ยนขนาดชัด ๆ (เกิน 5%) → กลับพอดีจอ · ขยับนิดหน่อยตอนแก้จุด ไม่รีเซ็ต
+  const lastDim = useRef({ w: plan.width, h: plan.height });
+  useEffect(() => {
+    const o = lastDim.current;
+    if (Math.abs(plan.width - o.w) > Math.max(o.w, 1) * 0.05 || Math.abs(plan.height - o.h) > Math.max(o.h, 1) * 0.05) { setView({ z: 1, cx: 0, cy: 0 }); lastDim.current = { w: plan.width, h: plan.height }; }
+  }, [plan.width, plan.height]);
   // ซูมไปกรอบที่ขอ (เช่น กด "ดูในภาพ" ของคำเตือน)
   useEffect(() => {
     if (!focus) return;
@@ -163,13 +174,21 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
   // ลากเลื่อน · ถ่างสองนิ้ว · คลิก = เลือกชิ้น
   const pts = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<{ moved: boolean; sx: number; sy: number; pinch?: number } | null>(null);
+  const planAt = (clientX: number, clientY: number): [number, number] => {
+    const r = boxRef.current!.getBoundingClientRect();
+    const k = fitK() * viewRef.current.z;
+    return [viewRef.current.cx + (clientX - r.left - size.w / 2) / k, viewRef.current.cy + (clientY - r.top - size.h / 2) / k];
+  };
+  const drawing = useRef(false);
   const onDown = (e: React.PointerEvent) => {
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (drawMode && onDraw && pts.current.size === 0 && e.button === 0) { drawing.current = true; const [x, y] = planAt(e.clientX, e.clientY); onDraw({ phase: "down", x, y }); return; }
     pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.current.size === 1) gesture.current = { moved: false, sx: e.clientX, sy: e.clientY };
     if (pts.current.size === 2) { const [a, b] = [...pts.current.values()]; gesture.current = { moved: true, sx: 0, sy: 0, pinch: Math.hypot(a.x - b.x, a.y - b.y) }; }
   };
   const onMove = (e: React.PointerEvent) => {
+    if (drawing.current && onDraw) { const [x, y] = planAt(e.clientX, e.clientY); onDraw({ phase: "move", x, y }); return; }
     const prev = pts.current.get(e.pointerId); if (!prev) return;
     pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const gs = gesture.current; if (!gs) return;
@@ -189,6 +208,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
     }
   };
   const onUp = (e: React.PointerEvent) => {
+    if (drawing.current) { drawing.current = false; if (onDraw) { const [x, y] = planAt(e.clientX, e.clientY); onDraw({ phase: "up", x, y }); } return; }
     pts.current.delete(e.pointerId);
     const gs = gesture.current;
     if (pts.current.size === 0) {
@@ -211,10 +231,18 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
 
   return (
     <div className={`relative w-full overflow-hidden rounded-lg border border-slate-200 ${className}`} style={{ height }}>
-      <div ref={boxRef} className="absolute inset-0 touch-none select-none" style={{ cursor: onPick ? "crosshair" : "grab" }}
+      <div ref={boxRef} className="absolute inset-0 touch-none select-none" style={{ cursor: drawMode ? "crosshair" : onPick ? "pointer" : "grab" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <canvas ref={ref} className="block" />
       </div>
+      {overlay && (() => {
+        const k = k0 * view.z, ox = size.w / 2 - view.cx * k, oy = size.h / 2 - view.cy * k;
+        return (
+          <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h}>
+            {overlay({ toScreen: (x, y) => [ox + x * k, oy + y * k], toPlan: planAt, k, w: size.w, h: size.h })}
+          </svg>
+        );
+      })()}
       <div className="absolute right-2 top-2 flex flex-col gap-1">
         <button type="button" className={btn} onClick={() => zoomAt(1.5)} aria-label="ซูมเข้า">+</button>
         <button type="button" className={btn} onClick={() => zoomAt(1 / 1.5)} aria-label="ซูมออก">−</button>
