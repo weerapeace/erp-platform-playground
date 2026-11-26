@@ -18,7 +18,7 @@
  *   คู่มือ docs/embroidery.md
  */
 import { autoGroup, eachOp, OP, pieceShapes, type BlockPiece, type FillRule } from "@/lib/block-print";
-import { dirAt, satinBorder, turningSatin, type DirLine } from "@/lib/embroidery-satin";
+import { dirAt, insideShape, satinBorder, turningSatin, type DirLine } from "@/lib/embroidery-satin";
 
 export type Pt = [number, number];
 export type StitchType = "auto" | "fill" | "satin" | "run" | "skip";
@@ -287,8 +287,12 @@ export function scanSegments(rings: Pt[][], fill: FillRule, spacing: number): Se
   return segs;
 }
 
-/** จัดช่วงเป็นบล็อกที่ปักต่อกันได้ (แถวติดกัน + ซ้อนกันในแนวนอน) — เริ่มจากแถวบนสุดก่อน */
-export function blocksOf(segs: Seg[]): Seg[][] {
+/**
+ * จัดช่วงเป็นบล็อกที่ปักต่อกันได้ (แถวติดกัน + ซ้อนกันในแนวนอน) — เริ่มจากแถวบนสุดก่อน
+ *   maxShift = ปลายแถวถัดไปเลื่อนไปจากปลายแถวนี้ได้ไม่เกินเท่านี้ (มม.) · เกิน = ขึ้นบล็อกใหม่
+ *   (กันฝีเชื่อมแถวพาดข้ามช่องว่างในชิ้น เช่น รูของตัว P/O ตรงที่แถวเปลี่ยนจากแคบเป็นกว้าง → เห็นเป็นเส้นลอย)
+ */
+export function blocksOf(segs: Seg[], maxShift = Infinity, canLink?: (a: Seg, b: Seg) => boolean): Seg[][] {
   const byRow = new Map<number, Seg[]>();
   for (const s of segs) { const a = byRow.get(s.row) ?? []; a.push(s); byRow.set(s.row, a); }
   const sorted = [...segs].sort((a, b) => a.row - b.row || a.x0 - b.x0);
@@ -299,7 +303,7 @@ export function blocksOf(segs: Seg[]): Seg[][] {
     const blk = [first];
     let cur = first;
     for (;;) {
-      const next = (byRow.get(cur.row + 1) ?? []).filter((s) => !s.used && Math.min(s.x1, cur.x1) - Math.max(s.x0, cur.x0) > 0)
+      const next = (byRow.get(cur.row + 1) ?? []).filter((s) => !s.used && Math.min(s.x1, cur.x1) - Math.max(s.x0, cur.x0) > 0 && Math.abs(s.x0 - cur.x0) <= maxShift && Math.abs(s.x1 - cur.x1) <= maxShift && (!canLink || canLink(cur, s)))
         .sort((a, b) => (Math.min(b.x1, cur.x1) - Math.max(b.x0, cur.x0)) - (Math.min(a.x1, cur.x1) - Math.max(a.x0, cur.x0)))[0];
       if (!next) break;
       next.used = true; blk.push(next); cur = next;
@@ -359,7 +363,10 @@ function rowBlocks(rings: Pt[][], fill: FillRule, deg: number, spacing: number, 
   const t = (deg * Math.PI) / 180, c = Math.cos(-t), s = Math.sin(-t), cb = Math.cos(t), sb = Math.sin(t);
   const rr = rings.map((r) => r.map((p) => rot(p, c, s)));
   const segs = scanSegments(rr, fill, spacing).filter((g) => g.x1 - g.x0 + 2 * comp >= Math.max(minSeg, 0.05));
-  return blocksOf(segs).map((blk) => rowStitches(blk, len, comp, stagger).map((p) => rot(p, cb, sb)));
+  // ฝีเชื่อมแถว (ปลายแถวนี้ → ปลายแถวถัดไป ด้านซ้ายหรือขวา) ต้องอยู่ในชิ้น ไม่พาดข้ามช่องว่าง
+  const area = [{ rings: rr, fill }];
+  const canLink = (a: Seg, b: Seg) => segInside([a.x0, a.y], [b.x0, b.y], area) && segInside([a.x1, a.y], [b.x1, b.y], area);
+  return blocksOf(segs, Math.max(1.2, spacing * 3), canLink).map((blk) => rowStitches(blk, len, comp, stagger).map((p) => rot(p, cb, sb)));
 }
 
 /**
@@ -418,6 +425,26 @@ export function pieceWarning(type: ResolvedType, width: number, box: { w: number
   return { warn: null, level: null, kind: null };
 }
 
+/** ทางเดินตรงจาก a → b อยู่ในชิ้นใดชิ้นหนึ่งตลอดทาง (เช็กทุก ~0.3 มม. · เผื่อขอบ 0.25 มม. เพราะปลายฝีมีชดเชยผ้าหด) */
+function segInside(a: Pt, b: Pt, area: { rings: Pt[][]; fill: FillRule }[]): boolean {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const n = Math.max(2, Math.ceil(L / 0.3));
+  for (let k = 1; k < n; k++) {
+    const x = a[0] + ((b[0] - a[0]) * k) / n, y = a[1] + ((b[1] - a[1]) * k) / n;
+    if (!area.some((ar) => insideShape(ar.rings, ar.fill, x, y) || nearEdge(ar.rings, x, y, 0.25))) return false;
+  }
+  return true;
+}
+function nearEdge(rings: Pt[][], x: number, y: number, tol: number): boolean {
+  for (const r of rings) for (let i = 0; i < r.length; i++) {
+    const p = r[i], q = r[(i + 1) % r.length];
+    const dx = q[0] - p[0], dy = q[1] - p[1], L2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / L2));
+    if (Math.hypot(x - (p[0] + t * dx), y - (p[1] + t * dy)) <= tol) return true;
+  }
+  return false;
+}
+
 /** ทั้งงาน → คำสั่งเครื่องปัก (มม. · จุดกึ่งกลางงาน = 0,0 · แกน y ชี้ลง) — คิดเฉพาะชิ้นที่เลือกปัก */
 export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
   const active = pieces.filter(isActive);
@@ -431,6 +458,7 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
   let pos: Pt = [0, 0];
   let stitches = 0, jumps = 0, trims = 0, changes = 0;
   let needle = false;   // มีด้ายอยู่ในผ้า (ต้องล็อก/ตัดก่อนกระโดด)
+  let prevArea: { rings: Pt[][]; fill: FillRule } | null = null;   // ชิ้นที่เพิ่งปัก (ทางเดินไปชิ้นถัดไปอยู่ในชิ้นนี้หรือชิ้นใหม่ = เย็บได้)
 
   const stitchTo = (q: Pt) => {
     const d = Math.hypot(q[0] - pos[0], q[1] - pos[1]);
@@ -453,11 +481,15 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
   };
   let last: Pt = [0, 0];
   const trim = () => { if (needle) { tie(last); cmds.push({ t: "trim", x: pos[0], y: pos[1] }); trims++; needle = false; } };
-  /** ไปจุดเริ่มบล็อกถัดไป: ใกล้มาก = เย็บต่อ · ไม่ไกล = กระโดดไม่ตัด · ไกล = ล็อก → ตัด → กระโดด */
-  const travel = (start: Pt, next: Pt, newColor: boolean) => {
+  /**
+   * ไปจุดเริ่มบล็อกถัดไป: ใกล้มาก + ทางเดินอยู่ในชิ้น = เย็บต่อ · ไม่ไกล = กระโดดไม่ตัด · ไกล = ล็อก → ตัด → กระโดด
+   *   ทางเดินพาดออกนอกชิ้น (เช่น ข้ามรูตัว P) ห้ามเย็บ (จะเป็นเส้นลอย) · ในชิ้นเดียวกันข้ามช่องว่างเกิน 1.5 มม. = ตัดด้าย
+   */
+  const travel = (start: Pt, next: Pt, newColor: boolean, area?: { rings: Pt[][]; fill: FillRule }[], samePiece = false) => {
     const d = Math.hypot(start[0] - pos[0], start[1] - pos[1]);
-    if (needle && !newColor && d <= TRAVEL_STITCH_MAX) { stitchTo(start); return; }
-    if (needle && !newColor && d <= st.trim_at) { jumpTo(start); tie(next); return; }
+    const inside = !area?.length || segInside(pos, start, area);
+    if (needle && !newColor && d <= TRAVEL_STITCH_MAX && inside) { stitchTo(start); return; }
+    if (needle && !newColor && d <= st.trim_at && (inside || !samePiece || d <= 1.5)) { jumpTo(start); tie(next); return; }
     trim();
     if (newColor) { cmds.push({ t: "color", x: pos[0], y: pos[1] }); changes++; }
     jumpTo(start); tie(next); needle = true;
@@ -537,11 +569,15 @@ export function buildPlan(pieces: BlockPiece[], st: EmbSettings): EmbPlan {
       const endOf = (bs: Pt[][], d: Pt) => (bs.length ? bs[bs.length - 1][bs[bs.length - 1].length - 1] : d);
       const top = nearestOrder(t.blocks.top, endOf(under, pos));
       const edge = nearestOrder(t.blocks.edge, endOf(top, endOf(under, pos)));
+      const here = { rings: t.rings, fill: t.p.fill };
+      let firstBlk = true;
       for (const blk of [...under, ...top, ...edge]) {
-        travel(blk[0], blk[1] ?? blk[0], !colorStarted && !first);
+        travel(blk[0], blk[1] ?? blk[0], !colorStarted && !first, firstBlk && prevArea ? [prevArea, here] : [here], !firstBlk);
+        firstBlk = false;
         colorStarted = true;
         for (let i = 1; i < blk.length; i++) { last = pos; stitchTo(blk[i]); }
       }
+      if (stitches > pStart) prevArea = here;
       if (t.type !== "skip" && stitches > pStart) block.pieces++;
       const pw = pieceWarning(t.type, t.width, { w: t.pb.w, h: t.pb.h });
       infos.push({ id: t.p.id, name: t.p.name, color, type: t.type, width: r2(t.width), area: r2(ringsArea(t.rings)), stitches: stitches - pStart, ...pw, box: t.pb, rings: t.rings, cmdFrom: cFrom, cmdTo: cmds.length });

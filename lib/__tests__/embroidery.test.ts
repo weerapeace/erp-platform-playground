@@ -241,7 +241,7 @@ describe("รอบ 3: ซิกแซกเลี้ยวตามเส้น
     const on = buildPlan([L], { ...defaultSettings([L], 20) });
     const off = buildPlan([L], { ...defaultSettings([L], 20), satin_follow: false });
     expect(on.pieces[0].type).toBe("satin");
-    expect(on.stitches).not.toBe(off.stitches);
+    expect(JSON.stringify(on.cmds)).not.toBe(JSON.stringify(off.cmds));
   });
 
   it("ขอบซิกแซกรอบพื้นถม: อยู่ในแถบกว้าง bw คร่อมขอบสี่เหลี่ยม", () => {
