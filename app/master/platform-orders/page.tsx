@@ -297,7 +297,7 @@ function PlatformOrdersInner() {
     { key: "stock", header: "สต๊อก", width: "4.5rem", align: "center", defaultHidden: true, cell: (o) => o.stock_deducted ? <span className="text-emerald-600" title="ตัดสต๊อกแล้ว"><Icon value="i:check" /></span> : <span className="text-slate-300">—</span> },
     { key: "menu", header: "", width: "2.5rem", align: "center", cell: (o) => (
       <span onClick={(e) => e.stopPropagation()}>
-        <MenuBar menus={[{ key: "row", label: "ตัวเลือก", icon: "dots-vertical", iconOnly: true, align: "end", width: 220, items: [
+        <MenuBar floating menus={[{ key: "row", label: "ตัวเลือก", icon: "dots-vertical", iconOnly: true, align: "end", width: 220, items: [
           { key: "open", label: "เปิดรายละเอียด", icon: "layout-sidebar-right", onSelect: () => openOrder(o.id) },
           { key: "full", label: "เปิดเต็มหน้า (แท็บใหม่)", icon: "external-link", onSelect: () => window.open(fullUrl(o.id), "_blank", "noopener") },
           { key: "copy", label: "คัดลอกเลขออเดอร์", icon: "copy", onSelect: () => { void navigator.clipboard?.writeText(o.order_no ?? o.external_order_id ?? "").then(() => toast.success("คัดลอกแล้ว"), () => toast.error("คัดลอกไม่ได้")); } },

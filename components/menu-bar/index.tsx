@@ -22,10 +22,13 @@
  *       { type: "submenu", key: "cols", label: "คอลัมน์ที่โชว์", render: (close) => <ColumnPicker /> },
  *     ] },
  *   ]} />
+ *   • floating = แผงลอยทับทุกอย่าง (portal ผ่าน FloatingDropdown กลาง) — ใช้เมื่อเมนูอยู่ในตาราง/กล่องที่ตัดขอบ (overflow)
+ *     เช่น ปุ่ม ⋮ ในแถวตาราง (2026-11-26: ศูนย์ออเดอร์มีแถวเดียว เมนูโดนกรอบตารางตัดจนกดไม่ได้)
  * คู่มือ: docs/menu-bar.md · ตัวอย่าง: app/_demos/menu-bar-preview
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Icon } from "@/components/icon";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useT } from "@/components/i18n";
 
 type Base = { key: string; label: ReactNode; icon?: string; hint?: ReactNode; disabled?: boolean; title?: string };
@@ -139,20 +142,30 @@ function SubPanel({ item, close, up }: { item: Extract<MenuItem, { type: "submen
   );
 }
 
-export function MenuBar({ menus, className = "", placement = "down" }: { menus: MenuDef[]; className?: string; /** "up" = เมนูเด้งขึ้น (แถบปุ่มล่าง) */ placement?: "down" | "up" }) {
+export function MenuBar({ menus, className = "", placement = "down", floating = false }: {
+  menus: MenuDef[]; className?: string; /** "up" = เมนูเด้งขึ้น (แถบปุ่มล่าง) */ placement?: "down" | "up";
+  /** แผงลอยทับ (portal) — เมนูในตาราง/กล่องที่ตัดขอบ */ floating?: boolean;
+}) {
   const up = placement === "up";
   const t = useT();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const anchors = useRef<Record<string, RefObject<HTMLDivElement | null>>>({});
+  const anchorOf = (k: string) => (anchors.current[k] ??= { current: null });
   const close = useCallback(() => setOpenKey(null), []);
   const cancelClose = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } };
+  const scheduleClose = (k: string) => { cancelClose(); timer.current = setTimeout(() => setOpenKey((x) => (x === k ? null : x)), HOVER_CLOSE_MS); };
   useEffect(() => () => cancelClose(), []);
 
-  // กดที่อื่น / Esc = ปิด
+  // กดที่อื่น / Esc = ปิด (แผงลอยอยู่นอก rootRef → เช็กเครื่องหมาย data-menubar-float ด้วย)
   useEffect(() => {
     if (!openKey) return;
-    const onDown = (e: PointerEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpenKey(null); };
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as Element | null;
+      if (el?.closest?.("[data-menubar-float]")) return;
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpenKey(null);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpenKey(null); };
     document.addEventListener("pointerdown", onDown);
     window.addEventListener("keydown", onKey);
@@ -164,9 +177,9 @@ export function MenuBar({ menus, className = "", placement = "down" }: { menus: 
       {menus.map((m) => {
         const open = openKey === m.key;
         return (
-          <div key={m.key} className="relative"
+          <div key={m.key} ref={anchorOf(m.key)} className="relative"
             onMouseEnter={() => { if (!canHover()) return; cancelClose(); setOpenKey(m.key); }}
-            onMouseLeave={() => { if (!canHover()) return; cancelClose(); timer.current = setTimeout(() => setOpenKey((k) => (k === m.key ? null : k)), HOVER_CLOSE_MS); }}>
+            onMouseLeave={() => { if (!canHover()) return; scheduleClose(m.key); }}>
             <button type="button" aria-haspopup="menu" aria-expanded={open} title={m.title ?? (m.iconOnly && typeof m.label === "string" ? m.label : undefined)}
               aria-label={m.iconOnly && typeof m.label === "string" ? m.label : undefined}
               onClick={() => setOpenKey((k) => (k === m.key ? null : m.key))}
@@ -185,7 +198,14 @@ export function MenuBar({ menus, className = "", placement = "down" }: { menus: 
                 <Icon value="i:chevron-down" className={`text-[12px] transition ${open !== up ? "rotate-180" : ""}`} />
               )}
             </button>
-            {open && (
+            {open && floating && (
+              <FloatingDropdown anchorRef={anchorOf(m.key)} open onClose={close} minWidth={m.width ?? 200}>
+                <div data-menubar-float onMouseEnter={() => { if (canHover()) cancelClose(); }} onMouseLeave={() => { if (canHover()) scheduleClose(m.key); }}>
+                  <Panel items={m.items} width={m.width} close={close} up={false} />
+                </div>
+              </FloatingDropdown>
+            )}
+            {open && !floating && (
               <div className={`absolute z-[60] ${m.align === "end" ? "right-0" : "left-0"} ${up ? "bottom-full pb-1" : "top-full pt-1"}`}>
                 <Panel items={m.items} width={m.width} close={close} up={up} />
               </div>
