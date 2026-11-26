@@ -294,7 +294,7 @@ function pushLeg(out: Pt[], q: Pt) {
 export type DirLine = [number, number, number, number];
 
 /** ทิศฝีเข็มที่จุด p จากเส้นทิศที่ลากไว้ (เฉลี่ยแบบมุมคู่ ถ่วงตามระยะ — เส้นใกล้มีผลมาก) → เวกเตอร์หนึ่งหน่วย */
-export function dirAt(lines: DirLine[], p: Pt): Pt | null {
+export function dirAt(lines: DirLine[], p: Pt, soft = 0.25): Pt | null {
   if (!lines.length) return null;
   let sx = 0, sy = 0;
   for (const [x1, y1, x2, y2] of lines) {
@@ -302,7 +302,7 @@ export function dirAt(lines: DirLine[], p: Pt): Pt | null {
     if (L2 < 1e-9) continue;
     const t = Math.max(0, Math.min(1, ((p[0] - x1) * dx + (p[1] - y1) * dy) / L2));
     const d = Math.hypot(p[0] - (x1 + t * dx), p[1] - (y1 + t * dy));
-    const wgt = 1 / (d * d + 0.25);
+    const wgt = 1 / (d * d + soft);
     const a = Math.atan2(dy, dx) * 2;
     sx += Math.cos(a) * wgt; sy += Math.sin(a) * wgt;
   }
@@ -481,3 +481,202 @@ export function sizeAdvice(widths: number[], designW: number, minStroke = 1.5): 
   return { thinFile, minWidthMm: Math.ceil((designW * (minStroke / thinFile)) / 5) * 5 };
 }
 
+
+/** ตัดเส้นให้เหลือเฉพาะช่วงที่อยู่ในชิ้น (ตัดตรงจุดที่ชนขอบพอดี) · comp = ยืดปลายออกนอกขอบนิด (ชดเชยผ้าหด) */
+function clipToShape(line: Pt[], rings: Pt[][], fill: FillRule, comp: number): Pt[][] {
+  const out: Pt[][] = [];
+  let cur: Pt[] = [];
+  const cuts = (a: Pt, b: Pt): number[] => {
+    const ts: number[] = [];
+    const ex = b[0] - a[0], ey = b[1] - a[1];
+    for (const r of rings) for (let k = 0; k < r.length; k++) {
+      const p = r[k], q = r[(k + 1) % r.length];
+      const fx = q[0] - p[0], fy = q[1] - p[1], den = ex * fy - ey * fx;
+      if (Math.abs(den) < 1e-12) continue;
+      const t = ((p[0] - a[0]) * fy - (p[1] - a[1]) * fx) / den, u = ((p[0] - a[0]) * ey - (p[1] - a[1]) * ex) / den;
+      if (t > 0 && t < 1 && u >= 0 && u <= 1) ts.push(t);
+    }
+    return ts.sort((x, y) => x - y);
+  };
+  const ext = (a: Pt, b: Pt): Pt => { const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; return [b[0] + ((b[0] - a[0]) / L) * comp, b[1] + ((b[1] - a[1]) / L) * comp]; };
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1], b = line[i];
+    const ts = [0, ...cuts(a, b), 1];
+    for (let k = 1; k < ts.length; k++) {
+      const t0 = ts[k - 1], t1 = ts[k], tm = (t0 + t1) / 2;
+      const P = (t: number): Pt => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      if (insideShape(rings, fill, ...P(tm))) {
+        if (!cur.length) cur.push(t0 > 0 ? ext(P(t1), P(t0)) : P(t0));
+        cur.push(t1 < 1 ? ext(P(t0), P(t1)) : P(t1));
+        if (t1 < 1) { out.push(cur); cur = []; }
+      } else if (cur.length) { out.push(cur); cur = []; }
+    }
+  }
+  if (cur.length) out.push(cur);
+  return out.filter((r) => r.length >= 2);
+}
+
+/**
+ * ถมเต็มเลี้ยวตามเส้นทิศ (รอบ 5): แถวถมโค้งตามเส้นทิศที่ลากหลายเส้น (แทนแถวขนานทั้งชิ้น)
+ *   1) ตารางจุดในชิ้น · ทุกจุดรู้ "ทิศแถว" จาก dirAt → ทิศตั้งฉาก n
+ *   2) หาค่า φ ที่ความชันใกล้ n ที่สุด (ปรับค่าซ้ำแบบ Gauss-Seidel/SOR) → เส้นระดับ φ = แถว
+ *   3) ตัดเส้นระดับทุก ๆ ระยะแถว (marching squares) → ยืดปลายถึงขอบชิ้น → ฝีละ len มม. เหลื่อมแบบก่ออิฐ
+ *   คืนแต่ละแถวเป็นบล็อก (buildPlan ต่อแถวที่ใกล้กันให้เอง) · ทำไม่ได้ = null (ใช้มุมเดียวแบบเดิม)
+ */
+export function turningFill(rings: Pt[][], fill: FillRule, lines: DirLine[], opts: { spacing: number; len: number; comp: number }): Pt[][] | null {
+  if (lines.length < 2) return null;
+  const g = rasterize(rings, fill, Math.min(0.4, Math.max(0.15, opts.spacing * 0.7)));
+  if (!g) return null;
+  const { w, h, cell } = g;
+  const N = w * h;
+  const cx = (i: number) => g.x0 + ((i % w) + 0.5) * cell, cy = (i: number) => g.y0 + (Math.floor(i / w) + 0.5) * cell;
+  // ทิศตั้งฉากกับแถว (n) ทุกจุด · หันไปทางเดียวกับค่าเฉลี่ย (กันพลิกกลับหัว)
+  const nx = new Float32Array(N), ny = new Float32Array(N);
+  const inside: number[] = [];
+  let mx = 0, my = 0;
+  // ขยายพื้นที่คำนวณออกนอกขอบ 2 ช่อง (แถวจะเลยขอบแล้วค่อยตัดตามรูป → ชิดขอบพอดี ไม่เหลือแถบว่าง)
+  const dom = g.on.slice();
+  for (let pass = 0; pass < 2; pass++) { const prev = dom.slice(); for (let i = 0; i < N; i++) if (!prev[i]) { const x = i % w; if ((x > 0 && prev[i - 1]) || (x < w - 1 && prev[i + 1]) || (i >= w && prev[i - w]) || (i + w < N && prev[i + w])) dom[i] = 1; } }
+  for (let i = 0; i < N; i++) if (dom[i]) {
+    const d = dirAt(lines, [cx(i), cy(i)], 4); if (!d) return null;
+    nx[i] = -d[1]; ny[i] = d[0]; inside.push(i);
+  }
+  if (inside.length < 4) return null;
+  // ค่าเฉลี่ยแบบมุมคู่ แล้วหันทุกจุดให้ไปทางเดียวกัน
+  { let sx = 0, sy = 0; for (const i of inside) { const a = Math.atan2(ny[i], nx[i]) * 2; sx += Math.cos(a); sy += Math.sin(a); } const a = Math.atan2(sy, sx) / 2; mx = Math.cos(a); my = Math.sin(a); }
+  // หันทิศให้ต่อเนื่องกันทีละจุดจากเพื่อนบ้าน (ทางโค้งเลี้ยวเกิน 90° เช่น หัวตัว P ไม่พลิกกลับหัวกลางทาง)
+  {
+    const seen = new Uint8Array(N);
+    for (const s0 of inside) {
+      if (seen[s0]) continue;
+      if (nx[s0] * mx + ny[s0] * my < 0) { nx[s0] = -nx[s0]; ny[s0] = -ny[s0]; }
+      seen[s0] = 1;
+      const q = [s0];
+      for (let qi = 0; qi < q.length; qi++) {
+        const i = q[qi];
+        for (const o of [1, -1, w, -w]) {
+          const j = i + o; if (j < 0 || j >= N || seen[j] || !dom[j]) continue;
+          if ((o === 1 && i % w === w - 1) || (o === -1 && i % w === 0)) continue;
+          if (nx[i] * nx[j] + ny[i] * ny[j] < 0) { nx[j] = -nx[j]; ny[j] = -ny[j]; }
+          seen[j] = 1; q.push(j);
+        }
+      }
+    }
+  }
+  // φ เริ่มจากการฉายบนทิศเฉลี่ย แล้วปรับให้ความชันตาม n ทีละจุด
+  const phi = new Float32Array(N);
+  for (const i of inside) phi[i] = cx(i) * mx + cy(i) * my;
+  const nb = [1, -1, w, -w];
+  const iters = Math.min(400, 60 + Math.round(Math.sqrt(inside.length) * 3));
+  for (let it = 0; it < iters; it++) {
+    for (const i of inside) {
+      let s = 0, c = 0;
+      for (const o of nb) {
+        const j = i + o; if (j < 0 || j >= N || !dom[j]) continue;
+        const ddx = (o === 1 ? cell : o === -1 ? -cell : 0), ddy = (o === w ? cell : o === -w ? -cell : 0);
+        s += phi[j] - (((nx[i] + nx[j]) / 2) * ddx + ((ny[i] + ny[j]) / 2) * ddy); c++;
+      }
+      if (c) phi[i] = phi[i] + 1.8 * (s / c - phi[i]);
+    }
+  }
+  let lo = Infinity, hi = -Infinity;
+  for (const i of inside) { lo = Math.min(lo, phi[i]); hi = Math.max(hi, phi[i]); }
+  const rows: Pt[][] = [];
+  const val = (x: number, y: number) => phi[y * w + x];
+  const ok = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h && dom[y * w + x] === 1;
+  /** เส้นระดับ φ = L → เส้นยาว (ตัดตามรูปชิ้นแล้ว) */
+  const contours = (L: number): Pt[][] => {
+    const segs: [Pt, Pt][] = [];
+    for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+      if (!ok(x, y) || !ok(x + 1, y) || !ok(x, y + 1) || !ok(x + 1, y + 1)) continue;
+      const v = [val(x, y), val(x + 1, y), val(x + 1, y + 1), val(x, y + 1)];
+      const P: Pt[] = [[cx(y * w + x), cy(y * w + x)], [cx(y * w + x + 1), cy(y * w + x)], [cx(y * w + x + 1), cy((y + 1) * w + x)], [cx(y * w + x), cy((y + 1) * w + x)]];
+      const cross: Pt[] = [];
+      for (let k = 0; k < 4; k++) {
+        const a = v[k], b = v[(k + 1) % 4];
+        if ((a < L) !== (b < L)) { const t = (L - a) / (b - a); cross.push([P[k][0] + (P[(k + 1) % 4][0] - P[k][0]) * t, P[k][1] + (P[(k + 1) % 4][1] - P[k][1]) * t]); }
+      }
+      if (cross.length === 2) segs.push([cross[0], cross[1]]);
+      else if (cross.length === 4) { segs.push([cross[0], cross[1]]); segs.push([cross[2], cross[3]]); }
+    }
+    const key = (p: Pt) => `${Math.round(p[0] * 1e4)},${Math.round(p[1] * 1e4)}`;
+    const at = new Map<string, number[]>();
+    segs.forEach((sg, i) => { for (const p of sg) { const k = key(p); at.set(k, [...(at.get(k) ?? []), i]); } });
+    const used = new Uint8Array(segs.length);
+    const out: Pt[][] = [];
+    for (let s0 = 0; s0 < segs.length; s0++) {
+      if (used[s0]) continue;
+      used[s0] = 1;
+      const line: Pt[] = [segs[s0][0], segs[s0][1]];
+      for (const dirEnd of [true, false]) {
+        for (;;) {
+          const end = dirEnd ? line[line.length - 1] : line[0];
+          const nxt = (at.get(key(end)) ?? []).find((j) => !used[j]);
+          if (nxt == null) break;
+          used[nxt] = 1;
+          const sg = segs[nxt], other = key(sg[0]) === key(end) ? sg[1] : sg[0];
+          if (dirEnd) line.push(other); else line.unshift(other);
+        }
+      }
+      out.push(...clipToShape(line, rings, fill, opts.comp));
+    }
+    return out;
+  };
+  const lenOf = (l: Pt[]) => l.reduce((acc, p, i) => (i ? acc + Math.hypot(p[0] - l[i - 1][0], p[1] - l[i - 1][1]) : 0), 0);
+  /** เส้น → ฝีละ len มม. เหลื่อมแบบก่ออิฐ (เลื่อนจุดเริ่ม 1/3 ฝีทุกแถว) */
+  const stitchRow = (line: Pt[], rowNo: number): Pt[] => {
+    const phase = ((rowNo % 3) / 3) * opts.len;
+    const pts: Pt[] = [line[0]];
+    let acc = 0, nextAt = phase > 0.5 ? phase : phase + opts.len;
+    for (let i = 1; i < line.length; i++) {
+      const a = line[i - 1], b = line[i], d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      while (acc + d >= nextAt) { const t = (nextAt - acc) / d; pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); nextAt += opts.len; }
+      acc += d;
+    }
+    const last = line[line.length - 1];
+    if (Math.hypot(last[0] - pts[pts.length - 1][0], last[1] - pts[pts.length - 1][1]) > 0.3) pts.push(last); else pts[pts.length - 1] = last;
+    return pts;
+  };
+  // ช่องที่มีแถวผ่านใกล้ ๆ แล้ว (ไว้หาช่องว่างตรงที่แถวถ่างออก)
+  // ตารางละเอียดแยก (1/3 ระยะแถว) ไว้จำว่าตรงไหนมีแถวผ่านแล้ว
+  const cc = opts.spacing / 3, cw = Math.ceil((w * cell) / cc), ch = Math.ceil((h * cell) / cc);
+  const covered = new Uint8Array(cw * ch);
+  const rc = Math.max(1, Math.round((opts.spacing * 0.6) / cc));
+  const cellOf = (p: Pt) => { const x = Math.floor((p[0] - g.x0) / cell), y = Math.floor((p[1] - g.y0) / cell); return x < 0 || y < 0 || x >= w || y >= h ? -1 : y * w + x; };
+  const covOf = (p: Pt) => { const x = Math.floor((p[0] - g.x0) / cc), y = Math.floor((p[1] - g.y0) / cc); return x < 0 || y < 0 || x >= cw || y >= ch ? -1 : y * cw + x; };
+  const open = (p: Pt) => { const c = cellOf(p), v = covOf(p); return c >= 0 && v >= 0 && g.on[c] === 1 && !covered[v] && insideShape(rings, fill, p[0], p[1]); };
+  const densify = (l: Pt[]): Pt[] => { const out: Pt[] = [l[0]]; for (let i = 1; i < l.length; i++) { const a = l[i - 1], b = l[i], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (cc * 0.5))); for (let k = 1; k <= n; k++) out.push([a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n]); } return out; };
+  const mark = (l: Pt[]) => { for (const p of densify(l)) { const c = covOf(p); if (c < 0) continue; const x0 = c % cw, y0 = Math.floor(c / cw); for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) { const x = x0 + dx, y = y0 + dy; if (x >= 0 && y >= 0 && x < cw && y < ch && dx * dx + dy * dy <= rc * rc) covered[y * cw + x] = 1; } } };
+  let rowNo = 0;
+  for (let L = lo + opts.spacing / 2; L < hi; L += opts.spacing, rowNo++) {
+    for (const run of contours(L)) { if (lenOf(run) < 0.3) continue; rows.push(stitchRow(run, rowNo)); mark(run); }
+  }
+  // รอบเติม: แถวครึ่งระยะ เฉพาะช่วงที่ยังว่าง (แถวโค้งแล้วถ่างออก เช่น ด้านนอกของโค้ง)
+  rowNo = 0;
+  for (let L = lo + opts.spacing; L < hi; L += opts.spacing / 2, rowNo++) {
+    for (const run of contours(L)) {
+      const pts = densify(run);
+      let cur: Pt[] = [];
+      const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 0.8) { rows.push(stitchRow(cur, rowNo)); mark(cur); } cur = []; };
+      for (const p of pts) { if (open(p)) cur.push(p); else flush(); }
+      flush();
+    }
+  }
+  // รอบสุดท้าย: หย่อมที่ยังว่าง (ตรงที่แถวสองทิศมาบรรจบกันเป็นมุม) → แถวตรงสั้น ๆ ตามทิศเฉลี่ย
+  {
+    const rx = my, ry = -mx;   // ทิศแถวเฉลี่ย (ตั้งฉากกับ n เฉลี่ย)
+    let o0 = Infinity, o1 = -Infinity, t0 = Infinity, t1 = -Infinity;
+    for (const r of rings) for (const p of r) { const o = p[0] * mx + p[1] * my, t = p[0] * rx + p[1] * ry; o0 = Math.min(o0, o); o1 = Math.max(o1, o); t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+    let k = 0;
+    for (let o = o0 + opts.spacing / 2; o < o1; o += opts.spacing, k++) {
+      let cur: Pt[] = [];
+      const flush = () => { if (cur.length >= 2 && lenOf(cur) >= 0.6) { rows.push(stitchRow([cur[0], cur[cur.length - 1]], k)); mark(cur); } cur = []; };
+      for (let t = t0; t <= t1; t += cc) {
+        const p: Pt = [o * mx + t * rx, o * my + t * ry];
+        if (open(p)) cur.push(p); else flush();
+      }
+      flush();
+    }
+  }
+  return rows.length ? rows : null;
+}

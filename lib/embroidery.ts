@@ -18,7 +18,7 @@
  *   คู่มือ docs/embroidery.md
  */
 import { autoGroup, eachOp, OP, pieceShapes, type BlockPiece, type FillRule } from "@/lib/block-print";
-import { dirAt, insideShape, satinBorder, turningSatin, type DirLine } from "@/lib/embroidery-satin";
+import { dirAt, insideShape, satinBorder, turningFill, turningSatin, type DirLine } from "@/lib/embroidery-satin";
 
 export type Pt = [number, number];
 export type StitchType = "auto" | "fill" | "satin" | "run" | "skip";
@@ -389,7 +389,9 @@ export function pieceBlocks(rings: Pt[][], fill: FillRule, type: ResolvedType, s
   const edge = !satin && (st.border_mm ?? 0) > 0 && width >= st.border_mm * 3 ? satinBorder(rings, fill, { width: st.border_mm, spacing: st.satin_spacing, comp: st.pull_comp }) : [];
   // satin: ฝีขวางแนวยาวของชิ้น = แถววางตั้งฉากกับแนวยาว
   const deg = satin ? mainAxisDeg(rings) + 90 : angleDeg;
-  const top = rowBlocks(rings, fill, deg, satin ? st.satin_spacing : st.fill_spacing, satin ? SATIN_SPLIT : st.fill_len, st.pull_comp, !satin);
+  // ถมเต็มที่ลากเส้นทิศ ≥ 2 เส้น = แถวโค้งตามเส้น (turningFill) · ไม่ได้ = แถวขนานตามมุมเดียว
+  const turned = !satin && (po.lines?.length ?? 0) >= 2 ? turningFill(rings, fill, po.lines!, { spacing: st.fill_spacing, len: st.fill_len, comp: st.pull_comp }) : null;
+  const top = turned ?? rowBlocks(rings, fill, deg, satin ? st.satin_spacing : st.fill_spacing, satin ? SATIN_SPLIT : st.fill_len, st.pull_comp, !satin);
   const under = !st.underlay ? []
     : satin ? rowBlocks(rings, fill, deg, 1.6, SATIN_SPLIT, -0.4, false, 0.4)
     : rowBlocks(rings, fill, deg + 90, 2.5, st.fill_len, -0.5, false, 0.5);

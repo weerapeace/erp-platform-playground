@@ -26,6 +26,23 @@ function shade(hex: string, t: number): string {
 /**
  * วาดฝีเข็ม · real = ภาพเหมือนด้ายจริง: ด้ายหนา 0.4 มม. ขอบเข้ม + เงามันกลางเส้น + เงาตกบนผ้าบาง ๆ (ซูมเล็กมากจนด้ายบางกว่า ~1.5px ใช้เส้นธรรมดา)
  */
+/** ไล่แสงทีละฝีได้ไม่เกินเท่านี้ต่อสี (เกิน = แบบเร็ว ให้ซูม/เลื่อนยังลื่น) */
+const REAL_MAX = 25_000;
+
+/** ตาราง มม. แบบโปรแกรม Tajima (เส้นทุก 10 มม. · จางทุก 2 มม. เมื่อซูมใกล้) — สีตามความสว่างของผ้า */
+export function drawGrid(g: CanvasRenderingContext2D, W: number, H: number, k: number, ox: number, oy: number, fabric: string) {
+  const n = parseInt(fabric.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
+  const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  const ink = lum > 140 ? "0,0,0" : "255,255,255";
+  for (const [stepMm, alpha] of [[2, 0.05], [10, 0.13]] as const) {
+    if (stepMm * k < 6) continue;
+    g.strokeStyle = `rgba(${ink},${alpha})`; g.lineWidth = 1; g.beginPath();
+    for (let x = ox - Math.ceil(ox / (stepMm * k)) * stepMm * k; x <= W; x += stepMm * k) { g.moveTo(Math.round(x) + 0.5, 0); g.lineTo(Math.round(x) + 0.5, H); }
+    for (let y = oy - Math.ceil(oy / (stepMm * k)) * stepMm * k; y <= H; y += stepMm * k) { g.moveTo(0, Math.round(y) + 0.5); g.lineTo(W, Math.round(y) + 0.5); }
+    g.stroke();
+  }
+}
+
 export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, ox: number, oy: number, end: number, showJumps: boolean, lw: number, real = false) {
   let ci = 0, px = ox, py = oy;
   let color = plan.colors[0]?.color ?? "#000";
@@ -35,18 +52,27 @@ export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, 
   const flush = () => {
     if (!segs.length) return;
     const path = () => { g.beginPath(); for (let i = 0; i < segs.length; i += 4) { g.moveTo(segs[i], segs[i + 1]); g.lineTo(segs[i + 2], segs[i + 3]); } };
-    if (thread) {
-      // เงาตกบนผ้า → ด้ายขอบเข้ม → ตัวด้าย → เงามัน (ช่วงกลางฝี เยื้องขึ้นนิด)
+    if (thread && segs.length / 4 <= REAL_MAX) {
+      // แบบ Tajima: เงาตกบนผ้า (รวดเดียว) → ด้ายทีละฝี ไล่แสงขวางเส้นด้าย (ขอบเข้ม · สันสว่าง · กลางสีจริง) เหมือนด้ายนูน
+      //   ไล่แสงสร้างครั้งเดียวต่อสี แล้วหมุนกระดาษไปตามทิศฝี (setTransform) — ไม่ต้องสร้างใหม่ทุกฝี
+      g.save(); g.translate(lw * 0.15, lw * 0.22); g.strokeStyle = "rgba(0,0,0,0.22)"; g.lineWidth = lw * 1.08; path(); g.stroke(); g.restore();
+      const gr = g.createLinearGradient(0, -lw / 2, 0, lw / 2);
+      gr.addColorStop(0, shade(color, -0.55)); gr.addColorStop(0.28, shade(color, 0.38)); gr.addColorStop(0.5, color); gr.addColorStop(0.85, shade(color, -0.3)); gr.addColorStop(1, shade(color, -0.6));
+      const base = g.getTransform();
+      g.strokeStyle = gr; g.lineWidth = lw;
+      for (let i = 0; i < segs.length; i += 4) {
+        const x0 = segs[i], y0 = segs[i + 1], x1 = segs[i + 2], y1 = segs[i + 3];
+        const L = Math.hypot(x1 - x0, y1 - y0); if (L < 0.01) continue;
+        const c = (x1 - x0) / L, sn = (y1 - y0) / L, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+        g.setTransform(base.a * c, base.b + base.a * sn, base.c - base.d * sn, base.d * c, base.a * mx + base.e, base.d * my + base.f);
+        g.beginPath(); g.moveTo(-L / 2, 0); g.lineTo(L / 2, 0); g.stroke();
+      }
+      g.setTransform(base);
+    } else if (thread) {
+      // งานใหญ่มาก (ฝีเยอะเกินจะไล่แสงทีละฝีได้ลื่น) — แบบเร็ว: เงา → ขอบเข้ม → ตัวด้าย
       g.save(); g.translate(lw * 0.12, lw * 0.18); g.strokeStyle = "rgba(0,0,0,0.18)"; g.lineWidth = lw * 1.05; path(); g.stroke(); g.restore();
       g.strokeStyle = shade(color, -0.35); g.lineWidth = lw; path(); g.stroke();
       g.strokeStyle = color; g.lineWidth = lw * 0.72; path(); g.stroke();
-      g.save(); g.translate(-lw * 0.1, -lw * 0.12); g.strokeStyle = shade(color, 0.45); g.globalAlpha = 0.55; g.lineWidth = lw * 0.22; g.beginPath();
-      for (let i = 0; i < segs.length; i += 4) {
-        const [x0, y0, x1, y1] = [segs[i], segs[i + 1], segs[i + 2], segs[i + 3]];
-        if (Math.hypot(x1 - x0, y1 - y0) < lw * 1.2) continue;
-        g.moveTo(x0 + (x1 - x0) * 0.25, y0 + (y1 - y0) * 0.25); g.lineTo(x0 + (x1 - x0) * 0.7, y0 + (y1 - y0) * 0.7);
-      }
-      g.stroke(); g.restore();
     } else { g.strokeStyle = color; g.lineWidth = lw; path(); g.stroke(); }
     segs.length = 0;
   };
@@ -68,10 +94,11 @@ export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, 
   return { px, py };
 }
 
-export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, className = "", drawMode = false, onDraw, overlay }: {
+export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, grid = false, className = "", drawMode = false, onDraw, overlay }: {
   plan: EmbPlan; upto?: number; showJumps?: boolean; height?: number; fabric?: string; real?: boolean;
   selectedId?: string | null; onPick?: (id: string | null) => void; focus?: { key: string; box: BoxMm } | null; className?: string;
   /** โหมดวาด (เช่น ลากเส้นทิศฝีเข็ม): กด/ลาก/ปล่อย ส่งพิกัดงาน (มม.) แทนการเลื่อนภาพ · ล้อเมาส์ยังซูมได้ */
+  /** ตาราง มม. แบบ Tajima ใต้ฝีเข็ม */ grid?: boolean;
   drawMode?: boolean; onDraw?: (e: { phase: "down" | "move" | "up"; x: number; y: number }) => void;
   /** ชั้นวาดทับ (เส้นทิศ · จุดแก้รูปทรง) — ได้ตัวแปลงพิกัดงาน ↔ จอ */
   overlay?: (v: PreviewView) => ReactNode;
@@ -123,6 +150,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
     if (!plan.width || !plan.height) return;
     const k = fitK() * view.z;
     const ox = W / 2 - view.cx * k, oy = H / 2 - view.cy * k;
+    if (grid) drawGrid(g, W, H, k, ox, oy, fabric);
     const end = Math.min(upto ?? plan.cmds.length, plan.cmds.length);
     const { px, py } = drawPlan(g, plan, k, ox, oy, end, showJumps, Math.max(0.6, (real ? 0.42 : 0.35) * k), real);
     const sel = selectedId ? plan.pieces.find((p) => p.id === selectedId) : null;
@@ -132,7 +160,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
       g.stroke(); g.restore();
     }
     if (upto != null && upto < plan.cmds.length) { g.fillStyle = "#ef4444"; g.beginPath(); g.arc(px, py, 3.5, 0, Math.PI * 2); g.fill(); }
-  }, [plan, upto, showJumps, size, view, fabric, selectedId, fitK, real]);
+  }, [plan, upto, showJumps, size, view, fabric, selectedId, fitK, real, grid]);
 
   // แผนที่ย่อ (วาดใหม่เมื่องานเปลี่ยน)
   const MW = 120, MH = 80;

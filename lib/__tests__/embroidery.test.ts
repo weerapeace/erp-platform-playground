@@ -385,3 +385,36 @@ describe("รอบ 4: ตัวช่วยหน้าจอแก้ลาย
     expect(reorderSequence(["b", "a"], ["a", "b", "c"], 0, 2)).toEqual(["a", "c", "b"]);
   });
 });
+
+describe("รอบ 5: ถมเต็มเลี้ยวตามเส้นทิศ", async () => {
+  const { turningFill, insideShape } = await import("@/lib/embroidery-satin");
+  type P = [number, number];
+  it("แถบรูปตัว L + เส้นทิศ 2 เส้น: แถวแนวนอนในขาล่าง แนวตั้งในขาซ้าย · ฝีอยู่ในชิ้น · คลุมพื้นที่เกือบหมด", () => {
+    const L: P[][] = [[[0, 0], [6, 0], [6, 24], [30, 24], [30, 30], [0, 30]]];
+    const rows = turningFill(L, "nonzero", [[3, 2, 3, 20], [10, 27, 28, 27]], { spacing: 0.45, len: 3.5, comp: 0 })!;
+    expect(rows).not.toBeNull();
+    const dirNear = (x: number, y: number) => {
+      let best: { d: number; ang: number } = { d: 9, ang: 0 };
+      for (const r of rows) for (let i = 1; i < r.length; i++) {
+        const a = r[i - 1], b = r[i], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, d = Math.hypot(mx - x, my - y);
+        if (d < best.d) best = { d, ang: Math.abs((Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI) % 180 };
+      }
+      return best.ang;
+    };
+    const v = dirNear(3, 8), h = dirNear(22, 27);
+    expect(Math.min(v, 180 - v) > 60).toBe(true);   // ขาซ้าย ≈ แนวตั้ง
+    expect(Math.min(h, 180 - h) < 30).toBe(true);   // ขาล่าง ≈ แนวนอน
+    for (const r of rows) for (const [x, y] of r) expect(insideShape(L, "nonzero", Math.min(29.99, Math.max(0.01, x)), Math.min(29.99, Math.max(0.01, y))) || x < 0.3 || y > 29.7 || x > 29.7).toBe(true);
+    let ins = 0, far = 0;
+    for (let y = 0.25; y < 30; y += 0.5) for (let x = 0.25; x < 30; x += 0.5) {
+      if (!insideShape(L, "nonzero", x, y)) continue; ins++;
+      let best = 9;
+      for (const r of rows) for (let i = 1; i < r.length; i++) { const a = r[i - 1], b = r[i]; const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L2)); best = Math.min(best, Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy)); }
+      if (best > 0.5) far++;
+    }
+    expect(far / ins).toBeLessThan(0.03);
+  });
+  it("เส้นทิศเส้นเดียว = ไม่ใช้ (ใช้มุมเดียวแบบเดิม)", () => {
+    expect(turningFill([[[0, 0], [10, 0], [10, 10], [0, 10]]], "nonzero", [[0, 0, 10, 0]], { spacing: 0.45, len: 3.5, comp: 0 })).toBeNull();
+  });
+});

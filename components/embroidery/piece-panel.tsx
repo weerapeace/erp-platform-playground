@@ -6,12 +6,15 @@
  */
 import { Icon } from "@/components/icon";
 import { STITCH_TYPES, type PieceInfo, type PieceOpt, type StitchType } from "@/lib/embroidery";
+import { useState } from "react";
 import { fmtNum } from "./shared";
+import { ThreadPalette } from "./thread-palette";
 
 export type EditTool = "select" | "dir" | "node";
 
-export function PiecePanel({ info, opt, typeSet, canEdit, tool, setTool, onType, onOpt, onReset, onClose }: {
+export function PiecePanel({ info, opt, typeSet, canEdit, tool, setTool, onType, onOpt, onReset, onClose, sameCount, onColor }: {
   info: PieceInfo; opt: PieceOpt; typeSet: StitchType | undefined; canEdit: boolean;
+  /** จำนวนชิ้นที่ใช้สีเดียวกับชิ้นนี้ · onColor(สีใหม่, ชื่อด้าย, เปลี่ยนทั้งกลุ่ม) */ sameCount: number; onColor: (hex: string, label: string | null, all: boolean) => void;
   tool: EditTool; setTool: (t: EditTool) => void;
   onType: (t: StitchType | null) => void; onOpt: (patch: Partial<Record<keyof PieceOpt, PieceOpt[keyof PieceOpt] | null>>) => void; onReset: () => void; onClose: () => void;
 }) {
@@ -19,6 +22,7 @@ export function PiecePanel({ info, opt, typeSet, canEdit, tool, setTool, onType,
   const fill = info.type === "fill";
   const lines = opt.lines?.length ?? 0;
   const custom = typeSet || Object.keys(opt).length > 0;
+  const [allSame, setAllSame] = useState(false);
   return (
     <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 text-xs">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -28,6 +32,16 @@ export function PiecePanel({ info, opt, typeSet, canEdit, tool, setTool, onType,
         <button type="button" onClick={onClose} className="ml-auto text-xs text-slate-500 hover:text-slate-800">ปิด ×</button>
       </div>
       {info.warn && <div className={`mt-1 ${info.level === "danger" ? "text-red-700" : "text-amber-800"}`}>{info.warn}</div>}
+
+      <div className="mt-2 font-medium text-slate-600">สีด้าย</div>
+      <div className="mt-1 rounded-lg bg-white/70 p-2">
+        <ThreadPalette value={info.color} disabled={!canEdit} onPick={(h, label) => onColor(h, label, allSame)} />
+        {sameCount > 1 && (
+          <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
+            <input type="checkbox" checked={allSame} disabled={!canEdit} onChange={(e) => setAllSame(e.target.checked)} /> เปลี่ยนทุกชิ้นที่สีเดียวกัน ({sameCount} ชิ้น)
+          </label>
+        )}
+      </div>
 
       <div className="mt-2 font-medium text-slate-600">ชนิดฝี</div>
       <div className="mt-1 flex flex-wrap gap-1.5">

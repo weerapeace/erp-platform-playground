@@ -25,6 +25,7 @@ import { StitchPreview, type PreviewView } from "./stitch-preview";
 import { SequenceList } from "./sequence-list";
 import { PiecePanel, type EditTool } from "./piece-panel";
 import { TextPieceModal, type TextResult } from "./text-modal";
+import { ThreadPalette } from "./thread-palette";
 import { readLogoFile, SKIPPED_KEY } from "./list";
 import { SelectStep, type PickResult } from "./select-step";
 import { ShopFilePanel, useShopPlan } from "./shop-file";
@@ -70,6 +71,8 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const [focus, setFocus] = useState<{ key: string; box: BoxMm } | null>(null);
   const [tool, setTool] = useState<EditTool>("select");
   const [compare, setCompare] = useState(false);
+  const [grid, setGrid] = useState(true);
+  const [colorEdit, setColorEdit] = useState<string | null>(null);
   const [textOpen, setTextOpen] = useState(false);
   /** เส้นทิศที่กำลังลาก (พิกัดงาน) · จุดที่กำลังลากแก้ (ชิ้นตัวอย่างระหว่างลาก) */
   const [draft, setDraft] = useState<DirLine | null>(null);
@@ -261,6 +264,30 @@ export function EmbroideryEditor({ id }: { id: string }) {
     delete po[pid]; delete pt[pid];
     return { ...s, piece_opts: po, piece_types: pt };
   });
+  /**
+   * เปลี่ยนสีด้ายของชิ้น (ids) → สีใหม่ · ค่าตั้งของสีเดิม (ชนิดฝี/มุม/ปัก) ตามไปด้วย · เลือกจากจานด้าย = ใส่รหัสด้ายให้
+   *   ย้ายทั้งกลุ่ม = สีใหม่อยู่ลำดับเดิมของสีเก่า · ย้ายบางชิ้น = สีใหม่ต่อท้ายสีเก่า (ถ้ายังไม่มีสีนั้น)
+   */
+  const recolor = (ids: string[], hex: string, label: string | null) => {
+    const to = hex.toLowerCase();
+    const idSet = new Set(ids);
+    editPieces((ps) => ps.map((p) => (idSet.has(p.id) ? { ...p, color: to } : p)), (s0, oldP) => {
+      const from = oldP.find((p) => idSet.has(p.id))?.color ?? "#000000";
+      if (from === to) return s0;
+      const wholeGroup = !oldP.some((p) => !idSet.has(p.id) && (p.color ?? "#000000") === from);
+      const colors = { ...s0.colors };
+      const base = colors[from] ?? { type: "auto" as const, angle: 45, thread: "", on: true };
+      const keepThread = (t: string) => (label && (!t || t.startsWith("Brother ")) ? label : t);
+      if (!colors[to]) colors[to] = { ...base, thread: keepThread(wholeGroup ? base.thread : "") };
+      else if (label) colors[to] = { ...colors[to], thread: keepThread(colors[to].thread) };
+      let order = s0.color_order.filter((c) => c !== to);
+      const at = order.indexOf(from);
+      order = wholeGroup ? order.map((c) => (c === from ? to : c)) : [...order.slice(0, at + 1), to, ...order.slice(at + 1)];
+      if (wholeGroup) delete colors[from];
+      return { ...s0, colors, color_order: order };
+    });
+    toast.success(`เปลี่ยนสีด้าย ${ids.length} ชิ้นแล้ว${label ? ` (${label})` : ""} — ย้อนกลับได้`);
+  };
   const pickTool = (t: EditTool) => { if (t !== "select" && !sel) { toast.error("คลิกเลือกชิ้นในภาพ หรือในรายการลำดับปักก่อน"); return; } setTool(t); setDraft(null); };
   /** ลากเส้นทิศฝีเข็มบนชิ้นที่เลือก (พิกัดงาน → เก็บเป็นพิกัดไฟล์) */
   const onDraw = (e: { phase: "down" | "move" | "up"; x: number; y: number }) => {
@@ -272,7 +299,13 @@ export function EmbroideryEditor({ id }: { id: string }) {
       setDraft(null);
       if (!d || Math.hypot(e.x - d[0], e.y - d[1]) < 0.8) return;
       const a = frame.toFile(d[0], d[1]), b = frame.toFile(e.x, e.y);
-      setPieceOpt(sel.id, { lines: [...(selOpt.lines ?? []), [a[0], a[1], b[0], b[1]]] });
+      const lines = [...(selOpt.lines ?? []), [a[0], a[1], b[0], b[1]]];
+      // ชิ้นถมเต็มที่แคบ (≤ 8 มม.) ลากเส้นทิศ = อยากให้ฝีโค้งตามตัวอักษร → เปลี่ยนเป็นซิกแซกให้เลย
+      if (sel.type === "fill" && sel.width <= 8) {
+        const pid = sel.id;
+        edit((s) => ({ ...s, piece_types: { ...s.piece_types, [pid]: "satin" }, piece_opts: { ...s.piece_opts, [pid]: { ...(s.piece_opts[pid] ?? {}), lines: lines as DirLine[] } } }));
+        toast.success("ชิ้นนี้แคบ — เปลี่ยนเป็นซิกแซกให้แล้ว ฝีจะโค้งตามเส้นที่ลาก (ย้อนกลับได้)");
+      } else setPieceOpt(sel.id, { lines });
     }
   };
   const fileAt = (v: PreviewView, cx: number, cy: number) => { const [px, py] = v.toPlan(cx, cy); return frame.toFile(px, py); };
@@ -368,12 +401,12 @@ export function EmbroideryEditor({ id }: { id: string }) {
           {compare && shopPlan && !shopOnly ? (
             <div className="grid gap-2 md:grid-cols-2">
               <div><div className="mb-1 text-xs font-medium text-slate-500">ระบบแปลง · {fmtNum(plan.stitches)} ฝี · {(plan.width / 10).toFixed(1)} × {(plan.height / 10).toFixed(1)} ซม.</div>
-                <StitchPreview plan={plan} showJumps={showJumps} real={real} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
+                <StitchPreview plan={plan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
               <div><div className="mb-1 text-xs font-medium text-slate-500">ไฟล์จากร้าน · {fmtNum(shopPlan.stitches)} ฝี · {(shopPlan.width / 10).toFixed(1)} × {(shopPlan.height / 10).toFixed(1)} ซม.</div>
-                <StitchPreview plan={shopPlan} showJumps={showJumps} real={real} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
+                <StitchPreview plan={shopPlan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 420} /></div>
             </div>
           ) : (
-            <StitchPreview plan={vplan} upto={upto ?? undefined} showJumps={showJumps} real={real} fabric={st.fabric} selectedId={viewing ? null : selectedId} focus={viewing ? null : focus}
+            <StitchPreview plan={vplan} upto={upto ?? undefined} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} selectedId={viewing ? null : selectedId} focus={viewing ? null : focus}
               onPick={canEdit && !viewing ? setSelectedId : undefined} height={typeof window !== "undefined" && window.innerWidth < 768 ? 300 : 480}
               drawMode={tool === "dir" && !!sel && !viewing} onDraw={onDraw} overlay={overlay} />
           )}
@@ -384,11 +417,14 @@ export function EmbroideryEditor({ id }: { id: string }) {
             </button>
             <input type="range" min={0} max={vplan.cmds.length} value={upto ?? vplan.cmds.length} onChange={(e) => { setPlaying(false); const v = Number(e.target.value); setUpto(v >= vplan.cmds.length ? null : v); }} className="min-w-[120px] flex-1" aria-label="ปักถึงฝีที่" />
             <label className="inline-flex items-center gap-1"><input type="checkbox" checked={real} onChange={(e) => setReal(e.target.checked)} /> เหมือนด้ายจริง</label>
+            <label className="inline-flex items-center gap-1"><input type="checkbox" checked={grid} onChange={(e) => setGrid(e.target.checked)} /> ตาราง มม.</label>
             <label className="inline-flex items-center gap-1"><input type="checkbox" checked={showJumps} onChange={(e) => setShowJumps(e.target.checked)} /> เส้นกระโดด</label>
           </div>
 
           {sel && !viewing && (
             <PiecePanel info={sel} opt={selOpt} typeSet={st.piece_types[sel.id]} canEdit={canEdit} tool={tool} setTool={pickTool}
+              sameCount={snap.pieces.filter((p) => isActive(p) && (p.color ?? "#000000") === sel.color).length}
+              onColor={(h, label, all) => recolor(all ? snap.pieces.filter((p) => (p.color ?? "#000000") === sel.color).map((p) => p.id) : [sel.id], h, label)}
               onType={(t) => setPieceType(sel.id, t)} onOpt={(patch) => setPieceOpt(sel.id, patch)} onReset={() => resetPiece(sel.id)}
               onClose={() => { setSelectedId(null); setTool("select"); }} />
           )}
@@ -520,7 +556,8 @@ export function EmbroideryEditor({ id }: { id: string }) {
                   <li key={c} className={`space-y-1.5 py-2 ${cs.on ? "" : "opacity-50"}`}>
                     <div className="flex items-center gap-2">
                       <span className="w-4 text-center text-xs text-slate-400">{i + 1}</span>
-                      <span className="h-5 w-5 shrink-0 rounded border border-black/10" style={{ background: c }} title={c} />
+                      <button type="button" disabled={!canEdit} onClick={() => setColorEdit((x) => (x === c ? null : c))} title="เปลี่ยนสีด้ายทั้งกลุ่มนี้"
+                        className={`h-6 w-6 shrink-0 rounded border ${colorEdit === c ? "ring-2 ring-indigo-500 ring-offset-1" : "border-black/10"}`} style={{ background: c }} aria-label={`เปลี่ยนสี ${c}`} />
                       <select disabled={!canEdit || !cs.on} value={cs.type} onChange={(e) => setColor(c, { type: e.target.value as StitchType })} className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-1.5 text-sm">
                         {STITCH_TYPES.filter((t) => t.key !== "skip").map((t) => <option key={t.key} value={t.key}>{t.th}</option>)}
                       </select>
@@ -541,6 +578,11 @@ export function EmbroideryEditor({ id }: { id: string }) {
                       )}
                       <label className="inline-flex items-center gap-1"><input type="checkbox" disabled={!canEdit} checked={cs.on} onChange={(e) => setColor(c, { on: e.target.checked })} /> ปัก</label>
                     </div>
+                    {colorEdit === c && canEdit && (
+                      <div className="ml-6 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <ThreadPalette value={c} onPick={(h, label) => { recolor(snap.pieces.filter((p) => (p.color ?? "#000000") === c).map((p) => p.id), h, label); setColorEdit(null); }} />
+                      </div>
+                    )}
                     <div className="pl-6 text-[11px] text-slate-400">{piecesOfColor(c)} ชิ้น · {fmtNum(cb?.stitches ?? 0)} ฝี</div>
                   </li>
                 );
