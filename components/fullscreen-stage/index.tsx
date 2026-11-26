@@ -52,8 +52,8 @@ export type FullscreenStageState = {
 const parseBool = (v: unknown) => (typeof v === "boolean" ? v : null);
 
 /** active = หน้านี้กำลังโชว์กระดานอยู่ไหม (เช่น อยู่แท็บอื่น = false → ไม่เต็มจอ ไม่ฟังคีย์ แม้เป็นมือถือ) */
-export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; active?: boolean; defaultOn?: boolean; autoHide?: boolean; float?: boolean } = {}): FullscreenStageState {
-  const { active = true, defaultOn = false, autoHide = false, float = false } = opts;
+export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; active?: boolean; defaultOn?: boolean; autoHide?: boolean; float?: boolean; phoneAlways?: boolean } = {}): FullscreenStageState {
+  const { active = true, defaultOn = false, autoHide = false, float = false, phoneAlways = true } = opts;
   const hotkey = (opts.hotkey ?? true) && active;
   const [saved, setSaved] = useUserPref<boolean>(prefKey, defaultOn, parseBool);
   const [pinned, setPinned] = useUserPref<boolean>(`${prefKey}_pin`, false, parseBool);
@@ -69,8 +69,14 @@ export function useFullscreenStage(prefKey: string, opts: { hotkey?: boolean; ac
     return () => mq.removeEventListener?.("change", apply);
   }, []);
 
-  const on = active && (phone ? !phoneExit : saved);
-  const set = useCallback((v: boolean) => { if (phone) setPhoneExit(!v); else setSaved(v); }, [phone, setSaved]);
+  // phoneAlways=false (หน้าแก้งานที่มีแผงข้าง เช่น ไฟล์ปัก · ชุดกระดาน board-kit) = มือถือไม่บังคับเต็มจอ · กดขยายเองได้ (ไม่จำ)
+  const [phoneOn, setPhoneOn] = useState(false);
+  const on = active && (phone ? (phoneAlways ? !phoneExit : phoneOn) : saved);
+  const set = useCallback((v: boolean) => {
+    if (!phone) setSaved(v);
+    else if (phoneAlways) setPhoneExit(!v);
+    else setPhoneOn(v);
+  }, [phone, phoneAlways, setSaved]);
   const toggle = useCallback(() => set(!on), [set, on]);
 
   // Esc = ออก (บนมือถือไม่มีคีย์บอร์ดจริง ไม่ต้องจดชั้น)

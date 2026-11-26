@@ -1056,6 +1056,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "fullscreen-stage.md",
   },
   {
+    key: "board-kit", label: "ชุดกระดานแก้งาน (ล็อก · กล่องเครื่องมือลอย · ปุ่มลัด)", code: "useBoardLock · BoardLockButton · BoardLockHint · BoardToolbox · BoardShortcuts · BoardFullscreenButton", category: "layout",
+    source: { path: "components/board-kit" },
+    what: "ของที่ทุกกระดานแก้งานใช้ร่วมกัน: ล็อกกระดาน (ค่าเริ่มต้นล็อก · จำต่อคน · ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl+ลูกกลิ้ง = ซูม · ล็อกเข้ม = ห้ามแก้บนกระดาน · คีย์ L · มือถือนิ้วเดียวเลื่อนหน้าได้) + ฟองเตือนพร้อมปุ่มปลดล็อก · กล่องเครื่องมือลอยซ้าย (ไอคอน + ชื่อ + ปุ่มลัด · ลากย้าย · ย่อเหลือไอคอน · จำตำแหน่งต่อคน · มือถือเป็นแถบล่าง) · ป๊อปปุ่มลัดทั้งหมด (?) · ปุ่มขยายเต็มจอขนาดเท่าปุ่มซูม (คู่ FullscreenStage phoneAlways:false)",
+    when: "หน้าที่มีกระดาน/ภาพให้แก้งาน มีเครื่องมือหลายแบบ และซูมด้วยลูกกลิ้ง (ตอนนี้: ไฟล์ปัก /master/embroidery)",
+    notWhen: "กระดานวาด Excalidraw (CanvasSketch) / ผัง FlowchartBoard มีแถบเครื่องมือของตัวเอง · ดูรูปซูมเฉย ๆ ไม่มีเครื่องมือ → ZoomBox · ปุ่มเต็มจอแบบมีปุ่มข้อความ → FullscreenToggle",
+    doc: "board-kit.md",
+  },
+  {
     key: "app-access-gate", label: "ด่านว่าใครเข้าแอปนี้ได้ + ล็อกพนักงานในแอป", code: "AppAccessGate · AppLockGate · lib/app-lock", category: "layout",
     source: { path: "components/app-access-gate" },
     what: "กันคนที่ไม่มีสิทธิ์เข้าแอปแยก ใช้กฎเดียวกับเมนูหลัก · AppLockGate (ครอบทั้งเว็บที่ root layout) = คนที่ถูกล็อกในแอปพนักงานเปิดหน้านอกแอป → หน้า “หน้านี้ไม่อยู่ในแอป X” + ขอสิทธิ์",

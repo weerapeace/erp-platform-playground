@@ -1,7 +1,7 @@
 "use client";
 /**
  * 🧵 ภาพตัวอย่างฝีเข็ม — วาดคำสั่งเครื่องปักลงแคนวาส (ด้ายตามสีที่ปัก · เส้นกระโดดประจาง ๆ · พื้นตามสีผ้า)
- *   ซูม: ล้อเมาส์ (ตรงจุดที่ชี้) · ถ่างสองนิ้ว · ปุ่ม + − พอดีจอ 1:1 (ขนาดจริงบนจอ) · ลาก = เลื่อน · แผนที่ย่อมุมขวาล่าง (คลิก = ไปตรงนั้น)
+ *   ซูม: ล้อเมาส์ (ตรงจุดที่ชี้ · locked = ต้องกด Ctrl/⌘ ไม่งั้นหน้าเว็บเลื่อนตามปกติ — ชุดกระดาน board-kit) · ถ่างสองนิ้ว · ปุ่ม + − พอดีจอ 1:1 (ขนาดจริงบนจอ) · ลาก = เลื่อน · แผนที่ย่อมุมขวาล่าง (คลิก = ไปตรงนั้น)
  *   คลิกชิ้น → onPick(id) (หาชิ้นด้วย pieceAt) · selectedId = ไฮไลต์ขอบชิ้น · focus = ซูมไปกรอบนั้น (เปลี่ยน focus.key = ซูมใหม่)
  *   ไม่ใช้ useCanvasZoom ของบล็อกพิมพ์: ตัวนั้นขยายกล่อง SVG ให้เลื่อนดู — ฝีเข็มหลายหมื่นเส้นต้องวาดแคนวาสเท่าจอแล้วแปลงพิกัดเอง (แคนวาสขยาย 8 เท่ากินหน่วยความจำ)
  *   upto = วาดถึงคำสั่งที่เท่าไร (แถบเล่นลำดับการปัก) · ไม่ใส่ = ทั้งหมด
@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { pieceAt, type BoxMm, type EmbPlan } from "@/lib/embroidery";
+import { wheelAction } from "@/lib/board-kit";
 
 /** ตัวแปลงพิกัดที่ส่งให้ชั้นวาดทับ · toScreen = มม. งาน → px ในกล่อง · toPlan = จุดเมาส์ (clientX/Y) → มม. งาน · k = px ต่อ มม. */
 export type PreviewView = { toScreen: (x: number, y: number) => [number, number]; toPlan: (clientX: number, clientY: number) => [number, number]; k: number; w: number; h: number };
@@ -94,7 +95,7 @@ export function drawPlan(g: CanvasRenderingContext2D, plan: EmbPlan, k: number, 
   return { px, py };
 }
 
-export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, grid = false, className = "", drawMode = false, onDraw, overlay }: {
+export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabric = "#ffffff", selectedId, onPick, focus, real = true, grid = false, className = "", drawMode = false, onDraw, overlay, locked = false, onLockedWheel, controls, children }: {
   plan: EmbPlan; upto?: number; showJumps?: boolean; height?: number; fabric?: string; real?: boolean;
   selectedId?: string | null; onPick?: (id: string | null) => void; focus?: { key: string; box: BoxMm } | null; className?: string;
   /** โหมดวาด (เช่น ลากเส้นทิศฝีเข็ม): กด/ลาก/ปล่อย ส่งพิกัดงาน (มม.) แทนการเลื่อนภาพ · ล้อเมาส์ยังซูมได้ */
@@ -102,6 +103,10 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
   drawMode?: boolean; onDraw?: (e: { phase: "down" | "move" | "up"; x: number; y: number }) => void;
   /** ชั้นวาดทับ (เส้นทิศ · จุดแก้รูปทรง) — ได้ตัวแปลงพิกัดงาน ↔ จอ */
   overlay?: (v: PreviewView) => ReactNode;
+  /** กระดานล็อก (useBoardLock): ลูกกลิ้งเฉย ๆ = เลื่อนหน้าเว็บ · Ctrl+ลูกกลิ้ง = ซูม · มือถือนิ้วเดียว = เลื่อนหน้าเว็บ */
+  locked?: boolean; onLockedWheel?: () => void;
+  /** ปุ่มเพิ่มต่อท้ายแถบซูมมุมขวาบน (กุญแจ · เต็มจอ) */ controls?: ReactNode;
+  /** ของลอยบนกระดาน (กล่องเครื่องมือ · ฟองเตือน) */ children?: ReactNode;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const miniRef = useRef<HTMLCanvasElement>(null);
@@ -188,9 +193,11 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
   }, [fitK, size]);
 
   // ล้อเมาส์ (ต้อง passive:false ถึงกันหน้าเว็บเลื่อนได้)
+  const lockRef = useRef({ locked, onLockedWheel }); lockRef.current = { locked, onLockedWheel };
   useEffect(() => {
     const el = boxRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (wheelAction(lockRef.current.locked, e.ctrlKey || e.metaKey) === "pass") { lockRef.current.onLockedWheel?.(); return; }
       e.preventDefault();
       const r = el.getBoundingClientRect();
       zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - r.left, e.clientY - r.top);
@@ -259,7 +266,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
 
   return (
     <div className={`relative w-full overflow-hidden rounded-lg border border-slate-200 ${className}`} style={{ height }}>
-      <div ref={boxRef} className="absolute inset-0 touch-none select-none" style={{ cursor: drawMode ? "crosshair" : onPick ? "pointer" : "grab" }}
+      <div ref={boxRef} className="absolute inset-0 select-none" style={{ touchAction: locked ? "pan-x pan-y" : "none", cursor: drawMode ? "crosshair" : onPick ? "pointer" : "grab" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <canvas ref={ref} className="block" />
       </div>
@@ -276,10 +283,11 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
         <button type="button" className={btn} onClick={() => zoomAt(1 / 1.5)} aria-label="ซูมออก">−</button>
         <button type="button" className={btn} onClick={() => setView({ z: 1, cx: 0, cy: 0 })} aria-label="พอดีจอ" title="พอดีจอ">⤢</button>
         <button type="button" className={`${btn} text-[10px]`} onClick={() => setView((v) => ({ ...v, z: Math.min(MAX_Z, Math.max(MIN_Z, realZ)) }))} aria-label="ขนาดจริง" title="ขนาดจริงบนจอ (โดยประมาณ)">1:1</button>
+        {controls}
       </div>
       <div className="pointer-events-none absolute bottom-2 left-2 flex gap-1.5 text-[11px]">
         <span className="rounded-full bg-white/90 px-2 py-0.5 text-slate-600 shadow-sm">{zoomPct}%</span>
-        <span className="hidden rounded-full bg-white/90 px-2 py-0.5 text-slate-500 shadow-sm sm:inline">ล้อเมาส์ = ซูม · ลาก = เลื่อน{onPick ? " · คลิกชิ้น = ตั้งฝีเข็ม" : ""}</span>
+        <span className="hidden rounded-full bg-white/90 px-2 py-0.5 text-slate-500 shadow-sm sm:inline">{locked ? "ล็อกอยู่: Ctrl + ล้อเมาส์ = ซูม" : "ล้อเมาส์ = ซูม"} · ลาก = เลื่อน{onPick ? " · คลิกชิ้น = ตั้งฝีเข็ม" : ""}</span>
       </div>
       {(
         <div className="absolute bottom-2 right-2 overflow-hidden rounded-md border border-slate-200 shadow-sm" style={{ width: MW, height: MH, visibility: view.z > 1.05 ? "visible" : "hidden" }}
@@ -288,6 +296,7 @@ export function StitchPreview({ plan, upto, showJumps = true, height = 360, fabr
           <div className="pointer-events-none absolute border-2 border-indigo-500" style={{ left: MW / 2 + (view.cx - vw / 2) * mk, top: MH / 2 + (view.cy - vh / 2) * mk, width: vw * mk, height: vh * mk }} />
         </div>
       )}
+      {children}
     </div>
   );
 }
