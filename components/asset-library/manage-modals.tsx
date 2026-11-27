@@ -81,29 +81,36 @@ export function ManageMetaModal({ kind, items, onClose, onChanged }: {
   );
 }
 
-export function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+/** สร้างอัลบั้มใหม่ / อัลบั้มย่อย (parent) / เปลี่ยนชื่อ (rename) — ป๊อปเดียวกัน */
+export function NewCollectionModal({ onClose, onDone, parent, rename }: {
+  onClose: () => void; onDone: () => void;
+  parent?: { id: string; name: string } | null;
+  rename?: { id: string; name: string } | null;
+}) {
   const toast = useToast();
   const t = useT();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(rename?.name ?? "");
   const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!name.trim()) { toast.error(t("ใส่ชื่ออัลบั้มก่อน", "Enter an album name first")); return; }
     setBusy(true);
     try {
-      const res = await apiFetch("/api/assets/collections", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }),
-      });
+      const res = await apiFetch("/api/assets/collections", rename
+        ? { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rename.id, name: name.trim() }) }
+        : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), parent_id: parent?.id ?? null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(t("สร้างอัลบั้มแล้ว", "Album created")); onDone();
-    } catch (e) { toast.error(e instanceof Error ? e.message : t("สร้างไม่สำเร็จ", "Create failed")); }
+      toast.success(rename ? t("เปลี่ยนชื่อแล้ว", "Renamed") : t("สร้างอัลบั้มแล้ว", "Album created")); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); }
   };
+  const title = rename ? t("เปลี่ยนชื่ออัลบั้ม", "Rename album")
+    : parent ? `${t("อัลบั้มย่อยใน", "Sub-album in")} “${parent.name}”` : t("สร้างอัลบั้มใหม่", "New album");
   return (
-    <ERPModal open onClose={onClose} title={t("สร้างอัลบั้มใหม่", "New album")} size="sm"
+    <ERPModal open onClose={onClose} title={title} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={create} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{t("สร้าง", "Create")}</button>
+          <button onClick={create} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{rename ? t("บันทึก", "Save") : t("สร้าง", "Create")}</button>
         </div>
       }>
       <label className="text-[12px] text-slate-500">{t("ชื่ออัลบั้ม", "Album name")}

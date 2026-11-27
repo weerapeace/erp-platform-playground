@@ -3,7 +3,8 @@
  *   body: { action: "tag" | "untag" | "move", asset_ids: string[], tag?: string, collection_id?: string | null }
  *   - tag   : ติดแท็ก (สร้างแท็กถ้ายังไม่มี) ให้ทุกไฟล์
  *   - untag : เอาแท็กออกจากทุกไฟล์
- *   - move  : ย้ายทุกไฟล์ไปอัลบั้ม (collection_id=null = เอาออกจากอัลบั้ม)
+ *   - move  : ย้ายทุกไฟล์ไปอัลบั้ม (collection_id=null = เอาออกจากอัลบั้ม) · ตอบ added = ไฟล์ที่เพิ่งเข้าอัลบั้ม (ไว้ย้อนกลับ)
+ *   - remove_from : เอาออกจากอัลบั้ม collection_id อัลบั้มเดียว (ย้อนกลับการลากรูปวางลงอัลบั้ม)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
@@ -33,9 +34,24 @@ export async function POST(request: NextRequest) {
 
   const admin = supabaseAdmin();
 
-  if (action === "move") {
+  let added: string[] | undefined;
+  if (action === "remove_from") {
+    // เอาออกจากอัลบั้มเดียว (ใช้ย้อนกลับการลากรูปเข้าอัลบั้ม) — อัลบั้มหลักที่ชี้อัลบั้มนี้ → ย้ายไปอัลบั้มอื่นที่ยังอยู่ หรือว่าง
+    const target = b.collection_id || null;
+    if (!target) return NextResponse.json({ error: "ต้องระบุอัลบั้ม" }, { status: 400 });
+    const { error } = await admin.from("asset_collection_map").delete().eq("collection_id", target).in("asset_id", ids);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data: still } = await admin.from("asset_collection_map").select("asset_id, collection_id").in("asset_id", ids);
+    const other = new Map(((still ?? []) as { asset_id: string; collection_id: string }[]).map((m) => [m.asset_id, m.collection_id]));
+    for (const id of ids)
+      await admin.from("assets").update({ collection_id: other.get(id) ?? null, updated_at: new Date().toISOString() }).eq("id", id).eq("collection_id", target);
+  } else if (action === "move") {
     const target = b.collection_id || null;
     if (target) {
+      // ตัวที่อยู่ในอัลบั้มนี้อยู่แล้ว — คืนเฉพาะตัวที่เพิ่มใหม่ (ย้อนกลับจะเอาออกเฉพาะตัวพวกนี้)
+      const { data: had } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", target).in("asset_id", ids);
+      const hadSet = new Set(((had ?? []) as { asset_id: string }[]).map((m) => m.asset_id));
+      added = ids.filter((id) => !hadSet.has(id));
       // เพิ่มเข้าอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)
       const { error } = await admin.from("asset_collection_map").upsert(
         ids.map((asset_id) => ({ asset_id, collection_id: target })),
@@ -104,5 +120,5 @@ export async function POST(request: NextRequest) {
     action: `bulk_${action}`, entityType: "asset", actorId: await actorId(request),
     metadata: { count: ids.length, tag: b.tag ?? null, collection_id: b.collection_id ?? null },
   });
-  return NextResponse.json({ ok: true, count: ids.length, error: null });
+  return NextResponse.json({ ok: true, count: ids.length, ...(added ? { added } : {}), error: null });
 }

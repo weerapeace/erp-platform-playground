@@ -89,3 +89,29 @@ export function ancestorIds(options: readonly AlbumOption[], id: string | null |
   while (cur && !out.includes(cur)) { out.push(cur); cur = byId.get(cur)?.parent ?? null; }
   return out;
 }
+
+/** ไอดีลูกหลานทั้งหมดของอัลบั้ม (ไม่รวมตัวเอง) — ใช้ตอนลบทั้งต้น / กันย้ายแม่ไปอยู่ใต้ลูกตัวเอง · วนซ้ำ = หยุด */
+export function albumDescendantIds(albums: readonly Pick<AlbumLike, "id" | "parent_id">[], id: string): string[] {
+  const kids = new Map<string, string[]>();
+  for (const a of albums) {
+    if (!a.parent_id || a.parent_id === a.id) continue;
+    if (!kids.has(a.parent_id)) kids.set(a.parent_id, []);
+    kids.get(a.parent_id)!.push(a.id);
+  }
+  const out: string[] = [];
+  const stack = [...(kids.get(id) ?? [])];
+  while (stack.length) {
+    const c = stack.pop()!;
+    if (c === id || out.includes(c)) continue;
+    out.push(c);
+    stack.push(...(kids.get(c) ?? []));
+  }
+  return out;
+}
+
+/** ย้ายอัลบั้ม id ไปอยู่ใต้ newParent ได้ไหม (ห้ามใต้ตัวเอง/ใต้ลูกหลานตัวเอง) · null = ชั้นบนสุด ได้เสมอ */
+export function canMoveAlbum(albums: readonly Pick<AlbumLike, "id" | "parent_id">[], id: string, newParent: string | null): boolean {
+  if (!newParent) return true;
+  if (newParent === id) return false;
+  return !albumDescendantIds(albums, id).includes(newParent);
+}

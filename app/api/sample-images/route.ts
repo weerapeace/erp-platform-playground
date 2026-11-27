@@ -88,7 +88,7 @@ async function loadBrands(admin: Admin): Promise<BrandRow[]> {
 /** อัลบั้ม SAMPLE ทั้งหมด (ล่าสุดก่อน) พร้อมแบรนด์/อัลบั้มแม่จากป้าย */
 async function loadAlbums(admin: Admin, limit = ALBUM_LIMIT): Promise<AlbumRow[]> {
   const { data, error } = await admin.from("asset_collections").select("id, name, description, created_at, note, display_name, sort_order, parent_sku_codes, sku_codes, keywords")
-    .like("description", `${SAMPLE_ALBUM_MARK}%`).order("created_at", { ascending: false }).limit(limit);
+    .like("description", `${SAMPLE_ALBUM_MARK}%`).is("deleted_at", null).order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return ((data ?? []) as Omit<AlbumRow, "brandId" | "parentId">[]).flatMap((a) => {
     const m = parseSampleMark(a.description);

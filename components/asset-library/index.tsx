@@ -43,12 +43,16 @@ import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
 import { Icon } from "@/components/icon";
 import { AlbumTree, albumFullName, buildAlbumOptions } from "@/components/album-picker";
+import { AlbumRowMenu, AlbumMoveModal, AlbumTrashModal, ASSET_DRAG_TYPE, type AlbumAction } from "./album-tree-actions";
+import { isVectorFile } from "@/lib/vector-split";
 
 // 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
 const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
 
 // 📂 จัดรูปสินค้าหลายโฟลเดอร์ (ของกลาง — ตัวเดียวกับหน้า Parent SKU) · โหลดเมื่อกดปุ่ม
 const ProductImageRouter = nextDynamic(() => import("@/components/product-image-router").then((m) => m.ProductImageRouter), { ssr: false });
+// ✂️ แยกชิ้นจากไฟล์ออกแบบ (.ai/.pdf/.svg) เป็น PNG พื้นใส · โหลดเมื่อกดปุ่ม/ลากไฟล์ออกแบบมาวาง
+const VectorSplitterModal = nextDynamic(() => import("@/components/vector-splitter").then((m) => m.VectorSplitterModal), { ssr: false });
 const TYPE_FILTERS: { key: string; label: string; en: string }[] = [
   { key: "", label: "ทั้งหมด", en: "All" },
   { key: "image", label: "🖼️ รูปภาพ", en: "🖼️ Images" },
@@ -97,6 +101,9 @@ export function AssetLibrary() {
   const [fileSortOpen, setFileSortOpen] = useState(false);   // ตั้งค่าตัวแยกไฟล์ ERP (สูตรแยกไฟล์ · โปรแกรมบนเครื่อง)
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
+  const [albumAct, setAlbumAct] = useState<{ kind: AlbumAction; album: AssetCollection } | null>(null);   // เมนู ⋯ ของอัลบั้มในแถบซ้าย
+  const [albumTrashOpen, setAlbumTrashOpen] = useState(false);
+  const [splitter, setSplitter] = useState<{ file: File | null } | null>(null);   // ✂️ แยกชิ้นจากไฟล์ออกแบบ
   const [metaMgr, setMetaMgr] = useState<"albums" | "tags" | null>(null);   // หน้าต่างจัดการ อัลบั้ม / แท็ก (เปลี่ยนชื่อ + ลบ)
   const [artworkAddOpen, setArtworkAddOpen] = useState(false);
   const [massOpen, setMassOpen] = useState(false);   // โหมด MASS: เพิ่ม Artwork หลายรายการแบบตาราง inline
@@ -274,6 +281,39 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
+  // ── อัลบั้มย่อย: ลบ (เก็บในถังขยะ + ปุ่มย้อนกลับ) · ลากรูปวางบนอัลบั้ม (ย้อนกลับได้) ──
+  const deleteAlbum = async (a: AssetCollection) => {
+    try {
+      const j = await (await apiFetch(`/api/assets/collections?id=${encodeURIComponent(a.id)}`, { method: "DELETE" })).json();
+      if (j.error) throw new Error(j.error);
+      if (collectionId === a.id) setCollectionId(null);
+      await loadMeta();
+      const more = (j.data?.albums ?? 1) > 1 ? ` (${t("รวมอัลบั้มย่อย", "incl. sub-albums")} ${(j.data.albums as number) - 1})` : "";
+      toast.undo(`${t("ลบอัลบั้ม", "Deleted album")} “${a.name}”${more} — ${t("อยู่ในถังขยะอัลบั้ม", "in album trash")}`, async () => {
+        await apiFetch("/api/assets/collections", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, restore: true }) });
+        await loadMeta();
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
+  };
+  const onAlbumAction = (kind: AlbumAction, album: AssetCollection) => {
+    if (kind === "delete") { void deleteAlbum(album); return; }
+    setAlbumAct({ kind, album });
+  };
+  const dropAssetsOnAlbum = async (album: AssetCollection, ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      const j = await (await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "move", asset_ids: ids, collection_id: album.id }) })).json();
+      if (j.error) throw new Error(j.error);
+      const added = (j.added ?? ids) as string[];
+      clearSel(); await loadMeta(); await load();
+      if (!added.length) { toast.info(`${t("อยู่ใน", "Already in")} “${album.name}” ${t("อยู่แล้ว", "")}`); return; }
+      toast.undo(`${t("ใส่", "Added")} ${added.length} ${t("ไฟล์เข้า", "files to")} “${album.name}”`, async () => {
+        await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "remove_from", asset_ids: added, collection_id: album.id }) });
+        await loadMeta(); await load();
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ใส่อัลบั้มไม่สำเร็จ", "Failed to add to album")); }
+  };
+
   const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen || fileSortOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
@@ -294,7 +334,10 @@ export function AssetLibrary() {
   const onPageDrop = (e: React.DragEvent) => {
     setPageDrag(false);
     if (anyModalOpen || contentsView) return;   // แถบ Contents มีตัวรับลากวางของมันเอง (ถามว่าลงอัลบั้มไหน)
-    const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
+    // ไฟล์ออกแบบ (.ai/.pdf/.svg/.eps) → เปิดหน้าแยกชิ้นเป็น PNG
+    const vector = Array.from(e.dataTransfer.files).find((f) => isVectorFile(f));
+    if (vector) { e.preventDefault(); setSplitter({ file: vector }); return; }
+    const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/") && !isVectorFile(f));
     if (!imgs.length) return;
     e.preventDefault();
     // อยู่ในมุมมองโฟลเดอร์เดียวกัน → เพิ่มเข้าโฟลเดอร์นั้นเลย (Artwork ผูกโฟลเดอร์ Drive เดิม)
@@ -396,6 +439,12 @@ export function AssetLibrary() {
               className="h-9 px-3 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 whitespace-nowrap"
             >{t("📂 จัดรูปสินค้าหลายโฟลเดอร์", "📂 Sort product images")}</button>
           )}
+          {can("assets.upload") && source !== "print" && (
+            <button onClick={() => setSplitter({ file: null })}
+              title={t("โยนไฟล์ .ai / .pdf / .svg ที่มีหลายชิ้นในแผ่นเดียว → เลือกชิ้นที่ต้องการ → ได้ PNG พื้นใสเข้าอัลบั้ม", "Drop an .ai / .pdf / .svg sheet → pick pieces → transparent PNGs into an album")}
+              className="h-9 px-3 text-sm font-medium border border-pink-300 text-pink-700 rounded-lg hover:bg-pink-50 whitespace-nowrap"
+            >{t("✂️ แยกชิ้นจากไฟล์ออกแบบ", "✂️ Split design file")}</button>
+          )}
           <button
             onClick={() => {
               if (source === "artwork") setArtworkAddOpen(true);
@@ -488,7 +537,11 @@ export function AssetLibrary() {
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label={t("ทั้งหมด", "All")} />
             <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label={t("ไม่อยู่อัลบั้ม", "No album")} />
-            <SideAlbums collections={collections} activeId={collectionId} onSelect={setCollectionId} />
+            <SideAlbums collections={collections} activeId={collectionId} onSelect={setCollectionId}
+              canManage={can("assets.manage")} canDrop={can("assets.edit")} onAction={onAlbumAction} onDropAssets={dropAssetsOnAlbum} />
+            {can("assets.manage") && (
+              <button onClick={() => setAlbumTrashOpen(true)} className="mt-1 self-start px-2 text-[11px] text-slate-400 hover:text-indigo-600 hover:underline">🗑 {t("ถังขยะอัลบั้ม", "Album trash")}</button>
+            )}
           </div>
           {tags.length > 0 && (
             <>
@@ -584,6 +637,7 @@ export function AssetLibrary() {
             <CardGrid gallery={gallery}>
               {rows.map((a) => (
                 <AssetCard key={a.id} a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
+                  dragIds={() => (selected.has(a.id) ? Array.from(selected) : [a.id])}
                   onToggle={() => toggleSel(a.id)} onOpen={() => setDetailId(a.id)}
                   onSameFolder={(id, label) => setFolderFilter({ id, label })} />
               ))}
@@ -673,6 +727,29 @@ export function AssetLibrary() {
         <NewCollectionModal onClose={() => setNewColOpen(false)}
           onDone={async () => { setNewColOpen(false); await loadMeta(); }} />
       )}
+      {(albumAct?.kind === "sub" || albumAct?.kind === "rename") && (
+        <NewCollectionModal onClose={() => setAlbumAct(null)}
+          parent={albumAct.kind === "sub" ? albumAct.album : null} rename={albumAct.kind === "rename" ? albumAct.album : null}
+          onDone={async () => { setAlbumAct(null); await loadMeta(); }} />
+      )}
+      {albumAct?.kind === "move" && (
+        <AlbumMoveModal album={albumAct.album} collections={collections} onClose={() => setAlbumAct(null)}
+          onMoved={async (fromParent) => {
+            const a = albumAct.album;
+            setAlbumAct(null); await loadMeta();
+            toast.undo(`${t("ย้ายอัลบั้ม", "Moved album")} “${a.name}” ${t("แล้ว", "")}`, async () => {
+              await apiFetch("/api/assets/collections", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, parent_id: fromParent }) });
+              await loadMeta();
+            });
+          }} />
+      )}
+      {albumTrashOpen && <AlbumTrashModal onClose={() => setAlbumTrashOpen(false)} onRestored={() => { void loadMeta(); }} />}
+      {splitter && (
+        <VectorSplitterModal initialFile={splitter.file} collections={collections} actor={actor}
+          defaultCollectionId={collectionId && collectionId !== "none" ? collectionId : null}
+          onClose={() => setSplitter(null)}
+          onDone={async () => { setSplitter(null); await load(); await loadMeta(); }} />
+      )}
       {metaMgr && (
         <ManageMetaModal kind={metaMgr} items={metaMgr === "albums" ? collections : tags}
           onClose={() => setMetaMgr(null)}
@@ -715,21 +792,42 @@ export function AssetLibrary() {
 // ─────────────────────────── sub-components ───────────────────────────
 
 // แถบซ้าย: อัลบั้มเป็นต้นไม้ของกลาง — อัลบั้มปกติ (เกิน 6 ย่อ) → กลุ่ม SAMPLE ตามแบรนด์ (ยุบไว้) → กางทีละชั้น
-function SideAlbums({ collections, activeId, onSelect }: { collections: AssetCollection[]; activeId: string | null; onSelect: (id: string) => void }) {
+// อัลบั้มย่อย: เมนู ⋯ (สร้างย่อย/เปลี่ยนชื่อ/ย้าย/ลบ) · ลากการ์ดไฟล์มาวางบนแถว = ใส่เข้าอัลบั้มนั้น
+function SideAlbums({ collections, activeId, onSelect, canManage, canDrop, onAction, onDropAssets }: {
+  collections: AssetCollection[]; activeId: string | null; onSelect: (id: string) => void;
+  canManage?: boolean; canDrop?: boolean;
+  onAction?: (kind: AlbumAction, album: AssetCollection) => void;
+  onDropAssets?: (album: AssetCollection, ids: string[]) => void;
+}) {
   const t = useT();
   const options = useMemo(() => buildAlbumOptions(collections), [collections]);
+  const byId = useMemo(() => new Map(collections.map((c) => [c.id, c])), [collections]);
+  const [over, setOver] = useState<string | null>(null);
   return (
     <AlbumTree key={options.length ? "ready" : "empty"} options={options} activeId={activeId}
-      renderRow={(o, x) => (
-        <div className="flex items-center min-w-0" style={{ paddingLeft: x.depth * 12 }}>
-          {x.hasKids
-            ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? t("ยุบ", "Collapse") : t("กาง", "Expand")}>{x.expanded ? "▾" : "▸"}</button>
-            : <span className="w-4 shrink-0" />}
-          <div className="flex-1 min-w-0 flex flex-col" title={albumFullName(o)}>
-            <SideItem active={activeId === o.value} onClick={() => onSelect(o.value)} label={o.label} count={o.count} icon="📁" />
+      renderRow={(o, x) => {
+        const album = byId.get(o.value);
+        return (
+          <div className={`group/albumrow flex items-center min-w-0 rounded-lg ${over === o.value ? "ring-2 ring-indigo-400 bg-indigo-50" : ""}`} style={{ paddingLeft: x.depth * 12 }}
+            onDragOver={(e) => { if (!canDrop || !album || !Array.from(e.dataTransfer.types).includes(ASSET_DRAG_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setOver(o.value); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((v) => (v === o.value ? null : v)); }}
+            onDrop={(e) => {
+              setOver(null);
+              const raw = e.dataTransfer.getData(ASSET_DRAG_TYPE);
+              if (!raw || !album) return;
+              e.preventDefault(); e.stopPropagation();
+              try { onDropAssets?.(album, JSON.parse(raw) as string[]); } catch { /* ข้อมูลลากเสีย */ }
+            }}>
+            {x.hasKids
+              ? <button type="button" onClick={x.toggle} className="w-4 shrink-0 text-[10px] text-slate-400 hover:text-slate-700" aria-label={x.expanded ? t("ยุบ", "Collapse") : t("กาง", "Expand")}>{x.expanded ? "▾" : "▸"}</button>
+              : <span className="w-4 shrink-0" />}
+            <div className="flex-1 min-w-0 flex flex-col" title={albumFullName(o)}>
+              <SideItem active={activeId === o.value} onClick={() => onSelect(o.value)} label={o.label} count={o.count} icon="📁" />
+            </div>
+            {canManage && album && onAction && <AlbumRowMenu album={album} onAction={(k) => onAction(k, album)} />}
           </div>
-        </div>
-      )} />
+        );
+      }} />
   );
 }
 

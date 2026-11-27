@@ -55,3 +55,23 @@ describe("albumNearPath", () => {
     expect(albumNearPath({ sub: "" })).toBe("");
   });
 });
+
+describe("albumDescendantIds / canMoveAlbum", () => {
+  const tree = [
+    { id: "a", parent_id: null }, { id: "b", parent_id: "a" }, { id: "c", parent_id: "b" },
+    { id: "d", parent_id: null }, { id: "x", parent_id: "y" }, { id: "y", parent_id: "x" },
+  ];
+  it("ลูกหลานทุกชั้น", async () => {
+    const { albumDescendantIds } = await import("../album-options");
+    expect(albumDescendantIds(tree, "a").sort()).toEqual(["b", "c"]);
+    expect(albumDescendantIds(tree, "d")).toEqual([]);
+    expect(albumDescendantIds(tree, "x")).toEqual(["y"]);   // วนซ้ำไม่ค้าง
+  });
+  it("ห้ามย้ายใต้ตัวเอง/ลูกหลาน", async () => {
+    const { canMoveAlbum } = await import("../album-options");
+    expect(canMoveAlbum(tree, "a", "c")).toBe(false);
+    expect(canMoveAlbum(tree, "a", "a")).toBe(false);
+    expect(canMoveAlbum(tree, "c", "d")).toBe(true);
+    expect(canMoveAlbum(tree, "b", null)).toBe(true);
+  });
+});

@@ -10,14 +10,23 @@ import { HoverPreview } from "@/components/hover-image";
 import { VideoThumb } from "@/components/video-thumb";
 import { StorageProviderBadge } from "@/components/storage-rules";
 import { isImage, TYPE_ICON, driveFolderNameOf } from "./asset-shared";
+import { ASSET_DRAG_TYPE } from "./album-tree-actions";
 
-export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder }: {
+export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder, dragIds }: {
   a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void; onSameFolder?: (id: string, label: string) => void;
+  /** ลากการ์ดไปวางบนอัลบั้มในแถบซ้าย — คืนไอดีที่ลาก (การ์ดที่เลือกอยู่ = ทั้งชุด) · ไม่ใส่ = ลากไม่ได้ */
+  dragIds?: () => string[];
 }) {
   const t = useT();
   const [broken, setBroken] = useState(false);
   return (
-    <div className={`group relative rounded-xl border overflow-hidden bg-white ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}>
+    <div className={`group relative rounded-xl border overflow-hidden bg-white ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}
+      draggable={!!dragIds}
+      onDragStart={dragIds ? (e) => {
+        const ids = dragIds();
+        e.dataTransfer.setData(ASSET_DRAG_TYPE, JSON.stringify(ids));
+        e.dataTransfer.effectAllowed = "copy";
+      } : undefined}>
       {/* ในโหมดเลือก (มีของเลือกอยู่แล้ว): กล่องติ๊กใหญ่ขึ้น + โชว์ตลอด กดง่าย */}
       <button
         onClick={(e) => { e.stopPropagation(); onToggle(); }}

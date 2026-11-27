@@ -86,6 +86,7 @@ export type AssetRow = {
   keywords: string | null;      // คำค้นเพิ่มเติม (คำพ้อง/ชื่ออื่น) — รวมเข้า search
   sizes: AssetSize[];           // หลายไซส์ (กว้าง×ยาว+ชื่อ+หน่วย) — artwork
   parent_sku_codes: string[];   // Parent SKU ที่ใช้ artwork นี้
+  source_asset_id?: string | null; // ไฟล์ต้นฉบับ (.ai/.pdf/.svg) ที่ PNG นี้ถูกแยกออกมา (ตัวแยกชิ้น components/vector-splitter)
   tags: string[];
   usage_count: number;
 };
@@ -111,6 +112,7 @@ export type AssetDbRow = {
   source: string; artwork_type: string | null; keywords: string | null;
   print_type?: string | null; print_items?: unknown;
   sizes?: unknown; parent_sku_codes?: unknown; artwork_types?: unknown;
+  source_asset_id?: string | null;
 };
 
 // drive:<fileId> = ไฟล์อยู่ Google Drive ไม่มีสำเนาใน R2 (เช่นวิดีโอในอัลบั้ม Contents ที่ทำภาพปกไม่ได้) → ย่อผ่าน /api/drive/thumb
@@ -151,6 +153,7 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     keywords: r.keywords,
     sizes: normalizeSizes(r.sizes),
     parent_sku_codes: normalizeCodes(r.parent_sku_codes),
+    source_asset_id: r.source_asset_id ?? null,
     tags,
     usage_count: usageCount,
   };

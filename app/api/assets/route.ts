@@ -44,6 +44,8 @@ export async function GET(request: NextRequest) {
   const folder    = (sp.get("folder") ?? "").replace(/[^a-zA-Z0-9_-]/g, "");   // เฉพาะรูปในโฟลเดอร์ Drive นี้ (folder id)
   const byKey     = (sp.get("key") ?? "").trim();   // หา 1 รายการจาก r2_key (ตัวอัปโหลดกลาง → เลือกไฟล์ที่เพิ่งอัป)
   const byId      = (sp.get("id") ?? "").trim();
+  // ชิ้น PNG ที่แยกจากไฟล์ต้นฉบับนี้ (ตัวแยกชิ้น) — หน้ารายละเอียดโชว์ "ชิ้นพี่น้อง"
+  const fromSource = (sp.get("source_asset_id") ?? "").trim();
   // หลายรายการจาก id (คั่นด้วย ,) — ตัวเลือกไฟล์กลางดึงรูปที่เลือกจากแท็บ SAMPLE Images ครั้งเดียว · สูงสุด 200
   const idsRaw    = (sp.get("ids") ?? "").trim();
   const byIds     = idsRaw ? idsRaw.split(",").map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s)).slice(0, 200) : [];
@@ -78,6 +80,7 @@ export async function GET(request: NextRequest) {
   if (artworkType) q = q.contains("artwork_types", JSON.stringify([artworkType]));
   if (printType) q = q.eq("print_type", printType);
   if (type) q = q.eq("asset_type", type);
+  if (/^[0-9a-f-]{36}$/i.test(fromSource)) q = q.eq("source_asset_id", fromSource);
   if (byKey) q = q.eq("r2_key", byKey);
   if (byId) q = q.eq("id", byId);
   if (byIds.length) q = q.in("id", byIds);
@@ -161,7 +164,9 @@ export async function POST(request: NextRequest) {
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
   const sizes        = normalizeSizes(safeJson(String(form.get("sizes") ?? "")));            // หลายไซส์ (artwork)
   const parentCodes  = normalizeCodes(safeJson(String(form.get("parent_sku_codes") ?? "")));  // Parent SKU ที่ใช้
-  const brandId      = form.get("brand_id") ? String(form.get("brand_id")) : null;             // แบรนด์ของ artwork
+  const brandId      = form.get("brand_id") ? String(form.get("brand_id")) : null;
+  const srcRaw       = String(form.get("source_asset_id") ?? "").trim();
+  const sourceAssetId = /^[0-9a-f-]{36}$/i.test(srcRaw) ? srcRaw : null;   // PNG ที่แยกจากไฟล์ต้นฉบับนี้             // แบรนด์ของ artwork
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
@@ -203,7 +208,7 @@ export async function POST(request: NextRequest) {
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
     source, artwork_type: artworkType, artwork_types: artworkTypes, print_type: printType, print_items: printItems, master_path: masterPath, master_url: masterUrl, keywords,
-    sizes, parent_sku_codes: parentCodes, brand_id: brandId,
+    sizes, parent_sku_codes: parentCodes, brand_id: brandId, source_asset_id: sourceAssetId,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });

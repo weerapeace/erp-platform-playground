@@ -18,6 +18,7 @@ import { StorageProviderBadge } from "@/components/storage-rules";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { type LookupItem, isImage, TYPE_ICON, driveFolderNameOf, commonNameSeed, uploadArtworkToDrive, useArtworkPathRule, pathMatchesRule, useDriveFolderMaps, brandFolderPath } from "./asset-shared";
 import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
+import { SplitFamily } from "./split-family";
 import { CollectionMultiSelect, ArtTypeMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField, Meta, UsageList } from "./asset-fields";
 
 // ── รายละเอียดไฟล์ ──
@@ -346,6 +347,9 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
                 <Meta label={t("วันที่อัป", "Uploaded at")} value={new Date(d.created_at).toLocaleString("th-TH")} />
               </tbody>
             </table>
+
+            {/* ✂️ PNG ที่แยกจากไฟล์ออกแบบ: มาจากไฟล์ไหน + ชิ้นพี่น้อง */}
+            <SplitFamily asset={d} onOpen={onNavigate} />
 
             <div className="mt-3 pt-3 border-t border-slate-100">
               <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📁 ไฟล์ต้นฉบับ", "📁 Source file")} <span className="text-[10px] text-slate-400 font-normal">{t("— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)", "— the library only stores the “location/link”, not the large file (it can live on NAS or Drive)")}</span></p>

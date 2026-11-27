@@ -490,6 +490,15 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "ทุกช่องรูปที่น่าจะมีรูปในคลังอยู่แล้ว",
   },
   {
+    key: "vector-splitter", label: "แยกชิ้นจากไฟล์ออกแบบเป็น PNG (.ai/.pdf/.svg → เลือกชิ้น → อัลบั้ม)", code: "VectorSplitterModal · lib/vector-split", category: "file",
+    source: { path: "components/vector-splitter" },
+    what: "โยนไฟล์เวกเตอร์ที่มีหลายชิ้นในแผ่นเดียว → หาชิ้นอัตโนมัติจากช่องว่าง (ลบพื้นขาวได้) → ติ๊ก/รวม/แยก/ลากกรอบเอง/ย้อน Ctrl+Z → ตั้งชื่อ heart_01… → PNG พื้นใส 512/1024/2048/เท่าจริง 300 DPI + ขอบใส → เข้าอัลบั้ม · ไฟล์ต้นฉบับเก็บในคลังและผูกทุกชิ้น (assets.source_asset_id) หน้ารายละเอียดโชว์ \"แยกมาจากไฟล์ + ชิ้นพี่น้อง\" (SplitFamily)",
+    when: "ตัดสติกเกอร์/ไอคอน/ลายเส้นจากไฟล์ชุด .ai .pdf .svg เป็นรูปแยก (ปุ่ม ✂️ ในคลังไฟล์ · ลากไฟล์ออกแบบวางหน้าคลัง)",
+    notWhen: "รูป JPG/PNG ธรรมดา → ImageCropPicker · ต้องการเส้นตัด/ขนาดบล็อกพิมพ์ → block-print · .eps/.ai รุ่นเก่า (PostScript) เปิดในเว็บไม่ได้ ระบบบอกให้ Save As .ai/.pdf",
+    doc: "vector-splitter.md",
+    note: "เจ้าของเลือกจาก widget 2026-11-27 (ข้อเสนอ 1 ตั้งชื่ออัตโนมัติ · 2 ลบพื้นขาว · 3 มาจากไฟล์ไหน · 6 ลากรูปลงอัลบั้มย่อย) · ไฟล์ต้นฉบับ >4MB เก็บเป็นภาพรวมแผ่นแทน (Vercel รับ ≤4.5MB)",
+  },
+  {
     key: "album-picker", label: "เลือกอัลบั้มคลังไฟล์ (ค้นได้ · โชว์อัลบั้มแม่ · ย่อเกิน 6)", code: "AlbumMultiPicker · AlbumSelect · AlbumTree · lib/album-options", category: "pick",
     source: { path: "components/album-picker" },
     what: "เลือกอัลบั้มหลายอัน (ชิปเฉพาะที่เลือก + ปุ่ม \"+ เพิ่มอัลบั้ม\") หรืออันเดียว (แทน select ยาว) · ค้นชื่อหรือชื่อแม่ได้ ไม่ต้องตรงเป๊ะ · ทุกอันโชว์เส้นทางแม่ (\"SAMPLE … › Product 012 › Version 2\") · ใช้ล่าสุดขึ้นบน · กลุ่ม SAMPLE ยุบตามแบรนด์ กางทีละชั้น · รายการไหนเกิน 6 อัน = โชว์ 6 + \"ดูอีก N\" · AlbumTree = ต้นไม้เดียวกันให้แถบข้างวาดแถวเอง",
