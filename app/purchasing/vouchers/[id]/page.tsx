@@ -40,6 +40,7 @@ const SHIP_LABEL: Record<ShipMethod, string> = { none: "ไม่คิดค่
 const SOURCE_BADGE: Record<string, { text: string; cls: string }> = {
   po: { text: "จากใบ PO", cls: "bg-blue-50 text-blue-700 border-blue-200" },
   price_list: { text: "ราคาต่อร้าน", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  taobao: { text: "ราคาจาก Taobao", cls: "bg-orange-50 text-orange-800 border-orange-300" },   // ★ 11-27 ราคา ¥ จากการ์ด Taobao ที่จับคู่สินค้า
   manual: { text: "กรอกเอง", cls: "bg-slate-100 text-slate-600 border-slate-200" },
   bill: { text: "จากบิลร้าน", cls: "bg-violet-50 text-violet-700 border-violet-200" },
   none: { text: "ยังไม่มีราคา", cls: "bg-amber-50 text-amber-700 border-amber-200" },
@@ -821,7 +822,7 @@ export default function PurchaseVoucherFormPage() {
                   {!readonly && (addOpen || data.lines.length === 0) && (
                     <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
                       {/* ★ 2026-11-14 เลือกสินค้า = เพิ่มทันที (ไม่มีปุ่ม + เพิ่ม) · พิมพ์ชื่อเอง + Enter = เพิ่ม · จำนวน/ราคา/ส่วนลด แก้ต่อในตาราง */}
-                      <div className="w-72"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า (เลือกแล้วเพิ่มเลย)</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(null); if (p) void addLine(p, ""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
+                      <div className="w-72"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า (เลือกแล้วเพิ่มเลย)</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(null); if (p) void addLine(p, ""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" showSourcing /></div>
                       <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม) แล้วกด Enter</label><input value={addName} disabled={addBusy} onChange={(e) => setAddName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && addName.trim()) void addLine(null, addName); }} className={`${inputCls} w-full`} placeholder="ชื่อรายการ แล้วกด Enter" /></div>
                       {addBusy && <span className="h-9 inline-flex items-center text-xs text-slate-500">กำลังเพิ่ม…</span>}
                       <span className="text-[11px] text-slate-400 basis-full">ได้จำนวน 1 + ราคาในระบบ (ถ้ามี) → แก้จำนวน / ราคา / ส่วนลด ในตารางได้เลย · รายการจากใบรับ แก้จำนวนหรือลบต้องทำที่ใบรับ · รายการที่เพิ่มเองกด 🗑 ลบได้</span>

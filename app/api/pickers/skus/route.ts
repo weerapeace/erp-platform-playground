@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type SkuPickerRow = {
   id: string;
@@ -170,10 +171,33 @@ export async function GET(request: NextRequest) {
       return s;
     };
     const ranked = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || a.r.code.localeCompare(b.r.code, "th")).map((x) => x.r);
-    return NextResponse.json({ data: ranked.slice(offset, offset + limit), total: ranked.length, error: null });
+    const page = ranked.slice(offset, offset + limit);
+    return NextResponse.json({ data: searchParams.get("with_taobao") === "1" ? await attachTaobao(request, page) : page, total: ranked.length, error: null });
   }
 
+  if (searchParams.get("with_taobao") === "1") rows = await attachTaobao(request, rows);
   return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
+}
+
+/**
+ * ★ 2026-11-27 ป้าย Taobao ในช่องค้นหาสินค้า (หน้าจัดซื้อ · SkuPicker showSourcing) — สินค้าที่จับคู่การ์ด Taobao แล้ว
+ *   แนบ taobao: { url, price_rmb } · ราคา ¥ = ต้นทุน → เฉพาะคนที่มีสิทธิ์ดูต้นทุน (products.cost.view) · การ์ดที่ถูกปฏิเสธไม่นับ
+ */
+async function attachTaobao<T extends { id: string }>(request: NextRequest, rows: T[]): Promise<(T & { taobao: { url: string | null; price_rmb: number | null } | null })[]> {
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return rows.map((r) => ({ ...r, taobao: null }));
+  const [{ data }, canCost] = await Promise.all([
+    supabaseAdmin().from("taobao_products").select("matched_sku_id, taobao_url, price_rmb, status, matched_at").in("matched_sku_id", ids).neq("status", "rejected").order("matched_at", { ascending: false }),
+    apiCan(request, "products.cost.view"),
+  ]);
+  const by = new Map<string, { url: string | null; price_rmb: number | null }>();
+  for (const t of (data ?? []) as Record<string, unknown>[]) {
+    const k = String(t.matched_sku_id ?? ""); if (!k || by.has(k)) continue;
+    const url = /^https?:\/\//i.test(String(t.taobao_url ?? "")) ? String(t.taobao_url) : null;
+    const pr = Number(t.price_rmb);
+    by.set(k, { url, price_rmb: canCost && Number.isFinite(pr) && pr > 0 ? pr : null });
+  }
+  return rows.map((r) => ({ ...r, taobao: by.get(r.id) ?? null }));
 }
 
 /** แถวฐานข้อมูล → แถวตัวเลือก (ใช้ทั้งค้นหา GET และหาจากรหัสหลายตัว POST) */

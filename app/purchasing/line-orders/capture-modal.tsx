@@ -360,6 +360,7 @@ export function CaptureModal({ id, canEdit, onClose, onOpen, onChanged }: {
                                 value={it.sku_id || it.sku_code ? { id: it.sku_id ?? it.sku_code ?? "", code: it.sku_code ?? "", name: it.sku_name ?? "" } : null}
                                 onChange={(p) => setItem(i, p ? { sku_id: p.id, sku_code: p.code, sku_name: p.name } : { sku_id: null, sku_code: null, sku_name: null, mo_no: null })}
                                 placeholder="จับคู่สินค้าในคลัง (ไม่บังคับ)"
+                                showSourcing
                               />
                             </div>
                             {editableAll && (

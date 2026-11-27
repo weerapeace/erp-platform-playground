@@ -1606,7 +1606,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         {changeSkuOpen && row.item_sku_id && (
           <div className="px-2.5 py-2 rounded-md bg-slate-50 border border-slate-200 space-y-1.5">
             <div className="text-[11px] text-slate-500">เลือกสินค้าที่จะใช้แทน:</div>
-            <SkuPicker value={null} onChange={onPickNewSku} placeholder="ค้นหา SKU (รหัส / ชื่อ)..." />
+            <SkuPicker value={null} onChange={onPickNewSku} placeholder="ค้นหา SKU (รหัส / ชื่อ)..." showSourcing />
           </div>
         )}
         {swap && (

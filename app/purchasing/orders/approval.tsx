@@ -258,7 +258,7 @@ function RejectedEditModal({ row, onClose, onSaved }: { row: Rej; onClose: () =>
       <div className="space-y-3">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">สินค้า</label>
-          <SkuPicker value={sku} onChange={setSku} />
+          <SkuPicker value={sku} onChange={setSku} showSourcing />
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน{sku?.uom_name ? ` (${sku.uom_name})` : ""}</label>

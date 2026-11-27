@@ -170,6 +170,8 @@ export type SkuPickerValue = {
   parent_sku_id?: string | null;
   parent_code?: string | null;
   parent_name?: string | null;
+  /** ★ 2026-11-27 จับคู่การ์ด Taobao แล้ว (มาเมื่อ showSourcing) · price_rmb เฉพาะคนที่มีสิทธิ์ดูต้นทุน */
+  taobao?: { url: string | null; price_rmb: number | null } | null;
 };
 
 export interface SkuPickerProps {
@@ -179,6 +181,8 @@ export interface SkuPickerProps {
   disabled?: boolean;
   error?: boolean;
   salesOnly?: boolean;
+  /** ★ 2026-11-27 หน้าจัดซื้อ: โชว์ป้าย "Taobao ¥x" ถ้าสินค้าจับคู่การ์ด Taobao แล้ว (กดป้าย = เปิดหน้า Taobao แท็บใหม่) */
+  showSourcing?: boolean;
 }
 
 function skuImageUrl(key: unknown): string | null {
@@ -198,12 +202,27 @@ function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
     fake_price: row.fake_price == null ? null : Number(row.fake_price),
     image_key: imageKey == null ? null : String(imageKey),
     image_url: skuImageUrl(imageKey),
+    taobao: row.taobao && typeof row.taobao === "object" ? { url: (row.taobao as { url?: unknown }).url ? String((row.taobao as { url?: unknown }).url) : null, price_rmb: (row.taobao as { price_rmb?: unknown }).price_rmb == null ? null : Number((row.taobao as { price_rmb?: unknown }).price_rmb) } : null,
     sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
     parent_sku_id: row.parent_sku_id == null ? null : String(row.parent_sku_id),
     barcode: row.barcode == null ? null : String(row.barcode),
     parent_code: row.parent_code == null ? null : String(row.parent_code),
     parent_name: row.parent_name == null ? null : String(row.parent_name),
   };
+}
+
+/** ★ 2026-11-27 ป้าย Taobao ในแถวผลค้นหา — กดป้าย = เปิดหน้า Taobao แท็บใหม่ (ไม่เลือกสินค้า) · อยู่ในปุ่มแถว จึงใช้ span + กันคลิกทะลุ */
+function TaobaoBadge({ tb }: { tb?: { url: string | null; price_rmb: number | null } | null }) {
+  if (!tb) return null;
+  const open = (e: React.SyntheticEvent) => { e.preventDefault(); e.stopPropagation(); if (tb.url) window.open(tb.url, "_blank", "noopener,noreferrer"); };
+  return (
+    <span role={tb.url ? "link" : undefined} tabIndex={tb.url ? 0 : undefined} onClick={tb.url ? open : undefined} onMouseDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => { if (tb.url && (e.key === "Enter" || e.key === " ")) open(e); }}
+      title={tb.url ? "เชื่อม Taobao แล้ว — กดเพื่อเปิดหน้าร้าน Taobao (แท็บใหม่)" : "เชื่อม Taobao แล้ว"}
+      className={`shrink-0 inline-flex items-center gap-0.5 text-[10px] leading-4 px-1.5 rounded border border-orange-300 bg-orange-50 text-orange-800 whitespace-nowrap ${tb.url ? "cursor-pointer hover:bg-orange-100" : ""}`}>
+      Taobao{tb.price_rmb != null ? ` ¥${tb.price_rmb.toLocaleString("th-TH", { maximumFractionDigits: 4 })}` : ""}{tb.url ? " ↗" : ""}
+    </span>
+  );
 }
 
 export function SkuPicker({
@@ -213,6 +232,7 @@ export function SkuPicker({
   disabled,
   error,
   salesOnly = false,
+  showSourcing = false,
 }: SkuPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -227,10 +247,11 @@ export function SkuPicker({
   const fetchPage = useCallback(async (q: string, offset: number): Promise<{ rows: SkuPickerValue[]; total: number }> => {
     const params = new URLSearchParams({ search: q, limit: String(SKU_PAGE), offset: String(offset) });
     if (!salesOnly) params.set("sales_only", "false");
+    if (showSourcing) params.set("with_taobao", "1");
     const res = await apiFetch(`/api/pickers/skus?${params}`);
     const json = await res.json();
     return { rows: ((json.data ?? []) as Record<string, unknown>[]).map(mapSkuRow), total: Number(json.total ?? 0) };
-  }, [salesOnly]);
+  }, [salesOnly, showSourcing]);
 
   useEffect(() => {
     if (!open) return;
@@ -304,6 +325,7 @@ export function SkuPicker({
                     <ImageThumbnail url={sku.image_url} size={26} alt={sku.name} />
                     <span className="font-mono text-xs bg-slate-100 px-1.5 py-1 rounded text-slate-600 truncate max-w-[120px]" title={sku.code}>{sku.code || "-"}</span>
                     <span className={PICKER_NAME_CLASS} title={sku.name}>{sku.name}</span>
+                    {showSourcing && <TaobaoBadge tb={sku.taobao} />}
                   </button>
                 ))}
                 <div className="px-3 pt-1.5 pb-0.5 text-[11px] text-slate-400 border-t border-slate-100">ทั้งหมด</div>
@@ -322,7 +344,7 @@ export function SkuPicker({
                     {sku.code || "-"}
                   </span>
                   <div className="min-w-0">
-                    <div className={PICKER_NAME_CLASS} title={sku.name}>{sku.name}</div>
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0"><span className={PICKER_NAME_CLASS + " min-w-0"} title={sku.name}>{sku.name}</span>{showSourcing && <TaobaoBadge tb={sku.taobao} />}</div>
                     <div className="text-xs text-slate-400 mt-0.5 truncate">
                       {sku.uom_name ? <>หน่วย: {sku.uom_name}</> : <span>ยังไม่ตั้งหน่วย</span>}
                       {sku.sale_ok === false && <span className="ml-2 text-amber-600">ไม่เปิดขาย</span>}

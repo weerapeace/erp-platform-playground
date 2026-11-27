@@ -67,6 +67,12 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
       const hit = rows.find((r) => partner && String(r.supplier_partner_id) === String(partner.id)) ?? rows.find((r) => r.is_default);
       if (hit) { price = num(hit.price); source = "price_list"; }
     }
+    // ★ 2026-11-27 ยังไม่มีราคา + ใบหยวน → ราคา ¥ จากการ์ด Taobao ที่จับคู่สินค้านี้ (ป้าย "ราคาจาก Taobao" · แก้ได้)
+    if (price == null && isCNY(String(v.currency ?? "THB"))) {
+      const { data: tb } = await admin.from("taobao_products").select("price_rmb, status, matched_at").eq("matched_sku_id", skuId).neq("status", "rejected").order("matched_at", { ascending: false }).limit(5);
+      const t = ((tb ?? []) as Row[]).find((x) => num(x.price_rmb) > 0);
+      if (t) { price = num(t.price_rmb); source = "taobao"; }
+    }
   }
   if (!name) return NextResponse.json({ error: "ต้องระบุชื่อสินค้า หรือเลือกจากคลังสินค้า" }, { status: 400 });
 
