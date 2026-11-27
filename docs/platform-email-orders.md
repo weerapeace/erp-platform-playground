@@ -133,6 +133,17 @@ GET /api/platform-sales/report?month= | ?date=  →  /master/platform-sales (ร
 - เปลี่ยน interval/backfill/คำค้น/กุญแจ → ต้องวางสคริปต์ใหม่ + Run `setup` อีกครั้ง
 - ต้องมี env `PLATFORM_SECRET_KEY` (มีอยู่แล้ว ใช้กับ Lazada/secret-box)
 
+## แบบ "ERP ดึงเอง" (หลายกล่อง · 2026-11-27)
+
+เจ้าของเลือก: กล่อง IG International = ERP ดึงเอง · กล่อง Louis Montini = สคริปต์เดิม (ใช้คู่กันได้)
+- ค่าตั้ง `platform_email_settings.pull_boxes` [{ email, label, enabled, added_at }] · ผลรอบ `ui_config` `email_pull:<email>` · เมลที่ดึงมา `platform_email_inbox.source` = อีเมลกล่อง (null = สคริปต์)
+- เชื่อม Gmail ใช้ของกลาง `lib/gmail-api` + `gmail_connections` (ตัวเดียวกับบิลค่าบริการ) · `/api/gmail/connect` รับสิทธิ์ subscriptions.edit หรือ platform_orders.manage
+- ตัวดึง `lib/platform-email/pull.ts`: คำค้นเดิม + `after:` → ตัดรหัสเมลที่รับแล้ว → อ่านเนื้อเมลเก่า→ใหม่ → `processInbound` (กฎเดียวกับสคริปต์) · อ่านอย่างเดียว ไม่ติดป้าย
+- รอบอัตโนมัติ: ต่อท้าย `/api/cron/tiktok-orders` (ทุก 15 นาที · ≤ 40 วิ) ย้อนจากรอบสำเร็จล่าสุด 6 ชม. (ไม่เกิน 3 วัน)
+- ปุ่ม: `POST /api/platform-email/mailboxes` add/update/remove/restore/pull(days) · ย้อนหลังทำครั้งละ ~45 วิ หน้าเว็บกดต่อเองจนครบ
+- ออเดอร์ซ้ำข้ามกล่อง ไม่นับซ้ำ (เช็กเลขออเดอร์) · ล้ม ≥2 รอบ/การเชื่อมหลุด → กระดิ่งกฎ `orders.pull_problem` (ลิงก์ไปแท็บตั้งค่า)
+- ⚠️ แอป Google ต้องเป็น In production ไม่งั้นการเชื่อมหลุดทุก 7 วัน (docs/gmail-connect-setup.md ข้อ 6)
+
 ## ปรับกฎเมื่อแพลตฟอร์มเปลี่ยนหน้าตาเมล
 
 1. ขอเมลจริงฉบับใหม่ (Gmail ⋮ → ดาวน์โหลดข้อความ .eml) หรือดู `body_text` ใน `platform_email_inbox`

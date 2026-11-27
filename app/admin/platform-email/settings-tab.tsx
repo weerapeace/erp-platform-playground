@@ -2,6 +2,7 @@
 
 // ⚙️ แท็บ "ตั้งค่า + ติดตั้ง" — เปิด/ปิด · ความถี่ · ดึงย้อนหลัง · ร้านของเรา (ชื่อในเมล → แบรนด์) · คำค้น Gmail (ขั้นสูง)
 //                              + ขั้นตอนติดตั้งสคริปต์ใน Gmail (คัดลอกสคริปต์/สร้างกุญแจใหม่ = admin.users เท่านั้น)
+//                              + กล่องเมลที่ให้ ERP ดึงเอง (./mailboxes-section · 2026-11-27)
 // ของกลาง: SaveBar (ยังไม่บันทึกถามก่อนสลับแท็บ) · ConfirmDialog · ERPInput/ERPSelect · copyText
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,6 +13,7 @@ import { copyText } from "@/components/copy-button";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { fmtDateTime, type SettingsResponse, type ShopRule } from "./types";
+import { MailboxesSection } from "./mailboxes-section";
 
 type Form = { enabled: boolean; interval_min: number; backfill_days: number; search_query: string; shops: ShopRule[] };
 const toForm = (d: SettingsResponse): Form => ({
@@ -75,6 +77,9 @@ export function SettingsTab({ data, onSaved }: { data: SettingsResponse; onSaved
           </div>
         </div>
       </section>
+
+      {/* แท็บนี้โหลดได้เฉพาะคนที่มี platform_orders.manage (API settings) → จัดการกล่องได้ */}
+      <MailboxesSection canManage />
 
       <section className="rounded-xl border border-slate-200 bg-white p-4">
         <div className="text-sm font-semibold text-slate-800">ร้านของเรา <span className="font-normal text-slate-500">— ชื่อร้านที่เมลเรียก (เช่น &quot;เรียน คุณ louismontini_officialshop&quot;) → แบรนด์</span></div>

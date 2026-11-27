@@ -15,6 +15,7 @@
  * + 2026-11-20 (เจ้าของเลือก widget หน้าสถานะดึงออเดอร์ ข้อ 1-5): ต่อท้ายด้วย Lazada (ทุกแบรนด์ที่เชื่อม · ย้อน 3 ชม.) · LINE SHOPPING · ออเดอร์เว็บไซต์
  *   ผ่านตัวกลาง ../../platform-orders/pull-runner · จดผลทุกร้านด้วย recordShopPull (หน้า /master/platform-orders/pull-status)
  *   ท้ายรอบเช็กร้านที่มีปัญหาแล้วเด้งกระดิ่ง (sendPullAlerts · เรื่องเดิมวันละครั้ง · กฎ orders.pull_problem)
+ * + 2026-11-27 (เจ้าของเลือก "ERP ดึงเมลเอง" หลายกล่อง): ต่อท้ายด้วยดึงเมลออเดอร์จากกล่อง Gmail ที่ตั้งไว้ (lib/platform-email/pull · ≤ 40 วิ)
  * ⚠️ อ่านอย่างเดียว — ไม่แก้อะไรบนร้าน TikTok / Shopee / Lazada / LINE SHOPPING
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -32,6 +33,7 @@ import { lazadaConnectedBrandIds } from "../../lazada/orders-sync";
 import { lineConnectedBrandIds } from "../../line-shopping/orders-sync";
 import { pullShop, type PullOutcome } from "../../platform-orders/pull-runner";
 import { loadPullInputs, recordShopPull, sendPullAlerts } from "@/lib/order-pull-server";
+import { pullAllBoxes } from "@/lib/platform-email/pull";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -140,6 +142,12 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const exNote = extra.length
     ? ` · ${["lazada", "line_shopping", "website"].map((p) => { const xs = extra.filter((x) => x.platform === p); return xs.length ? `${exName(p)} ใหม่ ${xs.reduce((a, x) => a + x.created, 0)}` : null; }).filter(Boolean).join(" · ")}${exFailed.length ? ` ⚠️ ${exFailed.map((f) => `${exName(f.platform)}: ${f.error}`).join(" · ").slice(0, 160)}` : ""}`
     : "";
+  // ── เมลออเดอร์จากกล่อง Gmail ที่ให้ ERP ดึงเอง (2026-11-27) · พลาดไม่ทำให้ส่วนอื่นล้ม ──
+  const mailBudget = Math.min(40_000, extraLeft() - 10_000);
+  const mail = mailBudget >= 5_000
+    ? await pullAllBoxes(admin, mailBudget).catch((e) => ({ boxes: 0, created: 0, failed: [String(e instanceof Error ? e.message : e)], alerts: 0 }))
+    : { boxes: 0, created: 0, failed: [] as string[], alerts: 0 };
+  const mailNote = mail.boxes ? ` · เมล ${mail.boxes} กล่อง ใหม่ ${mail.created}${mail.failed.length ? ` ⚠️ ${mail.failed.join(" · ").slice(0, 160)}` : ""}` : "";
   // ร้านที่มีปัญหา → กระดิ่ง (เรื่องเดิมวันละครั้ง)
   const alerts = await sendPullAlerts(admin, (await loadPullInputs(admin).catch(() => ({ shops: [] }))).shops);
 
@@ -154,11 +162,11 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   const spTrackErr = shopee.find((x) => x.tracking_error)?.tracking_error;
   const spNote = shopeeBrands.length ? ` · Shopee ใหม่ ${spCreated} อัปเดต ${spUpdated} เลขพัสดุ +${spTrack}${spTrackErr ? ` (เลขพัสดุ: ${spTrackErr.slice(0, 80)})` : ""}${spFailed.length ? ` ⚠️ ${spFailed.map((f) => f.error).join(" · ").slice(0, 160)}` : ""}` : "";
   await recordWorkerRun(admin, "tiktok-orders", {
-    ok: failed.length === 0, warn: spFailed.length > 0 || exFailed.length > 0,
-    summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote + exNote,
+    ok: failed.length === 0, warn: spFailed.length > 0 || exFailed.length > 0 || mail.failed.length > 0,
+    summary: (brands.length === 0 ? "ยังไม่มีแบรนด์ไหนเชื่อม TikTok" : `ออเดอร์ใหม่ ${created} · อัปเดตสถานะ ${updated} · สินค้าที่เปลี่ยน ${results.reduce((a, x) => a + (x.products ?? 0), 0)}`) + spNote + exNote + mailNote,
     ...(failed.length ? { error: failed.map((f) => f.error).join(" · ").slice(0, 300) } : {}),
   });
-  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { ok: spFailed.length === 0, brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee }, extra, alerts });
+  return NextResponse.json({ ok: failed.length === 0, brands: brands.length, created, updated, results, shopee: { ok: spFailed.length === 0, brands: shopeeBrands.length, created: spCreated, updated: spUpdated, results: shopee }, extra, mail, alerts });
 }
 
 export const GET = handle;

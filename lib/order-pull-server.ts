@@ -156,7 +156,12 @@ export async function sendPullAlerts(admin: SupabaseClient, shops: PullShopInput
   return sendAlerts(admin, pullAlerts(shops, now), now);
 }
 
-async function sendAlerts(admin: SupabaseClient, alerts: { key: string; title: string; body: string }[], now: number): Promise<number> {
+/** กระดิ่งเรื่องอื่นที่ใช้กฎ/กันซ้ำชุดเดียวกัน (เช่น กล่องเมลที่ ERP ดึงเองดึงไม่ได้ · lib/platform-email/pull) — เรื่องเดิมวันละครั้ง */
+export async function sendPullProblemAlerts(admin: SupabaseClient, alerts: { key: string; title: string; body: string }[], link: string, now = Date.now()): Promise<number> {
+  return sendAlerts(admin, alerts, now, link);
+}
+
+async function sendAlerts(admin: SupabaseClient, alerts: { key: string; title: string; body: string }[], now: number, link: string = PULL_STATUS_PATH): Promise<number> {
   try {
     if (!alerts.length) return 0;
     const { data } = await admin.from("ui_config").select("value").eq("key", ALERTS_KEY).maybeSingle();
@@ -169,7 +174,7 @@ async function sendAlerts(admin: SupabaseClient, alerts: { key: string; title: s
     for (const a of due) {
       const { error } = await admin.rpc("erp_notify", {
         p_user_ids: ids, p_event_type: PULL_ALERT_EVENT, p_title: a.title, p_body: a.body,
-        p_link_url: PULL_STATUS_PATH, p_entity_type: "order_pull", p_entity_id: null, p_priority: "high",
+        p_link_url: link, p_entity_type: "order_pull", p_entity_id: null, p_priority: "high",
       });
       if (error) { console.error("[order-pull] erp_notify", error.message); continue; }
       sent[a.key] = new Date(now).toISOString(); n++;

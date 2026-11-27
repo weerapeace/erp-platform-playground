@@ -279,11 +279,11 @@ export async function processParsed(
   return res("done", `สร้างออเดอร์ ${orderNo} · ${itemsSummary(p)}${lazNote}${pending ? ` · รอยืนยันสินค้า ${pending} รายการ` : ""}`, orderId, true);
 }
 
-/** เมลใหม่จากสคริปต์ Gmail: อ่าน → ทำ → เขียนกล่องเมล (message_id ซ้ำ = ข้าม) */
+/** เมลใหม่จากสคริปต์ Gmail หรือ ERP ดึงเอง (ctx.source = อีเมลกล่อง): อ่าน → ทำ → เขียนกล่องเมล (message_id ซ้ำ = ข้าม) */
 export async function processInbound(
   admin: Admin,
   msg: InboundMessage,
-  ctx: { shops: readonly ShopRule[]; platformIds: Partial<Record<PlatformCode, string>> },
+  ctx: { shops: readonly ShopRule[]; platformIds: Partial<Record<PlatformCode, string>>; source?: string | null },
 ): Promise<ProcessOutcome & { duplicate?: boolean }> {
   const lines = emailLines({ html: msg.html, text: msg.text });
   return processLines(admin, msg.id, lines, { from: msg.from ?? null, subject: msg.subject ?? null, receivedAt: normalizeDate(msg.date) }, ctx);
@@ -295,7 +295,7 @@ export async function processLines(
   messageId: string,
   lines: string[],
   meta: { from: string | null; subject: string | null; receivedAt: string | null },
-  ctx: { shops: readonly ShopRule[]; platformIds: Partial<Record<PlatformCode, string>> },
+  ctx: { shops: readonly ShopRule[]; platformIds: Partial<Record<PlatformCode, string>>; source?: string | null },
 ): Promise<ProcessOutcome> {
   const parsed = parsePlatformEmail({ from: meta.from, subject: meta.subject }, lines);
   let out: ProcessOutcome;
@@ -309,6 +309,7 @@ export async function processLines(
     body_text: lines.join("\n").slice(0, 60000), platform_code: parsed.platform, kind: parsed.kind,
     external_order_id: parsed.order_no, ref_no: parsed.ref_no, shop_name: parsed.shop_name,
     parsed: { ...parsed }, status: out.status, note: out.note, order_id: out.order_id, updated_at: new Date().toISOString(),
+    ...(ctx.source !== undefined ? { source: ctx.source } : {}),   // "อ่านใหม่" ไม่ส่ง source → คงค่าเดิม
   };
   const { error } = await admin.from("platform_email_inbox").upsert(row, { onConflict: "message_id" });
   if (error) console.error("[platform-email] เขียนกล่องเมลไม่สำเร็จ", error.message);

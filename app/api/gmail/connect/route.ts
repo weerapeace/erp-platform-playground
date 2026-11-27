@@ -1,5 +1,5 @@
 /**
- * POST /api/gmail/connect { email, return_to } — เริ่มเชื่อม Gmail ของกล่องนี้ (subscriptions.edit)
+ * POST /api/gmail/connect { email, return_to } — เริ่มเชื่อม Gmail ของกล่องนี้ (subscriptions.edit หรือ platform_orders.manage)
  * คืน { url } = หน้ายินยอมของ Google → หน้าเว็บพาไปเอง · เสร็จแล้ว Google ส่งกลับที่ /api/gmail/callback
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -11,7 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  const guard = await guardApi(request, "subscriptions.edit");
+  // เชื่อมได้ทั้งจากหน้าค่าบริการ (subscriptions.edit) และหน้าดึงออเดอร์จากเมล (platform_orders.manage)
+  const guard = (await guardApi(request, "subscriptions.edit")) && (await guardApi(request, "platform_orders.manage"));
   if (guard) return guard;
   if (!gmailConfigured()) return NextResponse.json({ error: "ผู้ดูแลยังไม่ได้ตั้งค่าการเชื่อม Gmail (ดู docs/gmail-connect-setup.md)" }, { status: 503 });
 

@@ -224,3 +224,51 @@ export async function gmailGetAttachment(token: string, messageId: string, partI
   const bytes = await gmailAttachmentBytes(token, messageId, attachment);
   return bytes ? { bytes, attachment, message } : null;
 }
+
+// ── ค้นหลายหน้า + อ่านเนื้อเมล (ใช้กับ "ดึงออเดอร์จากเมล" แบบ ERP ดึงเอง · lib/platform-email/pull) ──
+
+/** ค้นเมลแบบไล่หลายหน้า (ใหม่สุดก่อน) ได้ไม่เกิน max รหัส */
+export async function gmailSearchAll(token: string, q: string, max = 500): Promise<{ ids: string[]; error: string | null; more: boolean }> {
+  const ids: string[] = [];
+  let pageToken = "";
+  while (ids.length < max) {
+    const size = Math.min(500, max - ids.length);
+    const r = await gget(token, `/messages?maxResults=${size}&q=${encodeURIComponent(q)}${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`);
+    if (!r.ok) return { ids, error: r.message, more: false };
+    for (const m of (r.json.messages ?? []) as { id: string }[]) ids.push(m.id);
+    pageToken = String(r.json.nextPageToken ?? "");
+    if (!pageToken) return { ids, error: null, more: false };
+  }
+  return { ids, error: null, more: !!pageToken };
+}
+
+export type GmailMessageContent = { id: string; subject: string; from: string; date: string | null; html: string; text: string };
+
+function decodePart(data: string, mimeHeader: string): string {
+  const bytes = Buffer.from(data, "base64url");
+  const cs = /charset="?([\w-]+)"?/i.exec(mimeHeader)?.[1]?.toLowerCase() ?? "utf-8";
+  try { return new TextDecoder(cs).decode(bytes); } catch { return bytes.toString("utf8"); }
+}
+
+/** หัวเรื่อง/ผู้ส่ง/วันที่ + เนื้อเมล (HTML และข้อความล้วน — เอาส่วนแรกที่เจอของแต่ละแบบ) */
+export async function gmailGetMessageContent(token: string, id: string): Promise<GmailMessageContent | null> {
+  const r = await gget(token, `/messages/${encodeURIComponent(id)}?format=full`);
+  if (!r.ok) return null;
+  const payload = (r.json.payload ?? {}) as GPart;
+  const header = (p: GPart, n: string) => p.headers?.find((h) => h.name.toLowerCase() === n)?.value ?? "";
+  let html = "", text = "";
+  const walk = (p: GPart) => {
+    const mime = (p.mimeType ?? "").toLowerCase();
+    if (!p.filename && p.body?.data) {
+      if (mime === "text/html" && !html) html = decodePart(p.body.data, header(p, "content-type"));
+      else if (mime === "text/plain" && !text) text = decodePart(p.body.data, header(p, "content-type"));
+    }
+    p.parts?.forEach(walk);
+  };
+  walk(payload);
+  const ms = Number(r.json.internalDate);
+  return {
+    id, subject: header(payload, "subject"), from: header(payload, "from"), html, text,
+    date: Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null,
+  };
+}
