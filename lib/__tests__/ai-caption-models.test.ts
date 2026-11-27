@@ -21,13 +21,13 @@ describe("ai-caption-models — รุ่น GPT ที่เลือกได�
   it("รุ่น 4.x ใช้ max_tokens · รุ่น 5.x ใช้ max_completion_tokens + เผื่อเวลาคิด + คิดน้อย (ห้ามส่ง max_tokens)", () => {
     expect(chatLimitParams("gpt-4.1-mini", 1700)).toEqual({ max_tokens: 1700 });
     const p = chatLimitParams("gpt-5.4", 1700);
-    expect(p).toEqual({ max_completion_tokens: 1700 + REASONING_HEADROOM, reasoning_effort: "low" });
+    expect(p).toEqual({ max_completion_tokens: 1700 + REASONING_HEADROOM, reasoning_effort: "medium" });
     expect("max_tokens" in p).toBe(false);
   });
 
   it("ค้นเว็บ (Responses API): รุ่น 5.x เผื่อเวลาคิด + คิดน้อย", () => {
     expect(responsesLimitParams("gpt-4.1-mini", 800)).toEqual({ max_output_tokens: 800 });
-    expect(responsesLimitParams("gpt-5.4-mini", 800)).toEqual({ max_output_tokens: 800 + REASONING_HEADROOM, reasoning: { effort: "low" } });
+    expect(responsesLimitParams("gpt-5.4-mini", 800)).toEqual({ max_output_tokens: 800 + REASONING_HEADROOM, reasoning: { effort: "medium" } });
   });
 
   it("ประมาณค่าใช้จ่ายใช้ราคาของรุ่นนั้นจริง (ไม่ตกไปใช้ราคารุ่นแรก)", () => {

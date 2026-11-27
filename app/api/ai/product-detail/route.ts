@@ -160,7 +160,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "สาย/หูกระเป๋า (เจ้าของขอ 2026-11-25): has_strap = เห็นสายสะพาย/สายคล้องคอ/สายครอสบอดี้ในรูปไหม · has_handle = เห็นหูหิ้วไหม (true/false · ดูไม่ออก = null)",
         "ความยาวสาย/หูหิ้ว ใส่เฉพาะตัวเลขที่เขียนอยู่ในรูปเท่านั้น (strap_drop_cm = ความยาวสาย · strap_drop_max_cm = ปรับยาวได้สูงสุด · handle_drop_cm = ความสูงหูหิ้ว) ไม่มีตัวเลข = null",
         'ตอบ JSON เท่านั้น: {"size_length_cm":ตัวเลขหรือ null,"size_height_cm":ตัวเลขหรือ null,"size_thickness_cm":ตัวเลขหรือ null,"weight_g":ตัวเลขหรือ null,"has_strap":true/false/null,"has_handle":true/false/null,"strap_drop_cm":ตัวเลขหรือ null,"strap_drop_max_cm":ตัวเลขหรือ null,"handle_drop_cm":ตัวเลขหรือ null,"source":"อ่านมาจากรูปไหน เขียนว่าอะไร"}',
-      ].join("\n"), [{ type: "text", text: `รหัสสินค้า: ${p.code ?? "-"} · มีรูป ${images.length} รูป` }, ...imageParts(images)],
+      ].join("\n"), [{ type: "text", text: `รหัสสินค้า: ${p.code ?? "-"} · มีรูป ${images.length} รูป` }, ...imageParts(images, "high")],
       400, await productDetailModel(), { request });
     } catch (e) {
       return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ" }, { status: 502 });
@@ -365,7 +365,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       : "";
     out = await aiChat("ai.product_detail", system, [
       { type: "text", text: facts },
-      ...imageParts(images),
+      ...imageParts(images, "high"),
       ...(tail ? [{ type: "text", text: tail }] : []),
     ], 1700, model, { request });
   } catch (e) {

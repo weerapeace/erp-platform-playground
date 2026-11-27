@@ -44,7 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const prompt = attrAiPrompt({ platform: str(body.platform) || "marketplace", name, description: str(body.description), category: str(body.category) || null, fields });
   const keys = Array.isArray(body.image_keys) ? (body.image_keys as unknown[]).map(str).filter(Boolean).slice(0, MAX_IMAGES) : [];
   try {
-    const images = keys.length ? imageParts(await imagesToDataUrls(keys)) : [];
+    const images = keys.length ? imageParts(await imagesToDataUrls(keys), "high") : [];
     const raw = await aiChat("ai.attr_fill", prompt.system, [{ type: "text", text: prompt.user }, ...images], 1500, undefined, { request });
     return NextResponse.json({ hits: parseAttrAiResult(raw, prompt.fields), error: null }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {

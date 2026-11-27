@@ -165,7 +165,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let out: Record<string, unknown>;
   try {
-    out = await aiChat(KEY, system, [{ type: "text", text: facts }, ...imageParts(images)], 1400, model, { request });
+    out = await aiChat(KEY, system, [{ type: "text", text: facts }, ...imageParts(images, "high")], 1400, model, { request });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ";
     const code = (e as { code?: string } | null)?.code;
