@@ -194,7 +194,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   const postAsset = async (f: File, extra: Record<string, string>, vector?: string | null) => {
     const fd = new FormData();
     fd.append("file", f);
-    if (vector) fd.append("vector", new File([vector], `${f.name.replace(/.[^.]+$/, "")}.svg`, { type: "image/svg+xml" }));
+    if (vector) fd.append("vector", new File([vector], `${f.name.replace(/\.[^.]+$/, "")}.svg`, { type: "image/svg+xml" }));
     for (const [k, v] of Object.entries(extra)) fd.append(k, v);
     if (actor) fd.append("actor", actor);
     const res = await apiFetch("/api/assets", { method: "POST", body: fd });

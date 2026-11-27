@@ -174,11 +174,12 @@ export async function POST(request: NextRequest) {
 
   // 🎨 SVG เวกเตอร์คู่กับ PNG (ตัวแยกชิ้น / เปลี่ยนสี) — เก็บข้างกันใน R2 ไม่ใช่ไฟล์แยกในคลัง
   const vecFile = form.get("vector") as File | null;
-  const vector = vecFile && typeof vecFile === "object" && vecFile.size > 0 && vecFile.size <= 2 * 1024 * 1024 ? sanitizeSvg(await vecFile.text()) : null;
-  if (vector !== null && !/<svg[s>]/i.test(vector)) return NextResponse.json({ error: "ไฟล์เวกเตอร์ต้องเป็น SVG" }, { status: 400 });
+  const vecText = vecFile && typeof vecFile === "object" && vecFile.size > 0 && vecFile.size <= 2 * 1024 * 1024 ? sanitizeSvg(await vecFile.text()) : null;
+  // ไม่ใช่ SVG / ใหญ่เกิน = ไม่เก็บเวกเตอร์ แต่ยังเก็บ PNG (ไม่ให้ทั้งชิ้นล้ม)
+  const vector = vecText && /<svg[\s>]/i.test(vecText) ? vecText : null;
   const putVector = async (base: string) => {
     if (!vector) return null;
-    const k = `${base.replace(/.[^./]+$/, "")}-vec.svg`;
+    const k = `${base.replace(/\.[^./]+$/, "")}-vec.svg`;
     await r2PutObject(k, new TextEncoder().encode(vector), "image/svg+xml");
     return k;
   };
