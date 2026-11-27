@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
-import { openAiKey, productDetailModel } from "@/lib/ai-caption";
+import { openAiKey } from "@/lib/ai-caption";
 import { aiChat } from "@/lib/paid-services-server";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (text.length < 20) return NextResponse.json({ books: [], error: "ข้อความสั้นเกินไป — วางเนื้อหาอีเมลให้ครบก่อน" }, { status: 200 });
 
   try {
-    const model = await productDetailModel();
+    const model = "gpt-4.1-mini";   // งานอ่านอีเมล = รุ่นที่เหมาะกับงานนี้ (ไม่ตามรุ่นหลัก · เปลี่ยนเฉพาะได้ที่ศูนย์ AI)
     const out = await aiChat("ai.book_library", SYSTEM, [{ type: "text", text: text.slice(0, MAX_CHARS) }], 2000, model, { request });
     const raw = Array.isArray((out as { books?: unknown }).books) ? ((out as { books: unknown[] }).books) : [];
 

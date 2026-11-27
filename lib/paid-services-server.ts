@@ -3,7 +3,8 @@
  *
  *   aiChat(key, system, content, maxTokens, model?, ctx?)  GPT แบบตอบ JSON
  *       ปิดอยู่ (ทั้งบริการ หรือ "ที่" นั้น) = ServiceOffError · เกินงบ (หยุดอัตโนมัติ) = BudgetExceededError — ข้อความภาษาคนทั้งคู่
- *       โมเดล: ที่เลือกให้ "ที่" นั้น → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
+ *       โมเดล: ที่เลือกให้ "ที่" นั้น → ที่เลือกให้ทั้งบริการ → รุ่นหลักของทั้งระบบ (เฉพาะงาน modelTier main) → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
+ *       ระดับการคิดของรุ่น 5.x = ตามการ์ดรุ่นหลัก (ui_config ai_main_model · lib/ai-main-model-server)
  *   aiWebSearch(key, system, prompt, maxTokens, model?, ctx?)  GPT "ค้นเว็บก่อนตอบ" → { text, citations } · กติกาเดียวกับ aiChat
  *       ค่าใช้จ่าย = ตามคำ + ค่าค้นเว็บต่อครั้ง (WEB_SEARCH_CALL_THB)
  *   aiAvailable(key, ctx?)  เช็กก่อนว่า GPT ใช้ได้ไหม (เปิดอยู่ + ไม่เกินงบ) — ใช้ตอนมีทางสำรองฟรี (แปลภาษา)
@@ -22,8 +23,10 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { openAiChatRaw, openAiKey, openAiTranscribeRaw, openAiWebSearchRaw, type TranscribeResult, type WebCitation } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
+import { invalidateMainSetting, loadMainSetting } from "@/lib/ai-main-model-server";
+import type { ReasoningEffort } from "@/lib/ai-caption-models";
 import {
-  accessAllowed, accessDeniedMessage, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
+  accessAllowed, accessDeniedMessage, followsMain, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
   placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
@@ -48,7 +51,7 @@ export async function loadServiceSettings(force = false): Promise<Map<string, Se
 }
 
 /** ล้างแคชหลังแอดมินเปลี่ยนค่า (เครื่องเดียวกันเห็นทันที · เครื่องอื่นไม่เกิน 30 วิ) */
-export const invalidateServiceSettings = () => { cache = null; budgetCache = null; accessCache = null; };
+export const invalidateServiceSettings = () => { cache = null; budgetCache = null; accessCache = null; invalidateMainSetting(); };
 
 /** เปิดอยู่ไหม — บริการ + "ที่" (ถ้ามี) ต้องไม่ถูกปิด · ปิดไม่ได้ (locked) = เปิดเสมอ */
 export async function serviceOn(key: string, place?: string | null): Promise<boolean> {
@@ -188,11 +191,12 @@ export async function callTokensFor(key: string): Promise<CallTokens & { source:
   const p = paidService(key)?.costProfile ?? DEFAULT_CALL_TOKENS;
   return { in: p.in, out: p.out, calls: 0, source: "estimate" };
 }
-/** รุ่นที่ใช้จริงของฟีเจอร์ (ที่ผู้ดูแลเลือก → ที่ฟีเจอร์ส่งมา) */
+/** รุ่นที่ใช้จริงของฟีเจอร์ (ที่ผู้ดูแลเลือก → รุ่นหลัก ถ้าเป็นงานที่ทำตามรุ่นหลัก → ที่ฟีเจอร์ส่งมา) */
 export async function effectiveModel(key: string, fallback?: string | null, place?: string | null): Promise<string | null> {
   const settings = await loadServiceSettings();
   const p = resolvePlace(key, place);
-  return (p ? settings.get(placeKey(key, p))?.model : null) || settings.get(key)?.model || fallback || null;
+  const main = followsMain(paidService(key)) ? (await loadMainSetting()).model : null;
+  return (p ? settings.get(placeKey(key, p))?.model : null) || settings.get(key)?.model || main || fallback || null;
 }
 
 /**
@@ -286,16 +290,16 @@ export async function aiAvailable(key: string, ctx?: UseCtx): Promise<boolean> {
 
 /** GPT ตอบ JSON ผ่านด่านกลาง — แทน chatJson เดิม (ผลลัพธ์/ข้อความ error เหมือนเดิม) */
 export async function aiChat(key: string, system: string, userContent: unknown[], maxTokens: number, model?: string, ctx?: UseCtx): Promise<Record<string, unknown>> {
-  return guardedGpt(key, model, ctx, async (useModel) => {
-    const r = await openAiChatRaw(system, userContent, maxTokens, useModel);
+  return guardedGpt(key, model, ctx, async (useModel, effort) => {
+    const r = await openAiChatRaw(system, userContent, maxTokens, useModel, effort);
     return { value: r.data, model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, extraThb: 0 };
   });
 }
 
 /** GPT "ค้นเว็บก่อนตอบ" ผ่านด่านกลาง — คืนข้อความ (ผู้เรียกแกะ JSON เอง) + ลิงก์ที่อ้างอิง */
 export async function aiWebSearch(key: string, system: string, prompt: string, maxTokens: number, model?: string, ctx?: UseCtx): Promise<{ text: string; citations: WebCitation[] }> {
-  return guardedGpt(key, model, ctx, async (useModel) => {
-    const r = await openAiWebSearchRaw(system, prompt, maxTokens, useModel);
+  return guardedGpt(key, model, ctx, async (useModel, effort) => {
+    const r = await openAiWebSearchRaw(system, prompt, maxTokens, useModel, { effort });
     return { value: { text: r.text, citations: r.citations }, model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, extraThb: WEB_SEARCH_CALL_THB };
   });
 }
@@ -313,7 +317,7 @@ export async function aiTranscribe(key: string, audio: Blob, filename: string, o
 /** ขั้นตอนร่วมของ GPT ทุกแบบ: เปิดอยู่ไหม → งบ → เลือกโมเดล → เรียก → บันทึกการใช้/ค่าใช้จ่าย → เช็กแจ้งเตือนงบ */
 async function guardedGpt<T>(
   key: string, model: string | undefined, ctx: UseCtx | undefined,
-  run: (useModel: string | undefined) => Promise<{ value: T; model: string; tokensIn: number; tokensOut: number; extraThb: number }>,
+  run: (useModel: string | undefined, effort: ReasoningEffort) => Promise<{ value: T; model: string; tokensIn: number; tokensOut: number; extraThb: number }>,
 ): Promise<T> {
   if (!(await serviceOn(key, ctx?.place))) throw new ServiceOffError(key);
   const budget = await loadBudget();
@@ -321,12 +325,12 @@ async function guardedGpt<T>(
   if (!(await serviceAccess(key, ctx))) throw new AccessDeniedError(key);
   const over = await overBudgetMessage(key, budget, userId);
   if (over) throw new BudgetExceededError(over);
-  // โมเดล: ผู้ดูแลเลือกเองครั้งนี้ → ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
-  const settings = await loadServiceSettings();
+  // โมเดล: ผู้ดูแลเลือกเองครั้งนี้ → ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → รุ่นหลัก (งานเขียน/คิด) → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
+  const [settings, main] = await Promise.all([loadServiceSettings(), loadMainSetting()]);
   const place = resolvePlace(key, ctx?.place);
-  const useModel = ctx?.forceModel || (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || model;
+  const useModel = ctx?.forceModel || (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || (followsMain(paidService(key)) ? main.model : null) || model;
   try {
-    const r = await run(useModel);
+    const r = await run(useModel, main.effort);
     const cost = Math.round((estimateCostThb(r.model, r.tokensIn, r.tokensOut) + r.extraThb) * 10000) / 10000;
     await logServiceUse(key, { model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costThb: cost, userId, place: ctx?.place });
     if (spendCache && spendCache.month === monthKeyBangkok()) {

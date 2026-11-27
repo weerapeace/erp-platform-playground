@@ -10,7 +10,7 @@
  * เพิ่มจุดใหม่: (1) เพิ่มแถวใน PAID_SERVICES (key ไม่ซ้ำ · files = ไฟล์ที่เรียกจริง) (2) เรียกผ่านด่านกลางด้วย key นั้น
  * ค่าที่แอดมินเปลี่ยน (เปิด/ปิด · โมเดล) เก็บในตาราง paid_service_settings · ไม่มีแถว = ค่าเริ่มต้น (เปิด · โมเดลเดิมของระบบ)
  */
-import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
+import { AI_MODEL_CHOICES, reasoningExtraOut, type ReasoningEffort } from "@/lib/ai-caption-models";
 
 export type PaidProvider = "openai" | "cloudflare" | "easyslip" | "line" | "email" | "shippop";
 /** ai_chat = เลือกโมเดลได้ + คิดเงินตามคำ · ai_ocr = AI ฟรีตามโควตา · per_call = คิดต่อครั้ง/ตามโควตา · locked = ปิดไม่ได้ (โชว์อย่างเดียว) */
@@ -37,7 +37,20 @@ export type PaidService = {
   places?: PaidPlace[];
   /** เปลี่ยนผู้ให้บริการได้ (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือกเก็บ paid_service_settings.provider */
   providerChoices?: ProviderChoice[];
+  /**
+   * รุ่นที่ใช้เมื่อไม่ได้ตั้งเฉพาะ (เฉพาะ ai_chat · เจ้าของเลือกแบบ B 2026-11-27)
+   *   "main" = งานเขียน/คิด → ทำตาม "รุ่นหลักของทั้งระบบ" (ui_config ai_main_model)
+   *   ไม่ใส่ = งานอ่านบิล/แปล/งานง่าย → ใช้รุ่นที่ฟีเจอร์ส่งมาในโค้ด (เหมาะกับงาน · คุมค่าใช้จ่าย)
+   */
+  modelTier?: "main";
 };
+
+/** ฟีเจอร์นี้ทำตามรุ่นหลักไหม (เมื่อยังไม่ได้ตั้งเฉพาะ) */
+export const followsMain = (s: Pick<PaidService, "kind" | "modelTier"> | null | undefined) => !!s && s.kind === "ai_chat" && s.modelTier === "main";
+/** รุ่นของงานนี้มาจากไหน — own = ตั้งเฉพาะที่ศูนย์ AI · main = ตามรุ่นหลัก · fixed = รุ่นที่เหมาะกับงานนี้ (ในโค้ด) */
+export type ModelSource = "own" | "main" | "fixed";
+export const modelSource = (s: Pick<PaidService, "kind" | "modelTier">, ownModel: string | null | undefined): ModelSource => (ownModel ? "own" : followsMain(s) ? "main" : "fixed");
+export const MODEL_SOURCE_LABEL: Record<ModelSource, string> = { own: "ตั้งเฉพาะ", main: "ตามรุ่นหลัก", fixed: "รุ่นที่เหมาะกับงานนี้" };
 
 /** ตัวเลือกผู้ให้บริการ — provider = ใช้หาว่าตั้งรหัสแล้วหรือยัง / แท็บ · id = ค่าที่เก็บ */
 export type ProviderChoice = { id: string; th: string; provider: PaidProvider };
@@ -82,7 +95,7 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "ใช้เมื่อ GPT ปิด/ล่ม", provider: "cloudflare", kind: "ai_ocr",
     offBehavior: "ข้ามไปใช้ Google แปลฟรีแทน", costHint: "ฟรีตามโควตา (ทำงานเมื่อตั้งรหัส Cloudflare ไว้)", files: ["app/api/ai/translate/route.ts"] },
   // ── คอนเทนต์ / การตลาด
-  { key: "ai.caption", th: "เขียนแคปชั่น AI", en: "AI captions", group: "คอนเทนต์ / การตลาด",
+  { key: "ai.caption", modelTier: "main", th: "เขียนแคปชั่น AI", en: "AI captions", group: "คอนเทนต์ / การตลาด",
     usedAt: "คอนเทนต์ (ทีละช่อง / ทั้งใบ) · อัลบั้มคอนเทนต์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,
     files: ["app/api/ai/caption/route.ts", "app/api/ai/caption-all/route.ts", "app/api/ai/caption-options/route.ts", "app/api/content-albums/[id]/ai-caption/route.ts"],
     places: [
@@ -91,19 +104,19 @@ export const PAID_SERVICES: PaidService[] = [
       { key: "album", th: "อัลบั้มคอนเทนต์", files: ["app/api/content-albums/[id]/ai-caption/route.ts"] },
       { key: "options", th: "คอนเทนต์ — เขียนหลายแบบให้เลือก", files: ["app/api/ai/caption-options/route.ts"] },
     ] },
-  { key: "ai.mass_plan", th: "วางแผนคอนเทนต์ทั้งชุด", en: "Mass content plan", group: "คอนเทนต์ / การตลาด",
+  { key: "ai.mass_plan", modelTier: "main", th: "วางแผนคอนเทนต์ทั้งชุด", en: "Mass content plan", group: "คอนเทนต์ / การตลาด",
     usedAt: "แผนคอนเทนต์ (ร่างทีละหลายโพสต์)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/mass-plan/route.ts"] },
-  { key: "ai.marketing_weekly", th: "สรุปการตลาดรายสัปดาห์ (AI)", en: "Weekly marketing summary (AI)", group: "คอนเทนต์ / การตลาด",
+  { key: "ai.marketing_weekly", modelTier: "main", th: "สรุปการตลาดรายสัปดาห์ (AI)", en: "Weekly marketing summary (AI)", group: "คอนเทนต์ / การตลาด",
     usedAt: "หน้าภาพรวมการตลาด → แท็บสรุปสัปดาห์ (บทสรุป + สิ่งที่ควรทำ + สรุปรีวิว · ทุกวันจันทร์ 08:30 อัตโนมัติ 1 ใบ + กดสร้างเอง) ≈ 1–3 บาท/ใบ", provider: "openai", kind: "ai_chat",
     offBehavior: "ใบสรุปยังสร้างได้ — มีแต่ตัวเลข ไม่มีบทสรุปจาก AI (พิมพ์เองได้)", costHint: GPT_COST, files: ["lib/marketing-weekly-server.ts"] },
-  { key: "ai.brand_profile", th: "ร่างโปรไฟล์แบรนด์", en: "Brand profile draft", group: "คอนเทนต์ / การตลาด",
+  { key: "ai.brand_profile", modelTier: "main", th: "ร่างโปรไฟล์แบรนด์", en: "Brand profile draft", group: "คอนเทนต์ / การตลาด",
     usedAt: "การ์ดแบรนด์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/brand-profile-draft/route.ts"] },
-  { key: "ai.product_detail", th: "เขียนรายละเอียดสินค้า", en: "Product description writer", group: "สินค้า / เว็บร้าน",
+  { key: "ai.product_detail", modelTier: "main", th: "เขียนรายละเอียดสินค้า", en: "Product description writer", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้าสินค้า (รายละเอียดสำหรับเว็บ/แพลตฟอร์ม)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/product-detail/route.ts"] },
   { key: "ai.tag_setup", th: "ช่วยตั้งค่าประเภทสินค้า (แท็ก + กฎ)", en: "Product-type setup helper", group: "สินค้า / เว็บร้าน",
     usedAt: "ป๊อป ✨ AI ร่างรายละเอียดสินค้า → สร้างแท็ก / ⚙ ตั้งค่าประเภทนี้ → ✨ ให้ AI ช่วยคิด (รุ่นถูก gpt-4o-mini ข้อความล้วน)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม ✨ ให้ AI ช่วยคิด ขึ้นข้อความว่าผู้ดูแลปิดไว้ · กรอกเองได้ตามปกติ", costHint: GPT_COST, files: ["app/api/ai/tag-setup/route.ts"] },
-  { key: "ai.desc_highlights", th: "คิดจุดเด่นสินค้าจากรูป (7 ข้อ)", en: "Product highlights from photos", group: "สินค้า / เว็บร้าน",
+  { key: "ai.desc_highlights", modelTier: "main", th: "คิดจุดเด่นสินค้าจากรูป (7 ข้อ)", en: "Product highlights from photos", group: "สินค้า / เว็บร้าน",
     usedAt: "หน้าสินค้า → ＋ แทรก (Description) → ขั้นจุดเด่น → ✨ AI ดูรูป · ตรวจ Description เดิมว่าตรงรูปไหม", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม ✨ AI ในขั้นจุดเด่นขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ติ๊กข้อความสำเร็จรูป / พิมพ์เองได้ตามปกติ",
     costHint: "ประมาณ 0.1–0.4 บาท/ครั้ง (ดูรูปไม่เกิน 6 รูป · ขึ้นกับรุ่น) · จำกัดจำนวนครั้งต่อคนได้", files: ["app/api/ai/desc-highlights/route.ts"], costProfile: { in: 19300, out: 900 } },
@@ -111,7 +124,7 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "หน้า SKU → แท็บ Swatch (แผงผ้า) → ปุ่ม อ่านจากรูป (1 รูป = 1 ครั้ง)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม อ่านจากรูป ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ตีกรอบชิ้นเอง / แบ่งกรอบเท่า ๆ กัน ใช้ได้ตามปกติ",
     costHint: "ประมาณ 0.2 บาท/รูป (gpt-4.1-mini) · 0.5–0.7 บาท (gpt-5.4-mini)", files: ["app/api/sku-swatches/ai-read/route.ts"] },
-  { key: "ai.attr_fill", th: "AI เติมช่องคุณลักษณะสินค้า (ลงร้านค้าออนไลน์)", en: "AI attribute fill (marketplace listing)", group: "สินค้า / เว็บร้าน",
+  { key: "ai.attr_fill", modelTier: "main", th: "AI เติมช่องคุณลักษณะสินค้า (ลงร้านค้าออนไลน์)", en: "AI attribute fill (marketplace listing)", group: "สินค้า / เว็บร้าน",
     usedAt: "ตัวช่วยลงสินค้า → แท็บ Shopee → ช่องของหมวด → ปุ่ม ให้ AI ช่วยเติม (1 ครั้ง = 1 สินค้า · อ่านชื่อ + รายละเอียด + รูป ≤ 3)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่ม ให้ AI ช่วยเติม ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · ปุ่ม แนะนำจากชื่อ/รายละเอียด (ฟรี) และกรอกเองใช้ได้ตามปกติ",
     costHint: "ประมาณ 0.05–0.3 บาท/ครั้ง (ขึ้นกับจำนวนช่อง/รูป และโมเดล)", files: ["app/api/ai/attr-fill/route.ts"] },
@@ -132,7 +145,7 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "คำสั่งซื้อจากไลน์ (อ่านรายการ)", provider: "openai", kind: "ai_chat",
     offBehavior: "คำสั่งซื้อยังเข้าระบบ แต่ต้องกรอกรายการเอง", costHint: GPT_COST, files: ["lib/order-capture.ts"] },
   // ── ออเดอร์ออนไลน์
-  { key: "ai.gift_card", th: "AI เรียบเรียงข้อความการ์ดของขวัญ", en: "AI gift card message", group: "ออเดอร์ออนไลน์",
+  { key: "ai.gift_card", modelTier: "main", th: "AI เรียบเรียงข้อความการ์ดของขวัญ", en: "AI gift card message", group: "ออเดอร์ออนไลน์",
     usedAt: "หน้าคำสั่งพิเศษ & การ์ด › เขียนการ์ด (/order-ops/gift-cards/edit)", provider: "openai", kind: "ai_chat",
     offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/order-gift-cards/route.ts"] },
   // ── ผลิต / งานทีม
@@ -151,11 +164,11 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "ใบงานออกแบบ → ตีราคา → อ่านจากรูปโน้ต (AI อ่านลายมือช่าง → ตารางยืนยันก่อนเพิ่มบรรทัด)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่มนี้ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · เพิ่มวัตถุดิบเอง / วาดชิ้นวัสดุ ได้ตามปกติ", costHint: GPT_COST,
     files: ["app/api/design-sheets/read-note/route.ts"] },
-  { key: "ai.pattern_coach", th: "โค้ช AI แพทเทิร์นกระเป๋า", en: "Bag pattern AI coach", group: "ผลิต / งานทีม",
+  { key: "ai.pattern_coach", modelTier: "main", th: "โค้ช AI แพทเทิร์นกระเป๋า", en: "Bag pattern AI coach", group: "ผลิต / งานทีม",
     usedAt: "สตูดิโอแพทเทิร์น → โค้ช → ถามโค้ช AI (ผู้ใช้เห็นข้อความก่อนส่ง · ไม่มีรูป)", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่มถาม AI ขึ้นข้อความ \"ผู้ดูแลปิดฟีเจอร์นี้ไว้\" · โค้ชในเครื่อง (ฟรี) ยังใช้ได้ตามปกติ", costHint: GPT_COST,
     files: ["app/api/pattern-projects/ai-coach/route.ts"] },
-  { key: "ai.team_split", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
+  { key: "ai.team_split", modelTier: "main", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
     usedAt: "แผนทีม", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/team-plan/ai-split/route.ts"] },
   { key: "ai.transcribe", th: "ถอดเสียงคลิปเป็นซับ (Whisper)", en: "Clip transcription (Whisper)", group: "คอนเทนต์ / การตลาด",
     usedAt: "โปรแกรม Louis Subtitle (ใส่ซับคลิป) — เมื่อเลือกถอดเสียงผ่าน ERP", provider: "openai", kind: "per_call",
@@ -319,12 +332,12 @@ export const countQuotaOverMessage = (key: string, cap?: number | null) =>
 
 /* ── ราคาต่อครั้ง (เจ้าของขอ 2026-11-16 "อยากเห็นว่าแต่ละรุ่นกดครั้งละเท่าไหร่") ──
  *   คิดจาก "จำนวนคำเฉลี่ยต่อครั้ง" ของฟีเจอร์นั้น (ใช้จริงย้อนหลัง) × ราคาของรุ่น · ยังไม่เคยใช้ = costProfile ในทะเบียน หรือค่ากลาง
- *   รุ่น 5.x "คิดก่อนตอบ" = บวกคำตอบ ~600 คำ (ตั้งให้คิดน้อย) */
+ *   รุ่น 5.x "คิดก่อนตอบ" = บวกคำตอบตามระดับการคิด (น้อย 600 · กลาง 1,500 · มาก 4,000) */
 export type CallTokens = { in: number; out: number };
 export const DEFAULT_CALL_TOKENS: CallTokens = { in: 3000, out: 400 };
-export function callCostThb(model: string | null | undefined, t: CallTokens): number {
+export function callCostThb(model: string | null | undefined, t: CallTokens, effort?: ReasoningEffort | null): number {
   const m = PAID_MODEL_CHOICES.find((x) => x.id === model) ?? PAID_MODEL_CHOICES[0];
-  const out = t.out + (isReasoningModel(m.id) ? 600 : 0);
+  const out = t.out + reasoningExtraOut(m.id, effort);
   return Math.round(((t.in * m.inPerM + out * m.outPerM) / 1e6) * 10000) / 10000;
 }
 /** ใช้ได้อีกกี่ครั้ง จากเงินที่เหลือ ÷ ราคาต่อครั้ง (ไม่รู้ราคา = null) */

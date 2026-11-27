@@ -8,17 +8,14 @@ import { r2GetObject } from "@/lib/r2";
 export const CAPTION_MODEL = process.env.OPENAI_CAPTION_MODEL || "gpt-4o-mini";
 
 /** โมเดลที่เลือกได้ในหน้าตั้งค่า (ui_config key = "ai_product_model") — ย้ายไป lib/ai-caption-models (ใช้ร่วมหน้าจอ) · export ซ้ำไว้ให้ที่เดิมใช้ได้ */
-import { AI_MODEL_CHOICES, chatLimitParams, responsesLimitParams } from "@/lib/ai-caption-models";
+import { AI_MODEL_CHOICES, chatLimitParams, responsesLimitParams, type ReasoningEffort } from "@/lib/ai-caption-models";
+import { loadMainSetting } from "@/lib/ai-main-model-server";
 export { AI_MODEL_CHOICES };
 
-/** โมเดลที่ใช้เขียนรายละเอียดสินค้า — อ่านจากหน้าตั้งค่าก่อน แล้วค่อย env/ค่าเริ่มต้น */
+/** โมเดลของงานเขียน/คิดที่ทำตามรุ่นหลัก (รายละเอียดสินค้า · จุดเด่น · แผนคอนเทนต์ · โปรไฟล์แบรนด์) */
 export async function productDetailModel(): Promise<string> {
-  try {
-    const { data } = await supabaseAdmin().from("ui_config").select("value").eq("key", "ai_product_model").maybeSingle();
-    const picked = String(((data as { value?: Record<string, unknown> } | null)?.value ?? {}).model ?? "").trim();
-    if (picked && AI_MODEL_CHOICES.some((m) => m.id === picked)) return picked;
-  } catch { /* อ่านค่าไม่ได้ → ใช้ค่าเริ่มต้น */ }
-  return CAPTION_MODEL;
+  // = "รุ่นหลักของทั้งระบบ" ที่ศูนย์ AI (ยังไม่ตั้ง = ค่าเดิมของป๊อป ai_product_model) · ตั้งเฉพาะงานที่ศูนย์ AI ชนะที่ด่านกลาง
+  return (await loadMainSetting()).model;
 }
 export const MAX_IMAGES = 7;   // เพดานรูปต่อครั้ง — รูปคือส่วนที่กิน token มากที่สุด (~2,800 token/รูป)
 export const FALLBACK_PROMPT = "เขียนแคปชั่นภาษาไทยสั้น ๆ 2-4 บรรทัดจากรูปที่ให้มา โทนเป็นมิตร ชวนซื้อแต่ไม่ hard sell · ห้ามแต่งข้อมูลที่ไม่เห็นในรูป · ไม่ต้องใส่แฮชแท็กในแคปชั่น";
@@ -98,7 +95,7 @@ export async function imagesToDataUrls(keys: string[]): Promise<string[]> {
  * ⚠️ ห้ามเรียกตรงจากฟีเจอร์ — ใช้ aiChat("<key>", …) ใน lib/paid-services-server (ด่านกลาง: เปิด/ปิด · โมเดล · บันทึกการใช้)
  *    เทสต์ paid-services-guard บังคับไว้ · คืน usage (token) ให้ด่านกลางประมาณค่าใช้จ่าย
  */
-export async function openAiChatRaw(system: string, userContent: unknown[], maxTokens: number, model?: string): Promise<{ data: Record<string, unknown>; model: string; tokensIn: number; tokensOut: number }> {
+export async function openAiChatRaw(system: string, userContent: unknown[], maxTokens: number, model?: string, effort?: ReasoningEffort | null): Promise<{ data: Record<string, unknown>; model: string; tokensIn: number; tokensOut: number }> {
   const useModel = model || CAPTION_MODEL;
   const key = openAiKey();
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -107,7 +104,7 @@ export async function openAiChatRaw(system: string, userContent: unknown[], maxT
     body: JSON.stringify({
       model: useModel,
       response_format: { type: "json_object" },
-      ...chatLimitParams(useModel, maxTokens),   // รุ่น 4.x = max_tokens · รุ่น 5.x = max_completion_tokens + คิดน้อย
+      ...chatLimitParams(useModel, maxTokens, effort),   // รุ่น 4.x = max_tokens · รุ่น 5.x = max_completion_tokens + ระดับการคิด (ศูนย์ AI)
       messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
     }),
   });
@@ -157,7 +154,7 @@ export type WebCitation = { url: string; title: string };
  * - บัญชี/โมเดลที่ยังไม่รองรับ "web_search" → ลองตัวเก่า "web_search_preview" อีกครั้งเดียว
  * - ไม่บังคับรูปแบบ JSON (โหมดค้นเว็บไม่รับประกัน) → ผู้เรียกแกะ JSON จากข้อความเอง
  */
-export async function openAiWebSearchRaw(system: string, prompt: string, maxTokens: number, model?: string, opts?: { country?: string }): Promise<{ text: string; citations: WebCitation[]; model: string; tokensIn: number; tokensOut: number }> {
+export async function openAiWebSearchRaw(system: string, prompt: string, maxTokens: number, model?: string, opts?: { country?: string; effort?: ReasoningEffort | null }): Promise<{ text: string; citations: WebCitation[]; model: string; tokensIn: number; tokensOut: number }> {
   const useModel = model || "gpt-4.1-mini";
   const key = openAiKey();
   const call = (toolType: string) => fetch("https://api.openai.com/v1/responses", {
@@ -167,7 +164,7 @@ export async function openAiWebSearchRaw(system: string, prompt: string, maxToke
       model: useModel,
       instructions: system,
       input: prompt,
-      ...responsesLimitParams(useModel, maxTokens),
+      ...responsesLimitParams(useModel, maxTokens, opts?.effort),
       tools: [{ type: toolType, search_context_size: "low", user_location: { type: "approximate", country: opts?.country ?? "TH" } }],
     }),
   });

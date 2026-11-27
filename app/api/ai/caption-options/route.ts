@@ -18,9 +18,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { CAPTION_MODEL, imageParts, imagesToDataUrls, loadPromptRows, MAX_IMAGES, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
-import { AI_MODEL_CHOICES, isReasoningModel } from "@/lib/ai-caption-models";
-import { aiChat, featureAccess, loadServiceSettings, usageAllowance } from "@/lib/paid-services-server";
-import { placeKey } from "@/lib/paid-services";
+import { AI_MODEL_CHOICES, reasoningExtraOut } from "@/lib/ai-caption-models";
+import { aiChat, effectiveModel, featureAccess, usageAllowance } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { CAPTION_AI_MEMORY_KEY, isSimilar, memoryFor, normalizeMemory } from "@/lib/desc-ai-memory";
 
@@ -37,13 +36,13 @@ const canUse = async (request: NextRequest) => featureAccess(KEY, { request }, a
 type ContentRow = { id: string; title: string | null; post_type: string | null; brand_id: string | null; note: string | null; platform_images: unknown; task_id: string | null };
 
 async function defaultModel(): Promise<string> {
-  const s = await loadServiceSettings();
-  return s.get(placeKey(KEY, PLACE))?.model || s.get(KEY)?.model || CAPTION_MODEL;
+  // ตั้งเฉพาะ (ที่นี้ → ทั้งบริการ) → รุ่นหลักของทั้งระบบ (แคปชั่น = งานเขียน) → ค่าเริ่ม
+  return (await effectiveModel(KEY, CAPTION_MODEL, PLACE)) ?? CAPTION_MODEL;
 }
 /** ค่าใช้จ่ายประมาณต่อ "1 แพลตฟอร์ม" (บาท) — รูปละ ~2,800 token (ดูละเอียด ×3) + ข้อความ ~1,800 · ตอบ ~350/แบบ */
 function estThb(model: string, images: number, variants: number, high: boolean): number {
   const m = AI_MODEL_CHOICES.find((x) => x.id === model) ?? AI_MODEL_CHOICES[0];
-  const tin = 2800 * images * (high ? 3 : 1) + 1800, tout = 350 * variants + 150 + (isReasoningModel(m.id) ? 600 : 0);
+  const tin = 2800 * images * (high ? 3 : 1) + 1800, tout = 350 * variants + 150 + reasoningExtraOut(m.id);
   return Math.round(((tin * m.inPerM + tout * m.outPerM) / 1e6) * 100) / 100;
 }
 async function loadContent(contentId: string): Promise<ContentRow | null> {

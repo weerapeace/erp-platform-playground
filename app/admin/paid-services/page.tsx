@@ -21,7 +21,8 @@ import { SimpleBarChart } from "@/components/bar-chart";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { callCostThb, callsFromThb, PROVIDER_LABEL, type BudgetState, type CallTokens, type PaidBudget, type PaidProvider, type PaidService, type QuotaUnit, type ServiceAccess } from "@/lib/paid-services";
+import type { ReasoningEffort } from "@/lib/ai-caption-models";
+import { callCostThb, callsFromThb, followsMain, MODEL_SOURCE_LABEL, modelSource, PROVIDER_LABEL, type ModelSource, type BudgetState, type CallTokens, type PaidBudget, type PaidProvider, type PaidService, type QuotaUnit, type ServiceAccess } from "@/lib/paid-services";
 
 type Stat = { calls: number; failed: number; cost_thb: number; tokens: number };
 type PlaceRow = { key: string; th: string; enabled: boolean; model: string | null; month: Stat; last_used_at: string | null; updated_by_name: string | null };
@@ -34,7 +35,15 @@ type Row = Omit<PaidService, "places" | "providerChoices"> & {
   call_tokens: (CallTokens & { calls: number; source: "history" | "estimate" }) | null;
   /** รุ่นที่ใช้จริงครั้งล่าสุด — ใช้บอกราคาของ "ค่าเดิมของระบบ" */
   used_model: string | null;
+  /** ครั้งที่สำเร็จ 30 วันล่าสุด — ประมาณค่าใช้จ่ายก่อนเปลี่ยนรุ่นหลัก */
+  calls_30d: number;
 };
+type MainSetting = { model: string; effort: ReasoningEffort; updated_at: string | null; saved: boolean };
+type EffortChoice = { id: ReasoningEffort; label: string; note: string };
+type ModelHistoryRow = { at: string; who: string | null; what: string; from: unknown; to: unknown };
+const SOURCE_TONE: Record<ModelSource, string> = { main: "bg-blue-50 text-blue-700", own: "bg-violet-50 text-violet-700", fixed: "bg-slate-100 text-slate-600" };
+/** รุ่นที่งานนี้ใช้จริง: ตั้งเฉพาะ → รุ่นหลัก (งานเขียน/คิด) → รุ่นที่เหมาะกับงาน (ใช้ล่าสุด) */
+const rowModel = (r: Row, mainModel: string) => r.model ?? (followsMain(r) ? mainModel : r.used_model);
 type RoleOpt = { key: string; label: string };
 type NamedUser = { user_id: string; name: string };
 type UserRow = {
@@ -47,7 +56,7 @@ type OffTarget = { row: Row; place: PlaceRow | null };
 const baht = (n: number) => (n === 0 ? "฿0" : n < 1 ? `฿${n.toFixed(2)}` : `฿${n.toLocaleString("th-TH", { maximumFractionDigits: n < 100 ? 1 : 0 })}`);
 /** ราคาต่อครั้ง — เล็กมากโชว์ 3 ตำแหน่ง */
 const perCallText = (n: number) => (n < 0.001 ? "<฿0.001" : n < 0.1 ? `฿${n.toFixed(3)}` : `฿${n.toFixed(2)}`);
-const perCallOf = (r: { call_tokens: Row["call_tokens"] }, model: string | null | undefined) => (r.call_tokens ? callCostThb(model, r.call_tokens) : null);
+const perCallOf = (r: { call_tokens: Row["call_tokens"] }, model: string | null | undefined, effort?: ReasoningEffort) => (r.call_tokens ? callCostThb(model, r.call_tokens, effort) : null);
 const fmtWhen = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" });
 
 export default function PaidServicesPage() {
@@ -67,6 +76,9 @@ function PaidServicesView() {
   const [accessUsers, setAccessUsers] = useState<NamedUser[]>([]);
   const [accessFor, setAccessFor] = useState<Row | null>(null);
   const [models, setModels] = useState<ModelChoice[]>([]);
+  const [main, setMain] = useState<MainSetting>({ model: "gpt-4.1-mini", effort: "medium", updated_at: null, saved: false });
+  const [efforts, setEfforts] = useState<EffortChoice[]>([]);
+  const [modelHist, setModelHist] = useState<ModelHistoryRow[]>([]);
   const [totals, setTotals] = useState({ calls: 0, failed: 0, cost_thb: 0 });
   const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {}, count_quota: {} });
   const [bState, setBState] = useState<BudgetState>("none");
@@ -84,6 +96,7 @@ function PaidServicesView() {
       const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
       setRows(j.services ?? []); setTotals(j.totals ?? { calls: 0, failed: 0, cost_thb: 0 }); setModels(j.model_choices ?? []);
+      if (j.main) setMain(j.main); setEfforts(j.effort_choices ?? []); setModelHist(j.model_history ?? []);
       setBudget(j.budget); setBState(j.budget_state ?? "none"); setUsers(j.by_user ?? []);
       setCountUsage(j.count_usage ?? {}); setCountUsers(j.count_users ?? []); setCountUsageThb(j.count_usage_thb ?? {});
       setAccess(j.access ?? {}); setRoles(j.roles ?? []); setAccessUsers(j.access_users ?? []);
@@ -92,8 +105,9 @@ function PaidServicesView() {
   }, []);
   useEffect(() => { if (canManage) void load(); }, [canManage, load]);
 
-  const save = async (r: Row, patch: { enabled?: boolean; model?: string; provider?: string }, place?: PlaceRow) => {
+  const save = async (r: Row, patch: { enabled?: boolean; model?: string; provider?: string }, place?: PlaceRow, isUndo = false) => {
     const id = place ? `${r.key}@${place.key}` : r.key;
+    const prevModel = place ? place.model : r.model;
     setBusy(id);
     try {
       const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: r.key, ...(place ? { place: place.key } : {}), ...patch }) });
@@ -106,7 +120,12 @@ function PaidServicesView() {
         return { ...x, enabled: j.data.enabled, model: j.data.model, provider_choice: j.data.provider ?? x.provider_choices[0]?.id ?? null, updated_at: j.data.updated_at, updated_by_name: j.data.updated_by_name };
       }));
       const label = place ? `${r.th} · ${place.th}` : r.th;
-      toast.success("enabled" in patch ? (patch.enabled ? `เปิด "${label}" แล้ว` : `ปิด "${label}" แล้ว`) : "provider" in patch ? `เปลี่ยนผู้ให้บริการของ "${label}" แล้ว` : `เปลี่ยนโมเดลของ "${label}" แล้ว`);
+      if ("model" in patch && !isUndo) {
+        // เปลี่ยนรุ่นรายงาน = ย้อนกลับได้จากแจ้งเตือน (กลับไปค่าก่อนหน้า)
+        toast.undo(`เปลี่ยนโมเดลของ "${label}" เป็น ${patch.model || (place ? "ตามบริการ" : followsMain(r) ? "ตามรุ่นหลัก" : "รุ่นที่เหมาะกับงานนี้")} แล้ว`, () => save(r, { model: prevModel ?? "" }, place, true));
+      } else {
+        toast.success(isUndo ? `ย้อนโมเดลของ "${label}" กลับแล้ว` : "enabled" in patch ? (patch.enabled ? `เปิด "${label}" แล้ว` : `ปิด "${label}" แล้ว`) : "provider" in patch ? `เปลี่ยนผู้ให้บริการของ "${label}" แล้ว` : `เปลี่ยนโมเดลของ "${label}" แล้ว`);
+      }
     } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${(e as Error).message}`); }
     finally { setBusy(null); }
   };
@@ -208,6 +227,7 @@ function PaidServicesView() {
   const groupOrder = useMemo(() => { const order = [...new Set(rows.map((r) => r.group))]; return (g: string) => order.indexOf(g); }, [rows]);
   const toggleOpen = (k: string) => setOpen((cur) => { const n = new Set(cur); if (n.has(k)) n.delete(k); else n.add(k); return n; });
 
+  const pco = (r: Row, m: string | null | undefined) => perCallOf(r, m, main.effort);
   const columns: MiniColumn<Row>[] = [
     {
       key: "what", header: "ใช้ทำอะไร · อยู่หน้าไหน", width: "minmax(0,2fr)", sortValue: (r) => r.th, sortLabel: "ชื่อ",
@@ -249,14 +269,19 @@ function PaidServicesView() {
         <div className="flex flex-col gap-1">
           <select value={r.model ?? ""} disabled={!r.enabled || busy === r.key} onChange={(e) => void save(r, { model: e.target.value })}
             className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
-            <option value="">ค่าเดิมของระบบ{!r.model && r.used_model ? ` (ตอนนี้ ${r.used_model}${perCallOf(r, r.used_model) !== null ? ` · ~${perCallText(perCallOf(r, r.used_model)!)}/ครั้ง` : ""})` : ""}</option>
-            {models.map((m) => { const c = perCallOf(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
+            {(() => {
+              const base = followsMain(r) ? main.model : r.used_model; const c = base ? pco(r, base) : null;
+              return <option value="">{followsMain(r) ? `ตามรุ่นหลัก (${main.model}` : `รุ่นที่เหมาะกับงานนี้${base ? ` (${base}` : ""}`}{base ? `${c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""})` : ""}</option>;
+            })()}
+            {models.map((m) => { const c = pco(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
           </select>
           {(() => {
-            const eff = r.model ?? r.used_model;
-            const m = models.find((x) => x.id === r.model); const c = eff ? perCallOf(r, eff) : null;
+            const eff = rowModel(r, main.model);
+            const m = models.find((x) => x.id === r.model); const c = eff ? pco(r, eff) : null;
+            const src = modelSource(r, r.model);
             return (
               <>
+                <span className={`self-start rounded-full px-2 py-0.5 text-[11px] ${SOURCE_TONE[src]}`} data-model-source={src}>{MODEL_SOURCE_LABEL[src]}{eff ? ` · ${eff}` : ""}</span>
                 {c !== null && <span className="text-[11px] font-medium text-slate-600" data-per-call={r.key}>กดครั้งละ ~{perCallText(c)} <span className="font-normal text-slate-400">({r.call_tokens?.source === "history" ? `เฉลี่ยจากใช้จริง ${r.call_tokens.calls.toLocaleString("th-TH")} ครั้ง` : "ประมาณการ ยังไม่เคยใช้"})</span></span>}
                 {m && <span className="text-[11px] text-slate-400">{m.note} · เข้า ฿{m.inPerM}/ออก ฿{m.outPerM} ต่อ 1 ล้านคำ</span>}
               </>
@@ -323,6 +348,9 @@ function PaidServicesView() {
         : err ? <ErrorState title="โหลดข้อมูลไม่สำเร็จ" hint={err} onRetry={() => void load()} retrying={loading} />
         : (
           <>
+            <MainModelCard main={main} models={models} efforts={efforts} rows={rows} history={modelHist}
+              onChanged={(m, h) => { setMain(m); setModelHist(h); }} />
+
             <BudgetCard budget={budget} state={bState} spent={totals.cost_thb}
               onSaved={(b) => { setBudget(b); void load(); }} />
 
@@ -355,8 +383,8 @@ function PaidServicesView() {
                           <select value={p.model ?? ""} disabled={!p.enabled || !r.enabled || busy === `${r.key}@${p.key}`} onChange={(e) => void save(r, { model: e.target.value }, p)}
                             title="โมเดลเฉพาะที่นี้ — ไม่เลือก = ใช้ตามบริการ"
                             className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
-                            <option value="">ตามบริการ ({models.find((m) => m.id === r.model)?.id ?? "ค่าเดิมของระบบ"})</option>
-                            {models.map((m) => { const c = perCallOf(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
+                            <option value="">ตามบริการ ({rowModel(r, main.model) ?? "รุ่นที่เหมาะกับงานนี้"})</option>
+                            {models.map((m) => { const c = pco(r, m.id); return <option key={m.id} value={m.id}>{m.label}{c !== null ? ` · ~${perCallText(c)}/ครั้ง` : ""}</option>; })}
                           </select>
                         )}
                         <MonthCell s={p.month} showCost={r.kind === "ai_chat"} last={p.last_used_at} />
@@ -401,6 +429,111 @@ function PaidServicesView() {
         title={confirmOff ? `ปิด "${confirmOff.row.th}${confirmOff.place ? ` · ${confirmOff.place.th}` : ""}"?` : ""} confirmText="ปิด"
         message={confirmOff ? `ผลที่เกิด: ${confirmOff.row.offBehavior}${confirmOff.place ? ` (เฉพาะที่ "${confirmOff.place.th}")` : `\nใช้ที่: ${confirmOff.row.usedAt}`}\nเปิดกลับได้ทุกเมื่อที่หน้านี้` : ""} />
     </div>
+  );
+}
+
+/**
+ * การ์ด "รุ่นหลักของทั้งระบบ" (เจ้าของเลือกแบบ B 2026-11-27)
+ *   งานเขียน/คิด (ทะเบียน modelTier main) ทำตามรุ่นนี้ · งานอ่านบิล/แปล/งานง่าย ใช้รุ่นที่เหมาะกับงาน · ตั้งเฉพาะในตารางชนะเสมอ
+ *   เปลี่ยนรุ่น/ระดับการคิด → ยืนยันพร้อมค่าใช้จ่ายที่จะเปลี่ยน (คิดจากใช้จริง 30 วัน) → แจ้งเตือนมีปุ่มย้อนกลับ · ประวัติจาก audit_logs
+ */
+function MainModelCard({ main, models, efforts, rows, history, onChanged }: {
+  main: MainSetting; models: ModelChoice[]; efforts: EffortChoice[]; rows: Row[]; history: ModelHistoryRow[];
+  onChanged: (m: MainSetting, h: ModelHistoryRow[]) => void;
+}) {
+  const toast = useToast();
+  const [pending, setPending] = useState<{ model: string; effort: ReasoningEffort } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showHist, setShowHist] = useState(false);
+  const gpt = rows.filter((r) => r.kind === "ai_chat");
+  const followers = gpt.filter((r) => followsMain(r) && !r.model);
+  /** ค่า AI ต่อเดือนโดยประมาณ ถ้าใช้รุ่นหลัก/ระดับคิดนี้ — จำนวนครั้ง 30 วันล่าสุด × ราคาต่อครั้งของรุ่นที่งานนั้นจะใช้ */
+  const monthly = (model: string, effort: ReasoningEffort) =>
+    gpt.reduce((sum, r) => { const m = rowModel(r, model); const c = m ? perCallOf(r, m, effort) : null; return sum + (c !== null ? c * r.calls_30d : 0); }, 0);
+  const now = monthly(main.model, main.effort);
+  const calls = gpt.reduce((n, r) => n + r.calls_30d, 0);
+  const label = (id: string) => models.find((m) => m.id === id)?.label ?? id;
+  const effortLabel = (id: unknown) => efforts.find((e) => e.id === id)?.label ?? String(id ?? "");
+
+  const apply = async (next: { model: string; effort: ReasoningEffort }, isUndo = false) => {
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ main: next }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      const before = j.data.before as { model: string; effort: ReasoningEffort };
+      onChanged(j.data.main, j.data.model_history ?? history);
+      if (isUndo) toast.success("ย้อนรุ่นหลักกลับแล้ว");
+      else toast.undo(`รุ่นหลักเป็น ${j.data.main.model} · คิด${effortLabel(j.data.main.effort)} แล้ว — มีผลภายใน ~30 วินาที`, () => apply(before, true), { ms: 10_000 });
+    } catch (e) { toast.error(`บันทึกรุ่นหลักไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setSaving(false); setPending(null); }
+  };
+  const ask = (next: { model: string; effort: ReasoningEffort }) => { if (next.model !== main.model || next.effort !== main.effort) setPending(next); };
+  const after = pending ? monthly(pending.model, pending.effort) : 0;
+  const diff = after - now;
+
+  return (
+    <section className="mb-4 rounded-xl border border-blue-200 bg-blue-50/30 p-4" data-main-model-card>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-sm font-semibold text-slate-800">รุ่นหลักของทั้งระบบ</h2>
+        <span className="text-xs text-slate-500">งานเขียน/คิด {followers.length} งานทำตามรุ่นนี้ · งานอ่านบิล แปล งานง่าย ใช้รุ่นที่เหมาะกับงาน · ตั้งเฉพาะรายงานได้ในตาราง</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1.3fr)_12rem_minmax(0,1fr)] sm:items-end">
+        <label className="text-xs font-medium text-slate-600">รุ่นหลัก
+          <select value={main.model} disabled={saving} onChange={(e) => ask({ model: e.target.value, effort: main.effort })}
+            className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal outline-none focus:border-blue-400 disabled:opacity-50">
+            {models.map((m) => <option key={m.id} value={m.id}>{m.label} · {m.note}</option>)}
+          </select>
+        </label>
+        <label className="text-xs font-medium text-slate-600">ระดับการคิด (รุ่น 5.x)
+          <select value={main.effort} disabled={saving} onChange={(e) => ask({ model: main.model, effort: e.target.value as ReasoningEffort })}
+            className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal outline-none focus:border-blue-400 disabled:opacity-50">
+            {efforts.map((e) => <option key={e.id} value={e.id}>{e.label} · {e.note}</option>)}
+          </select>
+        </label>
+        <div className="rounded-lg bg-white/80 px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
+          ค่า AI ทั้งหมดประมาณ <b className="font-semibold tabular-nums text-slate-800">{baht(now)}</b>/เดือน
+          <span className="block text-[11px] text-slate-400">คิดจากใช้จริง 30 วันล่าสุด {calls.toLocaleString("th-TH")} ครั้ง</span>
+        </div>
+      </div>
+      {followers.length > 0 && (
+        <p className="mt-2 text-[11px] text-slate-500">ทำตามรุ่นหลัก: {followers.map((r) => r.th).join(" · ")}</p>
+      )}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
+        {main.updated_at ? <span>เปลี่ยนล่าสุด {fmtWhen(main.updated_at)}</span> : <span>ยังไม่เคยตั้ง — ใช้ค่าเดิมจากป๊อป AI รายละเอียดสินค้า</span>}
+        {history.length > 0 && (
+          <button type="button" onClick={() => setShowHist((v) => !v)} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-slate-600 hover:bg-slate-50">
+            <Icon name="history" /> ประวัติการเปลี่ยนรุ่น ({history.length})
+          </button>
+        )}
+      </div>
+      {showHist && (
+        <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-xs">
+          {history.map((h, i) => (
+            <li key={i} className="flex flex-wrap gap-x-2 px-3 py-1.5">
+              <span className="tabular-nums text-slate-400">{fmtWhen(h.at)}</span>
+              <span className="font-medium text-slate-700">{h.who ?? "ระบบ"}</span>
+              <span className="text-slate-600">{h.what}: {h.what === "ระดับการคิด" ? `${effortLabel(h.from)} → ${effortLabel(h.to)}` : `${String(h.from ?? "ค่าเดิม")} → ${String(h.to ?? "ค่าเดิม")}`}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <ConfirmDialog open={pending !== null} onClose={() => setPending(null)} loading={saving}
+        onConfirm={() => { if (pending) void apply(pending); }}
+        title="เปลี่ยนรุ่นหลักของทั้งระบบ?" confirmText="เปลี่ยน"
+        message={pending ? (
+          <div className="space-y-2 text-sm">
+            <p>{pending.model !== main.model ? `รุ่น: ${label(main.model)} → ${label(pending.model)}` : `รุ่น: ${label(main.model)} (เหมือนเดิม)`}</p>
+            <p>{pending.effort !== main.effort ? `ระดับการคิด: ${effortLabel(main.effort)} → ${effortLabel(pending.effort)}` : `ระดับการคิด: ${effortLabel(main.effort)}`}</p>
+            <p className={`rounded-lg px-3 py-2 ${diff > 0.005 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"}`}>
+              ค่า AI ประมาณ {baht(now)} → <b>{baht(after)}</b> ต่อเดือน ({diff >= 0 ? "+" : "−"}{baht(Math.abs(diff))})
+              <span className="block text-xs opacity-80">คิดจากการใช้จริง 30 วันล่าสุด {calls.toLocaleString("th-TH")} ครั้ง · ระดับการคิดมีผลกับทุกงานที่ใช้รุ่น 5.x</span>
+            </p>
+            <p className="text-xs text-slate-500">มีผลกับ: {followers.map((r) => r.th).join(" · ") || "ยังไม่มีงานที่ทำตามรุ่นหลัก"} · ย้อนกลับได้จากแจ้งเตือนหลังเปลี่ยน</p>
+          </div>
+        ) : ""} />
+    </section>
   );
 }
 

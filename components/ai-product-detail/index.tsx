@@ -13,7 +13,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { ERPModal } from "@/components/modal";
-import { useAuth } from "@/components/auth";
+import { useAuth, usePermission } from "@/components/auth";
+import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { useFormDraft } from "@/components/form/use-form-draft";
@@ -27,7 +28,7 @@ import {
 } from "@/lib/ai-draft-setup";
 import { CreateTagModal, EditTagModal, ImageStrip, MaterialRuleEditor, RefSelect, RuleQuickEditor, TemplatePicker, TopicSubInline, WarrantySelect, useDraftSetup, type ImageGroupKey, type MatchedRule } from "@/components/ai-product-detail/wizard-parts";
 import { apiFetch } from "@/lib/api";
-import { AI_MODEL_CHOICES, productDetailCostThb } from "@/lib/ai-caption-models";
+import { AI_MODEL_CHOICES, productDetailCostThb, type ReasoningEffort } from "@/lib/ai-caption-models";
 import { ancestorTagsOf, type TagGroupLike } from "@/lib/tag-hierarchy";
 import { Spinner } from "@/components/spinner";
 import { useTickCatalog } from "@/components/tick-list-field";
@@ -83,47 +84,71 @@ const CFG_FIELDS: { field: string; label: string; en: string; hint: string }[] =
 type TagRow = { id: string; name: string; name_en?: string | null; group_id?: string | null };
 
 /**
- * เลือกโมเดล AI ที่ใช้เขียน (เก็บที่ ui_config key = ai_product_model)
- * รายการรุ่น + ราคา = ของกลาง lib/ai-caption-models (เพิ่มรุ่นที่นั่นที่เดียว) · ราคาต่อสินค้า 1 ตัว = productDetailCostThb
+ * เลือกโมเดล AI ที่ใช้เขียนรายละเอียดสินค้า — เก็บที่ศูนย์ AI (paid_service_settings key ai.product_detail) ที่เดียว
+ * (เจ้าของเลือก 2026-11-27: เลิกเก็บแยกที่ ui_config ai_product_model) · "ตามรุ่นหลัก" = ไม่ตั้งเฉพาะ ใช้รุ่นหลักของทั้งระบบ
+ * เห็นเฉพาะผู้มีสิทธิ์ admin.paid_services (มีราคา — พนักงานเห็นแค่จำนวนครั้ง) · เปลี่ยนแล้วย้อนกลับได้จากแจ้งเตือน
+ * รายการรุ่น + ราคา = ของกลาง lib/ai-caption-models · ราคาต่อสินค้า 1 ตัว = productDetailCostThb (ตามระดับการคิดที่ตั้ง)
  */
 const fmtBaht = (n: number) => (n < 1 ? n.toFixed(2) : n.toFixed(1));
-const MODEL_CHOICES = AI_MODEL_CHOICES.map((m) => ({ ...m, perItem: productDetailCostThb(m) }));
+const PRODUCT_DETAIL_SERVICE = "ai.product_detail";
 
 function ModelPicker() {
   const t = useT();
-  const [model, setModel] = useState<string | null>(null);
+  const toast = useToast();
+  const canManage = usePermission("admin.paid_services");
+  const [own, setOwn] = useState<string | null | undefined>(undefined);   // undefined = กำลังโหลด · null = ตามรุ่นหลัก
+  const [main, setMain] = useState<{ model: string; effort: ReasoningEffort } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    apiFetch("/api/ui-config?key=ai_product_model").then((r) => r.json())
-      .then((j) => setModel(String((j.value ?? {}).model ?? "gpt-4o-mini")))
-      .catch(() => setModel("gpt-4o-mini"));
-  }, []);
+    if (!canManage) return;
+    apiFetch(`/api/admin/paid-services?view=model&key=${PRODUCT_DETAIL_SERVICE}`).then((r) => r.json())
+      .then((j) => { if (j.error) throw new Error(j.error); setOwn(j.model ?? null); setMain(j.main ?? null); })
+      .catch(() => { setOwn(null); setMsg(tr("โหลดรุ่นที่ตั้งไว้ไม่สำเร็จ", "Couldn't load the model setting")); });
+  }, [canManage]);
 
-  const save = async (id: string) => {
+  const choices = useMemo(() => AI_MODEL_CHOICES.map((m) => ({ ...m, perItem: productDetailCostThb(m, main?.effort) })), [main?.effort]);
+
+  const save = async (id: string, isUndo = false) => {
+    const prev = own ?? "";
     setBusy(true); setMsg("");
     try {
-      const j = await apiFetch("/api/ui-config", {
+      const j = await apiFetch("/api/admin/paid-services", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "ai_product_model", value: { model: id } }),
+        body: JSON.stringify({ key: PRODUCT_DETAIL_SERVICE, model: id }),
       }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setModel(id); setMsg(t("บันทึกแล้ว — กด “ให้คิดใหม่” เพื่อใช้โมเดลนี้", "Saved — press “Redraft” to use this model"));
+      setOwn(j.data?.model ?? null);
+      setMsg(t("บันทึกแล้ว — กด “ให้คิดใหม่” เพื่อใช้โมเดลนี้", "Saved — press “Redraft” to use this model"));
+      if (isUndo) toast.success(t("ย้อนรุ่นกลับแล้ว", "Model reverted"));
+      else toast.undo(t(`ใช้ ${id || "รุ่นหลัก"} เขียนรายละเอียดสินค้าแล้ว`, `Now writing with ${id || "the main model"}`), () => save(prev, true));
     } catch (e) { setMsg(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setBusy(false); }
   };
 
+  if (!canManage) return null;
+  const model = own === undefined ? null : own ?? "";
+  const mainPer = main ? choices.find((m) => m.id === main.model)?.perItem : undefined;
+
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-2.5 mb-2">
       <p className="text-[12px] font-medium text-slate-600 mb-1.5">
-        🧠 {t("โมเดล AI ที่ใช้เขียน", "AI model for writing")} <span className="font-normal text-slate-400">{t("· ยิ่งแพงยิ่งเขียนดี — ราคาต่อสินค้า 1 ตัว (รูป ~5 ใบ)", "· pricier writes better — cost per product (~5 images)")}</span>
+        <Icon name="sparkles" /> {t("โมเดล AI ที่ใช้เขียน", "AI model for writing")} <span className="font-normal text-slate-400">{t("· ยิ่งแพงยิ่งเขียนดี — ราคาต่อสินค้า 1 ตัว (รูป ~5 ใบ)", "· pricier writes better — cost per product (~5 images)")}</span>
       </p>
       <div className="space-y-1">
-        {MODEL_CHOICES.map((m) => {
+        <button type="button" disabled={busy || own === undefined} onClick={() => void save("")}
+          className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition ${model === ""
+            ? "border-fuchsia-300 bg-fuchsia-50" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-50`}>
+          <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${model === "" ? "border-fuchsia-500 bg-fuchsia-500" : "border-slate-300"}`} />
+          <span className="text-[12.5px] font-medium text-slate-700 w-[110px] shrink-0">{t("ตามรุ่นหลัก", "Main model")}</span>
+          <span className="text-[11.5px] text-slate-500 flex-1 min-w-0">{main ? `${main.model} · ${t("ตั้งที่ศูนย์ AI ใช้ร่วมงานเขียนทั้งระบบ", "set in AI center, shared by all writing tasks")}` : "…"}</span>
+          {mainPer !== undefined && <span className="text-[11.5px] font-semibold text-slate-600 tabular-nums shrink-0">~{fmtBaht(mainPer)} {t("บาท", "THB")}</span>}
+        </button>
+        {choices.map((m) => {
           const on = model === m.id;
           return (
-            <button key={m.id} type="button" disabled={busy} onClick={() => void save(m.id)}
+            <button key={m.id} type="button" disabled={busy || own === undefined} onClick={() => void save(m.id)}
               className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition ${on
                 ? "border-fuchsia-300 bg-fuchsia-50" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-50`}>
               <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${on ? "border-fuchsia-500 bg-fuchsia-500" : "border-slate-300"}`} />
@@ -135,8 +160,9 @@ function ModelPicker() {
         })}
       </div>
       {msg && <p className="mt-1.5 text-[11.5px] text-slate-500">{msg}</p>}
+      <a href="/admin/paid-services" className="mt-1 inline-block text-[11px] text-blue-600 hover:underline">{t("ตั้งรุ่นหลัก / ระดับการคิด ที่ศูนย์ AI →", "Set main model / thinking level in AI center →")}</a>
       <p className="mt-1 text-[11px] text-slate-400">
-        {t("ทั้งระบบ 1,482 สินค้า:", "All 1,482 products:")} {MODEL_CHOICES.filter((m) => ["gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.4"].includes(m.id))
+        {t("ทั้งระบบ 1,482 สินค้า:", "All 1,482 products:")} {choices.filter((m) => ["gpt-4.1-mini", "gpt-5.4-mini", "gpt-5.4"].includes(m.id))
           .map((m) => `${m.id} ≈ ${Math.round(m.perItem * 1482).toLocaleString()} ${t("บาท", "THB")}`).join(" · ")}
       </p>
     </div>

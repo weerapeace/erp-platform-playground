@@ -18,6 +18,10 @@
  *   GET คืน access { <key>: { mode, roles, users } } + roles [{ key, label }] (erp_roles) + access_users [{ user_id, name }]
  *   GET services[].call_tokens = { in, out, calls, source: history|estimate } — จำนวนคำเฉลี่ยต่อครั้ง (90 วัน) ใช้คิด "ราคาต่อครั้ง" ของแต่ละรุ่น
  *   GET services[].used_model = รุ่นที่ใช้จริงครั้งล่าสุด (ไว้บอกราคาของ "ค่าเดิมของระบบ" เมื่อยังไม่ได้เลือกรุ่น)
+ * รุ่นหลักของทั้งระบบ (แบบ B · 2026-11-27): GET คืน main { model, effort, updated_at, saved } + effort_choices + model_history (ประวัติเปลี่ยนรุ่น 10 รายการ)
+ *   services[].calls_30d = ครั้งที่สำเร็จ 30 วันล่าสุด (ไว้ประมาณค่าใช้จ่ายก่อนเปลี่ยนรุ่น) · services[].modelTier = "main" = ทำตามรุ่นหลัก
+ * PATCH { main: { model?, effort? } }  เปลี่ยนรุ่นหลัก / ระดับการคิด (ui_config ai_main_model · audit entity ai_main_model)
+ * GET ?view=model&key=<service>  → { main, model (ตั้งเฉพาะ | null), effective, follows_main } — เบา ไว้ใช้ในป๊อป AI รายละเอียดสินค้า
  * ทะเบียน = lib/paid-services · ด่านกลาง = lib/paid-services-server
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -30,9 +34,40 @@ import { openAiKey } from "@/lib/ai-caption";
 import { emailProvider } from "@/lib/email";
 import {
   AUTO_USER_LABEL, budgetState, callCostThb, cleanAccess, DEFAULT_CALL_TOKENS, effectiveChoice, type ProviderChoice, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_ACCESS_KEY, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES, type QuotaUnit,
-  paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
+  followsMain, paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
 import { avgCallTokens, callTokensFor, checkBudgetAlerts, effectiveModel, invalidateServiceSettings, loadAccess, loadBudget } from "@/lib/paid-services-server";
+import { loadMainSetting } from "@/lib/ai-main-model-server";
+import { AI_MAIN_MODEL_KEY, AI_MODEL_CHOICES, cleanMainSetting, EFFORT_CHOICES, isEffort } from "@/lib/ai-caption-models";
+
+/** ครั้งที่สำเร็จ 30 วันล่าสุด รายบริการ (รวมทุกที่) — ไว้ประมาณ "เปลี่ยนรุ่นแล้วเดือนหนึ่งแพงขึ้นเท่าไหร่" */
+async function calls30d(): Promise<Map<string, number>> {
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const out = new Map<string, number>();
+  for (let from = 0; from < 200_000; from += 10_000) {
+    const { data, error } = await supabaseAdmin().from(USAGE).select("key").gte("at", since).eq("ok", true).not("model", "is", null).range(from, from + 9_999);
+    if (error) break;
+    for (const r of (data ?? []) as Array<{ key: string }>) { const k = splitPlaceKey(r.key).key; out.set(k, (out.get(k) ?? 0) + 1); }
+    if ((data ?? []).length < 10_000) break;
+  }
+  return out;
+}
+
+/** ประวัติเปลี่ยนรุ่น (รุ่นหลัก + ตั้งเฉพาะรายงาน) 10 รายการล่าสุด — จาก audit_logs */
+async function modelHistory(): Promise<Array<{ at: string; who: string | null; what: string; from: unknown; to: unknown }>> {
+  const { data } = await supabaseAdmin().from("audit_logs").select("created_at, entity_type, metadata").in("entity_type", ["ai_main_model", SETTINGS]).order("created_at", { ascending: false }).limit(60);
+  const out: Array<{ at: string; who: string | null; what: string; from: unknown; to: unknown }> = [];
+  for (const r of (data ?? []) as Array<{ created_at: string; entity_type: string; metadata: Record<string, unknown> | null }>) {
+    const m = r.metadata ?? {}; const ch = (m.changes ?? {}) as Record<string, { from: unknown; to: unknown }>;
+    const who = typeof m.actor === "string" ? m.actor : null;
+    if (r.entity_type === "ai_main_model") {
+      if (ch.model) out.push({ at: r.created_at, who, what: "รุ่นหลัก", from: ch.model.from, to: ch.model.to });
+      if (ch.effort) out.push({ at: r.created_at, who, what: "ระดับการคิด", from: ch.effort.from, to: ch.effort.to });
+    } else if (ch.model) out.push({ at: r.created_at, who, what: String(m.label ?? m.key ?? ""), from: ch.model.from ?? "ค่าเดิม", to: ch.model.to ?? "ค่าเดิม" });
+    if (out.length >= 10) break;
+  }
+  return out.slice(0, 10);
+}
 
 /** รุ่นที่ฟีเจอร์นี้ใช้จริงครั้งล่าสุด (ยังไม่ได้เลือกรุ่นในศูนย์ = รู้ว่า "ค่าเดิม" คือรุ่นไหน) */
 async function lastUsedModel(key: string): Promise<string | null> {
@@ -77,6 +112,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const sp = new URL(request.url).searchParams;
   if (sp.get("view") === "history") return history(sp);
+  if (sp.get("view") === "model") {
+    const svc = paidService(sp.get("key") ?? "");
+    if (!svc || svc.kind !== "ai_chat") return NextResponse.json({ error: "ไม่พบรายการนี้ในทะเบียน" }, { status: 404 });
+    const [main, own] = await Promise.all([loadMainSetting(true), admin.from(SETTINGS).select("model").eq("key", svc.key).maybeSingle()]);
+    const model = ((own.data as { model?: string | null } | null)?.model) || null;
+    return NextResponse.json({ main, model, effective: await effectiveModel(svc.key, null), follows_main: followsMain(svc), error: null });
+  }
   const monthStart = monthStartBangkokIso();
   const monthRows: Array<{ key: string; ok: boolean; est_cost_thb: number | null; tokens_in: number | null; tokens_out: number | null; user_id: string | null }> = [];
   for (let from = 0; from < 200_000; from += 10_000) {
@@ -85,13 +127,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     monthRows.push(...((data ?? []) as typeof monthRows));
     if ((data ?? []).length < 10_000) break;
   }
-  const [settings, recent, budget, tokMap, access, rolesRes] = await Promise.all([
+  const [settings, recent, budget, tokMap, access, rolesRes, main, c30, mHistory] = await Promise.all([
     admin.from(SETTINGS).select("*"),
     admin.from(USAGE).select("key, at, model, ok").order("at", { ascending: false }).limit(5000),
     loadBudget(true),
     avgCallTokens(true),
     loadAccess(true),
     admin.from("erp_roles").select("key, label, active, sort_order").order("sort_order", { ascending: true }),
+    loadMainSetting(true),
+    calls30d(),
+    modelHistory(),
   ]);
   if (settings.error) return NextResponse.json({ services: [], error: "โหลดค่าตั้งไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
 
@@ -145,6 +190,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         return { in: p.in, out: p.out, calls: 0, source: "estimate" as const };
       })() : null,
       month: byKey.get(s.key) ?? emptyStat(),
+      calls_30d: c30.get(s.key) ?? 0,
       last_used_at: last.get(s.key) ?? null,
       updated_at: (st?.updated_at as string | null) ?? null,
       updated_by_name: (st?.updated_by_name as string | null) ?? null,
@@ -181,7 +227,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const access_users = [...new Set(accessUids)].map((id) => ({ user_id: id, name: names.get(id) ?? "ผู้ใช้ (ลบแล้ว)" }));
   return NextResponse.json({
     services, totals, budget, budget_state: budgetState(totals.cost_thb, budget), by_user, count_usage: countUsage, count_usage_thb: countUsageThb, count_users,
-    access, roles, access_users, month_start: monthStart, model_choices: PAID_MODEL_CHOICES, error: null,
+    access, roles, access_users, month_start: monthStart, model_choices: PAID_MODEL_CHOICES,
+    main, effort_choices: EFFORT_CHOICES, model_history: mHistory, error: null,
   });
 }
 
@@ -191,6 +238,26 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const actor = await requestActor(supabaseFromRequest(request));
+
+  // ── รุ่นหลักของทั้งระบบ + ระดับการคิด (ใช้กับงานเขียน/คิด · ย้อนกลับ = ส่งค่าเดิมกลับมา)
+  if (body.main && typeof body.main === "object") {
+    const raw = body.main as { model?: unknown; effort?: unknown };
+    if (raw.model !== undefined && !AI_MODEL_CHOICES.some((m) => m.id === raw.model)) return NextResponse.json({ error: "โมเดลไม่อยู่ในรายการที่เลือกได้" }, { status: 400 });
+    if (raw.effort !== undefined && !isEffort(raw.effort)) return NextResponse.json({ error: "ระดับการคิดไม่ถูกต้อง" }, { status: 400 });
+    const before = await loadMainSetting(true);
+    const next = cleanMainSetting({ model: raw.model ?? before.model, effort: raw.effort ?? before.effort });
+    const { error } = await admin.from("ui_config").upsert({ key: AI_MAIN_MODEL_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return NextResponse.json({ error: "บันทึกรุ่นหลักไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
+    invalidateServiceSettings();
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    if (before.model !== next.model) changes.model = { from: before.model, to: next.model };
+    if (before.effort !== next.effort) changes.effort = { from: before.effort, to: next.effort };
+    if (Object.keys(changes).length || !before.saved) {
+      await writeAudit(admin, { action: "update", entityType: "ai_main_model", entityId: null, actorId: actor.id, actorName: actor.name,
+        metadata: { label: "รุ่นหลักของทั้งระบบ", changes, first_save: !before.saved } });
+    }
+    return NextResponse.json({ data: { main: await loadMainSetting(true), before: { model: before.model, effort: before.effort }, model_history: await modelHistory() }, error: null });
+  }
 
   // ── ตั้งงบต่อเดือน
   if (body.budget !== undefined) {
