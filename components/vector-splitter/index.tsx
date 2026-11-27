@@ -24,6 +24,7 @@ import {
 } from "@/lib/vector-split";
 import { openVectorFile, canvasToPng, type VectorSource } from "./render";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
+import type { AssetRow } from "@/app/api/assets/shared";
 
 type Piece = { id: number; box: Box; selected: boolean; name?: string };
 type Preview = { url: string; scale: number; data: ImageData };
@@ -43,7 +44,9 @@ function looksWhiteBacked(d: ImageData): boolean {
 
 export function VectorSplitterModal({ initialFile, collections, defaultCollectionId, actor, onClose, onDone }: {
   initialFile?: File | null; collections: AssetCollection[]; defaultCollectionId?: string | null; actor?: string | null;
-  onClose: () => void; onDone: () => void;
+  onClose: () => void;
+  /** กด "เสร็จ" · saved = PNG ชิ้นที่บันทึกสำเร็จ (ไม่รวมไฟล์ต้นฉบับ) — ตัวเลือกรูป (AssetPicker) ใช้ติ๊กชิ้นให้เลย */
+  onDone: (saved: AssetRow[]) => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -68,6 +71,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   const [drag, setDrag] = useState<{ x: number; y: number; x2: number; y2: number } | null>(null);
   const [progress, setProgress] = useState<UploadProgressState | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [saved, setSaved] = useState<AssetRow[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const cols = useMemo(() => [...collections, ...extraCols.filter((x) => !collections.some((c) => c.id === x.id))], [collections, extraCols]);
@@ -193,7 +197,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
     const res = await apiFetch("/api/assets", { method: "POST", body: fd });
     const j = await res.json().catch(() => ({ error: res.status === 413 ? t("ไฟล์ใหญ่เกินที่ระบบรับได้", "File too large") : t("อัปโหลดไม่สำเร็จ", "Upload failed") }));
     if (!res.ok || j.error) throw new Error(j.error || t("อัปโหลดไม่สำเร็จ", "Upload failed"));
-    return j.data?.id as string;
+    return j.data as AssetRow;
   };
   const save = async () => {
     if (!file || !src || !preview) return;
@@ -206,18 +210,19 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
     let step = 0;
     let sourceId: string | null = null;
     const failed: Result["failed"] = [];
+    const savedRows: AssetRow[] = [];
     try {
       if (keepOriginal) {
         step++;
         setProgress({ name: file.name, size: file.size, pct: null, label: t("เก็บไฟล์ต้นฉบับ", "Saving original"), count: { current: step, total } });
         const common: Record<string, string> = { tags: "ไฟล์ต้นฉบับ", ...(originalInAlbum && albumIds ? { collection_ids: albumIds } : {}) };
         try {
-          if (file.size <= SMALL_UPLOAD_BYTES) sourceId = await postAsset(file, { ...common, title: file.name });
+          if (file.size <= SMALL_UPLOAD_BYTES) sourceId = (await postAsset(file, { ...common, title: file.name }))?.id ?? null;
           else {
             // ไฟล์จริงใหญ่เกินที่เว็บรับ (4MB) → เก็บภาพรวมแผ่นแทน (ผูกชิ้นได้เหมือนกัน · ไฟล์จริงเก็บ NAS/Drive แล้วใส่ path ในรายละเอียด)
             const sheet = await canvasToPng(await src.renderRegion({ x: 0, y: 0, w: src.width, h: src.height }, preview.scale));
-            sourceId = await postAsset(new File([sheet], `${file.name.replace(/\.[^.]+$/, "")}_sheet.png`, { type: "image/png" }),
-              { ...common, title: `${file.name} (${t("ภาพรวมแผ่น — ไฟล์จริงใหญ่เกิน 4MB", "sheet preview — original over 4MB")})` });
+            sourceId = (await postAsset(new File([sheet], `${file.name.replace(/\.[^.]+$/, "")}_sheet.png`, { type: "image/png" }),
+              { ...common, title: `${file.name} (${t("ภาพรวมแผ่น — ไฟล์จริงใหญ่เกิน 4MB", "sheet preview — original over 4MB")})` }))?.id ?? null;
           }
         } catch (e) { failed.push({ name: file.name, error: e instanceof Error ? e.message : String(e) }); }
       }
@@ -235,14 +240,16 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
           }
           const blob = await canvasToPng(canvas);
           if (blob.size > SMALL_UPLOAD_BYTES) throw new Error(t("PNG ใหญ่เกิน 4MB — เลือกขนาดเล็กลง", "PNG over 4MB — pick a smaller size"));
-          await postAsset(new File([blob], `${name}.png`, { type: "image/png" }), {
+          const row = await postAsset(new File([blob], `${name}.png`, { type: "image/png" }), {
             title: name, width: String(canvas.width), height: String(canvas.height), tags: "แยกจากไฟล์ออกแบบ",
             ...(albumIds ? { collection_ids: albumIds } : {}), ...(sourceId ? { source_asset_id: sourceId } : {}),
           });
+          if (row) savedRows.push(row);
         } catch (e) { failed.push({ name, error: e instanceof Error ? e.message : String(e) }); }
       }
     } finally { setProgress(null); }
     const ok = selected.length - failed.filter((f) => f.name !== file.name).length;
+    setSaved((prev) => [...prev, ...savedRows]);   // "แยกไฟล์อื่นต่อ" = สะสมชิ้นของทุกไฟล์
     setResult({ ok, failed, album: cols.find((c) => c.id === albumId)?.name ?? null });
     if (ok) toast.success(`${t("บันทึก", "Saved")} ${ok} ${t("ชิ้นเข้าคลังแล้ว", "pieces to the library")}`);
   };
@@ -254,7 +261,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   const footer = result ? (
     <div className="flex justify-end gap-2 w-full">
       <button onClick={() => { setResult(null); setFile(null); setSrc(null); setPreview(null); setPieces([]); }} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("แยกไฟล์อื่นต่อ", "Split another file")}</button>
-      <button onClick={onDone} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("เสร็จ", "Done")}</button>
+      <button onClick={() => onDone(saved)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("เสร็จ", "Done")}</button>
     </div>
   ) : (
     <div className="flex items-center gap-2 w-full">

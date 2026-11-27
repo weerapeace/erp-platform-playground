@@ -15,6 +15,9 @@
  *    ซ่อนเมื่อ: ช่องวิดีโอ/เอกสารอย่างเดียว · ล็อกอัลบั้ม · ต้องมีโฟลเดอร์ Drive
  *
  * ⏱ แท็บ "ใช้ล่าสุด" (2026-11-17) = รูปที่ฉันกด "ใช้" ล่าสุด 30 รูป (จำในเครื่อง · lib/recent-picks RECENT_KEYS.assets) · ไม่มีประวัติ = ไม่โชว์แท็บ
+ * ✂️ แท็บ "แยกชิ้นจากไฟล์ออกแบบ" (2026-11-27) = โยน .ai/.eps/.pdf/.svg → ตัวแยกชิ้นกลาง (components/vector-splitter) → ชิ้นที่บันทึกถูกติ๊กให้เลย
+ *    โยน .ai/.eps ในแท็บอัปโหลด = เปิดตัวแยกชิ้นให้เอง · ช่องรูปเท่านั้น (เงื่อนไขเดียวกับแท็บ SAMPLE)
+ * 📁 เลือกอัลบั้มแม่ + ติ๊ก "รวมอัลบั้มย่อย" (ค่าเริ่ม) = โชว์รูปในอัลบั้มย่อยทั้งต้นด้วย (/api/assets?collection_ids=)
  * 🔢 เลือกหลายรูป: ลำดับที่ส่งให้โมดูล = ลำดับที่คลิก · ช่องรูปโชว์เลข 1, 2, 3 …
  *
  * ตัวอย่าง:
@@ -44,6 +47,8 @@ import {
 import type { SamplePhoto } from "@/lib/sample-images";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { useUserPref } from "@/lib/use-user-pref";
+import { albumDescendantIds } from "@/lib/album-options";
+import { VECTOR_ACCEPT } from "@/lib/vector-split";
 
 const RECENT_ASSET_LIMIT = 30;
 
@@ -52,6 +57,9 @@ const SamplePickerPanel = dynamic(() => import("@/components/sample-images/picke
   ssr: false,
   loading: () => <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
 });
+
+// ✂️ ตัวแยกชิ้นจากไฟล์ออกแบบ (ของกลาง) — โหลดโค้ดเฉพาะตอนเปิด
+const VectorSplitterModal = dynamic(() => import("@/components/vector-splitter").then((m) => m.VectorSplitterModal), { ssr: false });
 
 /** รูปจาก SAMPLE Images → แถวชั่วคราวไว้โชว์ว่าเลือกแล้ว (id จริงของคลัง) — ตอนกดใช้ จะดึงแถวคลังตัวจริงมาแทน */
 function sampleAsRow(p: SamplePhoto): AssetRow {
@@ -95,11 +103,13 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const firstKind = typeFilter ?? kinds?.[0] ?? "";
   const kindTabs = !typeFilter && (kinds?.length ?? 0) > 1 ? kinds! : null;
   const toast = useToast();
-  const [tab, setTab] = useState<"library" | "upload" | "sample" | "recent" | "sheet">("library");
+  const [tab, setTab] = useState<"library" | "upload" | "sample" | "recent" | "sheet" | "split">("library");
+  const [splitter, setSplitter] = useState<{ file: File | null } | null>(null);   // ✂️ ตัวแยกชิ้นที่เปิดอยู่
   const [recentAssets, setRecentAssets] = useState<AssetRow[]>([]);
   useEffect(() => { if (open) setRecentAssets(loadRecent<AssetRow>(RECENT_KEYS.assets)); }, [open]);
   // 📸 SAMPLE Images: ช่องที่รับรูปได้เท่านั้น (ไม่ใช่ช่องวิดีโอ/เอกสารอย่างเดียว · ไม่ล็อกอัลบั้ม · ไม่บังคับโฟลเดอร์ Drive)
   const sampleOk = !lockCollectionName && !requireDriveFolder && (!typeFilter || typeFilter === "image") && (!kinds || kinds.includes("image"));
+  const splitOk = sampleOk;   // ✂️ ได้ PNG = รูป → เงื่อนไขเดียวกับ SAMPLE
   const fromSample = useRef<Set<string>>(new Set());   // id ที่เลือกมาจากแท็บ SAMPLE (ตอนกดใช้ ดึงแถวคลังจริงมาแทน)
   const [rows, setRows] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +128,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [confirming, setConfirming] = useState(false);
   const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
   const [tagId, setTagId] = useState("");            // แท็ก
+  const [withSub, setWithSub] = useState(true);      // 📁 รวมอัลบั้มย่อยของอัลบั้มที่เลือก
   const [collections, setCollections] = useState<{ id: string; name: string; count: number; parent_id?: string | null; group?: string | null }[]>([]);
   const [tags, setTags] = useState<{ id: string; name: string; count: number }[]>([]);
   const [selected, setSelected] = useState<Map<string, AssetRow>>(new Map());
@@ -146,18 +157,22 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     if (c && c.id !== collectionId) setCollectionId(c.id);
   }, [open, lockCollectionName, collections]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // อัลบั้มย่อยทั้งต้นของอัลบั้มที่เลือก (string = ค่าคงที่ ไม่โหลดซ้ำทุก render)
+  const subIds = collectionId ? albumDescendantIds(collections, collectionId) : [];
+  const subKey = withSub && !lockCollectionName ? subIds.join(",") : "";
   const buildParams = useCallback((off: number) => {
     const p = new URLSearchParams({ status: "active", limit: String(PAGE), offset: String(off) });
     if (query) p.set("search", query);
     if (type) p.set("type", type);
-    if (collectionId) p.set("collection_id", collectionId);
+    if (collectionId && subKey) p.set("collection_ids", `${collectionId},${subKey}`);
+    else if (collectionId) p.set("collection_id", collectionId);
     if (tagId) p.set("tag", tagId);
     // ที่มา: เลือกเอง → ใช้ค่านั้น · ไม่เลือก → ค้น/กรองอัลบั้ม/แท็ก = รวมทุกที่มา ไม่งั้นเฉพาะรูปอัปเอง
     const eff = source || ((query || collectionId || tagId) ? "all" : "upload");
     p.set("source", eff);
     if (requireDriveFolder) p.set("has_folder", "1");   // โชว์เฉพาะรูปที่มีโฟลเดอร์ Drive แล้ว
     return p;
-  }, [query, type, source, collectionId, tagId, requireDriveFolder]);
+  }, [query, type, source, collectionId, subKey, tagId, requireDriveFolder]);
   const load = useCallback(async () => {   // โหลดหน้าแรก (รีเซ็ตตอนเปลี่ยนตัวกรอง/ค้นหา)
     const seq = ++reqSeq.current;
     if (source === "parent") { setRows([]); setTotal(0); setLoading(false); return; }   // ดูเฉพาะรูปจาก Parent SKU
@@ -272,6 +287,19 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
     onSelect(final);
     onClose();
   };
+  // ✂️ แยกชิ้นเสร็จ → ติ๊กชิ้นที่บันทึกให้เลย (ช่องรูปเดียว = ชิ้นแรก) แล้วกลับแท็บคลัง
+  const onSplitDone = (saved: AssetRow[]) => {
+    setSplitter(null);
+    if (!saved.length) return;
+    setSelected((m) => {
+      const n = new Map(multiple ? m : []);
+      for (const a of multiple ? saved : saved.slice(0, 1)) n.set(a.id, a);
+      return n;
+    });
+    if (type && type !== "image") setType(kindTabs?.includes("image") ? "image" : ""); else void load();
+    setTab("library");
+    toast.success(multiple ? `ติ๊กชิ้นที่แยกไว้ให้แล้ว ${saved.length} รูป` : `เลือก ${saved[0].title} ให้แล้ว (ช่องนี้ใช้ได้รูปเดียว)`);
+  };
   // ใช้ล่าสุด — กรองให้ตรงชนิดที่ช่องนี้รับ
   const recentShown = recentAssets.filter((a) => (typeFilter ? a.asset_type === typeFilter : kindTabs ? kindTabs.includes(a.asset_type as AssetType) : true));
   const orderOf = (id: string) => (multiple ? Array.from(selected.keys()).indexOf(id) + 1 : 0);
@@ -295,7 +323,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         </div>
       }>
       {/* tabs */}
-      <div className="flex gap-4 border-b border-slate-200 mb-3">
+      <div className="flex gap-4 border-b border-slate-200 mb-3 overflow-x-auto whitespace-nowrap">
         <button onClick={() => setTab("library")}
           className={`pb-2 text-sm ${tab === "library" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>📁 เลือกจากคลัง</button>
         {sampleOk && (
@@ -309,6 +337,10 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         {recentShown.length > 0 && !lockCollectionName && (
           <button onClick={() => setTab("recent")}
             className={`pb-2 text-sm ${tab === "recent" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}>⏱ ใช้ล่าสุด</button>
+        )}
+        {splitOk && (
+          <button onClick={() => setTab("split")}
+            className={`pb-2 text-sm inline-flex items-center gap-1 whitespace-nowrap ${tab === "split" ? "border-b-2 border-indigo-500 text-indigo-700 font-medium" : "text-slate-500"}`}><Icon name="scissors" /> แยกชิ้นจากไฟล์ออกแบบ</button>
         )}
         {!lockCollectionName && (
           <button onClick={() => setTab("upload")}
@@ -357,6 +389,11 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
               <option value="all">ทุกที่มา</option>
             </select>
             <AlbumSelect albums={collections} value={collectionId} onChange={setCollectionId} compact showCount noneLabel="ทุกอัลบั้ม" className="w-48 max-w-full" />
+            {subIds.length > 0 && (
+              <label className="inline-flex items-center gap-1 h-8 px-2 text-[12px] rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer" title="โชว์รูปในอัลบั้มย่อยของอัลบั้มนี้ด้วย">
+                <input type="checkbox" checked={withSub} onChange={(e) => setWithSub(e.target.checked)} /> รวมอัลบั้มย่อย ({subIds.length})
+              </label>
+            )}
             <select value={tagId} onChange={(e) => setTagId(e.target.value)} title="แท็ก"
               className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
               <option value="">🏷 ทุกแท็ก</option>
@@ -402,10 +439,12 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       ) : tab === "sheet" && designSheets ? (
         <DesignSheetImagesPanel sheets={designSheets} grid={tileGrid}
           renderTile={(a) => <AssetTile a={a} on={selected.has(a.id)} order={orderOf(a.id)} onPick={pick} />} />
+      ) : tab === "split" ? (
+        <SplitTab onFile={(file) => setSplitter({ file })} />
       ) : tab === "sample" ? (
         <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (
-        <UploadTab actor={actor} typeFilter={typeFilter} kinds={kinds} albums={collections} viewingAlbumId={collectionId}
+        <UploadTab onVectorFile={splitOk ? (file) => setSplitter({ file }) : undefined} actor={actor} typeFilter={typeFilter} kinds={kinds} albums={collections} viewingAlbumId={collectionId}
           onCreateAlbum={async (name) => {
             try {
               const j = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json());
@@ -429,7 +468,32 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
           }} />
       )}
       </div>
+      {splitter && (
+        <VectorSplitterModal initialFile={splitter.file} actor={actor} defaultCollectionId={collectionId || null}
+          collections={collections.map((c) => ({ ...c, description: null }))}
+          onClose={() => setSplitter(null)} onDone={onSplitDone} />
+      )}
     </ERPModal>
+  );
+}
+
+/** ✂️ แท็บแยกชิ้น: ลากไฟล์ออกแบบมาวาง / คลิกเลือก → เปิดตัวแยกชิ้นกลาง */
+function SplitTab({ onFile }: { onFile: (f: File) => void }) {
+  const [over, setOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) onFile(f); }}
+      onClick={() => inputRef.current?.click()}
+      className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center ${over ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}>
+      <div className="mb-2 flex justify-center text-3xl text-slate-500"><Icon name="scissors" /></div>
+      <p className="text-sm font-medium text-slate-700">ลากไฟล์ .ai · .eps · .pdf · .svg มาวาง หรือ คลิกเลือก</p>
+      <p className="text-[12px] text-slate-400 mt-1">ระบบหาชิ้นให้อัตโนมัติ · ติ๊ก/ลากกรอบ/รวม/แยก · แปลงเป็น PNG พื้นใสเข้าคลัง → ชิ้นที่แปลงถูกเลือกให้เลย</p>
+      <input ref={inputRef} type="file" accept={VECTOR_ACCEPT} className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onFile(f); }} />
+    </div>
   );
 }
 
@@ -524,7 +588,9 @@ function ParentImagesSection({ hits, loading, query, only, group, onGroup, selec
   );
 }
 
-function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumId, onCreateAlbum }: {
+function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumId, onCreateAlbum, onVectorFile }: {
+  /** ✂️ ส่งมา = โยน .ai/.eps แล้วเปิดตัวแยกชิ้นแทนการอัปทั้งไฟล์ */
+  onVectorFile?: (f: File) => void;
   actor: string | null; typeFilter?: AssetType; kinds?: AssetType[]; onUploaded: (assets: AssetRow[]) => void;
   /** อัปเข้าอัลบั้ม (เจ้าของเลือก 2026-11-27): รายการอัลบั้ม · อัลบั้มที่เปิดดูในแท็บคลัง (ค่าเริ่ม) · สร้างอัลบั้มใหม่ */
   albums: { id: string; name: string; count: number; parent_id?: string | null; group?: string | null }[];
@@ -544,7 +610,8 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumI
   /** ไฟล์ใหญ่/วิดีโอ: แถบ % ของไฟล์ที่กำลังส่ง */
   const [pct, setPct] = useState<{ name: string; pct: number | null } | null>(null);
   const allowed: AssetType[] | null = typeFilter ? [typeFilter] : kinds ?? null;
-  const accept = allowed ? allowed.map((k) => (k === "image" ? "image/*" : k === "video" ? "video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" : "")).filter(Boolean).join(",") || undefined : undefined;
+  const baseAccept = allowed ? allowed.map((k) => (k === "image" ? "image/*" : k === "video" ? "video/mp4,video/webm,video/quicktime,.mp4,.m4v,.webm,.mov" : "")).filter(Boolean).join(",") || undefined : undefined;
+  const accept = baseAccept && onVectorFile ? `${baseAccept},.ai,.eps` : baseAccept;
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -557,10 +624,21 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumI
       img.src = url;
     });
 
-  const handle = async (files: FileList | File[]) => {
+  const handle = async (input: FileList | File[]) => {
+    let files = Array.from(input);
+    // ✂️ .ai / .eps = ไฟล์ออกแบบหลายชิ้น → เปิดตัวแยกชิ้น (ทีละไฟล์) · ไฟล์อื่นอัปตามปกติ
+    if (onVectorFile) {
+      const vec = files.filter((f) => /\.(ai|eps)$/i.test(f.name));
+      if (vec.length) {
+        files = files.filter((f) => !vec.includes(f));
+        if (vec.length > 1) toast.info(`เปิดตัวแยกชิ้นกับ ${vec[0].name} ก่อน — ไฟล์ออกแบบอื่นโยนต่อได้ทีหลัง`);
+        onVectorFile(vec[0]);
+        if (!files.length) return;
+      }
+    }
     setBusy(true);
     const done: AssetRow[] = [];
-    for (const picked of Array.from(files)) {
+    for (const picked of files) {
       // ชนิดจริงจากหัวไฟล์ (บางเครื่องส่ง MP4 มาไม่บอกชนิด)
       const file = await normalizeMediaFile(picked);
       const isVideo = file.type.startsWith("video/");

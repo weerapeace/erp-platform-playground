@@ -33,6 +33,8 @@ export async function GET(request: NextRequest) {
   const search       = (sp.get("search") ?? "").trim();
   const type         = sp.get("type");
   const collectionId = sp.get("collection_id");
+  // หลายอัลบั้มพร้อมกัน (อัลบั้มแม่ + อัลบั้มย่อยทั้งต้น · ตัวเลือกรูปติ๊ก "รวมอัลบั้มย่อย") — คั่นด้วย ,
+  const collectionIdList = (sp.get("collection_ids") ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 300);
   const tag          = sp.get("tag");
   const status       = sp.get("status") ?? "active";
   const source       = sp.get("source") ?? "upload";   // upload | odoo_product | artwork | all
@@ -67,9 +69,10 @@ export async function GET(request: NextRequest) {
 
   // ฟิลเตอร์ตามอัลบั้ม → asset อยู่ได้หลายอัลบั้ม (ผ่าน asset_collection_map)
   let collAssetIds: string[] | null = null;
-  if (collectionId && collectionId !== "none") {
-    const { data: cm } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", collectionId);
-    collAssetIds = (cm ?? []).map((m) => (m as { asset_id: string }).asset_id);
+  if (collectionIdList.length || (collectionId && collectionId !== "none")) {
+    const base = admin.from("asset_collection_map").select("asset_id");
+    const { data: cm } = collectionIdList.length ? await base.in("collection_id", collectionIdList) : await base.eq("collection_id", collectionId!);
+    collAssetIds = [...new Set((cm ?? []).map((m) => (m as { asset_id: string }).asset_id))];
     if (collAssetIds.length === 0)
       return NextResponse.json({ data: [], total: 0, error: null } satisfies AssetListResponse);
   }
