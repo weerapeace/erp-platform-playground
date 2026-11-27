@@ -124,14 +124,18 @@ export type TranscribeResult = { model: string; duration: number; text: string; 
  * ถอดเสียงเป็นข้อความพร้อมเวลา (OpenAI Whisper · ขอเวลาทั้งรายประโยคและรายคำ)
  * ⚠️ ห้ามเรียกตรงจากฟีเจอร์ — ใช้ aiTranscribe("<key>", …) ใน lib/paid-services-server (เทสต์ paid-services-guard บังคับไว้)
  */
-export async function openAiTranscribeRaw(audio: Blob, filename: string, opts: { language?: string; prompt?: string } = {}): Promise<TranscribeResult> {
-  const model = "whisper-1";
+export async function openAiTranscribeRaw(audio: Blob, filename: string, opts: { language?: string; prompt?: string; model?: string } = {}): Promise<TranscribeResult> {
+  // whisper-1 = ได้เวลารายประโยค/รายคำ (ทำซับ) · รุ่น gpt-*-transcribe = แม่นกว่าแต่คืนแค่ข้อความ (ใช้กับคำสั่งเสียงสั้น ๆ)
+  const model = opts.model || "whisper-1";
+  const timed = model === "whisper-1";
   const fd = new FormData();
   fd.append("file", audio, filename);
   fd.append("model", model);
-  fd.append("response_format", "verbose_json");
-  fd.append("timestamp_granularities[]", "segment");
-  fd.append("timestamp_granularities[]", "word");
+  fd.append("response_format", timed ? "verbose_json" : "json");
+  if (timed) {
+    fd.append("timestamp_granularities[]", "segment");
+    fd.append("timestamp_granularities[]", "word");
+  }
   if (opts.language) fd.append("language", opts.language);
   if (opts.prompt) fd.append("prompt", opts.prompt.slice(0, 800));
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${openAiKey()}` }, body: fd });
@@ -139,7 +143,8 @@ export async function openAiTranscribeRaw(audio: Blob, filename: string, opts: {
   if (!res.ok) throw new Error(`ถอดเสียงไม่สำเร็จ: ${(j?.error?.message as string) || `HTTP ${res.status}`}`);
   const num = (v: unknown) => Number(v) || 0;
   return {
-    model, duration: num(j.duration), text: String(j.text ?? ""),
+    // รุ่น gpt-*-transcribe ไม่คืน duration → ใช้ usage.seconds ถ้ามี (ไม่มี = 0 · ผู้เรียกประมาณเอง)
+    model, duration: num(j.duration ?? (j.usage?.type === "duration" ? j.usage.seconds : 0)), text: String(j.text ?? ""),
     segments: (Array.isArray(j.segments) ? j.segments : []).map((s: Record<string, unknown>) => ({ start: num(s.start), end: num(s.end), text: String(s.text ?? "") })),
     words: (Array.isArray(j.words) ? j.words : []).map((w: Record<string, unknown>) => ({ word: String(w.word ?? ""), start: num(w.start), end: num(w.end) })),
   };

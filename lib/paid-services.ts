@@ -58,6 +58,16 @@ const OCR_CHOICES: ProviderChoice[] = [
   { id: "openai", th: "GPT (OpenAI) — อ่านภาษาไทยแม่นกว่า · ~0.02 บาท/รูป", provider: "openai" },
   { id: "cloudflare", th: "Cloudflare AI — ฟรีตามโควตา (ต้องตั้งรหัส Cloudflare)", provider: "cloudflare" },
 ];
+/**
+ * รุ่นถอดเสียงของผู้ช่วยเสียง (เลือกในศูนย์ได้ · ตัวแรก = ค่าเริ่ม) — id = ชื่อรุ่น OpenAI · thbPerMin = ราคา/นาทีของเสียง (36 บาท/USD · ราคา ณ 2026-11)
+ * ใช้คิดค่าใช้จ่ายใน aiTranscribe ด้วย (รุ่นที่ไม่อยู่ในรายการ = ราคา whisper)
+ */
+export const TRANSCRIBE_CHOICES: (ProviderChoice & { thbPerMin: number })[] = [
+  { id: "gpt-4o-transcribe", th: "gpt-4o-transcribe — แม่นสุด · ~0.02 บาท/คำสั่ง", provider: "openai", thbPerMin: 0.216 },
+  { id: "gpt-transcribe", th: "gpt-transcribe — รุ่นใหม่ · ~0.013 บาท/คำสั่ง", provider: "openai", thbPerMin: 0.162 },
+  { id: "gpt-4o-mini-transcribe", th: "gpt-4o-mini-transcribe — ถูกสุด · ~0.01 บาท/คำสั่ง", provider: "openai", thbPerMin: 0.108 },
+  { id: "whisper-1", th: "whisper-1 — รุ่นเก่า · ~0.02 บาท/คำสั่ง", provider: "openai", thbPerMin: 0.216 },
+];
 /** ผู้ให้บริการที่ใช้อยู่ — ที่เลือกไว้ (ถ้ายังมีในตัวเลือก) → ตัวแรก · ไม่มีตัวเลือก = null */
 export function effectiveChoice(svc: PaidService, picked: string | null | undefined): ProviderChoice | null {
   if (!svc.providerChoices?.length) return null;
@@ -94,6 +104,15 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "cf.translate", th: "แปลภาษา (ตัวสำรองฟรี)", en: "Translate (free fallback)", group: "ทั่วทั้งระบบ",
     usedAt: "ใช้เมื่อ GPT ปิด/ล่ม", provider: "cloudflare", kind: "ai_ocr",
     offBehavior: "ข้ามไปใช้ Google แปลฟรีแทน", costHint: "ฟรีตามโควตา (ทำงานเมื่อตั้งรหัส Cloudflare ไว้)", files: ["app/api/ai/translate/route.ts"] },
+  // ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ · components/voice-assistant) — 1 คำสั่ง = ฟัง 1 ครั้ง + เข้าใจ 1 ครั้ง
+  { key: "ai.voice_listen", th: "ผู้ช่วยเสียง — ฟังเสียงเป็นข้อความ", en: "Voice assistant — speech to text", group: "ทั่วทั้งระบบ",
+    usedAt: "ปุ่มไมค์มุมจอ (ทุกหน้า) — กดค้างแล้วพูด", provider: "openai", kind: "per_call",
+    offBehavior: "สลับไปใช้ตัวฟังฟรีของเบราว์เซอร์ (Chrome/Edge/Safari) · เบราว์เซอร์ที่ไม่มีให้พิมพ์แทน",
+    costHint: "~0.01–0.02 บาท/คำสั่ง (พูด ~5 วินาที · ตามรุ่นที่เลือก)", files: ["app/api/voice-assistant/transcribe/route.ts"], providerChoices: TRANSCRIBE_CHOICES },
+  { key: "ai.voice_assistant", th: "ผู้ช่วยเสียง — เข้าใจคำสั่ง (เปิดหน้า · เพิ่ม SKU)", en: "Voice assistant — understand commands", group: "ทั่วทั้งระบบ",
+    usedAt: "ปุ่มไมค์มุมจอ (ทุกหน้า) — ปิดฟีเจอร์นี้ = ปุ่มไมค์ซ่อน · ช่วงทดลอง \"ทุกคน\" = เฉพาะแอดมิน → เปิดให้คนอื่นที่ \"ใครใช้ได้ → เฉพาะที่เลือก\"", provider: "openai", kind: "ai_chat",
+    offBehavior: "ปุ่มไมค์มุมจอซ่อน · ทำงานผ่านเมนูได้ตามปกติ",
+    costHint: "~0.03 บาท/คำสั่ง (gpt-6-luna) · ~0.5 บาท (รุ่นใหญ่)", files: ["app/api/voice-assistant/command/route.ts"], costProfile: { in: 4500, out: 300 } },
   // ── คอนเทนต์ / การตลาด
   { key: "ai.caption", modelTier: "main", th: "เขียนแคปชั่น AI", en: "AI captions", group: "คอนเทนต์ / การตลาด",
     usedAt: "คอนเทนต์ (ทีละช่อง / ทั้งใบ) · อัลบั้มคอนเทนต์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,

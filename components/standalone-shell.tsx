@@ -18,6 +18,10 @@ import { GlobalSearch } from "@/components/global-search";
 import { LangToggle, useT } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
 import { Icon } from "@/components/icon";
+import dynamic from "next/dynamic";
+
+// ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ) — โหลดแยกทีหลัง · โชว์เฉพาะคนที่ศูนย์ AI ให้ใช้
+const VoiceAssistant = dynamic(() => import("@/components/voice-assistant").then((m) => m.VoiceAssistant), { ssr: false });
 
 export function StandaloneShell({
   title, icon, accent = "violet", children,
@@ -97,6 +101,7 @@ export function StandaloneShell({
       <main className="flex-1 flex flex-col">{children}</main>
 
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <VoiceAssistant />
     </div>
   );
 }

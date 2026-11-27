@@ -26,14 +26,16 @@ import { getAi, type AiRunner } from "@/lib/ai";
 import { invalidateMainSetting, loadMainSetting } from "@/lib/ai-main-model-server";
 import type { ReasoningEffort } from "@/lib/ai-caption-models";
 import {
-  accessAllowed, accessDeniedMessage, followsMain, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
+  TRANSCRIBE_CHOICES, accessAllowed, accessDeniedMessage, followsMain, budgetOverMessage, budgetState, callCostThb, callsFromThb, cleanAccess, cleanBudget, countCap, countQuotaOverMessage, DEFAULT_CALL_TOKENS, effectiveChoice, PAID_ACCESS_KEY, quotaUnit, type CallTokens, type ServiceAccess, estimateCostThb, monthKeyBangkok, WEB_SEARCH_CALL_THB, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
   placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
 export type ServiceSetting = { key: string; enabled: boolean; model: string | null; provider: string | null };
 export type UseCtx = { request?: Request | null; userId?: string | null; place?: string | null;
   /** รุ่นที่ "ผู้ดูแล" เลือกเองเฉพาะครั้งนี้ (ชนะค่าที่ตั้งในศูนย์) — route ต้องเช็กสิทธิ์ admin.paid_services + รุ่นอยู่ใน AI_MODEL_CHOICES ก่อนส่ง */
-  forceModel?: string | null };
+  forceModel?: string | null;
+  /** ระดับการคิดของรุ่น 5.x ขึ้นไป (ไม่ส่ง = ระดับของรุ่นหลักที่ศูนย์ AI) — งานที่ต้องตอบไว (ผู้ช่วยเสียง) ส่ง "low" */
+  effort?: ReasoningEffort };
 
 const TTL_MS = 30_000;
 let cache: { at: number; map: Map<string, ServiceSetting> } | null = null;
@@ -306,11 +308,16 @@ export async function aiWebSearch(key: string, system: string, prompt: string, m
 
 /** ค่าถอดเสียง Whisper ≈ US$0.006/นาที (~0.22 บาท) */
 export const TRANSCRIBE_THB_PER_MIN = 0.22;
-/** ถอดเสียงผ่านด่านกลาง — คิดค่าใช้จ่ายตามความยาวเสียง (ไม่ใช่ตามคำ) */
-export async function aiTranscribe(key: string, audio: Blob, filename: string, opts: { language?: string; prompt?: string }, ctx?: UseCtx): Promise<TranscribeResult> {
+/**
+ * ถอดเสียงผ่านด่านกลาง — คิดค่าใช้จ่ายตามความยาวเสียง (ไม่ใช่ตามคำ)
+ * opts.model = รุ่นถอดเสียง (ไม่ส่ง = whisper-1) · opts.secondsHint = ความยาวที่ฝั่งอัดวัดได้ (ใช้คิดเงินเมื่อ API ไม่คืนความยาว)
+ */
+export async function aiTranscribe(key: string, audio: Blob, filename: string, opts: { language?: string; prompt?: string; model?: string; secondsHint?: number }, ctx?: UseCtx): Promise<TranscribeResult> {
   return guardedGpt(key, undefined, ctx, async () => {
-    const r = await openAiTranscribeRaw(audio, filename, opts);
-    return { value: r, model: r.model, tokensIn: 0, tokensOut: 0, extraThb: Math.round((r.duration / 60) * TRANSCRIBE_THB_PER_MIN * 10000) / 10000 };
+    const r = await openAiTranscribeRaw(audio, filename, { language: opts.language, prompt: opts.prompt, model: opts.model });
+    const seconds = r.duration > 0 ? r.duration : Math.max(0, Math.min(120, Number(opts.secondsHint) || 0));
+    const perMin = TRANSCRIBE_CHOICES.find((c) => c.id === r.model)?.thbPerMin ?? TRANSCRIBE_THB_PER_MIN;
+    return { value: { ...r, duration: seconds }, model: r.model, tokensIn: 0, tokensOut: 0, extraThb: Math.round((seconds / 60) * perMin * 10000) / 10000 };
   });
 }
 
@@ -330,7 +337,8 @@ async function guardedGpt<T>(
   const place = resolvePlace(key, ctx?.place);
   const useModel = ctx?.forceModel || (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || (followsMain(paidService(key)) ? main.model : null) || model;
   try {
-    const r = await run(useModel, main.effort);
+    // ระดับการคิด: ฟีเจอร์ขอเอง (เช่น ผู้ช่วยเสียงขอ "low" ให้ตอบไว) → ระดับของรุ่นหลักที่ศูนย์ AI
+    const r = await run(useModel, ctx?.effort ?? main.effort);
     const cost = Math.round((estimateCostThb(r.model, r.tokensIn, r.tokensOut) + r.extraThb) * 10000) / 10000;
     await logServiceUse(key, { model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costThb: cost, userId, place: ctx?.place });
     if (spendCache && spendCache.month === monthKeyBangkok()) {

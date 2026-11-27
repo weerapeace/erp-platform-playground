@@ -32,6 +32,10 @@ import { Icon } from "@/components/icon";
 import { isLegacyIconValue, splitIconColor } from "@/lib/icon-registry";
 import { erpIconDef } from "@/lib/erp-icons";
 import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
+import dynamic from "next/dynamic";
+
+// ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ) — โหลดแยกทีหลัง ไม่ถ่วงการเปิดหน้า · โชว์เฉพาะคนที่ศูนย์ AI ให้ใช้
+const VoiceAssistant = dynamic(() => import("@/components/voice-assistant").then((m) => m.VoiceAssistant), { ssr: false });
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -730,6 +734,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
 
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      <VoiceAssistant />
 
       {/* ปุ่มสลับเต็มจอ — โชว์เฉพาะหน้าที่เปิดเต็มจอได้ (เช่น บอร์ดจ่ายงาน) */}
       {onFocusRoute && (

@@ -15,10 +15,12 @@ export const AI_MODEL_CHOICES: AiModelChoice[] = [
   // รุ่น 5.x = "คิดก่อนตอบ" (เวลาคิดนับเป็น token ออกด้วย) — ระดับการคิดตั้งที่ศูนย์ AI (ค่าเริ่ม กลาง)
   { id: "gpt-5.4-mini", label: "gpt-5.4-mini (รุ่นใหม่)", note: "รุ่นใหม่ ฉลาดกว่า 4.1 · อ่านรูปละเอียดกว่า", inPerM: 27, outPerM: 162 },
   { id: "gpt-5.4", label: "gpt-5.4 (รุ่นใหม่ ตัวเต็ม)", note: "เขียนดีสุดในรายการ · แพงสุด", inPerM: 90, outPerM: 540 },
+  // รุ่น 6.x = คิดก่อนตอบเหมือน 5.x · luna = ตัวเล็กสุด เร็ว ถูกมาก (ราคา $0.10/$0.50 ต่อล้าน token ณ 2026-11) — ใช้กับผู้ช่วยเสียง
+  { id: "gpt-6-luna", label: "gpt-6-luna (เร็ว ถูกมาก)", note: "รุ่นใหม่ตัวเล็ก · งานสั้น เข้าใจคำสั่ง/เลือกตัวเลือก", inPerM: 3.6, outPerM: 18 },
 ];
 
-/** รุ่นที่ "คิดก่อนตอบ" (gpt-5.x / o-series) — เรียก API คนละแบบกับรุ่น 4.x */
-export const isReasoningModel = (model: string) => /^(gpt-5|o\d)/i.test(model.trim());
+/** รุ่นที่ "คิดก่อนตอบ" (gpt-5.x ขึ้นไป / o-series) — เรียก API คนละแบบกับรุ่น 4.x */
+export const isReasoningModel = (model: string) => /^(gpt-([5-9]|\d{2,})|o\d)/i.test(model.trim());
 
 /**
  * ระดับการคิดของรุ่น 5.x — ตั้งได้ที่ศูนย์ AI (การ์ด "รุ่นหลักของทั้งระบบ") · ใช้กับทุกงานที่วิ่งบนรุ่น 5.x

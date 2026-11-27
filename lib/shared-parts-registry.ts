@@ -1139,6 +1139,15 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "global-search.md",
   },
   {
+    key: "voice-assistant", label: "ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ)", code: "VoiceAssistant", category: "layout",
+    source: { path: "components/voice-assistant" },
+    what: "กดค้างแล้วพูดคำสั่งภาษาไทย → ผู้ช่วยเปิดหน้าให้ หรือเปิดตัวเพิ่ม SKU พร้อมค่าที่พูด (คนกดบันทึกเอง) · ตอบกลับเป็นเสียง",
+    when: "วางในเปลือกหน้ากลางแล้ว (PlaygroundShell / StandaloneShell) ขึ้นทุกหน้าเอง — คำสั่งใหม่ให้เพิ่มใน lib/voice-assistant (VOICE_ACTIONS + normalizeVoiceReply)",
+    notWhen: "อย่าทำปุ่มไมค์/ตัวฟังเสียงแยกในหน้าใด ๆ · อย่าให้ผู้ช่วยบันทึกข้อมูลเอง — ให้เปิดฟอร์ม/ตัวช่วยของเดิมพร้อมค่า",
+    doc: "voice-assistant.md",
+    note: "เปิด-ปิด · ใครใช้ได้ · งบ · รุ่น AI ตั้งที่ /admin/paid-services (ai.voice_listen + ai.voice_assistant)",
+  },
+  {
     key: "brand", label: "โลโก้และชื่อระบบ", code: "Logo / Wordmark", category: "layout",
     source: { path: "components/brand" },
     what: "โลโก้ ชื่อระบบ สีหลักของแบรนด์ แก้ที่เดียวเปลี่ยนทั้งระบบ",

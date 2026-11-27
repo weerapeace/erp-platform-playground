@@ -194,13 +194,15 @@ export type SkuWizardResult = { created: number; ids: string[]; skus: { id: stri
 /** ข้อมูลจากการ์ด Taobao — มี = ป๊อปเข้าโหมด Taobao (สี/ผู้ขาย Taobao/ราคาหยวน×เรต) · ไม่มี = ฟอร์มปกติ ไม่มีส่วน Taobao */
 export type SkuWizardTaobao = { colors?: string[]; tagIds?: string[] };
 
-export function SkuWizard({ open, onClose, onCreated, prefill, taobao }: {
+export function SkuWizard({ open, onClose, onCreated, prefill, taobao, initialTagId }: {
   open: boolean;
   onClose: () => void;
   onCreated: (result?: SkuWizardResult) => void;
   /** ค่าเริ่มต้นของฟอร์ม "เพิ่มทีละตัว" (เช่น name_th / rmb_cost / purchase_link) — มีค่า = ข้ามหน้าเลือกโหมด ไปโหมดเดี่ยวเลย */
   prefill?: Record<string, unknown>;
   taobao?: SkuWizardTaobao;
+  /** ประเภท (แท็ก) ที่เลือกมาแล้ว (เช่น ผู้ช่วยเสียง) — เปิดมาเลือกให้เลย (รหัส/ชื่อ/หน่วยตามประเภททำงานเหมือนกดเลือกเอง · เปลี่ยนได้) */
+  initialTagId?: string | null;
 }) {
   const t = useT();
   const toast = useToast();
@@ -377,6 +379,15 @@ export function SkuWizard({ open, onClose, onCreated, prefill, taobao }: {
     setSTag(nv); setTagErr(false); setTagPanel(false);
     if (nv) { loadSuggest(nv); prefillFromTag(nv); loadContext(nv); } else { setSug(null); setTagCodes([]); setCtx({ fabric_widths: [], sellers: [] }); }
   };
+  // ประเภทที่ผู้เรียกเลือกมาแล้ว (initialTagId) — เลือกให้ครั้งเดียวต่อการเปิด เมื่อรายการประเภทโหลดเสร็จ
+  const initTagDone = useRef(false);
+  useEffect(() => {
+    if (!open) { initTagDone.current = false; return; }
+    if (!initialTagId || initTagDone.current || step !== "single" || !tags.some((x) => x.id === initialTagId)) return;
+    initTagDone.current = true;
+    pickSingleTag(initialTagId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pickSingleTag สร้างใหม่ทุก render · ต้องการรันตอนประเภทโหลดเสร็จเท่านั้น
+  }, [open, initialTagId, tags, step]);
   const [tagPanel, setTagPanel] = useState(false);   // เปิดตัวเลือกประเภท (หมวดซ้าย·แท็กขวา)
   const [tagQ, setTagQ] = useState("");
   const tagColTags = useMemo(() => tags.map((x) => ({ id: x.id, label: x.name, group_id: x.group_id ?? null })), [tags]);

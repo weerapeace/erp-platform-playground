@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { tokenize, scoreRow, ilikeOr } from "@/lib/search-score";
 import { getSearchScope, type SearchScope } from "@/lib/search-scopes";
 import { isLegacyIconValue } from "@/lib/icon-registry";
+import { loadMenuRegistry, loadMyAccess, menuAppsFor, type CanFn } from "@/lib/menu-pages-server";
 
 // ---- Types ----
 
@@ -53,40 +54,7 @@ const st = (s: unknown) => { const k = String(s ?? ""); return k ? (STATUS_TH[k]
 const money = (n: unknown) => { const v = Number(n); return Number.isFinite(v) && v !== 0 ? `฿${v.toLocaleString("th-TH", { maximumFractionDigits: 2 })}` : ""; };
 const join = (...parts: (string | null | undefined)[]) => parts.map((p) => (p ?? "").trim()).filter(Boolean).join(" · ");
 
-type MenuRowLite = {
-  id: string; label: string; href: string; section: string | null; icon: string | null;
-  app_keys: string[] | null; permission_key: string | null; is_active: boolean;
-  search_keywords?: string[] | null;   // คำค้นเพิ่ม/คำพ้อง (ตั้งที่ /admin/menu)
-};
-type AppGroupLite = { key: string; label: string; permission_key: string | null; is_active: boolean };
-
-// cache ทะเบียนเมนู/แอป สั้น ๆ (60 วิ) — ตารางเล็ก (~200 แถว) แต่ค้นถี่ (ทุกครั้งที่พิมพ์)
-let menuCache: { at: number; rows: MenuRowLite[]; apps: AppGroupLite[] } | null = null;
-const MENU_TTL = 60_000;
-
-async function loadMenuRegistry() {
-  if (menuCache && Date.now() - menuCache.at < MENU_TTL) return menuCache;
-  const admin = supabaseAdmin();
-  const [{ data: rows }, { data: apps }] = await Promise.all([
-    admin.from("erp_menu_items").select("*").eq("is_active", true),
-    admin.from("erp_app_groups").select("key, label, permission_key, is_active"),
-  ]);
-  menuCache = { at: Date.now(), rows: (rows ?? []) as MenuRowLite[], apps: (apps ?? []) as AppGroupLite[] };
-  return menuCache;
-}
-
-type CanFn = (key: string | null | undefined) => boolean;
-
-/** สิทธิ์ของคนที่ค้น — ใช้กรองเมนู/แอป/โมดูลที่เขาเห็นได้เท่านั้น (admin = เห็นหมด) */
-async function loadMyAccess(sb: ReturnType<typeof supabaseFromRequest>, userId: string): Promise<{ can: CanFn }> {
-  const [{ data: perms }, { data: prof }] = await Promise.all([
-    sb.rpc("erp_my_permissions"),
-    supabaseAdmin().from("user_profiles").select("role").eq("id", userId).maybeSingle(),
-  ]);
-  const isAdmin = (prof as { role?: string } | null)?.role === "admin";
-  const set = new Set<string>(Array.isArray(perms) ? (perms as string[]) : []);
-  return { can: (key) => !key || isAdmin || set.has(key) };
-}
+// ทะเบียนเมนู/แอป + สิทธิ์ของคนที่ค้น — ของกลาง lib/menu-pages-server (ผู้ช่วยเสียงใช้กฎเดียวกัน)
 
 // ---- 📄 หน้า/เมนู — จากทะเบียนเมนูกลาง (erp_menu_items) ----
 
@@ -100,13 +68,11 @@ async function searchPages(q: string, can: CanFn, limit: number, scope: SearchSc
   const hits: SearchHit[] = [];
   const seenHref = new Set<string>();
   for (const r of rows) {
-    if (!r.is_active || !r.href || !r.label) continue;
-    if (!can(r.permission_key)) continue;
+    // แอปที่เมนูนี้สังกัด + คนนี้เข้าได้ · null = เมนูปิด/ไม่มีสิทธิ์/เข้าแอปไม่ได้
+    const myApps = menuAppsFor(r, can, appByKey);
+    if (!myApps) continue;
     // ค้นในแอปเดี่ยว → เฉพาะเมนูที่สังกัดแอปนั้น (หรือ href อยู่ใต้แอป)
     if (scope && !(r.app_keys ?? []).includes(scope.appKey) && !r.href.startsWith(scope.hrefPrefix)) continue;
-    // แอปที่เมนูนี้สังกัด + คนนี้เข้าได้ (ถ้าเมนูไม่สังกัดแอปไหน = เห็นได้ถ้าสิทธิ์เมนูผ่าน)
-    const myApps = (r.app_keys ?? []).map((k) => appByKey.get(k)).filter((a): a is AppGroupLite => !!a && a.is_active && can(a.permission_key));
-    if ((r.app_keys ?? []).length > 0 && myApps.length === 0) continue;
     if (seenHref.has(r.href)) continue;
 
     const label = norm(r.label);
