@@ -227,3 +227,23 @@ describe("ค่าธรรมเนียม Lazada ต่อออเดอ�
     expect(lazFinanceRows({})).toHaveLength(0);
   });
 });
+
+describe("LINE SHOPPING — ข้อความลูกค้า + ตัวเลือกสินค้า (2026-11-27)", () => {
+  it("เก็บ remarkBuyer · remarkRecipient · isGift · ตัวเลือกสินค้า ใน raw", () => {
+    const m = lineOrderToPlatformOrder({ orderNumber: "2611260001", remarkBuyer: " สลักชื่อ KORN ", remarkRecipient: "HBD", isGift: true,
+      orderItems: [{ sku: "TTM131-01D", name: "กระเป๋า", quantity: 1, variants: [{ name: "สี", value: "ดำ" }, { name: "ชื่อที่สลัก", value: "KORN" }] }] })!;
+    const ls = m.head.raw.line_shopping as Record<string, unknown>;
+    expect(ls.remarkBuyer).toBe("สลักชื่อ KORN");
+    expect(ls.remarkRecipient).toBe("HBD");
+    expect(ls.isGift).toBe(true);
+    expect(m.items[0].variant).toBe("สี: ดำ / ชื่อที่สลัก: KORN");
+    expect(ls.itemVariants).toEqual([{ sku: "TTM131-01D", variant: "สี: ดำ / ชื่อที่สลัก: KORN" }]);
+  });
+  it("ไม่มีข้อความ = null · isGift ไม่ติ๊ก = false · variants เป็นข้อความล้วน", () => {
+    const m = lineOrderToPlatformOrder({ orderNumber: "2611260002", orderItems: [{ sku: "A", variants: ["แดง", "M"] }] })!;
+    const ls = m.head.raw.line_shopping as Record<string, unknown>;
+    expect(ls.remarkBuyer).toBeNull();
+    expect(ls.isGift).toBe(false);
+    expect(m.items[0].variant).toBe("แดง / M");
+  });
+});

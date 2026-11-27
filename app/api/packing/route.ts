@@ -34,7 +34,7 @@ export const revalidate = 0;
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
 
-const ORDER_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, ship_by_at, tracking_no, package_no, carrier, cod_amount, source, packed_at, packed_by, shipping, raw->>buyer_message, shopee_note:raw->shopee->>message_to_seller, raw->>note";
+const ORDER_COLS = "id, platform_id, brand_id, external_order_id, order_no, customer_name, status, platform_status, ship_by_at, tracking_no, package_no, carrier, cod_amount, source, packed_at, packed_by, shipping, raw->>buyer_message, shopee_note:raw->shopee->>message_to_seller, ls_note:raw->line_shopping->>remarkBuyer, raw->>note";
 const str = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
 
 async function whoAmI(request: Request, admin: Admin): Promise<{ id: string | null; name: string | null }> {
@@ -173,7 +173,7 @@ async function lookup(admin: Admin, rawCode: string, orderId0?: string | null) {
   }));
   const missingBox = outItems.some((it) => !it.box);
   const packedByName = (packer as { display_name?: string; username?: string } | null)?.display_name ?? (packer as { username?: string } | null)?.username ?? null;
-  const buyerNote = str(order.buyer_message) ?? str(order.shopee_note) ?? str(order.note);
+  const buyerNote = str(order.buyer_message) ?? str(order.shopee_note) ?? str(order.ls_note) ?? str(order.note);
 
   return NextResponse.json({
     order: {

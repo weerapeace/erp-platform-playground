@@ -3,6 +3,8 @@
  * ใช้ที่: app/api/line-shopping/orders-sync (ตัวดึงอัตโนมัติทุก 15 นาที + ปุ่ม "ดึงตอนนี้") · เจ้าของเลือก 2026-11-20 ข้อ 4
  * ⚠️ ยังไม่เคยเห็นข้อมูลจริง (ร้านยังไม่มีออเดอร์ผ่านระบบ) — ตัวแปลงอ่านได้หลายชื่อช่อง · รอบแรกที่มีออเดอร์จะจดรูปข้อมูล (ไม่มีที่อยู่) ใน audit ให้ตรวจ
  * ไม่เก็บที่อยู่/เบอร์ผู้รับ
+ * 2026-11-27 (เจ้าของสั่ง): เก็บข้อความลูกค้า remarkBuyer · ข้อความถึงผู้รับ remarkRecipient · isGift · ตัวเลือกสินค้า (variants)
+ *   ไว้ใน raw.line_shopping → หน้างานพิเศษ (/order-ops/gift-cards) อ่านไปคัดแยกการ์ด/สลักชื่อ · ไม่กระทบการจับคู่สินค้า/สต๊อก
  */
 import { lineShoppingStatus, lineShoppingToInternal, type PlatformOrderStatus } from "@/lib/platform-order-status";
 
@@ -37,6 +39,22 @@ const iso = (v: unknown): string | null => {
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 };
 
+/** ตัวเลือกสินค้าเป็นข้อความ — variantName (ข้อความ) หรือ variants (รายการ {name,value} / ข้อความ) เช่น "สี: ดำ / ชื่อที่สลัก: KORN" */
+export function lineVariantText(it: Record<string, unknown>): string | null {
+  const one = str(pick(it, "variantName", "variant", "optionName", "variationName"));
+  const arr = it.variants;
+  if (!Array.isArray(arr) || !arr.length) return one;
+  const parts = (arr as unknown[]).map((v) => {
+    if (v == null) return null;
+    if (typeof v !== "object") return str(v);
+    const o = v as Record<string, unknown>;
+    const k = str(pick(o, "name", "optionName", "key", "title", "label"));
+    const val = str(pick(o, "value", "optionValue", "valueName", "text"));
+    return k && val && k !== val ? `${k}: ${val}` : val ?? k;
+  }).filter((x): x is string => !!x);
+  return parts.length ? parts.join(" / ").slice(0, 300) : one;
+}
+
 /** รายการสินค้าในออเดอร์ (ชื่อช่องที่เป็นไปได้: orderItems / items / products) */
 export function lineOrderItems(o: Record<string, unknown>): LineOrderItemMapped[] {
   const arr = pick(o, "orderItems", "items", "products", "orderProducts");
@@ -46,7 +64,7 @@ export function lineOrderItems(o: Record<string, unknown>): LineOrderItemMapped[
     name: str(pick(it, "name", "productName", "title")),
     qty: Math.max(1, Math.round(Number(pick(it, "quantity", "qty", "amount")) || 1)),
     price: money(pick(it, "price", "unitPrice", "salePrice", "pricePerUnit")),
-    variant: str(pick(it, "variantName", "variant", "optionName", "variationName")),
+    variant: lineVariantText(it),
   }));
 }
 
@@ -79,6 +97,11 @@ export function lineOrderToPlatformOrder(o: Record<string, unknown>): LineOrderM
           paymentMethod: pick(o, "paymentMethod", "paymentType") ?? null, createdAt: pick(o, "createdAt") ?? null, checkoutAt: pick(o, "checkoutAt") ?? null,
           updatedAt: pick(o, "updatedAt") ?? null, subtotal: pick(o, "subtotalPrice", "subtotal") ?? null, shipping: pick(o, "shippingPrice", "shippingFee") ?? null,
           discount: pick(o, "discountAmount", "discount") ?? null,
+          // ข้อความลูกค้า (ชื่อสลัก/ข้อความการ์ด) + ของขวัญ + ตัวเลือกสินค้า — หน้างานพิเศษอ่าน (lib/gift-card-design buyerNoteOf)
+          remarkBuyer: str(pick(o, "remarkBuyer", "buyerRemark", "remark", "note")),
+          remarkRecipient: str(pick(o, "remarkRecipient", "recipientRemark", "giftMessage")),
+          isGift: pick(o, "isGift") === true || pick(o, "isGift") === "true",
+          itemVariants: lineOrderItems(o).filter((i) => i.variant).map((i) => ({ sku: i.sku_code, variant: i.variant })),
         },
       },
     },

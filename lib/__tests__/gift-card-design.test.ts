@@ -226,3 +226,14 @@ describe("suggestMessages — หลายแบบจากหมายเห�
     expect(suggestMessages("ขอเป็นแบบผ้าลายค่ะ ขอบคุณค่ะ")).toEqual([]);
   });
 });
+
+describe("LINE SHOPPING — ข้อความลูกค้า / ของขวัญ", () => {
+  it("remarkBuyer + ข้อความถึงผู้รับ", async () => {
+    const { buyerNoteOf: note, isGiftOrder } = await import("@/lib/gift-card-design");
+    expect(note({ line_shopping: { remarkBuyer: "สลักชื่อ KORN", remarkRecipient: null } })).toBe("สลักชื่อ KORN");
+    expect(note({ line_shopping: { remarkBuyer: "", remarkRecipient: "HBD" } })).toBe("ข้อความถึงผู้รับ: HBD");
+    expect(note({ line_shopping: { remarkBuyer: "ห่อด้วย", remarkRecipient: "รักนะ" } })).toBe("ห่อด้วย\nข้อความถึงผู้รับ: รักนะ");
+    expect(isGiftOrder({ line_shopping: { isGift: true } })).toBe(true);
+    expect(isGiftOrder({ line_shopping: { isGift: false } })).toBe(false);
+  });
+});
