@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/icon";
+import { LessonAnim } from "@/components/lesson-anim";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { formatDateTime } from "@/lib/date";
 import { estimateMinutes, formatTimeText, parseVideoLink, type Lesson, type LessonStep, type VideoLink } from "@/lib/learn";
@@ -174,6 +175,7 @@ export function LessonReader({ lesson, canManage, onEdit, onPublish }: {
                       )}
                     </div>
                     {s.body && <div className="mt-1.5"><StepBody text={s.body} /></div>}
+                    {s.animation && <div className="mt-3"><LessonAnim animation={s.animation} /></div>}
                     {own && <div className="mt-3"><VideoBox link={own} /></div>}
                     {s.video_r2_key && (
                       <video src={r2(s.video_r2_key)} controls playsInline preload="metadata" className="mt-3 w-full max-h-[520px] rounded-xl border border-slate-200 bg-black" />

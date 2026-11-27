@@ -16,13 +16,16 @@ import { MediaUploadField, type MediaValue } from "@/components/media-upload-fie
 import { DriveUploadBox } from "@/components/drive-upload-box";
 import { formatTimeText, parseTimeText, parseVideoLink, type Lesson, type LessonStatus } from "@/lib/learn";
 import type { LessonDraft } from "./use-learn";
+import { AnimPicker } from "./anim-picker";
+import type { LessonAnimation } from "@/lib/lesson-anim";
 
 type StepForm = {
   title: string; body: string; image_r2_key: string; link_url: string;
   video_url: string; video_start: string; video_r2_key: string; checklist: string;
+  animation: LessonAnimation | null;
 };
 
-const blankStep = (): StepForm => ({ title: "", body: "", image_r2_key: "", link_url: "", video_url: "", video_start: "", video_r2_key: "", checklist: "" });
+const blankStep = (): StepForm => ({ title: "", body: "", image_r2_key: "", link_url: "", video_url: "", video_start: "", video_r2_key: "", checklist: "", animation: null });
 
 function toForm(l: Lesson | null) {
   return {
@@ -31,7 +34,7 @@ function toForm(l: Lesson | null) {
     steps: (l?.steps ?? []).map((s) => ({
       title: s.title, body: s.body ?? "", image_r2_key: s.image_r2_key ?? "", link_url: s.link_url ?? "",
       video_url: s.video_url ?? "", video_start: formatTimeText(s.video_start_sec), video_r2_key: s.video_r2_key ?? "",
-      checklist: s.checklist.join("\n"),
+      checklist: s.checklist.join("\n"), animation: s.animation ?? null,
     })) as StepForm[],
   };
 }
@@ -80,6 +83,7 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
         title: s.title.trim(), body: s.body.trim() || null, image_r2_key: s.image_r2_key || null, link_url: s.link_url.trim() || null,
         video_url: s.video_url.trim() || null, video_start_sec: parseTimeText(s.video_start), video_r2_key: s.video_r2_key || null,
         checklist: s.checklist.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
+        animation: s.animation,
       })),
     });
     setBusy(false);
@@ -152,6 +156,7 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
                     <button type="button" onClick={() => setF((x) => ({ ...x, steps: x.steps.filter((_, j) => j !== i) }))} className="px-1 text-slate-400 hover:text-rose-500" title="ลบขั้นตอนนี้" aria-label="ลบขั้นตอนนี้"><Icon name="trash" /></button>
                   </div>
                   <textarea value={s.body} onChange={(e) => patchStep(i, { body: e.target.value })} rows={3} placeholder="อธิบายวิธีทำ (หลายบรรทัดได้)" className={area} />
+                  <div className="mt-2"><AnimPicker value={s.animation} onChange={(a) => patchStep(i, { animation: a })} /></div>
                   <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
                     <div>
                       <label className={lbl}>คลิปของขั้นนี้ (ลิงก์ YouTube/TikTok/Drive)</label>

@@ -3,8 +3,11 @@
  *   บทเรียน = แถวใน erp_help_guides ที่ kind = "lesson" (ต่อยอดตารางคู่มือวิธีใช้งานเดิม ไม่สร้างตารางที่ 2)
  *   ขั้นตอน = erp_help_guide_steps (ข้อความ · รูป · ลิงก์คลิป + นาทีเริ่ม · คลิปสั้นอัปเอง · เช็กลิสต์)
  *   สถานะ draft = "ร่าง รอตรวจ" (คนทั่วไปไม่เห็น) · published = เผยแพร่แล้ว
+ *   ภาพเคลื่อนไหวสอนต่อขั้น = animation (คลังสำเร็จรูป / เฉพาะเรื่อง) — lib/lesson-anim.ts
  * เทสต์ lib/__tests__/learn.test.ts · คู่มือ docs/learning-center.md
  */
+
+import { cleanAnimation, type LessonAnimation } from "@/lib/lesson-anim";
 
 export const LEARN_VIEW = "learn.view";
 export const LEARN_MANAGE = "learn.manage";
@@ -21,6 +24,7 @@ export type LessonStep = {
   video_start_sec: number | null;
   video_r2_key: string | null;
   checklist: string[];
+  animation: LessonAnimation | null;
 };
 
 export type Lesson = {
@@ -45,7 +49,7 @@ export type Lesson = {
 
 /** คอลัมน์ที่อ่าน (บทเรียน / ขั้นตอน) */
 export const LESSON_COLS = "id, title, icon, description, category, status, source_url, source_title, drive_folder_url, sort_order, is_active, deleted_at, created_by, updated_by, created_at, updated_at";
-export const STEP_COLS = "id, guide_id, step_no, title, body, image_r2_key, link_url, video_url, video_start_sec, video_r2_key, checklist, sort_order";
+export const STEP_COLS = "id, guide_id, step_no, title, body, image_r2_key, link_url, video_url, video_start_sec, video_r2_key, checklist, animation, sort_order";
 
 export const UNCATEGORIZED = "ทั่วไป";
 
@@ -154,8 +158,9 @@ export function cleanSteps(v: unknown): LessonStep[] {
       video_start_sec: parseTimeText(s.video_start_sec),
       video_r2_key: str(s.video_r2_key, 500),
       checklist: cleanChecklist(s.checklist),
+      animation: cleanAnimation(s.animation),
     };
-    const empty = !step.title && !step.body && !step.image_r2_key && !step.link_url && !step.video_url && !step.video_r2_key && !step.checklist.length;
+    const empty = !step.title && !step.body && !step.image_r2_key && !step.link_url && !step.video_url && !step.video_r2_key && !step.checklist.length && !step.animation;
     if (empty) continue;
     if (!step.title) step.title = `ขั้นตอน ${out.length + 1}`;
     out.push(step);

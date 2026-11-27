@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cleanChecklist, cleanLessonBody, cleanSteps, formatTimeText, groupLessons, parseTimeText, parseVideoLink } from "../learn";
+import { animLabel, cleanAnimation } from "../lesson-anim";
 
 describe("parseTimeText / formatTimeText", () => {
   it("อ่านเวลาได้หลายแบบ", () => {
@@ -71,5 +72,26 @@ describe("groupLessons", () => {
     ]);
     expect(g.map((x) => x.category)).toEqual(["ถ่ายวิดีโอ", "ทั่วไป"]);
     expect(g[0].lessons.map((x) => x.title)).toEqual(["c", "a"]);
+  });
+});
+
+
+describe("ภาพเคลื่อนไหวสอน", () => {
+  it("รับเฉพาะ key ที่มีในคลัง", () => {
+    expect(cleanAnimation({ type: "preset", key: "light-falloff" })).toEqual({ type: "preset", key: "light-falloff" });
+    expect(cleanAnimation({ type: "preset", key: "nope" })).toBeNull();
+    expect(cleanAnimation(null)).toBeNull();
+    expect(cleanAnimation("x")).toBeNull();
+  });
+  it("custom: ต้องมีโค้ด · ความสูงถูกบีบ 120–900", () => {
+    expect(cleanAnimation({ type: "custom", html: "<svg/>", height: 5000 })).toEqual({ type: "custom", html: "<svg/>", height: 900 });
+    expect(cleanAnimation({ type: "custom", html: "<svg/>" })).toEqual({ type: "custom", html: "<svg/>", height: 300 });
+    expect(cleanAnimation({ type: "custom", html: "  " })).toBeNull();
+  });
+  it("ขั้นที่มีแค่ภาพเคลื่อนไหวไม่ถูกตัดทิ้ง", () => {
+    const s = cleanSteps([{ animation: { type: "preset", key: "flag" } }]);
+    expect(s).toHaveLength(1);
+    expect(s[0].title).toBe("ขั้นตอน 1");
+    expect(animLabel(s[0].animation)).toBe("บังแสงด้วย Flag");
   });
 });

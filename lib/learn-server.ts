@@ -2,6 +2,7 @@
  * 🎓 ศูนย์เรียนรู้ — ตัวช่วยฝั่งเซิร์ฟเวอร์ (ใช้ใน /api/learn/*)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { animLabel, cleanAnimation } from "@/lib/lesson-anim";
 import { LESSON_COLS, STEP_COLS, type Lesson, type LessonStep } from "@/lib/learn";
 
 /** ขั้นตอน → แถวที่บันทึก */
@@ -9,7 +10,7 @@ export function stepRows(guideId: string, steps: LessonStep[]) {
   return steps.map((s, i) => ({
     guide_id: guideId, step_no: i + 1, sort_order: i,
     title: s.title, body: s.body, image_r2_key: s.image_r2_key, link_url: s.link_url,
-    video_url: s.video_url, video_start_sec: s.video_start_sec, video_r2_key: s.video_r2_key, checklist: s.checklist,
+    video_url: s.video_url, video_start_sec: s.video_start_sec, video_r2_key: s.video_r2_key, checklist: s.checklist, animation: s.animation,
   }));
 }
 
@@ -23,7 +24,7 @@ export async function attachSteps(rows: Omit<Lesson, "steps">[]): Promise<Lesson
     for (const s of (data ?? []) as unknown as (LessonStep & { guide_id: string })[]) {
       const { guide_id, ...rest } = s;
       const a = by.get(guide_id) ?? [];
-      a.push({ ...rest, checklist: Array.isArray(rest.checklist) ? rest.checklist : [] });
+      a.push({ ...rest, checklist: Array.isArray(rest.checklist) ? rest.checklist : [], animation: cleanAnimation(rest.animation) });
       by.set(guide_id, a);
     }
   }
@@ -41,5 +42,5 @@ export async function loadLesson(id: string): Promise<Lesson | null> {
 
 /** ขั้นตอนแบบย่อสำหรับเทียบ audit (ก่อน/หลัง) */
 export function stepsDigest(steps: LessonStep[]): string[] {
-  return steps.map((s, i) => `${i + 1}. ${s.title}${s.video_url ? " [คลิป]" : ""}${s.video_r2_key ? " [คลิปอัป]" : ""}${s.image_r2_key ? " [รูป]" : ""}${s.checklist.length ? ` [เช็กลิสต์ ${s.checklist.length}]` : ""}`);
+  return steps.map((s, i) => `${i + 1}. ${s.title}${s.video_url ? " [คลิป]" : ""}${s.video_r2_key ? " [คลิปอัป]" : ""}${s.image_r2_key ? " [รูป]" : ""}${s.checklist.length ? ` [เช็กลิสต์ ${s.checklist.length}]` : ""}${s.animation ? ` [ภาพเคลื่อนไหว: ${animLabel(s.animation)}]` : ""}`);
 }
