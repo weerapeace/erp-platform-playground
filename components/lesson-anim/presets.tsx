@@ -2,10 +2,12 @@
 
 /**
  * 🎞️ คลังภาพเคลื่อนไหวสอนสำเร็จรูป — ฉากกดเล่นได้ (แถบลาก / ปุ่มสลับ)
+ *   ฉากเรื่องไฟ = สตูดิโอจำลอง (studio.tsx · ตาราง STUDIO ด้านล่าง) · ฉากอื่น = PRESETS
  *   รายชื่อ + คำอธิบาย = lib/lesson-anim.ts (ANIM_PRESETS) · เพิ่มฉาก: เพิ่มทั้ง 2 ที่
  *   วาดเป็น SVG ล้วน (ไม่โหลดไลบรารี เบา เปิดบนมือถือได้)
  */
 import { useState, type ReactNode } from "react";
+import { StudioSim, type StudioConfig } from "./studio";
 
 type Ctl =
   | { kind: "range"; label: string; min: number; max: number; step: number; init: number; fmt?: (v: number) => string }
@@ -19,16 +21,7 @@ type SceneOut = {
 
 type Preset = { ctl: Ctl; scene: (v: number) => SceneOut };
 
-const kelvinColor = (k: number) => {
-  const t = (k - 2700) / 3800;
-  return `rgb(${Math.round(250 - t * 70)},${Math.round(180 + t * 45)},${Math.round(100 + t * 150)})`;
-};
-
 const PRESETS: Record<string, Preset> = {
-  "light-mood": {
-    ctl: { kind: "buttons", options: ["สดใส", "ดราม่า"] },
-    scene: (v) => ({ bg: v ? "#2C2C2A" : "#B4B2A9", beam: v ? 0.35 : 0.1, shadow: v ? 0.75 : 0.25, caption: v ? "มืด เงาเยอะ = ตึงเครียด ลึกลับ" : "สว่างทั่ว เงาน้อย = สดใส เป็นมิตร" }),
-  },
   "light-sources": {
     ctl: { kind: "buttons", options: ["แดด", "ไฟในเฟรม", "ไฟที่มีอยู่แล้ว"] },
     scene: (v) => v === 0
@@ -36,14 +29,6 @@ const PRESETS: Record<string, Preset> = {
       : v === 1
         ? { lampX: null, extra: <g><rect x={90} y={54} width={10} height={60} fill="#5F5E5A" /><circle cx={95} cy={50} r={10} fill="#FAC775" /></g>, caption: "ไฟที่เห็นในภาพ (Practical) — โคมไฟ หลอดไฟ" }
         : { lampX: null, extra: <g><rect x={20} y={28} width={6} height={100} fill="#5F5E5A" /><circle cx={30} cy={30} r={7} fill="#FAC775" /></g>, caption: "ไฟที่มีอยู่แล้วในสถานที่ (Ambient) — ไฟถนน ป้ายไฟ" },
-  },
-  "light-falloff": {
-    ctl: { kind: "range", label: "ระยะไฟ", min: 1, max: 4, step: 0.1, init: 1, fmt: (v) => `${v.toFixed(1)} เท่า` },
-    scene: (v) => { const p = Math.round(100 / (v * v)); return { lampX: 210 - (v - 1) * 55, productOpacity: 0.25 + 0.75 * p / 100, caption: `แสงถึงสินค้า ${p}%` }; },
-  },
-  "color-temp": {
-    ctl: { kind: "range", label: "เคลวิน", min: 2700, max: 6500, step: 100, init: 3200, fmt: (v) => `${v}K` },
-    scene: (v) => { const c = kelvinColor(v); return { color: c, product: c, caption: v < 4000 ? "ออกส้ม — ไฟหลอดไส้ (ทังสเตน)" : v > 5200 ? "ออกฟ้า — แสงกลางวัน" : "ขาวกลาง ๆ" }; },
   },
   "iso-noise": {
     ctl: { kind: "range", label: "ISO", min: 100, max: 6400, step: 100, init: 400 },
@@ -55,34 +40,7 @@ const PRESETS: Record<string, Preset> = {
         caption: v > 2000 ? "สว่างขึ้น แต่ภาพเป็นเม็ดหยาบ — เพิ่มไฟดีกว่า" : "ภาพเนียน",
       };
     },
-  },
-  "key-contrast": {
-    ctl: { kind: "buttons", options: ["High-key", "Low-key"] },
-    scene: (v) => ({ bg: v ? "#2C2C2A" : "#D3D1C7", shadow: v ? 0.85 : 0.15, beam: v ? 0.35 : 0.15, caption: v ? "แสงกับเงาต่างกันมาก = ดราม่า" : "แสงกับเงาต่างกันน้อย = สดใส" }),
-  },
-  "hard-soft": {
-    ctl: { kind: "range", label: "ความนุ่ม", min: 0, max: 100, step: 1, init: 0, fmt: (v) => `${v}%` },
-    scene: (v) => ({ soft: v, caption: v < 30 ? "แสงแข็ง — เงาคม ขอบชัด" : v > 70 ? "แสงนุ่ม — เงาฟุ้ง ขอบไม่ชัด" : "กลาง ๆ" }),
-  },
-  "light-position": {
-    ctl: { kind: "buttons", options: ["Broad side", "Short side"] },
-    scene: (v) => ({
-      lampX: null, product: null,
-      extra: (
-        <g>
-          <circle cx={160} cy={78} r={32} fill="#5F5E5A" />
-          <path d={`M160 46 A32 32 0 0 ${v ? 1 : 0} 160 110 Z`} fill="#F1EFE8" />
-          <rect x={150} y={120} width={20} height={10} fill="#888780" />
-          <circle cx={v ? 228 : 92} cy={48} r={8} fill="#FAC775" />
-        </g>
-      ),
-      caption: v ? "ส่องด้านที่หันออกจากกล้อง = มีมิติ ดราม่า" : "ส่องด้านที่หันหากล้อง = เป็นมิตร เข้าถึงง่าย",
-    }),
-  },
-  "light-types": {
-    ctl: { kind: "buttons", options: ["ทังสเตน", "HMI", "LED ปรับสี"] },
-    scene: (v) => { const c = ["#FAC775", "#B5D4F4", "#AFA9EC"][v]; return { color: c, product: c, caption: ["ทังสเตน — แรง แสงอุ่นออกส้ม", "HMI — แรงมาก แทนแสงแดด ออกเย็น", "LED — ปรับสีและความแรงได้ละเอียด"][v] }; },
-  },
+  },
   histogram: {
     ctl: { kind: "range", label: "ค่าแสง", min: -3, max: 3, step: 0.5, init: 0, fmt: (v) => (v > 0 ? `+${v}` : `${v}`) },
     scene: (v) => ({
@@ -95,22 +53,6 @@ const PRESETS: Record<string, Preset> = {
         </g>
       ),
       caption: v >= 2 ? "กราฟชนขอบขวา = ขาวโพลน" : v <= -2 ? "กราฟชนขอบซ้าย = ดำมืด" : "กราฟอยู่กลาง ค่าแสงพอดี",
-    }),
-  },
-  diffusion: {
-    ctl: { kind: "buttons", options: ["ไม่มีซอฟต์บ็อกซ์", "ใส่ซอฟต์บ็อกซ์"] },
-    scene: (v) => ({ soft: v ? 90 : 0, extra: v ? <rect x={204} y={56} width={10} height={48} rx={2} fill="#F1EFE8" opacity={0.85} /> : null, caption: v ? "ผ้า/กระดาษคั่นหน้าไฟ แสงนุ่ม เงาฟุ้ง" : "ไฟเปล่า แสงแข็ง เงาคม" }),
-  },
-  flag: {
-    ctl: { kind: "buttons", options: ["ไม่บัง", "ใส่ flag"] },
-    scene: (v) => ({
-      extra: (
-        <g>
-          <rect x={292} y={28} width={24} height={106} fill={v ? "#444441" : "#EF9F27"} opacity={v ? 1 : 0.55} />
-          {v ? <rect x={226} y={30} width={6} height={90} fill="#0b0b0b" /> : null}
-        </g>
-      ),
-      caption: v ? "บังแล้ว ฉากหลังไม่โดนแสง" : "แสงหกไปโดนฉากหลัง",
     }),
   },
 };
@@ -145,9 +87,38 @@ function Scene({ s }: { s: SceneOut }) {
   );
 }
 
-export function hasPreset(key: string) { return key in PRESETS; }
+/** ฉากเรื่องไฟ = สตูดิโอจำลอง (ผังไฟ + จอกล้อง) · ฉากอื่น (ชนิดแหล่งแสง · ISO · Histogram) ใช้ฉากเดี่ยวด้านบน */
+const STUDIO: Record<string, StudioConfig> = {
+  "light-mood": { focus: "angle", init: { d: 2.2, a: 20, soft: 85, k: 5600 }, chips: [
+    { label: "สดใส", set: { d: 2.2, a: 20, soft: 85, k: 5600 }, tip: "สดใส = ไฟนุ่ม อยู่ไกล เกือบตรงหน้า" },
+    { label: "ดราม่า", set: { d: 0.7, a: 100, soft: 10, k: 3200 }, tip: "ดราม่า = ไฟแข็ง ชิดสินค้า ส่องด้านข้าง" }] },
+  "light-falloff": { focus: "dist", init: { a: 35, d: 1 }, exposure: "fixed" },
+  "color-temp": { focus: "k", init: { a: 35 } },
+  "key-contrast": { focus: "dist", chips: [
+    { label: "High-key", set: { d: 2.6, a: 15, soft: 90, k: 5600 }, tip: "High-key = สว่างทั่ว เงาน้อย" },
+    { label: "Low-key", set: { d: 0.6, a: 85, soft: 20 }, tip: "Low-key = มืดเยอะ แสงเงาตัดกันแรง" }] },
+  "hard-soft": { focus: "soft", init: { soft: 0, a: 45 } },
+  "light-position": { focus: "angle", init: { a: 0, soft: 30 } },
+  "light-types": { focus: "k", chips: [
+    { label: "ทังสเตน", set: { k: 3200, soft: 20 }, tip: "ทังสเตน: แรง แสงอุ่นออกส้ม" },
+    { label: "HMI", set: { k: 5600, soft: 10, d: 2.5 }, tip: "HMI: แรงมาก แทนแสงแดด วางไกลได้" },
+    { label: "LED", set: { k: 4400, soft: 60 }, tip: "LED: ปรับสีและความแรงได้ละเอียด" }] },
+  diffusion: { focus: "soft", init: { soft: 0, a: 45 }, chips: [
+    { label: "ไม่มีซอฟต์บ็อกซ์", set: { soft: 0 }, tip: "ไฟเปล่า" },
+    { label: "ใส่ซอฟต์บ็อกซ์", set: { soft: 90 }, tip: "ผ้า/กระดาษคั่นหน้าไฟ" }] },
+  flag: { focus: "dist", init: { d: 1.6, a: 50 }, chips: [
+    { label: "ไม่บัง", set: { flag: false }, tip: "แสงหกโดนฉากหลัง" },
+    { label: "ใส่ Flag", set: { flag: true }, tip: "Flag บังแสงไม่ให้โดนฉากหลัง ฉากหลังมืดลง" }] },
+};
+
+export function hasPreset(key: string) { return key in PRESETS || key in STUDIO; }
 
 export function PresetAnim({ animKey }: { animKey: string }) {
+  if (STUDIO[animKey]) return <StudioSim config={STUDIO[animKey]} />;
+  return <ScenePreset animKey={animKey} />;
+}
+
+function ScenePreset({ animKey }: { animKey: string }) {
   const p = PRESETS[animKey];
   const init = p ? (p.ctl.kind === "range" ? p.ctl.init : (p.ctl.init ?? 0)) : 0;
   const [v, setV] = useState(init);
