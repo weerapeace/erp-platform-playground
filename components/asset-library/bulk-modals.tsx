@@ -47,21 +47,25 @@ export function BulkTagModal({ count, tags, onClose, onApply }: {
 }
 
 // ── ย้ายหลายไฟล์ไปอัลบั้ม ──
-export function BulkMoveModal({ count, collections, onClose, onApply }: {
+export function BulkMoveModal({ count, collections, onClose, onApply, mode = "add", fromName }: {
   count: number; collections: AssetCollection[]; onClose: () => void; onApply: (collectionId: string) => void;
+  /** add = ใส่อัลบั้มเพิ่ม (เลือก "เอาออกจากทุกอัลบั้ม" ได้) · move = ย้ายออกจาก fromName ไปอัลบั้มที่เลือก (ต้องเลือก) */
+  mode?: "add" | "move"; fromName?: string;
 }) {
   const t = useT();
   const [col, setCol] = useState("");
+  const isMove = mode === "move";
   return (
-    <ERPModal open onClose={onClose} title={`${t("เพิ่ม", "Add")} ${count} ${t("ไฟล์เข้าอัลบั้ม", "files to album")}`} size="sm"
+    <ERPModal open onClose={onClose} size="sm"
+      title={isMove ? `${t("ย้าย", "Move")} ${count} ${t("ไฟล์จาก", "files from")} “${fromName ?? ""}”` : `${t("เพิ่ม", "Add")} ${count} ${t("ไฟล์เข้าอัลบั้ม", "files to album")}`}
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("ตกลง", "OK")}</button>
+          <button onClick={() => onApply(col)} disabled={isMove && !col} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{isMove ? t("ย้าย", "Move") : t("ตกลง", "OK")}</button>
         </div>
       }>
-      <label className="text-[12px] text-slate-500">{t("เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)", "Select album (an asset can be in multiple albums)")}
-        <AlbumSelect albums={collections} value={col} onChange={setCol} className="mt-1" noneLabel={t("— เอาออกจากทุกอัลบั้ม —", "— Remove from all albums —")} />
+      <label className="text-[12px] text-slate-500">{isMove ? t("ย้ายไปอัลบั้ม", "Move to album") : t("เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)", "Select album (an asset can be in multiple albums)")}
+        <AlbumSelect albums={collections} value={col} onChange={setCol} className="mt-1" noneLabel={isMove ? t("— เลือกอัลบั้ม —", "— Choose album —") : t("— เอาออกจากทุกอัลบั้ม —", "— Remove from all albums —")} />
       </label>
     </ERPModal>
   );

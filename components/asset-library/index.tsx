@@ -48,6 +48,9 @@ import { isVectorFile } from "@/lib/vector-split";
 import { useSelectMode } from "@/components/select-mode";
 import { useUserPref } from "@/lib/use-user-pref";
 import { FolderPath, FolderStrip, type FolderMode } from "./folder-view";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { Popover } from "@/components/popover";
+import { AssetActionList, AssetContextMenu, type AssetActionItem, type AssetActionKey } from "./bulk-actions";
 
 // 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
 const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
@@ -122,7 +125,8 @@ export function AssetLibrary() {
   const [folderScan, setFolderScan] = useState<{ folderId: string; folderName: string; folderLink: string } | null>(null);   // หารูปยังไม่ลง เฉพาะโฟลเดอร์ที่กำลังดู
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
-  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState<false | "add" | "move">(false);   // add = ใส่อัลบั้มเพิ่ม · move = ย้ายออกจากอัลบั้มที่เปิดไปอัลบั้มอื่น
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; title: string } | null>(null);   // เมนูคลิกขวาที่รูป
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkLinkOpen, setBulkLinkOpen] = useState(false);   // เลือกรูปต้นทางเพื่อผูกโฟลเดอร์เดียวกัน (bulk)
   const [bulkLinkBusy, setBulkLinkBusy] = useState(false);
@@ -284,6 +288,78 @@ export function AssetLibrary() {
   };
   const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `${t("ติดแท็ก", "Tagged")} “${tag}” ${t("ให้", "on")} ${selected.size} ${t("ไฟล์แล้ว", "files")}`); };
   const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `${t("อัปเดตอัลบั้ม", "Updated album for")} ${selected.size} ${t("ไฟล์แล้ว", "files")}`); };
+  const postBulk = async (body: Record<string, unknown>) => {
+    const j = await (await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+    if (j.error) throw new Error(j.error);
+    return j as { added?: string[] };
+  };
+  const openAlbum = collectionId && collectionId !== "none" ? collections.find((c) => c.id === collectionId) ?? null : null;
+  // เอาออกจากอัลบั้มที่เปิดอยู่ (ไฟล์ยังอยู่ในคลัง) + ย้อนกลับ = ใส่คืน
+  const removeFromAlbum = async (ids: string[], album: AssetCollection) => {
+    if (!ids.length) return;
+    try {
+      await postBulk({ action: "remove_from", asset_ids: ids, collection_id: album.id });
+      clearSel(); await load(); await loadMeta();
+      toast.undo(`${t("เอาออกจาก", "Removed from")} “${album.name}” ${ids.length} ${t("ไฟล์ · ไฟล์ยังอยู่ในคลัง", "files · still in library")}`, async () => {
+        await postBulk({ action: "move", asset_ids: ids, collection_id: album.id });
+        await load(); await loadMeta();
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เอาออกไม่สำเร็จ", "Remove failed")); }
+  };
+  // ย้ายไปอัลบั้มอื่น = ใส่อัลบั้มใหม่ + เอาออกจากอัลบั้มที่เปิด · ย้อนกลับ = ใส่คืน + เอาออกเฉพาะตัวที่เพิ่งเข้าใหม่
+  const moveToAlbum = async (targetId: string) => {
+    setBulkMoveOpen(false);
+    const from = openAlbum; const ids = Array.from(selected);
+    const target = collections.find((c) => c.id === targetId);
+    if (!from || !target || !ids.length || target.id === from.id) return;
+    try {
+      const { added = ids } = await postBulk({ action: "move", asset_ids: ids, collection_id: target.id });
+      await postBulk({ action: "remove_from", asset_ids: ids, collection_id: from.id });
+      clearSel(); await load(); await loadMeta();
+      toast.undo(`${t("ย้าย", "Moved")} ${ids.length} ${t("ไฟล์", "files")} “${from.name}” → “${target.name}”`, async () => {
+        await postBulk({ action: "move", asset_ids: ids, collection_id: from.id });
+        if (added.length) await postBulk({ action: "remove_from", asset_ids: added, collection_id: target.id });
+        await load(); await loadMeta();
+      });
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ย้ายไม่สำเร็จ", "Move failed")); }
+  };
+  // รายการคำสั่ง (ชุดเดียว ใช้ทั้งแถบล่างและคลิกขวา)
+  const albumItems: AssetActionItem[] = trash ? [] : [
+    { key: "add", label: t("ใส่อัลบั้มเพิ่ม", "Add to album"), icon: "i:folder-plus" },
+    ...(openAlbum ? [{ key: "move_to" as const, label: t("ย้ายไปอัลบั้มอื่น", "Move to another album"), icon: "i:arrows-exchange" }] : []),
+    ...(can("assets.manage") ? [{ key: "new_sub" as const, label: t("ใส่อัลบั้มย่อยใหม่", "Add to new sub-album"), icon: "i:folders" }] : []),
+    ...(openAlbum ? [{ key: "remove" as const, label: t("เอาออกจากอัลบั้มนี้", "Remove from this album"), icon: "i:minus", tone: "warn" as const }] : []),
+  ];
+  const moreItems: AssetActionItem[] = trash ? [] : [
+    { key: "edit", label: t("แก้หลายรายการ", "Edit many"), icon: "i:pencil" },
+    ...(driveOn ? [{ key: "drive_folder" as const, label: t("สร้าง Folder Drive", "Create Drive folder"), icon: "i:cloud-upload" }] : []),
+    ...(driveOn ? [{ key: "same_folder" as const, label: bulkLinkBusy ? t("กำลังผูก…", "Linking…") : t("ใช้โฟลเดอร์เดียวกัน", "Use same folder"), icon: "i:paperclip" }] : []),
+  ];
+  const ctxItems: AssetActionItem[] = [
+    ...albumItems, ...(albumItems.length ? ["sep" as const] : []),
+    ...(trash ? [] : [{ key: "tag" as const, label: t("ติดแท็ก", "Add tag"), icon: "i:tag" }]),
+    ...moreItems, "sep",
+    { key: "trash", label: t("ลบ", "Delete"), icon: "i:trash", tone: "danger" },
+  ];
+  const runAction = (k: AssetActionKey) => {
+    if (k === "add") setBulkMoveOpen("add");
+    else if (k === "move_to") setBulkMoveOpen("move");
+    else if (k === "new_sub") setBulkNewAlbumOpen(true);
+    else if (k === "remove") { if (openAlbum) void removeFromAlbum(Array.from(selected), openAlbum); }
+    else if (k === "tag") setBulkTagOpen(true);
+    else if (k === "edit") setBulkEditOpen(true);
+    else if (k === "drive_folder") setBulkFolderOpen(true);
+    else if (k === "same_folder") { if (!bulkLinkBusy) setBulkLinkOpen(true); }
+    else if (k === "trash") setBulkTrashOpen(true);
+  };
+  // คลิกขวาที่รูป: รูปที่ยังไม่ได้ติ๊ก = เลือกรูปนั้นรูปเดียวก่อน (แบบ Windows) · กดค้างบนมือถือ = โหมดเลือก ไม่เปิดเมนู
+  const openCtx = (e: React.MouseEvent, a: AssetRow) => {
+    if (e.defaultPrevented || showBrandView) return;
+    e.preventDefault();
+    const n = selected.has(a.id) ? selected.size : 1;
+    if (!selected.has(a.id)) setSelected(new Set([a.id]));
+    setCtxMenu({ x: e.clientX, y: e.clientY, title: n > 1 ? `${n} ${t("ไฟล์ที่เลือก", "files selected")}` : (a.title || a.file_name || "") });
+  };
 
   const selCount = selected.size;
 
@@ -320,7 +396,7 @@ export function AssetLibrary() {
     } catch (e) { toast.error(e instanceof Error ? e.message : t("ใส่อัลบั้มไม่สำเร็จ", "Failed to add to album")); }
   };
 
-  const anyModalOpen = bulkNewAlbumOpen || artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen || fileSortOpen;
+  const anyModalOpen = bulkNewAlbumOpen || artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || !!bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen || fileSortOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -542,7 +618,9 @@ export function AssetLibrary() {
           </div>
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={collectionId === null} onClick={() => setCollectionId(null)} label={t("ทั้งหมด", "All")} />
-            <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label={t("ไม่อยู่อัลบั้ม", "No album")} />
+            <SideItem active={collectionId === "none"} onClick={() => setCollectionId("none")} label={t("ไม่อยู่อัลบั้ม", "No album")}
+              dropTitle={openAlbum ? `${t("วางที่นี่ = เอาออกจาก", "Drop here = remove from")} “${openAlbum.name}”` : undefined}
+              onDropIds={openAlbum && can("assets.edit") ? (ids) => void removeFromAlbum(ids, openAlbum) : undefined} />
             <SideAlbums collections={collections} activeId={collectionId} onSelect={setCollectionId}
               canManage={can("assets.manage")} canDrop={can("assets.edit")} onAction={onAlbumAction} onDropAssets={dropAssetsOnAlbum} />
             {can("assets.manage") && (() => { const cur = collections.find((c) => c.id === collectionId); return cur ? <InlineSubAlbum parent={cur} onCreated={() => loadMeta()} /> : null; })()}
@@ -650,10 +728,12 @@ export function AssetLibrary() {
             <CardViewBar gallery={gallery} count={`${total.toLocaleString("th-TH")} ${t("ไฟล์", "files")}`} />
             <CardGrid gallery={gallery}>
               {rows.map((a) => (
-                <AssetCard key={a.id} a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
+                <div key={a.id} className="contents" onContextMenu={(e) => openCtx(e, a)}>
+                <AssetCard a={a} selected={selected.has(a.id)} selectionMode={selCount > 0}
                   dragIds={() => (selected.has(a.id) ? Array.from(selected) : [a.id])}
                   onToggle={(e) => sm.pick(a.id, e)} onOpen={() => setDetailId(a.id)} pressProps={sm.pressProps(a.id)}
                   onSameFolder={(id, label) => setFolderFilter({ id, label })} />
+                </div>
               ))}
             </CardGrid>
           </>)}
@@ -664,20 +744,28 @@ export function AssetLibrary() {
         </main>
       </div>
 
-      {/* bulk bar — อยู่ล่าง (ที่เดิม) · z สูง ลอยอยู่หน้าสุดไม่โดนบัง */}
-      {selCount > 0 && (
-        <div className="sticky bottom-4 z-40 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap justify-center">
-          <span className="text-sm font-medium">{t("เลือก", "Selected")} {selCount} {t("ไฟล์", "files")}</span>
-          {!trash && <button onClick={() => setBulkEditOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("✏️ แก้หลายรายการ", "✏️ Edit many")}</button>}
-          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🏷️ ติดแท็ก", "🏷️ Add tag")}</button>}
-          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("📁 จัดอัลบั้ม", "📁 Organize album")}</button>}
-          {!trash && can("assets.manage") && <button onClick={() => setBulkNewAlbumOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("📁＋ ใส่อัลบั้มย่อยใหม่", "📁＋ New sub-album")}</button>}
-          {!trash && driveOn && <button onClick={() => setBulkFolderOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🗂️ สร้าง Folder Drive", "🗂️ Create Drive folder")}</button>}
-          {!trash && driveOn && <button onClick={() => setBulkLinkOpen(true)} disabled={bulkLinkBusy} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-50">{bulkLinkBusy ? t("กำลังผูก…", "Linking…") : t("📎 ใช้โฟลเดอร์เดียวกัน", "📎 Use same folder")}</button>}
-          <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">{t("🗑️ ลบ", "🗑️ Delete")}</button>
-          <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">{t("ยกเลิก", "Cancel")}</button>
-        </div>
-      )}
+      {/* แถบคำสั่งหลายไฟล์ = ของกลาง BulkActionBar (ลอยล่างจอ · มือถืออยู่เหนือเมนูล่าง) · ปุ่มหลัก 4 + ⋯ (เจ้าของเลือก 2026-11-27) */}
+      <BulkActionBar count={selCount} unit={t("ไฟล์", "files")} onClear={clearSel}>
+        {albumItems.length > 0 && (
+          <Popover align="right" panelClassName="rounded-xl border border-slate-200 bg-white shadow-xl"
+            trigger={(toggle) => <button type="button" onClick={toggle} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] bg-white/10 hover:bg-white/20"><Icon value="i:folder" /> {t("อัลบั้ม", "Album")} <span className="text-[10px] opacity-70">▾</span></button>}>
+            {(close) => <AssetActionList items={albumItems} onPick={(k) => { close(); runAction(k); }} />}
+          </Popover>
+        )}
+        {openAlbum && !trash && (
+          <button type="button" onClick={() => runAction("remove")} title={`${t("เอาออกจาก", "Remove from")} “${openAlbum.name}” · ${t("ไฟล์ยังอยู่ในคลัง", "files stay in library")}`}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] bg-amber-600 hover:bg-amber-500"><Icon value="i:minus" /> <span className="hidden sm:inline">{t("เอาออกจากอัลบั้มนี้", "Remove from album")}</span><span className="sm:hidden">{t("เอาออก", "Remove")}</span></button>
+        )}
+        {!trash && <button type="button" onClick={() => runAction("tag")} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] bg-white/10 hover:bg-white/20 max-sm:hidden"><Icon value="i:tag" /> {t("ติดแท็ก", "Tag")}</button>}
+        <button type="button" onClick={() => runAction("trash")} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] bg-white/10 hover:bg-white/20"><Icon value="i:trash" /> {t("ลบ", "Delete")}</button>
+        {!trash && (
+          <Popover align="right" panelClassName="rounded-xl border border-slate-200 bg-white shadow-xl"
+            trigger={(toggle) => <button type="button" onClick={toggle} title={t("คำสั่งอื่น", "More")} aria-label={t("คำสั่งอื่น", "More")} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] bg-white/10 hover:bg-white/20"><Icon value="i:dots-vertical" /></button>}>
+            {(close) => <AssetActionList items={window.innerWidth < 640 ? [{ key: "tag", label: t("ติดแท็ก", "Add tag"), icon: "i:tag" } as AssetActionItem, ...moreItems] : moreItems /* มือถือซ่อนปุ่มติดแท็กบนแถบ → อยู่ในนี้ */} onPick={(k) => { close(); runAction(k); }} />}
+          </Popover>
+        )}
+      </BulkActionBar>
+      {ctxMenu && selCount > 0 && <AssetContextMenu x={ctxMenu.x} y={ctxMenu.y} title={ctxMenu.title} items={ctxItems} onPick={runAction} onClose={() => setCtxMenu(null)} />}
 
       {/* modals */}
       {fileSortOpen && <FileSortSettingsModal canEdit={can("assets.manage")} onClose={() => setFileSortOpen(false)} />}
@@ -780,7 +868,8 @@ export function AssetLibrary() {
         confirmText={t("ย้ายลงถังขยะ", "Move to trash")} variant="danger"
       />
       {bulkTagOpen && <BulkTagModal count={selCount} tags={tags} onClose={() => setBulkTagOpen(false)} onApply={bulkTag} />}
-      {bulkMoveOpen && <BulkMoveModal count={selCount} collections={collections} onClose={() => setBulkMoveOpen(false)} onApply={bulkMove} />}
+      {bulkMoveOpen && <BulkMoveModal count={selCount} collections={bulkMoveOpen === "move" ? collections.filter((c) => c.id !== openAlbum?.id) : collections}
+        mode={bulkMoveOpen} fromName={openAlbum?.name} onClose={() => setBulkMoveOpen(false)} onApply={bulkMoveOpen === "move" ? (id) => void moveToAlbum(id) : bulkMove} />}
       {bulkNewAlbumOpen && <BulkNewAlbumModal ids={Array.from(selected)} collections={collections} defaultParent={collectionId && collectionId !== "none" ? collectionId : null}
         onClose={() => setBulkNewAlbumOpen(false)} onDone={async () => { clearSel(); await loadMeta(); await load(); }} />}
       {bulkEditOpen && <BulkEditModal ids={Array.from(selected)} artTypes={artTypes}
@@ -848,12 +937,24 @@ function SideAlbums({ collections, activeId, onSelect, canManage, canDrop, onAct
   );
 }
 
-function SideItem({ active, onClick, label, count, icon }: {
+function SideItem({ active, onClick, label, count, icon, onDropIds, dropTitle }: {
   active: boolean; onClick: () => void; label: string; count?: number; icon?: string;
+  /** ลากรูปมาวางได้ (เช่น "ไม่อยู่อัลบั้ม" = เอาออกจากอัลบั้มที่เปิดอยู่) */
+  onDropIds?: (ids: string[]) => void; dropTitle?: string;
 }) {
+  const [over, setOver] = useState(false);
   return (
-    <button onClick={onClick}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[13px] text-left ${active
+    <button onClick={onClick} title={onDropIds ? dropTitle : undefined}
+      onDragOver={(e) => { if (!onDropIds || !Array.from(e.dataTransfer.types).includes(ASSET_DRAG_TYPE)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        setOver(false);
+        const raw = onDropIds ? e.dataTransfer.getData(ASSET_DRAG_TYPE) : "";
+        if (!raw) return;
+        e.preventDefault();
+        try { onDropIds?.(JSON.parse(raw) as string[]); } catch { /* ข้อมูลลากเสีย */ }
+      }}
+      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[13px] text-left ${over ? "bg-amber-50 text-amber-800 ring-2 ring-amber-300" : active
         ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>
       {icon && <span className="text-[13px]"><Icon value={icon} /></span>}
       <span className="truncate flex-1">{label}</span>
