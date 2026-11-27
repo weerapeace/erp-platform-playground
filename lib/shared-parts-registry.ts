@@ -499,6 +499,15 @@ export const SHARED_PARTS: SharedPart[] = [
     note: "เจ้าของเลือกจาก widget 2026-11-27 (ข้อเสนอ 1 ตั้งชื่ออัตโนมัติ · 2 ลบพื้นขาว · 3 มาจากไฟล์ไหน · 6 ลากรูปลงอัลบั้มย่อย) · ไฟล์ต้นฉบับ >4MB เก็บเป็นภาพรวมแผ่นแทน (Vercel รับ ≤4.5MB) · .eps แปลงด้วย Ghostscript wasm ใน public/vendor (AGPL · โหลดตอนใช้ ~16MB) เจ้าของสั่ง 2026-11-27",
   },
   {
+    key: "asset-recolor", label: "เปลี่ยนสีรูปในคลัง → สำเนาใหม่ (ทีละสีจากเวกเตอร์ / สีเดียวทั้งชิ้น)", code: "AssetRecolorModal · lib/svg-recolor · /api/assets/vector · lib/brand-swatches", category: "file",
+    source: { path: "components/asset-recolor" },
+    what: "รูปที่มีเวกเตอร์คู่ (assets.vector_key · ตัวแยกชิ้นเก็บ SVG ให้) = เปลี่ยนทีละสี (พื้น/เส้น/จุด) + ทาสีเดียวทั้งชิ้น · PNG ธรรมดา = ทาสีเดียวคงความโปร่งใส · ปุ่มสีแบรนด์ · บันทึก = PNG + SVG ชุดใหม่ผูกกลับไฟล์ต้นทาง (source_asset_id) · ย้อนกลับจากแจ้งผล (ลงถังขยะ) · lib/svg-recolor = หาสี/แทนสี/ตัดสคริปต์ (ใช้ร่วมกับตัวออกแบบการ์ดที่เปลี่ยนสีชิ้นบนการ์ดโดยไม่สร้างสำเนา)",
+    when: "เปลี่ยนสีสติกเกอร์/ไอคอน/ลายเส้นในคลังให้เป็นสีแบรนด์อื่น (ปุ่ม 🎨 เปลี่ยนสี หน้ารายละเอียดไฟล์)",
+    notWhen: "ปรับแสง/ตัด/หมุนรูปถ่าย → ImageCropPicker · ลงสีชิ้นส่วนสินค้าตามตัวเลือก → product-configurator (recolor_slot)",
+    doc: "vector-splitter.md",
+    note: "เจ้าของเลือกแบบ A (PNG + SVG คู่) + ข้อเสนอ 1, 2, 3, 5 จาก widget 2026-11-27 · .ai/.pdf/.eps → SVG ด้วย MuPDF wasm ใน public/vendor/mupdf-1.27.0 (AGPL · โหลดตอนใช้ ~10MB) · ColorPicker/ColorInput รับ swatches (สีลัด) แล้ว",
+  },
+  {
     key: "album-picker", label: "เลือกอัลบั้มคลังไฟล์ (ค้นได้ · โชว์อัลบั้มแม่ · ย่อเกิน 6)", code: "AlbumMultiPicker · AlbumSelect · AlbumTree · lib/album-options", category: "pick",
     source: { path: "components/album-picker" },
     what: "เลือกอัลบั้มหลายอัน (ชิปเฉพาะที่เลือก + ปุ่ม \"+ เพิ่มอัลบั้ม\") หรืออันเดียว (แทน select ยาว) · ค้นชื่อหรือชื่อแม่ได้ ไม่ต้องตรงเป๊ะ · ทุกอันโชว์เส้นทางแม่ (\"SAMPLE … › Product 012 › Version 2\") · ใช้ล่าสุดขึ้นบน · กลุ่ม SAMPLE ยุบตามแบรนด์ กางทีละชั้น · รายการไหนเกิน 6 อัน = โชว์ 6 + \"ดูอีก N\" · AlbumTree = ต้นไม้เดียวกันให้แถบข้างวาดแถวเอง",

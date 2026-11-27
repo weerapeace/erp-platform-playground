@@ -6,6 +6,8 @@
  *   + ปุ่ม 💧 ดูดสีจากหน้าจอ (รวมพรีวิวเว็บร้านใน iframe) — EyeDropper ของเบราว์เซอร์ (Chrome/Edge) · ไม่รองรับ = ไม่โชว์ปุ่ม
  * - ColorInput: ปุ่ม swatch + ช่องพิมพ์ hex/rgba → กดเปิด popover (portal ลอยทะลุ modal)
  *
+ * - swatches = ปุ่มสีลัด (เช่น สีแบรนด์จาก lib/brand-swatches useBrandSwatches) โชว์แถวบนสุด
+ *
  * ใช้แทน <input type="color"> ทุกที่ในระบบ (มาตรฐานกลาง)
  *   <ColorInput value={hex} onChange={setHex} />
  */
@@ -55,7 +57,9 @@ type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> };
 const eyeDropperCtor = (): EyeDropperCtor | null =>
   typeof window !== "undefined" && "EyeDropper" in window ? (window as unknown as { EyeDropper: EyeDropperCtor }).EyeDropper : null;
 
-export function ColorPicker({ value, onChange }: { value: string; onChange: (hex: string) => void }) {
+export type ColorSwatch = { color: string; label: string };
+
+export function ColorPicker({ value, onChange, swatches }: { value: string; onChange: (hex: string) => void; swatches?: ColorSwatch[] }) {
   const hsv = hexToHsv(value);
   const [h, setH] = useState(hsv.h);
   const [s, setS] = useState(hsv.s);
@@ -125,6 +129,14 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
         style={{ background: "linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}>
         <span className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow" style={{ left: `${(h / 360) * 100}%`, background: hsvToHex(h, 1, 1) }} />
       </div>
+      {swatches && swatches.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1" title="สีแบรนด์">
+          {swatches.map((sw) => { const c = normHex(sw.color); return c ? (
+            <button key={sw.label + c} type="button" onClick={() => { applyHex(c); remember(c); }} title={`${sw.label} ${c}`}
+              className={`h-5 w-5 shrink-0 rounded-full border ${c === normHex(hexText) ? "border-blue-500 ring-1 ring-blue-400" : "border-slate-200"}`} style={{ background: c }} />
+          ) : null; })}
+        </div>
+      )}
       {recent.length > 0 && (
         <div className="mt-2 flex items-center gap-1" title="สีที่ใช้ล่าสุด">
           {recent.map((c) => (
@@ -150,8 +162,8 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
 }
 
 // ปุ่ม swatch + ช่องพิมพ์ + popover picker (ลอย portal) — ใช้แทน <input type="color"> + ช่อง hex
-export function ColorInput({ value, onChange, allowText = true, invalid }: {
-  value: string; onChange: (v: string) => void; allowText?: boolean; invalid?: boolean;
+export function ColorInput({ value, onChange, allowText = true, invalid, swatches }: {
+  value: string; onChange: (v: string) => void; allowText?: boolean; invalid?: boolean; swatches?: ColorSwatch[];
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
@@ -189,7 +201,7 @@ export function ColorInput({ value, onChange, allowText = true, invalid }: {
       {open && pos && createPortal(
         <div ref={panelRef} className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl p-2"
           style={{ left: pos.left, top: pos.top, transform: pos.up ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
-          <ColorPicker value={normHex(value) ?? "#000000"} onChange={onChange} />
+          <ColorPicker value={normHex(value) ?? "#000000"} onChange={onChange} swatches={swatches} />
         </div>,
         document.body,
       )}

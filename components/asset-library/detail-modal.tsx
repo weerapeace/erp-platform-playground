@@ -19,6 +19,9 @@ import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { type LookupItem, isImage, TYPE_ICON, driveFolderNameOf, commonNameSeed, uploadArtworkToDrive, useArtworkPathRule, pathMatchesRule, useDriveFolderMaps, brandFolderPath } from "./asset-shared";
 import { useSaveShortcut } from "@/components/save-bar/use-save-shortcut";
 import { SplitFamily } from "./split-family";
+import nextDynamicRecolor from "next/dynamic";
+// 🎨 เปลี่ยนสี → สำเนาใหม่ (ของกลาง · โหลดตอนกด)
+const AssetRecolorModal = nextDynamicRecolor(() => import("@/components/asset-recolor").then((m) => m.AssetRecolorModal), { ssr: false });
 import { CollectionMultiSelect, ArtTypeMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField, Meta, UsageList } from "./asset-fields";
 
 // ── รายละเอียดไฟล์ ──
@@ -52,6 +55,7 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
   const [replacing, setReplacing] = useState(false);
   const [zoom, setZoom] = useState(false);   // กดรูป → ดูเต็มจอ
   const replaceRef = useRef<HTMLInputElement>(null);
+  const [recolorOpen, setRecolorOpen] = useState(false);
   // เพิ่มไฟล์ต้นฉบับขึ้น Drive ย้อนหลัง (บางทีตอนสร้างลืมใส่) — สร้างโฟลเดอร์ + ก็อปรูป preview ให้
   const [driveOn, setDriveOn] = useState(false);
   const [brandId, setBrandId] = useState("");
@@ -252,6 +256,10 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
                 className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
                 {replacing ? t("กำลังแทนที่…", "Replacing…") : t("🔄 แทนที่ไฟล์", "🔄 Replace file")}</button>
             )}
+            {!trashed && d?.asset_type === "image" && (
+              <button onClick={() => setRecolorOpen(true)} title={d.vector_key ? t("เปลี่ยนทีละสี (มีไฟล์เวกเตอร์)", "Recolor each color (has vector)") : t("เปลี่ยนเป็นสีเดียวทั้งชิ้น", "Tint to one color")}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">{t("🎨 เปลี่ยนสี", "🎨 Recolor")}</button>
+            )}
             <input ref={replaceRef} type="file" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void doReplace(f); e.currentTarget.value = ""; }} />
           </div>
@@ -350,6 +358,7 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
 
             {/* ✂️ PNG ที่แยกจากไฟล์ออกแบบ: มาจากไฟล์ไหน + ชิ้นพี่น้อง */}
             <SplitFamily asset={d} onOpen={onNavigate} />
+            {recolorOpen && <AssetRecolorModal asset={d} actor={actor} onClose={() => setRecolorOpen(false)} onSaved={() => onChanged()} />}
 
             <div className="mt-3 pt-3 border-t border-slate-100">
               <p className="text-[12px] font-medium text-slate-600 mb-1.5">{t("📁 ไฟล์ต้นฉบับ", "📁 Source file")} <span className="text-[10px] text-slate-400 font-normal">{t("— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)", "— the library only stores the “location/link”, not the large file (it can live on NAS or Drive)")}</span></p>

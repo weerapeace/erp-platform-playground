@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { printPreviewProblem } from "@/lib/print-file-policy";
+import { sanitizeSvg } from "@/lib/svg-recolor";
 import { detectAssetType, extOf, sha256Hex, ASSET_MAX_BYTES } from "@/lib/assets";
 import {
   type AssetRow, buildRow, sanitizeToken, loadTags, loadUsageCounts, attachTags, rowOf, actorId,
@@ -171,6 +172,17 @@ export async function POST(request: NextRequest) {
   const srcRaw       = String(form.get("source_asset_id") ?? "").trim();
   const sourceAssetId = /^[0-9a-f-]{36}$/i.test(srcRaw) ? srcRaw : null;   // PNG ที่แยกจากไฟล์ต้นฉบับนี้             // แบรนด์ของ artwork
 
+  // 🎨 SVG เวกเตอร์คู่กับ PNG (ตัวแยกชิ้น / เปลี่ยนสี) — เก็บข้างกันใน R2 ไม่ใช่ไฟล์แยกในคลัง
+  const vecFile = form.get("vector") as File | null;
+  const vector = vecFile && typeof vecFile === "object" && vecFile.size > 0 && vecFile.size <= 2 * 1024 * 1024 ? sanitizeSvg(await vecFile.text()) : null;
+  if (vector !== null && !/<svg[s>]/i.test(vector)) return NextResponse.json({ error: "ไฟล์เวกเตอร์ต้องเป็น SVG" }, { status: 400 });
+  const putVector = async (base: string) => {
+    if (!vector) return null;
+    const k = `${base.replace(/.[^./]+$/, "")}-vec.svg`;
+    await r2PutObject(k, new TextEncoder().encode(vector), "image/svg+xml");
+    return k;
+  };
+
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
   // หมวดงานพิมพ์: R2 เก็บได้แค่รูปตัวอย่าง — PDF/EPS/AI ต้องไป Google Drive (lib/print-file-policy)
@@ -187,6 +199,10 @@ export async function POST(request: NextRequest) {
     : await admin.from("assets").select("*").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
   const dup = dupRes.data;
   if (dup) {
+    // ไฟล์ซ้ำแต่ยังไม่มีเวกเตอร์ → เติมให้ (PNG เดิมจากรอบก่อนที่ยังไม่ได้เก็บ SVG)
+    if (vector && !dup.vector_r2_key) {
+      try { const vk = await putVector(String(dup.r2_key)); if (vk) { await admin.from("assets").update({ vector_r2_key: vk }).eq("id", dup.id as string); dup.vector_r2_key = vk; } } catch { /* PNG ยังใช้ได้ */ }
+    }
     if (tagNames.length) await attachTags(admin, dup.id as string, tagNames);
     for (const cid of collectionIds) await admin.from("asset_collection_map").upsert({ asset_id: dup.id as string, collection_id: cid }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
     return NextResponse.json({ data: await rowOf(admin, dup as Parameters<typeof rowOf>[1]), duplicate: true, error: null });
@@ -204,6 +220,9 @@ export async function POST(request: NextRequest) {
       { error: "อัปโหลดไฟล์ไม่สำเร็จ: " + (err instanceof Error ? err.message : "") }, { status: 500 });
   }
 
+  let vectorKey: string | null = null;
+  try { vectorKey = await putVector(r2Key); } catch { vectorKey = null; }   // เก็บเวกเตอร์ไม่ได้ = ยังได้ PNG
+
   const { data: ins, error } = await admin.from("assets").insert({
     title, file_name: file.name, r2_key: r2Key, asset_type: assetType,
     content_type: file.type || null, ext: ext || null, size_bytes: file.size,
@@ -211,7 +230,7 @@ export async function POST(request: NextRequest) {
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
     source, artwork_type: artworkType, artwork_types: artworkTypes, print_type: printType, print_items: printItems, master_path: masterPath, master_url: masterUrl, keywords,
-    sizes, parent_sku_codes: parentCodes, brand_id: brandId, source_asset_id: sourceAssetId,
+    sizes, parent_sku_codes: parentCodes, brand_id: brandId, source_asset_id: sourceAssetId, vector_r2_key: vectorKey,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
@@ -222,7 +241,7 @@ export async function POST(request: NextRequest) {
   await writeAudit(admin, {
     action: "create", entityType: "asset", entityId: ins.id as string,
     actorId: await actorId(request), actorName: actor,
-    metadata: { file_name: file.name, asset_type: assetType, size_bytes: file.size },
+    metadata: { file_name: file.name, asset_type: assetType, size_bytes: file.size, ...(vectorKey ? { vector: true } : {}) },
   });
 
   return NextResponse.json({ data: await rowOf(admin, ins as Parameters<typeof rowOf>[1]), duplicate: false, error: null });

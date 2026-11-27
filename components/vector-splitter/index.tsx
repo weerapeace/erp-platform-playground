@@ -23,6 +23,7 @@ import {
   safeFileName, exportScale, boxFromDrag, clearEdgeWhite, readingOrder,
 } from "@/lib/vector-split";
 import { openVectorFile, canvasToPng, type VectorSource } from "./render";
+import { prepareSheet, cropPiece, type PreparedSheet } from "./svg-crop";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetRow } from "@/app/api/assets/shared";
 
@@ -67,6 +68,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   const [extraCols, setExtraCols] = useState<AssetCollection[]>([]);
   const [keepOriginal, setKeepOriginal] = useState(true);
   const [originalInAlbum, setOriginalInAlbum] = useState(false);
+  const [keepVector, setKeepVector] = useState(true);   // 🎨 เก็บ SVG คู่ PNG — เปลี่ยนสีได้ทีหลัง (เจ้าของเลือกแบบ A)
   const [drawMode, setDrawMode] = useState(false);
   const [drag, setDrag] = useState<{ x: number; y: number; x2: number; y2: number } | null>(null);
   const [progress, setProgress] = useState<UploadProgressState | null>(null);
@@ -189,9 +191,10 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
     setExtraCols((x) => [...x, { id: j.data.id, name, description: null, count: 0, parent_id: null }]);
     return j.data.id as string;
   };
-  const postAsset = async (f: File, extra: Record<string, string>) => {
+  const postAsset = async (f: File, extra: Record<string, string>, vector?: string | null) => {
     const fd = new FormData();
     fd.append("file", f);
+    if (vector) fd.append("vector", new File([vector], `${f.name.replace(/.[^.]+$/, "")}.svg`, { type: "image/svg+xml" }));
     for (const [k, v] of Object.entries(extra)) fd.append(k, v);
     if (actor) fd.append("actor", actor);
     const res = await apiFetch("/api/assets", { method: "POST", body: fd });
@@ -226,6 +229,13 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
           }
         } catch (e) { failed.push({ name: file.name, error: e instanceof Error ? e.message : String(e) }); }
       }
+      // 🎨 เตรียมแผ่นเวกเตอร์ครั้งเดียว (.ai/.pdf/.eps = แปลงด้วย MuPDF ครั้งแรก ~10MB) · ไม่สำเร็จ = เก็บ PNG อย่างเดียว ไม่ล้มทั้งงาน
+      let vecSheet: PreparedSheet | null = null;
+      if (keepVector) {
+        setProgress({ name: file.name, pct: null, label: t("เตรียมไฟล์เวกเตอร์ (ครั้งแรกโหลดตัวแปลง ~10MB)", "Preparing vectors (first time loads ~10MB)"), count: { current: step, total } });
+        try { vecSheet = prepareSheet(await src.vectorSheet()); }
+        catch (e) { failed.push({ name: t("ไฟล์เวกเตอร์ (เปลี่ยนสี)", "Vector (recolor)"), error: `${e instanceof Error ? e.message : String(e)} — ${t("เก็บเป็น PNG อย่างเดียว", "saved PNG only")}` }); }
+      }
       for (let i = 0; i < selected.length; i++) {
         const p = selected[i], name = names[i];
         step++;
@@ -239,16 +249,22 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
             ctx.putImageData(img, 0, 0);
           }
           const blob = await canvasToPng(canvas);
+          const scale = exportScale(p.box, size, src.unitsPerInch);
+          let vector: string | null = null;
+          if (vecSheet) {
+            try { vector = cropPiece(vecSheet, p.box, pad / scale, canvas.width, canvas.height, removeWhite); } catch { vector = null; }
+            if (vector && vector.length > 1.8 * 1024 * 1024) vector = null;   // เวกเตอร์ใหญ่เกินที่เว็บรับคู่กับ PNG → PNG อย่างเดียว
+          }
           if (blob.size > SMALL_UPLOAD_BYTES) throw new Error(t("PNG ใหญ่เกิน 4MB — เลือกขนาดเล็กลง", "PNG over 4MB — pick a smaller size"));
           const row = await postAsset(new File([blob], `${name}.png`, { type: "image/png" }), {
             title: name, width: String(canvas.width), height: String(canvas.height), tags: "แยกจากไฟล์ออกแบบ",
             ...(albumIds ? { collection_ids: albumIds } : {}), ...(sourceId ? { source_asset_id: sourceId } : {}),
-          });
+          }, vector);
           if (row) savedRows.push(row);
         } catch (e) { failed.push({ name, error: e instanceof Error ? e.message : String(e) }); }
       }
     } finally { setProgress(null); }
-    const ok = selected.length - failed.filter((f) => f.name !== file.name).length;
+    const ok = savedRows.length;
     setSaved((prev) => [...prev, ...savedRows]);   // "แยกไฟล์อื่นต่อ" = สะสมชิ้นของทุกไฟล์
     setResult({ ok, failed, album: cols.find((c) => c.id === albumId)?.name ?? null });
     if (ok) toast.success(`${t("บันทึก", "Saved")} ${ok} ${t("ชิ้นเข้าคลังแล้ว", "pieces to the library")}`);
@@ -417,6 +433,12 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
                   {t("ใส่ไฟล์ต้นฉบับในอัลบั้มด้วย", "Also put the original in the album")}
                 </label>
               )}
+              <label className="flex items-start gap-2 text-[12px] text-slate-600">
+                <input type="checkbox" checked={keepVector} onChange={(e) => setKeepVector(e.target.checked)} className="mt-0.5" />
+                <span>{t("เก็บไฟล์เวกเตอร์ไว้เปลี่ยนสีทีหลัง", "Keep vectors to recolor later")}
+                  <span className="block text-[11px] text-slate-400">{t("ได้ PNG + SVG คู่กัน · กด “เปลี่ยนสี” ในหน้ารายละเอียดไฟล์ หรือในตัวออกแบบการ์ด", "PNG + SVG pair · use “Recolor” in file details or the card designer")}</span>
+                </span>
+              </label>
               {progress && <UploadProgress {...progress} />}
             </div>
           )}

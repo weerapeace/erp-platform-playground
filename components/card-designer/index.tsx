@@ -27,6 +27,8 @@ import {
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
+import { useBrandSwatches } from "@/lib/brand-swatches";
+import { listSvgColors, vectorUrl } from "@/lib/svg-recolor";
 import { CardElView as ElView, CardPreview, InlineTextEditor, ScreenMarks, cardFontOptions, useCardFonts, useWidth, type UploadedFont } from "./preview";
 export { CardPreview, CardQuickEdit, InlineTextEditor, cardFontOptions, useCardFonts, type UploadedFont } from "./preview";
 const r2Url = (k: string) => r2ImageUrl(k);
@@ -253,10 +255,11 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
 
   // ── รูป: อัปโหลด / คลังรูป ──
   const ratioOf = (url: string) => new Promise<number>((res) => { const im = new Image(); im.onload = () => res(im.naturalWidth / Math.max(1, im.naturalHeight)); im.onerror = () => res(1); im.src = url; });
-  const placeImage = async (key: string) => {
+  const placeImage = async (key: string, vec?: string | null) => {
     if (uploadTarget.current === "bg") { commit({ ...docRef.current, bg: { ...docRef.current.bg, image: `r2:${key}` } }); return; }
     const ratio = await ratioOf(r2ImageUrl(key) ?? "");
-    addEl(newImageEl(docRef.current, `r2:${key}`, ratio));
+    const el = newImageEl(docRef.current, `r2:${key}`, ratio);
+    addEl(vec ? { ...el, vec } : el);   // 🎨 ชิ้นเวกเตอร์ = เปลี่ยนสีบนการ์ดได้
   };
   const onFile = async (f: File | undefined) => {
     if (!f) return;
@@ -372,6 +375,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
         <div className="flex flex-wrap gap-1.5">
           <button type="button" className={btn()} onClick={() => patchEl(selected.id, { fit: selected.fit === "cover" ? "contain" : "cover" })}>{selected.fit === "cover" ? "ตัดให้เต็มกรอบ" : "พอดีกรอบ"}</button>
           <button type="button" className={btn(!!selected.flipX)} onClick={() => patchEl(selected.id, { flipX: !selected.flipX })}>กลับด้าน</button>
+          {selected.vec && <VectorColors vec={selected.vec} recolor={selected.recolor} onChange={(rc, key) => patchEl(selected.id, { recolor: rc }, key)} />}
         </div>
       )}
       {selected.kind === "shape" && (
@@ -506,7 +510,38 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
 
       <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={(e) => void onFile(e.target.files?.[0])} />
       <AssetPicker open={picker !== null} onClose={() => setPicker(null)} typeFilter="image" title={picker === "bg" ? "เลือกรูปพื้นการ์ด" : "เลือกรูปใส่การ์ด"}
-        onSelect={(assets) => { setPicker(null); for (const a of assets.slice(0, 5)) if (a.r2_key) void placeImage(a.r2_key); }} />
+        onSelect={(assets) => { setPicker(null); for (const a of assets.slice(0, 5)) if (a.r2_key) void placeImage(a.r2_key, picker === "bg" ? null : a.vector_key); }} />
+    </div>
+  );
+}
+
+/** 🎨 สีในชิ้นเวกเตอร์บนการ์ด — เปลี่ยนทีละสี (ไม่สร้างสำเนาในคลัง · เก็บแผนที่สีในการ์ด · ย้อนด้วย Ctrl+Z ได้) */
+function VectorColors({ vec, recolor, onChange }: { vec: string; recolor?: Record<string, string>; onChange: (rc: Record<string, string> | undefined, key: string) => void }) {
+  const swatches = useBrandSwatches();
+  const [colors, setColors] = useState<string[] | null>(null);
+  useEffect(() => {
+    let off = false;
+    fetch(vectorUrl(vec)).then((r) => (r.ok ? r.text() : "")).then((s) => { if (!off) setColors(listSvgColors(s).slice(0, 12).map((c) => c.color)); }).catch(() => { if (!off) setColors([]); });
+    return () => { off = true; };
+  }, [vec]);
+  if (!colors?.length) return null;
+  const set = (from: string, to: string | null) => {
+    const n = { ...(recolor ?? {}) };
+    if (!to || to === from) delete n[from]; else n[from] = to.toLowerCase();
+    onChange(Object.keys(n).length ? n : undefined, `rc:${from}`);
+  };
+  return (
+    <div className="w-full space-y-1 rounded-lg border border-slate-200 p-2 text-[12px]">
+      <div className="flex items-center justify-between text-slate-500"><span>สีในรูป (เปลี่ยนได้)</span>
+        {recolor && <button type="button" className="text-violet-600 hover:underline" onClick={() => onChange(undefined, "rc:all")}>สีเดิมทั้งหมด</button>}</div>
+      {colors.map((c) => (
+        <div key={c} className="flex items-center gap-1.5">
+          <span className="h-5 w-5 shrink-0 rounded border border-slate-200" style={{ background: c }} title={c} />
+          <span className="text-slate-400">→</span>
+          <ColorInput value={recolor?.[c] ?? c} onChange={(v) => /^#[0-9a-f]{6}$/i.test(v) && set(c, v)} allowText={false} swatches={swatches} />
+          {recolor?.[c] && <button type="button" title="สีเดิม" className="text-slate-400 hover:text-violet-600" onClick={() => set(c, null)}>↺</button>}
+        </div>
+      ))}
     </div>
   );
 }

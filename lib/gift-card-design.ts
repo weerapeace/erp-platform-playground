@@ -11,6 +11,7 @@
  * คู่มือ docs/order-gift-cards.md
  */
 import { sheetGrid, type GiftCardConfig } from "@/lib/website-gift-cards";
+import { VECTOR_KEY_RE, cleanColorMap, vectorUrl } from "@/lib/svg-recolor";
 
 // ─── ชนิด ───
 
@@ -54,6 +55,10 @@ export interface CardEl {
   src?: string;
   fit?: "contain" | "cover";
   flipX?: boolean;
+  /** 🎨 ชิ้นเวกเตอร์จากคลัง (R2 key ของ SVG · assets.vector_key) → เปลี่ยนสีบนการ์ดได้ */
+  vec?: string;
+  /** สีเดิม → สีใหม่ (#rrggbb) ของชิ้นเวกเตอร์ */
+  recolor?: Record<string, string>;
   // รูปทรง
   shape?: CardShape;
   fill?: string;
@@ -244,6 +249,15 @@ export const stickerByKey = (key: string) => STICKERS.find((s) => s.key === key)
 export const stickerDataUrl = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 
 /** แปลง src ของชิ้นรูปเป็นลิงก์ · r2ToUrl = ฟังก์ชันจากฝั่งที่เรียก (lib/r2-image) */
+/** ลิงก์รูปของชิ้นรูป — ชิ้นเวกเตอร์ที่เปลี่ยนสีแล้ว = SVG สีใหม่ (/api/assets/vector) · นอกนั้น = resolveSrc */
+export function elSrc(e: Pick<CardEl, "src" | "vec" | "recolor">, r2ToUrl: (key: string) => string | null): string | null {
+  if (e.vec && e.recolor && Object.keys(e.recolor).length) {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";   // ลิงก์เต็ม — หน้าพิมพ์/แปลง PNG ที่เปิดหน้าต่างใหม่ก็โหลดได้
+    return origin + vectorUrl(e.vec, e.recolor);
+  }
+  return resolveSrc(e.src, r2ToUrl);
+}
+
 export function resolveSrc(src: string | null | undefined, r2ToUrl: (key: string) => string | null): string | null {
   if (!src) return null;
   if (src.startsWith("sticker:")) { const s = stickerByKey(src.slice(8)); return s ? stickerDataUrl(s.svg) : null; }
@@ -320,6 +334,11 @@ export function cleanEl(raw: unknown, doc: { w: number; h: number }): CardEl | n
     base.src = src;
     base.fit = r.fit === "cover" ? "cover" : "contain";
     if (r.flipX === true) base.flipX = true;
+    if (typeof r.vec === "string" && VECTOR_KEY_RE.test(r.vec)) {
+      base.vec = r.vec;
+      const rc = cleanColorMap(r.recolor);
+      if (rc) base.recolor = rc;
+    }
   } else {
     base.shape = r.shape === "ellipse" || r.shape === "line" ? r.shape : "rect";
     base.fill = typeof r.fill === "string" && HEX.test(r.fill) ? r.fill.toLowerCase() : "";
@@ -661,7 +680,7 @@ export function cardHtml(doc: CardDoc, opts: { r2ToUrl: (key: string) => string 
       const inner = cssStr({ display: "flex", flexDirection: "column", width: "100%", height: "100%", whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...t } as Record<string, string | number>, unit);
       parts.push(`<div style="${box}"><div style="${inner}"><span style="display:block">${esc(e.text ?? "")}</span></div></div>`);
     } else if (e.kind === "image") {
-      const url = resolveSrc(e.src, opts.r2ToUrl);
+      const url = elSrc(e, opts.r2ToUrl);
       if (url) parts.push(`<img src="${esc(url)}" alt="" style="${box};object-fit:${e.fit ?? "contain"}"/>`);
     } else if (e.kind === "shape") {
       const sw = r3((e.strokeW ?? 0) * k);

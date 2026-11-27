@@ -4,6 +4,7 @@
 //   วาดพื้นใสเสมอ · วาดเฉพาะกรอบที่ต้องการที่สเกลไหนก็ได้ (จากเส้นเวกเตอร์ใหม่ → คม)
 import { loadPdfJs } from "@/lib/pdf-merge-engine";
 import { type Box, vectorFileProblem, isSvgName, isPostScript } from "@/lib/vector-split";
+import type { SheetSvg } from "./svg-crop";
 
 export type VectorSource = {
   /** ขนาดแผ่นในหน่วยไฟล์ (PDF = point · SVG = px) */
@@ -14,6 +15,8 @@ export type VectorSource = {
   /** วาดกรอบ box (หน่วยไฟล์) ที่สเกล scale + ขอบใส pad px รอบ ๆ */
   renderRegion: (box: Box, scale: number, pad?: number) => Promise<HTMLCanvasElement>;
   setPage: (n: number) => Promise<VectorSource>;
+  /** 🎨 แผ่นเวกเตอร์เต็ม (SVG) ไว้ตัดชิ้นแบบเปลี่ยนสีได้ · PDF = แปลงด้วย MuPDF ตอนเรียกครั้งแรก (lib/pdf-to-svg) */
+  vectorSheet: () => Promise<SheetSvg>;
   destroy: () => void;
 };
 
@@ -50,13 +53,15 @@ export async function openVectorFile(file: File, onStatus?: (msg: string) => voi
 async function openPdf(bytes: Uint8Array): Promise<VectorSource> {
   const lib = (await loadPdfJs()) as unknown as PdfJsLib;
   let doc: PdfDoc;
-  try { doc = await lib.getDocument({ data: bytes }).promise; }
+  // ส่งสำเนาให้ pdf.js (มันยึดหน่วยความจำไปใช้ในตัวทำงานเบื้องหลัง) — ตัวจริงเก็บไว้แปลงเป็นเวกเตอร์ (vectorSheet)
+  try { doc = await lib.getDocument({ data: bytes.slice() }).promise; }
   catch { throw new Error("เปิดไฟล์ไม่ได้ — ไฟล์อาจเสีย หรือมีรหัสผ่าน"); }
   const atPage = async (n: number): Promise<VectorSource> => {
     const page = await doc.getPage(n);
     const vp1 = page.getViewport({ scale: 1 });
     // pdf.js วาดทีละงานต่อหน้า — ต่อคิวกันวาดซ้อน
     let chain: Promise<unknown> = Promise.resolve();
+    let sheet: Promise<SheetSvg> | null = null;
     const src: VectorSource = {
       width: vp1.width, height: vp1.height, pages: doc.numPages, page: n, unitsPerInch: 72,
       renderRegion: (box, scale, pad = 0) => {
@@ -73,6 +78,13 @@ async function openPdf(bytes: Uint8Array): Promise<VectorSource> {
         });
         chain = job.catch(() => undefined);
         return job;
+      },
+      vectorSheet: () => {
+        sheet ??= import("@/lib/pdf-to-svg").then((m) => m.pdfPageToSvg(bytes, n - 1)).then((r) => ({
+          svg: r.svg, vx: 0, vy: 0, kx: r.width / vp1.width, ky: r.height / vp1.height, width: vp1.width, height: vp1.height,
+        }));
+        sheet.catch(() => { sheet = null; });
+        return sheet;
       },
       setPage: (m) => { page.cleanup(); return atPage(m); },
       destroy: () => { page.cleanup(); void doc.destroy().catch(() => undefined); },
@@ -129,6 +141,7 @@ async function openSvg(text: string): Promise<VectorSource> {
       } finally { URL.revokeObjectURL(url); }
     },
     setPage: async () => src,
+    vectorSheet: async () => ({ svg: text, vx: g.vx, vy: g.vy, kx: g.vw / g.w, ky: g.vh / g.h, width: g.w, height: g.h }),
     destroy: () => undefined,
   };
   return src;

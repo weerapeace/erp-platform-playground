@@ -11,7 +11,7 @@ import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { TextFontOption } from "@/lib/text-style";
 import {
-  CARD_FONTS, CARD_MAX_ELS, FONT_SIZE_MAX, FONT_SIZE_MIN, elBox, fontStack, googleFontsHref, newTextEl, resolveSrc, textCss, uploadFontFaces,
+  CARD_FONTS, CARD_MAX_ELS, FONT_SIZE_MAX, FONT_SIZE_MIN, elBox, elSrc, fontStack, googleFontsHref, newTextEl, resolveSrc, textCss, uploadFontFaces,
   faceDoc, isFolded, withFace, sampleView,
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardTextStyle,
 } from "@/lib/gift-card-design";
@@ -72,7 +72,7 @@ export function CardElView({ e, k, sample }: { e: CardEl; k: number; sample?: { 
     return <div style={{ ...box, opacity: op }}><div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...t }}><span style={{ display: "block" }}>{sample ? sample.text : e.text ||" "}</span></div></div>;
   }
   if (e.kind === "image") {
-    const url = resolveSrc(e.src, r2Url);
+    const url = elSrc(e, r2Url);
     // eslint-disable-next-line @next/next/no-img-element
     return url ? <img src={url} alt="" draggable={false} style={{ ...box, objectFit: e.fit ?? "contain", userSelect: "none" }} /> : null;
   }
