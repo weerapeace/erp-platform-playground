@@ -299,7 +299,7 @@ export function BlockPrintEditor({ id }: { id: string }) {
 
       {tab === "layout" ? (
         <BlockLayoutEditor code={job.code} layouts={doc.layouts} pieces={doc.pieces} unit={unit} paper={doc.paper} canEdit={canEdit}
-          onLayouts={(ls) => apply((d) => ({ ...d, layouts: ls }))} onPaper={(p) => apply((d) => ({ ...d, paper: p }))} onUnit={(u) => apply((d) => ({ ...d, unit: u }))} undo={undo} />
+          onLayouts={(ls) => apply((d) => ({ ...d, layouts: ls }))} onPaper={(p) => apply((d) => ({ ...d, paper: p }))} onUnit={(u) => apply((d) => ({ ...d, unit: u }))} undo={undo} redo={redo} />
       ) : (
       <div className="grid gap-3 lg:grid-cols-[250px_minmax(0,1fr)_270px]">
         {/* ซ้าย: ชิ้นที่พบในไฟล์ */}

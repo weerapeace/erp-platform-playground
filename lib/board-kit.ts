@@ -51,3 +51,14 @@ export function isTypingTarget(el: { tagName?: string; isContentEditable?: boole
   if (el.tagName && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return true;
   return !!el.closest?.(".excalidraw");
 }
+
+/** หากล่องที่เลื่อนได้ "ชั้นนอก" ของ el (ไม่รวม el เอง) — ไม่มี = หน้าเว็บ · ใช้ส่งลูกกลิ้งต่อตอนกระดานล็อก */
+export function scrollOuter(el: HTMLElement, dx: number, dy: number) {
+  let p = el.parentElement;
+  while (p && p !== document.body) {
+    const cs = getComputedStyle(p);
+    if (/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1) { p.scrollBy({ left: dx, top: dy }); return; }
+    p = p.parentElement;
+  }
+  (document.scrollingElement ?? document.documentElement).scrollBy({ left: dx, top: dy });
+}

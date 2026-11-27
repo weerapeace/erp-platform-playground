@@ -23,6 +23,8 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
+import { BoardLockButton, BoardLockHint, useBoardLock } from "@/components/board-kit";
+import { wheelAction } from "@/lib/board-kit";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { MaterialAddSelect } from "@/components/material-quick-create";
@@ -269,6 +271,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);   // ป๊อปวาดลูกทีหลัง → ผูกตัววัดขนาด/ล้อเมาส์ตอนพื้นที่วาดโผล่จริง
   const bindSvg = useCallback((el: SVGSVGElement | null) => { svgRef.current = el; setSvgEl(el); }, []);
+  // ล็อกกระดาน (ชุดกระดานกลาง board-kit · จำต่อคน) — ล็อก: ลูกกลิ้ง = เลื่อนป๊อป/หน้าเว็บ · Ctrl+ลูกกลิ้ง = ซูม · วาด/ย้าย/แก้ชิ้นไม่ได้ (เลื่อนดู/วัดได้)
+  //   ไม่ใช้คีย์ L ของชุดกลาง (L = เครื่องมือเส้นในของหน้านี้) → กดปุ่มกุญแจมุมขวาบน
+  const boardLock = useBoardLock("shape_editor_board_lock", { hotkey: false });
+  const boardLockRef = useRef(boardLock);
+  boardLockRef.current = boardLock;
   const [size, setSize] = useState({ cw: 0, ch: 0 });   // วัดจริงหลังเปิด (ResizeObserver)
   const sizeRef = useRef({ cw: 0, ch: 0 });
   const [pieces, setPieces] = useState<Piece[]>(() => {
@@ -994,6 +1001,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   useEffect(() => {
     const el = svgEl; if (!el || !open) return;
     const onWheel = (e: WheelEvent) => {
+      if (wheelAction(boardLockRef.current.locked, e.ctrlKey || e.metaKey, false) === "pass") { boardLockRef.current.nudge(); return; }
       e.preventDefault();
       const r = el.getBoundingClientRect();
       setView((v) => {
@@ -2279,6 +2287,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         </div>
       )}
       <div className={`${fbar} absolute right-2 top-2`}>
+        <BoardLockButton lock={boardLock} className="h-8 w-8 border-0 shadow-none" />
         <button type="button" data-toggle-mat-labels onClick={() => setShowMats(!showMats)} aria-pressed={showMats} title={showMats ? t("ซ่อนป้ายวัสดุบนชิ้น", "Hide material labels") : t("โชว์ป้ายวัสดุบนชิ้น (วัสดุละสี)", "Show material labels (one colour per material)")} aria-label={t("ป้ายวัสดุบนชิ้น", "Material labels")} className={ibCls(showMats)}>
           <Icon value="i:tags" className="text-[16px]" />
         </button>
@@ -2361,8 +2370,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div className="relative min-w-0">
               <svg ref={bindSvg} className="block w-full bg-white" style={{ height: focus ? "calc(100vh - 150px)" : canvasH, cursor, touchAction: "none" }}
                 viewBox={`${view.x} ${view.y} ${view.w} ${Math.max(0.001, vh)}`} preserveAspectRatio="none"
-                onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
-                onPointerLeave={() => setHover(null)} onDoubleClick={onDoubleClick}>
+                onPointerDown={(e) => {
+                  // ล็อกเข้ม: เลื่อนดู (มือ/ลูกกลิ้งกลาง/Space) กับวัด ยังได้ · อย่างอื่น = เตือนให้ปลดล็อก
+                  const viewOnly = e.button === 1 || spaceDown.current || tool === "measure" || (tool === "hand" && !(e.target as Element).getAttribute?.("data-piece"));
+                  if (boardLock.locked && !readonly && !viewOnly) { boardLock.nudge("edit"); return; }
+                  onPointerDown(e);
+                }} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
+                onPointerLeave={() => setHover(null)} onDoubleClick={(e) => { if (boardLock.locked && !readonly) return; onDoubleClick(e); }}>
                 {refs.filter((r) => r.show).map((r) => (
                   <image key={r.id} href={r.url} x={r.x} y={r.y} width={r.w} height={r.w * r.ar} opacity={r.op} preserveAspectRatio="none"
                     data-ref={r.lock || readonly ? undefined : r.id} style={{ pointerEvents: r.lock || readonly || cal ? "none" : "auto", cursor: "move" }} />
@@ -2542,6 +2556,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 })()}
               </svg>
               {overlayEl}
+              <BoardLockHint lock={boardLock} />
               </div>
             </div>
             <div className="text-xs text-slate-500">{hint}</div>

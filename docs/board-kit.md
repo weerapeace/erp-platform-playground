@@ -53,9 +53,14 @@ const groups: BoardToolGroup[] = [
 
 ## ใช้อยู่ที่
 - ไฟล์ปัก `/master/embroidery/<id>` (`components/embroidery/editor.tsx` + `stitch-preview.tsx` prop `locked`/`controls`/children) — key `embroidery_board_lock` · `embroidery_toolbox` · `embroidery_board_fullscreen` · เพิ่มทำซ้ำ (Ctrl+Y)
+- บล็อกพิมพ์ `/master/block-print/<id>` (รอบ 2 · 2026-11-27) — ตัวซูมกลาง `use-zoom.ts` รับ `lock` (ล็อก = ลูกกลิ้งส่งไปเลื่อนหน้าเว็บ ไม่เลื่อนในกล่อง)
+  - หน้าเลือกชิ้น `grouper.tsx`: กล่องเครื่องมือ (เลือกทุกชิ้น A · รวม M · แยก S · ไม่เอา H · ย้อน/ทำซ้ำ) แทนแถวปุ่ม — key `block_print_group_toolbox`
+  - หน้าจัดวาง `layout-editor.tsx`: กล่องเครื่องมือ (ข้อความ T · สี่เหลี่ยม R · วงกลม E · เส้นตรง I · ลบ · ย้อน/ทำซ้ำ) · ล็อกเข้ม = ลาก/ปรับขนาด/ลูกศร/Delete ไม่ได้ (เลือกได้) — key `block_print_layout_toolbox`
+  - ทั้งสองหน้าใช้ล็อก `block_print_board_lock` + เต็มจอ `block_print_board_fullscreen` ร่วมกัน
+- หน้าต่างวาดชิ้น `ShapeEditor` (ตีราคา · ใบงานออกแบบ · เครื่องคิดเลขผ้า · สตูดิโอแพทเทิร์น) — **ใส่แค่ล็อก** (`shape_editor_board_lock` · ปุ่มกุญแจมุมขวาบน · ไม่มีคีย์ L เพราะ L = เส้นใน) · แถบเครื่องมือลอย/ขยายเต็มจอ/ย้อนกลับ ของหน้านี้มีครบอยู่แล้ว (ทะเบียนเครื่องมือ lib/pattern-tools) ไม่เปลี่ยน · ล็อกเข้ม = เลื่อนดู (มือ/Space/ลูกกลิ้งกลาง) กับวัด ได้ · อย่างอื่นต้องปลดล็อก
 
-## ยังไม่ได้ใส่ (รอบถัดไป)
-- บล็อกพิมพ์ (`components/block-print` — ซูมด้วย Ctrl อยู่แล้ว มีปุ่มกระจาย) · หน้าต่างวาดชิ้น `ShapeEditor` · ป๊อปแกะจากรูป (`pattern-studio/photo-modal` — ลูกกลิ้งซูมทันที ตามที่เคยเลือกไว้)
+## ยังไม่ได้ใส่
+- ป๊อปแกะจากรูป (`pattern-studio/photo-modal` — ลูกกลิ้งซูมทันที ตามที่เจ้าของเคยเลือกไว้ · ต้องถามก่อนเปลี่ยน)
 
 ## ข้อจำกัด
 - กล่องเครื่องมือจำตำแหน่งเป็น px จากมุมซ้ายบนของกระดาน — กระดานเล็กลงจะถูกดันกลับเข้าในกรอบเอง
