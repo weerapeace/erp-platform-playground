@@ -129,9 +129,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastCtx.Provider value={api}>
       {children}
       {mounted && createPortal(
-        <div className="fixed top-4 right-4 z-[300] flex flex-col gap-2 max-w-[90vw]">
+        <div data-tm-toasts="" className="fixed top-4 right-4 z-[300] flex flex-col gap-2 max-w-[90vw]">
           {items.map((t) => (
-            <div key={t.id} onClick={() => remove(t.id)}
+            <div key={t.id} onClick={() => remove(t.id)} data-tm-toast={t.variant}
               className={`${STYLE[t.variant].bg} text-white text-sm px-4 py-2.5 rounded-lg shadow-lg flex flex-wrap items-start gap-2 cursor-pointer animate-[slideIn_0.15s_ease-out] max-w-md`}>
               <span className="font-bold flex-shrink-0">{STYLE[t.variant].icon}</span>
               <span className="flex-1 min-w-0 break-words">{t.msg}</span>

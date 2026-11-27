@@ -165,7 +165,7 @@ export function StatusBadge({ status, module }: { status: string; module?: strin
   const ctxModule = React.useContext(StatusModuleContext);
   const cfg = getStatusStyle(status, module ?? ctxModule);
   return (
-    <span data-tm-urgent={isUrgentStatus(status) ? "" : undefined} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+    <span data-tm-badge="" data-tm-urgent={isUrgentStatus(status) ? "" : undefined} className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
       {cfg.label}
     </span>
   );

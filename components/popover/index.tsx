@@ -72,7 +72,7 @@ export function Popover({ trigger, children, panelClassName = "", align = "left"
       {open && typeof document !== "undefined" && createPortal(
         <>
           <div className="fixed inset-0 z-[79]" onClick={close} />
-          <div style={style} className={`bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto ${panelClassName}`}>
+          <div style={style} data-tm-menu="" className={`bg-white border border-slate-200 rounded-lg shadow-xl overflow-y-auto ${panelClassName}`}>
             {children(close)}
           </div>
         </>,

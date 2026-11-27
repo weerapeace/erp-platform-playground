@@ -323,3 +323,88 @@ html[data-tm-fx-badge] [data-tm-urgent] {
   --tm-ring: var(--tm-ring-badge); --tm-spread: var(--tm-spread-badge); --tm-blinkmin: var(--tm-blinkmin-badge);
   animation: var(--tm-anim-badge);
 }
+
+/* ================= ธีมกลาง · ชิ้นส่วนย่อย (lib/erp-theme-chrome · 2026-11-27) — ไม่ตั้ง = ไม่มี attr = หน้าตาเดิม ================= */
+/* ป๊อปอัป / ลิ้นชัก / แผงล่าง (ERPModal · ConfirmDialog · Drawer · DrawerShell · BottomSheet) */
+html[data-tm-pop-head] [data-tm-pop-head] { background: var(--tm-pop-head); border-color: transparent !important; color: #fff; border-top-left-radius: inherit; border-top-right-radius: inherit; }
+html[data-tm-pop-head] [data-tm-pop-head] :is(h2, h3, .text-slate-900, .text-slate-800, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400) { color: rgba(255, 255, 255, .92) !important; }
+html[data-tm-pop-head] [data-tm-pop-head] :is(button, a):hover { background-color: rgba(255, 255, 255, .16) !important; }
+html[data-tm-pop-head] [data-tm-pop-head] .bg-slate-200 { background-color: rgba(255, 255, 255, .45) !important; }
+html[data-tm-backdrop] [data-tm-backdrop] { background-color: var(--tm-backdrop); backdrop-filter: var(--tm-backdrop-filter, none); -webkit-backdrop-filter: var(--tm-backdrop-filter, none); }
+html[data-tm-pop-radius] [data-tm-pop="modal"] { border-radius: var(--tm-pop-radius); }
+html[data-tm-pop-radius] [data-tm-pop="sheet"] { border-top-left-radius: var(--tm-pop-radius); border-top-right-radius: var(--tm-pop-radius); }
+html[data-tm-pop-shadow] [data-tm-pop] { box-shadow: var(--tm-pop-shadow); }
+html[data-tm-drawer-bar] [data-tm-pop="drawer"] { border-left: 4px solid rgb(var(--tm-primary-600)) !important; }
+/* เปิดป๊อป: ใช้ translate/scale (แยกจาก transform) → ไม่ชนตำแหน่งที่ลากป๊อปไว้ */
+html[data-tm-pop-open] [data-tm-pop="modal"] { animation: tmPopFade calc(.2s * var(--tm-speed, 1)) ease-out; }
+html[data-tm-pop-open="up"] [data-tm-pop="modal"] { animation-name: tmPopUp; }
+html[data-tm-pop-open="zoom"] [data-tm-pop="modal"] { animation-name: tmPopZoom; }
+html[data-tm-pop-open] [data-tm-pop="drawer"] { animation: tmPopDrawer calc(.22s * var(--tm-speed, 1)) ease-out; }
+html[data-tm-pop-open] [data-tm-pop="sheet"] { animation: tmPopSheet calc(.22s * var(--tm-speed, 1)) ease-out; }
+@keyframes tmPopFade { from { opacity: 0; } }
+@keyframes tmPopUp { from { opacity: 0; translate: 0 16px; } }
+@keyframes tmPopZoom { from { opacity: 0; scale: .95; } }
+@keyframes tmPopDrawer { from { opacity: .4; translate: 48px 0; } }
+@keyframes tmPopSheet { from { translate: 0 40px; } }
+/* ตาราง (DataTable) — หัวตาราง · แถวที่เลือก · แบบ (แถวสลับสี / มีเส้นแบ่ง) */
+html[data-tm-thead] table[data-erp-table] thead, html[data-tm-thead] table[data-erp-table] thead :is(tr, th) { background-color: var(--tm-thead-bg) !important; }
+html[data-tm-thead] table[data-erp-table] thead th, html[data-tm-thead] table[data-erp-table] thead th :is(.text-slate-400, .text-slate-500, .text-slate-600, .text-slate-700) { color: var(--tm-thead-tx) !important; }
+html[data-tm-rowsel] table[data-erp-table] tbody tr.bg-blue-50 { background-color: var(--tm-rowsel); }
+html[data-tm-table="zebra"] table[data-erp-table] tbody tr:nth-child(even):not(.bg-blue-50) { background-color: rgba(241, 245, 249, .7); }
+html[data-tm-table="lines"] table[data-erp-table] :is(td, th):not(:last-child) { border-right: 1px solid #e2e8f0; }
+/* ช่องกรอก — สีกรอบตอนพิมพ์ + วงแสง · แบบพื้นเทา */
+html[data-tm-focus] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, select):focus { outline: none; border-color: var(--tm-focus); box-shadow: 0 0 0 var(--tm-ring-w) var(--tm-focus-ring); }
+html[data-tm-input="filled"] [data-tm-page] :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), textarea, select).border:not(:focus) { background-color: #f1f5f9; border-color: transparent; }
+/* ปุ่มหลัก (bg-blue-600) แบบอ่อน / ขอบ */
+html[data-tm-btnstyle="soft"] :is(button, a).bg-blue-600 { background-color: rgb(var(--tm-primary-100)); color: rgb(var(--tm-primary-700)); box-shadow: inset 0 0 0 1px rgb(var(--tm-primary-200)); }
+html[data-tm-btnstyle="soft"] :is(button, a).bg-blue-600:hover { background-color: rgb(var(--tm-primary-200)); }
+html[data-tm-btnstyle="outline"] :is(button, a).bg-blue-600 { background-color: transparent; color: rgb(var(--tm-primary-700)); box-shadow: inset 0 0 0 1.5px rgb(var(--tm-primary-600)); }
+html[data-tm-btnstyle="outline"] :is(button, a).bg-blue-600:hover { background-color: rgb(var(--tm-primary-50)); }
+/* ปุ่มรอง (ขาว มีขอบ ชี้แล้วเทา) — ไม่รวมช่องเลือก/ปุ่มเต็มแถว */
+html[data-tm-btn2="soft"] :is(button, a).bg-white.border:is(.hover\:bg-slate-50, .hover\:bg-slate-100):not(.w-full):not(.justify-between):not([data-tm-skip]) { background-color: rgb(var(--tm-primary-50)); border-color: rgb(var(--tm-primary-200)); color: rgb(var(--tm-primary-700)); }
+html[data-tm-btn2="soft"] :is(button, a).bg-white.border:is(.hover\:bg-slate-50, .hover\:bg-slate-100):not(.w-full):not(.justify-between):not([data-tm-skip]):hover { background-color: rgb(var(--tm-primary-100)); }
+html[data-tm-btn2="ghost"] :is(button, a).bg-white.border:is(.hover\:bg-slate-50, .hover\:bg-slate-100):not(.w-full):not(.justify-between):not([data-tm-skip]) { background-color: transparent; border-color: transparent; }
+html[data-tm-btn2="ghost"] :is(button, a).bg-white.border:is(.hover\:bg-slate-50, .hover\:bg-slate-100):not(.w-full):not(.justify-between):not([data-tm-skip]):hover { background-color: rgba(15, 23, 42, .06); }
+/* แท็บ (ScrollTabs) — แคปซูล / กล่อง · แท็บที่เลือก = ขีดเส้นใต้ที่ไม่ใช่ border-transparent */
+html[data-tm-tabs] [data-tm-tablist] { border-bottom-color: transparent !important; gap: 4px; }
+html[data-tm-tabs] [data-tm-tablist] > :is(button, a) { border-bottom-width: 0 !important; margin-bottom: 0 !important; }
+html[data-tm-tabs="pill"] [data-tm-tablist] > :is(button, a) { border-radius: 999px; }
+html[data-tm-tabs="pill"] [data-tm-tablist] > :is(button, a).border-b-2:not(.border-transparent) { background-color: rgb(var(--tm-accent-600)); color: #fff !important; }
+html[data-tm-tabs="box"] [data-tm-tablist] { background-color: #f1f5f9; border-radius: var(--tm-radius, 8px); padding: 3px; }
+html[data-tm-tabs="box"] [data-tm-tablist] > :is(button, a) { border-radius: calc(var(--tm-radius, 8px) - 2px); }
+html[data-tm-tabs="box"] [data-tm-tablist] > :is(button, a).border-b-2:not(.border-transparent) { background-color: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .14); }
+/* ป้ายสถานะ (StatusBadge) — รูปทรง (สีล็อก) */
+html[data-tm-badge-shape="rounded"] [data-tm-badge] { border-radius: 5px; }
+html[data-tm-badge-shape="dot"] [data-tm-badge]::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; margin-right: 5px; flex: none; }
+/* ติ๊ก / วงกลมเลือก / สวิตช์ เป็นสีธีม */
+html[data-tm-checks] :is(input[type="checkbox"], input[type="radio"], input[type="range"], progress) { accent-color: rgb(var(--tm-primary-600)); }
+html[data-tm-checks] [role="switch"][aria-checked="true"].bg-emerald-500 { background-color: rgb(var(--tm-primary-600)); }
+/* เมนูลอย (Popover) — ขอบมน + แถวที่เลือก */
+html[data-tm-menu-radius] [data-tm-menu] { border-radius: var(--tm-menu-radius); }
+html[data-tm-menu-sel="soft"] [data-tm-menu] .bg-blue-50 { background-color: rgb(var(--tm-primary-100)); }
+html[data-tm-menu-sel="strong"] [data-tm-menu] .bg-blue-50 { background-color: rgb(var(--tm-primary-600)); color: #fff; }
+html[data-tm-menu-sel="strong"] [data-tm-menu] .bg-blue-50 :is(.text-blue-700, .text-blue-800, .text-slate-500, .text-slate-700) { color: #fff; }
+/* แจ้งผลมุมจอ (Toast) — ตำแหน่ง + แบบขาวมีแถบสี */
+html[data-tm-toast-pos="top-center"] [data-tm-toasts] { right: auto; left: 50%; transform: translateX(-50%); align-items: center; }
+html[data-tm-toast-pos="bottom-right"] [data-tm-toasts] { top: auto; bottom: max(1rem, env(safe-area-inset-bottom)); flex-direction: column-reverse; }
+html[data-tm-toast-pos="bottom-center"] [data-tm-toasts] { top: auto; right: auto; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%); flex-direction: column-reverse; align-items: center; }
+html[data-tm-toast-style="white"] [data-tm-toast] { background-color: #fff !important; color: #0f172a !important; border: 1px solid #e2e8f0; border-left: 4px solid #059669; }
+html[data-tm-toast-style="white"] [data-tm-toast="error"] { border-left-color: #dc2626; }
+html[data-tm-toast-style="white"] [data-tm-toast="warning"] { border-left-color: #f59e0b; }
+html[data-tm-toast-style="white"] [data-tm-toast="info"] { border-left-color: #475569; }
+html[data-tm-toast-style="white"] [data-tm-toast] button { background-color: #f1f5f9 !important; color: #0f172a; }
+/* แถบเลื่อน */
+html[data-tm-scrollbar] * { scrollbar-width: thin; }
+html[data-tm-scrollbar="thin"] * { scrollbar-color: rgba(100, 116, 139, .4) transparent; }
+html[data-tm-scrollbar="theme"] * { scrollbar-color: rgb(var(--tm-primary-300)) transparent; }
+/* ไอคอน — ความหนาเส้น + ไอคอนเมนู/หัวข้อเป็นสีหลัก (เมนูข้างเข้มไม่แตะ) */
+html[data-tm-icon-sw] svg[data-icon] { stroke-width: var(--tm-icon-sw); }
+html[data-tm-icon-tint]:not([data-tm-sidebar]) aside[aria-label="เมนูหลัก"] svg[data-icon], html[data-tm-icon-tint] [data-tm-page] :is(h1, h2, h3) svg[data-icon] { color: rgb(var(--tm-primary-600)); }
+/* ขนาดหัวข้อในเนื้อหาของหน้า */
+html[data-tm-hsize="sm"] [data-tm-page] h1 { font-size: 1.125rem; line-height: 1.6rem; }
+html[data-tm-hsize="sm"] [data-tm-page] h2 { font-size: 1rem; line-height: 1.5rem; }
+html[data-tm-hsize="sm"] [data-tm-page] h3 { font-size: .9375rem; }
+html[data-tm-hsize="lg"] [data-tm-page] h1 { font-size: 1.5rem; line-height: 2rem; }
+html[data-tm-hsize="lg"] [data-tm-page] h2 { font-size: 1.25rem; line-height: 1.75rem; }
+html[data-tm-hsize="lg"] [data-tm-page] h3 { font-size: 1.0625rem; }
+@media (prefers-reduced-motion: reduce) { html [data-tm-pop] { animation: none !important; } }

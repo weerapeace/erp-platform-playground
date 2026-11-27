@@ -42,10 +42,10 @@ export function BottomSheet({ open, onClose, title, subtitle, children, footer, 
   useEscLayer(open, onClose);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 flex items-end bg-black/40" style={{ zIndex }} onClick={onClose} role="presentation">
+    <div data-tm-backdrop="" className="fixed inset-0 flex items-end bg-black/40" style={{ zIndex }} onClick={onClose} role="presentation">
       <div role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}
-        className="flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl" style={{ maxHeight }}>
-        <div className="shrink-0 px-3 pt-2">
+        data-tm-pop="sheet" className="flex w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl" style={{ maxHeight }}>
+        <div data-tm-pop-head="" className="shrink-0 px-3 pt-2">
           <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
           {(title || subtitle) && (
             <div className="flex items-start gap-2 pb-2">

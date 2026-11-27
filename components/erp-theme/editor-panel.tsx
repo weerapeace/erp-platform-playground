@@ -154,7 +154,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
           <Row label="ปุ่มหลัก"><Seg value={c.components.button} options={[["solid", "ทึบ"], ["soft", "อ่อน"], ["outline", "ขอบ"]]} onChange={(v) => set("components", { button: v })} /></Row>
           <Row label="ตาราง"><Seg value={c.components.table} options={[["plain", "เรียบ"], ["zebra", "แถวสลับสี"], ["lines", "มีเส้นแบ่ง"]]} onChange={(v) => set("components", { table: v })} /></Row>
           <Row label="ช่องกรอก"><Seg value={c.components.input} options={[["outline", "กรอบ"], ["filled", "พื้นเทา"]]} onChange={(v) => set("components", { input: v })} /></Row>
-          <Row label="แท็บ"><Seg value={c.components.tabs} options={[["underline", "ขีดเส้นใต้"], ["pill", "แคปซูล"]]} onChange={(v) => set("components", { tabs: v })} /></Row>
+          <Row label="แท็บ"><Seg value={c.components.tabs} options={[["underline", "ขีดเส้นใต้"], ["pill", "แคปซูล"], ["box", "กล่อง"]]} onChange={(v) => set("components", { tabs: v })} /></Row>
           <Row label="ป้ายสถานะ"><Seg value={c.components.badge} options={[["soft", "อ่อน"], ["solid", "ทึบ"]]} onChange={(v) => set("components", { badge: v })} /></Row>
           <Row label="เมนูข้าง"><Seg value={c.components.sidebar} options={[["light", "สว่าง"], ["dark", "เข้ม"], ["brand", "สีธีม"]]} onChange={(v) => set("components", { sidebar: v })} /></Row>
         </>
@@ -645,3 +645,113 @@ export function PartQuickEditor({ config: c, part, onPatch, readOnly }: { config
   );
 }
 
+// ── แผง "ชิ้นส่วน" (ปุ่มที่ 5 ในแถบล่าง · 2026-11-27 แบบ A) — ป๊อป/ลิ้นชัก · ตาราง/ฟอร์ม · ปุ่ม/ป้าย/แท็บ · อื่น ๆ ──
+type PartsTab = "pop" | "form" | "btn" | "misc";
+const PARTS_TAB_OVERLAY: Record<PartsTab, "modal" | "toast" | "menu" | null> = { pop: "modal", form: null, btn: "menu", misc: "toast" };
+
+function SliderRow({ label, value, fallback, min, max, onChange, onReset }: { label: string; value: number | null; fallback: number; min: number; max: number; onChange: (v: number) => void; onReset: () => void }) {
+  return (
+    <div>
+      <div className="flex items-center text-xs font-medium text-slate-700 mb-1">{label}
+        <span className="ml-auto text-[11px] font-normal text-slate-500">{value === null ? `เดิม (${fallback}px)` : `${value}px`}</span>
+        {value !== null && <button type="button" onClick={onReset} className="ml-2 text-[11px] font-normal text-blue-700 hover:underline">คืนค่าเดิม</button>}
+      </div>
+      <input type="range" min={min} max={max} step={1} value={value ?? fallback} onChange={(e) => onChange(Number(e.target.value))} className="w-full" aria-label={label} />
+    </div>
+  );
+}
+
+export function ThemePartsSheet({ config: c, onPatch, readOnly, onOverlay, onReplay }: {
+  config: ErpThemeConfig; onPatch: (p: Patch) => void; readOnly?: boolean;
+  /** บอกหน้าว่าจะโชว์อะไรทับพรีวิว (ป๊อป/ลิ้นชัก/แจ้งผล/เมนูลอย) */
+  onOverlay?: (o: "modal" | "drawer" | "toast" | "menu" | null) => void;
+  onReplay?: () => void;
+}) {
+  const [tab, setTab] = useState<PartsTab>("pop");
+  const [popView, setPopView] = useState<"modal" | "drawer">("modal");
+  useEffect(() => { onOverlay?.(tab === "pop" ? popView : PARTS_TAB_OVERLAY[tab]); }, [tab, popView, onOverlay]);
+  useEffect(() => () => onOverlay?.(null), [onOverlay]);
+  const ch = c.chrome;
+  const set = (patch: Record<string, unknown>) => onPatch({ chrome: patch });
+  const tabs: [PartsTab, string][] = [["pop", "ป๊อป/ลิ้นชัก"], ["form", "ตาราง/ฟอร์ม"], ["btn", "ปุ่ม/แท็บ"], ["misc", "อื่น ๆ"]];
+  return (
+    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70">
+      <div className="grid grid-cols-4 gap-0.5 rounded-lg bg-slate-100 p-0.5 mb-3" role="tablist">
+        {tabs.map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+            className={`h-8 rounded-md text-[11px] ${tab === k ? "bg-white shadow-sm text-slate-900 font-medium" : "text-slate-500 hover:text-slate-800"}`}>{l}</button>
+        ))}
+      </div>
+
+      {tab === "pop" && (
+        <div className="space-y-3">
+          <div className="flex rounded-lg border border-slate-200 p-0.5 w-fit">
+            {([["modal", "ดูป๊อปอัป"], ["drawer", "ดูลิ้นชัก"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setPopView(k)} className={`h-7 px-3 rounded-md text-xs ${popView === k ? "bg-blue-50 text-blue-800 font-medium" : "text-slate-600"}`}>{l}</button>
+            ))}
+          </div>
+          <div><SheetLabel hint="ใช้กับทุกป๊อปอัป ลิ้นชัก และแผงล่างมือถือ">หัวป๊อป</SheetLabel>
+            <Seg value={ch.popup.header} options={[["plain", "ขาว"], ["theme", "สีธีม"], ["gradient", "ไล่สี"]]} onChange={(v) => set({ popup: { header: v } })} /></div>
+          <div><SheetLabel hint="เบลอ = กระจกฝ้า (มือถือใช้แบบมืดเพื่อให้ลื่น)">ฉากหลังตอนเปิด</SheetLabel>
+            <Seg value={ch.popup.backdrop} options={[["dark", "มืด"], ["blur", "เบลอ"], ["tint", "สีธีมจาง"]]} onChange={(v) => set({ popup: { backdrop: v } })} />
+            <div className="mt-1.5"><Seg value={ch.popup.dim} options={[[1, "อ่อน"], [2, "ปกติ"], [3, "เข้ม"]]} onChange={(v) => set({ popup: { dim: v } })} /></div></div>
+          <SliderRow label="ขอบมนป๊อป" value={ch.popup.radius} fallback={12} min={0} max={28} onChange={(v) => set({ popup: { radius: v } })} onReset={() => set({ popup: { radius: null } })} />
+          <div><SheetLabel>เงาป๊อป</SheetLabel>
+            <Seg value={ch.popup.shadow} options={[["default", "ปกติ"], ["soft", "บาง"], ["float", "ลอย"], ["theme", "สีธีม"]]} onChange={(v) => set({ popup: { shadow: v } })} /></div>
+          <div><SheetLabel hint="ลิ้นชักเลื่อนจากขวา · แผงล่างเลื่อนขึ้น · ผู้ใช้ที่ปิดแอนิเมชันจะไม่ขยับ">แอนิเมชันตอนเปิด</SheetLabel>
+            <Seg value={ch.popup.open} options={[["none", "ไม่มี"], ["fade", "จาง"], ["up", "เด้งขึ้น"], ["zoom", "ซูม"]]} onChange={(v) => { set({ popup: { open: v } }); onReplay?.(); }} /></div>
+          <Check checked={ch.popup.drawerBar} onChange={(v) => { set({ popup: { drawerBar: v } }); setPopView("drawer"); }} label="แถบสีธีมขอบซ้ายของลิ้นชัก" />
+        </div>
+      )}
+
+      {tab === "form" && (
+        <div className="space-y-3">
+          <div><SheetLabel hint="ใช้กับตารางกลางทุกหน้า">ตาราง</SheetLabel>
+            <Seg value={c.components.table} options={[["plain", "เรียบ"], ["zebra", "แถวสลับสี"], ["lines", "มีเส้นแบ่ง"]]} onChange={(v) => onPatch({ components: { table: v } })} /></div>
+          <div><SheetLabel>หัวตาราง</SheetLabel>
+            <Seg value={ch.table.head} options={[["gray", "เทา (เดิม)"], ["soft", "สีธีมอ่อน"], ["theme", "สีธีมเข้ม"]]} onChange={(v) => set({ table: { head: v } })} /></div>
+          <div><SheetLabel hint="แถวที่ติ๊กเลือกไว้ในตาราง">แถวที่เลือก</SheetLabel>
+            <Seg value={ch.table.selected} options={[["soft", "อ่อน (เดิม)"], ["strong", "เข้มขึ้น"]]} onChange={(v) => set({ table: { selected: v } })} /></div>
+          <div><SheetLabel>ช่องกรอก</SheetLabel>
+            <Seg value={c.components.input} options={[["outline", "กรอบ"], ["filled", "พื้นเทา"]]} onChange={(v) => onPatch({ components: { input: v } })} /></div>
+          <div><SheetLabel hint="ใช้กับทุกช่องกรอกในระบบ รวมในป๊อป">กรอบตอนพิมพ์</SheetLabel>
+            <Seg value={ch.input.focus} options={[["default", "เดิม"], ["primary", "สีหลัก"], ["accent", "สีรอง"]]} onChange={(v) => set({ input: { focus: v } })} />
+            {ch.input.focus !== "default" && <div className="mt-1.5"><Seg value={ch.input.ring} options={[[0, "ไม่มีวงแสง"], [1, "บาง"], [2, "ปกติ"], [3, "หนา"]]} onChange={(v) => set({ input: { ring: v } })} /></div>}</div>
+          <Check checked={ch.checks} onChange={(v) => set({ checks: v })} label="ติ๊ก / วงกลมเลือก / สวิตช์ เป็นสีธีม" hint="ปกติติ๊กเป็นสีฟ้าของเบราว์เซอร์ สวิตช์เป็นสีเขียว" />
+        </div>
+      )}
+
+      {tab === "btn" && (
+        <div className="space-y-3">
+          <div><SheetLabel hint="ปุ่มหลักสีธีมทั้งระบบ">ปุ่มหลัก</SheetLabel>
+            <Seg value={c.components.button} options={[["solid", "ทึบ"], ["soft", "อ่อน"], ["outline", "ขอบ"]]} onChange={(v) => onPatch({ components: { button: v } })} /></div>
+          <div><SheetLabel hint="ปุ่มขาวมีขอบ เช่น ยกเลิก ส่งออก · ไม่รวมช่องเลือกและปุ่มเต็มแถว">ปุ่มรอง</SheetLabel>
+            <Seg value={ch.button2} options={[["default", "ขาวขอบเทา"], ["soft", "สีธีมอ่อน"], ["ghost", "ไม่มีขอบ"]]} onChange={(v) => set({ button2: v })} /></div>
+          <div><SheetLabel hint="แท็บของกลาง (แถบแท็บเลื่อนได้) · แท็บที่หน้าเขียนเองยังเหมือนเดิม">แท็บ</SheetLabel>
+            <Seg value={c.components.tabs} options={[["underline", "ขีดเส้นใต้"], ["pill", "แคปซูล"], ["box", "กล่อง"]]} onChange={(v) => onPatch({ components: { tabs: v } })} /></div>
+          <div><SheetLabel hint="สีป้ายยังล็อกตามความหมาย เปลี่ยนแค่รูปทรง">รูปทรงป้ายสถานะ</SheetLabel>
+            <Seg value={ch.badgeShape} options={[["pill", "แคปซูล"], ["rounded", "เหลี่ยมมน"], ["dot", "มีจุดนำ"]]} onChange={(v) => set({ badgeShape: v })} /></div>
+          <div><SheetLabel hint="เมนูที่ลอยออกจากปุ่ม (ปุ่ม ⋯ ฯลฯ)">เมนูลอย: แถวที่เลือก</SheetLabel>
+            <Seg value={ch.menu.selected} options={[["default", "เดิม"], ["soft", "สีธีมอ่อน"], ["strong", "สีธีมเข้ม"]]} onChange={(v) => set({ menu: { selected: v } })} /></div>
+          <SliderRow label="เมนูลอย: ขอบมน" value={ch.menu.radius} fallback={8} min={0} max={20} onChange={(v) => set({ menu: { radius: v } })} onReset={() => set({ menu: { radius: null } })} />
+        </div>
+      )}
+
+      {tab === "misc" && (
+        <div className="space-y-3">
+          <div><SheetLabel hint="แจ้งผลมุมจอ เช่น บันทึกแล้ว · ย้อนกลับ">แจ้งผล: ตำแหน่ง</SheetLabel>
+            <Seg value={ch.toast.position} options={[["top-right", "บนขวา"], ["top-center", "บนกลาง"], ["bottom-right", "ล่างขวา"], ["bottom-center", "ล่างกลาง"]]} onChange={(v) => set({ toast: { position: v } })} /></div>
+          <div><SheetLabel>แจ้งผล: แบบ</SheetLabel>
+            <Seg value={ch.toast.style} options={[["solid", "ทึบสี (เดิม)"], ["white", "ขาวมีแถบสี"]]} onChange={(v) => set({ toast: { style: v } })} /></div>
+          <div><SheetLabel hint="แถบเลื่อนของกล่องที่เลื่อนได้">แถบเลื่อน</SheetLabel>
+            <Seg value={ch.scrollbar} options={[["default", "เดิม"], ["thin", "บาง"], ["theme", "บาง สีธีม"]]} onChange={(v) => set({ scrollbar: v })} /></div>
+          <div><SheetLabel>ไอคอน: ความหนาเส้น</SheetLabel>
+            <Seg value={ch.icon.stroke} options={[["thin", "บาง"], ["normal", "ปกติ"], ["bold", "หนา"]]} onChange={(v) => set({ icon: { stroke: v } })} /></div>
+          <Check checked={ch.icon.tint} onChange={(v) => set({ icon: { tint: v } })} label="ไอคอนเมนูข้างและหัวข้อเป็นสีหลัก" hint="เมนูข้างสีเข้มจะไม่เปลี่ยน (กันอ่านยาก)" />
+          <div><SheetLabel hint="หัวข้อในเนื้อหาของหน้า (แยกจากขนาดตัวอักษรพื้นฐาน)">ขนาดหัวข้อ</SheetLabel>
+            <Seg value={ch.headingSize} options={[["sm", "เล็ก"], ["md", "ปกติ"], ["lg", "ใหญ่"]]} onChange={(v) => set({ headingSize: v })} /></div>
+        </div>
+      )}
+    </fieldset>
+  );
+}

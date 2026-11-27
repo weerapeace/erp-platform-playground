@@ -10,6 +10,7 @@ import {
   DEFAULT_ELEVATION, DEFAULT_FX, DEFAULT_OUTLINE, hasFx, normalizeElevation, normalizeFx, normalizeOutline,
   type ThemeElevation, type ThemeFx, type ThemeOutline,
 } from "./erp-theme-fx";
+import { DEFAULT_CHROME, normalizeChrome, type ThemeChrome } from "./erp-theme-chrome";
 import { ORANGE_SCALE, VIOLET_SCALE, hexToChannels, isHexColor, scaleFromHex, shiftScale, themeVars, type ColorScale } from "./erp-theme";
 
 export type BgWhere = "page" | "top" | "banner";
@@ -36,7 +37,7 @@ export type ErpThemeConfig = {
     button: "solid" | "soft" | "outline";
     table: "plain" | "zebra" | "lines";
     input: "outline" | "filled";
-    tabs: "underline" | "pill";
+    tabs: "underline" | "pill" | "box";
     badge: "soft" | "solid";
     sidebar: "light" | "dark" | "brand";
   };
@@ -47,6 +48,8 @@ export type ErpThemeConfig = {
   outline: ThemeOutline;
   /** เงา (แทน shape.shadow เดิม — shape.shadow คำนวณตามให้) */
   elevation: ThemeElevation;
+  /** ชิ้นส่วนย่อย: ป๊อป ลิ้นชัก ตาราง ช่องกรอก ปุ่มรอง ป้าย ติ๊ก เมนูลอย แจ้งผล แถบเลื่อน ไอคอน หัวข้อ (lib/erp-theme-chrome) */
+  chrome: ThemeChrome;
 };
 
 export const FONT_OPTIONS: { key: FontKey; label: string; family: string; google: string | null }[] = [
@@ -72,6 +75,7 @@ export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
   effects: DEFAULT_FX,
   outline: DEFAULT_OUTLINE,
   elevation: DEFAULT_ELEVATION,
+  chrome: DEFAULT_CHROME,
 };
 
 /** ตัวกันอ่านยาก: รูปพื้นหลังทั้งหน้าชัดได้ไม่เกินเท่านี้ (เมื่อเปิด veil) */
@@ -147,7 +151,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
       button: pick(k.button, ["solid", "soft", "outline"] as const, D.components.button),
       table: pick(k.table, ["plain", "zebra", "lines"] as const, D.components.table),
       input: pick(k.input, ["outline", "filled"] as const, D.components.input),
-      tabs: pick(k.tabs, ["underline", "pill"] as const, D.components.tabs),
+      tabs: pick(k.tabs, ["underline", "pill", "box"] as const, D.components.tabs),
       badge: pick(k.badge, ["soft", "solid"] as const, D.components.badge),
       sidebar: pick(k.sidebar, ["light", "dark", "brand"] as const, D.components.sidebar),
     },
@@ -155,6 +159,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
     effects,
     outline: normalizeOutline(r.outline),
     elevation,
+    chrome: normalizeChrome(r.chrome),
   };
 }
 

@@ -198,6 +198,28 @@
 - จุดเหลืองเตือน: พื้นหลังหน้าเข้มเกิน (แก้ = กลับไปตามธีม) · หัวข้ออ่อนเกิน · ลิงก์อ่อนเกิน (แก้ = เข้มขึ้นจนอ่านออก)
 - เทสต์ `lib/__tests__/erp-theme-palettes.test.ts`
 
+## ชิ้นส่วนย่อย (เจ้าของเลือก 2026-11-27: แบบ A ปุ่มที่ 5 + ข้อ 1–4, 6–14, 16, 19–21)
+
+ค่าตั้ง `config.chrome` (`lib/erp-theme-chrome.ts` · ค่าเริ่ม = ไม่มี attr = หน้าตาเดิม) · แผง `ThemePartsSheet` = ปุ่ม "ชิ้นส่วน" ในแถบล่าง 4 แท็บ · เปิดแท็บแล้วพรีวิวโชว์ป๊อป/ลิ้นชัก/เมนูลอย/แจ้งผลทับให้เห็น (`ThemePreview overlay`)
+
+| ส่วน | ค่า | จุดเสียบในชิ้นกลาง |
+|---|---|---|
+| หัวป๊อป · ฉากหลัง (มืด/เบลอ/สีธีมจาง × 3 ระดับ) · ขอบมน · เงา · แอนิเมชันเปิด · แถบสีขอบลิ้นชัก | `chrome.popup` | ERPModal · ConfirmDialog · ApprovalDialog · Drawer · DrawerShell · BottomSheet → `data-tm-pop="modal|drawer|sheet"` · `data-tm-pop-head` · `data-tm-backdrop` (⚠️ ไม่ใช้ `data-erp-modal` — ตัวนั้นหลายหน้าใช้เช็กว่ามีป๊อปเปิดอยู่) |
+| หัวตาราง · แถวที่เลือก · แบบตาราง (แถวสลับสี/เส้นแบ่ง) | `chrome.table` + `components.table` | `table[data-erp-table]` (DataTable) |
+| กรอบตอนพิมพ์ + วงแสง · ช่องกรอกพื้นเทา | `chrome.input` + `components.input` | ทุก input/textarea/select (พื้นเทาเฉพาะในเนื้อหาหน้า) |
+| ปุ่มหลัก ทึบ/อ่อน/ขอบ · ปุ่มรอง | `components.button` · `chrome.button2` | `.bg-blue-600` · ปุ่ม `.bg-white.border.hover:bg-slate-50/100` (ไม่รวม `.w-full` `.justify-between` `[data-tm-skip]`) |
+| แท็บ ขีดเส้นใต้/แคปซูล/กล่อง | `components.tabs` | ScrollTabs (`data-tm-tablist`) — แท็บที่เลือก = `border-b-2` ที่ไม่ใช่ `border-transparent` · แท็บที่หน้าเขียนเองยังเหมือนเดิม |
+| รูปทรงป้ายสถานะ | `chrome.badgeShape` | StatusBadge (`data-tm-badge`) · สียังล็อก |
+| ติ๊ก/วงกลม/สวิตช์สีธีม | `chrome.checks` | accent-color · ToggleSwitch (`role=switch`) |
+| เมนูลอย แถวที่เลือก + ขอบมน | `chrome.menu` | Popover (`data-tm-menu`) |
+| แจ้งผล ตำแหน่ง + แบบขาวมีแถบสี | `chrome.toast` | Toast (`data-tm-toasts` · `data-tm-toast="success|error|warning|info"`) |
+| แถบเลื่อน · ไอคอน (ความหนา + สีเมนู/หัวข้อ) · ขนาดหัวข้อ | `chrome.scrollbar/icon/headingSize` | ทั้งหน้า · `svg[data-icon]` (Icon) · h1–h3 ใน `[data-tm-page]` |
+
+- `components.button/table/input/tabs` เดิมมีผลแค่ในพรีวิว — รอบนี้ผูกเข้าหน้าจริงแล้ว (attr `tm-btnstyle/tm-table/tm-input/tm-tabs`) · ป้ายแบบทึบ (`components.badge`) ยังมีผลแค่พรีวิว
+- แอนิเมชันเปิดป๊อปใช้ `translate`/`scale` (แยกจาก transform) ไม่ชนตำแหน่งป๊อปที่ลากไว้ · มือถือไม่เบลอฉากหลัง · ปิดแอนิเมชัน = ไม่ขยับ
+- แก้บั๊กรอบสีแยกส่วน: attr `tm-pagebg/heading/link/border/sidetint` ไม่อยู่ในรายการล้าง → ค้างเมื่อสลับแอป · ตอนนี้ `EFFECT_ATTRS` รวม `CHROME_ATTRS` แล้ว + เทสต์เช็ก
+- เทสต์ `lib/__tests__/erp-theme-chrome.test.ts` (รวมเช็กว่า globals.css มีกฎของทุก attr)
+
 ## เอฟเฟกต์เพิ่ม — รอบ 4: เข้าหน้า 4 แบบ · อนุภาค · ป้ายด่วน ในหน้าจริง (ครบ 28 ข้อที่เลือก)
 
 - **เข้าหน้า:** `data-tm-enter` = fade / up / zoom / blur (ค่าเดิม "1" = fade) · ThemeApplier ใส่ `.tm-enter` ที่ `[data-tm-page]` ตอนเปลี่ยนหน้าแล้วถอดภายใน 0.9 วิ · ⚠️ แบบ up/zoom/blur ใช้ transform/filter ชั่วครู่ — ป๊อปที่เปิดภายในครึ่งวินาทีแรกหลังเปลี่ยนหน้าอาจขยับนิดหน่อย

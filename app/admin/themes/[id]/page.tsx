@@ -25,8 +25,8 @@ import { PublishThemeDialog } from "@/components/erp-theme/publish-dialog";
 import { refreshActiveThemes } from "@/components/erp-theme/active-themes";
 import { ErrorState, LoadingState, EmptyState } from "@/components/state-views";
 import { shortcutKey } from "@/lib/shortcut-key";
-import { ThemePreview, type PreviewSample } from "@/components/erp-theme/preview";
-import { PartQuickEditor, ThemeAdvancedPanel, ThemeBgSheet, ThemeColorSheet, ThemeStyleSheet } from "@/components/erp-theme/editor-panel";
+import { ThemePreview, type PreviewOverlay, type PreviewSample } from "@/components/erp-theme/preview";
+import { PartQuickEditor, ThemeAdvancedPanel, ThemeBgSheet, ThemeColorSheet, ThemePartsSheet, ThemeStyleSheet } from "@/components/erp-theme/editor-panel";
 import { PART_INFO, groupOfCat, searchSettings, type AdvGroupKey, type EditorCategory, type PreviewPart } from "@/lib/erp-theme-easy";
 import { THEME_PREVIEW_MSG, themePreviewMessage } from "@/components/erp-theme/preview-bridge";
 import {
@@ -38,7 +38,7 @@ type Theme = {
   id: string; name: string; draft_config: unknown; published_config: unknown; published_version: number;
   published_at: string | null; published_by_name: string | null; deleted_at: string | null; has_unpublished: boolean;
 };
-type Sheet = "color" | "style" | "bg" | "more";
+type Sheet = "color" | "style" | "bg" | "parts" | "more";
 
 const REAL_PAGES = [
   { href: "/purchase-orders", label: "ใบสั่งซื้อ" },
@@ -50,9 +50,10 @@ const DOCK: { key: Sheet; label: string; icon: string }[] = [
   { key: "color", label: "สี", icon: "i:palette" },
   { key: "style", label: "สไตล์", icon: "i:sparkles" },
   { key: "bg", label: "พื้นหลัง", icon: "i:photo" },
+  { key: "parts", label: "ชิ้นส่วน", icon: "i:layout-cards" },
   { key: "more", label: "เพิ่มเติม", icon: "i:adjustments-horizontal" },
 ];
-const SHEET_TITLE: Record<Sheet, string> = { color: "สี", style: "สไตล์", bg: "พื้นหลัง", more: "ตั้งค่าเพิ่มเติม" };
+const SHEET_TITLE: Record<Sheet, string> = { color: "สี", style: "สไตล์", bg: "พื้นหลัง", parts: "ชิ้นส่วน", more: "ตั้งค่าเพิ่มเติม" };
 const when = (d: string) => new Date(d).toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export default function ThemeEditorPage() {
@@ -74,6 +75,9 @@ export default function ThemeEditorPage() {
   const [q, setQ] = useState("");
   const goTo = (cat: EditorCategory) => { setSheet("more"); setOpenGroup(groupOfCat(cat)); setFocusCat(cat); setQ(""); };
   const [gallery, setGallery] = useState(false);
+  // แผง "ชิ้นส่วน" บอกว่าจะโชว์ป๊อป/ลิ้นชัก/แจ้งผล/เมนูลอยทับพรีวิว
+  const [overlay, setOverlay] = useState<PreviewOverlay>(null);
+  const bumpReplay = useCallback(() => setReplay((n) => n + 1), []);
   const [full, setFull] = useState(false);
   // คลิกแก้ในพรีวิว
   const [editMode, setEditMode] = useState(true);
@@ -315,6 +319,7 @@ export default function ThemeEditorPage() {
     if (k === "color") return <ThemeColorSheet config={cfg} onPatch={onPatch} readOnly={readOnly} />;
     if (k === "style") return <ThemeStyleSheet config={cfg} onPatch={onPatch} onReplace={(n) => apply(n)} readOnly={readOnly} />;
     if (k === "bg") return <ThemeBgSheet config={cfg} onPatch={onPatch} readOnly={readOnly} />;
+    if (k === "parts") return <ThemePartsSheet config={cfg} onPatch={onPatch} readOnly={readOnly} onOverlay={setOverlay} onReplay={bumpReplay} />;
     return (
       <div>
         <div className="relative mb-2">
@@ -345,7 +350,7 @@ export default function ThemeEditorPage() {
         <div className="flex gap-1 rounded-2xl border border-slate-200 bg-white/95 backdrop-blur p-1.5 shadow-xl">
           {DOCK.map((d) => (
             <button key={d.key} type="button" aria-pressed={sheet === d.key} onClick={() => { setPop(null); setSheet((s) => (s === d.key ? null : d.key)); }}
-              className={`min-w-[64px] h-12 px-2 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] ${sheet === d.key ? "bg-blue-50 text-blue-800 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>
+              className={`min-w-[58px] h-12 px-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] ${sheet === d.key ? "bg-blue-50 text-blue-800 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>
               <Icon value={d.icon} size={18} />{d.label}
             </button>
           ))}
@@ -391,7 +396,8 @@ export default function ThemeEditorPage() {
           </div>
         ) : (
           shown && <ThemePreview config={shown} device={device} sample={sample} dark={dark} replayKey={replay}
-            editMode={editMode && canEdit && !readOnly && !showPublished} selectedPart={pop?.part ?? null} onPartClick={onPartClick} />
+            editMode={editMode && canEdit && !readOnly && !showPublished && !(sheet === "parts" && overlay)} selectedPart={pop?.part ?? null} onPartClick={onPartClick}
+            overlay={sheet === "parts" ? overlay : null} />
         )
       ) : (
         <div className={device === "mobile" ? "flex justify-center rounded-xl bg-slate-200 p-3" : ""}>

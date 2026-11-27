@@ -7,6 +7,7 @@
 // เทสต์: lib/__tests__/erp-theme-effects.test.ts
 // ============================================================
 import { SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
+import { CHROME_ATTRS, chromeEffects } from "./erp-theme-chrome";
 import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
 
 /** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
@@ -179,6 +180,15 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
     animate: motion && g.animate && sp.banner,
   } : null;
 
+  // ชิ้นส่วนย่อย (ป๊อป/ลิ้นชัก/ตาราง/ช่องกรอก/…) + ผูกแบบชิ้นส่วนเดิม (components.*) เข้าหน้าจริง
+  const ch = chromeEffects(c.chrome, p, scaleOf(c.colors.accent), g.color2, g.angle, env);
+  Object.assign(attrs, ch.attrs); Object.assign(vars, ch.vars);
+  const k = c.components;
+  if (k.button !== "solid") attrs["tm-btnstyle"] = k.button;
+  if (k.table !== "plain") attrs["tm-table"] = k.table;
+  if (k.input !== "outline") attrs["tm-input"] = k.input;
+  if (k.tabs !== "underline") attrs["tm-tabs"] = k.tabs;
+
   const mascot = a.mascot && motion ? { image: a.mascotImage ? `/api/r2-image?key=${encodeURIComponent(a.mascotImage)}` : null, color: scaleOf(c.colors.accent)[500] } : null;
   const particles = motion && c.effects.particles !== "none" ? { kind: c.effects.particles, color: scaleOf(c.colors.accent)[300], speed: SPEED_FACTOR[a.speed] } : null;
   return { attrs, vars, page, banner, mascot, particles };
@@ -189,4 +199,6 @@ export const EFFECT_ATTRS = [
   "tm-btn", "tm-shine", "tm-topbar", "tm-sidebar", "tm-sidegrad", "tm-enter", "tm-ganim", "tm-hover", "tm-count",
   "tm-fx-button", "tm-fx-topbar", "tm-fx-menu", "tm-fx-number", "tm-fx-bell", "tm-scale", "tm-ripple", "tm-underline", "tm-wiggle",
   "tm-fx-badge", "tm-fx-card", "tm-card-border", "tm-card-run", "tm-card-bar", "tm-card-shadow", "tm-card-hglow", "tm-inset", "tm-stagger",
+  "tm-pagebg", "tm-heading", "tm-link", "tm-border", "tm-sidetint",
+  ...CHROME_ATTRS,
 ] as const;

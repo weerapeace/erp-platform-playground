@@ -571,6 +571,7 @@ export function ERPModal({
       {/* Backdrop — เกาะขอบ = ไม่มีพื้นหลัง (หน้าด้านหลังเลื่อน/กดได้) */}
       {!docked && (
         <div
+          data-tm-backdrop=""
           className={`absolute inset-0 ${backdrop === "light" ? "bg-black/15" : "bg-black/50"} transition-opacity`}
           {...backdropDismiss}
         />
@@ -584,6 +585,7 @@ export function ERPModal({
       {/* Modal panel */}
       <div
         ref={panelRef}
+        data-tm-pop={docked ? "drawer" : "modal"}
         className={docked
           ? `relative pointer-events-auto bg-white shadow-2xl flex flex-col h-full ${dock === "r" ? "border-l" : "border-r"} border-slate-200`
           : `relative bg-white rounded-xl shadow-2xl flex flex-col ${panelClass}`}
@@ -605,6 +607,7 @@ export function ERPModal({
             ? tr("ลากออกจากขอบ = กลับเป็นป๊อปลอย · ดับเบิลคลิก = กลับกลางจอ", "Drag away from the edge to float · double-click to recenter")
             : tr("ลากเพื่อย้ายป๊อป · ลากไปชนขอบซ้าย/ขวา = เกาะเป็นแผงข้าง · ดับเบิลคลิก = กลับกลางจอ", "Drag to move · drag to the left/right edge to dock · double-click to recenter")}
           style={canDrag ? { touchAction: "none" } : undefined}
+          data-tm-pop-head=""
           className={`flex items-start justify-between px-6 pt-6 pb-4 border-b border-slate-100 flex-shrink-0 ${canDrag ? "cursor-move select-none" : ""}`}
         >
           <div>
@@ -783,8 +786,9 @@ export function ConfirmDialog({
 
   return createPortal(
     <div data-erp-modal className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
+      <div data-tm-backdrop="" className="absolute inset-0 bg-black/50" {...backdropDismiss} />
       <div
+        data-tm-pop="modal"
         className="relative w-full max-w-md bg-white rounded-xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -942,12 +946,13 @@ export function Drawer({
     <div className="fixed inset-0 z-50 flex">
       {/* Backdrop */}
       <div
+        data-tm-backdrop=""
         className="absolute inset-0 bg-black/50"
         {...backdropDismiss}
       />
 
       {/* Drawer panel (from right) — F22: resizable width */}
-      <div className="relative ml-auto flex flex-col bg-white shadow-2xl h-full" style={{ width, maxWidth: "100vw" }}>
+      <div data-tm-pop="drawer" className="relative ml-auto flex flex-col bg-white shadow-2xl h-full" style={{ width, maxWidth: "100vw" }}>
         {/* F22: resize handle (ขอบซ้าย) */}
         <div
           onMouseDown={(e) => {
@@ -970,7 +975,7 @@ export function Drawer({
         />
 
         {/* Header — มือถือ (< sm) ขอบแคบ + ชื่อยาวตัดบรรทัดเดียว (เจ้าของขอ 2026-11-12 "drawer เป็น phone responsive") */}
-        <div className="flex items-start justify-between px-3 pt-3 pb-2 sm:px-6 sm:pt-6 sm:pb-4 border-b border-slate-100">
+        <div data-tm-pop-head="" className="flex items-start justify-between px-3 pt-3 pb-2 sm:px-6 sm:pt-6 sm:pb-4 border-b border-slate-100">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-slate-900 truncate sm:whitespace-normal">{title}</h2>
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
@@ -1054,8 +1059,8 @@ export function DrawerShell({ open = true, onClose, width, className = "", style
   if (!mounted || !open) return null;
   return createPortal(
     <div className={`fixed inset-0 z-50 flex ${modal ? "" : "pointer-events-none"}`}>
-      {modal && <div className="absolute inset-0 bg-black/20" {...backdropDismiss} />}
-      <div className={`relative ml-auto h-full max-w-[100vw] sm:max-w-[97vw] bg-white shadow-2xl flex flex-col border-l border-slate-200 ${modal ? "" : "pointer-events-auto"} ${className}`}
+      {modal && <div data-tm-backdrop="" className="absolute inset-0 bg-black/20" {...backdropDismiss} />}
+      <div data-tm-pop="drawer" className={`relative ml-auto h-full max-w-[100vw] sm:max-w-[97vw] bg-white shadow-2xl flex flex-col border-l border-slate-200 ${modal ? "" : "pointer-events-auto"} ${className}`}
         style={{ ...(width !== undefined ? { width } : {}), ...style }} onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
@@ -1101,8 +1106,8 @@ export function ApprovalDialog({
 
   return createPortal(
     <div data-erp-modal className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
-      <div className="relative w-full max-w-md bg-white rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div data-tm-backdrop="" className="absolute inset-0 bg-black/50" {...backdropDismiss} />
+      <div data-tm-pop="modal" className="relative w-full max-w-md bg-white rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="p-6">
           {mode === "choose" ? (
             <>

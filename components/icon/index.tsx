@@ -118,7 +118,7 @@ export function Icon({
   const a11y = title ? { role: "img" as const, "aria-label": title } : { "aria-hidden": true as const };
   if (r.kind === "line")
     return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={cls} style={style} {...a11y}>
+      <svg data-icon="" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={cls} style={style} {...a11y}>
         {title && <title>{title}</title>}
         {r.d.map((d, i) => <path key={i} d={d} />)}
       </svg>

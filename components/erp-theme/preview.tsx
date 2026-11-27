@@ -17,6 +17,10 @@ import { Icon } from "@/components/icon";
 import { ensureThemeFont } from "./active-themes";
 import { ThemeParticles } from "./particles";
 import { PART_INFO } from "@/lib/erp-theme-easy";
+import { ICON_STROKE, chromeLook } from "@/lib/erp-theme-chrome";
+
+/** ชิ้นที่โชว์ทับพรีวิว (แผง "ชิ้นส่วน") */
+export type PreviewOverlay = "modal" | "drawer" | "toast" | "menu" | null;
 const PART_LABEL = Object.fromEntries(Object.entries(PART_INFO).map(([k, v]) => [k, v.label])) as Record<EffectTarget, string>;
 
 export type PreviewSample = "purchase" | "products" | "tasks";
@@ -39,6 +43,11 @@ const rgba = (hex: string, a: number) => { const n = parseInt(hex.slice(1), 16);
 
 const CSS = `
 @keyframes tmpFade{from{opacity:0}to{opacity:1}}
+@keyframes tmpPopUp{from{opacity:0;translate:0 14px}}
+@keyframes tmpPopZoom{from{opacity:0;scale:.94}}
+@keyframes tmpPopDrawer{from{opacity:.4;translate:40px 0}}
+@keyframes tmpPopSheet{from{translate:0 40px}}
+.tmp-root svg[data-icon]{stroke-width:var(--tmp-isw,1.75)}
 @keyframes tmpUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes tmpZoom{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
 @keyframes tmpBlur{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:none}}
@@ -85,8 +94,10 @@ const CSS = `
 const ENTER: Record<string, string> = { none: "none", fade: "tmpFade", up: "tmpUp", zoom: "tmpZoom", blur: "tmpBlur" };
 
 export function ThemePreview({
-  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false, editMode = false, selectedPart = null, onPartClick,
+  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false, editMode = false, selectedPart = null, onPartClick, overlay = null,
 }: {
+  /** โชว์ป๊อป/ลิ้นชัก/แจ้งผล/เมนูลอยทับพรีวิว (แผง "ชิ้นส่วน") */
+  overlay?: PreviewOverlay;
   /** โหมดคลิกแก้: ชี้ชิ้นแล้วเห็นชื่อ + กรอบประ · คลิก = onPartClick (ปุ่มในพรีวิวไม่ทำงานจริงระหว่างนี้) */
   editMode?: boolean;
   selectedPart?: EffectTarget | null;
@@ -105,6 +116,9 @@ export function ThemePreview({
   useEffect(() => { if (!compact) ensureThemeFont(c.typography.font); }, [compact, c.typography.font]);
   const p = primaryScale(c), a = scaleOf(c.colors.accent);
   const pt = c.colors.parts;
+  const ch = c.chrome;
+  const L = chromeLook(ch, p, a, c.gradient.color2, c.gradient.angle, device === "mobile");
+  const headFs = (base: number) => base + (ch.headingSize === "sm" ? -2 : ch.headingSize === "lg" ? 3 : 0);
   const s = SAMPLES[sample];
   const g = c.gradient, sp = g.spots, fx = c.effects, o = c.outline, el = c.elevation;
   const grad = `linear-gradient(${g.angle}deg, ${p[600]}, ${g.color2})`;
@@ -181,7 +195,10 @@ export function ThemePreview({
     setTimeout(() => sp2.remove(), 650);
   };
   const btn = (primary = true): React.CSSProperties => {
-    if (!primary) return { background: P.surf, color: P.tx, border: `1px solid ${P.bd}`, borderRadius: R, padding: "4px 10px", fontSize: fs };
+    if (!primary) {
+      const b2: React.CSSProperties = ch.button2 === "soft" ? { background: p[50], color: p[700], border: `1px solid ${p[200]}` } : ch.button2 === "ghost" ? { background: "transparent", color: P.tx, border: "1px solid transparent" } : { background: P.surf, color: P.tx, border: `1px solid ${P.bd}` };
+      return { ...b2, borderRadius: R, padding: "4px 10px", fontSize: fs };
+    }
     const base: React.CSSProperties = { borderRadius: R, padding: "4px 11px", fontSize: fs, fontWeight: 500, position: "relative", overflow: "hidden" };
     if (c.components.button === "soft") return { ...base, background: p[100], color: p[700], border: `1px solid ${p[200]}` };
     if (c.components.button === "outline") return { ...base, background: "transparent", color: p[600], border: `1.5px solid ${p[600]}` };
@@ -196,7 +213,7 @@ export function ThemePreview({
   const badge = (k: string, label: string) => {
     const [bg, tx, solid] = STATUS[k];
     const urgent = k === "wait";
-    return <span {...(urgent ? pp("badge") : {})} className={urgent ? badgeFx.cls : ""} style={{ display: "inline-block", fontSize: fs - 2, padding: "1px 7px", borderRadius: 999, whiteSpace: "nowrap", ...(c.components.badge === "solid" ? { background: solid, color: "#fff" } : { background: bg, color: tx }), ...(urgent ? badgeFx.style : {}) }}>{label}</span>;
+    return <span {...(urgent ? pp("badge") : {})} className={urgent ? badgeFx.cls : ""} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: fs - 2, padding: "1px 7px", borderRadius: ch.badgeShape === "rounded" ? 4 : 999, whiteSpace: "nowrap", ...(c.components.badge === "solid" ? { background: solid, color: "#fff" } : { background: bg, color: tx }), ...(urgent ? badgeFx.style : {}) }}>{ch.badgeShape === "dot" && <span style={{ width: 5, height: 5, borderRadius: 99, background: "currentColor" }} />}{label}</span>;
   };
 
   const sideLight = pt.sidebar ? isLightColor(pt.sidebar) : c.components.sidebar === "light";
@@ -266,7 +283,7 @@ export function ThemePreview({
     <div className="tmp-en" style={{ position: "relative", overflow: "hidden", borderRadius: R + 2, background: sp.banner ? grad : p[600], color: "#fff", padding: "12px 14px", marginBottom: gap, display: "flex", alignItems: "center", gap: 8 }}>
       {bgLayer("banner")}
       <div style={{ position: "relative", zIndex: 1, flex: 1 }}>
-        <div style={{ fontSize: fs + 4, fontWeight: c.typography.headingWeight }}>{s.title}</div>
+        <div style={{ fontSize: headFs(fs + 4), fontWeight: c.typography.headingWeight }}>{s.title}</div>
         <div style={{ fontSize: fs - 2 }}>อัปเดตล่าสุด 5 นาทีที่แล้ว</div>
       </div>
       <PrimaryBtn onBanner>+ สร้างใหม่</PrimaryBtn>
@@ -274,7 +291,7 @@ export function ThemePreview({
   ) : (
     <div className="tmp-en" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: gap }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: fs + 4, fontWeight: c.typography.headingWeight, color: headColor }}>{s.title}</div>
+        <div style={{ fontSize: headFs(fs + 4), fontWeight: c.typography.headingWeight, color: headColor }}>{s.title}</div>
         <div style={{ fontSize: fs - 2, color: P.mut }}>อัปเดตล่าสุด 5 นาทีที่แล้ว</div>
       </div>
       {!mob && <button type="button" style={btn(false)}>ส่งออก</button>}
@@ -297,11 +314,16 @@ export function ThemePreview({
   );
 
   const inputBase: React.CSSProperties = { borderRadius: R, ...(c.components.input === "filled" ? { background: dark ? "#0b1220" : "#f1f5f9", border: "1px solid transparent" } : { background: P.surf, border: `1px solid ${P.bd}` }), ...(el.inset ? { boxShadow: `inset 0 2px 4px ${rgba("#0f172a", dark ? 0.4 : 0.12)}` } : {}) };
+  const focusBox: React.CSSProperties = ch.input.focus === "default"
+    ? { borderRadius: R, border: `2px solid ${p[500]}`, boxShadow: `0 0 0 3px ${p[500]}33` }
+    : { borderRadius: R, border: `1.5px solid ${L.focus}`, boxShadow: ch.input.ring ? `0 0 0 ${ch.input.ring}px ${L.focusRing}` : "none" };
   const tabs = (
     <div className="tmp-en" style={{ ...delay(4), display: "flex", gap: 10, alignItems: "center", marginBottom: gap - 4 }}>
       <div style={{ flex: 1, padding: "4px 9px", color: P.mut, fontSize: fs - 1, ...inputBase }}>ค้นหา…</div>
       {["ทั้งหมด", "ของฉัน"].map((t, i) =>
-        c.components.tabs === "pill"
+        c.components.tabs === "box"
+          ? <span key={t} style={{ fontSize: fs - 1, padding: "2px 10px", borderRadius: Math.max(2, R - 2), ...(i === 0 ? { background: P.surf, color: a[700], boxShadow: "0 1px 2px rgba(15,23,42,.15)" } : { color: P.mut }) }}>{t}</span>
+          : c.components.tabs === "pill"
           ? <span key={t} style={{ fontSize: fs - 1, padding: "2px 10px", borderRadius: 999, ...(i === 0 ? { background: a[600], color: "#fff" } : { color: P.mut }) }}>{t}</span>
           : anim && fx.underline
             ? <span key={`${t}-${replayKey}`} className={`tmp-under${i === 0 ? " on" : ""}`} style={{ fontSize: fs - 1, color: i === 0 ? a[600] : P.mut, cursor: "pointer" }}>{t}</span>
@@ -322,10 +344,10 @@ export function ThemePreview({
   ) : (
     <div {...pp("card")} className={`tmp-en${hglow}`} style={{ ...cardBox({ overflow: "hidden" }), ...hringVar, ...delay(5) }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{s.cols.map((h) => <th key={h} style={{ textAlign: "left", fontWeight: 500, fontSize: fs - 2, color: P.mut, padding: `${pad}px 10px`, borderBottom: `1px solid ${P.bd}`, background: c.components.table === "lines" ? (dark ? "#0b1220" : "#f8fafc") : undefined }}>{h}</th>)}</tr></thead>
+        <thead><tr>{s.cols.map((h) => <th key={h} style={{ textAlign: "left", fontWeight: 500, fontSize: fs - 2, color: L.theadTx ?? P.mut, padding: `${pad}px 10px`, borderBottom: `1px solid ${P.bd}`, background: L.theadBg ?? (c.components.table === "lines" ? (dark ? "#0b1220" : "#f8fafc") : undefined) }}>{h}</th>)}</tr></thead>
         <tbody>
           {s.rows.slice(0, compact ? 2 : 4).map((r, i) => (
-            <tr key={r[0]} className="tmp-row" style={{ background: c.components.table === "zebra" && i % 2 ? (dark ? "#172033" : "#f8fafc") : undefined }}>
+            <tr key={r[0]} className="tmp-row" style={{ background: i === 0 && overlay === null && !compact ? (L.rowSel ?? P.ps) : c.components.table === "zebra" && i % 2 ? (dark ? "#172033" : "#f8fafc") : undefined }}>
               {[r[0], r[1], r[2]].map((v, j) => <td key={j} style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined, borderRight: c.components.table === "lines" ? `1px solid ${P.bd}` : undefined, color: j === 0 ? linkColor ?? P.mut : P.tx, whiteSpace: "nowrap" }}>{v}</td>)}
               <td style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined }}>{badge(r[3], r[4])}</td>
             </tr>
@@ -340,7 +362,7 @@ export function ThemePreview({
       <div style={{ flex: 1, ...cardBox({ padding: 10 }) }}>
         <div style={{ fontSize: fs - 2, color: P.mut, marginBottom: 4 }}>ช่องกรอก</div>
         <div style={{ padding: "4px 8px", ...inputBase }}>ผ้าใบ 10 ม้วน</div>
-        <div style={{ marginTop: 6, padding: "4px 8px", borderRadius: R, border: `2px solid ${p[500]}`, boxShadow: `0 0 0 3px ${p[500]}33` }}>กำลังพิมพ์…</div>
+        <div style={{ marginTop: 6, padding: "4px 8px", ...focusBox }}>กำลังพิมพ์…</div>
       </div>
       <div style={{ flex: 1, ...cardBox({ padding: 10, borderRadius: R + 2, boxShadow: el.depth === "none" ? "none" : `0 10px 24px -8px ${rgba(shColor, 0.3)}` }) }}>
         <div style={{ fontWeight: c.typography.headingWeight, color: headColor }}>ยืนยันอนุมัติ?</div>
@@ -361,9 +383,72 @@ export function ThemePreview({
   // อนุภาค (ข้อ 27)
   const particles = anim && fx.particles !== "none" && <ThemeParticles kind={fx.particles} speed={spd} color={a[300]} />;
 
+  // ── ชิ้นส่วนย่อยในพรีวิว (ป๊อป · ลิ้นชัก · แจ้งผล · เมนูลอย — ข้อ 21) ──
+  const popR = ch.popup.radius ?? 12;
+  const popShadow = L.shadow ?? "0 20px 40px -12px rgba(15,23,42,.35)";
+  const popAnim = anim && ch.popup.open !== "none" ? { animation: `${ch.popup.open === "up" ? "tmpPopUp" : ch.popup.open === "zoom" ? "tmpPopZoom" : "tmpFade"} ${0.22 * spd}s ease-out` } : {};
+  const popHead = (title: string) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", fontWeight: c.typography.headingWeight, ...(L.head ? { background: L.head, color: "#fff" } : { background: P.surf, color: P.tx, borderBottom: `1px solid ${P.bd}` }), borderTopLeftRadius: "inherit", borderTopRightRadius: "inherit" }}>
+      <span style={{ flex: 1 }}>{title}</span><Icon value="i:x" />
+    </div>
+  );
+  const checkColor = ch.checks ? p[600] : "#2563eb";
+  const formBody = (
+    <div style={{ padding: "10px 12px", display: "grid", gap: 8 }}>
+      <div><div style={{ fontSize: fs - 2, color: P.mut, marginBottom: 3 }}>รายการ</div><div style={{ padding: "4px 8px", ...focusBox }}>ผ้าใบ 10 ม้วน</div></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: fs - 1 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 13, height: 13, borderRadius: 3, background: checkColor, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9 }}>✓</span>ด่วน</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 26, height: 15, borderRadius: 99, background: ch.checks ? p[600] : "#10b981", position: "relative" }}><span style={{ position: "absolute", right: 2, top: 2, width: 11, height: 11, borderRadius: 99, background: "#fff" }} /></span>แจ้งเตือน</span>
+      </div>
+    </div>
+  );
+  const popFoot = (
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, padding: "8px 12px", borderTop: `1px solid ${P.bd}` }}>
+      <button type="button" style={btn(false)}>ยกเลิก</button><PrimaryBtn>บันทึก</PrimaryBtn>
+    </div>
+  );
+  const backdropEl = <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 5, background: L.backdrop, backdropFilter: L.blur, WebkitBackdropFilter: L.blur }} />;
+  const overlayEl = compact || !overlay ? null
+    : overlay === "modal" ? (
+      <>
+        {backdropEl}
+        {mob
+          ? <div key={`m-${replayKey}`} style={{ position: "absolute", left: 0, right: 0, bottom: 0, zIndex: 6, background: P.surf, borderTopLeftRadius: popR, borderTopRightRadius: popR, boxShadow: popShadow, ...(anim && ch.popup.open !== "none" ? { animation: `tmpPopSheet ${0.22 * spd}s ease-out` } : {}) }}>{popHead("แก้ใบขอซื้อ")}{formBody}{popFoot}</div>
+          : <div key={`m-${replayKey}`} style={{ position: "absolute", left: "50%", top: "50%", width: 280, marginLeft: -140, marginTop: -100, zIndex: 6, background: P.surf, borderRadius: popR, boxShadow: popShadow, ...popAnim }}>{popHead("แก้ใบขอซื้อ")}{formBody}{popFoot}</div>}
+      </>
+    ) : overlay === "drawer" ? (
+      <>
+        {backdropEl}
+        <div key={`d-${replayKey}`} style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: mob ? "86%" : "44%", zIndex: 6, background: P.surf, boxShadow: popShadow, borderLeft: ch.popup.drawerBar ? `4px solid ${p[600]}` : undefined, ...(anim && ch.popup.open !== "none" ? { animation: `tmpPopDrawer ${0.22 * spd}s ease-out` } : {}) }}>
+          {popHead("PR-00118")}
+          <div style={{ padding: "8px 12px", fontSize: fs - 1 }}><div style={{ color: P.mut }}>ผู้ขอ</div><div style={{ fontWeight: 500 }}>สมชาย</div></div>
+          {formBody}
+        </div>
+      </>
+    ) : overlay === "toast" ? (
+      <div key={`t-${replayKey}`} style={{
+        position: "absolute", zIndex: 6, maxWidth: "80%", fontSize: fs - 1, padding: "6px 12px", borderRadius: 8, boxShadow: "0 8px 20px -8px rgba(15,23,42,.4)", display: "flex", gap: 8, alignItems: "center",
+        ...(ch.toast.position.startsWith("top") ? { top: mob ? 42 : 40 } : { bottom: 10 }),
+        ...(ch.toast.position.endsWith("center") ? { left: "50%", transform: "translateX(-50%)" } : { right: 10 }),
+        ...(ch.toast.style === "white" ? { background: "#fff", color: "#0f172a", border: "1px solid #e2e8f0", borderLeft: "4px solid #059669" } : { background: "#059669", color: "#fff" }),
+        animation: anim ? `tmpUp ${0.25 * spd}s ease-out` : undefined,
+      }}>
+        <span>บันทึกแล้ว</span>
+        <span style={{ borderRadius: 6, padding: "1px 8px", background: ch.toast.style === "white" ? "#f1f5f9" : "rgba(255,255,255,.2)", fontWeight: 600 }}>ย้อนกลับ</span>
+      </div>
+    ) : (
+      <div style={{ position: "absolute", zIndex: 6, top: mob ? 96 : 84, right: mob ? 12 : 20, width: 150, background: P.surf, border: `1px solid ${P.bd}`, borderRadius: ch.menu.radius ?? 8, boxShadow: "0 12px 28px -10px rgba(15,23,42,.35)", padding: 4, fontSize: fs - 1 }}>
+        {["Excel (.xlsx)", "CSV", "PDF"].map((t, i) => {
+          const sel = i === 0;
+          const st: React.CSSProperties = !sel ? { color: P.tx } : ch.menu.selected === "strong" ? { background: p[600], color: "#fff" } : ch.menu.selected === "soft" ? { background: p[100], color: p[800] } : { background: p[50], color: p[700] };
+          return <div key={t} style={{ padding: "5px 8px", borderRadius: Math.max(0, (ch.menu.radius ?? 8) - 3), ...st }}>{t}</div>;
+        })}
+      </div>
+    );
+
   const menuFx = fxStyle("menu");
   const rootStyle = {
-    "--spd": String(spd), "--ps": P.ps, "--enter": anim ? ENTER[fx.enter] : "none",
+    "--spd": String(spd), "--ps": P.ps, "--enter": anim ? ENTER[fx.enter] : "none", "--tmp-isw": String(ICON_STROKE[ch.icon.stroke]),
     position: "relative", overflow: "hidden", background: pageBg, color: P.tx, fontFamily: font.family, fontSize: fs, lineHeight: 1.45,
     borderRadius: 12, border: `1px solid ${dark ? "#334155" : "#cbd5e1"}`,
   } as React.CSSProperties;
@@ -383,6 +468,7 @@ export function ThemePreview({
           {["หน้าแรก", s.app, "งาน", "ฉัน"].map((t, i) => <div key={t} {...(i === 1 ? pp("menu") : {})} className={i === 1 ? menuFx.cls : ""} style={{ flex: 1, textAlign: "center", fontSize: fs - 2, padding: "6px 0", color: i === 1 ? p[600] : P.mut, ...(i === 1 ? { ...menuFx.style, color: menuFx.style.backgroundImage ? "#fff" : p[600] } : {}) }}>{t}</div>)}
         </div>
       )}
+      {overlayEl}
       {particles}
       {mascot}
       {lbl}
@@ -402,7 +488,7 @@ export function ThemePreview({
               const icon = ["home", "file-text", "chart-bar", "settings"][i];
               return (
                 <div key={t} {...(on ? pp("menu") : {})} className={on ? menuFx.cls : ""} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: R, marginBottom: 2, fontWeight: on ? 500 : 400, ...st, ...(on ? { ...menuFx.style, ...(menuFx.style.backgroundImage ? { color: "#fff" } : {}) } : {}) }}>
-                  <span className={wig} style={{ display: "inline-flex" }}><Icon name={icon} /></span>{t}
+                  <span className={wig} style={{ display: "inline-flex", ...(ch.icon.tint && sideLight && !on ? { color: p[600] } : {}) }}><Icon name={icon} /></span>{t}
                 </div>
               );
             })}
@@ -412,6 +498,7 @@ export function ThemePreview({
           {head}{stats}{!compact && tabs}{table}{modal}
         </div>
       </div>
+      {overlayEl}
       {particles}
       {mascot}
       {lbl}
