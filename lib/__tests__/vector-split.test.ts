@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectPieces, inkMask, pieceNames, readingOrder, mergeOverlapping, vectorFileProblem, exportScale, edgeWhiteMask, isVectorFile } from "../vector-split";
+import { detectPieces, inkMask, pieceNames, readingOrder, mergeOverlapping, vectorFileProblem, exportScale, edgeWhiteMask, isVectorFile, isPostScript } from "../vector-split";
 
 /** ภาพ w×h โปร่งใส + วาดสี่เหลี่ยมทึบ */
 function canvasOf(w: number, h: number, rects: [number, number, number, number][], bg?: [number, number, number]) {
@@ -59,10 +59,14 @@ describe("helpers", () => {
   it("ตรวจหัวไฟล์", () => {
     const enc = (s: string) => new TextEncoder().encode(s);
     expect(vectorFileProblem(enc("%PDF-1.6 ..."), "a.ai")).toBeNull();
-    expect(vectorFileProblem(enc("%!PS-Adobe-3.0 EPSF-3.0"), "h.eps")).toMatch(/Save As/);
-    expect(vectorFileProblem(enc("%!PS-Adobe-3.0"), "old.ai")).toMatch(/PDF Compatible/);
+    // PostScript (.eps / .ai รุ่นเก่า) เปิดได้แล้ว — แปลงเป็น PDF ก่อน
+    expect(vectorFileProblem(enc("%!PS-Adobe-3.0 EPSF-3.0"), "h.eps")).toBeNull();
+    expect(isPostScript(enc("%!PS-Adobe-3.0 EPSF-3.0"), "h.eps")).toBe(true);
+    expect(isPostScript(enc("%!PS-Adobe-3.0"), "old.ai")).toBe(true);
+    expect(isPostScript(new Uint8Array([0xc5, 0xd0, 0xd3, 0xc6, 0]), "x.bin")).toBe(true);
+    expect(isPostScript(enc("%PDF-1.6"), "a.ai")).toBe(false);
     expect(vectorFileProblem(enc("<svg"), "a.svg")).toBeNull();
-    expect(vectorFileProblem(new Uint8Array([0xc5, 0xd0, 0xd3, 0xc6, 0]), "x.bin")).toMatch(/\.eps/);
+    expect(vectorFileProblem(enc("GIF89a"), "x.pdf")).toMatch(/\.eps/);
   });
   it("สเกลส่งออก: ด้านยาวตามที่เลือก · 300 DPI · เพดาน 4096", () => {
     expect(exportScale({ x: 0, y: 0, w: 100, h: 50 }, 1024)).toBeCloseTo(10.24);

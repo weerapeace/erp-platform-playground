@@ -1,8 +1,9 @@
 // ตัววาดไฟล์ออกแบบสำหรับตัวแยกชิ้น (ฝั่งเบราว์เซอร์เท่านั้น)
 //   .ai (PDF Compatible) / .pdf → pdf.js ใน public/vendor (ของกลาง loadPdfJs) · .svg → เบราว์เซอร์วาดเอง
+//   .eps / .ai รุ่นเก่า (PostScript) → Ghostscript ในเบราว์เซอร์แปลงเป็น PDF ก่อน (lib/eps-convert)
 //   วาดพื้นใสเสมอ · วาดเฉพาะกรอบที่ต้องการที่สเกลไหนก็ได้ (จากเส้นเวกเตอร์ใหม่ → คม)
 import { loadPdfJs } from "@/lib/pdf-merge-engine";
-import { type Box, vectorFileProblem, isSvgName } from "@/lib/vector-split";
+import { type Box, vectorFileProblem, isSvgName, isPostScript } from "@/lib/vector-split";
 
 export type VectorSource = {
   /** ขนาดแผ่นในหน่วยไฟล์ (PDF = point · SVG = px) */
@@ -29,13 +30,20 @@ function makeCanvas(w: number, h: number) {
   return c;
 }
 
-/** เปิดไฟล์ → ตัววาด · ไฟล์เปิดไม่ได้ = throw ข้อความภาษาคน */
-export async function openVectorFile(file: File): Promise<VectorSource> {
+/** เปิดไฟล์ → ตัววาด · ไฟล์เปิดไม่ได้ = throw ข้อความภาษาคน
+ *  .eps / .ai รุ่นเก่า (PostScript) → แปลงเป็น PDF ในเครื่องก่อน (lib/eps-convert · ครั้งแรกโหลดตัวแปลง ~16MB) · onStatus = ข้อความระหว่างรอ */
+export async function openVectorFile(file: File, onStatus?: (msg: string) => void): Promise<VectorSource> {
   if (file.size > MAX_VECTOR_BYTES) throw new Error("ไฟล์ใหญ่เกิน 80MB");
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
   const problem = vectorFileProblem(bytes, file.name, file.type);
   if (problem) throw new Error(problem);
   if (isSvgName(file.name, file.type)) return openSvg(new TextDecoder().decode(bytes));
+  if (isPostScript(bytes, file.name)) {
+    onStatus?.("กำลังแปลงไฟล์ .eps (ครั้งแรกต้องโหลดตัวแปลง ~16MB อาจใช้เวลาสักครู่)…");
+    const { epsToPdf } = await import("@/lib/eps-convert");
+    bytes = await epsToPdf(bytes);
+    onStatus?.("กำลังหาชิ้น…");
+  }
   return openPdf(bytes);
 }
 

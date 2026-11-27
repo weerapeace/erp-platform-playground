@@ -6,7 +6,7 @@
  *   → ไฟล์ต้นฉบับเก็บในคลังด้วย และ PNG ทุกชิ้นผูกกลับ (assets.source_asset_id) — หน้ารายละเอียดโชว์ "มาจากไฟล์ไหน"
  * ใช้เมื่อ: ต้องการตัดชิ้นส่วนจากไฟล์เวกเตอร์ชุด (สติกเกอร์/ไอคอน/ลายเส้น) เป็นรูปแยก
  * ห้ามใช้เมื่อ: ไฟล์รูป (JPG/PNG) ธรรมดา → ใช้ครอปรูป (ImageCropPicker) · ไฟล์บล็อกพิมพ์ที่ต้องการเส้นตัด → BlockPrint
- * .eps / .ai รุ่นเก่า = PostScript เปิดในเว็บไม่ได้ → ระบบบอกให้ Save As เป็น .ai/.pdf
+ * .eps / .ai รุ่นเก่า (PostScript) → แปลงเป็น PDF ในเครื่องผู้ใช้ด้วย Ghostscript (lib/eps-convert · ครั้งแรกโหลด ~16MB)
  * ตรรกะหาชิ้น/ตั้งชื่อ/สเกล = lib/vector-split (มีเทสต์) · ตัววาด = ./render
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -51,6 +51,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   const [src, setSrc] = useState<VectorSource | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState<string | null>(null);   // เช่น "กำลังแปลงไฟล์ .eps…"
   const [error, setError] = useState<string | null>(null);
   const [removeWhite, setRemoveWhite] = useState(false);
   const [gapPct, setGapPct] = useState(2.5);   // % ของด้านยาว — ขีดประดับรอบชิ้น (เช่น ขีดรอบหัวใจ) นับรวมเป็นชิ้นเดียว
@@ -80,9 +81,9 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   }, []);
 
   const loadFile = useCallback(async (f: File, page = 1) => {
-    setLoading(true); setError(null); setPieces([]); setHistory([]); setPreview(null);
+    setLoading(true); setLoadingMsg(null); setError(null); setPieces([]); setHistory([]); setPreview(null);
     try {
-      let s = src && file === f ? src : await openVectorFile(f);
+      let s = src && file === f ? src : await openVectorFile(f, setLoadingMsg);
       if (s.page !== page) s = await s.setPage(page);
       setSrc(s);
       const scale = Math.min(PREVIEW_LONG / Math.max(s.width, s.height), 8);
@@ -110,7 +111,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
 
   const pickFile = (f: File | undefined) => {
     if (!f) return;
-    if (!isVectorFile(f)) { toast.error(t("รับไฟล์ .ai / .pdf / .svg (และ .eps ที่ Save As แล้ว)", "Accepts .ai / .pdf / .svg files")); return; }
+    if (!isVectorFile(f)) { toast.error(t("รับไฟล์ .ai / .eps / .pdf / .svg", "Accepts .ai / .eps / .pdf / .svg files")); return; }
     src?.destroy(); setSrc(null); setFile(f); setResult(null); void loadFile(f);
   };
   const { over, zone } = useFileDrop((fs) => pickFile(fs[0]), { disabled: !!progress });
@@ -284,8 +285,8 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
           className="relative cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center">
           <FileDropHint show={over === "pick"} label={t("วางไฟล์ออกแบบ", "Drop design file")} />
           <div className="text-4xl mb-2">✂️</div>
-          <p className="text-sm font-medium text-slate-700">{t("ลากไฟล์ .ai / .pdf / .svg มาวาง หรือคลิกเลือก", "Drop an .ai / .pdf / .svg file or click to choose")}</p>
-          <p className="text-[12px] text-slate-400 mt-1">{t("ไฟล์ .eps: เปิดใน Illustrator แล้ว Save As เป็น .ai หรือ .pdf ก่อน", ".eps files: Save As .ai or .pdf in Illustrator first")}</p>
+          <p className="text-sm font-medium text-slate-700">{t("ลากไฟล์ .ai / .eps / .pdf / .svg มาวาง หรือคลิกเลือก", "Drop an .ai / .eps / .pdf / .svg file or click to choose")}</p>
+          <p className="text-[12px] text-slate-400 mt-1">{t("ไฟล์ .eps ครั้งแรกต้องโหลดตัวแปลงสักครู่ (~16MB) ครั้งต่อไปเร็ว", "First .eps loads a converter (~16MB) once")}</p>
           <input ref={inputRef} type="file" accept={VECTOR_ACCEPT} className="hidden" onChange={(e) => pickFile(e.target.files?.[0])} />
         </div>
       ) : (
@@ -312,7 +313,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
                 <ToolBtn onClick={undo} disabled={!history.length}>↶ {t("ย้อน", "Undo")}</ToolBtn>
               </div>
             )}
-            {loading && <p className="py-16 text-center text-sm text-slate-400">{t("กำลังเปิดไฟล์และหาชิ้น…", "Opening file and finding pieces…")}</p>}
+            {loading && <p className="py-16 text-center text-sm text-slate-400">{loadingMsg ?? t("กำลังเปิดไฟล์และหาชิ้น…", "Opening file and finding pieces…")}</p>}
             {error && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
                 <p className="font-medium mb-1">{t("เปิดไฟล์นี้ไม่ได้", "Can't open this file")}</p>

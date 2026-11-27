@@ -17,19 +17,24 @@ export function isVectorFile(f: { name: string; type?: string }): boolean {
 export const isSvgName = (name: string, type?: string) => /\.svg$/i.test(name) || type === "image/svg+xml";
 
 /**
+ * ไฟล์นี้เป็น PostScript (.eps / .ai รุ่นเก่า) ไหม — ต้องแปลงเป็น PDF ก่อน (lib/eps-convert · Ghostscript ในเบราว์เซอร์)
+ * ไฟล์ .eps แบบมีรูปตัวอย่าง (หัวไบนารี C5 D0 D3 C6) ก็นับด้วย
+ */
+export function isPostScript(head: Uint8Array, name: string): boolean {
+  const s = new TextDecoder("latin1").decode(head.slice(0, 2048));
+  if (s.includes("%PDF-")) return false;
+  return /\.e?ps$/i.test(name) || s.startsWith("%!PS") || (head[0] === 0xc5 && head[1] === 0xd0 && head[2] === 0xd3 && head[3] === 0xc6);
+}
+
+/**
  * ไบต์แรกของไฟล์ → ข้อความบอกวิธีแก้ (ภาษาคน) หรือ null = เปิดได้
- * .ai แบบ PDF Compatible / .pdf = ข้างในเป็น PDF (pdf.js อ่านได้) · .eps / .ai รุ่นเก่า = PostScript อ่านในเว็บไม่ได้
+ * .ai แบบ PDF Compatible / .pdf = PDF (pdf.js อ่านได้) · .eps / .ai รุ่นเก่า = PostScript → แปลงก่อน (isPostScript) · .svg = เบราว์เซอร์วาดเอง
  */
 export function vectorFileProblem(head: Uint8Array, name: string, type?: string): string | null {
   if (isSvgName(name, type)) return null;
   const s = new TextDecoder("latin1").decode(head.slice(0, 2048));
-  if (s.includes("%PDF-")) return null;
-  const eps = /\.eps$/i.test(name) || (head[0] === 0xc5 && head[1] === 0xd0 && head[2] === 0xd3 && head[3] === 0xc6);
-  if (eps || s.startsWith("%!PS"))
-    return eps
-      ? "ไฟล์ .eps เปิดในเว็บตรง ๆ ไม่ได้ — เปิดใน Illustrator แล้ว Save As เป็น .ai (ติ๊ก \"Create PDF Compatible File\") หรือ .pdf แล้วโยนไฟล์ใหม่"
-      : "ไฟล์ .ai นี้บันทึกแบบไม่ติ๊ก \"Create PDF Compatible File\" — เปิดใน Illustrator แล้ว Save As ใหม่ (ติ๊กช่องนี้) แล้วโยนอีกครั้ง";
-  return "เปิดได้เฉพาะไฟล์ .ai (แบบ PDF Compatible) · .pdf · .svg";
+  if (s.includes("%PDF-") || isPostScript(head, name)) return null;
+  return "เปิดได้เฉพาะไฟล์ .ai · .eps · .pdf · .svg";
 }
 
 /** ใกล้ขาวพอจะนับเป็น "พื้นขาว" */
