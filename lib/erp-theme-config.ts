@@ -11,12 +11,14 @@ import {
   type ThemeElevation, type ThemeFx, type ThemeOutline,
 } from "./erp-theme-fx";
 import { DEFAULT_CHROME, normalizeChrome, type ThemeChrome } from "./erp-theme-chrome";
+import { DEFAULT_TYPOGRAPHY, THEME_FONTS, fontStack, normalizeTypography, type ThemeTypography } from "./erp-theme-fonts";
 import { ORANGE_SCALE, VIOLET_SCALE, hexToChannels, isHexColor, scaleFromHex, shiftScale, themeVars, type ColorScale } from "./erp-theme";
 
 export type BgWhere = "page" | "top" | "banner";
 export type AnimSpeed = "slow" | "normal" | "fast";
 export type Density = "compact" | "normal" | "spacious";
-export type FontKey = "inter-noto" | "sarabun" | "prompt" | "ibm-plex-thai" | "kanit";
+/** key ฟอนต์ใน THEME_FONTS (lib/erp-theme-fonts) */
+export type FontKey = string;
 
 /** สีแยกทีละส่วน (null = ตามธีม/ค่าเดิม) — แผงสี แท็บ "แต่ละส่วน" · lib/erp-theme-palettes PART_COLORS */
 export type ColorParts = { topbar: string | null; sidebar: string | null; page: string | null; heading: string | null; link: string | null; border: string | null };
@@ -30,7 +32,8 @@ export type ErpThemeConfig = {
   background: { image: string | null; where: BgWhere; opacity: number; blur: number; veil: boolean; darkImage: string | null };
   gradient: { color2: string; angle: number; spots: { top: boolean; button: boolean; sidebar: boolean; banner: boolean; page: boolean }; animate: boolean };
   animation: { enter: boolean; hover: boolean; shine: boolean; countUp: boolean; mascot: boolean; mascotImage: string | null; speed: AnimSpeed };
-  typography: { font: FontKey; baseSize: number; headingWeight: 500 | 600 | 700 };
+  /** ตัวอักษร (lib/erp-theme-fonts · แผง "ตัวอักษร") */
+  typography: ThemeTypography;
   shape: { radius: number; shadow: "none" | "soft" | "strong" };
   density: Density;
   components: {
@@ -52,13 +55,8 @@ export type ErpThemeConfig = {
   chrome: ThemeChrome;
 };
 
-export const FONT_OPTIONS: { key: FontKey; label: string; family: string; google: string | null }[] = [
-  { key: "inter-noto", label: "Inter + Noto Sans Thai (ค่าเริ่ม)", family: "'Inter','Noto Sans Thai',system-ui,sans-serif", google: null },
-  { key: "sarabun", label: "Sarabun", family: "'Sarabun',system-ui,sans-serif", google: "Sarabun:wght@400;500;600;700" },
-  { key: "prompt", label: "Prompt", family: "'Prompt',system-ui,sans-serif", google: "Prompt:wght@400;500;600;700" },
-  { key: "ibm-plex-thai", label: "IBM Plex Sans Thai", family: "'IBM Plex Sans Thai',system-ui,sans-serif", google: "IBM+Plex+Sans+Thai:wght@400;500;600;700" },
-  { key: "kanit", label: "Kanit", family: "'Kanit',system-ui,sans-serif", google: "Kanit:wght@400;500;600;700" },
-];
+/** คลังฟอนต์ไทย (ชื่อเดิม · ตัวจริงอยู่ lib/erp-theme-fonts THEME_FONTS) */
+export const FONT_OPTIONS = THEME_FONTS;
 
 /** หน้าตาเดิมของระบบ = ธีม "ส้มคลาสสิก" */
 export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
@@ -67,7 +65,7 @@ export const DEFAULT_THEME_CONFIG: ErpThemeConfig = {
   background: { image: null, where: "page", opacity: 30, blur: 0, veil: true, darkImage: null },
   gradient: { color2: "#f59e0b", angle: 90, spots: { top: false, button: false, sidebar: false, banner: false, page: false }, animate: false },
   animation: { enter: false, hover: false, shine: false, countUp: true,  mascot: false, mascotImage: null, speed: "normal" },
-  typography: { font: "inter-noto", baseSize: 14, headingWeight: 600 },
+  typography: DEFAULT_TYPOGRAPHY,
   shape: { radius: 8, shadow: "soft" },
   density: "normal",
   components: { button: "solid", table: "plain", input: "outline", tabs: "underline", badge: "soft", sidebar: "light" },
@@ -103,7 +101,6 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
   const g = isObj(r.gradient) ? r.gradient : {};
   const gs = isObj(g.spots) ? g.spots : {};
   const a = isObj(r.animation) ? r.animation : {};
-  const t = isObj(r.typography) ? r.typography : {};
   const s = isObj(r.shape) ? r.shape : {};
   const k = isObj(r.components) ? r.components : {};
   const m = isObj(r.mode) ? r.mode : {};
@@ -140,11 +137,7 @@ export function normalizeThemeConfig(raw: unknown): ErpThemeConfig {
       countUp: hasFx(effects, "number", "countUp"), mascot: bool(a.mascot, false), mascotImage: key(a.mascotImage),
       speed: pick(a.speed, ["slow", "normal", "fast"] as const, "normal"),
     },
-    typography: {
-      font: pick(t.font, FONT_OPTIONS.map((f) => f.key), D.typography.font),
-      baseSize: num(t.baseSize, D.typography.baseSize, 12, 16),
-      headingWeight: pick(t.headingWeight as never, [500, 600, 700] as never[], D.typography.headingWeight as never),
-    },
+    typography: normalizeTypography(r.typography, isObj(r.chrome) ? r.chrome.headingSize : undefined),
     shape: { radius: num(s.radius, D.shape.radius, 0, 20), shadow: elevation.depth === "none" ? "none" : elevation.depth === "soft" ? "soft" : "strong" },
     density: pick(r.density, ["compact", "normal", "spacious"] as const, D.density),
     components: {
@@ -324,13 +317,12 @@ export const SPEED_FACTOR: Record<AnimSpeed, number> = { slow: 1.6, normal: 1, f
 
 /** ตัวแปร CSS ทั้งชุดของธีม (สี --tm-primary/accent-* ใช้ได้แล้วทั้งระบบ · ที่เหลือเตรียมให้เฟส 3–5) */
 export function themeCssVars(cfg: ErpThemeConfig): Record<string, string> {
-  const font = FONT_OPTIONS.find((f) => f.key === cfg.typography.font) ?? FONT_OPTIONS[0];
   const d = DENSITY_SCALE[cfg.density];
   return {
     ...themeVars({ primary: primaryScale(cfg), accent: scaleOf(cfg.colors.accent) }),
     "--tm-gradient": `linear-gradient(${cfg.gradient.angle}deg, ${primaryScale(cfg)[600]}, ${cfg.gradient.color2})`,
     "--tm-radius": `${cfg.shape.radius}px`,
-    "--tm-font": font.family,
+    "--tm-font": fontStack(cfg.typography.font, cfg.typography.latinFont),
     "--tm-font-size": `${cfg.typography.baseSize}px`,
     "--tm-heading-weight": String(cfg.typography.headingWeight),
     "--tm-row-pad": `${d.rowPad}px`,

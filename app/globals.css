@@ -400,11 +400,24 @@ html[data-tm-scrollbar="theme"] * { scrollbar-color: rgb(var(--tm-primary-300)) 
 /* ไอคอน — ความหนาเส้น + ไอคอนเมนู/หัวข้อเป็นสีหลัก (เมนูข้างเข้มไม่แตะ) */
 html[data-tm-icon-sw] svg[data-icon] { stroke-width: var(--tm-icon-sw); }
 html[data-tm-icon-tint]:not([data-tm-sidebar]) aside[aria-label="เมนูหลัก"] svg[data-icon], html[data-tm-icon-tint] [data-tm-page] :is(h1, h2, h3) svg[data-icon] { color: rgb(var(--tm-primary-600)); }
-/* ขนาดหัวข้อในเนื้อหาของหน้า */
-html[data-tm-hsize="sm"] [data-tm-page] h1 { font-size: 1.125rem; line-height: 1.6rem; }
-html[data-tm-hsize="sm"] [data-tm-page] h2 { font-size: 1rem; line-height: 1.5rem; }
-html[data-tm-hsize="sm"] [data-tm-page] h3 { font-size: .9375rem; }
-html[data-tm-hsize="lg"] [data-tm-page] h1 { font-size: 1.5rem; line-height: 2rem; }
-html[data-tm-hsize="lg"] [data-tm-page] h2 { font-size: 1.25rem; line-height: 1.75rem; }
-html[data-tm-hsize="lg"] [data-tm-page] h3 { font-size: 1.0625rem; }
+/* ---- ตัวอักษร (แผง "ตัวอักษร" · lib/erp-theme-fonts typeEffects · ค่าเริ่ม = ไม่มี attr) ---- */
+/* ฟอนต์หัวข้อแยก: หัวข้อในเนื้อหา + หัวป๊อป/ลิ้นชัก */
+html[data-tm-hfont] [data-tm-page] :is(h1, h2, h3), html[data-tm-hfont] [data-tm-pop-head] :is(h1, h2, h3, div, span) { font-family: var(--tm-font-heading); }
+/* ความหนาหัวข้อ */
+html[data-tm-hweight] [data-tm-page] :is(h1, h2, h3), html[data-tm-hweight] [data-tm-pop-head] :is(h1, h2, h3) { font-weight: var(--tm-heading-weight); }
+/* ขนาดตัวอักษร = ย่อ/ขยายทั้งหน้าตามสัดส่วน (ทุกขนาดในระบบเป็น rem) */
+html[data-tm-fsize] { font-size: calc(16px * var(--tm-fs-k)); }
+/* หัวข้อใหญ่กว่าเนื้อหากี่เท่า */
+html[data-tm-hscale] [data-tm-page] h1 { font-size: var(--tm-h1); line-height: 1.3; }
+html[data-tm-hscale] [data-tm-page] h2 { font-size: var(--tm-h2); line-height: 1.35; }
+html[data-tm-hscale] [data-tm-page] h3 { font-size: var(--tm-h3); line-height: 1.4; }
+/* ระยะบรรทัด */
+html[data-tm-lh] body, html[data-tm-lh] :is([data-tm-page], [data-tm-pop]) :is(.text-xs, .text-sm, .text-base, p, td, li) { line-height: var(--tm-lh); }
+/* ตัวเลข: กว้างเท่ากัน / แบบพิมพ์ดีด (ช่องตัวเลขในตาราง = .tabular-nums ของตารางกลาง · ช่องเงิน = inputmode decimal) */
+html[data-tm-num] :is(td, th, input[inputmode="decimal"], input[inputmode="numeric"], input[type="number"]) { font-variant-numeric: tabular-nums; }
+html[data-tm-num="mono"] :is(.tabular-nums, input[inputmode="decimal"], input[type="number"]) { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, var(--tm-font); letter-spacing: -.01em; }
+/* ความหนาแยกจุด */
+html[data-tm-wbtn] :is(button, a).bg-blue-600, html[data-tm-wbtn] :is(button, a).bg-white.border:is(.hover:bg-slate-50, .hover:bg-slate-100):not(.w-full):not(.justify-between):not([data-tm-skip]) { font-weight: var(--tm-w-btn); }
+html[data-tm-wth] table[data-erp-table] thead th, html[data-tm-wth] table[data-erp-table] thead th :is(span, div, button) { font-weight: var(--tm-w-th); }
+html[data-tm-wmenu] aside[aria-label="เมนูหลัก"] :is(a, button), html[data-tm-wmenu] aside[aria-label="เมนูหลัก"] :is(a, button) span { font-weight: var(--tm-w-menu); }
 @media (prefers-reduced-motion: reduce) { html [data-tm-pop] { animation: none !important; } }

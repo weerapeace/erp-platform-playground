@@ -8,6 +8,7 @@
 // ============================================================
 import { SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig } from "./erp-theme-config";
 import { CHROME_ATTRS, chromeEffects } from "./erp-theme-chrome";
+import { TYPE_ATTRS, typeEffects } from "./erp-theme-fonts";
 import { EFFECTS, blinkMinOpacity, fxDuration, fxSpread, type EffectKey, type EffectTarget } from "./erp-theme-fx";
 
 /** จุดที่รอบ 2 ทาในหน้าจริง (ป้ายด่วน/การ์ด = รอบ 3–4) */
@@ -188,6 +189,9 @@ export function themeEffects(raw: ErpThemeConfig | null, env: ThemeEffectEnv): T
   if (k.table !== "plain") attrs["tm-table"] = k.table;
   if (k.input !== "outline") attrs["tm-input"] = k.input;
   if (k.tabs !== "underline") attrs["tm-tabs"] = k.tabs;
+  // ตัวอักษร (ฟอนต์หัวข้อ · ขนาด · ระยะบรรทัด · ตัวเลข · ความหนาแยกจุด)
+  const ty = typeEffects(c.typography);
+  Object.assign(attrs, ty.attrs); Object.assign(vars, ty.vars);
 
   const mascot = a.mascot && motion ? { image: a.mascotImage ? `/api/r2-image?key=${encodeURIComponent(a.mascotImage)}` : null, color: scaleOf(c.colors.accent)[500] } : null;
   const particles = motion && c.effects.particles !== "none" ? { kind: c.effects.particles, color: scaleOf(c.colors.accent)[300], speed: SPEED_FACTOR[a.speed] } : null;
@@ -201,4 +205,5 @@ export const EFFECT_ATTRS = [
   "tm-fx-badge", "tm-fx-card", "tm-card-border", "tm-card-run", "tm-card-bar", "tm-card-shadow", "tm-card-hglow", "tm-inset", "tm-stagger",
   "tm-pagebg", "tm-heading", "tm-link", "tm-border", "tm-sidetint",
   ...CHROME_ATTRS,
+  ...TYPE_ATTRS,
 ] as const;

@@ -198,6 +198,28 @@
 - จุดเหลืองเตือน: พื้นหลังหน้าเข้มเกิน (แก้ = กลับไปตามธีม) · หัวข้ออ่อนเกิน · ลิงก์อ่อนเกิน (แก้ = เข้มขึ้นจนอ่านออก)
 - เทสต์ `lib/__tests__/erp-theme-palettes.test.ts`
 
+## ตัวอักษร (เจ้าของเลือก 2026-11-27: แบบ A ปุ่ม "ตัวอักษร" ในแถบล่าง + ข้อ 1–9)
+
+ค่าตั้ง `config.typography` (`lib/erp-theme-fonts.ts` · ค่าเริ่ม = ไม่มี attr = หน้าตาเดิม) · แผง `ThemeTypeSheet` (components/erp-theme/editor-panel.tsx)
+
+| ส่วน | ค่า | หน้าจริง |
+|---|---|---|
+| คลังฟอนต์ไทย 19 ตัว 4 กลุ่ม (อ่านง่าย / ทางการ-มีหัว / ทันสมัย / น่ารัก) | `font` (เนื้อหา) · `headingFont` (null = เหมือนเนื้อหา) | `--tm-font` บน body · `tm-hfont` → h1–h3 ใน `[data-tm-page]` + หัวป๊อป/ลิ้นชัก ใช้ `--tm-font-heading` |
+| คู่แนะนำ 5 คู่ | `FONT_PAIRS` | ตั้ง font + headingFont ทีเดียว |
+| ฟอนต์อังกฤษแยก 8 ตัว | `latinFont` | วางหน้าฟอนต์ไทยใน font-family (ตัวไทยตกไปฟอนต์ไทยเอง) |
+| ขนาดตัวอักษร 12–17 (14 = เดิม) | `baseSize` | `tm-fsize` → html font-size = 16px × ขนาด/14 = ย่อ/ขยายทั้งหน้าตามสัดส่วน (ทุกขนาดในระบบเป็น rem) |
+| หัวข้อใหญ่กว่าเนื้อหา 1.1–2 เท่า | `headingScale` (null = ขนาดเดิมของแต่ละหน้า) | `tm-hscale` + `--tm-h1/h2/h3` · ⚠️ ย้ายมาจาก `chrome.headingSize` เดิม (sm→1.3 · lg→1.7 อ่านอัตโนมัติตอน normalize) |
+| ความหนาหัวข้อ | `headingWeight` | `tm-hweight` (600 = เดิม ไม่มี attr) |
+| ระยะบรรทัด ชิด/ปกติ/โปร่ง | `lineHeight` | `tm-lh` + `--tm-lh` |
+| ตัวเลข กว้างเท่ากัน/แบบพิมพ์ดีด | `numbers` | `tm-num` → td/th/ช่องเงิน tabular · mono = `.tabular-nums` (ช่องตัวเลขตารางกลาง) + `input[inputmode=decimal]` (MoneyInput) |
+| ความหนาแยกจุด ปุ่ม/หัวตาราง/เมนูข้าง | `weights.button/tableHead/menu` (null = เดิม) | `tm-wbtn` · `tm-wth` · `tm-wmenu` |
+
+- โหลดฟอนต์: `ensureThemeFonts(typography)` (ThemeApplier + พรีวิว) โหลดเฉพาะฟอนต์ที่เลือก น้ำหนัก 400–700 ที่ฟอนต์นั้นมี · ฟอนต์ค่าเริ่ม (Inter + Noto Sans Thai) ฝังมากับระบบไม่ต้องโหลด · การ์ดตัวอย่างในแผงโหลดคลังทั้งชุดน้ำหนักเดียว (`ensureFontCatalog` — เฉพาะตอนเปิดแผง)
+- พรีวิวหน้าจริง (iframe) ส่งลิงก์ฟอนต์ไปด้วย (`themePreviewMessage().fonts` · รับเฉพาะ fonts.googleapis.com)
+- บอกน้ำหนักโหลดโดยประมาณ (`fontLoadKb`): ≤120 KB เบา · ≤220 ปานกลาง · เกินนั้นเตือน
+- ช่อง "พิมพ์ข้อความลองเอง" โชว์ในพรีวิวเท่านั้น ไม่บันทึก
+- รายชื่อฟอนต์ต้องมีใน `GOOGLE_FONTS` (lib/website-theme) พร้อมน้ำหนักที่ใช้ — เทสต์ `lib/__tests__/erp-theme-fonts.test.ts` เช็ก (ไม่ import ไฟล์นั้นตรงเพราะใหญ่ และตัวนี้โหลดทุกหน้า)
+
 ## ชิ้นส่วนย่อย (เจ้าของเลือก 2026-11-27: แบบ A ปุ่มที่ 5 + ข้อ 1–4, 6–14, 16, 19–21)
 
 ค่าตั้ง `config.chrome` (`lib/erp-theme-chrome.ts` · ค่าเริ่ม = ไม่มี attr = หน้าตาเดิม) · แผง `ThemePartsSheet` = ปุ่ม "ชิ้นส่วน" ในแถบล่าง 4 แท็บ · เปิดแท็บแล้วพรีวิวโชว์ป๊อป/ลิ้นชัก/เมนูลอย/แจ้งผลทับให้เห็น (`ThemePreview overlay`)
@@ -213,7 +235,7 @@
 | ติ๊ก/วงกลม/สวิตช์สีธีม | `chrome.checks` | accent-color · ToggleSwitch (`role=switch`) |
 | เมนูลอย แถวที่เลือก + ขอบมน | `chrome.menu` | Popover (`data-tm-menu`) |
 | แจ้งผล ตำแหน่ง + แบบขาวมีแถบสี | `chrome.toast` | Toast (`data-tm-toasts` · `data-tm-toast="success|error|warning|info"`) |
-| แถบเลื่อน · ไอคอน (ความหนา + สีเมนู/หัวข้อ) · ขนาดหัวข้อ | `chrome.scrollbar/icon/headingSize` | ทั้งหน้า · `svg[data-icon]` (Icon) · h1–h3 ใน `[data-tm-page]` |
+| แถบเลื่อน · ไอคอน (ความหนา + สีเมนู/หัวข้อ) | `chrome.scrollbar/icon` | ทั้งหน้า · `svg[data-icon]` (Icon) · (ขนาดหัวข้อย้ายไปหมวดตัวอักษรแล้ว) |
 
 - `components.button/table/input/tabs` เดิมมีผลแค่ในพรีวิว — รอบนี้ผูกเข้าหน้าจริงแล้ว (attr `tm-btnstyle/tm-table/tm-input/tm-tabs`) · ป้ายแบบทึบ (`components.badge`) ยังมีผลแค่พรีวิว
 - แอนิเมชันเปิดป๊อปใช้ `translate`/`scale` (แยกจาก transform) ไม่ชนตำแหน่งป๊อปที่ลากไว้ · มือถือไม่เบลอฉากหลัง · ปิดแอนิเมชัน = ไม่ขยับ

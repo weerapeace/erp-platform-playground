@@ -36,7 +36,7 @@ describe("normalizeThemeConfig", () => {
     expect(c.colors.accent).toBe("#abcdef");
     expect(c.background).toMatchObject({ opacity: 100, blur: 0, where: "page" });
     expect(c.gradient.angle).toBe(45);
-    expect(c.typography).toEqual({ font: "inter-noto", baseSize: 16, headingWeight: 600 });
+    expect(c.typography).toMatchObject({ font: "inter-noto", baseSize: 17, headingWeight: 600, headingFont: null, headingScale: null });
     expect(c.shape.radius).toBe(20);
     expect(c.density).toBe("normal");
   });

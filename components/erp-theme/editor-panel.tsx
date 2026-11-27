@@ -5,6 +5,7 @@
  *   หมวด: สี · พื้นหลัง · ไล่สี · เอฟเฟกต์ · ขอบและเงา · มาสคอต · ตัวอักษร · รูปทรง · ความแน่น · ชิ้นส่วน · สว่าง/มืด
  *   แผงสีแบบ A (2026-11-26): แท็บ ชุดสี (16 ชุด + ดูดสีจากรูป) / สีหลัก (เฉดปุ่ม · สีรองที่เข้ากัน · ไล่สี) / แต่ละส่วน (6 ส่วน)
  *   ตัวแก้แบบเรียบ (2026-11-25 · แบบ D): แถบล่าง สี / สไตล์ / พื้นหลัง (ThemeColorSheet · ThemeStyleSheet · ThemeBgSheet) + "เพิ่มเติม" = ThemeAdvancedPanel · คำอธิบายย่อเป็น ⓘ (InfoTip)
+ *   แผง "ตัวอักษร" (2026-11-27 แบบ A) = ThemeTypeSheet: คลังฟอนต์ 19 ตัว · หัวข้อ/เนื้อหาแยก · คู่แนะนำ · อังกฤษแยก · ขนาด · ระยะบรรทัด · ตัวเลข · ความหนาแยกจุด (lib/erp-theme-fonts)
  *   เอฟเฟกต์ = ตาราง "จุด × เอฟเฟกต์ (เลือกได้ 2) × ความแรง" + ชุดสำเร็จรูป (lib/erp-theme-fx · รอบเอฟเฟกต์เพิ่ม)
  */
 import { ColorInput } from "@/components/color-picker";
@@ -19,6 +20,10 @@ import { useEffect, useRef, useState } from "react";
 import { ADV_GROUPS, currentFxPreset, motionLevel, withMotionLevel, type AdvGroupKey, type EditorCategory } from "@/lib/erp-theme-easy";
 import { ThemeParticles } from "@/components/erp-theme/particles";
 import { Icon } from "@/components/icon";
+import { ensureFontCatalog } from "@/components/erp-theme/active-themes";
+import {
+  BASE_SIZE_DEFAULT, BASE_SIZE_MAX, BASE_SIZE_MIN, FONT_GROUPS, FONT_HEAVY_KB, FONT_MID_KB, FONT_PAIRS, HSCALE_MAX, HSCALE_MIN, LATIN_FONTS, THEME_FONTS, fontLoadKb, type FontGroup,
+} from "@/lib/erp-theme-fonts";
 
 export type ThemeCategory = "colors" | "background" | "gradient" | "effects" | "outline" | "animation" | "typography" | "shape" | "density" | "components" | "mode";
 export const THEME_CATEGORIES: { key: ThemeCategory; label: string }[] = [
@@ -134,7 +139,7 @@ export function ThemeEditorPanel({ config: c, category, onPatch, readOnly }: {
               {FONT_OPTIONS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
             </select>
           </Row>
-          <Row label="ขนาดตัวอักษรพื้นฐาน"><RangeInput value={c.typography.baseSize} min={12} max={16} unit="px" onChange={(v) => set("typography", { baseSize: v })} /></Row>
+          <Row label="ขนาดตัวอักษรพื้นฐาน"><RangeInput value={c.typography.baseSize} min={BASE_SIZE_MIN} max={BASE_SIZE_MAX} unit="px" onChange={(v) => set("typography", { baseSize: v })} /></Row>
           <Row label="ความหนาหัวข้อ"><Seg value={c.typography.headingWeight} options={[[500, "กลาง"], [600, "หนา"], [700, "หนามาก"]]} onChange={(v) => set("typography", { headingWeight: v })} /></Row>
         </>
       );
@@ -748,10 +753,118 @@ export function ThemePartsSheet({ config: c, onPatch, readOnly, onOverlay, onRep
           <div><SheetLabel>ไอคอน: ความหนาเส้น</SheetLabel>
             <Seg value={ch.icon.stroke} options={[["thin", "บาง"], ["normal", "ปกติ"], ["bold", "หนา"]]} onChange={(v) => set({ icon: { stroke: v } })} /></div>
           <Check checked={ch.icon.tint} onChange={(v) => set({ icon: { tint: v } })} label="ไอคอนเมนูข้างและหัวข้อเป็นสีหลัก" hint="เมนูข้างสีเข้มจะไม่เปลี่ยน (กันอ่านยาก)" />
-          <div><SheetLabel hint="หัวข้อในเนื้อหาของหน้า (แยกจากขนาดตัวอักษรพื้นฐาน)">ขนาดหัวข้อ</SheetLabel>
-            <Seg value={ch.headingSize} options={[["sm", "เล็ก"], ["md", "ปกติ"], ["lg", "ใหญ่"]]} onChange={(v) => set({ headingSize: v })} /></div>
+          <Note text="ขนาดหัวข้อย้ายไปอยู่ที่ปุ่ม ตัวอักษร แล้ว" />
         </div>
       )}
+    </fieldset>
+  );
+}
+
+// ── แผง "ตัวอักษร" (ปุ่มในแถบล่าง · 2026-11-27 แบบ A) — คลังฟอนต์ไทย · หัวข้อ/เนื้อหาแยก · คู่แนะนำ · อังกฤษแยก · ขนาด · ระยะบรรทัด · ตัวเลข · ความหนาแยกจุด ──
+type FontTarget = "all" | "heading" | "body";
+const WEIGHT_OPTS: [number, string][] = [[0, "เดิม"], [500, "กลาง"], [600, "หนา"], [700, "หนามาก"]];
+
+export function ThemeTypeSheet({ config: c, onPatch, readOnly, tryText = "", onTryText }: {
+  config: ErpThemeConfig; onPatch: (p: Patch) => void; readOnly?: boolean;
+  /** ข้อความที่ผู้ใช้พิมพ์ลอง (โชว์ในพรีวิว · ไม่บันทึก) */
+  tryText?: string; onTryText?: (s: string) => void;
+}) {
+  const [group, setGroup] = useState<FontGroup | "all">("all");
+  const [target, setTarget] = useState<FontTarget>("all");
+  useEffect(() => { ensureFontCatalog(); }, []);
+  const t = c.typography;
+  const set = (patch: Record<string, unknown>) => onPatch({ typography: patch });
+  const headKey = t.headingFont ?? t.font;
+  const current = target === "body" ? t.font : headKey;
+  const pick = (key: string) => {
+    if (target === "all") set({ font: key, headingFont: null });
+    else if (target === "body") set({ font: key, headingFont: headKey === key ? null : headKey });
+    else set({ headingFont: key === t.font ? null : key });
+  };
+  const kb = fontLoadKb(t);
+  const list = THEME_FONTS.filter((f) => group === "all" || f.group === group);
+  const scale = t.headingScale;
+  const w = t.weights;
+  const chip = (on: boolean) => `h-7 px-2.5 rounded-full border text-[11px] ${on ? "bg-blue-50 border-blue-300 text-blue-800 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`;
+  const card = (on: boolean) => `text-left rounded-lg border ${on ? "border-blue-500 ring-1 ring-blue-500 bg-blue-50/40" : "border-slate-200 hover:border-slate-300 bg-white"}`;
+  return (
+    <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-70 space-y-3">
+      <div>
+        <SheetLabel hint="การ์ดแต่ละใบเขียนด้วยฟอนต์นั้นจริง">ฟอนต์</SheetLabel>
+        <div className="flex flex-wrap gap-1 mb-2">
+          {([["all", "ทั้งหมด"], ...FONT_GROUPS.map((g) => [g.key, g.label])] as [FontGroup | "all", string][]).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setGroup(k)} className={chip(group === k)}>{l}</button>
+          ))}
+        </div>
+        <div className="mb-2"><Seg value={target} options={[["all", "ใช้ทั้งหมด"], ["heading", "เฉพาะหัวข้อ"], ["body", "เฉพาะเนื้อหา"]]} onChange={setTarget} /></div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {list.map((f) => {
+            const on = f.key === current;
+            const tags = t.headingFont ? [f.key === headKey ? "หัวข้อ" : null, f.key === t.font ? "เนื้อหา" : null].filter((x): x is string => !!x) : [];
+            return (
+              <button key={f.key} type="button" onClick={() => pick(f.key)} aria-pressed={on} className={`${card(on)} px-2 py-1.5`}>
+                <div className="text-[15px] leading-snug text-slate-900 truncate" style={{ fontFamily: `${f.family},sans-serif` }}>กขค สวัสดี 123</div>
+                <div className="flex items-center gap-1 text-[10px] text-slate-500"><span className="truncate">{f.label}</span>
+                  {tags.map((x, i) => <span key={x} className={`${i === 0 ? "ml-auto" : ""} shrink-0 rounded bg-blue-100 text-blue-800 px-1`}>{x}</span>)}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div>
+        <SheetLabel hint="กดทีเดียวได้ทั้งฟอนต์หัวข้อและเนื้อหา">คู่แนะนำ (หัวข้อ + เนื้อหา)</SheetLabel>
+        <div className="flex flex-wrap gap-1">
+          {FONT_PAIRS.map((p) => (
+            <button key={p.label} type="button" onClick={() => set({ font: p.body, headingFont: p.heading === p.body ? null : p.heading })}
+              className={chip(t.font === p.body && headKey === p.heading)}>{p.label}</button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <SheetLabel hint="ตัวอังกฤษและตัวเลขใช้ฟอนต์นี้ ตัวไทยยังใช้ฟอนต์ไทยที่เลือก">ฟอนต์ภาษาอังกฤษ</SheetLabel>
+        <div className="grid grid-cols-3 gap-1">
+          {[{ key: null as string | null, label: "ตามฟอนต์ไทย", family: null as string | null }, ...LATIN_FONTS].map((f) => (
+            <button key={f.key ?? "same"} type="button" onClick={() => set({ latinFont: f.key })} aria-pressed={t.latinFont === f.key} className={`${card(t.latinFont === f.key)} px-1.5 py-1`}>
+              <div className="text-[13px] text-slate-900 leading-tight" style={f.family ? { fontFamily: `${f.family},sans-serif` } : undefined}>Aa 123</div>
+              <div className="text-[10px] text-slate-500 truncate">{f.label}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center text-xs font-medium text-slate-700 mb-1">ขนาดตัวอักษร<InfoTip text="ย่อ/ขยายทั้งหน้าตามสัดส่วน (ระยะห่างขยายตามด้วย) · 14px = เดิม" />
+          <span className="ml-auto text-[11px] font-normal text-slate-500">{t.baseSize}px{t.baseSize === BASE_SIZE_DEFAULT ? " (เดิม)" : ""}</span>
+          {t.baseSize !== BASE_SIZE_DEFAULT && <button type="button" onClick={() => set({ baseSize: BASE_SIZE_DEFAULT })} className="ml-2 text-[11px] font-normal text-blue-700 hover:underline">คืนค่าเดิม</button>}</div>
+        <input type="range" min={BASE_SIZE_MIN} max={BASE_SIZE_MAX} step={1} value={t.baseSize} onChange={(e) => set({ baseSize: Number(e.target.value) })} className="w-full" aria-label="ขนาดตัวอักษร" />
+      </div>
+      <div>
+        <div className="flex items-center text-xs font-medium text-slate-700 mb-1">หัวข้อใหญ่กว่าเนื้อหา<InfoTip text="ตั้งแล้วหัวข้อทุกหน้าใช้ขนาดตามนี้ · เดิม = แต่ละหน้าใช้ขนาดของตัวเอง" />
+          <span className="ml-auto text-[11px] font-normal text-slate-500">{scale === null ? "เดิมของแต่ละหน้า" : `${scale.toFixed(1)} เท่า`}</span>
+          {scale !== null && <button type="button" onClick={() => set({ headingScale: null })} className="ml-2 text-[11px] font-normal text-blue-700 hover:underline">คืนค่าเดิม</button>}</div>
+        <input type="range" min={HSCALE_MIN} max={HSCALE_MAX} step={0.1} value={scale ?? 1.4} onChange={(e) => set({ headingScale: Number(e.target.value) })} className="w-full" aria-label="หัวข้อใหญ่กว่าเนื้อหา" />
+      </div>
+      <div><SheetLabel>ความหนาหัวข้อ</SheetLabel>
+        <Seg value={t.headingWeight} options={[[500, "กลาง"], [600, "หนา (เดิม)"], [700, "หนามาก"]]} onChange={(v) => set({ headingWeight: v })} /></div>
+      <div><SheetLabel hint="ฟอนต์ไทยบางตัวสระบน-ล่างชิดกัน ใช้แบบโปร่งจะอ่านง่ายขึ้น">ระยะบรรทัด</SheetLabel>
+        <Seg value={t.lineHeight} options={[["tight", "ชิด"], ["normal", "ปกติ"], ["loose", "โปร่ง"]]} onChange={(v) => set({ lineHeight: v })} /></div>
+      <div><SheetLabel hint="ตัวเลขในตารางและช่องเงิน · กว้างเท่ากัน = หลักตรงกันเวลาเรียงลงมา">ตัวเลข</SheetLabel>
+        <Seg value={t.numbers} options={[["same", "ตามฟอนต์"], ["tabular", "กว้างเท่ากัน"], ["mono", "แบบพิมพ์ดีด"]]} onChange={(v) => set({ numbers: v })} /></div>
+      <div className="space-y-1.5">
+        <SheetLabel hint="เดิม = หนาเท่าที่แต่ละหน้าตั้งไว้">ความหนาแยกจุด</SheetLabel>
+        {([["button", "ปุ่ม"], ["tableHead", "หัวตาราง"], ["menu", "เมนูข้าง"]] as const).map(([k, l]) => (
+          <div key={k} className="flex items-center gap-2"><span className="w-14 shrink-0 text-[11px] text-slate-600">{l}</span>
+            <div className="flex-1 min-w-0"><Seg value={w[k] ?? 0} options={WEIGHT_OPTS} onChange={(v) => set({ weights: { [k]: v === 0 ? null : v } })} /></div></div>
+        ))}
+      </div>
+      <div>
+        <SheetLabel hint="ลองชื่อสินค้า/ชื่อร้านจริง ดูในพรีวิวว่าอ่านง่ายไหม (ไม่บันทึก)">พิมพ์ข้อความลองเอง</SheetLabel>
+        <input value={tryText} onChange={(e) => onTryText?.(e.target.value)} placeholder="เช่น ผ้าใบกันน้ำ 3x4 ม. สีกรมท่า"
+          className="w-full h-9 rounded-lg border border-slate-200 px-2 text-sm" />
+      </div>
+      <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] ${kb >= FONT_HEAVY_KB ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-600"}`}>
+        <Icon value="i:weight" size={14} />
+        {kb === 0 ? "ไม่ต้องโหลดฟอนต์เพิ่ม (ฟอนต์เดิมของระบบ)" : `โหลดฟอนต์เพิ่มประมาณ ${kb} KB${kb >= FONT_HEAVY_KB ? " · ค่อนข้างหนัก ลองใช้ฟอนต์เดียวกันทั้งหัวข้อและเนื้อหา หรือไม่แยกฟอนต์อังกฤษ" : kb > FONT_MID_KB ? " · ปานกลาง" : " · เบา"}`}
+      </div>
     </fieldset>
   );
 }

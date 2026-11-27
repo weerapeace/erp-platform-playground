@@ -10,11 +10,12 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  FONT_OPTIONS, DENSITY_SCALE, SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig,
+  DENSITY_SCALE, SPEED_FACTOR, effectiveBgOpacity, isLightColor, mobileLiteConfig, primaryScale, scaleOf, type ErpThemeConfig,
 } from "@/lib/erp-theme-config";
 import { blinkMinOpacity, fxDuration, fxSpread, hasFx, type EffectKey, type EffectTarget } from "@/lib/erp-theme-fx";
 import { Icon } from "@/components/icon";
-import { ensureThemeFont } from "./active-themes";
+import { ensureThemeFonts } from "./active-themes";
+import { LINE_HEIGHT, fontStack } from "@/lib/erp-theme-fonts";
 import { ThemeParticles } from "./particles";
 import { PART_INFO } from "@/lib/erp-theme-easy";
 import { ICON_STROKE, chromeLook } from "@/lib/erp-theme-chrome";
@@ -94,8 +95,10 @@ const CSS = `
 const ENTER: Record<string, string> = { none: "none", fade: "tmpFade", up: "tmpUp", zoom: "tmpZoom", blur: "tmpBlur" };
 
 export function ThemePreview({
-  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false, editMode = false, selectedPart = null, onPartClick, overlay = null,
+  config, device = "pc", sample = "purchase", dark = false, replayKey = 0, compact = false, editMode = false, selectedPart = null, onPartClick, overlay = null, tryText = "",
 }: {
+  /** ข้อความที่พิมพ์ลองในแผง "ตัวอักษร" */
+  tryText?: string;
   /** โชว์ป๊อป/ลิ้นชัก/แจ้งผล/เมนูลอยทับพรีวิว (แผง "ชิ้นส่วน") */
   overlay?: PreviewOverlay;
   /** โหมดคลิกแก้: ชี้ชิ้นแล้วเห็นชื่อ + กรอบประ · คลิก = onPartClick (ปุ่มในพรีวิวไม่ทำงานจริงระหว่างนี้) */
@@ -112,13 +115,19 @@ export function ThemePreview({
 }) {
   const mob = device === "mobile";
   const c = useMemo(() => (mob ? mobileLiteConfig(config) : config), [config, mob]);
-  const font = FONT_OPTIONS.find((f) => f.key === c.typography.font) ?? FONT_OPTIONS[0];
-  useEffect(() => { if (!compact) ensureThemeFont(c.typography.font); }, [compact, c.typography.font]);
+  const ty = c.typography;
+  const bodyFamily = fontStack(ty.font, ty.latinFont);
+  const headFamily = ty.headingFont ? fontStack(ty.headingFont, ty.latinFont) : bodyFamily;
+  const fontSig = `${ty.font}|${ty.headingFont}|${ty.latinFont}`;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!compact) ensureThemeFonts(ty); }, [compact, fontSig]);
+  /** ตัวเลขในตาราง/การ์ด (แผงตัวอักษร: กว้างเท่ากัน / แบบพิมพ์ดีด) */
+  const numStyle: React.CSSProperties = ty.numbers === "mono" ? { fontFamily: `ui-monospace,Menlo,Consolas,${bodyFamily}`, fontVariantNumeric: "tabular-nums", letterSpacing: "-.01em" } : ty.numbers === "tabular" ? { fontVariantNumeric: "tabular-nums" } : {};
+  const headStyle: React.CSSProperties = { fontFamily: headFamily, fontWeight: ty.headingWeight };
   const p = primaryScale(c), a = scaleOf(c.colors.accent);
   const pt = c.colors.parts;
   const ch = c.chrome;
   const L = chromeLook(ch, p, a, c.gradient.color2, c.gradient.angle, device === "mobile");
-  const headFs = (base: number) => base + (ch.headingSize === "sm" ? -2 : ch.headingSize === "lg" ? 3 : 0);
   const s = SAMPLES[sample];
   const g = c.gradient, sp = g.spots, fx = c.effects, o = c.outline, el = c.elevation;
   const grad = `linear-gradient(${g.angle}deg, ${p[600]}, ${g.color2})`;
@@ -127,6 +136,7 @@ export function ThemePreview({
   const spd = SPEED_FACTOR[c.animation.speed];
   const pad = DENSITY_SCALE[c.density].rowPad, gap = DENSITY_SCALE[c.density].gap;
   const fs = c.typography.baseSize - 1;
+  const headFs = (base: number) => (ty.headingScale === null ? base : Math.round(fs * ty.headingScale));
   const P = dark
     ? { page: "#0f172a", surf: "#1e293b", tx: "#f1f5f9", mut: "#94a3b8", bd: "#334155", ps: p[500] + "40" }
     : { page: pt.page ?? "#f8fafc", surf: "#ffffff", tx: "#0f172a", mut: "#64748b", bd: pt.border ?? "#e2e8f0", ps: p[50] };
@@ -197,9 +207,9 @@ export function ThemePreview({
   const btn = (primary = true): React.CSSProperties => {
     if (!primary) {
       const b2: React.CSSProperties = ch.button2 === "soft" ? { background: p[50], color: p[700], border: `1px solid ${p[200]}` } : ch.button2 === "ghost" ? { background: "transparent", color: P.tx, border: "1px solid transparent" } : { background: P.surf, color: P.tx, border: `1px solid ${P.bd}` };
-      return { ...b2, borderRadius: R, padding: "4px 10px", fontSize: fs };
+      return { ...b2, borderRadius: R, padding: "4px 10px", fontSize: fs, ...(ty.weights.button ? { fontWeight: ty.weights.button } : {}) };
     }
-    const base: React.CSSProperties = { borderRadius: R, padding: "4px 11px", fontSize: fs, fontWeight: 500, position: "relative", overflow: "hidden" };
+    const base: React.CSSProperties = { borderRadius: R, padding: "4px 11px", fontSize: fs, fontWeight: ty.weights.button ?? 500, position: "relative", overflow: "hidden" };
     if (c.components.button === "soft") return { ...base, background: p[100], color: p[700], border: `1px solid ${p[200]}` };
     if (c.components.button === "outline") return { ...base, background: "transparent", color: p[600], border: `1.5px solid ${p[600]}` };
     return { ...base, backgroundColor: p[600], backgroundImage: sp.button ? grad : undefined, color: "#fff", border: "none", ...btnFx.style };
@@ -283,7 +293,7 @@ export function ThemePreview({
     <div className="tmp-en" style={{ position: "relative", overflow: "hidden", borderRadius: R + 2, background: sp.banner ? grad : p[600], color: "#fff", padding: "12px 14px", marginBottom: gap, display: "flex", alignItems: "center", gap: 8 }}>
       {bgLayer("banner")}
       <div style={{ position: "relative", zIndex: 1, flex: 1 }}>
-        <div style={{ fontSize: headFs(fs + 4), fontWeight: c.typography.headingWeight }}>{s.title}</div>
+        <div style={{ fontSize: headFs(fs + 4), ...headStyle }}>{s.title}</div>
         <div style={{ fontSize: fs - 2 }}>อัปเดตล่าสุด 5 นาทีที่แล้ว</div>
       </div>
       <PrimaryBtn onBanner>+ สร้างใหม่</PrimaryBtn>
@@ -291,8 +301,9 @@ export function ThemePreview({
   ) : (
     <div className="tmp-en" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: gap }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: headFs(fs + 4), fontWeight: c.typography.headingWeight, color: headColor }}>{s.title}</div>
+        <div style={{ fontSize: headFs(fs + 4), ...headStyle, color: headColor }}>{s.title}</div>
         <div style={{ fontSize: fs - 2, color: P.mut }}>อัปเดตล่าสุด 5 นาทีที่แล้ว</div>
+        {tryText && <div style={{ marginTop: 4, padding: "3px 8px", borderRadius: R, background: P.surf, border: `1px dashed ${P.bd}`, overflowWrap: "anywhere" }}>{tryText}</div>}
       </div>
       {!mob && <button type="button" style={btn(false)}>ส่งออก</button>}
       <PrimaryBtn>{mob ? "+" : "+ สร้างใหม่"}</PrimaryBtn>
@@ -307,7 +318,7 @@ export function ThemePreview({
       {s.stats.map(([l, v], i) => (
         <div key={l} {...pp("card")} className={cardCls} style={{ ...cardBox({ padding: `${pad}px 10px` }), ...cardFx.style, ...hringVar, ...delay(i + 1) }}>
           <div style={{ fontSize: fs - 2, color: P.mut }}>{l}</div>
-          <div data-cnt={v} {...pp("number")} className={numFx.cls} style={{ display: "inline-block", fontSize: fs + (mob ? 2 : 5), fontWeight: c.typography.headingWeight, ...numFx.style }}>{v.toLocaleString()}</div>
+          <div data-cnt={v} {...pp("number")} className={numFx.cls} style={{ display: "inline-block", fontSize: fs + (mob ? 2 : 5), fontWeight: c.typography.headingWeight, ...numStyle, ...numFx.style }}>{v.toLocaleString()}</div>
         </div>
       ))}
     </div>
@@ -344,11 +355,11 @@ export function ThemePreview({
   ) : (
     <div {...pp("card")} className={`tmp-en${hglow}`} style={{ ...cardBox({ overflow: "hidden" }), ...hringVar, ...delay(5) }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead><tr>{s.cols.map((h) => <th key={h} style={{ textAlign: "left", fontWeight: 500, fontSize: fs - 2, color: L.theadTx ?? P.mut, padding: `${pad}px 10px`, borderBottom: `1px solid ${P.bd}`, background: L.theadBg ?? (c.components.table === "lines" ? (dark ? "#0b1220" : "#f8fafc") : undefined) }}>{h}</th>)}</tr></thead>
+        <thead><tr>{s.cols.map((h) => <th key={h} style={{ textAlign: "left", fontWeight: ty.weights.tableHead ?? 500, fontSize: fs - 2, color: L.theadTx ?? P.mut, padding: `${pad}px 10px`, borderBottom: `1px solid ${P.bd}`, background: L.theadBg ?? (c.components.table === "lines" ? (dark ? "#0b1220" : "#f8fafc") : undefined) }}>{h}</th>)}</tr></thead>
         <tbody>
           {s.rows.slice(0, compact ? 2 : 4).map((r, i) => (
             <tr key={r[0]} className="tmp-row" style={{ background: i === 0 && overlay === null && !compact ? (L.rowSel ?? P.ps) : c.components.table === "zebra" && i % 2 ? (dark ? "#172033" : "#f8fafc") : undefined }}>
-              {[r[0], r[1], r[2]].map((v, j) => <td key={j} style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined, borderRight: c.components.table === "lines" ? `1px solid ${P.bd}` : undefined, color: j === 0 ? linkColor ?? P.mut : P.tx, whiteSpace: "nowrap" }}>{v}</td>)}
+              {[r[0], r[1], r[2]].map((v, j) => <td key={j} style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined, borderRight: c.components.table === "lines" ? `1px solid ${P.bd}` : undefined, color: j === 0 ? linkColor ?? P.mut : P.tx, whiteSpace: "nowrap", ...(j === 2 ? { textAlign: "right", ...numStyle } : {}) }}>{v}</td>)}
               <td style={{ padding: `${pad}px 10px`, borderBottom: i < 3 ? `1px solid ${P.bd}` : undefined }}>{badge(r[3], r[4])}</td>
             </tr>
           ))}
@@ -365,7 +376,7 @@ export function ThemePreview({
         <div style={{ marginTop: 6, padding: "4px 8px", ...focusBox }}>กำลังพิมพ์…</div>
       </div>
       <div style={{ flex: 1, ...cardBox({ padding: 10, borderRadius: R + 2, boxShadow: el.depth === "none" ? "none" : `0 10px 24px -8px ${rgba(shColor, 0.3)}` }) }}>
-        <div style={{ fontWeight: c.typography.headingWeight, color: headColor }}>ยืนยันอนุมัติ?</div>
+        <div style={{ ...headStyle, color: headColor }}>ยืนยันอนุมัติ?</div>
         <div style={{ fontSize: fs - 2, color: P.mut, margin: "4px 0 8px" }}>ใบขอซื้อ PR-00118 ยอด 12,400 บาท</div>
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}><button type="button" style={btn(false)}>ยกเลิก</button><PrimaryBtn>อนุมัติ</PrimaryBtn></div>
       </div>
@@ -388,7 +399,7 @@ export function ThemePreview({
   const popShadow = L.shadow ?? "0 20px 40px -12px rgba(15,23,42,.35)";
   const popAnim = anim && ch.popup.open !== "none" ? { animation: `${ch.popup.open === "up" ? "tmpPopUp" : ch.popup.open === "zoom" ? "tmpPopZoom" : "tmpFade"} ${0.22 * spd}s ease-out` } : {};
   const popHead = (title: string) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", fontWeight: c.typography.headingWeight, ...(L.head ? { background: L.head, color: "#fff" } : { background: P.surf, color: P.tx, borderBottom: `1px solid ${P.bd}` }), borderTopLeftRadius: "inherit", borderTopRightRadius: "inherit" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", ...headStyle, ...(L.head ? { background: L.head, color: "#fff" } : { background: P.surf, color: P.tx, borderBottom: `1px solid ${P.bd}` }), borderTopLeftRadius: "inherit", borderTopRightRadius: "inherit" }}>
       <span style={{ flex: 1 }}>{title}</span><Icon value="i:x" />
     </div>
   );
@@ -449,7 +460,7 @@ export function ThemePreview({
   const menuFx = fxStyle("menu");
   const rootStyle = {
     "--spd": String(spd), "--ps": P.ps, "--enter": anim ? ENTER[fx.enter] : "none", "--tmp-isw": String(ICON_STROKE[ch.icon.stroke]),
-    position: "relative", overflow: "hidden", background: pageBg, color: P.tx, fontFamily: font.family, fontSize: fs, lineHeight: 1.45,
+    position: "relative", overflow: "hidden", background: pageBg, color: P.tx, fontFamily: bodyFamily, fontSize: fs, lineHeight: ty.lineHeight === "normal" ? 1.45 : LINE_HEIGHT[ty.lineHeight],
     borderRadius: 12, border: `1px solid ${dark ? "#334155" : "#cbd5e1"}`,
   } as React.CSSProperties;
   const cls = `tmp-root ${sp.page && anim && g.animate ? "tmp-ganim" : ""} ${editing ? "tmp-edit" : ""}`;
@@ -487,7 +498,7 @@ export function ThemePreview({
                 : {};
               const icon = ["home", "file-text", "chart-bar", "settings"][i];
               return (
-                <div key={t} {...(on ? pp("menu") : {})} className={on ? menuFx.cls : ""} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: R, marginBottom: 2, fontWeight: on ? 500 : 400, ...st, ...(on ? { ...menuFx.style, ...(menuFx.style.backgroundImage ? { color: "#fff" } : {}) } : {}) }}>
+                <div key={t} {...(on ? pp("menu") : {})} className={on ? menuFx.cls : ""} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", borderRadius: R, marginBottom: 2, fontWeight: ty.weights.menu ?? (on ? 500 : 400), ...st, ...(on ? { ...menuFx.style, ...(menuFx.style.backgroundImage ? { color: "#fff" } : {}) } : {}) }}>
                   <span className={wig} style={{ display: "inline-flex", ...(ch.icon.tint && sideLight && !on ? { color: p[600] } : {}) }}><Icon name={icon} /></span>{t}
                 </div>
               );

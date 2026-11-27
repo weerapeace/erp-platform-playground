@@ -14,7 +14,7 @@ import { usePathname } from "next/navigation";
 import { themeCssVars, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { themeForApp } from "@/lib/erp-theme-assign";
 import { CARD_SELECTOR, EFFECT_ATTRS, themeEffects, type ThemeEffects, type ThemeLayer } from "@/lib/erp-theme-effects";
-import { ensureThemeFont, useActiveThemes } from "./active-themes";
+import { ensureThemeFonts, useActiveThemes } from "./active-themes";
 import { ThemeParticles } from "./particles";
 import { useIsMobileScreen, useMotionPref } from "./motion-pref";
 
@@ -53,7 +53,7 @@ export function ThemeApplier({ appKey, decor = true }: { appKey: string | null |
     appliedVars = [];
     for (const a of EFFECT_ATTRS) root.removeAttribute(`data-${a}`);
     if (!cfg) { delete root.dataset.erpTheme; return; }
-    ensureThemeFont(cfg.typography.font);
+    ensureThemeFonts(cfg.typography);
     for (const [k, v] of Object.entries({ ...themeCssVars(cfg), ...fx.vars })) { root.style.setProperty(k, v); appliedVars.push(k); }
     for (const [k, v] of Object.entries(fx.attrs)) root.setAttribute(`data-${k}`, v);
     root.dataset.erpTheme = scope ?? "company";

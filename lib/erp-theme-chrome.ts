@@ -29,7 +29,6 @@ export type ThemeChrome = {
   toast: { position: "top-right" | "top-center" | "bottom-right" | "bottom-center"; style: "solid" | "white" };
   scrollbar: "default" | "thin" | "theme";
   icon: { stroke: "thin" | "normal" | "bold"; tint: boolean };
-  headingSize: "sm" | "md" | "lg";
 };
 
 export const DEFAULT_CHROME: ThemeChrome = {
@@ -43,7 +42,6 @@ export const DEFAULT_CHROME: ThemeChrome = {
   toast: { position: "top-right", style: "solid" },
   scrollbar: "default",
   icon: { stroke: "normal", tint: false },
-  headingSize: "md",
 };
 
 type Obj = Record<string, unknown>;
@@ -78,7 +76,6 @@ export function normalizeChrome(raw: unknown): ThemeChrome {
     },
     scrollbar: pick(r.scrollbar, ["default", "thin", "theme"] as const, D.scrollbar),
     icon: { stroke: pick(ic.stroke, ["thin", "normal", "bold"] as const, D.icon.stroke), tint: typeof ic.tint === "boolean" ? ic.tint : D.icon.tint },
-    headingSize: pick(r.headingSize, ["sm", "md", "lg"] as const, D.headingSize),
   };
 }
 
@@ -129,7 +126,6 @@ export function chromeEffects(ch: ThemeChrome, p: ColorScale, accent: ColorScale
   if (ch.scrollbar !== "default") attrs["tm-scrollbar"] = ch.scrollbar;
   if (ch.icon.stroke !== "normal") { attrs["tm-icon-sw"] = ch.icon.stroke; vars["--tm-icon-sw"] = String(ICON_STROKE[ch.icon.stroke]); }
   if (ch.icon.tint) attrs["tm-icon-tint"] = "1";
-  if (ch.headingSize !== "md") attrs["tm-hsize"] = ch.headingSize;
   return { attrs, vars };
 }
 
@@ -137,6 +133,6 @@ export function chromeEffects(ch: ThemeChrome, p: ColorScale, accent: ColorScale
 export const CHROME_ATTRS = [
   "tm-pop-head", "tm-backdrop", "tm-pop-radius", "tm-pop-shadow", "tm-pop-open", "tm-drawer-bar", "tm-thead", "tm-rowsel",
   "tm-focus", "tm-btn2", "tm-badge-shape", "tm-checks", "tm-menu-sel", "tm-menu-radius", "tm-toast-pos", "tm-toast-style",
-  "tm-scrollbar", "tm-icon-sw", "tm-icon-tint", "tm-hsize",
+  "tm-scrollbar", "tm-icon-sw", "tm-icon-tint",
   "tm-btnstyle", "tm-table", "tm-input", "tm-tabs",
 ] as const;

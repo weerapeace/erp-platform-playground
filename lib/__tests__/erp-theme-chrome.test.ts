@@ -11,7 +11,7 @@ const FULL = {
     popup: { header: "gradient", backdrop: "blur", dim: 3, radius: 20, shadow: "theme", open: "up", drawerBar: true },
     table: { head: "theme", selected: "strong" }, input: { focus: "accent", ring: 3 }, button2: "soft", badgeShape: "dot", checks: true,
     menu: { selected: "strong", radius: 12 }, toast: { position: "bottom-center", style: "white" }, scrollbar: "theme",
-    icon: { stroke: "bold", tint: true }, headingSize: "lg",
+    icon: { stroke: "bold", tint: true },
   },
   components: { button: "soft", table: "zebra", input: "filled", tabs: "box" },
   colors: { parts: { topbar: "#f1f5f9", sidebar: "#f1f5f9", page: "#fffbeb", heading: "#7c2d12", link: "#1d4ed8", border: "#cbd5e1" } },
@@ -38,7 +38,7 @@ describe("ชิ้นส่วนย่อย (chrome)", () => {
       "tm-pop-head": "gradient", "tm-backdrop": "blur", "tm-pop-radius": "1", "tm-pop-shadow": "theme", "tm-pop-open": "up", "tm-drawer-bar": "1",
       "tm-thead": "theme", "tm-rowsel": "strong", "tm-focus": "accent", "tm-btn2": "soft", "tm-badge-shape": "dot", "tm-checks": "1",
       "tm-menu-sel": "strong", "tm-menu-radius": "1", "tm-toast-pos": "bottom-center", "tm-toast-style": "white", "tm-scrollbar": "theme",
-      "tm-icon-sw": "bold", "tm-icon-tint": "1", "tm-hsize": "lg", "tm-btnstyle": "soft", "tm-table": "zebra", "tm-input": "filled", "tm-tabs": "box",
+      "tm-icon-sw": "bold", "tm-icon-tint": "1", "tm-btnstyle": "soft", "tm-table": "zebra", "tm-input": "filled", "tm-tabs": "box",
     });
     expect(fx.vars["--tm-pop-radius"]).toBe("20px");
     expect(fx.vars["--tm-backdrop-filter"]).toMatch(/blur/);

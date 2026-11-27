@@ -8,14 +8,16 @@
 import { useEffect } from "react";
 import { themeCssVars, type ErpThemeConfig } from "@/lib/erp-theme-config";
 import { themeEffects } from "@/lib/erp-theme-effects";
+import { fontsHref, typographyFonts } from "@/lib/erp-theme-fonts";
 
 export const THEME_PREVIEW_MSG = "erp-theme-preview";
 
 /** ข้อความพรีวิวที่ส่งเข้า iframe (ตัวแปรสี/ฟอนต์ + เอฟเฟกต์) · cfg=null = ล้างกลับหน้าตาเดิม */
 export function themePreviewMessage(cfg: ErpThemeConfig | null, mobile = false) {
-  if (!cfg) return { type: THEME_PREVIEW_MSG, vars: null, attrs: null };
+  if (!cfg) return { type: THEME_PREVIEW_MSG, vars: null, attrs: null, fonts: [] as string[] };
   const fx = themeEffects(cfg, { mobile, motionOff: false });
-  return { type: THEME_PREVIEW_MSG, vars: { ...themeCssVars(cfg), ...fx.vars }, attrs: fx.attrs };
+  const fonts = typographyFonts(cfg.typography).map((f) => fontsHref([f])).filter((h): h is string => !!h);
+  return { type: THEME_PREVIEW_MSG, vars: { ...themeCssVars(cfg), ...fx.vars }, attrs: fx.attrs, fonts };
 }
 
 export function ThemePreviewBridge() {
@@ -23,7 +25,7 @@ export function ThemePreviewBridge() {
     if (typeof window === "undefined" || window.self === window.top) return;
     const onMsg = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
-      const d = e.data as { type?: string; vars?: Record<string, string> | null; attrs?: Record<string, string> | null } | null;
+      const d = e.data as { type?: string; vars?: Record<string, string> | null; attrs?: Record<string, string> | null; fonts?: string[] } | null;
       if (!d || d.type !== THEME_PREVIEW_MSG) return;
       const root = document.documentElement;
       root.dataset.themePreview = "1";   // บอก ThemeApplier ว่าหน้านี้อยู่ในพรีวิว อย่าทาทับ
@@ -36,6 +38,14 @@ export function ThemePreviewBridge() {
       // เอฟเฟกต์ (ปุ่มไล่สี/แสงวิ่ง · แถบบน · เมนูข้าง — lib/erp-theme-effects) · ชั้นพื้นหลัง/แบนเนอร์/มาสคอตไม่มาในพรีวิวนี้
       for (const [k, v] of Object.entries(d.attrs ?? {})) {
         if (/^tm-[a-z-]+$/.test(k) && typeof v === "string") root.setAttribute(`data-${k}`, v);
+      }
+      // ฟอนต์ของร่าง (Google Fonts เท่านั้น · โหลดครั้งเดียวต่อลิงก์)
+      for (const href of Array.isArray(d.fonts) ? d.fonts : []) {
+        if (typeof href !== "string" || !href.startsWith("https://fonts.googleapis.com/css2?")) continue;
+        if (document.head.querySelector(`link[data-tm-font="${CSS.escape(href)}"]`)) continue;
+        const l = document.createElement("link");
+        l.rel = "stylesheet"; l.href = href; l.dataset.tmFont = href;
+        document.head.appendChild(l);
       }
     };
     window.addEventListener("message", onMsg);

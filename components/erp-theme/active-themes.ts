@@ -2,11 +2,13 @@
 /**
  * ธีมที่ใช้อยู่ (ฝั่งเบราว์เซอร์) — โหลด /api/themes/active ครั้งเดียวต่อหน้า + จำใน localStorage (เปิดหน้าใหม่ไม่กระพริบ)
  *   useActiveThemes() → ActiveThemes | null · refreshActiveThemes() = โหลดใหม่ (หลังบันทึกธีมของแอป)
- *   ensureThemeFont(fontKey) = โหลดฟอนต์ Google ของธีม (ครั้งเดียว)
+ *   ensureThemeFonts(typography) = โหลดฟอนต์ Google ของธีม (เนื้อหา/หัวข้อ/อังกฤษ · ครั้งเดียวต่อลิงก์)
+ *   ensureFontCatalog() = โหลดคลังฟอนต์ทั้งหมดน้ำหนักเดียว (การ์ดตัวอย่างในแผง "ตัวอักษร" เท่านั้น)
  */
 import { useSyncExternalStore } from "react";
 import { apiFetch } from "@/lib/api";
-import { FONT_OPTIONS, normalizeThemeConfig, type FontKey } from "@/lib/erp-theme-config";
+import { normalizeThemeConfig } from "@/lib/erp-theme-config";
+import { LATIN_FONTS, THEME_FONTS, fontsHref, typographyFonts, type ThemeTypography } from "@/lib/erp-theme-fonts";
 import type { ActiveThemes } from "@/lib/erp-theme-assign";
 
 const LS_KEY = "erp-theme-active-v1";
@@ -56,12 +58,17 @@ export function useActiveThemes(): ActiveThemes | null {
 }
 
 const fontsLoaded = new Set<string>();
-export function ensureThemeFont(key: FontKey) {
-  const f = FONT_OPTIONS.find((x) => x.key === key);
-  if (!f?.google || fontsLoaded.has(f.google) || typeof document === "undefined") return;
-  fontsLoaded.add(f.google);
+function addFontLink(href: string | null) {
+  if (!href || fontsLoaded.has(href) || typeof document === "undefined") return;
+  fontsLoaded.add(href);
   const l = document.createElement("link");
   l.rel = "stylesheet";
-  l.href = `https://fonts.googleapis.com/css2?family=${f.google}&display=swap`;
+  l.href = href;
   document.head.appendChild(l);
+}
+export function ensureThemeFonts(t: ThemeTypography) {
+  for (const f of typographyFonts(t)) addFontLink(fontsHref([f]));
+}
+export function ensureFontCatalog() {
+  addFontLink(fontsHref([...THEME_FONTS, ...LATIN_FONTS], [400]));
 }
