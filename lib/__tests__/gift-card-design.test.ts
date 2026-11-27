@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSpecialTemplate, newFoldedDoc as nfdSpecial,
+import { isSpecialTemplate, newFoldedDoc as nfdSpecial, sampleView, CARD_SAMPLES, newTextEl,
   acceptsMessage, buyerNoteOf, faceDoc, foldLine, groupTemplates, isFolded, newFoldedDoc, withFace, builtinTemplates, cardHtml, cardStatus, cardsPrintHtml, classifyNote, cleanDoc, docFonts, extractEngraveText,
   fillTexts, fontStack, googleFontsHref, resizeDoc, resolveSrc, roleTexts, suggestMessage, suggestMessages, uploadFontFaces, type CardDoc,
 } from "@/lib/gift-card-design";
@@ -269,5 +269,22 @@ describe("การ์ดพับแนวนอน + สลับทิศพ�
     const { switchFold, builtinTemplates: bt } = await import("@/lib/gift-card-design");
     const plain = bt()[0].doc;
     expect(switchFold(plain, "top")).toBe(plain);
+  });
+});
+
+describe("ข้อความตัวอย่าง (sampleView)", () => {
+  const newDoc = () => cleanDoc({});
+  it("ช่องว่างที่มี role = ตัวอย่างจาง ๆ · ช่องมีข้อความจริง = ไม่โชว์ตัวอย่าง", () => {
+    const d = newDoc();
+    const empty = { ...newTextEl(d, ""), role: "from" as const };
+    const filled = { ...newTextEl(d, "จาก แม่"), role: "from" as const };
+    expect(sampleView(empty, { on: false, len: "short" })).toEqual({ text: CARD_SAMPLES.short.from, faint: true });
+    expect(sampleView(filled, { on: false, len: "short" })).toBeNull();
+  });
+  it("โหมดดูตัวอย่าง = เติมทุกช่องที่มี role เต็มสี · ชิ้นไม่มี role ไม่ยุ่ง", () => {
+    const d = newDoc();
+    const msg = { ...newTextEl(d, "ข้อความจริง"), role: "message" as const };
+    expect(sampleView(msg, { on: true, len: "long" })).toEqual({ text: CARD_SAMPLES.long.message, faint: false });
+    expect(sampleView(newTextEl(d, ""), { on: true, len: "short" })).toBeNull();
   });
 });

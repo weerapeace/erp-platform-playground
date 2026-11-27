@@ -23,7 +23,7 @@ import type { TextFontOption, TextStyle } from "@/lib/text-style";
 import {
   CARD_FONTS, CARD_MAX_ELS, CARD_MAX_MM, CARD_MIN_MM, CARD_SIZES, FONT_SIZE_MAX, FONT_SIZE_MIN, STICKERS, elBox, fontStack, googleFontsHref,
   newElId, newImageEl, newShapeEl, newTextEl, resizeDoc, resolveSrc, stickerDataUrl, textCss, uploadFontFaces,
-  faceDoc, foldLine, isFolded, switchFold, withFace,
+  faceDoc, foldLine, isFolded, switchFold, withFace, CARD_SAMPLES, sampleView, type CardSampleLen,
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
@@ -44,6 +44,8 @@ const HANDLES: { hx: -1 | 0 | 1; hy: -1 | 0 | 1; cur: string }[] = [
 ];
 const r2d = (n: number) => Math.round(n * 100) / 100;
 const btn = (on = false) => `inline-flex h-8 items-center gap-1 rounded-md border px-2 text-[12px] ${on ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"} disabled:opacity-40`;
+/** โหมดข้อความตัวอย่างล่าสุด — คงไว้ตอนตัวออกแบบสลับด้าน (การ์ดพับ) */
+let lastSample: { on: boolean; len: CardSampleLen } = { on: false, len: "short" };
 
 export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460, fold = null, lockSize = false, faceNote }: {
   value: CardDoc;
@@ -64,6 +66,9 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
   const [sel, setSel] = useState<string | null>(null);
   /** กำลังพิมพ์บนการ์ด (ชิ้นข้อความ) — selectAll = เพิ่งเพิ่มข้อความใหม่ พิมพ์ทับได้เลย */
   const [editing, setEditing] = useState<{ id: string; selectAll: boolean } | null>(null);
+  /** ดูแบบมีข้อความตัวอย่าง (บนจอเท่านั้น) — จำไว้ตอนสลับด้านนอก/ด้านใน */
+  const [sample, setSampleState] = useState(lastSample);
+  const setSample = (p: Partial<typeof lastSample>) => setSampleState((s) => (lastSample = { ...s, ...p }));
   /** หน้าตาการ์ดก่อนเริ่มพิมพ์ — จบการพิมพ์ = ย้อนกลับได้ 1 ขั้นต่อการพิมพ์ 1 ครั้ง (ข้อ 5) */
   const editStart = useRef<CardDoc | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
@@ -428,6 +433,15 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <button type="button" className={btn()} disabled={!past.current.length} onClick={undo} title="ย้อนกลับ (Ctrl+Z)"><Icon value="i:arrow-back-up" /> ย้อน</button>
           <button type="button" className={btn()} disabled={!future.current.length} onClick={redo} title="ทำซ้ำ (Ctrl+Y)"><Icon value="i:arrow-forward-up" /> ทำซ้ำ</button>
+          <button type="button" className={btn(sample.on)} onClick={() => setSample({ on: !sample.on })} aria-pressed={sample.on}
+            title="เติมข้อความตัวอย่างในช่อง ถึง / ข้อความจากลูกค้า / จาก ให้เห็นการ์ดเสร็จทั้งใบ — บนจอเท่านั้น ไม่ติดตอนพิมพ์ ไม่แก้ข้อความจริง">
+            <Icon value={sample.on ? "i:eye-off" : "i:eye"} /> {sample.on ? "ปิดข้อความตัวอย่าง" : "ดูแบบมีข้อความตัวอย่าง"}
+          </button>
+          <select value={sample.len} onChange={(ev) => setSample({ len: ev.target.value as CardSampleLen })} title="ความยาวข้อความตัวอย่าง — ยาว = ลองว่าข้อความลูกค้ายาว ๆ ล้นกรอบไหม" aria-label="ความยาวข้อความตัวอย่าง"
+            className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-[12px] text-slate-700">
+            <option value="short">ตัวอย่างสั้น</option>
+            <option value="long">ตัวอย่างยาว</option>
+          </select>
           {faceNote && <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">{faceNote}</span>}
           <span className="text-[11px] text-slate-400">{doc.w} × {doc.h} มม. · ลูกศร = ขยับ 0.5 มม. (Shift = 5) · Alt ค้าง = ไม่ดูดเส้น</span>
         </div>
@@ -440,16 +454,16 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
               {doc.els.map((e) => !e.hidden && editing?.id !== e.id && (
                 <div key={e.id} onPointerDown={(ev) => onElDown(ev, e)} onDoubleClick={() => { if (e.kind === "text" && !e.locked) startEdit(e.id); else setTab("edit"); }}
                   title={e.kind === "text" && !e.locked ? "ดับเบิลคลิกเพื่อพิมพ์บนการ์ด" : undefined} style={{ cursor: e.locked ? "default" : "move" }}>
-                  <ElView e={e} k={k} />
+                  <ElView e={e} k={k} sample={sampleView(e, sample)} />
                 </div>
               ))}
             </div>
-            <ScreenMarks doc={doc} k={k} fold={fold} />
+            <ScreenMarks doc={doc} k={k} fold={fold} sampleOn={sample.on} />
             {editing && (() => {
               const e = doc.els.find((x) => x.id === editing.id);
               if (!e) return null;
               return (
-                <InlineTextEditor key={e.id} e={e} k={k} value={e.text ?? ""} selectAll={editing.selectAll} fontOpts={fontOpts}
+                <InlineTextEditor key={e.id} e={e} k={k} value={e.text ?? ""} selectAll={editing.selectAll} fontOpts={fontOpts} placeholder={e.role ? CARD_SAMPLES[sample.len][e.role] : undefined}
                   onText={(v) => liveEl(e.id, { text: v })}
                   onGrow={(h) => liveEl(e.id, { h: r2d(Math.min(doc.h - e.y, h)) })}
                   onStyle={(p) => e.style && liveEl(e.id, { style: { ...e.style, ...p } })}

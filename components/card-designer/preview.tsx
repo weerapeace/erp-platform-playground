@@ -12,7 +12,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import type { TextFontOption } from "@/lib/text-style";
 import {
   CARD_FONTS, CARD_MAX_ELS, FONT_SIZE_MAX, FONT_SIZE_MIN, elBox, fontStack, googleFontsHref, newTextEl, resolveSrc, textCss, uploadFontFaces,
-  faceDoc, isFolded, withFace,
+  faceDoc, isFolded, withFace, sampleView,
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
@@ -21,14 +21,14 @@ const r2Url = (k: string) => r2ImageUrl(k);
 const ROLE_LABEL: Record<CardRole, string> = { message: "ข้อความจากลูกค้า", to: "ถึง", from: "จาก" };
 
 /** เครื่องหมายบนจอ (ไม่ติดตอนพิมพ์): กรอบเส้นปะสีเหลือง = ช่องข้อความจากลูกค้า/ถึง/จาก · เส้นปะแดง = รอยพับ */
-export function ScreenMarks({ doc, k, fold, labels = true }: { doc: CardDoc; k: number; fold?: { x?: number; y?: number } | null; labels?: boolean }) {
+export function ScreenMarks({ doc, k, fold, labels = true, sampleOn = false }: { doc: CardDoc; k: number; fold?: { x?: number; y?: number } | null; labels?: boolean; /** โหมดดูข้อความตัวอย่าง = ป้ายบอก "ตัวอย่าง" */ sampleOn?: boolean }) {
   return (
     <>
       {doc.els.filter((e) => !e.hidden && e.kind === "text" && e.role).map((e) => {
         const b = elBox(e, k);
         return (
           <div key={`m${e.id}`} className="pointer-events-none absolute" style={{ left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, outline: "1.5px dashed #BA7517", background: "rgba(250,199,117,.16)" }}>
-            {labels && <span className="absolute -top-4 left-0 whitespace-nowrap rounded bg-amber-100 px-1 text-[9px] leading-4 text-amber-800">{ROLE_LABEL[e.role as CardRole]}</span>}
+            {labels && <span className="absolute -top-4 left-0 whitespace-nowrap rounded bg-amber-100 px-1 text-[9px] leading-4 text-amber-800">{ROLE_LABEL[e.role as CardRole]}{sampleOn || !(e.text ?? "").trim() ? " · ตัวอย่าง" : ""}</span>}
           </div>
         );
       })}
@@ -62,12 +62,14 @@ export function cardFontOptions(uploaded: UploadedFont[] = []): TextFontOption[]
 }
 
 // ─── วาดชิ้นเดียว (ใช้ทั้งพรีวิวและตัวออกแบบ) ───
-export function CardElView({ e, k }: { e: CardEl; k: number }) {
+/** sample = ข้อความตัวอย่างแทนข้อความจริง (บนจอเท่านั้น) · faint = จาง ๆ (ช่องยังว่าง) */
+export function CardElView({ e, k, sample }: { e: CardEl; k: number; sample?: { text: string; faint: boolean } | null }) {
   const b = elBox(e, k);
   const box: CSSProperties = { position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, opacity: e.opacity };
   if (e.kind === "text" && e.style) {
     const t = textCss(e.style, k) as CSSProperties;
-    return <div style={box}><div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...t }}><span style={{ display: "block" }}>{e.text || " "}</span></div></div>;
+    const op = sample?.faint ? (e.opacity ?? 1) * 0.35 : e.opacity;
+    return <div style={{ ...box, opacity: op }}><div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...t }}><span style={{ display: "block" }}>{sample ? sample.text : e.text ||" "}</span></div></div>;
   }
   if (e.kind === "image") {
     const url = resolveSrc(e.src, r2Url);
@@ -191,7 +193,7 @@ export function CardQuickEdit({ doc, onChange, message, onMessage, maxHeight = 2
               return (
                 <div key={e.id} onPointerDown={(ev) => down(ev, e)} onDoubleClick={() => { if (!e.locked) { setSel(e.id); setEditing(e.id); } }} title={e.locked ? "ล็อกไว้ — แก้ในตัวออกแบบเต็ม" : "ลากเพื่อย้าย · ดับเบิลคลิกเพื่อพิมพ์"}
                   style={{ position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, cursor: e.locked ? "default" : "move", outline: sel === e.id ? "1.5px solid #378ADD" : "1px dashed rgba(55,138,221,.45)", zIndex: 2 }}>
-                  <div style={{ position: "absolute", inset: 0, transform: "none" }}><CardElView e={{ ...e, x: 0, y: 0, rot: 0 }} k={k} /></div>
+                  <div style={{ position: "absolute", inset: 0, transform: "none" }}><CardElView e={{ ...e, x: 0, y: 0, rot: 0 }} k={k} sample={sampleView(e, { on: false, len: "short" })} /></div>
                 </div>
               );
             })}
@@ -236,9 +238,9 @@ const ALIGN_NEXT: Record<string, CardTextStyle["align"]> = { left: "center", cen
  *   แถบจัดรูปแบบลอย (onStyle): ฟอนต์ · ขนาด −/+ · ตัวหนา · จัดชิด · สี — กดแถบไม่หลุดโหมดพิมพ์
  *   ปุ่มลบ/ลูกศรระหว่างพิมพ์ไม่หลุดไปลบ/ขยับกล่อง (หยุดแป้นไว้ที่ช่องพิมพ์)
  */
-export function InlineTextEditor({ e, k, value, onText, onGrow, onStyle, onDone, selectAll = false, fontOpts = [] }: {
+export function InlineTextEditor({ e, k, value, onText, onGrow, onStyle, onDone, selectAll = false, fontOpts = [], placeholder }: {
   e: CardEl; k: number; value: string; onText: (v: string) => void; onGrow: (hMm: number) => void;
-  onStyle?: (p: Partial<CardTextStyle>) => void; onDone: () => void; selectAll?: boolean; fontOpts?: TextFontOption[];
+  onStyle?: (p: Partial<CardTextStyle>) => void; onDone: () => void; selectAll?: boolean; fontOpts?: TextFontOption[]; /** ข้อความจาง ๆ ตอนช่องยังว่าง */ placeholder?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -285,7 +287,7 @@ export function InlineTextEditor({ e, k, value, onText, onGrow, onStyle, onDone,
           <button type="button" className={`${barBtn} text-sky-300`} onClick={onDone}>เสร็จ</button>
         </div>
       )}
-      <textarea ref={ref} value={value} maxLength={600} spellCheck={false} aria-label="พิมพ์ข้อความบนการ์ด"
+      <textarea ref={ref} value={value} maxLength={600} spellCheck={false} aria-label="พิมพ์ข้อความบนการ์ด" placeholder={placeholder}
         onChange={(ev) => onText(ev.target.value)}
         onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Escape" || (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); onDone(); } }}
         onBlur={(ev) => { if (barRef.current?.contains(ev.relatedTarget as Node)) return; onDone(); }}

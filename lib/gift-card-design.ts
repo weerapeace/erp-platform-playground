@@ -411,6 +411,28 @@ export function fillTexts(doc: CardDoc, t: Partial<CardTexts>): CardDoc {
   return out;
 }
 
+// ─── ข้อความตัวอย่าง (บนจอเท่านั้น ไม่ติดตอนพิมพ์/PNG · ไม่บันทึกลงการ์ด) ───
+
+export type CardSampleLen = "short" | "long";
+/** ข้อความตัวอย่างต่อช่อง — สั้น = ทั่วไป · ยาว = ลองว่าข้อความลูกค้ายาว ๆ ล้นกรอบไหม */
+export const CARD_SAMPLES: Record<CardSampleLen, Record<CardRole, string>> = {
+  short: { to: "ถึง น้องมายด์", message: "สุขสันต์วันเกิดนะ ขอให้มีความสุขมาก ๆ", from: "จาก พี่เจน" },
+  long: {
+    to: "ถึง คุณแม่ที่รักที่สุดในโลก",
+    message: "สุขสันต์วันเกิดนะคะแม่ ขอบคุณที่ดูแลกันมาตลอด ขอให้แม่สุขภาพแข็งแรง มีความสุขทุกวัน อยู่กับพวกเรานาน ๆ รักแม่ที่สุดเลยค่ะ",
+    from: "จาก ลูก ๆ ทุกคน",
+  },
+};
+
+/** ชิ้นนี้ควรโชว์ข้อความตัวอย่างไหม — คืน { text, faint } หรือ null
+ *  ช่องว่าง (มี role) = ตัวอย่างจาง ๆ เสมอ · โหมด "ดูแบบมีข้อความตัวอย่าง" = เติมทุกช่องที่มี role เต็มสี */
+export function sampleView(e: CardEl, mode: { on: boolean; len: CardSampleLen }): { text: string; faint: boolean } | null {
+  if (e.kind !== "text" || !e.role) return null;
+  const text = CARD_SAMPLES[mode.len][e.role];
+  if (mode.on) return { text, faint: false };
+  return (e.text ?? "").trim() ? null : { text, faint: true };
+}
+
 // ─── แม่แบบเริ่มต้น (ใช้ได้ทันที ยังไม่ต้องออกแบบ · กด "ทำสำเนาไปแก้" = เก็บลงฐานข้อมูล) ───
 
 export const BUILTIN_PREFIX = "builtin:";
