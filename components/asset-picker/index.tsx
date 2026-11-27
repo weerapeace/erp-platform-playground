@@ -388,7 +388,8 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
               <option value="parent">📦 รูปจาก Parent SKU</option>
               <option value="all">ทุกที่มา</option>
             </select>
-            <AlbumSelect albums={collections} value={collectionId} onChange={setCollectionId} compact showCount noneLabel="ทุกอัลบั้ม" className="w-48 max-w-full" />
+            <AlbumSelect albums={collections} value={collectionId} onChange={setCollectionId} compact showCount noneLabel="ทุกอัลบั้ม" className="w-48 max-w-full"
+              onCreated={(a) => setCollections((cs) => [...cs, { id: a.id, name: a.name, count: 0, parent_id: a.parent_id ?? null }])} />
             {subIds.length > 0 && (
               <label className="inline-flex items-center gap-1 h-8 px-2 text-[12px] rounded-lg border border-slate-200 bg-white text-slate-600 cursor-pointer" title="โชว์รูปในอัลบั้มย่อยของอัลบั้มนี้ด้วย">
                 <input type="checkbox" checked={withSub} onChange={(e) => setWithSub(e.target.checked)} /> รวมอัลบั้มย่อย ({subIds.length})
@@ -445,14 +446,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
         <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (
         <UploadTab onVectorFile={splitOk ? (file) => setSplitter({ file }) : undefined} actor={actor} typeFilter={typeFilter} kinds={kinds} albums={collections} viewingAlbumId={collectionId}
-          onCreateAlbum={async (name) => {
-            try {
-              const j = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json());
-              if (j.error || !j.data?.id) throw new Error(j.error || "สร้างอัลบั้มไม่สำเร็จ");
-              setCollections((cs) => [...cs, { id: String(j.data.id), name: String(j.data.name ?? name), count: 0 }]);
-              return String(j.data.id);
-            } catch (e) { toast.error((e as Error).message); return null; }
-          }}
+          onAlbumCreated={(a) => setCollections((cs) => [...cs, { id: a.id, name: a.name, count: 0, parent_id: a.parent_id ?? null }])}
           onUploaded={(assets) => {
             setSelected((m) => {
               const n = new Map(multiple ? m : []);
@@ -588,14 +582,14 @@ function ParentImagesSection({ hits, loading, query, only, group, onGroup, selec
   );
 }
 
-function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumId, onCreateAlbum, onVectorFile }: {
+function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumId, onAlbumCreated, onVectorFile }: {
   /** ✂️ ส่งมา = โยน .ai/.eps แล้วเปิดตัวแยกชิ้นแทนการอัปทั้งไฟล์ */
   onVectorFile?: (f: File) => void;
   actor: string | null; typeFilter?: AssetType; kinds?: AssetType[]; onUploaded: (assets: AssetRow[]) => void;
   /** อัปเข้าอัลบั้ม (เจ้าของเลือก 2026-11-27): รายการอัลบั้ม · อัลบั้มที่เปิดดูในแท็บคลัง (ค่าเริ่ม) · สร้างอัลบั้มใหม่ */
   albums: { id: string; name: string; count: number; parent_id?: string | null; group?: string | null }[];
   viewingAlbumId: string;
-  onCreateAlbum: (name: string) => Promise<string | null>;
+  onAlbumCreated: (a: { id: string; name: string; parent_id?: string | null }) => void;
 }) {
   const toast = useToast();
   // ค่าเริ่ม = อัลบั้มที่เปิดดูอยู่ในแท็บ "เลือกจากคลัง" · ไม่ได้เปิด = อัลบั้มที่อัปครั้งล่าสุด (จำรายคน) · "" = ไม่ใส่อัลบั้ม
@@ -687,7 +681,7 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumI
     {/* อัปเข้าอัลบั้ม (ตัวเลือกอัลบั้มกลาง · สร้างใหม่ได้ตามสิทธิ์) + อัลบั้มที่ใช้ล่าสุด */}
     <div className="flex flex-wrap items-center gap-2 text-[13px]">
       <span className="font-medium text-slate-700">อัปเข้าอัลบั้ม</span>
-      <AlbumSelect albums={albums} value={albumId} onChange={chooseAlbum} noneLabel="ไม่ใส่อัลบั้ม (คลังกลางเฉย ๆ)" compact showCount className="w-72 max-w-full" onCreate={onCreateAlbum} />
+      <AlbumSelect albums={albums} value={albumId} onChange={chooseAlbum} noneLabel="ไม่ใส่อัลบั้ม (คลังกลางเฉย ๆ)" compact showCount className="w-72 max-w-full" onCreated={onAlbumCreated} />
       {recentAlbums.filter((r) => r.id !== albumId).length > 0 && (
         <span className="flex flex-wrap items-center gap-1 text-[12px]">
           <span className="text-slate-400">ใช้ล่าสุด:</span>

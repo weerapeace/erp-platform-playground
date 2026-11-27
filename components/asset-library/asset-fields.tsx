@@ -84,11 +84,11 @@ export function CollectionMultiSelect({ value, collections, onChange, onCreated,
 }) {
   const toast = useToast();
   const t = useT();
-  const create = async (n: string): Promise<string | null> => {
+  const create = async (n: string, parentId: string | null): Promise<string | null> => {
     try {
-      const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
+      const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n, ...(parentId ? { parent_id: parentId } : {}) }) });
       const j = await r.json(); if (!r.ok || j.error || !j.data) throw new Error(j.error || t("สร้างอัลบั้มไม่สำเร็จ", "Failed to create album"));
-      const col = { ...(j.data as AssetCollection), count: 0, parent_id: null, group: null };
+      const col = { ...(j.data as AssetCollection), count: 0, parent_id: parentId, group: null };
       onCreated(col);
       toast.success(`${t("สร้างอัลบั้ม", "Created album")} "${n}"`);
       return col.id;

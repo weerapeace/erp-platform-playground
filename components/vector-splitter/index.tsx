@@ -185,12 +185,6 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
   };
 
   // ── บันทึก: ต้นฉบับ → PNG ทีละชิ้น → คลังไฟล์ ──
-  const createAlbum = async (name: string) => {
-    const j = await (await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) })).json();
-    if (j.error || !j.data?.id) { toast.error(j.error || t("สร้างอัลบั้มไม่สำเร็จ", "Create album failed")); return null; }
-    setExtraCols((x) => [...x, { id: j.data.id, name, description: null, count: 0, parent_id: null }]);
-    return j.data.id as string;
-  };
   const postAsset = async (f: File, extra: Record<string, string>, vector?: string | null) => {
     const fd = new FormData();
     fd.append("file", f);
@@ -419,7 +413,7 @@ export function VectorSplitterModal({ initialFile, collections, defaultCollectio
               </div>
               <div>
                 <p className="text-[12px] text-slate-500 mb-1">{t("บันทึกเข้าอัลบั้ม", "Save into album")}</p>
-                <AlbumSelect albums={cols} value={albumId} onChange={setAlbumId} noneLabel={t("— ไม่ใส่อัลบั้ม —", "— No album —")} onCreate={createAlbum} />
+                <AlbumSelect albums={cols} value={albumId} onChange={setAlbumId} noneLabel={t("— ไม่ใส่อัลบั้ม —", "— No album —")} onCreated={(a) => setExtraCols((x) => [...x, { id: a.id, name: a.name, description: null, count: 0, parent_id: a.parent_id ?? null }])} />
               </div>
               <label className="flex items-start gap-2 text-[12px] text-slate-600">
                 <input type="checkbox" checked={keepOriginal} onChange={(e) => setKeepOriginal(e.target.checked)} className="mt-0.5" />

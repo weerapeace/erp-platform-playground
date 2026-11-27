@@ -12,15 +12,19 @@ import { StorageProviderBadge } from "@/components/storage-rules";
 import { isImage, TYPE_ICON, driveFolderNameOf } from "./asset-shared";
 import { ASSET_DRAG_TYPE } from "./album-tree-actions";
 
-export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder, dragIds }: {
-  a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: () => void; onOpen: () => void; onSameFolder?: (id: string, label: string) => void;
+export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder, dragIds, pressProps }: {
+  /** ติ๊ก/เอาออก · e = ไว้ดู Shift (เลือกเป็นช่วง · ของกลาง components/select-mode) */
+  a: AssetRow; selected: boolean; selectionMode: boolean; onToggle: (e?: { shiftKey?: boolean }) => void; onOpen: () => void; onSameFolder?: (id: string, label: string) => void;
   /** ลากการ์ดไปวางบนอัลบั้มในแถบซ้าย — คืนไอดีที่ลาก (การ์ดที่เลือกอยู่ = ทั้งชุด) · ไม่ใส่ = ลากไม่ได้ */
   dragIds?: () => string[];
+  /** กดค้างบนมือถือ = เข้าโหมดเลือก (useSelectMode().pressProps) */
+  pressProps?: Record<string, unknown>;
 }) {
   const t = useT();
   const [broken, setBroken] = useState(false);
   return (
     <div className={`group relative rounded-xl border overflow-hidden bg-white ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200"}`}
+      {...pressProps}
       draggable={!!dragIds}
       onDragStart={dragIds ? (e) => {
         const ids = dragIds();
@@ -29,7 +33,7 @@ export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSame
       } : undefined}>
       {/* ในโหมดเลือก (มีของเลือกอยู่แล้ว): กล่องติ๊กใหญ่ขึ้น + โชว์ตลอด กดง่าย */}
       <button
-        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+        onClick={(e) => { e.stopPropagation(); onToggle(e); }}
         className={`absolute top-1.5 left-1.5 z-10 rounded-md border flex items-center justify-center ${selectionMode ? "w-7 h-7 text-sm" : "w-5 h-5 text-[11px]"} ${selected
           ? "bg-indigo-600 border-indigo-600 text-white" : selectionMode ? "bg-white border-slate-400 text-slate-300 shadow-sm" : "bg-white/90 border-slate-300 text-transparent group-hover:text-slate-300"}`}
       >✓</button>
@@ -47,7 +51,7 @@ export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSame
           {!/\/folders\//.test(a.master_url ?? "") && <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-100 text-amber-700 border border-amber-200 shadow-sm">{t("⚠ ยังไม่มีไฟล์พิมพ์", "⚠ No print file")}</span>}
         </div>
       )}
-      <button onClick={selectionMode ? (e) => { e.stopPropagation(); onToggle(); } : onOpen} className="block w-full text-left">
+      <button onClick={(e) => { if (selectionMode || e.shiftKey) { e.stopPropagation(); onToggle(e); } else onOpen(); }} className="block w-full text-left">
         <HoverPreview url={isImage(a) && !broken ? a.url : null} previewW={440}>
           {/* กรอบ 1:1 — รูปแสดงเต็มทั้งใบ (object-contain) ไม่ตัดขอบ/ตัวหนังสือ */}
           <div className="aspect-square bg-slate-50 flex items-center justify-center overflow-hidden">
@@ -63,7 +67,7 @@ export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSame
           </div>
         </HoverPreview>
       </button>
-      <div className={`${GALLERY_LABEL} px-2 py-1.5 cursor-pointer`} title={a.title} onClick={selectionMode ? () => onToggle() : onOpen}>
+      <div className={`${GALLERY_LABEL} px-2 py-1.5 cursor-pointer`} title={a.title} onClick={(e) => (selectionMode || e.shiftKey ? onToggle(e) : onOpen())}>
         <p className="text-[12px] font-medium text-slate-700 truncate">{a.title}</p>
         <div className="flex items-center justify-between gap-1 mt-0.5">
           <p className="text-[10px] text-slate-400 truncate">

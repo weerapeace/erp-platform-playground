@@ -12,10 +12,14 @@
  *   <AlbumSelect albums={collections} value={id} onChange={setId} noneLabel="— ไม่ระบุ —" />
  *   <AlbumTree options={buildAlbumOptions(collections)} renderRow={(o, x) => …} />   ← แถบข้าง/รายการที่เขียนแถวเอง
  * ห้ามใช้เมื่อ: อัลบั้มของหน้า SAMPLE Images ที่ต้องเห็นรูปปก → SampleAlbumPickerModal · อัลบั้ม Contents → แถบ Contents ของมันเอง
+ * ➕ สร้างอัลบั้ม (เจ้าของเลือก 2026-11-27): ปุ่ม "＋ สร้างอัลบั้มใหม่" ท้ายแผงเห็นตลอด + เลือกได้ว่าอยู่ใต้อัลบั้มไหน
+ *   ไม่ส่ง onCreate = ใช้ตัวสร้างในตัว (POST /api/assets/collections) ได้ทุกที่ · allowCreate={false} = ปิด · onCreated = แจ้งหน้าที่ใช้ให้เพิ่มเข้ารายการ
  * ข้อมูล: /api/assets/collections (ช่อง parent_id + group) · ตรรกะล้วน + เทสต์: lib/album-options.ts
  * คู่มือ: docs/album-picker.md
  */
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { apiFetch } from "@/lib/api";
+import { useToast } from "@/components/toast";
 import { createPortal } from "react-dom";
 import { useT } from "@/components/i18n";
 import { useAuthOptional } from "@/components/auth";
@@ -164,15 +168,43 @@ function useCanCreate(perm?: string): boolean {
 }
 
 // ── แผงลอย (ค้น + ใช้ล่าสุด + ต้นไม้) ──
+/** สร้างอัลบั้มคลังไฟล์ (ตัวสร้างในตัวของตัวเลือกอัลบั้ม) · parentId = อยู่ใต้อัลบั้มนี้ · ล้ม = throw ข้อความภาษาคน */
+export async function createAssetAlbum(name: string, parentId: string | null): Promise<AlbumLike> {
+  const r = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, ...(parentId ? { parent_id: parentId } : {}) }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error || !j.data?.id) throw new Error(j.error || "สร้างอัลบั้มไม่สำเร็จ");
+  return { id: String(j.data.id), name: String(j.data.name ?? name), count: 0, parent_id: parentId, group: null };
+}
+
+/** ตัวสร้างที่ตัวเลือกอัลบั้มใช้จริง: ของหน้าเจ้าของ (onCreate) หรือตัวในตัว + เก็บอัลบั้มใหม่ไว้โชว์ทันที */
+function useAlbumCreator(albums: readonly AlbumLike[], opts: { onCreate?: (name: string, parentId: string | null) => Promise<string | null>; onCreated?: (a: AlbumLike) => void; allowCreate?: boolean; createPermission?: string }) {
+  const toast = useToast();
+  const allowed = useCanCreate(opts.createPermission) && opts.allowCreate !== false;
+  const [extra, setExtra] = useState<AlbumLike[]>([]);
+  const merged = useMemo(() => (extra.length ? [...albums, ...extra.filter((x) => !albums.some((a) => a.id === x.id))] : albums), [albums, extra]);
+  const create = async (name: string, parentId: string | null): Promise<string | null> => {
+    if (opts.onCreate) return opts.onCreate(name, parentId);
+    try {
+      const a = await createAssetAlbum(name, parentId);
+      setExtra((x) => [...x, a]); opts.onCreated?.(a);
+      toast.success(`สร้างอัลบั้ม “${a.name}” แล้ว`);
+      return a.id;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างอัลบั้มไม่สำเร็จ"); return null; }
+  };
+  return { albums: merged, create: allowed ? create : undefined };
+}
+
 function AlbumMenu({ anchor, options, selected, multi, onPick, onClose, none, onCreate }: {
   anchor: React.RefObject<HTMLElement | null>;
   options: AlbumOption[]; selected: string[]; multi: boolean;
   onPick: (id: string) => void; onClose: () => void;
   none?: { label: string; onPick: () => void };
-  onCreate?: (name: string) => void;
+  onCreate?: (name: string, parentId: string | null) => void;
 }) {
   const t = useT();
   const [q, setQ] = useState("");
+  const [form, setForm] = useState<{ name: string; parent: string } | null>(null);   // ฟอร์มสร้างอัลบั้ม (ชื่อ + อยู่ใต้)
+  const parentChoices = useMemo(() => options.filter((o) => !o.group), [options]);   // อัลบั้ม SAMPLE สร้างย่อยที่หน้า SAMPLE
   const pos = useFloatPos(true, anchor, 420);
   useEscLayer(true, onClose);
   const { recent, remember } = useRecentPicks<{ id: string }>(RECENT_KEYS.albums, true);
@@ -190,7 +222,7 @@ function AlbumMenu({ anchor, options, selected, multi, onPick, onClose, none, on
         style={{ left: Math.max(8, Math.min(pos.left, window.innerWidth - Math.min(360, window.innerWidth - 16) - 8)), top: pos.top, width: Math.min(360, window.innerWidth - 16), maxHeight: 420, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
         <div className="p-2 border-b border-slate-100">
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (ranked[0]) pick(ranked[0].value); else if (onCreate && q.trim()) { onCreate(q.trim()); setQ(""); } } }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (ranked[0]) pick(ranked[0].value); else if (onCreate && q.trim()) { onCreate(q.trim(), null); setQ(""); } } }}
             placeholder={t("ค้นชื่ออัลบั้ม หรือชื่อแม่ เช่น Product 012", "Search album or parent, e.g. Product 012")}
             className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500" />
         </div>
@@ -217,13 +249,31 @@ function AlbumMenu({ anchor, options, selected, multi, onPick, onClose, none, on
                 renderRow={(o, ctx) => <PickRow o={o} on={isOn(o.value)} multi={multi} depth={ctx.depth} ctx={ctx} onPick={() => pick(o.value)} />} />
             </>
           )}
-          {onCreate && q.trim() && !exact && (
-            <button type="button" onClick={() => { onCreate(q.trim()); setQ(""); }}
-              className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-100">
-              ＋ {t("สร้างอัลบั้มใหม่", "New album")}: <strong>&ldquo;{q.trim()}&rdquo;</strong>
-            </button>
-          )}
         </div>
+        {onCreate && (form ? (
+          <div className="p-2 border-t border-slate-100 bg-emerald-50/40 space-y-1.5">
+            <input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              onKeyDown={(e) => { if (e.key === "Enter" && form.name.trim()) { e.preventDefault(); onCreate(form.name.trim(), form.parent || null); setForm(null); setQ(""); } }}
+              placeholder={t("ชื่ออัลบั้มใหม่", "New album name")} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+            <label className="flex items-center gap-1.5 text-[12px] text-slate-500">
+              <span className="shrink-0">{t("อยู่ใต้", "Inside")}</span>
+              <select value={form.parent} onChange={(e) => setForm({ ...form, parent: e.target.value })} className="flex-1 min-w-0 h-7 text-[12px] border border-slate-200 rounded-md bg-white">
+                <option value="">{t("— ชั้นบนสุด —", "— Top level —")}</option>
+                {parentChoices.map((o) => <option key={o.value} value={o.value}>{"\u00a0\u00a0".repeat(o.depth)}{o.label}</option>)}
+              </select>
+            </label>
+            <div className="flex justify-end gap-1.5">
+              <button type="button" onClick={() => setForm(null)} className="h-7 px-2.5 text-[12px] rounded-md border border-slate-200 bg-white hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+              <button type="button" disabled={!form.name.trim()} onClick={() => { onCreate(form.name.trim(), form.parent || null); setForm(null); setQ(""); }}
+                className="h-7 px-3 text-[12px] rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">{t("สร้าง", "Create")}</button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setForm({ name: q.trim(), parent: selected.length === 1 && parentChoices.some((o) => o.value === selected[0]) ? selected[0] : "" })}
+            className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-100">
+            ＋ {t("สร้างอัลบั้มใหม่", "New album")}{q.trim() && !exact ? <>: <strong>&ldquo;{q.trim()}&rdquo;</strong></> : null}
+          </button>
+        ))}
         {multi && (
           <div className="p-2 border-t border-slate-100 flex justify-end">
             <button type="button" onClick={onClose} className="h-7 px-3 text-[12px] rounded-md bg-indigo-600 text-white hover:bg-indigo-700">{t("เสร็จ", "Done")}</button>
@@ -239,18 +289,21 @@ function AlbumMenu({ anchor, options, selected, multi, onPick, onClose, none, on
  * เลือกหลายอัลบั้ม: ชิปเฉพาะอัลบั้มที่เลือก (เกิน 6 = ย่อ) + ปุ่ม "+ เพิ่มอัลบั้ม"
  * onCreate (ไม่ใส่ = ไม่มีปุ่มสร้าง) = สร้างอัลบั้มใหม่จากคำค้น → คืน id ใหม่ (ตัวนี้ติ๊กให้เลย) หรือ null
  */
-export function AlbumMultiPicker({ albums, value, onChange, disabled, onCreate, createPermission = "assets.manage", emptyLabel }: {
+export function AlbumMultiPicker({ albums: albumsIn, value, onChange, disabled, onCreate, onCreated, allowCreate, createPermission = "assets.manage", emptyLabel }: {
   albums: readonly AlbumLike[]; value: string[]; onChange: (ids: string[]) => void; disabled?: boolean;
-  onCreate?: (name: string) => Promise<string | null>; createPermission?: string; emptyLabel?: string;
+  /** สร้างเอง (ไม่ใส่ = ตัวสร้างในตัว) · parentId = อยู่ใต้อัลบั้มนี้ */
+  onCreate?: (name: string, parentId: string | null) => Promise<string | null>;
+  onCreated?: (album: AlbumLike) => void; allowCreate?: boolean; createPermission?: string; emptyLabel?: string;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const creator = useAlbumCreator(albumsIn, { onCreate, onCreated, allowCreate, createPermission });
+  const albums = creator.albums;
   const options = useMemo(() => buildAlbumOptions(albums), [albums]);
   const byId = useMemo(() => new Map(options.map((o) => [o.value, o])), [options]);
-  const canCreate = useCanCreate(createPermission) && !!onCreate;
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
-  const create = async (name: string) => { const id = await onCreate?.(name); if (id && !value.includes(id)) onChange([...value, id]); };
+  const create = async (name: string, parentId: string | null) => { const id = await creator.create?.(name, parentId); if (id && !value.includes(id)) onChange([...value, id]); };
   return (
     <div className="min-w-0">
       {value.length === 0
@@ -275,19 +328,21 @@ export function AlbumMultiPicker({ albums, value, onChange, disabled, onCreate, 
       )}
       {open && !disabled && (
         <AlbumMenu anchor={btnRef} options={options} selected={value} multi onPick={toggle} onClose={() => setOpen(false)}
-          onCreate={canCreate ? (n) => void create(n) : undefined} />
+          onCreate={creator.create ? (n, p) => void create(n, p) : undefined} />
       )}
     </div>
   );
 }
 
 /** เลือกอัลบั้มอันเดียว (แทน select ยาว) · value "" = ไม่เลือก (noneLabel) · compact = ปุ่มสูง 32px สำหรับแถบตัวกรอง */
-export function AlbumSelect({ albums, value, onChange, noneLabel, compact, className = "", showCount, onCreate, createPermission = "assets.manage" }: {
+export function AlbumSelect({ albums: albumsIn, value, onChange, noneLabel, compact, className = "", showCount, onCreate, onCreated, allowCreate, createPermission = "assets.manage" }: {
   albums: readonly AlbumLike[]; value: string; onChange: (id: string) => void; noneLabel: string; compact?: boolean; className?: string; showCount?: boolean;
-  /** สร้างอัลบั้มใหม่จากคำค้น (ไม่ใส่ = ไม่มีปุ่มสร้าง) → คืน id ใหม่ (เลือกให้เลย) หรือ null */
-  onCreate?: (name: string) => Promise<string | null>; createPermission?: string;
+  /** สร้างอัลบั้มใหม่ (ไม่ใส่ = ตัวสร้างในตัว · allowCreate={false} = ไม่มีปุ่มสร้าง) → คืน id ใหม่ (เลือกให้เลย) หรือ null */
+  onCreate?: (name: string, parentId: string | null) => Promise<string | null>;
+  onCreated?: (album: AlbumLike) => void; allowCreate?: boolean; createPermission?: string;
 }) {
-  const canCreate = useCanCreate(createPermission) && !!onCreate;
+  const creator = useAlbumCreator(albumsIn, { onCreate, onCreated, allowCreate, createPermission });
+  const albums = creator.albums;
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const options = useMemo(() => buildAlbumOptions(albums), [albums]);
@@ -304,7 +359,7 @@ export function AlbumSelect({ albums, value, onChange, noneLabel, compact, class
       {open && (
         <AlbumMenu anchor={btnRef} options={options} selected={value ? [value] : []} multi={false}
           onPick={(id) => onChange(id)} onClose={() => setOpen(false)} none={{ label: noneLabel, onPick: () => onChange("") }}
-          onCreate={canCreate ? (name) => { void onCreate!(name).then((id) => { if (id) { onChange(id); setOpen(false); } }); } : undefined} />
+          onCreate={creator.create ? (name, parentId) => { void creator.create!(name, parentId).then((id) => { if (id) { onChange(id); setOpen(false); } }); } : undefined} />
       )}
     </div>
   );
