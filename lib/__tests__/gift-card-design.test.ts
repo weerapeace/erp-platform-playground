@@ -237,3 +237,37 @@ describe("LINE SHOPPING — ข้อความลูกค้า / ของ�
     expect(isGiftOrder({ line_shopping: { isGift: false } })).toBe(false);
   });
 });
+
+describe("การ์ดพับแนวนอน + สลับทิศพับ (2026-11-27)", () => {
+  it("มีแม่แบบวันเกิดพับบน A6 แนวนอน (กระดาษ A5 แนวตั้ง)", async () => {
+    const { builtinTemplates: bt } = await import("@/lib/gift-card-design");
+    const t = bt().find((x) => x.id === "builtin:bday-fold-top")!;
+    expect(t.doc.fold).toBe("top");
+    expect([t.doc.w, t.doc.h]).toEqual([148, 210]);
+  });
+  it("พับข้าง → พับบน: แผ่นหมุนแนว · ชิ้นอยู่ครึ่งเดิม · หลังการ์ดหมุน 180° · สลับกลับได้ใกล้เดิม", async () => {
+    const { builtinTemplates: bt, switchFold, cleanDoc: cd } = await import("@/lib/gift-card-design");
+    const side = bt().find((x) => x.id === "builtin:bday-fold")!.doc;
+    const top = switchFold(side, "top");
+    expect([top.w, top.h, top.fold]).toEqual([148, 210, "top"]);
+    const heart = top.els.find((e) => e.src === "sticker:heart")!;   // เดิมอยู่หลังการ์ด (ซ้าย)
+    expect(heart.y + heart.h / 2).toBeLessThan(105);                 // ไปอยู่ครึ่งบน (หลัง)
+    expect(Math.abs(heart.rot)).toBe(180);
+    const hb = top.els.find((e) => e.text === "Happy Birthday")!;    // ปกหน้า → ครึ่งล่าง
+    expect(hb.y + hb.h / 2).toBeGreaterThan(105);
+    const msg = top.inside!.els.find((e) => e.role === "message")!;  // ข้อความลูกค้า → ด้านในครึ่งล่าง
+    expect(msg.y + msg.h / 2).toBeGreaterThan(105);
+    expect(cd(top).els.length).toBe(side.els.length);
+    const back = switchFold(top, "side");
+    const h2 = back.els.find((e) => e.src === "sticker:heart")!;
+    const h0 = side.els.find((e) => e.src === "sticker:heart")!;
+    expect(Math.abs(h2.x - h0.x)).toBeLessThan(0.5);
+    expect(Math.abs(h2.y - h0.y)).toBeLessThan(0.5);
+    expect(h2.rot).toBe(h0.rot);
+  });
+  it("การ์ดแผ่นเดียว / ทิศเดิม = ไม่เปลี่ยน", async () => {
+    const { switchFold, builtinTemplates: bt } = await import("@/lib/gift-card-design");
+    const plain = bt()[0].doc;
+    expect(switchFold(plain, "top")).toBe(plain);
+  });
+});

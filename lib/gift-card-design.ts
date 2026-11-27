@@ -193,6 +193,34 @@ export function newFoldedDoc(fold: CardFold = "side"): CardDoc {
   return { v: 1, w, h, bg: { color: "#fffdf8", image: null, fit: "cover" }, els: [], fold, inside: { bg: { color: "#ffffff", image: null, fit: "cover" }, els: inEls } };
 }
 
+/**
+ * สลับทิศพับ พับข้าง ↔ พับบน (เจ้าของเลือก 2026-11-27 ข้อ 6) — แผ่น A5 หมุนแนว ชิ้นทุกชิ้นย้ายตามครึ่งที่อยู่
+ *   พับข้าง: ซ้าย = หลัง/ในซ้าย · ขวา = ปกหน้า/ในขวา · พับบน: บน = หลัง (พิมพ์กลับหัว)/ในบน · ล่าง = ปกหน้า/ในล่าง
+ *   ตำแหน่ง = สัดส่วนเดิมในครึ่งนั้น · ขนาดชิ้น/ตัวอักษรคงเดิม (กล่องข้อความที่ล้นครึ่งใหม่ถูกบีบให้พอดี)
+ *   หลังการ์ด (ด้านนอกครึ่งแรก) พับบนต้องกลับหัว → หมุนชิ้น 180° ให้เอง · สลับกลับได้ (กดซ้ำ)
+ */
+export function switchFold(doc: CardDoc, to: CardFold): CardDoc {
+  if (!isFolded(doc) || doc.fold === to) return doc;
+  const from = doc.fold as CardFold;
+  const src = FOLD_SHEET[from], dst = FOLD_SHEET[to];
+  const half = (f: CardFold, sheet: { w: number; h: number }, i: 0 | 1) =>
+    f === "side" ? { x: i * sheet.w / 2, y: 0, w: sheet.w / 2, h: sheet.h } : { x: 0, y: i * sheet.h / 2, w: sheet.w, h: sheet.h / 2 };
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const move = (els: CardEl[], outside: boolean): CardEl[] => els.map((e) => {
+    const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+    const i: 0 | 1 = (from === "side" ? cx >= src.w / 2 : cy >= src.h / 2) ? 1 : 0;
+    const a = half(from, src, i), b = half(to, dst, i);
+    let u = (cx - a.x) / a.w, v = (cy - a.y) / a.h;
+    let rot = e.rot;
+    // หลังการ์ดด้านนอก: พับบนพิมพ์กลับหัว — เข้า = หมุน 180° · ออก = หมุนกลับ
+    if (outside && i === 0) { u = 1 - u; v = 1 - v; rot = to === "top" ? rot + 180 : rot - 180; if (rot > 180) rot -= 360; if (rot <= -180) rot += 360; }
+    const w = e.kind === "text" ? Math.min(e.w, b.w - 4) : e.w;
+    const h = e.kind === "text" ? Math.min(e.h, b.h - 4) : e.h;
+    return { ...e, w: r2(w), h: r2(h), x: r2(b.x + u * b.w - w / 2), y: r2(b.y + v * b.h - h / 2), rot };
+  });
+  return { ...doc, w: dst.w, h: dst.h, fold: to, els: move(doc.els, true), inside: doc.inside ? { ...doc.inside, els: move(doc.inside.els, false) } : doc.inside };
+}
+
 // ─── สติ๊กเกอร์ในตัว (ข้อ 9) ───
 
 const sv = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
@@ -407,6 +435,19 @@ export function builtinTemplates(): { id: string; name: string; group: string; d
     ];
     return d;
   })();
+  // พับบน เปิดขึ้น = หน้าการ์ด A6 แนวนอน (เจ้าของขอ 2026-11-27) · 148×210 · บน = หลังการ์ด (พิมพ์กลับหัว) · ล่าง = ปกหน้า
+  const foldBdayTop = (() => {
+    const d = newFoldedDoc("top");
+    d.bg = { color: "#fff4f1", image: null, fit: "cover" };
+    d.els = [
+      I({ x: 10, y: 112, w: 26, h: 30, rot: -10, src: "sticker:balloons" }),
+      I({ x: 116, y: 113, w: 22, h: 22, src: "sticker:confetti" }),
+      T({ x: 24, y: 138, w: 100, h: 26, text: "Happy Birthday", style: { font: "Great Vibes", size: 38, color: "#9b2c4a" } }),
+      I({ x: 62, y: 172, w: 24, h: 26, src: "sticker:cake" }),
+      I({ x: 67.5, y: 6, w: 13, h: 13, rot: 180, src: "sticker:heart" }),
+    ];
+    return d;
+  })();
   return [
     {
       id: `${BUILTIN_PREFIX}plain`, name: "การ์ดเรียบ", group: GROUP_GENERAL,
@@ -437,6 +478,7 @@ export function builtinTemplates(): { id: string; name: string; group: string; d
       ] },
     },
     { id: `${BUILTIN_PREFIX}bday-fold`, name: "วันเกิด พับ A6", group: GROUP_BDAY, doc: foldBday },
+    { id: `${BUILTIN_PREFIX}bday-fold-top`, name: "วันเกิด พับบน A6 แนวนอน", group: GROUP_BDAY, doc: foldBdayTop },
     // การ์ดสำเร็จรูป (ข้อความตายตัว ไม่มีช่องข้อความลูกค้า) — โหมด "การ์ดสำเร็จรูป" ในป๊อปคำสั่งพิเศษ (2026-11-25)
     {
       id: `${BUILTIN_PREFIX}ready-bday`, name: "สำเร็จรูป · Happy Birthday", group: GROUP_BDAY,

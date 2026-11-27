@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { usePermission } from "@/components/auth";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
-import { StatFilterCards } from "@/components/stat-filter-cards";
+import { StatFilterCards, type StatFilterCard } from "@/components/stat-filter-cards";
 import { PlatformBadge } from "@/components/platform-icon";
 import { Popover } from "@/components/popover";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
@@ -77,22 +77,23 @@ export const GIFT_INBOX_TABS: GiftInboxTab[] = ["no_ins", "ins_todo", "engrave_m
 export type GiftInboxKind = "" | "card" | "engrave" | "chat" | "other";
 export type GiftCounts = Partial<Counts>;
 
+/** การ์ดตัวเลขหลัก 3 ตัว (งานที่ต้องทำ) — ที่เหลืออยู่ใต้ "ดูทั้งหมด" */
+const MAIN_STATS: GiftInboxTab[] = ["no_ins", "engrave_missing", "due_soon"];
+
 export function GiftInbox({ tab, onTab, kind, onKind, openIns, onCounts }: {
   tab: GiftInboxTab; onTab: (t: GiftInboxTab) => void; kind: GiftInboxKind; onKind: (k: GiftInboxKind) => void;
   /** เปิดคำสั่งใบนี้ทันที (ลิงก์เก่า ?s=orders&open=) */
   openIns?: string | null; onCounts?: (c: GiftCounts) => void;
 }) {
   const [counts, setCounts] = useState<GiftCounts>({});
+  const [statsOpen, setStatsOpen] = useState(false);
   const onCountsRef = useRef(onCounts); onCountsRef.current = onCounts;
   const kinds: [GiftInboxKind, string, number | undefined][] = [["", "ทุกชนิด", counts.all], ["card", "การ์ด / ห่อ", counts.card], ["engrave", "สลักชื่อ", counts.engrave], ["chat", "แจ้งทางแชท", counts.chat], ["other", "หมายเหตุอื่น", counts.other]];
   return (
     <>
-      <StatFilterCards
-        className="mb-2"
-        value={tab}
-        onChange={(k) => onTab(k as GiftInboxTab)}
-        showZero
-        cards={[
+      {/* ตัวเลขแบบ B (เจ้าของเลือก 2026-11-27): 3 การ์ดงานที่ต้องทำ + "ดูทั้งหมด" ขยายตัวที่เหลือเป็นแถวเตี้ย · ตัวที่เป็น 0 ไม่โชว์ (ยกเว้นตัวที่เลือกอยู่) */}
+      {(() => {
+        const all: StatFilterCard[] = [
           { key: "no_ins", label: "ยังไม่สร้างคำสั่ง", value: counts.no_ins ?? null, tone: "warning", icon: <Icon value="i:inbox" />, hint: "ไม่นับที่ส่งแล้ว/ยกเลิก", keep: true },
           { key: "ins_todo", label: "คำสั่งยังไม่ทำ", value: counts.ins_todo ?? null, tone: "info", icon: <Icon value="i:gift" />, keep: true },
           { key: "engrave_missing", label: "สลัก แต่ไม่มีชื่อ", value: counts.engrave_missing ?? null, tone: "danger", icon: <Icon value="i:alert-triangle" />, hint: "ต้องทักลูกค้า", keep: true },
@@ -102,8 +103,23 @@ export function GiftInbox({ tab, onTab, kind, onKind, openIns, onCounts }: {
           { key: "done_today", label: "เสร็จวันนี้", value: counts.done_today ?? null, tone: "success", icon: <Icon value="i:check" />, keep: true },
           { key: "all", label: "ทั้งหมด", value: counts.all ?? null, tone: "neutral", keep: true },
           { key: "hidden", label: "ไม่ใช่งานพิเศษ", value: counts.hidden ?? null, tone: "neutral", icon: <Icon value="i:eye-off" />, hint: "ซ่อนไว้ · กดดูคืนได้", keep: true },
-        ]}
-      />
+        ];
+        const main = all.filter((c) => MAIN_STATS.includes(c.key as GiftInboxTab));
+        const rest = all.filter((c) => !MAIN_STATS.includes(c.key as GiftInboxTab)).map((c) => ({ ...c, keep: c.key === tab }));
+        const restShown = rest.filter((c) => c.keep || (c.value ?? 0) > 0);
+        const open = statsOpen || rest.some((c) => c.key === tab);
+        return (
+          <div className="mb-2">
+            <StatFilterCards value={tab} onChange={(k) => onTab(k as GiftInboxTab)} showZero cards={main} />
+            {open && restShown.length > 0 && <StatFilterCards className="mt-2" compact value={tab} onChange={(k) => onTab(k as GiftInboxTab)} cards={restShown} />}
+            {restShown.length > 0 && !rest.some((c) => c.key === tab) && (
+              <button type="button" onClick={() => setStatsOpen((o) => !o)} className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] text-slate-500 hover:bg-slate-100">
+                {statsOpen ? "ย่อ" : `ดูทั้งหมด (${restShown.length})`} <Icon value={statsOpen ? "i:chevron-up" : "i:chevron-down"} />
+              </button>
+            )}
+          </div>
+        );
+      })()}
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span className="text-[12px] text-slate-500">ชนิด:</span>
         {kinds.map(([k, l, n]) => (

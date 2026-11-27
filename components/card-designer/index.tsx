@@ -23,7 +23,7 @@ import type { TextFontOption, TextStyle } from "@/lib/text-style";
 import {
   CARD_FONTS, CARD_MAX_ELS, CARD_MAX_MM, CARD_MIN_MM, CARD_SIZES, FONT_SIZE_MAX, FONT_SIZE_MIN, STICKERS, elBox, fontStack, googleFontsHref,
   newElId, newImageEl, newShapeEl, newTextEl, resizeDoc, resolveSrc, stickerDataUrl, textCss, uploadFontFaces,
-  faceDoc, foldLine, isFolded, withFace,
+  faceDoc, foldLine, isFolded, switchFold, withFace,
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
@@ -507,6 +507,12 @@ export function CardDesignerAny({ value, onChange, uploadedFonts = [], height = 
           ))}
         </div>
         <span className="text-[12px] text-slate-500">การ์ดพับ A6 (กระดาษ A5 พับครึ่ง · {side ? "พับข้าง เปิดแบบหนังสือ" : "พับบน เปิดขึ้น"}) · เส้นปะแดง = รอยพับ ไม่ติดตอนพิมพ์</span>
+        {/* สลับทิศพับ (เจ้าของเลือก 2026-11-27 ข้อ 6) — ชิ้นย้ายตามให้เอง · กดอีกครั้ง = สลับกลับ */}
+        <button type="button" onClick={() => onChange(switchFold(valueRef.current, side ? "top" : "side"))}
+          title={side ? "เปลี่ยนเป็นพับบน เปิดขึ้น — หน้าการ์ด A6 แนวนอน" : "เปลี่ยนเป็นพับข้าง เปิดแบบหนังสือ — หน้าการ์ด A6 แนวตั้ง"}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-700 hover:bg-slate-50">
+          <Icon value="i:arrows-exchange" /> {side ? "เปลี่ยนเป็นหน้าแนวนอน (พับบน)" : "เปลี่ยนเป็นหน้าแนวตั้ง (พับข้าง)"}
+        </button>
       </div>
       <CardDesigner key={face} value={faceDoc(value, face)} onChange={onFace} uploadedFonts={uploadedFonts} height={height} fold={foldLine(value)} lockSize faceNote={note} />
     </div>

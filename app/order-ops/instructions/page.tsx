@@ -88,6 +88,7 @@ function Body() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [optOpen, setOptOpen] = useState(false);
   const [engraveOpen, setEngraveOpen] = useState(false);
+  const [descOpen, setDescOpen] = useState(false);
   const canEditIns = usePermission("order_ops.edit");
   const canDeleteIns = usePermission("order_ops.delete");
   const { options: hubOptions, reload: reloadOptions } = useOpsOptions();
@@ -107,9 +108,11 @@ function Body() {
   return (
     <>
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-bold text-slate-900">คำสั่งพิเศษ &amp; การ์ด</h1>
-          <p className="text-sm text-slate-500">ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก/แจ้งทางแชท → กดแถวสร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
+          {/* คำอธิบายย่อบรรทัดเดียว — ชี้/แตะเพื่ออ่านเต็ม (เจ้าของเลือก 2026-11-27 ข้อ 4) */}
+          <p onClick={() => setDescOpen((o) => !o)} title="ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก/แจ้งทางแชท → กดแถวสร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์"
+            className={`max-w-[46rem] cursor-pointer text-sm text-slate-500 ${descOpen ? "" : "truncate"}`}>ออเดอร์ที่ลูกค้าฝากข้อความ/ซื้อสินค้าสลัก/แจ้งทางแชท → กดแถวสร้างคำสั่งพิเศษ → พิมพ์การ์ด/ใบสลัก → รอของ · เด้งเตือนที่หน้าแพ็กของตอนสแกนออเดอร์</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {canEditIns && <button type="button" onClick={() => setChatNew(true)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" title="ลูกค้าแจ้งทางแชท ไม่ได้ลงหมายเหตุในออเดอร์"><Icon value="i:plus" /> คำสั่งพิเศษ</button>}
