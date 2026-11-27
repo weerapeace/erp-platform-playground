@@ -23,7 +23,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { DeliveryBillLine } from "@/lib/delivery-bill";
 import { normDesc, ruleForDescription, autoMatchBoxes, boxWeightCheck, type DescRule } from "@/lib/delivery-bill-check";
-import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billDirty, matchCopyRow } from "@/lib/delivery-bill-share";
+import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billDirty, boxKey, dupBoxStatus } from "@/lib/delivery-bill-share";
 import { QtyCheckCard, type BoxSuggestion } from "./qty-check";
 
 export type BillRow = {
@@ -33,7 +33,7 @@ export type BillRow = {
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
 export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean; kg_per_unit?: number | null; cbm_per_unit?: number | null };
 type VOpt = { id: string; pv_no: string | null; status: string; voucher_date: string | null; seller_name: string | null; why: string };
-type ShortRow = { idx: number; no: number | null; description: string | null; qty: number | null; weight_kg: number | null; m3: number | null; owner?: string | null; applied?: boolean };
+type ShortRow = { idx: number; no: number | null; description: string | null; qty: number | null; weight_kg: number | null; m3: number | null; owner?: string | null; applied?: boolean; stock?: string | null; po_no?: string | null };
 type Dup = { bill_id: string; tracking_no: string; voucher_id: string; pv_no: string | null; created_at: string; rows: number; lines?: ShortRow[] };
 type Parked = { bill_id: string; tracking_no: string | null; bill_date: string | null; voucher_id: string; pv_no: string | null; rows: ShortRow[] };
 type Draft = { tracking_no: string; bill_date: string; lines: DeliveryBillLine[] };
@@ -73,7 +73,8 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   const [vouchers, setVouchers] = useState<VOpt[]>([]);   // ใบที่เลือกเป็นเจ้าของแถวได้
   const [dups, setDups] = useState<Dup[]>([]);
   const [parked, setParked] = useState<Parked[]>([]);
-  const [claim, setClaim] = useState<{ billId: string; title: string; note: string; rows: ShortRow[]; picked: Set<number>; dropBillId: string | null } | null>(null);
+  // ★ 11-27 extra = กล่องในใบซ้ำของใบนี้ที่ใบเดิมไม่มี (ใบเดิมลบไปแล้ว) → เพิ่มเข้าใบเดิมเป็นของใบนี้
+  const [claim, setClaim] = useState<{ billId: string; title: string; note: string; rows: ShortRow[]; picked: Set<number>; dropBillId: string | null; extra: ShortRow[]; pickedAdd: Set<number> } | null>(null);
   const [dupAsk, setDupAsk] = useState<{ billId: string; dups: { voucher_id: string; pv_no: string | null }[] } | null>(null);
   const [searchFor, setSearchFor] = useState<{ billId: string; idx: number } | null>(null);
   const [pvQ, setPvQ] = useState("");
@@ -250,32 +251,33 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   const openShare = (billId: string) => {
     const mine = bills.find((b) => b.id === billId); if (!mine) return;
     const tn = String(mine.tracking_no ?? "").trim().toUpperCase();
-    const copies = dups.filter((d) => d.tracking_no === tn && d.lines?.length);
+    const copies = dups.filter((d) => d.tracking_no === tn);
     const target = [...copies].sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
     if (!target) { toast.error("ไม่พบใบส่งของเดิมของเลขนี้ — โหลดใหม่แล้วลองอีกครั้ง"); return; }
-    // ติ๊กให้ก่อน: กล่องที่ใบนี้จับคู่สินค้าไว้แล้วในใบซ้ำ
     const myLines = draft[billId]?.lines ?? mine.lines ?? [];
-    const picked = new Set<number>();
-    for (const r of target.lines ?? []) {
-      const asLine = { ...r, stock: null, po_no: null, pack: null, package: null, voucher_line_ids: [] } as unknown as DeliveryBillLine;
-      const hit = matchCopyRow(myLines, asLine, r.idx);
-      if (hit && hit.voucher_line_ids.length > 0) picked.add(r.idx);
-    }
-    setClaim({ billId: target.bill_id, dropBillId: billId, picked, rows: target.lines ?? [],
+    const myOwned = myLines.map((l, idx) => ({ l, idx })).filter((x) => rowOwner(x.l, mine.voucher_id) === voucherId);
+    const myKeys = new Set(myOwned.map((x) => boxKey(x.l)));
+    const tRows = target.lines ?? [];
+    const tKeys = new Set(tRows.map((r) => boxKey(r)));
+    // ติ๊กให้ก่อน: กล่องในใบเดิมที่เป็นกล่องเดียวกับของใบนี้ (และยังรับได้)
+    const picked = new Set(tRows.filter((r) => myKeys.has(boxKey(r)) && !(r.applied && r.owner && r.owner !== voucherId)).map((r) => r.idx));
+    // กล่องของใบนี้ที่ใบเดิมไม่มี (ใบเดิมลบไปแล้ว) → เพิ่มเข้าใบเดิมเป็นของใบนี้ (ติ๊กไว้)
+    const extra: ShortRow[] = myOwned.filter((x) => !tKeys.has(boxKey(x.l))).map((x) => ({ idx: x.idx, no: x.l.no ?? null, description: x.l.description, qty: x.l.qty, weight_kg: x.l.weight_kg, m3: x.l.m3, stock: x.l.stock, po_no: x.l.po_no, applied: !!x.l.applied_at }));
+    setClaim({ billId: target.bill_id, dropBillId: billId, picked, rows: tRows, extra, pickedAdd: new Set(extra.map((r) => r.idx)),
       title: `ใช้ร่วมกับ ${target.pv_no ?? "ใบเดิม"}`,
-      note: `ใบส่งของ ${tn} อัปโหลดไว้ที่ ${target.pv_no ?? "ใบอื่น"} แล้ว — ติ๊กกล่องที่เป็นของใบนี้ · การจับคู่สินค้าที่ทำไว้ในใบซ้ำของใบนี้จะยกไปให้ · ใบซ้ำของใบนี้จะถูกเอาออก (เก็บไว้ ไม่ลบถาวร)` });
+      note: `ใบส่งของ ${tn} อัปโหลดไว้ที่ ${target.pv_no ?? "ใบอื่น"} แล้ว — ติ๊กกล่องที่เป็นของใบนี้ · การจับคู่สินค้า + น้ำหนัก/คิวที่ใช้แล้วยกไปให้ · ใบซ้ำของใบนี้จะถูกเอาออก (เก็บไว้ ไม่ลบถาวร)` });
   };
-  const openParked = (p: Parked) => setClaim({ billId: p.bill_id, dropBillId: null, picked: new Set(), rows: p.rows,
+  const openParked = (p: Parked) => setClaim({ billId: p.bill_id, dropBillId: null, picked: new Set(), rows: p.rows, extra: [], pickedAdd: new Set(),
     title: "รับกล่องที่พักไว้เข้าใบนี้", note: `ใบส่งของ ${p.tracking_no ?? "—"} (${p.bill_date ? formatDate(p.bill_date) : "—"}) จาก ${p.pv_no ?? "ใบอื่น"} — ติ๊กกล่องที่เป็นของใบนี้` });
   const doClaim = async () => {
-    if (!claim || claim.picked.size === 0) return;
+    if (!claim || claim.picked.size + claim.pickedAdd.size === 0) return;
     setBusy("claim");
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "claim", bill_id: claim.billId, rows: [...claim.picked], drop_bill_id: claim.dropBillId }) });
+        body: JSON.stringify({ action: "claim", bill_id: claim.billId, rows: [...claim.picked], add_rows: [...claim.pickedAdd], drop_bill_id: claim.dropBillId }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-      toast.success(`รับ ${j.claimed} กล่องเข้าใบนี้แล้ว${j.dropped ? " · เอาใบซ้ำของใบนี้ออกแล้ว" : ""} — ตรวจการจับคู่แล้วกด ใช้น้ำหนัก/คิว`);
+      toast.success(`ใช้ร่วมแล้ว: รับ ${j.claimed} กล่อง${j.added ? ` + เพิ่ม ${j.added} กล่องที่ใบเดิมไม่มี` : ""}${j.dropped ? " · เอาใบซ้ำของใบนี้ออกแล้ว" : ""} — ตรวจการจับคู่แล้วกด ใช้น้ำหนัก/คิว (ถ้ายังไม่ได้ใช้)`);
       if (claim.dropBillId) setDraft((p) => { const n = { ...p }; delete n[claim.dropBillId!]; return n; });
       setClaim(null);
       await load();
@@ -417,7 +419,11 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
             const tn = String(b.tracking_no ?? "").trim().toUpperCase();
             const copies = isHome ? dups.filter((x) => x.tracking_no === tn) : [];
             const firstCopy = [...copies].sort((x, y) => x.created_at.localeCompare(y.created_at))[0];
-            const iAmCopy = !!firstCopy && firstCopy.created_at < b.created_at;
+            // ★ 11-27 สำเนาเลขเดียวกัน: แยกกล่องกันถูกแล้ว = ไม่เตือน · กล่องเดียวกันอยู่หลายใบ = เหลือง (ใช้ร่วม) · ใช้ค่าส่งทั้ง 2 ใบ = แดง
+            const dupSt = copies.length ? dupBoxStatus(
+              d.lines.filter((l) => rowOwner(l, home) === voucherId).map((l) => ({ key: boxKey(l), applied: !!l.applied_at || (b.status === "applied" && !d.lines.some((x) => x.applied_at)) })),
+              copies.flatMap((c) => (c.lines ?? []).map((r) => ({ key: boxKey(r), owner: r.owner ?? null, applied: !!r.applied, pv: c.pv_no })))) : null;
+            const dupBoxName = (k: string) => d.lines.find((l) => boxKey(l) === k)?.description ?? k;
             const dirty = isDirty(b.id);
             const ownerOpts = [...vouchers.filter((v) => v.id !== voucherId)];
             for (const l of d.lines) { const o = rowOwner(l, home); if (o && o !== voucherId && !ownerOpts.some((v) => v.id === o)) ownerOpts.push({ id: o, pv_no: pvOf(o), status: "", voucher_date: null, seller_name: null, why: "linked" }); }
@@ -446,15 +452,20 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                   </div>
                 </div>
                 {/* ข้อเสนอ 1: เลขขนส่งซ้ำกับใบอื่น (อัปโหลดซ้ำ) */}
-                {copies.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[11px] bg-amber-50 border-t border-amber-200 text-amber-900">
-                    {iAmCopy ? <>
-                      <span>⚠ ใบส่งของ {tn} อยู่ใน {firstCopy.pv_no ?? "ใบอื่น"} แล้ว (อัปโหลดซ้ำ) — ใช้ร่วมกันดีกว่า ค่าส่งจะไม่ซ้ำ</span>
-                      {!readonly && <button onClick={() => openShare(b.id)} className="h-7 px-2.5 rounded-md border border-amber-400 bg-white text-amber-900 hover:bg-amber-100 font-medium whitespace-nowrap">ใช้ร่วมกับ {firstCopy.pv_no ?? "ใบเดิม"}</button>}
-                      {readonly && <span className="text-amber-700">(กด แก้ไขใบ ก่อน)</span>}
-                    </> : <span>ⓘ ใบส่งของเลขนี้อัปโหลดไว้ใน {copies.map((c) => c.pv_no ?? "ใบอื่น").join(", ")} ด้วย — ใบนี้เป็นใบแรก ให้ใบนั้นกด &ldquo;ใช้ร่วม&rdquo; หรือเลือกช่อง &ldquo;ของใบ&rdquo; ที่นี่ว่ากล่องไหนเป็นของใบไหน</span>}
+                {dupSt && dupSt.doubleCharged.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[11px] bg-red-50 border-t border-red-200 text-red-800">
+                    <span>⚠ ค่าส่งซ้ำ: กล่อง {dupSt.doubleCharged.map((x) => `${dupBoxName(x.key)} (ใช้ที่ ${x.pv ?? "ใบอื่น"} ด้วย)`).join(", ")} ใช้น้ำหนัก/คิวทั้งใบนี้และใบอื่น — เลือกช่อง &ldquo;ของใบ&rdquo; ให้เหลือใบเดียว (หรือ ✕ ลบแถวในใบที่ไม่ใช่) แล้วกด ใช้น้ำหนัก/คิว ใหม่</span>
+                    {!readonly && firstCopy && <button onClick={() => openShare(b.id)} className="h-7 px-2.5 rounded-md border border-red-300 bg-white text-red-800 hover:bg-red-100 font-medium whitespace-nowrap">ใช้ร่วมกับ {firstCopy.pv_no ?? "ใบเดิม"}</button>}
                   </div>
-                )}
+                ) : dupSt && dupSt.overlap.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[11px] bg-amber-50 border-t border-amber-200 text-amber-900">
+                    <span>⚠ ใบส่งของ {tn} อยู่ใน {copies.map((c) => c.pv_no ?? "ใบอื่น").join(", ")} ด้วย และมีกล่องเดียวกัน ({dupSt.overlap.map(dupBoxName).join(", ")}) — ใช้ร่วมกัน หรือเลือกช่อง &ldquo;ของใบ&rdquo; ให้แต่ละกล่องอยู่ใบเดียว ค่าส่งจะไม่ซ้ำ</span>
+                    {!readonly && firstCopy && <button onClick={() => openShare(b.id)} className="h-7 px-2.5 rounded-md border border-amber-400 bg-white text-amber-900 hover:bg-amber-100 font-medium whitespace-nowrap">ใช้ร่วมกับ {firstCopy.pv_no ?? "ใบเดิม"}</button>}
+                    {readonly && <span className="text-amber-700">(กด แก้ไขใบ ก่อน)</span>}
+                  </div>
+                ) : dupSt ? (
+                  <div className="px-3 py-1 text-[10px] text-slate-400 border-t border-slate-100">ⓘ ใบส่งของเลขนี้แยกกล่องกับ {copies.map((c) => c.pv_no ?? "ใบอื่น").join(", ")} แล้ว — ไม่มีกล่องซ้ำ</div>
+                ) : null}
                 {wc && (
                   <div className="px-3 py-1.5 text-[11px] bg-red-50 border-t border-red-200 text-red-800">
                     ⚠ น้ำหนักสินค้าในใบรวม {fmtN(wc.line_kg, 3)} กก. / {fmtN(wc.line_m3, 5)} คิว แต่กล่องที่จับคู่ {fmtN(wc.box_kg, 3)} กก. / {fmtN(wc.box_m3, 5)} คิว — จำนวนชิ้นในใบผิด หรือใช้น้ำหนัก/คิวตอนจำนวนยังไม่ถูก? {readonly ? "กด แก้ไขใบ แล้ว" : ""}แก้จำนวนให้ถูก แล้วกด ✓ ใช้น้ำหนัก/คิว อีกครั้ง (ค่าส่งจะคิดใหม่)
@@ -593,8 +604,8 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
         <ERPModal open onClose={() => busy !== "claim" && setClaim(null)} size="md" storageKey="pv-bill-claim" title={claim.title} description={claim.note}
           footer={<>
             <button onClick={() => setClaim(null)} disabled={busy === "claim"} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-            <button onClick={() => void doClaim()} disabled={busy === "claim" || claim.picked.size === 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-              {busy === "claim" ? "กำลังบันทึก…" : `รับ ${claim.picked.size} กล่องเข้าใบนี้${claim.dropBillId ? " + เอาใบซ้ำออก" : ""}`}</button>
+            <button onClick={() => void doClaim()} disabled={busy === "claim" || claim.picked.size + claim.pickedAdd.size === 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
+              {busy === "claim" ? "กำลังบันทึก…" : `${claim.picked.size ? `รับ ${claim.picked.size} กล่อง` : ""}${claim.picked.size && claim.pickedAdd.size ? " + " : ""}${claim.pickedAdd.size ? `เพิ่ม ${claim.pickedAdd.size} กล่อง` : ""}${!claim.picked.size && !claim.pickedAdd.size ? "ยังไม่ได้เลือกกล่อง" : ""}${claim.dropBillId ? " + เอาใบซ้ำออก" : ""}`}</button>
           </>}>
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
             {claim.rows.map((r) => {
@@ -610,7 +621,27 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                 </label>
               );
             })}
+            {claim.rows.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ใบเดิมไม่มีกล่องเหลือ</div>}
           </div>
+          {claim.extra.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs font-medium text-slate-700 mb-1">กล่องของใบนี้ที่ใบเดิมไม่มี <span className="font-normal text-slate-400">(ใบเดิมลบไปแล้ว) — จะเพิ่มเข้าใบเดิมเป็นของใบนี้</span></div>
+              <div className="border border-emerald-200 rounded-lg divide-y divide-emerald-100">
+                {claim.extra.map((r) => {
+                  const on = claim.pickedAdd.has(r.idx);
+                  return (
+                    <label key={`add-${r.idx}`} className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2 text-sm cursor-pointer ${on ? "bg-emerald-50" : "hover:bg-slate-50"}`}>
+                      <input type="checkbox" checked={on} onChange={(e) => setClaim((c) => { if (!c) return c; const s = new Set(c.pickedAdd); if (e.target.checked) s.add(r.idx); else s.delete(r.idx); return { ...c, pickedAdd: s }; })} className="rounded border-slate-300" />
+                      <span className="font-mono text-[11px] text-slate-400 w-6">{billLineNo(r.no, r.idx)}</span>
+                      <span className="font-medium text-slate-800">{r.description ?? "—"}</span>
+                      <span className="text-xs text-slate-500 whitespace-nowrap">Qty {r.qty ?? "—"} · {r.weight_kg ?? "—"} กก. · {r.m3 ?? "—"} คิว</span>
+                      <span className="ml-auto text-[10px] text-emerald-700 whitespace-nowrap">+ เพิ่มเป็นของใบนี้{r.applied ? " · ใช้แล้ว (ยกไปด้วย)" : ""}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </ERPModal>
       )}
 

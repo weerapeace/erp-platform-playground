@@ -132,3 +132,29 @@ export function matchCopyRow(copyLines: DeliveryBillLine[], target: DeliveryBill
   if (same && desc(same) === desc(target)) return same;
   return copyLines.find((c) => desc(c) === desc(target) && c.qty === target.qty) ?? null;
 }
+
+/**
+ * ★ 2026-11-27 กล่องเดียวกันไหม (ข้ามสำเนาใบส่งของเลขเดียวกัน) — P/o.No ของขนส่งไม่ซ้ำต่อกล่อง → ใช้ก่อน · ไม่มีใช้ Stock · ไม่มีใช้เลขบรรทัด + Description
+ *   ใช้: ป๊อปใช้ร่วม (กล่องที่ใบเดิมไม่มี = เพิ่มเข้าไป) · แถบอัปโหลดซ้ำ (ไม่ทับกัน = ไม่เตือน · ใช้ค่าส่งทั้ง 2 ใบ = แถบแดง)
+ */
+export function boxKey(l: { po_no?: unknown; stock?: unknown; no?: unknown; description?: unknown }): string {
+  const n = (x: unknown) => String(x ?? "").replace(/\s+/g, "").toUpperCase();
+  if (n(l.po_no)) return "po:" + n(l.po_no);
+  if (n(l.stock)) return "st:" + n(l.stock);
+  return `no:${l.no ?? ""}|${n(l.description)}`;
+}
+
+/**
+ * ★ 2026-11-27 สำเนาใบส่งของเลขเดียวกันหลายใบ: กล่องของใบนี้ซ้ำกับกล่องที่ใบอื่นถือไหม
+ *   overlap = กล่องของใบนี้ที่ใบอื่นก็มี (ยังมีเจ้าของ) → ควรใช้ร่วม/เลือกให้เหลือใบเดียว
+ *   doubleCharged = กล่องที่ทั้งใบนี้และใบอื่นใช้น้ำหนัก/คิวแล้ว → ค่าส่งถูกคิดซ้ำ (แถบแดง)
+ *   ไม่ทับกันเลย = ทีมแยกกล่องกันถูกแล้ว ไม่ต้องเตือน
+ */
+export function dupBoxStatus(mine: { key: string; applied: boolean }[], others: { key: string; owner: string | null; applied: boolean; pv: string | null }[]):
+  { overlap: string[]; doubleCharged: { key: string; pv: string | null }[] } {
+  const owned = others.filter((o) => o.owner);
+  const overlap = mine.filter((m) => owned.some((o) => o.key === m.key)).map((m) => m.key);
+  const doubleCharged: { key: string; pv: string | null }[] = [];
+  for (const m of mine) { if (!m.applied) continue; const o = owned.find((x) => x.key === m.key && x.applied); if (o) doubleCharged.push({ key: m.key, pv: o.pv }); }
+  return { overlap: [...new Set(overlap)], doubleCharged };
+}

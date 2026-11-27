@@ -82,7 +82,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   const tracks = [...new Set(((own ?? []) as Row[]).map((b) => str(b.tracking_no).toUpperCase()).filter(Boolean))];
   let dupRows: Row[] = [];
   if (tracks.length) {
-    const { data } = await admin.from("purchase_delivery_bills").select("id, tracking_no, voucher_id, created_at, lines").in("tracking_no", tracks).neq("kind", "seller").not("is_active", "is", false);
+    const { data } = await admin.from("purchase_delivery_bills").select("id, tracking_no, voucher_id, created_at, lines, status").in("tracking_no", tracks).neq("kind", "seller").not("is_active", "is", false);
     dupRows = ((data ?? []) as Row[]).filter((b) => !ownIds.has(String(b.id)));
   }
 
@@ -107,7 +107,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   }
   const vouchers = [...vmap.values()].sort((a, b) => String(b.voucher_date ?? "").localeCompare(String(a.voucher_date ?? "")));
   const duplicates = dupRows.map((d) => ({ bill_id: String(d.id), tracking_no: str(d.tracking_no).toUpperCase(), voucher_id: String(d.voucher_id), pv_no: vmap.get(String(d.voucher_id))?.pv_no ?? null, created_at: String(d.created_at ?? ""), rows: linesOf(d).length,
-    lines: linesOf(d).map((l, idx) => ({ idx, no: l.no ?? null, description: l.description, qty: l.qty, weight_kg: l.weight_kg, m3: l.m3, owner: rowOwner(l, String(d.voucher_id)), applied: !!l.applied_at })) }));
+    lines: linesOf(d).map((l, idx) => ({ idx, no: l.no ?? null, description: l.description, qty: l.qty, weight_kg: l.weight_kg, m3: l.m3, stock: l.stock ?? null, po_no: l.po_no ?? null, owner: rowOwner(l, String(d.voucher_id)), applied: !!l.applied_at || (d.status === "applied" && !linesOf(d).some((x) => x.applied_at)) })) }));
 
   // กล่องที่พักไว้ อาจเป็นของใบนี้ (ข้อเสนอ 4) — ใบนี้ยังไม่มีใบส่งของเลย · ช่วงวันใกล้กัน
   let parked: { bill_id: string; tracking_no: string | null; bill_date: string | null; voucher_id: string; pv_no: string | null; rows: { idx: number; no: number | null; description: string | null; qty: number | null; weight_kg: number | null; m3: number | null }[] }[] = [];
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const actorName = (user?.user_metadata?.name as string) || user?.email || null;
   const { id } = await params;
-  let body: { r2_key?: string; gr_id?: string | null; action?: string; bill_id?: string; rows?: unknown; drop_bill_id?: string | null };
+  let body: { r2_key?: string; gr_id?: string | null; action?: string; bill_id?: string; rows?: unknown; add_rows?: unknown; drop_bill_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
   const { data: v } = await admin.from("purchase_vouchers_v2").select("id, status, editing_at, pv_no").eq("id", id).maybeSingle();
@@ -166,7 +166,10 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
     if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว — กด แก้ไขใบ ก่อน แล้วค่อยรับแถวเข้าใบ" }, { status: 400 });
     const billId = str(body.bill_id);
     const want = [...new Set((Array.isArray(body.rows) ? body.rows : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0))];
-    if (!billId || want.length === 0) return NextResponse.json({ error: "เลือกแถวที่เป็นของใบนี้ก่อน" }, { status: 400 });
+    // ★ 11-27 กล่องในใบซ้ำของใบนี้ที่ใบเดิมไม่มี (ใบเดิมลบไปแล้ว) → เพิ่มเข้าใบเดิมเป็นของใบนี้ (ต้องมี drop_bill_id)
+    const addIdx = [...new Set((Array.isArray(body.add_rows) ? body.add_rows : []).map(Number).filter((n) => Number.isInteger(n) && n >= 0))];
+    if (!billId || want.length + addIdx.length === 0) return NextResponse.json({ error: "เลือกแถวที่เป็นของใบนี้ก่อน" }, { status: 400 });
+    if (addIdx.length && !body.drop_bill_id) return NextResponse.json({ error: "เพิ่มกล่องได้เฉพาะตอนใช้ร่วม (ต้องมีใบซ้ำของใบนี้)" }, { status: 400 });
     const { data: b } = await admin.from("purchase_delivery_bills").select("*").eq("id", billId).neq("kind", "seller").not("is_active", "is", false).maybeSingle();
     if (!b) return NextResponse.json({ error: "ไม่พบใบส่งของ" }, { status: 404 });
     const home = String((b as Row).voucher_id);
@@ -185,6 +188,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
       drop = dr as Row;
     }
     const copyLines = drop ? linesOf(drop) : [];
+    if (addIdx.some((i) => i >= copyLines.length || rowOwner(copyLines[i], id) !== id)) return NextResponse.json({ error: "กล่องที่จะเพิ่มไม่ตรงกับใบซ้ำ — โหลดใหม่แล้วลองอีกครั้ง" }, { status: 409 });
     const before = ownerSummary(lines, home);
     for (const i of want) {
       const l = lines[i];
@@ -194,18 +198,20 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
         voucher_line_ids: fromCopy?.voucher_line_ids?.length ? [...fromCopy.voucher_line_ids] : wasMine ? l.voucher_line_ids : [],
         method: l.method ?? fromCopy?.method ?? null, applied_at: wasMine ? l.applied_at ?? null : null };
     }
+    // กล่องที่ใบเดิมไม่มี → ต่อท้ายใบเดิมเป็นของใบนี้ (ยกการจับคู่ + ใช้แล้ว ไปด้วย)
+    for (const i of addIdx) { const l = copyLines[i]; lines.push({ ...l, hold: null, for_voucher_id: id === home ? null : id }); }
     const now = new Date().toISOString();
     const { error } = await admin.from("purchase_delivery_bills").update({ lines, status: billStatusAfter(lines, home), updated_at: now }).eq("id", billId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const after = ownerSummary(lines, home);
     await writeAudit(admin, { action: "update", entityType: "purchase_delivery_bills", entityId: billId, actorId: user?.id ?? null, actorName,
-      metadata: { note: drop ? `ใช้ร่วม: ${(v as Row).pv_no ?? "ใบนี้"} รับ ${want.length} แถว + เอาใบซ้ำออก` : `${(v as Row).pv_no ?? "ใบนี้"} รับ ${want.length} แถวเข้าใบ`, voucher_id: id, claimed_rows: want, dropped_copy: drop ? String(drop.id) : null, changes: auditDiff(before, after) } });
+      metadata: { note: drop ? `ใช้ร่วม: ${(v as Row).pv_no ?? "ใบนี้"} รับ ${want.length} แถว${addIdx.length ? ` + เพิ่ม ${addIdx.length} กล่องที่ใบเดิมไม่มี` : ""} + เอาใบซ้ำออก` : `${(v as Row).pv_no ?? "ใบนี้"} รับ ${want.length} แถวเข้าใบ`, voucher_id: id, claimed_rows: want, added_rows: addIdx, dropped_copy: drop ? String(drop.id) : null, changes: auditDiff(before, after) } });
     if (drop) {
       await admin.from("purchase_delivery_bills").update({ is_active: false, updated_at: now }).eq("id", String(drop.id));
       await writeAudit(admin, { action: "delete", entityType: "purchase_delivery_bills", entityId: String(drop.id), actorId: user?.id ?? null, actorName,
         metadata: { note: "ใบส่งของซ้ำ — ใช้ร่วมกับใบเดิมแทน (เก็บไว้ ไม่ลบถาวร)", voucher_id: id, merged_into_bill: billId, tracking_no: (drop.tracking_no as string) ?? null } });
     }
-    return NextResponse.json({ ok: true, claimed: want.length, dropped: drop ? String(drop.id) : null, error: null });
+    return NextResponse.json({ ok: true, claimed: want.length, added: addIdx.length, dropped: drop ? String(drop.id) : null, error: null });
   }
 
   // ── อ่านใบส่งของใหม่ด้วย AI ────────────────────────────────────────────────

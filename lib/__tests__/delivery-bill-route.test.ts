@@ -185,3 +185,28 @@ describe("★ 11-23 แบบ A ข้อ 2: อ่านใบส่งขอ�
     expect(j.auto).toBeNull();
   });
 });
+
+describe("★ 11-27 ใช้ร่วม เมื่อใบเดิมลบกล่องของใบอื่นไปแล้ว (เคสจริง EK-16661126)", () => {
+  it("ใบเดิมเหลือแค่ BAG (ใบนั้นใช้แล้ว) → ใบนี้เพิ่ม DECORATIONS + ORNAMENT เข้าใบเดิมเป็นของใบนี้ + เอาใบซ้ำออก", async () => {
+    const b16 = bill(B16), b15 = bill(B15);
+    b16.lines = [{ no: 1, po_no: "4E261108/44", description: "BAG", qty: 1, weight_kg: 0.29, m3: 0.0026, voucher_line_ids: ["L16-bag"], applied_at: "2026-11-27T13:18:50Z" }];
+    b16.status = "applied";
+    b15.lines = [
+      { no: 1, po_no: "4E261108/44", description: "BAG", qty: 1, weight_kg: 0.29, m3: 0.0026, voucher_line_ids: [] },
+      { no: 2, po_no: "4E261108556", description: "DECORATIONS", qty: 5, weight_kg: 0.09, m3: 0.0007, voucher_line_ids: ["L15-a"] },
+      { no: 3, po_no: "4E261108557", description: "ORNAMENT", qty: 3, weight_kg: 0.2, m3: 0.0015, voucher_line_ids: ["L15-b"], applied_at: "2026-11-27T13:26:13Z" },
+    ];
+    // กล่อง BAG ของใบเดิมใช้แล้ว → รับไม่ได้ · กล่องที่ใบเดิมไม่มี 2 กล่อง → เพิ่ม
+    const res = await POST(req("http://t/api", "POST", { action: "claim", bill_id: B16, rows: [], add_rows: [1, 2], drop_bill_id: B15 }), params(V15));
+    expect(await res.json()).toMatchObject({ ok: true, claimed: 0, added: 2, dropped: B15 });
+    const ls = linesOf(B16);
+    expect(ls.map((l) => [l.description, l.for_voucher_id ?? null])).toEqual([["BAG", null], ["DECORATIONS", V15], ["ORNAMENT", V15]]);
+    expect(ls[1].voucher_line_ids).toEqual(["L15-a"]);
+    expect(ls[2].applied_at).toBe("2026-11-27T13:26:13Z");   // ใช้แล้วยกไปด้วย
+    expect(bill(B15).is_active).toBe(false);
+  });
+  it("เพิ่มกล่องโดยไม่มีใบซ้ำ = ไม่ยอม", async () => {
+    const res = await POST(req("http://t/api", "POST", { action: "claim", bill_id: B16, rows: [], add_rows: [0] }), params(V15));
+    expect(res.status).toBe(400);
+  });
+});

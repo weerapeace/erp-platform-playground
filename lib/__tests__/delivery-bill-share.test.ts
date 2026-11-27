@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { DeliveryBillLine } from "@/lib/delivery-bill";
-import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billStatusAfter, billDirty, retargetRows, restoreRowTargets, matchCopyRow } from "@/lib/delivery-bill-share";
+import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billStatusAfter, billDirty, retargetRows, restoreRowTargets, matchCopyRow, boxKey, dupBoxStatus } from "@/lib/delivery-bill-share";
 
 const L = (p: Partial<DeliveryBillLine> = {}): DeliveryBillLine => ({ stock: null, po_no: null, description: "BOX", pack: 1, package: null, qty: 1, weight_kg: 1, m3: 0.01, method: null, voucher_line_ids: [], ...p });
 const H = "home", A = "va", B = "vb";
@@ -90,5 +90,25 @@ describe("ใช้ร่วม: ยกการจับคู่จากใ�
     expect(matchCopyRow(copy, L({ no: 2, description: "paper card" }), 1)?.voucher_line_ids).toEqual(["b"]);
     expect(matchCopyRow(copy, L({ description: "DECORATIONS" }), 0)?.voucher_line_ids).toEqual(["a"]);
     expect(matchCopyRow(copy, L({ no: 3, description: "OTHER" }), 2)).toBeNull();
+  });
+});
+
+describe("★ 11-27 สำเนาเลขเดียวกัน: กล่องเดียวกันไหม + ทับกันไหม (เคสจริง EK-16661126)", () => {
+  it("boxKey: P/o.No ก่อน · ไม่มีใช้ Stock · ไม่มีใช้เลขบรรทัด + Description", () => {
+    expect(boxKey({ po_no: "4E261108/44", stock: "bdg14169" })).toBe("po:4E261108/44");
+    expect(boxKey({ po_no: " 4e261108/44 " })).toBe("po:4E261108/44");
+    expect(boxKey({ stock: "bdg14353" })).toBe("st:BDG14353");
+    expect(boxKey({ no: 2, description: "Decorations / Ornament" })).toBe("no:2|DECORATIONS/ORNAMENT");
+  });
+  it("แต่ละใบถือกล่องคนละกล่อง (BAG→001 · ORNAMENT→002 · DECORATIONS→003) = ไม่ทับ ไม่เตือน", () => {
+    const r = dupBoxStatus([{ key: "po:557", applied: true }], [{ key: "po:44", owner: "v001", applied: true, pv: "001" }, { key: "po:556", owner: "v003", applied: true, pv: "003" }]);
+    expect(r).toEqual({ overlap: [], doubleCharged: [] });
+  });
+  it("กล่องเดียวกันอยู่ 2 ใบ ยังไม่ใช้ทั้งคู่ = ทับ (ควรใช้ร่วม) · ใช้แล้วทั้งคู่ = ค่าส่งซ้ำ", () => {
+    expect(dupBoxStatus([{ key: "po:44", applied: false }], [{ key: "po:44", owner: "v001", applied: true, pv: "001" }])).toEqual({ overlap: ["po:44"], doubleCharged: [] });
+    expect(dupBoxStatus([{ key: "po:44", applied: true }], [{ key: "po:44", owner: "v001", applied: true, pv: "001" }]).doubleCharged).toEqual([{ key: "po:44", pv: "001" }]);
+  });
+  it("กล่องที่ใบอื่นตั้งพักไว้/ไม่ใช่ของเรา = ไม่นับว่าทับ", () => {
+    expect(dupBoxStatus([{ key: "po:44", applied: true }], [{ key: "po:44", owner: null, applied: false, pv: "001" }]).overlap).toEqual([]);
   });
 });
