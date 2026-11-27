@@ -113,16 +113,17 @@ async function searchPages(q: string, can: CanFn, limit: number, scope: SearchSc
 
 // ---- 📖 วิธีใช้งาน — คู่มือทีละขั้น (erp_help_guides + steps) ----
 
-type GuideRow = { id: string; title: string; description: string | null; category: string | null; icon: string | null };
+type GuideRow = { id: string; title: string; description: string | null; category: string | null; icon: string | null; kind: string | null; status: string | null };
 type StepRow  = { guide_id: string; title: string | null; body: string | null; step_no: number };
 
 async function searchGuides(q: string, limit: number, scope: SearchScope | null): Promise<SearchHit[]> {
   const toks = tokensOf(q);
   if (toks.length === 0) return [];
   const admin = supabaseAdmin();
-  const { data: guides } = await admin.from("erp_help_guides").select("id, title, description, category, icon").eq("is_active", true);
+  const { data: guides } = await admin.from("erp_help_guides").select("id, title, description, category, icon, kind, status").eq("is_active", true);
   // ค้นในแอปเดี่ยว → เฉพาะคู่มือที่ชื่อ/หมวด/คำอธิบายมีคำของแอปนั้น
   const list = ((guides ?? []) as GuideRow[]).filter((g) => {
+    if (g.status === "draft") return false;   // บทเรียนร่างรอตรวจ (ศูนย์เรียนรู้) ไม่โผล่ในค้นหา
     if (!scope) return true;
     const text = norm(`${g.title} ${g.description ?? ""} ${g.category ?? ""}`);
     return scope.guideKeywords.some((k) => text.includes(norm(k)));
@@ -156,7 +157,7 @@ async function searchGuides(q: string, limit: number, scope: SearchScope | null)
     hits.push({
       entity_type: "guide", id: g.id, label: `${g.icon && isLegacyIconValue(g.icon) ? `${g.icon} ` : ""}${g.title}`,
       sublabel: matchedStep ? `${base} · ขั้นที่ ${matchedStep.step_no}: ${matchedStep.title ?? ""}` : base,
-      link_url: `/master/help-guides?guide=${g.id}`, score,
+      link_url: g.kind === "lesson" ? `/misc/learn?lesson=${g.id}` : `/master/help-guides?guide=${g.id}`, score,
     });
   }
   hits.sort((a, b) => b.score - a.score);

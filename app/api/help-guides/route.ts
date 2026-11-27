@@ -20,7 +20,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const key = (new URL(request.url).searchParams.get("key") ?? "").trim();
   const admin = supabaseAdmin();
 
-  let gq = admin.from("erp_help_guides").select("id, guide_key, title, icon, description, category, sort_order").eq("is_active", true);
+  let gq = admin.from("erp_help_guides").select("id, guide_key, title, icon, description, category, sort_order").eq("is_active", true).eq("kind", "help");   // บทเรียนสอนพนักงาน (kind=lesson) อยู่ที่ /api/learn
   if (key) gq = gq.eq("guide_key", key);
   const { data: guides, error } = await gq.order("sort_order", { ascending: true }).order("title", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

@@ -70,6 +70,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/misc/pdf-merge", keys: [] },
   // งานอื่นๆ → 🐾 ทะเบียนแมว — ดู / เพิ่ม-แก้-ลบ (ใช้ร่วมกันในบ้าน · docs/cat-registry.md · 2026-11-24)
   { href: "/misc/cats", prefixes: ["cats."] },
+  // งานอื่นๆ → 🎓 ศูนย์เรียนรู้ — อ่าน / สร้าง-แก้-เผยแพร่-ลบ (docs/learning-center.md · 2026-11-27)
+  { href: "/misc/learn", prefixes: ["learn."] },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */

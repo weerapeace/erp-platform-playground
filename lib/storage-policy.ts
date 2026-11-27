@@ -94,7 +94,8 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   customer_print_uploads: "supabase", // bucket print-uploads
   customer_review_return: "r2",  // lib/website-reviews-server + website-returns-server
   work_logs: "rule",             // รูปใบจดผลงาน /master/work-logs → ตัวอัปกลาง lib/file-upload
-  china_pay: "rule",             // สลิปโอน/รูปบิลจีน/บิล CTW ในแอปโอนเงินจีน /app/china-pay → ตัวอัปกลาง lib/file-upload
+  learning_videos: "drive",      // คลิปยาวของบทเรียน → โฟลเดอร์ Drive ต่อบท (/api/learn/[id]/drive · DriveUploadBox) · คลิปสั้นในขั้นตอน = MediaUploadField (คลังกลาง R2)
+  china_pay: "rule",            // สลิปโอน/รูปบิลจีน/บิล CTW ในแอปโอนเงินจีน /app/china-pay → ตัวอัปกลาง lib/file-upload
 };
 
 /**
