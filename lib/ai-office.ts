@@ -152,8 +152,17 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     does: "วันละ 2 รอบดึงรีวิวสินค้าจาก Shopee (ดาว ข้อความ ร้านตอบแล้วหรือยัง) และยอดถูกใจ/คอมเมนต์/แชร์ของโพสต์ Facebook และ Instagram มาไว้ในแท็บรีวิวและคอนเทนต์",
     trigger: `${DAILY} 09:00 + 21:00`, cron: "/api/cron/marketing-content", everyHours: 12,
     can: ["อ่านรีวิวจาก Shopee", "อ่านโพสต์เพจ Facebook/Instagram", "จดในระบบ"], cannot: ["ตอบรีวิว", "โพสต์/ลบโพสต์"],
-    source: "บันทึกรอบล่าสุด + ตาราง marketing_reviews / marketing_social_posts", href: "/marketing/dashboard?tab=reviews",
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_reviews / marketing_social_posts", href: "/marketing/dashboard",
     files: ["app/api/cron/marketing-content/route.ts", "lib/marketing-content-server.ts"],
+  },
+  {
+    id: "marketing-weekly", zone: "marketing", kind: "auto", icon: "📝",
+    title: "ผู้เขียนสรุปการตลาดรายสัปดาห์", titleEn: "Weekly marketing writer",
+    does: "ทุกวันจันทร์เช้ารวมตัวเลขสัปดาห์ที่แล้ว (ยอดขาย ช่องทาง สินค้า โฆษณา รีวิว โพสต์) ให้ AI เขียนบทสรุป สิ่งที่ควรทำ และสรุปรีวิว แล้วแจ้งกระดิ่ง",
+    trigger: "ทุกวันจันทร์ 08:30", cron: "/api/cron/marketing-weekly", everyHours: 168,
+    can: ["อ่านยอดขาย/โฆษณา/รีวิว/โพสต์", "ใช้ AI เขียนสรุป (มีค่าใช้จ่าย)", "ส่งแจ้งเตือน"], cannot: ["แก้ออเดอร์/โฆษณา/โปร", "ส่ง LINE"],
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_weekly_reports + แจ้งเตือน marketing.weekly", href: "/marketing/dashboard",
+    files: ["app/api/cron/marketing-weekly/route.ts", "lib/marketing-weekly-server.ts", "lib/marketing-weekly-calc.ts"],
   },
   {
     id: "marketing-promos", zone: "marketing", kind: "auto", icon: "🏷️",
@@ -161,7 +170,7 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     does: "ทุกเช้าดึงรายการโค้ดส่วนลด โปรลดราคา และแฟลชเซลจาก Shopee (ใช้ไปกี่ครั้ง ช่วงเวลา คนกดเตือน) มาไว้ในแท็บโปรโมชั่น เพื่อดูว่าโปรไหนได้ผล",
     trigger: `${DAILY} 08:50`, cron: "/api/cron/marketing-promos", everyHours: 24,
     can: ["อ่านรายการโปรจากร้าน", "จดรายการโปรในระบบ"], cannot: ["สร้าง/แก้/ปิดโปร", "แก้ราคา"],
-    source: "บันทึกรอบล่าสุด + ตาราง marketing_promotions", href: "/marketing/dashboard?tab=promos",
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_promotions", href: "/marketing/dashboard",
     files: ["app/api/cron/marketing-promos/route.ts", "lib/marketing-promos-server.ts", "lib/shopee-promos.ts"],
   },
   {
@@ -170,7 +179,7 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     does: "ทุกเที่ยงคืนจดยอดคนดู กดถูกใจ ดาว และรีวิวของสินค้าทุกตัวบน Shopee แล้วลบกับเมื่อวานเป็นยอดรายวัน ให้แท็บคนเข้าร้านและเตือนดาวตก/คนดูพุ่ง",
     trigger: `${DAILY} 00:05`, cron: "/api/cron/marketing-traffic", everyHours: 24,
     can: ["อ่านยอดคนดู/ดาว/รีวิวจากร้าน", "จดยอดในระบบ"], cannot: ["แก้สินค้าบนร้าน", "ตอบรีวิว"],
-    source: "บันทึกรอบล่าสุด + ตาราง marketing_item_stats", href: "/marketing/dashboard?tab=traffic",
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_item_stats", href: "/marketing/dashboard",
     files: ["app/api/cron/marketing-traffic/route.ts", "lib/marketing-traffic-server.ts", "lib/marketing-traffic-calc.ts"],
   },
   {
@@ -179,7 +188,7 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     does: "วันละ 2 รอบดึงยอดโฆษณาจาก Shopee Ads และ Meta Ads (ค่าโฆษณา ยอดขายจากโฆษณา คลิก) รายแคมเปญรายวัน มาไว้ในแท็บโฆษณาของหน้าการตลาด",
     trigger: `${DAILY} 08:40 + 20:40`, cron: "/api/cron/marketing-ads", everyHours: 12,
     can: ["อ่านยอดโฆษณาจาก Shopee / Meta", "จดยอดโฆษณาในระบบ"], cannot: ["แก้งบหรือแคมเปญ", "เปิด/ปิดโฆษณา"],
-    source: "บันทึกรอบล่าสุด + ตาราง marketing_ads_daily", href: "/marketing/dashboard?tab=ads",
+    source: "บันทึกรอบล่าสุด + ตาราง marketing_ads_daily", href: "/marketing/dashboard",
     files: ["app/api/cron/marketing-ads/route.ts", "lib/marketing-ads-server.ts", "lib/shopee-ads.ts", "lib/meta-ads.ts"],
   },
   {
@@ -188,7 +197,7 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     does: "ทุก 30 นาทีถาม Shopee และ Lazada ว่าแต่ละออเดอร์โดนค่าธรรมเนียมเท่าไหร่ และร้านได้เงินจริงเท่าไหร่ แล้วเก็บไว้ให้หน้าค่าธรรมเนียม/กำไรของการตลาด",
     trigger: "ทุก 30 นาที", cron: "/api/cron/platform-fees", everyHours: 1,
     can: ["อ่านรายได้ต่อออเดอร์จากร้าน", "จดค่าธรรมเนียมในออเดอร์ของเรา"], cannot: ["แก้อะไรบนร้าน", "แก้สถานะหรือยอดออเดอร์"],
-    source: "บันทึกรอบล่าสุด", href: "/marketing/dashboard?tab=fees",
+    source: "บันทึกรอบล่าสุด", href: "/marketing/dashboard",
     files: ["app/api/cron/platform-fees/route.ts", "lib/marketing-fees-server.ts", "lib/marketing-profit-calc.ts"],
   },
   {

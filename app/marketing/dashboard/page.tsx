@@ -12,6 +12,7 @@
  * ➕ 2026-11-25 รอบ 4 (แบบ A): แท็บ "คนเข้าร้าน" → app/marketing/dashboard/traffic-tab.tsx (/api/marketing/traffic)
  * ➕ 2026-11-25 รอบ 5 (แบบ A): แท็บ "ลูกค้า" → app/marketing/dashboard/customers-tab.tsx (/api/marketing/customers)
  * ➕ 2026-11-25 รอบ 6 (แบบ A): แท็บ "โปรโมชั่น" → app/marketing/dashboard/promos-tab.tsx (/api/marketing/promos)
+ * ➕ 2026-11-27 รอบ 8 (แบบ A): แท็บ "สรุปสัปดาห์" (weekly-tab.tsx · /api/marketing/weekly · พิมพ์ /print/marketing-weekly/[id] · ทุกจันทร์ /api/cron/marketing-weekly)
  * ➕ 2026-11-26 รอบ 7 (แบบ A): แท็บ "รีวิว" (reviews-tab.tsx · /api/marketing/reviews) + "คอนเทนต์" (content-tab.tsx · /api/marketing/content · คู่แข่ง /api/marketing/competitors)
  *   แท็บอยู่ใน URL (?tab=) — ลิงก์จากกระดิ่งแจ้งเตือนเปิดแท็บที่เกี่ยวข้องได้
  * ของกลาง: PlaygroundShell · PeriodPicker · CountUp · SimpleBarChart · DataTable (ค้นหา/เรียง/มุมมอง/ส่งออก Excel/ลิ้นชัก)
@@ -48,6 +49,7 @@ const CustomersTab = dynamic(() => import("./customers-tab").then((m) => m.Custo
 const PromosTab = dynamic(() => import("./promos-tab").then((m) => m.PromosTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บโปรโมชั่น…" /> });
 const ReviewsTab = dynamic(() => import("./reviews-tab").then((m) => m.ReviewsTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บรีวิว…" /> });
 const ContentTab = dynamic(() => import("./content-tab").then((m) => m.ContentTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บคอนเทนต์…" /> });
+const WeeklyTab = dynamic(() => import("./weekly-tab").then((m) => m.WeeklyTab), { ssr: false, loading: () => <LoadingState label="กำลังโหลดแท็บสรุปสัปดาห์…" /> });
 const ShopeeFileView = dynamic(() => import("./shopee-file-view"), { ssr: false, loading: () => <LoadingState label="กำลังโหลดข้อมูลไฟล์ Shopee…" /> });
 
 // ── รูปแบบตัวเลข ──
@@ -64,7 +66,7 @@ const pad = (n: number) => String(n).padStart(2, "0");
 const localYmd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const thisMonth = (): Period => { const now = new Date(); return { from: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, to: localYmd(now) }; };
 
-type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "fees" | "profit" | "ads" | "traffic" | "customers" | "promos" | "reviews" | "content" | "shopee_file";
+type Tab = "overview" | "sales" | "products" | "cancel" | "campaign" | "fees" | "profit" | "ads" | "traffic" | "customers" | "promos" | "reviews" | "content" | "weekly" | "shopee_file";
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "overview", label: "ภาพรวม", icon: "chart" },
   { key: "sales", label: "ยอดขาย & ช่องทาง", icon: "store" },
@@ -79,6 +81,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "promos", label: "โปรโมชั่น", icon: "tag" },
   { key: "reviews", label: "รีวิว", icon: "star" },
   { key: "content", label: "คอนเทนต์", icon: "image" },
+  { key: "weekly", label: "สรุปสัปดาห์", icon: "ai" },
   { key: "shopee_file", label: "ไฟล์ Shopee", icon: "import" },
 ];
 const isTab = (s: string | null): s is Tab => !!s && TABS.some((t) => t.key === s);
@@ -223,6 +226,7 @@ export default function MarketingOverviewPage() {
               {tab === "promos" && <PromosTab from={period.from} to={period.to} brandId={brandId} reloadKey={reloadKey} />}
               {tab === "reviews" && <ReviewsTab from={period.from} to={period.to} brandId={brandId} reloadKey={reloadKey} />}
               {tab === "content" && <ContentTab from={period.from} to={period.to} brandId={brandId} reloadKey={reloadKey} />}
+              {tab === "weekly" && <WeeklyTab brandId={brandId} brandName={d.filters.brands.find((b) => b.id === brandId)?.name ?? "ทุกแบรนด์"} reloadKey={reloadKey} />}
               {tab === "profit" && <ProfitTab from={period.from} to={period.to} platformId={platformId} brandId={brandId} reloadKey={reloadKey} />}
               {d.notes.length > 0 && (
                 <ul className="mt-6 space-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
