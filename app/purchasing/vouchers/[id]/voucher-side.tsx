@@ -5,10 +5,12 @@
  *   VoucherChecklistCard  ด้านขวาตอนเป็นร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน + "กดแล้วจะเกิดอะไร"
  *   VoucherConfirmModal   ป๊อปยืนยัน: บอก 4 อย่างที่จะเกิด (ออกเลข · อัปเดตราคา 3 ที่ · ใบล็อก · ต่อไปจ่ายเงิน)
  *   VoucherNextSteps      หลังยืนยัน: งานถัดไป 3 ช่อง (พิมพ์ใบซื้อ · จ่ายค่าสินค้า · ค่าส่ง)
+ *   ShipZeroFix           ★ 11-27 ค่าส่ง ฿0 เพราะอะไร + ปุ่มแก้ (เช็กลิสต์ · ป๊อปยืนยัน · ป๊อปก่อนบันทึกการแก้ไข) — สาเหตุ = lib/voucher-ship-zero
  * กติกาเช็กลิสต์/สถานะงานถัดไป = lib/purchase-voucher-checklist (pure, มีเทสต์) · ยืนยันจริงที่ API .../confirm
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
+import { isQuickFix, type ShipCause, type ShipFix } from "@/lib/voucher-ship-zero";
 import { Icon } from "@/components/icon";
 import { formatDate } from "@/lib/date";
 import { fmtMoney } from "@/lib/landed-cost";
@@ -58,12 +60,15 @@ const ROW: Record<CheckItem["level"], { icon: string; row: string; ic: string; h
 };
 const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
 
-export function CollapseCard({ title, summary, defaultOpen = false, tone, children }: {
+export function CollapseCard({ title, summary, defaultOpen = false, tone, children, id, openSignal = 0 }: {
   title: React.ReactNode; summary?: React.ReactNode; defaultOpen?: boolean; tone?: "warn"; children: React.ReactNode;
+  /** ★ 11-27 id ไว้เลื่อนไปหา · openSignal เปลี่ยน (> 0) = เปิดกล่องเอง (ปุ่ม "ไปจับคู่" / "ใส่เรท" ในกล่องค่าส่ง ฿0) */
+  id?: string; openSignal?: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  useEffect(() => { if (openSignal > 0) setOpen(true); }, [openSignal]);
   return (
-    <div className={`bg-white border rounded-xl ${tone === "warn" ? "border-amber-300" : "border-slate-200"}`}>
+    <div id={id} className={`bg-white border rounded-xl scroll-mt-4 ${tone === "warn" ? "border-amber-300" : "border-slate-200"}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50/60 rounded-xl">
         <span className="text-sm font-semibold text-slate-700">{title}</span>
@@ -73,6 +78,49 @@ export function CollapseCard({ title, summary, defaultOpen = false, tone, childr
         </span>
       </button>
       {open && <div className="px-4 pb-4">{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * ★ 2026-11-27 ค่าส่ง ฿0 เพราะอะไร + ปุ่มแก้ (เจ้าของเลือกข้อ 2 + 4) — ใช้ 3 ที่: เช็กลิสต์ข้างหน้า · ป๊อปยืนยัน · ป๊อปก่อนบันทึกการแก้ไข
+ * สาเหตุ/ยอดล่วงหน้า = lib/voucher-ship-zero · แก้แล้ว = ที่แก้ในหน้า (ยังไม่บันทึก) มีปุ่มย้อนกลับ
+ */
+export function ShipZeroFix({ info, onFix, undo, busy = false, compact = false }: {
+  info: { ship_thb: number; causes: ShipCause[]; preview_all_thb: number | null } | null;
+  onFix: (fixes: ShipFix[]) => void;
+  /** แก้ไปแล้ว (ยังไม่บันทึก) → กล่องเขียว "ค่าส่ง ฿x · ย้อนกลับ" */
+  undo?: (() => void) | null;
+  busy?: boolean; compact?: boolean;
+}) {
+  if (!info) return null;
+  if (!info.causes.length) {
+    if (!undo || !(info.ship_thb > 0)) return null;
+    return (
+      <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[13px] text-emerald-800 flex items-center gap-2 flex-wrap">
+        <Icon name="check" mode="line" size={14} className="shrink-0" />
+        <span>แก้ค่าส่งแล้ว: <b className="tabular-nums">฿{fmtMoney(info.ship_thb)}</b> <span className="text-[11px] text-emerald-700">(บันทึกตอนกดยืนยัน)</span></span>
+        <button type="button" onClick={undo} className="ml-auto text-xs text-emerald-700 underline hover:text-emerald-900">ย้อนกลับ</button>
+      </div>
+    );
+  }
+  const quick = info.causes.filter((c) => isQuickFix(c.fix));
+  return (
+    <div className={`rounded-lg bg-amber-50 border border-amber-200 ${compact ? "px-2.5 py-2" : "px-3 py-2.5"} text-[13px] text-amber-900`}>
+      <div className="font-medium mb-1 flex items-center gap-1.5"><Icon name="warning" mode="line" size={14} className="text-amber-600 shrink-0" />ค่าส่งยังเป็น ฿0 เพราะ</div>
+      <ol className="space-y-1.5">
+        {info.causes.map((c, k) => (
+          <li key={`${c.key}-${k}`} className="flex items-start gap-2 flex-wrap">
+            <span className="min-w-0 flex-1 leading-snug">{info.causes.length > 1 ? `${k + 1}. ` : ""}{c.text}{c.preview_thb != null && <span className="text-amber-700"> → ฿{fmtMoney(c.preview_thb)}</span>}</span>
+            <button type="button" disabled={busy} onClick={() => onFix([c.fix])}
+              className="shrink-0 h-7 px-2.5 text-xs rounded-md border border-amber-300 bg-white text-amber-800 hover:bg-amber-100 disabled:opacity-50">{c.fix_label}</button>
+          </li>
+        ))}
+      </ol>
+      {quick.length > 1 && info.preview_all_thb != null && (
+        <button type="button" disabled={busy} onClick={() => onFix(quick.map((c) => c.fix))}
+          className="mt-2 w-full h-8 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50">แก้ทั้ง {quick.length} ข้อ → ค่าส่ง ฿{fmtMoney(info.preview_all_thb)}</button>
+      )}
     </div>
   );
 }
@@ -241,7 +289,9 @@ function SummaryRows({ t, foreign, sym, fxRate }: { t: Totals; foreign: boolean;
 }
 
 /** ด้านขวาตอนเป็นร่าง: เช็กลิสต์ + สรุปยอด + บันทึกร่าง + ยืนยัน */
-export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null, onSetShip, hideSave = false, onEditFx, refFxDate = null, docDate = null }: {
+export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refFx = null, dirty, saving, onSave, onConfirm, onSetGoodsThb, revise = null, onSetShip, hideSave = false, onEditFx, refFxDate = null, docDate = null, shipFix = null, hideShipItem = false }: {
+  /** ★ 11-27 กล่อง "ค่าส่ง ฿0 เพราะ…" + ปุ่มแก้ (ShipZeroFix) — เห็นก่อนกดยืนยัน · hideShipItem = ซ่อนแถว "ค่าส่ง" ในเช็กลิสต์ (กล่องนี้บอกละเอียดกว่า) */
+  shipFix?: React.ReactNode; hideShipItem?: boolean;
   items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   /** เรทอ้างอิง (เรทหยวนวันที่ใบ) — ใช้เตือนเรทผิดปกติ · ไม่มี = ไม่เทียบ */
   refFx?: number | null;
@@ -263,7 +313,8 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="px-4 pt-3 pb-3">
         <SectionTitle icon="inspect">ตรวจก่อนยืนยัน<CheckChip items={items} /></SectionTitle>
-        <div className="-mx-2"><CheckList items={items} /></div>
+        <div className="-mx-2"><CheckList items={hideShipItem ? items.filter((c) => c.key !== "ship") : items} /></div>
+        {shipFix && <div className="mt-2">{shipFix}</div>}
       </div>
       <MoneySection t={totals} foreign={foreign} sym={sym} fxRate={fxRate} refFx={refFx} onSetGoodsThb={onSetGoodsThb} onSetShip={onSetShip} onEditFx={onEditFx} refFxDate={refFxDate} docDate={docDate} />
       <div className="bg-slate-800 text-white px-4 py-2.5 flex items-baseline justify-between gap-2">
@@ -292,9 +343,13 @@ export function VoucherChecklistCard({ items, totals, foreign, sym, fxRate, refF
 }
 
 /** ป๊อปยืนยัน — บอกชัด ๆ ว่ากดแล้วเกิดอะไร (ใช้ข้อมูลจริงของใบ) */
-export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRate, skuCount, confirming, onClose, onConfirm, poPlanLabels = [] }: {
+export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRate, skuCount, confirming, onClose, onConfirm, poPlanLabels = [], shipFix = null, shipZero = false, autoApplied = 0 }: {
   header: VoucherHeader; items: CheckItem[]; totals: Totals; foreign: boolean; sym: string; fxRate: string | number | null;
   skuCount: number; confirming: boolean; onClose: () => void; onConfirm: () => void;
+  /** ★ 11-27 กล่อง "ค่าส่ง ฿0 เพราะ…" + ปุ่มแก้ · shipZero = ยังเป็น ฿0 และมีสาเหตุ → ปุ่มเป็น "ยืนยันโดยไม่มีค่าส่ง" */
+  shipFix?: React.ReactNode; shipZero?: boolean;
+  /** ★ 11-27 ระบบเพิ่งใส่น้ำหนัก/คิวจากใบส่งของให้ก่อนเปิดป๊อป (กี่รายการ) */
+  autoApplied?: number;
   /** ★ 2026-11-15 งานแก้ใบสั่งซื้อที่เลือกไว้ในบิลร้าน (ลด PO ตามบิล / ปิดยอดของที่ไม่มา) — ทำหลังยืนยันใบ */
   poPlanLabels?: string[];
 }) {
@@ -312,8 +367,14 @@ export function VoucherConfirmModal({ header, items, totals, foreign, sym, fxRat
       title="✓ ยืนยันใบสำคัญรับ" description={`${header.seller_name ?? ""} · ฿${fmtMoney(totals.grand_total_thb)}`}
       footer={<>
         <button onClick={onClose} disabled={confirming} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยังก่อน</button>
-        <button onClick={onConfirm} disabled={confirming || blocks.length > 0} className="px-5 h-9 text-sm font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">{confirming ? "กำลังยืนยัน…" : "ยืนยัน + ออกเลข"}</button>
+        <button onClick={onConfirm} disabled={confirming || blocks.length > 0} className="px-5 h-9 text-sm font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">{confirming ? "กำลังยืนยัน…" : shipZero ? "ยืนยันโดยไม่มีค่าส่ง" : "ยืนยัน + ออกเลข"}</button>
       </>}>
+      {autoApplied > 0 && (
+        <div className="mb-3 flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-[13px] text-emerald-800">
+          <Icon name="check" mode="line" size={14} className="shrink-0" />ใส่น้ำหนัก/คิวจากใบส่งของให้แล้ว {autoApplied} รายการ <span className="text-[11px] text-emerald-700">(ย้อนได้ที่แจ้งเตือนมุมจอ)</span>
+        </div>
+      )}
+      {shipFix && <div className="mb-3">{shipFix}</div>}
       {poPlanLabels.length > 0 && (
         <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
           <div className="font-medium">จะแก้ใบสั่งซื้อด้วย ({poPlanLabels.length}) — ตามที่เลือกไว้ในบิลร้าน</div>

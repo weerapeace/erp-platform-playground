@@ -30,7 +30,8 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { computeVoucher, fxForTargetThb, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
 import { voucherChecklist, paidDiff, PAID_TOLERANCE_THB } from "@/lib/purchase-voucher-checklist";
-import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
+import { CollapseCard, ShipZeroFix, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
+import { isQuickFix, mappedUnapplied, shipZeroCauses, type ShipFix } from "@/lib/voucher-ship-zero";
 import { RevisionHistory } from "./revision-history";
 import { pvNoNeedsRenumber, reviseReasonFor, ADMIN_NO_REASON } from "@/lib/voucher-revision";
 
@@ -130,6 +131,12 @@ export default function PurchaseVoucherFormPage() {
   const onDbStatus = useCallback((s: DeliveryBillStatus) => { dbStatusRef.current = s; setDbStatus(s); }, []);
   const [dbAsk, setDbAsk] = useState<{ kind: "unsaved" | "ship0" | "weight"; next: "confirm" | "revise" } | null>(null);
   const [dbBusy, setDbBusy] = useState(false);
+  // ★ 2026-11-27 เจ้าของเลือกข้อ 1-4: กดยืนยัน = ใส่น้ำหนัก/คิวจากใบส่งของให้เอง (ย้อนได้) · ค่าส่ง ฿0 บอกสาเหตุ + ปุ่มแก้ (lib/voucher-ship-zero)
+  const [autoApplied, setAutoApplied] = useState(0);   // ใส่ให้กี่รายการก่อนเปิดป๊อปยืนยัน
+  const [shipUndo, setShipUndo] = useState<{ h: Partial<Record<"ship_manual_total" | "ship_method", string>>; ln: Record<string, LineEdit["ship_method"]> } | null>(null);
+  const [shipCardOpen, setShipCardOpen] = useState(0);   // เปิดกล่องค่าส่งเอง (ปุ่ม ไปจับคู่ / ใส่เรท)
+  const preCheckRef = useRef<(next: "confirm" | "revise", skip: ("unsaved" | "apply" | "ship0" | "weight")[], applied?: number) => void>(() => {});   // ขั้นหลังใส่น้ำหนัก/คิว (ค่าล่าสุดทุก render)
+  useEffect(() => { if (!dirty) setShipUndo(null); }, [dirty]);   // บันทึกแล้ว/โหลดใหม่ = ย้อนในหน้าไม่ได้แล้ว
   const [fxOpen, setFxOpen] = useState(false);
   const [fxDailyDate, setFxDailyDate] = useState<string | null>(null);   // ตั้งเรทกลางวันนี้จากหน้านี้แล้ว → ป้ายเรทเก่าหายทันที   // ★ 2026-11-22 แบบ B: แตะเรทในกล่องยอดเงิน → เปลี่ยนเรท (ใบนี้ / เรทกลางวันนี้)
   const onPanelStatus = useCallback((s: { pending: boolean; undecided: number; bills: number }) => setPanelStatus((p) => (p.pending === s.pending && p.undecided === s.undecided && p.bills === s.bills ? p : s)), []);
@@ -456,34 +463,90 @@ export default function PurchaseVoucherFormPage() {
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
   /** ★ 2026-11-21 ข้อเสนอ 1 — ใบนี้ยังไม่มีค่าส่ง + ร้านเดียวกันมีใบอื่นที่ยังไม่มีค่าส่ง (≤ 14 วัน) → ถามก่อน "ส่งมาพร้อมใบอื่นไหม?" · ถามไม่ได้ = ยืนยันตามปกติ */
   /** ★ 2026-11-22 ก่อนยืนยัน / บันทึกการแก้ไข: ใบส่งของยังไม่บันทึก → ถาม · มีกล่องของใบนี้แต่ยังไม่ได้ใช้น้ำหนัก/คิว หรือค่าส่ง ฿0 → เตือน */
-  const preCheck = (next: "confirm" | "revise", skip: ("unsaved" | "ship0" | "weight")[] = []) => {
+  //   ★ 2026-11-27 ข้อ 1+3: กล่องที่จับคู่แล้วแต่ยังไม่ได้ใช้ → ใส่น้ำหนัก/คิวให้เอง (ย้อนได้) แล้วไปต่อ · ไม่มีปุ่ม "ใช้เลย" + กดยืนยันซ้ำแล้ว
+  //   ค่าส่ง ฿0 → ป๊อปยืนยันบอกสาเหตุ + ปุ่มแก้ (ShipZeroFix) · บันทึกการแก้ไข (ไม่มีป๊อปยืนยัน) → ถามด้วยกล่องเดียวกัน
+  type PreSkip = "unsaved" | "apply" | "ship0" | "weight";
+  const preCheck = async (next: "confirm" | "revise", skip: PreSkip[] = []) => {
     if (!skip.includes("unsaved") && deliveryRef.current?.pending()) { setDbAsk({ kind: "unsaved", next }); return; }
+    if (!skip.includes("apply") && mappedUnapplied(dbStatusRef.current) > 0) {
+      setDbAsk(null);
+      const r = await applyBoxes();
+      await new Promise((res) => setTimeout(res, 80));   // รอหน้าโหลดค่าใหม่ → ใช้ฟังก์ชัน/ยอดล่าสุด
+      void preCheckRef.current(next, [...skip, "unsaved", "apply"], r?.applied ?? 0);
+      return;
+    }
+    void preCheckRef.current(next, [...skip, "unsaved", "apply"]);
+  };
+  /** ขั้นหลังใส่น้ำหนัก/คิวแล้ว — เรียกผ่าน ref = ได้ยอดค่าส่งล่าสุดเสมอ */
+  const preCheckRest = (next: "confirm" | "revise", skip: PreSkip[], applied = 0) => {
     const ds = dbStatusRef.current;
-    if (!skip.includes("ship0") && ds.mineRows > 0 && (ds.unappliedRows > 0 || !(Number(t?.ship_total_thb ?? 0) > 0))) { setDbAsk({ kind: "ship0", next }); return; }
+    const ship = Number(t?.ship_total_thb ?? 0);
+    if (next === "revise" && !skip.includes("ship0") && ds.mineRows > 0 && !(ship > 0)) { setDbAsk({ kind: "ship0", next }); return; }
     if (!skip.includes("weight") && ds.mismatchBills > 0) { setDbAsk({ kind: "weight", next }); return; }   // ★ 11-23 ข้อ 3: น้ำหนักสินค้าไม่ตรงกล่อง (หารด้วยจำนวนผิด)
     setDbAsk(null);
+    setAutoApplied(applied);
     if (next === "revise") startReviseSave(); else void askConfirmShip();
   };
+  preCheckRef.current = preCheckRest;
   const askConfirm = async () => preCheck("confirm");
   const dbSaveThen = async () => {
     if (!dbAsk) return;
     setDbBusy(true);
-    try { if (!(await deliveryRef.current?.flush())) return; await new Promise((r) => setTimeout(r, 80)); preCheck(dbAsk.next, ["unsaved"]); }   // รอแผงโหลดใหม่ → สถานะล่าสุด
+    try { if (!(await deliveryRef.current?.flush())) return; await new Promise((r) => setTimeout(r, 80)); void preCheck(dbAsk.next, ["unsaved"]); }   // รอแผงโหลดใหม่ → สถานะล่าสุด
     finally { setDbBusy(false); }
   };
-  const dbApplyNow = async () => {
+  /** ใส่น้ำหนัก/คิวจากกล่องที่จับคู่แล้ว (ทุกใบส่งของ) — แจ้งผลมุมจอพร้อมปุ่มย้อนกลับ */
+  const applyBoxes = async () => {
     setDbBusy(true);
     try {
       const r = await deliveryRef.current?.applyAll();
-      setDbAsk(null);
-      if (!r) return;
-      if (r.unmapped > 0) toast.warning(`ยังมี ${r.unmapped} กล่องของใบนี้ที่ยังไม่ได้จับคู่สินค้า — จับคู่ หรือเลือกช่อง "ของใบ" ว่าเป็นของใบอื่น / พักไว้ / ไม่ใช่ของเรา แล้วกดยืนยันอีกครั้ง`);
-      else if (r.failed > 0) toast.error("ใช้น้ำหนัก/คิวไม่สำเร็จบางใบ — ดูที่แผงใบส่งของ");
-      else toast.success(`ใส่น้ำหนัก/คิวแล้ว ${r.applied} รายการ — ตรวจค่าส่งแล้วกดยืนยันอีกครั้ง`);
+      if (!r) return null;
+      if (r.failed > 0) toast.error("ใส่น้ำหนัก/คิวจากใบส่งของไม่สำเร็จบางใบ — ดูที่แผงใบส่งของ");
+      if (r.applied > 0 && r.undo.length) {
+        const undo = r.undo;
+        toast.undo(`ใส่น้ำหนัก/คิวจากใบส่งของให้แล้ว ${r.applied} รายการ`, async () => {
+          const ok = await deliveryRef.current?.undoApply(undo);
+          if (ok) { setAutoApplied(0); toast.success("ย้อนแล้ว — น้ำหนัก/คิวกลับเป็นค่าเดิม (การจับคู่กล่องยังอยู่)"); }
+          else toast.error("ย้อนไม่สำเร็จบางรายการ — ดูที่แผงใบส่งของ");
+        }, { ms: 15000 });
+      }
+      return r;
     } finally { setDbBusy(false); }
   };
+  // ── ค่าส่ง ฿0: สาเหตุ + ปุ่มแก้ (ที่แก้ = แก้ในหน้า ยังไม่บันทึก · กดยืนยัน/บันทึกแล้วค่อยลง) ──
+  const shipZero = calcIn && !readonly ? shipZeroCauses({ header: calcIn.header, lines: calcIn.lines, delivery: dbStatus }) : null;   // (หลัง return สิทธิ์ → ห้ามใช้ hook)
+  const gotoShip = (elId: "pv-ship" | "pv-delivery" | "pv-lines") => {
+    setConfirmOpen(false); setDbAsk(null);
+    if (elId !== "pv-lines") setShipCardOpen((k) => k + 1);
+    setTimeout(() => document.getElementById(elId)?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+  };
+  const fixShip = (fixes: ShipFix[]) => {
+    const snapH: Partial<Record<"ship_manual_total" | "ship_method", string>> = {}, snapLn: Record<string, LineEdit["ship_method"]> = {};
+    const hp: Partial<typeof h> = {};
+    for (const f of fixes) {
+      if (f.kind === "clear_manual") { snapH.ship_manual_total = h.ship_manual_total; hp.ship_manual_total = ""; }
+      else if (f.kind === "set_header_method") { snapH.ship_method = h.ship_method; hp.ship_method = f.to; }
+      else if (f.kind === "switch_method") for (const k of f.line_idx) { const lid = data?.lines[k]?.id; if (!lid) continue; snapLn[lid] = ln[lid]?.ship_method ?? ""; setLine(lid, { ship_method: f.to }); }
+      else if (f.kind === "apply") void applyBoxes();
+      else if (f.kind === "goto_delivery") gotoShip("pv-delivery");
+      else if (f.kind === "goto_ship") gotoShip("pv-ship");
+      else if (f.kind === "goto_lines") gotoShip("pv-lines");
+    }
+    if (Object.keys(hp).length) setHeader(hp);
+    if (Object.keys(snapH).length || Object.keys(snapLn).length)   // เก็บค่าก่อนแก้ครั้งแรกไว้ (แก้หลายครั้ง → ย้อนกลับไปจุดเริ่ม)
+      setShipUndo((p) => ({ h: { ...snapH, ...(p?.h ?? {}) }, ln: { ...snapLn, ...(p?.ln ?? {}) } }));
+  };
+  const undoShipFix = () => {
+    if (!shipUndo) return;
+    if (Object.keys(shipUndo.h).length) setHeader(shipUndo.h as Partial<typeof h>);
+    for (const [lid, m] of Object.entries(shipUndo.ln)) setLine(lid, { ship_method: m });
+    setShipUndo(null);
+  };
+  const shipFixBox = (compact = false) => <ShipZeroFix info={shipZero} onFix={fixShip} undo={shipUndo ? undoShipFix : null} busy={dbBusy} compact={compact} />;
   const askConfirmShip = async () => {
-    if (!(Number(t?.ship_total_thb ?? 0) > 0)) {
+    // ค่าส่ง ฿0 ที่มีทางแก้ในใบนี้ (ล้างยอดจริง · เปลี่ยนวิธีคิด · ใช้กล่อง) = ไม่ใช่ "ส่งมาพร้อมใบอื่น" → ไม่ถามรวม ไปป๊อปยืนยัน (บอกสาเหตุ) เลย
+    const fixable = (shipZero?.causes ?? []).some((c) => isQuickFix(c.fix) || c.fix.kind === "apply");
+    if (!(Number(t?.ship_total_thb ?? 0) > 0) && !fixable) {
       try {
         const j = await apiFetch(`/api/purchasing/vouchers/merge?for=${id}`).then((r) => r.json());
         const list = (j.data ?? []) as NonNullable<typeof shipAsk>;
@@ -802,8 +865,10 @@ export default function PurchaseVoucherFormPage() {
                     ];
                     if (billView && rows.length === 0) return null;   // ทุกรายการมาจากบิล → ไม่ต้องมีกล่อง "ไม่มีบิล"
                     const table = (
+                      <div id="pv-lines" className="scroll-mt-4">
                       <MiniTable rows={rows} rowKey={(r) => r.l.id} columns={cols} hideToolbar zebra={false} dense resizable storageKey="pv-lines-c" columnMenu={{}} stickyCols={1}
                         emptyText={<span className="text-xs">— ยังไม่มีรายการ — เพิ่มจากแถบด้านล่าง</span>} />
+                      </div>
                     );
                     return billView ? (
                       <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
@@ -831,7 +896,7 @@ export default function PurchaseVoucherFormPage() {
                 </div>
 
                 {/* ค่าส่ง + ใบส่งของจากขนส่ง — พับไว้ (เปิดเองเมื่อมีปัญหา) · แบบ B */}
-                <CollapseCard title="🚚 ค่าส่ง" defaultOpen={shipIssue} tone={shipIssue ? "warn" : undefined}
+                <CollapseCard title="🚚 ค่าส่ง" defaultOpen={shipIssue} tone={shipIssue ? "warn" : undefined} id="pv-ship" openSignal={shipCardOpen}
                   summary={!anyShip ? "ไม่คิดค่าส่ง · กดเพื่อเลือกร้านขนส่ง" : `${h.carrier_name || SHIP_LABEL[h.ship_method]} · ฿${fmtMoney(t?.ship_total_thb)}${shipIssue ? ` · ขาดข้อมูล ${(t?.missing_basis_count ?? 0) + (t?.missing_rate_count ?? 0)} รายการ` : ""}`}>
                   <div className="space-y-3">
                     <div>
@@ -881,10 +946,12 @@ export default function PurchaseVoucherFormPage() {
                     </div>
     
                     {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
+                    <div id="pv-delivery" className="scroll-mt-4">
                     <DeliveryBillPanel voucherId={id} readonly={readonly}
                       lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no, is_product: !!l.item_sku_id, kg_per_unit: l.kg_per_unit, cbm_per_unit: l.cbm_per_unit }))}
                       onApplied={reloadKeep} controlRef={deliveryRef} onStatus={onDbStatus}
                       beforeApply={async () => (dirty ? await save() : true)} />
+                    </div>
                   </div>
                 </CollapseCard>
 
@@ -901,7 +968,8 @@ export default function PurchaseVoucherFormPage() {
                 {((hd.status === "draft" && canEdit) || (editing && canRevise)) && (
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} refFx={data?.ref_fx_rate ?? null} refFxDate={fxDailyDate ?? data?.ref_fx_date ?? null} docDate={h.voucher_date} onEditFx={readonly ? undefined : () => setFxOpen(true)} dirty={dirty} saving={saving || reviseBusy}
                     onSave={() => void save()} onConfirm={editing ? () => preCheck("revise") : () => void askConfirm()} onSetGoodsThb={readonly ? undefined : setGoodsThb}
-                    revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })} />
+                    revise={editing ? { nextRev: hd.revision + 1 } : null} hideSave onSetShip={readonly ? undefined : (v) => setHeader({ ship_manual_total: v == null ? "" : String(v) })}
+                    shipFix={(shipZero?.causes.length ?? 0) > 0 || shipUndo ? shipFixBox(true) : null} hideShipItem={(shipZero?.causes.length ?? 0) > 0} />
                 )}
                 {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
                 {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}
@@ -977,7 +1045,8 @@ export default function PurchaseVoucherFormPage() {
       {/* ยืนยัน — ป๊อปบอก 4 อย่างที่จะเกิด (ออกเลข · อัปเดตราคา 3 ที่ · ใบล็อก · ต่อไปจ่ายเงิน) · แบบ B */}
       {confirmOpen && data && hd && calc && (
         <VoucherConfirmModal header={hd} items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} skuCount={skuCount}
-          confirming={confirming} onClose={() => setConfirmOpen(false)} onConfirm={() => void confirm()} poPlanLabels={panelRef.current?.poPlanLabels() ?? []} />
+          confirming={confirming} onClose={() => setConfirmOpen(false)} onConfirm={() => void confirm()} poPlanLabels={panelRef.current?.poPlanLabels() ?? []}
+          shipFix={shipFixBox()} shipZero={(shipZero?.causes.length ?? 0) > 0} autoApplied={autoApplied} />
       )}
       {/* ยืนยันลบรายการที่เพิ่มเอง */}
       {delLine && (
@@ -1018,26 +1087,28 @@ export default function PurchaseVoucherFormPage() {
       {/* ★ 2026-11-22 ใบส่งของ: ยังไม่บันทึก / ค่าส่ง ฿0 — ถามก่อนยืนยันหรือบันทึกการแก้ไข */}
       {dbAsk && (
         <ERPModal open onClose={() => !dbBusy && setDbAsk(null)} size="sm" storageKey="pv-delivery-precheck"
-          title={dbAsk.kind === "unsaved" ? "ใบส่งของจากขนส่งยังไม่บันทึก" : dbAsk.kind === "weight" ? "น้ำหนักสินค้าไม่ตรงกับกล่อง" : dbStatus.unappliedRows > 0 ? "ยังไม่ได้ใช้น้ำหนัก/คิวจากใบส่งของ" : "ค่าส่งยังเป็น ฿0"}
+          title={dbAsk.kind === "unsaved" ? "ใบส่งของจากขนส่งยังไม่บันทึก" : dbAsk.kind === "weight" ? "น้ำหนักสินค้าไม่ตรงกับกล่อง" : (t?.ship_total_thb ?? 0) > 0 ? "ค่าส่งพร้อมแล้ว" : "ค่าส่งยังเป็น ฿0"}
           footer={dbAsk.kind === "weight" ? <>
             <button onClick={() => setDbAsk(null)} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">กลับไปแก้</button>
-            <button onClick={() => preCheck(dbAsk.next, ["unsaved", "ship0", "weight"])} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ถูกแล้ว ยืนยันต่อ</button>
+            <button onClick={() => void preCheck(dbAsk.next, ["unsaved", "apply", "ship0", "weight"])} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ถูกแล้ว ยืนยันต่อ</button>
           </> : dbAsk.kind === "unsaved" ? <>
             <button onClick={() => setDbAsk(null)} disabled={dbBusy} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">กลับไปแก้</button>
-            <button onClick={() => { deliveryRef.current?.discard(); preCheck(dbAsk.next, ["unsaved"]); }} disabled={dbBusy} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ทิ้งที่แก้</button>
+            <button onClick={() => { deliveryRef.current?.discard(); void preCheck(dbAsk.next, ["unsaved"]); }} disabled={dbBusy} className="px-4 h-9 text-sm border border-red-200 rounded-lg text-red-600 hover:bg-red-50">ทิ้งที่แก้</button>
             <button onClick={() => void dbSaveThen()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{dbBusy ? "กำลังบันทึก…" : "บันทึกแล้วไปต่อ"}</button>
           </> : <>
+            {/* ★ 11-27 ก่อนบันทึกการแก้ไข: ค่าส่ง ฿0 → สาเหตุ + ปุ่มแก้ (กล่องเดียวกับป๊อปยืนยัน) · แก้แล้ว = ปุ่มบันทึกปกติ */}
             <button onClick={() => setDbAsk(null)} disabled={dbBusy} className="mr-auto px-3 h-9 text-sm text-slate-500 hover:text-slate-700">ยกเลิก</button>
-            <button onClick={() => preCheck(dbAsk.next, ["unsaved", "ship0"])} disabled={dbBusy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยืนยันโดยไม่มีค่าส่ง</button>
-            <button onClick={() => void dbApplyNow()} disabled={dbBusy} className="px-5 h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">{dbBusy ? "กำลังใส่…" : "ใช้เลย"}</button>
+            <button onClick={() => void preCheck(dbAsk.next, ["unsaved", "apply", "ship0"])} disabled={dbBusy}
+              className={(t?.ship_total_thb ?? 0) > 0 ? "px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40" : "px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50"}>
+              {(t?.ship_total_thb ?? 0) > 0 ? "บันทึกการแก้ไข" : "บันทึกโดยไม่มีค่าส่ง"}</button>
           </>}>
           {dbAsk.kind === "weight"
             ? <p className="text-sm text-slate-600">มีใบส่งของ {dbStatus.mismatchBills} ใบที่น้ำหนัก/คิวรวมของสินค้า (จำนวน × ต่อชิ้น) ต่างจากกล่องเกิน 1.5 เท่า — มักเกิดจากใช้น้ำหนัก/คิวตอนจำนวนชิ้นยังไม่ถูก ค่าส่งจะเพี้ยน · แก้จำนวนให้ถูก แล้วกด ✓ ใช้น้ำหนัก/คิว อีกครั้ง (ดูแถบแดงที่ใบส่งของ)</p>
             : dbAsk.kind === "unsaved"
             ? <p className="text-sm text-slate-600">มีที่แก้ในใบส่งของ (ลบแถว · แก้ตัวเลข · จับคู่สินค้า · เลือกว่ากล่องเป็นของใบไหน) ที่ยังไม่ได้กดบันทึก — ถ้าไปต่อโดยไม่บันทึก ที่แก้จะหาย</p>
-            : <div className="text-sm text-slate-600 space-y-1">
-                <p>ใบนี้มีกล่องในใบส่งของ {dbStatus.mineRows} กล่อง{dbStatus.unappliedRows > 0 ? <> · ยังไม่ได้กด <b>ใช้น้ำหนัก/คิว</b> {dbStatus.unappliedRows} กล่อง</> : null}{dbStatus.unmappedRows > 0 ? <> · ยังไม่ได้จับคู่สินค้า {dbStatus.unmappedRows} กล่อง</> : null}</p>
-                <p>ค่าส่งตอนนี้ <b className="text-orange-700">฿{fmtMoney(t?.ship_total_thb ?? 0)}</b> — กด <b>ใช้เลย</b> = ใส่น้ำหนัก/คิวจากกล่องที่จับคู่แล้วให้ (แล้วกดยืนยันอีกครั้ง)</p>
+            : <div className="text-sm text-slate-600 space-y-2">
+                <p>ใบนี้มีกล่องในใบส่งของ {dbStatus.mineRows} กล่อง · ค่าส่งตอนนี้ <b className="text-orange-700">฿{fmtMoney(t?.ship_total_thb ?? 0)}</b></p>
+                {shipFixBox()}
               </div>}
         </ERPModal>
       )}

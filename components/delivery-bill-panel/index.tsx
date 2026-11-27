@@ -42,8 +42,12 @@ export type DeliveryBillApi = {
   pending: () => boolean;
   flush: () => Promise<boolean>;
   discard: () => void;
-  applyAll: () => Promise<{ applied: number; unmapped: number; failed: number }>;
+  /** ★ 11-27 undo = ค่าเดิมต่อใบส่งของ ไว้ให้ปุ่ม "ย้อนกลับ" (ส่งเข้า undoApply) */
+  applyAll: () => Promise<{ applied: number; unmapped: number; failed: number; undo: DeliveryApplyUndo[] }>;
+  /** ★ 11-27 ย้อน applyAll — คืนคิว/กก.ต่อชิ้นเดิม · แถวกลับเป็น "ยังไม่ได้ใช้" (การจับคู่คงไว้) */
+  undoApply: (undo: DeliveryApplyUndo[]) => Promise<boolean>;
 };
+export type DeliveryApplyUndo = { bill_id: string; before: unknown[]; rows: number[] };
 export type DeliveryBillStatus = { pending: boolean; mineRows: number; unappliedRows: number; unmappedRows: number; mismatchBills: number };
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -156,7 +160,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
 
   const draftRef = useRef(draft); draftRef.current = draft;
   const billsRef = useRef(bills); billsRef.current = bills;
-  const patchBill = async (billId: string, apply: boolean, opts: { quiet?: boolean } = {}): Promise<{ ok: boolean; applied: number }> => {
+  const patchBill = async (billId: string, apply: boolean, opts: { quiet?: boolean } = {}): Promise<{ ok: boolean; applied: number; undo?: DeliveryApplyUndo }> => {
     const d = draftRef.current[billId]; if (!d) return { ok: false, applied: 0 };
     const b = billsRef.current.find((x) => x.id === billId);
     if (apply && beforeApply && !(await beforeApply())) return { ok: false, applied: 0 };   // ที่แก้ในหน้าใบ (จำนวน) บันทึกก่อน — ไม่งั้นหารด้วยจำนวนเก่า
@@ -174,7 +178,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
       setDraft((p) => { const n = { ...p }; delete n[billId]; return n; });   // บันทึกแล้ว = ใช้ค่าจากเซิร์ฟเวอร์
       await load();
       if (apply) await onApplied();
-      return { ok: true, applied: Number(j.applied) || 0 };
+      return { ok: true, applied: Number(j.applied) || 0, undo: apply && Array.isArray(j.before) ? { bill_id: billId, before: j.before, rows: Array.isArray(j.rows) ? j.rows : [] } : undefined };
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); return { ok: false, applied: 0 }; }
     finally { setBusy(null); }
   };
@@ -336,6 +340,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
       discard: () => setDraft({ ...loadedRef.current }),
       applyAll: async () => {
         let applied = 0, failed = 0, unmapped = 0;
+        const undo: DeliveryApplyUndo[] = [];
         for (const b of billsRef.current) {
           const ls = effLines(b.id, draftRef.current[b.id]?.lines ?? b.lines ?? []);
           const idx = rowsOf(ls, b.voucher_id, voucherId);
@@ -343,9 +348,19 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
           const st = appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
           if (st.done || !idx.some((i) => (ls[i].voucher_line_ids ?? []).length > 0)) continue;
           const r = await patchBill(b.id, true, { quiet: true });
-          if (r.ok) applied += r.applied; else failed++;
+          if (r.ok) { applied += r.applied; if (r.undo) undo.push(r.undo); } else failed++;
         }
-        return { applied, unmapped, failed };
+        return { applied, unmapped, failed, undo };
+      },
+      undoApply: async (list) => {
+        let ok = true;
+        for (const u of list) {
+          const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unapply", bill_id: u.bill_id, before: u.before, rows: u.rows }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) ok = false;
+        }
+        await load(); await onApplied();
+        return ok;
       },
     };
   });   // ทุก render — ใช้ ref ค่าล่าสุดอยู่แล้ว
