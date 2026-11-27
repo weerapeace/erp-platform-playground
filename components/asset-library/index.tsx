@@ -46,6 +46,8 @@ import { AlbumTree, albumFullName, buildAlbumOptions } from "@/components/album-
 import { AlbumRowMenu, AlbumMoveModal, AlbumTrashModal, ASSET_DRAG_TYPE, InlineSubAlbum, BulkNewAlbumModal, type AlbumAction } from "./album-tree-actions";
 import { isVectorFile } from "@/lib/vector-split";
 import { useSelectMode } from "@/components/select-mode";
+import { useUserPref } from "@/lib/use-user-pref";
+import { FolderPath, FolderStrip, type FolderMode } from "./folder-view";
 
 // 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
 const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
@@ -78,7 +80,9 @@ export function AssetLibrary() {
   const [folderFilter, setFolderFilter] = useState<{ id: string; label: string } | null>(null);   // ดูรูปในโฟลเดอร์ Drive เดียวกัน
   const [type, setType] = useState("");
   const [collectionId, setCollectionId] = useState<string | null>(null); // null=ทั้งหมด, "none"=ไม่อยู่อัลบั้ม
-  const [bulkNewAlbumOpen, setBulkNewAlbumOpen] = useState(false);   // ใส่ไฟล์ที่ติ๊กเข้าอัลบั้มย่อยใหม่
+  const [bulkNewAlbumOpen, setBulkNewAlbumOpen] = useState(false);
+  // 📁 มุมมองโฟลเดอร์ (อัลบั้มย่อยเป็นการ์ดบนสุด) — จำรายคน · เจ้าของเลือก 2026-11-27
+  const [folderMode, setFolderMode] = useUserPref<FolderMode>("assets_folder_mode", "folder", (r) => (r === "folder" || r === "files" ? r : null));   // ใส่ไฟล์ที่ติ๊กเข้าอัลบั้มย่อยใหม่
   const [tag, setTag] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
   const [source, setSource] = useState("upload");   // upload = อัปเอง · artwork · print (งานพิมพ์) · odoo_product
@@ -612,6 +616,13 @@ export function AssetLibrary() {
               </div>
             </div>
           )}
+          {!showBrandView && !trash && !searching && !folderFilter && collectionId !== "none" && (<>
+            <FolderPath collections={collections} currentId={collectionId} onOpen={setCollectionId} mode={folderMode} onMode={setFolderMode} />
+            {folderMode === "folder" && (
+              <FolderStrip collections={collections} currentId={collectionId} onOpen={setCollectionId}
+                canManage={can("assets.manage")} canDrop={can("assets.edit")} onAction={onAlbumAction} onDropAssets={dropAssetsOnAlbum} />
+            )}
+          </>)}
           {!showBrandView && !loading && total > 0 && (
             <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
               {rows.length > 0
