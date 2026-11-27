@@ -27,8 +27,8 @@ import {
   type CardDoc, type CardEl, type CardFace, type CardRole, type CardShape, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
-import { CardElView as ElView, CardPreview, ScreenMarks, cardFontOptions, useCardFonts, useWidth, type UploadedFont } from "./preview";
-export { CardPreview, CardQuickEdit, cardFontOptions, useCardFonts, type UploadedFont } from "./preview";
+import { CardElView as ElView, CardPreview, InlineTextEditor, ScreenMarks, cardFontOptions, useCardFonts, useWidth, type UploadedFont } from "./preview";
+export { CardPreview, CardQuickEdit, InlineTextEditor, cardFontOptions, useCardFonts, type UploadedFont } from "./preview";
 const r2Url = (k: string) => r2ImageUrl(k);
 const ROLE_LABEL: Record<CardRole, string> = { message: "ข้อความจากลูกค้า", to: "ถึง", from: "จาก" };
 
@@ -62,6 +62,10 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
   useCardFonts(uploadedFonts);
   const doc = value;
   const [sel, setSel] = useState<string | null>(null);
+  /** กำลังพิมพ์บนการ์ด (ชิ้นข้อความ) — selectAll = เพิ่งเพิ่มข้อความใหม่ พิมพ์ทับได้เลย */
+  const [editing, setEditing] = useState<{ id: string; selectAll: boolean } | null>(null);
+  /** หน้าตาการ์ดก่อนเริ่มพิมพ์ — จบการพิมพ์ = ย้อนกลับได้ 1 ขั้นต่อการพิมพ์ 1 ครั้ง (ข้อ 5) */
+  const editStart = useRef<CardDoc | null>(null);
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
   const [tab, setTab] = useState<"add" | "edit" | "layers">("add");
   const [picker, setPicker] = useState<null | "el" | "bg">(null);
@@ -106,6 +110,25 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
     if (docRef.current.els.length >= CARD_MAX_ELS) { toast.error(`ใส่ได้สูงสุด ${CARD_MAX_ELS} ชิ้นต่อการ์ด`); return; }
     commit({ ...docRef.current, els: [...docRef.current.els, e] }); setSel(e.id); setTab("edit");
   };
+  // ── พิมพ์บนการ์ด (ข้อ 1-5) ──
+  const startEdit = (id: string, selectAll = false) => {
+    const e = docRef.current.els.find((x) => x.id === id);
+    if (!e || e.kind !== "text" || e.locked) return;
+    setSel(id); editStart.current = null; setEditing({ id, selectAll });
+  };
+  /** แก้ระหว่างพิมพ์ — ยังไม่ลงประวัติ (รวมเป็นขั้นเดียวตอนจบ) */
+  const liveEl = (id: string, p: Partial<CardEl>) => {
+    if (!editStart.current) editStart.current = docRef.current;
+    onChange({ ...docRef.current, els: docRef.current.els.map((e) => (e.id === id ? { ...e, ...p } : e)) });
+  };
+  const finishEdit = () => {
+    if (editStart.current && editStart.current !== docRef.current) {
+      past.current = [...past.current.slice(-79), editStart.current]; future.current = []; lastKey.current = null; force((x) => x + 1);
+    }
+    editStart.current = null; setEditing(null);
+  };
+  /** ข้อความที่เพิ่งเพิ่ม (ยังไม่อยู่ใน docRef ตอนกด) → เข้าโหมดพิมพ์ เลือกข้อความตัวอย่างไว้ให้พิมพ์ทับ (ข้อ 4) */
+  const startEditNew = (el: CardEl) => { setSel(el.id); editStart.current = null; setEditing({ id: el.id, selectAll: true }); };
   const removeEl = (id: string) => { commit({ ...docRef.current, els: docRef.current.els.filter((e) => e.id !== id) }); setSel(null); };
   const duplicate = (id: string) => {
     const e = docRef.current.els.find((x) => x.id === id); if (!e) return;
@@ -254,7 +277,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
   const addPanel = (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-1.5">
-        <button type="button" className={btn()} onClick={() => addEl(newTextEl(docRef.current))}><Icon value="i:typography" /> ข้อความ</button>
+        <button type="button" className={btn()} onClick={() => { const el = newTextEl(docRef.current); addEl(el); setTimeout(() => startEditNew(el), 0); }}><Icon value="i:typography" /> ข้อความ</button>
         <button type="button" className={btn()} disabled={uploading} onClick={() => pickUpload("el")}><Icon value="i:upload" /> {uploading ? "กำลังอัป…" : "รูป PNG"}</button>
         <button type="button" className={btn()} onClick={() => { uploadTarget.current = "el"; setPicker("el"); }}><Icon value="i:photo" /> คลังรูป</button>
         <Popover panelClassName="w-48 p-1" trigger={(toggle, open) => <button type="button" className={btn(open)} onClick={toggle}><Icon value="i:square" /> รูปทรง</button>}>
@@ -303,7 +326,7 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
   );
 
   const editPanel = !selected ? (
-    <p className="rounded-lg bg-slate-50 p-3 text-[12px] text-slate-500">กดชิ้นบนการ์ดเพื่อแก้ · ลากเพื่อย้าย · ลากจุดมุมเพื่อย่อ/ขยาย · ลากจุดกลมด้านบนเพื่อหมุน</p>
+    <p className="rounded-lg bg-slate-50 p-3 text-[12px] text-slate-500">กดชิ้นบนการ์ดเพื่อแก้ · ดับเบิลคลิกข้อความเพื่อพิมพ์บนการ์ด · ลากเพื่อย้าย · ลากจุดมุมเพื่อย่อ/ขยาย · ลากจุดกลมด้านบนเพื่อหมุน</p>
   ) : (
     <div className="space-y-3">
       {selected.kind === "text" && selected.style && <>
@@ -414,16 +437,28 @@ export function CardDesigner({ value, onChange, uploadedFonts = [], height = 460
             <div className="absolute inset-0 overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {bgUrl && <img src={bgUrl} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: doc.bg.fit, pointerEvents: "none" }} />}
-              {doc.els.map((e) => !e.hidden && (
-                <div key={e.id} onPointerDown={(ev) => onElDown(ev, e)} onDoubleClick={() => setTab("edit")} style={{ cursor: e.locked ? "default" : "move" }}>
+              {doc.els.map((e) => !e.hidden && editing?.id !== e.id && (
+                <div key={e.id} onPointerDown={(ev) => onElDown(ev, e)} onDoubleClick={() => { if (e.kind === "text" && !e.locked) startEdit(e.id); else setTab("edit"); }}
+                  title={e.kind === "text" && !e.locked ? "ดับเบิลคลิกเพื่อพิมพ์บนการ์ด" : undefined} style={{ cursor: e.locked ? "default" : "move" }}>
                   <ElView e={e} k={k} />
                 </div>
               ))}
             </div>
             <ScreenMarks doc={doc} k={k} fold={fold} />
+            {editing && (() => {
+              const e = doc.els.find((x) => x.id === editing.id);
+              if (!e) return null;
+              return (
+                <InlineTextEditor key={e.id} e={e} k={k} value={e.text ?? ""} selectAll={editing.selectAll} fontOpts={fontOpts}
+                  onText={(v) => liveEl(e.id, { text: v })}
+                  onGrow={(h) => liveEl(e.id, { h: r2d(Math.min(doc.h - e.y, h)) })}
+                  onStyle={(p) => e.style && liveEl(e.id, { style: { ...e.style, ...p } })}
+                  onDone={finishEdit} />
+              );
+            })()}
             {guides.v.map((x, i) => <div key={`v${i}`} className="pointer-events-none absolute top-0 h-full w-px bg-fuchsia-500" style={{ left: x * k }} />)}
             {guides.h.map((y, i) => <div key={`h${i}`} className="pointer-events-none absolute left-0 h-px w-full bg-fuchsia-500" style={{ top: y * k }} />)}
-            {selected && !selected.hidden && (() => {
+            {selected && !selected.hidden && !editing && (() => {
               const b = elBox(selected, k);
               const lineH = selected.kind === "shape" && selected.shape === "line";
               return (

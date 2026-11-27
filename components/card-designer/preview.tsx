@@ -11,9 +11,9 @@ import { Icon } from "@/components/icon";
 import { r2ImageUrl } from "@/lib/r2-image";
 import type { TextFontOption } from "@/lib/text-style";
 import {
-  CARD_FONTS, CARD_MAX_ELS, elBox, fontStack, googleFontsHref, newTextEl, resolveSrc, textCss, uploadFontFaces,
+  CARD_FONTS, CARD_MAX_ELS, FONT_SIZE_MAX, FONT_SIZE_MIN, elBox, fontStack, googleFontsHref, newTextEl, resolveSrc, textCss, uploadFontFaces,
   faceDoc, isFolded, withFace,
-  type CardDoc, type CardEl, type CardFace, type CardRole,
+  type CardDoc, type CardEl, type CardFace, type CardRole, type CardTextStyle,
 } from "@/lib/gift-card-design";
 
 export type UploadedFont = { id: string; name: string };
@@ -135,6 +135,7 @@ export function CardQuickEdit({ doc, onChange, message, onMessage, maxHeight = 2
   let k = boxW / cur.w;
   if (maxHeight && cur.h * k > maxHeight) k = maxHeight / cur.h;
   const [sel, setSel] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const drag = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const bg = resolveSrc(cur.bg.image, (key) => r2ImageUrl(key));
   const setFaceDoc = (f: CardDoc) => onChange(withFace(doc, folded ? face : "out", f));
@@ -161,7 +162,7 @@ export function CardQuickEdit({ doc, onChange, message, onMessage, maxHeight = 2
     if (cur.els.length >= CARD_MAX_ELS) return;
     const el = newTextEl(cur, "ข้อความ", { size: 14, font: "Charm" });
     setFaceDoc({ ...cur, els: [...cur.els, el] });
-    setSel(el.id);
+    setSel(el.id); setEditing(el.id);
   };
   const remove = (id: string) => { setFaceDoc({ ...cur, els: cur.els.filter((e) => e.id !== id) }); if (sel === id) setSel(null); };
 
@@ -174,14 +175,21 @@ export function CardQuickEdit({ doc, onChange, message, onMessage, maxHeight = 2
       )}
       <div ref={ref} className="touch-none select-none" onPointerMove={move} onPointerUp={up} onPointerCancel={up} onPointerDown={() => setSel(null)}>
         {k > 0 && (
-          <div style={{ position: "relative", overflow: "hidden", width: cur.w * k, height: cur.h * k, background: cur.bg.color, margin: "0 auto" }} className="rounded-[2px] shadow-sm ring-1 ring-black/10">
+          <div style={{ position: "relative", overflow: editing ? "visible" : "hidden", width: cur.w * k, height: cur.h * k, background: cur.bg.color, margin: "0 auto" }} className="rounded-[2px] shadow-sm ring-1 ring-black/10">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             {bg && <img src={bg} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: cur.bg.fit }} />}
             {cur.els.filter((e) => !e.hidden).map((e) => {
               if (e.kind !== "text") return <CardElView key={e.id} e={e} k={k} />;
+              if (editing === e.id) return (
+                <InlineTextEditor key={e.id} e={e} k={k} value={e.role === "message" ? message : e.text ?? ""}
+                  onText={(v) => (e.role === "message" ? onMessage(v) : patchEl(e.id, { text: v }))}
+                  onGrow={(h) => patchEl(e.id, { h: Math.min(cur.h - e.y, h) })}
+                  onStyle={(p) => e.style && patchEl(e.id, { style: { ...e.style, ...p } })}
+                  onDone={() => setEditing(null)} />
+              );
               const b = elBox(e, k);
               return (
-                <div key={e.id} onPointerDown={(ev) => down(ev, e)} title={e.locked ? "ล็อกไว้ — แก้ในตัวออกแบบเต็ม" : "ลากเพื่อย้าย"}
+                <div key={e.id} onPointerDown={(ev) => down(ev, e)} onDoubleClick={() => { if (!e.locked) { setSel(e.id); setEditing(e.id); } }} title={e.locked ? "ล็อกไว้ — แก้ในตัวออกแบบเต็ม" : "ลากเพื่อย้าย · ดับเบิลคลิกเพื่อพิมพ์"}
                   style={{ position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, cursor: e.locked ? "default" : "move", outline: sel === e.id ? "1.5px solid #378ADD" : "1px dashed rgba(55,138,221,.45)", zIndex: 2 }}>
                   <div style={{ position: "absolute", inset: 0, transform: "none" }}><CardElView e={{ ...e, x: 0, y: 0, rot: 0 }} k={k} /></div>
                 </div>
@@ -213,7 +221,80 @@ export function CardQuickEdit({ doc, onChange, message, onMessage, maxHeight = 2
         <span className="flex-1" />
         {onFull && <button type="button" onClick={onFull} className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 text-[12px] text-violet-800 hover:bg-violet-100"><Icon name="palette" className="h-3.5 w-3.5" /> ออกแบบเต็ม</button>}
       </div>
-      <p className="text-[10px] text-slate-400">ลากกล่องข้อความบนการ์ดเพื่อย้าย · ขนาด/ฟอนต์/รูป แก้ใน &quot;ออกแบบเต็ม&quot;</p>
+      <p className="text-[10px] text-slate-400">ลากกล่องข้อความเพื่อย้าย · ดับเบิลคลิก (มือถือ: แตะ 2 ครั้ง) เพื่อพิมพ์บนการ์ด · รูป/หมุน แก้ใน &quot;ออกแบบเต็ม&quot;</p>
     </div>
+  );
+}
+
+
+const INLINE_COLORS = ["#2c2c2a", "#5f5e5a", "#9b2c4a", "#993c1d", "#0f6e56", "#185fa5", "#ffffff"];
+const ALIGN_NEXT: Record<string, CardTextStyle["align"]> = { left: "center", center: "right", right: "left" };
+
+/**
+ * พิมพ์บนการ์ดโดยตรง (เจ้าของเลือก 2026-11-27 ข้อ 1-5) — กล่องพิมพ์วางทับชิ้นข้อความ ฟอนต์/ขนาด/สีเหมือนจริง
+ *   Esc · Ctrl+Enter · คลิกข้างนอก = เสร็จ · Enter = ขึ้นบรรทัดใหม่ · ข้อความยาวเกินกล่อง = onGrow (สูงขึ้นตาม)
+ *   แถบจัดรูปแบบลอย (onStyle): ฟอนต์ · ขนาด −/+ · ตัวหนา · จัดชิด · สี — กดแถบไม่หลุดโหมดพิมพ์
+ *   ปุ่มลบ/ลูกศรระหว่างพิมพ์ไม่หลุดไปลบ/ขยับกล่อง (หยุดแป้นไว้ที่ช่องพิมพ์)
+ */
+export function InlineTextEditor({ e, k, value, onText, onGrow, onStyle, onDone, selectAll = false, fontOpts = [] }: {
+  e: CardEl; k: number; value: string; onText: (v: string) => void; onGrow: (hMm: number) => void;
+  onStyle?: (p: Partial<CardTextStyle>) => void; onDone: () => void; selectAll?: boolean; fontOpts?: TextFontOption[];
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [pad, setPad] = useState(0);
+  useEffect(() => {
+    const t = ref.current; if (!t) return;
+    t.focus();
+    if (selectAll) t.select(); else t.setSelectionRange(t.value.length, t.value.length);
+  }, [selectAll]);
+  const b = elBox(e, k);
+  const st = e.style;
+  // วัดความสูงข้อความ → ขยายกล่อง + จัดแนวตั้งให้ตรงกับตอนแสดงผล
+  useLayoutEffect(() => {
+    const t = ref.current; if (!t) return;
+    const prevH = t.style.height, prevP = t.style.paddingTop;
+    t.style.paddingTop = "0px"; t.style.height = "0px";
+    const need = t.scrollHeight;
+    t.style.height = prevH; t.style.paddingTop = prevP;
+    if (need > b.height + 1) onGrow(Math.ceil((need / k) * 10) / 10);
+    const free = Math.max(0, b.height - need);
+    setPad(st?.valign === "top" ? 0 : st?.valign === "bottom" ? free : free / 2);
+  }, [value, st?.size, st?.font, st?.lineHeight, st?.letterSpacing, e.w, b.height, k]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { justifyContent, ...tcss } = (st ? textCss(st, k) : {}) as Record<string, string | number>;
+  void justifyContent;
+  const bump = (d: number) => st && onStyle?.({ size: Math.round(Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, st.size + d * Math.max(1, st.size * 0.1))) * 10) / 10 });
+  const barBtn = "inline-flex h-7 min-w-[28px] items-center justify-center rounded px-1.5 text-[12px] hover:bg-white/15";
+  return (
+    <>
+      {onStyle && st && (
+        <div ref={barRef} onPointerDown={(ev) => ev.stopPropagation()} onMouseDown={(ev) => { if ((ev.target as HTMLElement).tagName !== "SELECT") ev.preventDefault(); }}
+          className="absolute z-30 flex items-center gap-0.5 rounded-lg bg-slate-900 px-1 py-0.5 text-white shadow-lg" style={{ left: Math.max(0, b.left), top: b.top - 38 }}>
+          {fontOpts.length > 0 && (
+            <select value={st.font} onChange={(ev) => { onStyle({ font: ev.target.value }); ref.current?.focus(); }} className="h-7 max-w-[120px] rounded bg-slate-800 px-1 text-[12px] text-white" aria-label="ฟอนต์">
+              {fontOpts.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          )}
+          <button type="button" className={barBtn} onClick={() => bump(-1)} title="เล็กลง">A−</button>
+          <button type="button" className={barBtn} onClick={() => bump(1)} title="ใหญ่ขึ้น">A+</button>
+          <button type="button" className={`${barBtn} font-bold ${st.bold ? "bg-white/20" : ""}`} onClick={() => onStyle({ bold: !st.bold })} title="ตัวหนา">B</button>
+          <button type="button" className={barBtn} onClick={() => onStyle({ align: ALIGN_NEXT[st.align] ?? "center" })} title={`จัดชิด: ${st.align === "left" ? "ซ้าย" : st.align === "right" ? "ขวา" : "กลาง"}`}><Icon name={st.align === "left" ? "align-left" : st.align === "right" ? "align-right" : "align-center"} className="h-4 w-4" /></button>
+          <span className="mx-0.5 h-4 w-px bg-white/20" />
+          {INLINE_COLORS.map((c) => <button key={c} type="button" onClick={() => onStyle({ color: c })} aria-label={`สี ${c}`} className={`h-4 w-4 rounded-full border ${st.color.toLowerCase() === c ? "border-sky-300 ring-2 ring-sky-300" : "border-white/40"}`} style={{ background: c }} />)}
+          <span className="mx-0.5 h-4 w-px bg-white/20" />
+          <button type="button" className={`${barBtn} text-sky-300`} onClick={onDone}>เสร็จ</button>
+        </div>
+      )}
+      <textarea ref={ref} value={value} maxLength={600} spellCheck={false} aria-label="พิมพ์ข้อความบนการ์ด"
+        onChange={(ev) => onText(ev.target.value)}
+        onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Escape" || (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); onDone(); } }}
+        onBlur={(ev) => { if (barRef.current?.contains(ev.relatedTarget as Node)) return; onDone(); }}
+        onPointerDown={(ev) => ev.stopPropagation()}
+        style={{
+          position: "absolute", left: b.left, top: b.top, width: b.width, height: b.height, transform: b.transform, zIndex: 20,
+          ...tcss, paddingTop: pad, paddingLeft: 0, paddingRight: 0, paddingBottom: 0, margin: 0, border: "none", resize: "none", overflow: "hidden",
+          whiteSpace: "pre-wrap", overflowWrap: "anywhere", outline: "2px solid #378ADD", background: "rgba(255,255,255,.55)", boxSizing: "border-box",
+        } as CSSProperties} />
+    </>
   );
 }
