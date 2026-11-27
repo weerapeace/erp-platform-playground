@@ -282,9 +282,12 @@ export function AlbumMultiPicker({ albums, value, onChange, disabled, onCreate, 
 }
 
 /** เลือกอัลบั้มอันเดียว (แทน select ยาว) · value "" = ไม่เลือก (noneLabel) · compact = ปุ่มสูง 32px สำหรับแถบตัวกรอง */
-export function AlbumSelect({ albums, value, onChange, noneLabel, compact, className = "", showCount }: {
+export function AlbumSelect({ albums, value, onChange, noneLabel, compact, className = "", showCount, onCreate, createPermission = "assets.manage" }: {
   albums: readonly AlbumLike[]; value: string; onChange: (id: string) => void; noneLabel: string; compact?: boolean; className?: string; showCount?: boolean;
+  /** สร้างอัลบั้มใหม่จากคำค้น (ไม่ใส่ = ไม่มีปุ่มสร้าง) → คืน id ใหม่ (เลือกให้เลย) หรือ null */
+  onCreate?: (name: string) => Promise<string | null>; createPermission?: string;
 }) {
+  const canCreate = useCanCreate(createPermission) && !!onCreate;
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const options = useMemo(() => buildAlbumOptions(albums), [albums]);
@@ -300,7 +303,8 @@ export function AlbumSelect({ albums, value, onChange, noneLabel, compact, class
       </button>
       {open && (
         <AlbumMenu anchor={btnRef} options={options} selected={value ? [value] : []} multi={false}
-          onPick={(id) => onChange(id)} onClose={() => setOpen(false)} none={{ label: noneLabel, onPick: () => onChange("") }} />
+          onPick={(id) => onChange(id)} onClose={() => setOpen(false)} none={{ label: noneLabel, onPick: () => onChange("") }}
+          onCreate={canCreate ? (name) => { void onCreate!(name).then((id) => { if (id) { onChange(id); setOpen(false); } }); } : undefined} />
       )}
     </div>
   );

@@ -31,7 +31,8 @@ export const RECENT_KEYS = {
   skus:       "erp-recent-skus",
   parentSkus: "erp-recent-parent-skus",
   materials:  "erp-recent-materials",
-  globalSearch: "erp-recent-global-search",   // Global Search (Ctrl+K) — ผลที่เพิ่งเปิด
+  globalSearch: "erp-recent-global-search",
+  uploadAlbums: "erp-recent-upload-albums",   // อัลบั้มที่เพิ่งอัปรูปเข้า (ตัวเลือกรูปกลาง แท็บอัปโหลด)   // Global Search (Ctrl+K) — ผลที่เพิ่งเปิด
   designBrands: "erp-recent-design-brands",   // แบรนด์ที่ใช้สร้างใบงานออกแบบล่าสุด (ปุ่มลัดในฟอร์มสร้างใหม่)
   webProducts: "erp-recent-web-products",     // จัดการ Website › ตัวเลือกสินค้า (รหัสรุ่น) — เรียง "เลือกล่าสุดก่อน"
   webSkus:     "erp-recent-web-skus",         // จัดการ Website › ตัวเลือก SKU ("CODE:sku-xxx")

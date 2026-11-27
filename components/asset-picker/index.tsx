@@ -43,6 +43,7 @@ import {
 } from "@/lib/parent-sku-images";
 import type { SamplePhoto } from "@/lib/sample-images";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
+import { useUserPref } from "@/lib/use-user-pref";
 
 const RECENT_ASSET_LIMIT = 30;
 
@@ -404,7 +405,15 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       ) : tab === "sample" ? (
         <SamplePickerPanel multiple={multiple} isSelected={(id) => selected.has(id)} onToggle={pickSample} onPickMany={pickSampleMany} />
       ) : (
-        <UploadTab actor={actor} typeFilter={typeFilter} kinds={kinds}
+        <UploadTab actor={actor} typeFilter={typeFilter} kinds={kinds} albums={collections} viewingAlbumId={collectionId}
+          onCreateAlbum={async (name) => {
+            try {
+              const j = await apiFetch("/api/assets/collections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then((r) => r.json());
+              if (j.error || !j.data?.id) throw new Error(j.error || "สร้างอัลบั้มไม่สำเร็จ");
+              setCollections((cs) => [...cs, { id: String(j.data.id), name: String(j.data.name ?? name), count: 0 }]);
+              return String(j.data.id);
+            } catch (e) { toast.error((e as Error).message); return null; }
+          }}
           onUploaded={(assets) => {
             setSelected((m) => {
               const n = new Map(multiple ? m : []);
@@ -515,10 +524,22 @@ function ParentImagesSection({ hits, loading, query, only, group, onGroup, selec
   );
 }
 
-function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
+function UploadTab({ actor, typeFilter, kinds, onUploaded, albums, viewingAlbumId, onCreateAlbum }: {
   actor: string | null; typeFilter?: AssetType; kinds?: AssetType[]; onUploaded: (assets: AssetRow[]) => void;
+  /** อัปเข้าอัลบั้ม (เจ้าของเลือก 2026-11-27): รายการอัลบั้ม · อัลบั้มที่เปิดดูในแท็บคลัง (ค่าเริ่ม) · สร้างอัลบั้มใหม่ */
+  albums: { id: string; name: string; count: number; parent_id?: string | null; group?: string | null }[];
+  viewingAlbumId: string;
+  onCreateAlbum: (name: string) => Promise<string | null>;
 }) {
   const toast = useToast();
+  // ค่าเริ่ม = อัลบั้มที่เปิดดูอยู่ในแท็บ "เลือกจากคลัง" · ไม่ได้เปิด = อัลบั้มที่อัปครั้งล่าสุด (จำรายคน) · "" = ไม่ใส่อัลบั้ม
+  const [lastAlbum, setLastAlbum] = useUserPref<string>("asset_upload_album", "", (r) => (typeof r === "string" ? r : null));
+  const [albumPick, setAlbumPick] = useState<string | null>(null);
+  const albumId = albumPick ?? (viewingAlbumId || lastAlbum);
+  const albumName = albums.find((a) => a.id === albumId)?.name ?? "";
+  const [recentAlbums, setRecentAlbums] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { setRecentAlbums(loadRecent<{ id: string; name: string }>(RECENT_KEYS.uploadAlbums).filter((r) => albums.some((a) => a.id === r.id)).slice(0, 3)); }, [albums]);
+  const chooseAlbum = (id: string) => { setAlbumPick(id); setLastAlbum(id); };
   const [busy, setBusy] = useState(false);
   /** ไฟล์ใหญ่/วิดีโอ: แถบ % ของไฟล์ที่กำลังส่ง */
   const [pct, setPct] = useState<{ name: string; pct: number | null } | null>(null);
@@ -569,6 +590,7 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
         const fd = new FormData();
         fd.append("file", file);
         if (actor) fd.append("actor", actor);
+        if (albumId) fd.append("collection_id", albumId);
         const d = await imgDims(file);
         if (d) { fd.append("width", String(d.w)); fd.append("height", String(d.h)); }
         const res = await apiFetch("/api/assets", { method: "POST", body: fd });
@@ -578,10 +600,25 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
       } catch (e) { toast.error(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
     }
     setBusy(false);
+    if (done.length && albumId && albumName) setRecentAlbums(pushRecent(RECENT_KEYS.uploadAlbums, { id: albumId, name: albumName }).slice(0, 3));
     if (done.length) onUploaded(done);
   };
 
   return (
+    <div className="space-y-2">
+    {/* อัปเข้าอัลบั้ม (ตัวเลือกอัลบั้มกลาง · สร้างใหม่ได้ตามสิทธิ์) + อัลบั้มที่ใช้ล่าสุด */}
+    <div className="flex flex-wrap items-center gap-2 text-[13px]">
+      <span className="font-medium text-slate-700">อัปเข้าอัลบั้ม</span>
+      <AlbumSelect albums={albums} value={albumId} onChange={chooseAlbum} noneLabel="ไม่ใส่อัลบั้ม (คลังกลางเฉย ๆ)" compact showCount className="w-72 max-w-full" onCreate={onCreateAlbum} />
+      {recentAlbums.filter((r) => r.id !== albumId).length > 0 && (
+        <span className="flex flex-wrap items-center gap-1 text-[12px]">
+          <span className="text-slate-400">ใช้ล่าสุด:</span>
+          {recentAlbums.filter((r) => r.id !== albumId).map((r) => (
+            <button key={r.id} type="button" onClick={() => chooseAlbum(r.id)} className="h-6 max-w-[12rem] truncate rounded-full border border-slate-200 bg-white px-2 text-slate-600 hover:border-indigo-300">{r.name}</button>
+          ))}
+        </span>
+      )}
+    </div>
     <div
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
       onDragLeave={() => setDragOver(false)}
@@ -596,9 +633,10 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${pct.pct}%` }} />
         </div>
       )}
-      <p className="text-[12px] text-slate-400 mt-1">อัปแล้วจะเข้าคลังกลาง + ถูกเลือกให้อัตโนมัติ{!allowed || allowed.includes("video") ? " · วิดีโอ MP4 / WebM ถึง 200 MB" : ""}</p>
+      <p className="text-[12px] text-slate-400 mt-1">{albumName ? `อัปแล้วจะเข้าอัลบั้ม "${albumName}" + ถูกเลือกให้อัตโนมัติ (ไฟล์เกิน 4 MB / วิดีโอ เข้าคลังกลางเท่านั้น)` : "อัปแล้วจะเข้าคลังกลาง + ถูกเลือกให้อัตโนมัติ"}{!allowed || allowed.includes("video") ? " · วิดีโอ MP4 / WebM ถึง 200 MB" : ""}</p>
       <input ref={inputRef} type="file" multiple={true} accept={accept}
         className="hidden" onChange={(e) => e.target.files && handle(e.target.files)} />
+    </div>
     </div>
   );
 }
