@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useId, useRef, useState, type PointerEvent as RPointerEvent } from "react";
 import { Icon } from "@/components/icon";
+import { kelvinRgb } from "@/lib/studio-light";
 
 export type StudioState = { d: number; a: number; soft: number; k: number; flag: boolean };
 export type StudioFocus = "dist" | "angle" | "soft" | "k";
@@ -24,15 +25,8 @@ const FOCUS: Record<StudioFocus, { label: string; key: "d" | "a" | "soft" | "k";
 };
 
 const cl = (x: number) => Math.max(0, Math.min(1, x));
-/** สีของแสงตามเคลวิน (ประมาณจากตารางสีวัตถุดำ) — 3200K ส้ม · 5600K ขาว · 6500K ฟ้าอ่อน */
-const K_STOPS: [number, [number, number, number]][] = [[2700, [255, 172, 98]], [3200, [255, 190, 126]], [4300, [255, 224, 190]], [5600, [255, 248, 242]], [6500, [222, 234, 255]]];
-const tint = (k: number): [number, number, number] => {
-  for (let i = 1; i < K_STOPS.length; i++) {
-    const [k1, c1] = K_STOPS[i];
-    if (k <= k1) { const [k0, c0] = K_STOPS[i - 1]; const t = Math.max(0, (k - k0) / (k1 - k0)); return [0, 1, 2].map((j) => Math.round(c0[j] + (c1[j] - c0[j]) * t)) as [number, number, number]; }
-  }
-  return K_STOPS[K_STOPS.length - 1][1];
-};
+/** สีของแสงตามเคลวิน — ตารางกลางเดียวกับสตูดิโอเต็ม (lib/studio-light) */
+const tint = kelvinRgb;
 const rgb = (c: readonly number[], L: number) => `rgb(${c.map((v) => Math.round(v * cl(L))).join(",")})`;
 const SUBJ = { x: 150, y: 130 };
 const lampPos = (s: StudioState) => { const R = 30 + s.d * 36, r = (s.a * Math.PI) / 180; return [SUBJ.x + R * Math.sin(r), SUBJ.y + R * Math.cos(r)] as const; };

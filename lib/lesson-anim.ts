@@ -25,6 +25,7 @@ export const ANIM_PRESETS: AnimPresetMeta[] = [
   { key: "histogram", label: "อ่าน Histogram", group: "กล้อง", hint: "ค่าแสงเกิน/ขาด กราฟชนขอบ" },
   { key: "diffusion", label: "ทำแสงให้นุ่ม (ซอฟต์บ็อกซ์)", group: "อุปกรณ์", hint: "ใส่/ไม่ใส่ตัวกระจายแสง" },
   { key: "flag", label: "บังแสงด้วย Flag", group: "อุปกรณ์", hint: "กันแสงหกโดนฉากหลัง" },
+  { key: "studio-lab", label: "สตูดิโอจำลองตัวเต็ม", group: "สตูดิโอ", hint: "จัดไฟหลายดวง · ตัวปรับแสง · สูตรไฟ 16 สูตร" },
 ];
 
 export const ANIM_KEYS = new Set(ANIM_PRESETS.map((p) => p.key));

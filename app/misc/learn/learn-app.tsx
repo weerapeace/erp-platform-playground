@@ -8,6 +8,7 @@
  *   ข้อมูล/เขียน ผ่าน use-learn (API /api/learn) · กติกา lib/learn · คู่มือ docs/learning-center.md
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog } from "@/components/modal";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
@@ -173,6 +174,7 @@ export function LearnApp() {
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800"><Icon name="school" /> ศูนย์เรียนรู้</h1>
           <p className="text-[13px] text-slate-500">บทเรียนสอนงานทีละขั้น — อ่าน ดูคลิป แล้วติ๊กเช็กลิสต์ตอนทำงานจริง</p>
         </div>
+        <Link href="/misc/learn/studio" className="inline-flex h-9 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-sm font-medium text-indigo-700 hover:bg-indigo-50"><Icon name="bulb" /> สตูดิโอจำลอง</Link>
         {canManage && tab !== "shots" && (
           <button type="button" onClick={() => setEditing("new")} className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="plus" /> สร้างบทเรียน</button>
         )}

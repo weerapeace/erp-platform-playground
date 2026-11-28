@@ -8,6 +8,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { StudioSim, type StudioConfig } from "./studio";
+import { StudioLab } from "./studio-lab";
 
 type Ctl =
   | { kind: "range"; label: string; min: number; max: number; step: number; init: number; fmt?: (v: number) => string }
@@ -111,9 +112,10 @@ const STUDIO: Record<string, StudioConfig> = {
     { label: "ใส่ Flag", set: { flag: true }, tip: "Flag บังแสงไม่ให้โดนฉากหลัง ฉากหลังมืดลง" }] },
 };
 
-export function hasPreset(key: string) { return key in PRESETS || key in STUDIO; }
+export function hasPreset(key: string) { return key in PRESETS || key in STUDIO || key === "studio-lab"; }
 
 export function PresetAnim({ animKey }: { animKey: string }) {
+  if (animKey === "studio-lab") return <StudioLab variant="embed" />;
   if (STUDIO[animKey]) return <StudioSim config={STUDIO[animKey]} />;
   return <ScenePreset animKey={animKey} />;
 }
