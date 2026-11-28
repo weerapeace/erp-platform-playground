@@ -4,7 +4,7 @@
  *          ?pv=คำค้น                                       → ค้นใบสำคัญด้วยเลข PV (ช่อง "ของใบ" → ค้นหาใบอื่น)
  *   POST   { r2_key, gr_id? }                               → ให้ AI อ่านรูป → บันทึกเป็นใบส่งของ · เลขขนส่งซ้ำกับใบอื่น = ส่ง duplicates กลับไปถาม "ใช้ร่วมไหม"
  *   POST   { action:"claim", bill_id, rows[], drop_bill_id? } → รับแถวของบิลนั้นเข้าใบนี้ (ใช้ร่วม / กล่องที่พักไว้) · drop = เอาสำเนาซ้ำของใบนี้ออก
- *   PATCH  { bill_id, tracking_no?, bill_date?, lines?, apply?, expected_updated_at? } → แก้ค่า/จับคู่/เจ้าของแถว · apply = ใช้น้ำหนัก/คิว เฉพาะแถวของใบนี้
+ *   PATCH  { bill_id, tracking_no?, bill_date?, lines?, apply?, expected_updated_at? } → แก้ค่า/จับคู่/เจ้าของแถว · apply = ใช้น้ำหนัก/คิว เฉพาะแถวของใบนี้ · ★ 11-28 apply ไม่ต้องจับคู่ = เกลี่ยกล่องที่ใช้แล้วทุกใบให้ทุกสินค้าตามมูลค่า (lib/delivery-bill applyVoucherBoxes)
  *   POST   { action:"unapply", bill_id, before[], rows? }  → ย้อน "ใช้น้ำหนัก/คิว" (คืนคิว/กก.ต่อชิ้นเดิม) · ไม่มี rows = หลังอ่าน (ล้างการจับคู่อัตโนมัติด้วย)
  *                                                            มี rows = ย้อนตอนกดยืนยัน (★ 11-27 · แถวเหล่านั้นกลับเป็น "ยังไม่ได้ใช้" แต่การจับคู่คงไว้)
  *          PATCH apply คืน before[] + rows[] ไว้ให้ปุ่ม "ย้อนกลับ"
@@ -17,9 +17,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit, auditDiff } from "@/lib/audit";
-import { parseDeliveryBillImage, applyDeliveryBill, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
+import { parseDeliveryBillImage, applyVoucherBoxes, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
 import { rowOwner, rowsOf, otherOwners, billStatusAfter, matchCopyRow } from "@/lib/delivery-bill-share";
-import { autoMatchBoxes } from "@/lib/delivery-bill-check";
 import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isRefForCategory } from "@/lib/file-ref";
 import { voucherEditable } from "@/lib/voucher-revision";
@@ -250,29 +249,23 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
         duplicates = dl.map((d) => ({ bill_id: String(d.id), voucher_id: String(d.voucher_id), pv_no: pv.get(String(d.voucher_id)) ?? null, created_at: String(d.created_at ?? "") }));
       }
     }
-    // ★ 2026-11-23 ข้อ 2: ชัด → จับคู่ + ใช้น้ำหนัก/คิวให้เลย — ใบนี้แก้ได้ · ไม่ซ้ำกับใบอื่น · ใบนี้ยังไม่มีใบส่งของอื่นที่มีกล่องของใบนี้ · จับคู่ได้ครบทุกกล่อง
-    let auto: { applied: number; before: Row[] } | null = null;
+    // ★ 2026-11-28 อ่านแล้วใช้น้ำหนัก/คิวให้เลย — ไม่ต้องจับคู่สินค้าแล้ว (เกลี่ยให้ทุกสินค้าตามมูลค่า · นับรวมใบส่งของทุกใบของใบนี้)
+    //   เงื่อนไข: ใบนี้แก้ได้ · เลขขนส่งไม่ซ้ำกับใบอื่น (ซ้ำ = ถามใช้ร่วมก่อน) · ใบนี้มีรายการ · ย้อนได้ (before + rows)
+    let auto: { applied: number; before: Row[]; rows: number[] } | null = null;
     const newId = String((ins as Row).id);
     if (!duplicates.length && voucherEditable(v as { status: string; editing_at?: string | null }) && parsed.lines.length > 0) {
-      const [{ data: ownB }, { data: shB }, { data: vls }] = await Promise.all([
-        admin.from("purchase_delivery_bills").select("id").eq("voucher_id", id).neq("kind", "seller").not("is_active", "is", false).neq("id", newId).limit(1),
-        admin.from("purchase_delivery_bills").select("id").contains("lines", [{ for_voucher_id: id }]).neq("kind", "seller").not("is_active", "is", false).limit(1),
-        admin.from("purchase_voucher_lines_v2").select("id, qty, item_sku_id, kg_per_unit, cbm_per_unit, ship_method").eq("voucher_id", id).not("is_active", "is", false),
-      ]);
+      const { data: vls } = await admin.from("purchase_voucher_lines_v2").select("id, kg_per_unit, cbm_per_unit, ship_method").eq("voucher_id", id).not("is_active", "is", false);
       const vrows = (vls ?? []) as Row[];
-      if (!((ownB ?? []) as Row[]).length && !((shB ?? []) as Row[]).length && vrows.length) {
-        const r = autoMatchBoxes(vrows.map((l) => ({ id: String(l.id), label: "", qty: Number(l.qty) || 0, is_product: !!l.item_sku_id })),
-          [{ id: newId, tracking_no: null, lines: parsed.lines.map((l) => ({ qty: l.qty, voucher_line_ids: [] })) }]);
-        if (r.complete && r.matches.length) {
-          const now = new Date().toISOString();
-          const lines2: DeliveryBillLine[] = parsed.lines.map((l, i) => { const m = r.matches.find((x) => x.idx === i); return m ? { ...l, voucher_line_ids: m.line_ids, auto: true, applied_at: now } : l; });
-          const before = vrows.map((l) => ({ id: String(l.id), kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null, ship_method: l.ship_method ?? null }));
-          const n = await applyDeliveryBill(admin, id, { tracking_no: parsed.tracking_no, lines: lines2 });
-          await admin.from("purchase_delivery_bills").update({ lines: lines2, status: billStatusAfter(lines2, id), applied_at: now, updated_at: now }).eq("id", newId);
-          await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
-            metadata: { note: "อ่านใบส่งของแล้วจับคู่ + ใช้น้ำหนัก/คิวให้อัตโนมัติ (ใบส่งของใบเดียว จับคู่ครบ)", delivery_bill_applied: newId, lines_updated: n, auto: true, before } });
-          auto = { applied: n, before };
-        }
+      if (vrows.length) {
+        const now = new Date().toISOString();
+        const lines2: DeliveryBillLine[] = parsed.lines.map((l) => ({ ...l, applied_at: now }));
+        const before = vrows.map((l) => ({ id: String(l.id), kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null, ship_method: l.ship_method ?? null }));
+        await admin.from("purchase_delivery_bills").update({ lines: lines2, status: billStatusAfter(lines2, id), applied_at: now, updated_at: now }).eq("id", newId);
+        const r = await applyVoucherBoxes(admin, id, { tracking_no: parsed.tracking_no });
+        await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
+          metadata: { note: "อ่านใบส่งของแล้วใส่น้ำหนัก/คิวให้อัตโนมัติ (เกลี่ยให้ทุกสินค้าตามมูลค่า)", delivery_bill_applied: newId, lines_updated: r.updated, auto: true, spread_basis: r.spread.basis, before,
+            changes: auditDiff(Object.fromEntries(before.map((x) => [x.id, `คิว ${x.cbm_per_unit ?? "-"} · กก. ${x.kg_per_unit ?? "-"} ต่อชิ้น`])), Object.fromEntries(r.spread.per.map((x) => [x.id, `คิว ${x.cbm_per_unit ?? "-"} · กก. ${x.kg_per_unit ?? "-"} ต่อชิ้น`]))) } });
+        auto = { applied: r.updated, before, rows: lines2.map((_, i) => i) };
       }
     }
     return NextResponse.json({ ok: true, data: ins, duplicates, auto, error: null });
@@ -345,15 +338,14 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   if (body.apply) {
     if (!voucherEditable(v as { status: string; editing_at?: string | null })) return NextResponse.json({ error: "ใบสำคัญยืนยันแล้ว ใส่น้ำหนัก/คิวเพิ่มไม่ได้ (กด แก้ไขใบ ก่อน)" }, { status: 400 });
     const useLines = (lines ?? oldLines).map((l) => ({ ...l }));
-    // ใช้เฉพาะแถวของใบนี้ — แถวของใบอื่น/พักไว้ ไม่ลงใบนี้
+    // ใช้เฉพาะกล่องของใบนี้ — กล่องของใบอื่น/พักไว้ ไม่ลงใบนี้ · ★ 11-28 ไม่ต้องจับคู่สินค้าแล้ว (เกลี่ยให้ทุกสินค้าตามมูลค่า)
     const mine = rowsOf(useLines, home, id);
-    if (!mine.some((i) => (useLines[i].voucher_line_ids ?? []).length > 0)) return NextResponse.json({ error: "แถวของใบนี้ยังไม่ได้จับคู่สินค้าเลย" }, { status: 400 });
+    if (!mine.length) return NextResponse.json({ error: "ใบส่งของนี้ไม่มีกล่องของใบนี้ — เลือกช่อง \"ของใบ\" เป็นใบนี้ก่อน" }, { status: 400 });
     // ★ 11-27 เก็บค่าเดิมไว้ให้ปุ่ม "ย้อนกลับ" (ใช้ตอนกดยืนยันแล้วระบบใส่น้ำหนัก/คิวให้เอง)
     const { data: vls } = await admin.from("purchase_voucher_lines_v2").select("id, kg_per_unit, cbm_per_unit, ship_method").eq("voucher_id", id).not("is_active", "is", false);
     undoBefore = ((vls ?? []) as Row[]).map((l) => ({ id: String(l.id), kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null, ship_method: l.ship_method ?? null }));
-    undoRows = mine.filter((i) => (useLines[i].voucher_line_ids ?? []).length > 0 && !useLines[i].applied_at);
-    applied = await applyDeliveryBill(admin, id, { tracking_no: (patch.tracking_no as string | null) ?? (b.tracking_no as string | null) ?? null, lines: mine.map((i) => useLines[i]) });
-    for (const i of mine) if ((useLines[i].voucher_line_ids ?? []).length > 0) useLines[i].applied_at = now;
+    undoRows = mine.filter((i) => !useLines[i].applied_at);
+    for (const i of mine) if (!useLines[i].applied_at) useLines[i].applied_at = now;
     lines = useLines;
     patch.lines = useLines;
     patch.applied_at = now;
@@ -362,6 +354,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   patch.updated_at = now;
   const { data: upd, error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId).select("*").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ★ 11-28 บิลบันทึกแล้ว → เกลี่ยใหม่จากกล่องที่ใช้แล้วทุกใบส่งของของใบนี้ (ใบที่สองไม่ทับค่าของใบแรก)
+  let spreadBasis: string | null = null;
+  if (body.apply) { const r = await applyVoucherBoxes(admin, id, { tracking_no: (patch.tracking_no as string | null) ?? (b.tracking_no as string | null) ?? null }); applied = r.updated; spreadBasis = r.spread.basis; }
   // ประวัติ: ลบ/เพิ่มแถว · ย้ายแถวไปใบอื่น/พักไว้/ไม่ใช่ของเรา · ใช้น้ำหนัก/คิว
   if (lines) {
     const before = ownerSummary(oldLines, home), after = ownerSummary(lines, home);
@@ -369,7 +364,9 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     if (changes.length) await writeAudit(admin, { action: "update", entityType: "purchase_delivery_bills", entityId: billId, actorId: user?.id ?? null, actorName,
       metadata: { note: "แก้แถวใบส่งของ (ลบ/เพิ่ม/เปลี่ยนว่าเป็นของใบไหน)", voucher_id: id, tracking_no: (patch.tracking_no as string) ?? (b.tracking_no as string) ?? null, changes } });
   }
-  if (body.apply) await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName, metadata: { delivery_bill_applied: billId, lines_updated: applied, shared_bill: home !== id } });
+  if (body.apply) await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName,
+    metadata: { note: "ใช้น้ำหนัก/คิวจากใบส่งของ (เกลี่ยให้ทุกสินค้าตามมูลค่า)", delivery_bill_applied: billId, lines_updated: applied, shared_bill: home !== id, spread_basis: spreadBasis, rows_newly_applied: undoRows,
+      changes: auditDiff({ rows_applied: rowsOf(oldLines, home, id).filter((i) => !!oldLines[i]?.applied_at).length }, { rows_applied: rowsOf(lines ?? oldLines, home, id).length }) } });
   return NextResponse.json({ ok: true, data: upd, applied, ...(body.apply ? { before: undoBefore, rows: undoRows } : {}), error: null });
 }
 

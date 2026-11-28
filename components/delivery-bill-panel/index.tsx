@@ -10,6 +10,10 @@
  *   - แก้แล้วยังไม่บันทึก (ลบแถว/แก้ตัวเลข/จับคู่/ลาก/เปลี่ยนเจ้าของแถว) = ขึ้นป้ายทุกกรณี · หน้าใบถามก่อนยืนยัน/ออก (controlRef + onStatus)
  *   - แต่ละแถวเลือกว่าเป็นของใบไหน: ใบนี้ / ใบอื่น / พักไว้ / ไม่ใช่ของเรา (lib/delivery-bill-share) · ใบอื่นเห็นบิลเดียวกันโดยไม่ต้องอัปโหลดซ้ำ
  *   - เลขขนส่งซ้ำกับใบอื่น → ถาม/ปุ่ม "ใช้ร่วมกับ PV…" · ลบแถว = แจ้งเตือนมีปุ่มย้อนกลับ · กล่องที่พักไว้ = แนะนำให้ใบที่ยังไม่มีใบส่งของ
+ * ★ 2026-11-28 (เจ้าของ: "เอาที่เลือกสินค้าออกเลย" · "ตรงตรวจไม่ต้องตรวจแล้ว" · เกลี่ยแบบ A ตามมูลค่า)
+ *   - ไม่มีช่องจับคู่สินค้าแล้ว — กล่องของใบนี้ (ทุกใบส่งของ) รวมกัน เกลี่ยให้สินค้าทุกตัวตามมูลค่า (lib/delivery-bill-check spreadBoxesByValue)
+ *   - เอากล่อง "เช็กจำนวน" + ป้ายแดงน้ำหนักไม่ตรงออก (หน้าใบคิดใหม่ให้เองตอนกดยืนยัน ถ้าแก้จำนวนหลังใช้แล้ว)
+ *   - ตารางกล่องลากขยายคอลัมน์ได้ (components/col-resize)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -22,16 +26,17 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { DeliveryBillLine } from "@/lib/delivery-bill";
-import { normDesc, ruleForDescription, autoMatchBoxes, boxWeightCheck, type DescRule } from "@/lib/delivery-bill-check";
+import { normDesc, ruleForDescription, spreadBoxesByValue, type DescRule, type SpreadBox } from "@/lib/delivery-bill-check";
+import { useColWidths, ColGrip } from "@/components/col-resize";
 import { rowOwner, rowsOf, otherOwners, setRowOwner, choiceKey, parseChoiceKey, billTotalsFor, appliedFor, billDirty, boxKey, dupBoxStatus } from "@/lib/delivery-bill-share";
-import { QtyCheckCard, type BoxSuggestion } from "./qty-check";
 
 export type BillRow = {
   id: string; voucher_id: string; gr_id: string | null; r2_key: string; tracking_no: string | null; bill_date: string | null; marking: string | null; delivery_area: string | null;
   total_weight_kg: number | null; total_m3: number | null; total_packages: number | null; lines: DeliveryBillLine[]; status: string; applied_at: string | null; created_at: string; updated_at?: string | null;
 };
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
-export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean; kg_per_unit?: number | null; cbm_per_unit?: number | null };
+export type VoucherLineLite = { id: string; code: string; item_name: string; qty: number; uom: string | null; gr_no: string | null; is_product?: boolean; kg_per_unit?: number | null; cbm_per_unit?: number | null;
+  /** ★ 11-28 ไว้บอกว่าเกลี่ยตามมูลค่าได้ไหม (ไม่มีราคาเลยทั้งใบ = ตามจำนวนชิ้น) */ unit_price?: number | null; discount?: number | null; discount_pct?: number | null };
 type VOpt = { id: string; pv_no: string | null; status: string; voucher_date: string | null; seller_name: string | null; why: string };
 type ShortRow = { idx: number; no: number | null; description: string | null; qty: number | null; weight_kg: number | null; m3: number | null; owner?: string | null; applied?: boolean; stock?: string | null; po_no?: string | null };
 type Dup = { bill_id: string; tracking_no: string; voucher_id: string; pv_no: string | null; created_at: string; rows: number; lines?: ShortRow[] };
@@ -43,19 +48,31 @@ export type DeliveryBillApi = {
   flush: () => Promise<boolean>;
   discard: () => void;
   /** ★ 11-27 undo = ค่าเดิมต่อใบส่งของ ไว้ให้ปุ่ม "ย้อนกลับ" (ส่งเข้า undoApply) */
-  applyAll: () => Promise<{ applied: number; unmapped: number; failed: number; undo: DeliveryApplyUndo[] }>;
-  /** ★ 11-27 ย้อน applyAll — คืนคิว/กก.ต่อชิ้นเดิม · แถวกลับเป็น "ยังไม่ได้ใช้" (การจับคู่คงไว้) */
+  applyAll: (opts?: { refresh?: boolean }) => Promise<{ applied: number; unmapped: number; failed: number; undo: DeliveryApplyUndo[] }>;
+  /** ★ 11-28 กล่องของใบนี้ที่ใช้แล้ว (ทุกใบส่งของ) — หน้าใบเทียบกับจำนวนล่าสุดว่าต้องคิดใหม่ไหม (lib/delivery-bill-check spreadStale) */
+  appliedBoxes: () => SpreadBox[];
+  /** ★ 11-27 ย้อน applyAll — คืนคิว/กก.ต่อชิ้นเดิม · กล่องที่เพิ่งใช้กลับเป็น "ยังไม่ได้ใช้" */
   undoApply: (undo: DeliveryApplyUndo[]) => Promise<boolean>;
 };
 export type DeliveryApplyUndo = { bill_id: string; before: unknown[]; rows: number[] };
-export type DeliveryBillStatus = { pending: boolean; mineRows: number; unappliedRows: number; unmappedRows: number; mismatchBills: number };
+/** unmappedRows = 0 เสมอ (★ 11-28 ไม่ต้องจับคู่สินค้าแล้ว — คงช่องไว้ให้ตัวบอกสาเหตุค่าส่ง ฿0) */
+export type DeliveryBillStatus = { pending: boolean; mineRows: number; unappliedRows: number; unmappedRows: number };
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
 const fmtN = (v: number, d: number) => v.toLocaleString("th-TH", { maximumFractionDigits: d });
 const inp = "h-8 px-1.5 text-xs border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 /** ลากย้ายแถว: หลายใบในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับใบ × ROW_SPAN + ลำดับแถว (ลากข้ามใบไม่ได้) */
 const ROW_SPAN = 10000;
+/** ★ 11-28 คอลัมน์ตารางกล่อง [key, หัว, กว้างเริ่มต้น px, ชิดขวา] — ลากขยายได้ (components/col-resize) */
+const BOX_COLS: [string, string, number, boolean][] = [
+  ["db_no", "#", 52, false], ["db_owner", "ของใบ", 150, false], ["db_stock", "Stock", 104, false], ["db_po", "P/o.No", 124, false], ["db_desc", "Description", 150, false],
+  ["db_pack", "Pack", 64, true], ["db_pkg", "Package", 76, false], ["db_qty", "Qty", 76, true], ["db_kg", "Weight (กก.)", 92, true], ["db_m3", "M3 (คิว)", 92, true], ["db_method", "คิดค่าส่งจาก", 130, false],
+];
+const BOX_TIPS: Record<string, string> = {
+  db_no: "บรรทัดที่เท่าไรในใบ (บนกระดาษ) · ลากหูจับเพื่อย้ายแถว",
+  db_owner: "กล่องนี้เป็นของใบสำคัญไหน — ใบอื่นจะเห็นใบส่งของนี้เอง ไม่ต้องอัปโหลดซ้ำ",
+  db_method: "เลือกอัตโนมัติจากกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) แก้ได้",
+};
 const toDraft = (b: BillRow): Draft => ({ tracking_no: b.tracking_no ?? "", bill_date: b.bill_date ?? "", lines: (b.lines ?? []).map((l) => ({ ...l, voucher_line_ids: [...(l.voucher_line_ids ?? [])] })) });
 
 export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, controlRef, onStatus, beforeApply }: {
@@ -70,7 +87,6 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   const [busy, setBusy] = useState<string | null>(null);   // "parse" | bill id | "claim"
   const [draft, setDraft] = useState<Record<string, Draft>>({});
   const [loaded, setLoaded] = useState<Record<string, Draft>>({});   // ค่าจากเซิร์ฟเวอร์ ไว้เทียบ "ยังไม่บันทึก"
-  const [mapFor, setMapFor] = useState<{ billId: string; idx: number } | null>(null);
   const [open, setOpen] = useState(true);
   const [rules, setRules] = useState<DescRule[]>([]);   // กฎ Description → คิว/กก. (/m/freight-description-rules)
   const [remembering, setRemembering] = useState<string | null>(null);
@@ -120,14 +136,14 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as BillRow;
-      const au = j.auto as { applied: number; before: unknown[] } | null | undefined;
+      const au = j.auto as { applied: number; before: unknown[]; rows?: number[] } | null | undefined;
       if (au) {
-        // ข้อ 2: ชัด (ใบนี้มีใบส่งของใบเดียว จับคู่ครบ) → ใช้น้ำหนัก/คิวให้แล้ว · ย้อนกลับได้
-        toast.undo(`อ่านใบส่งของ ${b.tracking_no ?? ""} แล้ว · จับคู่ + ใส่น้ำหนัก/คิวให้อัตโนมัติ ${au.applied} รายการ — ตรวจได้ แก้ได้`, async () => {
-          const res2 = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unapply", bill_id: b.id, before: au.before }) });
+        // ★ 11-28 อ่านแล้วใส่น้ำหนัก/คิวให้เลย (เกลี่ยให้ทุกสินค้าตามมูลค่า) · ย้อนกลับได้
+        toast.undo(`อ่านใบส่งของ ${b.tracking_no ?? ""} แล้ว · ใส่น้ำหนัก/คิวให้สินค้า ${au.applied} รายการ (เกลี่ยตามมูลค่า) — แก้ได้`, async () => {
+          const res2 = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unapply", bill_id: b.id, before: au.before, rows: au.rows ?? [] }) });
           const j2 = await res2.json().catch(() => ({}));
           if (!res2.ok || j2.error) { toast.error("ย้อนไม่สำเร็จ: " + (j2.error ?? res2.status)); return; }
-          toast.success("ย้อนแล้ว — น้ำหนัก/คิวกลับเป็นค่าเดิม (ใบส่งของยังอยู่ จับคู่เองได้)");
+          toast.success("ย้อนแล้ว — น้ำหนัก/คิวกลับเป็นค่าเดิม (ใบส่งของยังอยู่ กด ใช้น้ำหนัก/คิว ได้ทีหลัง)");
           await load(); await onApplied();
         }, { ms: 12000 });
         await load(); await onApplied();
@@ -167,7 +183,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     setBusy(billId);
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, tracking_no: d.tracking_no, bill_date: d.bill_date || null, lines: effLines(billId, d.lines), apply, expected_updated_at: b?.updated_at ?? null }) });
+        body: JSON.stringify({ bill_id: billId, tracking_no: d.tracking_no, bill_date: d.bill_date || null, lines: d.lines, apply, expected_updated_at: b?.updated_at ?? null }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) {
         if (j.stale) toast.action(String(j.error), "โหลดใหม่", () => { setDraft((p) => { const n = { ...p }; delete n[billId]; return n; }); void load(); }, { variant: "error" });
@@ -212,27 +228,6 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
   };
   // แถวของใบนี้ในแต่ละบิล (ดัชนีจริง) — กล่องเช็กจำนวนดูเฉพาะแถวของใบนี้
   const mineIdx = useMemo(() => Object.fromEntries(bills.map((b) => [b.id, rowsOf(draft[b.id]?.lines ?? b.lines ?? [], b.voucher_id, voucherId)])), [bills, draft, voucherId]);
-  // ★ 2026-11-23 แบบ A: จับคู่กล่องให้เองเมื่อชัด (กล่องเดียว = ทุกสินค้าในใบ · หลายกล่องเดาจากจำนวน) — แสดง "อัตโนมัติ" · ส่งไปตอนบันทึก/ใช้ · ไม่นับเป็น "ยังไม่บันทึก"
-  const autoMap = useMemo(() => {
-    const out: Record<string, Record<number, { ids: string[]; all: boolean }>> = {};
-    if (readonly) return out;
-    const cbills = bills.map((b) => { const ls = draft[b.id]?.lines ?? b.lines ?? []; const idx = mineIdx[b.id] ?? []; return { id: b.id, tracking_no: null, idx, lines: idx.map((i) => ({ qty: ls[i].qty, voucher_line_ids: ls[i].voucher_line_ids })) }; });
-    const r = autoMatchBoxes(lines.map((l) => ({ id: l.id, label: l.item_name, qty: l.qty, is_product: !!l.is_product })), cbills);
-    for (const m of r.matches) { const cb = cbills.find((c) => c.id === m.bill_id); const real = cb?.idx[m.idx]; if (real == null) continue; (out[m.bill_id] ??= {})[real] = { ids: m.line_ids, all: m.all }; }
-    return out;
-  }, [bills, draft, mineIdx, lines, readonly]);
-  const autoMapRef = useRef(autoMap); autoMapRef.current = autoMap;
-  /** แถวที่จะส่งไปบันทึก/ใช้ = ที่แก้ + ที่ระบบจับคู่ให้ (เฉพาะกล่องที่ยังว่าง) */
-  const effLines = (billId: string, ls: DeliveryBillLine[]) => { const a = autoMapRef.current[billId]; return a ? ls.map((l, i) => (a[i] && l.voucher_line_ids.length === 0 ? { ...l, voucher_line_ids: a[i].ids, auto: true } : l)) : ls; };
-  // ★ 2026-11-15 กล่องเช็กจำนวน: ระบบเดาสินค้าให้กล่องที่ยังว่าง → คนกดยืนยันก่อน (ยังไม่บันทึก จนกว่าจะกด บันทึก / ใช้น้ำหนัก/คิว)
-  const applySuggest = (sugg: BoxSuggestion[]) => {
-    setDraft((p) => {
-      const nx = { ...p };
-      for (const s of sugg) { const d = nx[s.bill_id]; const real = mineIdx[s.bill_id]?.[s.idx]; if (!d || real == null) continue; nx[s.bill_id] = { ...d, lines: d.lines.map((l, i) => (i === real && l.voucher_line_ids.length === 0 ? { ...l, voucher_line_ids: [s.line_id] } : l)) }; }
-      return nx;
-    });
-    toast.success(`จับคู่ให้ ${sugg.length} กล่องแล้ว — ตรวจแล้วกด บันทึก`);
-  };
   // ★ 2026-11-15 จำกฎ Description (เช่น METAL ACCY = กก.) → ใบส่งของครั้งหน้าระบบเลือกให้เอง + เติมกล่องที่ยังว่างในใบที่ยังไม่ได้ใช้
   const rememberRule = async (description: string, method: "cube" | "weight") => {
     const key = normDesc(description); if (!key) return;
@@ -269,7 +264,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     const extra: ShortRow[] = myOwned.filter((x) => !tKeys.has(boxKey(x.l))).map((x) => ({ idx: x.idx, no: x.l.no ?? null, description: x.l.description, qty: x.l.qty, weight_kg: x.l.weight_kg, m3: x.l.m3, stock: x.l.stock, po_no: x.l.po_no, applied: !!x.l.applied_at }));
     setClaim({ billId: target.bill_id, dropBillId: billId, picked, rows: tRows, extra, pickedAdd: new Set(extra.map((r) => r.idx)),
       title: `ใช้ร่วมกับ ${target.pv_no ?? "ใบเดิม"}`,
-      note: `ใบส่งของ ${tn} อัปโหลดไว้ที่ ${target.pv_no ?? "ใบอื่น"} แล้ว — ติ๊กกล่องที่เป็นของใบนี้ · การจับคู่สินค้า + น้ำหนัก/คิวที่ใช้แล้วยกไปให้ · ใบซ้ำของใบนี้จะถูกเอาออก (เก็บไว้ ไม่ลบถาวร)` });
+      note: `ใบส่งของ ${tn} อัปโหลดไว้ที่ ${target.pv_no ?? "ใบอื่น"} แล้ว — ติ๊กกล่องที่เป็นของใบนี้ · น้ำหนัก/คิวที่ใช้แล้วยกไปให้ · ใบซ้ำของใบนี้จะถูกเอาออก (เก็บไว้ ไม่ลบถาวร)` });
   };
   const openParked = (p: Parked) => setClaim({ billId: p.bill_id, dropBillId: null, picked: new Set(), rows: p.rows, extra: [], pickedAdd: new Set(),
     title: "รับกล่องที่พักไว้เข้าใบนี้", note: `ใบส่งของ ${p.tracking_no ?? "—"} (${p.bill_date ? formatDate(p.bill_date) : "—"}) จาก ${p.pv_no ?? "ใบอื่น"} — ติ๊กกล่องที่เป็นของใบนี้` });
@@ -281,7 +276,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
         body: JSON.stringify({ action: "claim", bill_id: claim.billId, rows: [...claim.picked], add_rows: [...claim.pickedAdd], drop_bill_id: claim.dropBillId }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-      toast.success(`ใช้ร่วมแล้ว: รับ ${j.claimed} กล่อง${j.added ? ` + เพิ่ม ${j.added} กล่องที่ใบเดิมไม่มี` : ""}${j.dropped ? " · เอาใบซ้ำของใบนี้ออกแล้ว" : ""} — ตรวจการจับคู่แล้วกด ใช้น้ำหนัก/คิว (ถ้ายังไม่ได้ใช้)`);
+      toast.success(`ใช้ร่วมแล้ว: รับ ${j.claimed} กล่อง${j.added ? ` + เพิ่ม ${j.added} กล่องที่ใบเดิมไม่มี` : ""}${j.dropped ? " · เอาใบซ้ำของใบนี้ออกแล้ว" : ""} — กด ใช้น้ำหนัก/คิว (หรือกดยืนยันใบ ระบบใส่ให้เอง)`);
       if (claim.dropBillId) setDraft((p) => { const n = { ...p }; delete n[claim.dropBillId!]; return n; });
       setClaim(null);
       await load();
@@ -303,28 +298,16 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     setSearchFor(null);
   };
 
-  // ★ 2026-11-23 ข้อ 3: เช็กกลับหลังใช้น้ำหนัก/คิวแล้ว — น้ำหนัก/คิวรวมของสินค้า (จำนวน × ต่อชิ้น) ต่างจากกล่องเกิน 1.5 เท่า = เตือน (จับเคสหารด้วยจำนวนผิด)
-  const weightCheckOf = (b: BillRow) => {
-    if (!appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId).done) return null;
-    const mine = rowsOf(b.lines ?? [], b.voucher_id, voucherId).map((i) => b.lines[i]);
-    const r = boxWeightCheck(mine, lines.map((l) => ({ id: l.id, qty: l.qty, kg_per_unit: l.kg_per_unit ?? null, cbm_per_unit: l.cbm_per_unit ?? null })));
-    return r.ok ? null : r;
-  };
-  const weightOff = (b: BillRow) => !!weightCheckOf(b);
   // ── สถานะให้หน้าใบ (ยังไม่บันทึก · แถวของใบนี้ที่ยังไม่ได้ใช้น้ำหนัก/คิว) ───────────
   const status = useMemo<DeliveryBillStatus>(() => {
-    let mineRows = 0, unappliedRows = 0, unmappedRows = 0, mismatchBills = 0;
+    let mineRows = 0, unappliedRows = 0;
     for (const b of bills) {
-      const ls = effLines(b.id, draft[b.id]?.lines ?? b.lines ?? []);
-      if (weightOff(b)) mismatchBills++;
       const st = appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
-      const idx = rowsOf(ls, b.voucher_id, voucherId);
-      mineRows += idx.length;
+      mineRows += rowsOf(draft[b.id]?.lines ?? b.lines ?? [], b.voucher_id, voucherId).length;
       unappliedRows += Math.max(0, st.mine - st.applied);
-      unmappedRows += idx.filter((i) => (ls[i].voucher_line_ids ?? []).length === 0).length;
     }
-    return { pending: dirtyIds.length > 0, mineRows, unappliedRows, unmappedRows, mismatchBills };
-  }, [bills, draft, dirtyIds, voucherId, autoMap, lines]);   // eslint-disable-line react-hooks/exhaustive-deps
+    return { pending: dirtyIds.length > 0, mineRows, unappliedRows, unmappedRows: 0 };
+  }, [bills, draft, dirtyIds, voucherId]);
   const onStatusRef = useRef(onStatus); onStatusRef.current = onStatus;
   const statusKey = JSON.stringify(status);
   useEffect(() => { onStatusRef.current?.(status); }, [statusKey]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,23 +321,31 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
         return ok;
       },
       discard: () => setDraft({ ...loadedRef.current }),
-      applyAll: async () => {
-        let applied = 0, failed = 0, unmapped = 0;
+      // ★ 11-28 ใบที่ยังมีกล่องไม่ได้ใช้ → ใช้ (แต่ละครั้งเกลี่ยใหม่จากทุกใบ) · refresh = ทุกกล่องใช้แล้วแต่ต้องคิดใหม่ (แก้จำนวนหลังใช้) → ใช้ซ้ำใบแรกที่มีกล่องของใบนี้
+      applyAll: async (opts) => {
+        let applied = 0, failed = 0;
         const undo: DeliveryApplyUndo[] = [];
-        for (const b of billsRef.current) {
-          const ls = effLines(b.id, draftRef.current[b.id]?.lines ?? b.lines ?? []);
-          const idx = rowsOf(ls, b.voucher_id, voucherId);
-          unmapped += idx.filter((i) => (ls[i].voucher_line_ids ?? []).length === 0).length;
-          const st = appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
-          if (st.done || !idx.some((i) => (ls[i].voucher_line_ids ?? []).length > 0)) continue;
+        const st = (b: BillRow) => appliedFor({ voucher_id: b.voucher_id, status: b.status, lines: b.lines ?? [] }, voucherId);
+        const todo = billsRef.current.filter((b) => { const x = st(b); return x.mine > 0 && !x.done; });
+        if (!todo.length && opts?.refresh) { const first = billsRef.current.find((b) => st(b).mine > 0); if (first) todo.push(first); }
+        for (const b of todo) {
           const r = await patchBill(b.id, true, { quiet: true });
-          if (r.ok) { applied += r.applied; if (r.undo) undo.push(r.undo); } else failed++;
+          if (r.ok) { applied = Math.max(applied, r.applied); if (r.undo) undo.push(r.undo); } else failed++;   // แต่ละครั้งเขียนทุกสินค้า → นับครั้งที่มากสุด
         }
-        return { applied, unmapped, failed, undo };
+        return { applied, unmapped: 0, failed, undo };
+      },
+      appliedBoxes: () => {
+        const out: SpreadBox[] = [];
+        for (const b of billsRef.current) {
+          const ls = b.lines ?? [];
+          const legacy = b.status === "applied" && b.voucher_id === voucherId && !ls.some((l) => l.applied_at);
+          for (const l of ls) if (rowOwner(l, b.voucher_id) === voucherId && (l.applied_at || legacy)) out.push({ weight_kg: l.weight_kg ?? null, m3: l.m3 ?? null, method: l.method ?? null });
+        }
+        return out;
       },
       undoApply: async (list) => {
         let ok = true;
-        for (const u of list) {
+        for (const u of [...list].reverse()) {   // ย้อนจากครั้งล่าสุด → ได้ค่าก่อนครั้งแรกจริง
           const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/bills`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "unapply", bill_id: u.bill_id, before: u.before, rows: u.rows }) });
           const j = await res.json().catch(() => ({}));
           if (!res.ok || j.error) ok = false;
@@ -365,8 +356,16 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
     };
   });   // ทุก render — ใช้ ref ค่าล่าสุดอยู่แล้ว
 
-  const mapLine = mapFor ? draft[mapFor.billId]?.lines[mapFor.idx] : null;
-  const usedElsewhere = (billId: string, idx: number, lineId: string) => (draft[billId]?.lines ?? []).some((l, i) => i !== idx && l.voucher_line_ids.includes(lineId));
+  // ★ 11-28 สรุปการเกลี่ย: กล่องของใบนี้ทุกใบส่งของ (ตามที่แก้ในแผง) → สินค้ากี่ตัว ตามมูลค่า/จำนวนชิ้น · กล่องคิดคนละแบบ
+  const spreadInfo = useMemo(() => {
+    const boxes: SpreadBox[] = [];
+    for (const b of bills) { const ls = draft[b.id]?.lines ?? b.lines ?? []; for (const i of rowsOf(ls, b.voucher_id, voucherId)) boxes.push({ weight_kg: ls[i].weight_kg ?? null, m3: ls[i].m3 ?? null, method: ls[i].method ?? null }); }
+    if (!boxes.length) return null;
+    const r = spreadBoxesByValue(boxes, lines.map((l) => ({ id: l.id, qty: l.qty, unit_price: l.unit_price ?? null, discount: l.discount ?? null, discount_pct: l.discount_pct ?? null, is_product: l.is_product !== false })));
+    return { boxes: boxes.length, products: r.per.length, ...r };
+  }, [bills, draft, lines, voucherId]);
+  // ตารางกล่อง: ลากขยายคอลัมน์ได้ (จำต่อคน · ดับเบิลคลิก = พอดีหัวคอลัมน์)
+  const cw = useColWidths("delivery_bill_box_cols", { min: 32 });
   const pvLabel = (v: VOpt) => `${v.pv_no ?? "ใบร่าง"}${v.voucher_date ? ` · ${formatDate(v.voucher_date)}` : ""}${v.seller_name ? ` · ${v.seller_name}` : ""}`;
 
   return (
@@ -374,7 +373,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700">{open ? "▾" : "▸"} 📄 ใบส่งของจากขนส่ง (Delivery Bill) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}</button>
         {dirtyIds.length > 0 && <span className="text-[11px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">แก้แล้วยังไม่บันทึก {dirtyIds.length} ใบ</span>}
-        <span className="text-[11px] text-slate-400">ลากรูป/PDF มาวาง → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → เลือกว่ากล่องเป็นของใบไหน → จับคู่สินค้า → ใช้ค่าจริงแทนค่าประเมิน</span>
+        <span className="text-[11px] text-slate-400">ลากรูป/PDF มาวาง → AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → เลือกว่ากล่องเป็นของใบไหน → ระบบเกลี่ยให้สินค้าทุกตัวตามมูลค่าเอง</span>
         <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-sky-700">⚙ กฎ Description</a>
       </div>
       {open && (
@@ -417,17 +416,19 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
             </div>
           )}
           {bills.length === 0 && <div className="text-xs text-slate-300 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีใบส่งของ —</div>}
-          {/* ★ 2026-11-15 เช็กจำนวน: รวมทุกใบส่งของ (มาหลายรอบ) เทียบกับในใบ → ครบ / ขาด / เกิน / ยังไม่มา · ★ 2026-11-22 เฉพาะกล่องของใบนี้ */}
-          <QtyCheckCard lines={lines} readonly={readonly} onSuggest={applySuggest}
-            bills={bills.map((b) => { const ls = effLines(b.id, draft[b.id]?.lines ?? b.lines ?? []); return { id: b.id, tracking_no: (draft[b.id]?.tracking_no || b.tracking_no) ?? null, lines: (mineIdx[b.id] ?? []).map((i) => ls[i]) }; })} />
+          {/* ★ 11-28 แทนกล่อง "เช็กจำนวน": บอกว่ากล่องของใบนี้เกลี่ยให้สินค้ายังไง */}
+          {spreadInfo && spreadInfo.products > 0 && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs text-sky-900">
+              กล่องของใบนี้ {spreadInfo.boxes} กล่อง{spreadInfo.total_kg != null ? ` · ${fmtN(spreadInfo.total_kg, 3)} กก.` : ""}{spreadInfo.total_m3 != null ? ` · ${fmtN(spreadInfo.total_m3, 4)} คิว` : ""}
+              {" "}→ เกลี่ยให้สินค้า {spreadInfo.products} ตัวในใบ <b>{spreadInfo.basis === "qty" ? "ตามจำนวนชิ้น (ยังไม่มีราคา)" : "ตามมูลค่า"}</b> · ไม่ต้องเลือกว่ากล่องไหนมีอะไร
+              {spreadInfo.mixed && <div className="mt-0.5 text-amber-800">⚠ กล่องคิดค่าส่งคนละแบบ (คิว {spreadInfo.mixed.cube} · กก. {spreadInfo.mixed.weight} กล่อง) — ทั้งใบคิดตาม{spreadInfo.method === "weight" ? "น้ำหนัก" : "คิว"} · ถ้าต้องแยก แก้ช่อง &ldquo;คิดจาก&rdquo; ในรายการสินค้า</div>}
+            </div>
+          )}
           {bills.map((b, bi) => {
             const d = draft[b.id] ?? toDraft(b);
             const home = b.voucher_id;
             const isHome = home === voucherId;
             const mine = rowsOf(d.lines, home, voucherId);
-            const am = autoMap[b.id] ?? {};
-            const mapped = mine.filter((i) => d.lines[i].voucher_line_ids.length > 0 || !!am[i]).length;
-            const wc = weightCheckOf(b);
             const tot = billTotalsFor(d.lines, home, voucherId);
             const st = appliedFor({ voucher_id: home, status: b.status, lines: b.lines ?? [] }, voucherId);
             const others = otherOwners(d.lines, home).filter((x) => x !== voucherId);
@@ -462,7 +463,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                   <div className="ml-auto flex items-center gap-1.5 flex-wrap">
                     {dirty && <span className="text-[11px] font-medium text-amber-800">แก้แล้วยังไม่บันทึก — กดบันทึก</span>}
                     {!readonly && <button onClick={() => void patchBill(b.id, false)} disabled={busy === b.id} className={`h-8 px-2.5 text-xs rounded-md border disabled:opacity-40 ${dirty ? "border-amber-400 bg-amber-100 text-amber-900 hover:bg-amber-200 font-medium" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>💾 บันทึก</button>}
-                    {!readonly && <button onClick={() => void patchBill(b.id, true)} disabled={busy === b.id || mapped === 0} title={mapped === 0 ? "จับคู่สินค้าให้กล่องของใบนี้ก่อน" : "เขียนน้ำหนัก/คิวต่อชิ้นลงสินค้าที่จับคู่ (เฉพาะกล่องของใบนี้) + รหัสขนส่งลงหัวใบ"} className="h-8 px-3 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">✓ ใช้น้ำหนัก/คิว ({mapped}/{mine.length})</button>}
+                    {!readonly && <button onClick={() => void patchBill(b.id, true)} disabled={busy === b.id || mine.length === 0} title={mine.length === 0 ? "ใบส่งของนี้ไม่มีกล่องของใบนี้ — เลือกช่อง \"ของใบ\" เป็นใบนี้ก่อน" : "รวมกล่องของใบนี้ (ทุกใบส่งของ) → เกลี่ยน้ำหนัก/คิวให้สินค้าทุกตัวตามมูลค่า + รหัสขนส่งลงหัวใบ · กดยืนยันใบ ระบบทำให้เอง"} className="h-8 px-3 text-xs font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">✓ ใช้น้ำหนัก/คิว ({mine.length} กล่อง)</button>}
                     {!readonly && <button onClick={() => setRemoveAsk(b)} disabled={busy === b.id} title={isHome && others.length === 0 ? "ถอดใบส่งของ" : "ถอดออกจากใบนี้ — กล่องของใบนี้ไปพักไว้ ใบอื่นยังใช้บิลนี้"} className="h-8 w-8 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50">✕</button>}
                   </div>
                 </div>
@@ -481,44 +482,27 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                 ) : dupSt ? (
                   <div className="px-3 py-1 text-[10px] text-slate-400 border-t border-slate-100">ⓘ ใบส่งของเลขนี้แยกกล่องกับ {copies.map((c) => c.pv_no ?? "ใบอื่น").join(", ")} แล้ว — ไม่มีกล่องซ้ำ</div>
                 ) : null}
-                {wc && (
-                  <div className="px-3 py-1.5 text-[11px] bg-red-50 border-t border-red-200 text-red-800">
-                    ⚠ น้ำหนักสินค้าในใบรวม {fmtN(wc.line_kg, 3)} กก. / {fmtN(wc.line_m3, 5)} คิว แต่กล่องที่จับคู่ {fmtN(wc.box_kg, 3)} กก. / {fmtN(wc.box_m3, 5)} คิว — จำนวนชิ้นในใบผิด หรือใช้น้ำหนัก/คิวตอนจำนวนยังไม่ถูก? {readonly ? "กด แก้ไขใบ แล้ว" : ""}แก้จำนวนให้ถูก แล้วกด ✓ ใช้น้ำหนัก/คิว อีกครั้ง (ค่าส่งจะคิดใหม่)
-                  </div>
-                )}
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="text-xs table-fixed" style={{ width: BOX_COLS.reduce((a, [k, , w]) => a + (cw.px(k) ?? w), 0) + 32, minWidth: "100%" }}>
+                    <colgroup>{BOX_COLS.map(([k, , w]) => <col key={k} style={{ width: cw.px(k) ?? w }} />)}<col style={{ width: 32 }} /></colgroup>
                     <thead className="text-slate-500 bg-white border-b border-slate-100">
                       <tr>
-                        <th className="text-left px-2 py-1.5 font-medium w-12" title="บรรทัดที่เท่าไรในใบ (บนกระดาษ) · ลากหูจับเพื่อย้ายแถว">#</th>
-                        <th className="text-left px-2 py-1.5 font-medium" title="กล่องนี้เป็นของใบสำคัญไหน — ใบอื่นจะเห็นใบส่งของนี้เอง ไม่ต้องอัปโหลดซ้ำ">ของใบ</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Stock</th>
-                        <th className="text-left px-2 py-1.5 font-medium">P/o.No</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Description</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Pack</th>
-                        <th className="text-left px-2 py-1.5 font-medium">Package</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Qty</th>
-                        <th className="text-right px-2 py-1.5 font-medium">Weight (กก.)</th>
-                        <th className="text-right px-2 py-1.5 font-medium">M3 (คิว)</th>
-                        <th className="text-left px-2 py-1.5 font-medium" title="เลือกอัตโนมัติจากกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) แก้ได้">คิดค่าส่งจาก</th>
-                        <th className="text-left px-2 py-1.5 font-medium">สินค้าที่จับคู่</th>
-                        <th className="w-8"></th>
+                        {BOX_COLS.map(([k, label, , right]) => (
+                          <th key={k} data-col={k} className={`relative px-2 py-1.5 font-medium whitespace-nowrap ${right ? "text-right" : "text-left"}`} title={BOX_TIPS[k]}>{label}<ColGrip {...cw.grip(k)} /></th>
+                        ))}
+                        <th className="w-8 text-right pr-1">{cw.changed && <button type="button" onClick={cw.reset} title="คืนความกว้างคอลัมน์เดิม" className="text-[10px] font-normal text-slate-400 hover:text-sky-700">↺</button>}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {d.lines.map((l, i) => {
                         const owner = rowOwner(l, home);
                         const isMine = owner === voucherId;
-                        const auto = isMine && l.voucher_line_ids.length === 0 ? am[i] : undefined;
-                        const shownIds = auto ? auto.ids : l.voucher_line_ids;
-                        const names = isMine ? (shownIds.map((id) => lines.find((x) => x.id === id)).filter(Boolean) as VoucherLineLite[]) : [];
-                        const isAll = (auto?.all ?? false) || (l.auto === true && names.length > 1 && names.length === lines.filter((x) => x.is_product).length);
                         const dk = bi * ROW_SPAN + i;
                         const descKey = normDesc(l.description);
                         const rule = ruleForDescription(l.description, rules);
                         const ck = choiceKey(l, home);
                         return (
-                          <tr key={i} {...drag.rowProps(dk)} className={`${!isMine ? "bg-slate-50/80 text-slate-400" : names.length === 0 ? "bg-amber-50/30" : ""} ${drag.rowCls(dk)}`}>
+                          <tr key={i} {...drag.rowProps(dk)} className={`${!isMine ? "bg-slate-50/80 text-slate-400" : ""} ${drag.rowCls(dk)}`}>
                             <td className="px-2 py-1 whitespace-nowrap">
                               {!readonly && <DragHandle {...drag.handleProps(dk)} title="ลากเพื่อย้ายแถว" className="text-base align-middle" />}
                               <span className="font-mono text-[11px] text-slate-400 align-middle ml-0.5">{billLineNo(l.no, i)}</span>
@@ -526,7 +510,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                             <td className="px-2 py-1">
                               <select value={ck} disabled={readonly || (!!l.applied_at && !isMine)} onChange={(e) => setOwner(b.id, i, e.target.value)}
                                 title={l.applied_at && !isMine ? "ใบนั้นใช้น้ำหนัก/คิวของกล่องนี้ไปแล้ว — เปลี่ยนที่ใบนั้น" : "กล่องนี้เป็นของใบสำคัญไหน"}
-                                className={`${inp} w-36 ${isMine ? "border-emerald-300 bg-emerald-50 text-emerald-900" : l.hold === "not_ours" ? "border-slate-200 text-slate-400" : l.hold === "parked" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-indigo-200 bg-indigo-50 text-indigo-800"}`}>
+                                className={`${inp} w-full ${isMine ? "border-emerald-300 bg-emerald-50 text-emerald-900" : l.hold === "not_ours" ? "border-slate-200 text-slate-400" : l.hold === "parked" ? "border-sky-200 bg-sky-50 text-sky-800" : "border-indigo-200 bg-indigo-50 text-indigo-800"}`}>
                                 <option value={`v:${voucherId}`}>ใบนี้</option>
                                 {ownerOpts.map((v) => <option key={v.id} value={`v:${v.id}`}>{v.pv_no ?? "ใบร่าง"}{v.why === "same_tracking" ? " · เลขขนส่งเดียวกัน" : ""}</option>)}
                                 <option value="parked">ยังไม่มีใบ · พักไว้</option>
@@ -534,18 +518,18 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                                 <option value="search">ค้นหาเลข PV อื่น…</option>
                               </select>
                             </td>
-                            <td className="px-2 py-1"><input value={l.stock ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { stock: e.target.value })} className={`${inp} w-24 font-mono`} /></td>
-                            <td className="px-2 py-1"><input value={l.po_no ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { po_no: e.target.value })} className={`${inp} w-28 font-mono`} /></td>
-                            <td className="px-2 py-1"><input value={l.description ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { description: e.target.value })} className={`${inp} w-28`} /></td>
-                            <td className="px-2 py-1"><input type="number" step="any" value={l.pack ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { pack: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-14 text-right`} /></td>
-                            <td className="px-2 py-1"><input value={l.package ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { package: e.target.value })} className={`${inp} w-16`} /></td>
-                            <td className="px-2 py-1"><input type="number" step="any" value={l.qty ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { qty: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-16 text-right`} /></td>
-                            <td className="px-2 py-1"><input type="number" step="any" value={l.weight_kg ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { weight_kg: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-20 text-right`} /></td>
-                            <td className="px-2 py-1"><input type="number" step="any" value={l.m3 ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { m3: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-20 text-right`} /></td>
+                            <td className="px-2 py-1"><input value={l.stock ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { stock: e.target.value })} className={`${inp} w-full font-mono`} /></td>
+                            <td className="px-2 py-1"><input value={l.po_no ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { po_no: e.target.value })} className={`${inp} w-full font-mono`} /></td>
+                            <td className="px-2 py-1"><input value={l.description ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { description: e.target.value })} className={`${inp} w-full`} title={l.description ?? undefined} /></td>
+                            <td className="px-2 py-1"><input type="number" step="any" value={l.pack ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { pack: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-full text-right`} /></td>
+                            <td className="px-2 py-1"><input value={l.package ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { package: e.target.value })} className={`${inp} w-full`} /></td>
+                            <td className="px-2 py-1"><input type="number" step="any" value={l.qty ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { qty: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-full text-right`} /></td>
+                            <td className="px-2 py-1"><input type="number" step="any" value={l.weight_kg ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { weight_kg: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-full text-right`} /></td>
+                            <td className="px-2 py-1"><input type="number" step="any" value={l.m3 ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { m3: e.target.value === "" ? null : Number(e.target.value) })} className={`${inp} w-full text-right`} /></td>
                             <td className="px-2 py-1">
                               <select value={l.method ?? ""} disabled={readonly} onChange={(e) => setLine(b.id, i, { method: (e.target.value || null) as "cube" | "weight" | null })}
                                 title={rule ? `กฎ Description: "${rule.keyword}" = ${rule.method === "cube" ? "คิว" : "กก."}` : "Description นี้ยังไม่มีกฎ — เลือกแล้วกด \"จำ\" ครั้งหน้าระบบเลือกให้เอง"}
-                                className={`${inp} w-28 ${l.method === "cube" ? "bg-sky-50 border-sky-200" : l.method === "weight" ? "bg-violet-50 border-violet-200" : "border-amber-300"}`}>
+                                className={`${inp} w-full ${l.method === "cube" ? "bg-sky-50 border-sky-200" : l.method === "weight" ? "bg-violet-50 border-violet-200" : "border-amber-300"}`}>
                                 <option value="">ตามใบ</option>
                                 <option value="cube">📦 คิว (M3)</option>
                                 <option value="weight">⚖️ น้ำหนัก (kg)</option>
@@ -561,18 +545,6 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
                                   className="block mt-0.5 text-[10px] text-sky-700 hover:underline whitespace-nowrap">ใช้ตามกฎ: {rule.method === "cube" ? "คิว" : "กก."}</button>
                               )}
                             </td>
-                            <td className="px-2 py-1">
-                              {isMine ? (
-                                <button disabled={readonly} onClick={() => { if (auto) setLine(b.id, i, { voucher_line_ids: auto.ids, auto: false }); setMapFor({ billId: b.id, idx: i }); }}
-                                  className={`h-8 px-2 rounded-md border text-left max-w-[18rem] truncate ${names.length ? "border-sky-200 bg-sky-50 text-sky-800" : "border-amber-300 bg-amber-50 text-amber-700"} disabled:opacity-70`}
-                                  title={(names.map((n) => `${n.code || ""} ${stripCode(n.item_name)}`).join("\n") || "ยังไม่ได้จับคู่") + (auto || l.auto ? "\n\nระบบจับคู่ให้เอง (ใบนี้มีกล่องเดียว หรือเดาจากจำนวน) — กดเพื่อแก้" : "")}>
-                                  {names.length === 0 ? "＋ เลือกสินค้าในกล่องนี้" : isAll ? `ทุกสินค้าในใบ (${names.length} ตัว)` : `${names.length} ตัว: ${names.map((n) => n.code || stripCode(n.item_name)).join(", ")}`}
-                                  {(auto || l.auto) && names.length > 0 && <span className="ml-1 text-[10px] text-sky-600">· อัตโนมัติ</span>}
-                                </button>
-                              ) : (
-                                <span className="text-[11px] whitespace-nowrap">{l.hold === "parked" ? "พักไว้ — ยังไม่ลงใบไหน" : l.hold === "not_ours" ? "ไม่ใช่ของเรา" : `จับคู่ที่ ${pvOf(owner)}${l.applied_at ? " · ใช้แล้ว" : ""}`}</span>
-                              )}
-                            </td>
                             <td className="px-1 py-1 text-center">{!readonly && <button onClick={() => delLine(b.id, i)} title="ลบแถว (ย้อนกลับได้จากแจ้งเตือน · ยังไม่บันทึกจนกด บันทึก)" className="text-slate-300 hover:text-red-600">✕</button>}</td>
                           </tr>
                         );
@@ -585,33 +557,6 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied, contr
             );
           })}
         </div>
-      )}
-
-      {/* ป๊อปจับคู่: บรรทัดในใบส่งของ ↔ สินค้าในใบสำคัญ (เลือกได้หลายตัว) */}
-      {mapFor && mapLine && (
-        <ERPModal open onClose={() => setMapFor(null)} size="md" storageKey="pv-bill-map"
-          title="จับคู่สินค้ากับกล่องนี้" description={`${mapLine.description ?? "—"} · P/o.No ${mapLine.po_no ?? "—"} · Qty ${mapLine.qty ?? "—"} · ${mapLine.weight_kg ?? "—"} กก. · ${mapLine.m3 ?? "—"} คิว`}
-          footer={<>
-            <button onClick={() => setLine(mapFor.billId, mapFor.idx, { auto: false, voucher_line_ids: lines.map((l) => l.id) })} className="mr-auto h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
-            <button onClick={() => setMapFor(null)} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>
-          </>}>
-          <p className="text-[11px] text-slate-400 mb-2">น้ำหนัก/คิวของกล่องจะถูกหารด้วยจำนวนชิ้นรวมของสินค้าที่เลือก (ถือว่าทุกชิ้นในกล่องหนัก/ใหญ่เท่ากัน)</p>
-          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
-            {lines.map((vl) => {
-              const on = mapLine.voucher_line_ids.includes(vl.id);
-              const elsewhere = usedElsewhere(mapFor.billId, mapFor.idx, vl.id);
-              return (
-                <label key={vl.id} className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer ${on ? "bg-sky-50" : "hover:bg-slate-50"}`}>
-                  <input type="checkbox" checked={on} onChange={(e) => setLine(mapFor.billId, mapFor.idx, { auto: false, voucher_line_ids: e.target.checked ? [...mapLine.voucher_line_ids, vl.id] : mapLine.voucher_line_ids.filter((x) => x !== vl.id) })} className="rounded border-slate-300" />
-                  <span className="font-mono text-xs text-slate-500 w-24 shrink-0 truncate">{vl.code || "—"}</span>
-                  <span className="flex-1 min-w-0 truncate text-slate-800" title={vl.item_name}>{stripCode(vl.item_name)}</span>
-                  <span className="text-xs text-slate-500 tabular-nums shrink-0">{vl.qty.toLocaleString()} {vl.uom ?? ""}</span>
-                  {elsewhere && <span className="text-[10px] text-indigo-500 shrink-0" title="สินค้านี้อยู่ในกล่องอื่นด้วย (น้ำหนัก/คิวจะรวมกัน)">อยู่กล่องอื่นด้วย</span>}
-                </label>
-              );
-            })}
-          </div>
-        </ERPModal>
       )}
 
       {/* ใช้ร่วม / รับกล่องที่พักไว้: ติ๊กกล่องที่เป็นของใบนี้ */}

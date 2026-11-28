@@ -25,6 +25,7 @@ import { SaveBar } from "@/components/save-bar";
 import { useUserPref } from "@/lib/use-user-pref";
 import { BillSummaryBox } from "./bill-summary";
 import { RowMenu, type RowMenuItem } from "./row-menu";
+import { useColWidths, ColGrip } from "@/components/col-resize";
 import { emptySummary, billTotals, mergeBillTotals, billQtyText, type BillSummary, type BillTotalCheck } from "@/lib/seller-bill-summary";
 
 /** ลากย้ายแถว: หลายบิลในแผงเดียวใช้ตัวลากตัวเดียว → ดัชนี = ลำดับบิล × ROW_SPAN + ลำดับแถว (ลากข้ามบิลไม่ได้) */
@@ -466,6 +467,20 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
   const thb = !!lineMoney;
   const GRID_MD = thb ? ROW_GRID_THB : ROW_GRID;
   const GRID = `${ROW_MOBILE} ${GRID_MD}`;
+  // ★ 11-28 ลากเส้นหัวคอลัมน์เพื่อขยายได้ (เจ้าของ: "อยากได้ที่ขยาย column ด้วย") — จำต่อคน ทุกเครื่อง · ดับเบิลคลิก = พอดีชื่อ · มือถือเป็นการ์ด ไม่ใช้
+  const cw = useColWidths(thb ? "seller_bill_cols_thb" : "seller_bill_cols", { min: 36 });
+  const COLS: [string, string][] = thb
+    ? [["sb_no", "2.75rem"], ["sb_name", "1fr"], ["sb_qty", "3.75rem"], ["sb_price", "4.5rem"], ["sb_disc", "4.75rem"], ["sb_amt", "4.75rem"], ["sb_uthb", "4.5rem"], ["sb_athb", "5.25rem"], ["sb_act", "7.5rem"]]
+    : [["sb_no", "3.5rem"], ["sb_name", "1fr"], ["sb_qty", "4.75rem"], ["sb_price", "5.25rem"], ["sb_disc", "6.5rem"], ["sb_amt", "5.5rem"], ["sb_act", "9rem"]];
+  const gridStyle: React.CSSProperties = { gridTemplateColumns: cw.track(COLS) };
+  const gridMinW = cw.minWidth(COLS);
+  /** กว้างรวมเกินจอ → เลื่อนซ้ายขวาได้ (เฉพาะจอ md ขึ้นไป) */
+  const minWCls = gridMinW ? "md:min-w-[var(--sbw)]" : thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]";
+  const minWStyle = (gridMinW ? { "--sbw": `${gridMinW}px` } : undefined) as React.CSSProperties | undefined;
+  const HEAD: [string, string, string, string?][] = [
+    ["sb_no", "#", ""], ["sb_name", "สินค้า", ""], ["sb_qty", "จำนวน", "text-right"], ["sb_price", "ราคา ¥", "text-right"], ["sb_disc", "ส่วนลด", "text-right"], ["sb_amt", "ยอด ¥", "text-right"],
+    ...(thb ? [["sb_uthb", "฿/ชิ้น", "text-right", "ราคาต่อชิ้นเป็นบาท (ราคา × เรท) — จากรายการในใบ"], ["sb_athb", "ยอด ฿", "text-right", "ค่าสินค้าเป็นบาท (ไม่รวมค่าส่ง) — จากรายการในใบ"]] as [string, string, string, string][] : []),
+  ];
   /** ฿ ของแถวบิล = รวมรายการในใบที่แถวนี้ลงไว้ (แถวเดียวลงหลาย PO = หลายบรรทัด) */
   const rowThb = (l: SellerBillLine): BillLineMoney | null => {
     const ms = (l.voucher_line_ids ?? []).map((id) => lineMoney?.[id]).filter((x): x is BillLineMoney => !!x);
@@ -722,6 +737,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                             className={`h-7 px-2.5 ${n > 0 ? "border-l border-slate-200" : ""} ${rowFilter === k ? "bg-slate-800 text-white" : k === "todo" && nTodo > 0 ? "bg-white text-amber-700 hover:bg-amber-50" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                         ))}
                       </div>
+                      {cw.changed && <button type="button" onClick={cw.reset} title="คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น" className="hidden md:inline text-[11px] text-slate-400 hover:text-sky-700 underline">คืนความกว้างคอลัมน์</button>}
                       {!ro && highN > 0 && (
                         <button type="button" onClick={() => setHighAsk({ billId: b.id, n: highN })} disabled={applying.size > 0} title="ลงใบทุกแถวที่จับคู่แล้วและระบบมั่นใจสูง (ไม่รวมแถว ให้เช็ก และแถวที่ยังไม่จับคู่) — ถามก่อน"
                           className="ml-auto h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">✓ ยืนยันทุกแถวที่มั่นใจ ({highN})</button>
@@ -730,10 +746,9 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                   );
                 })()}
                 <div className="overflow-x-auto">
-                <div className={thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]"}>
-                <div className={`hidden ${GRID_MD} px-3 py-1 text-[10px] text-slate-400 border-y border-slate-200 bg-slate-100/70`}>
-                  <span>#</span><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา ¥</span><span className="text-right">ส่วนลด</span><span className="text-right">ยอด ¥</span>
-                  {thb && <><span className="text-right" title="ราคาต่อชิ้นเป็นบาท (ราคา × เรท) — จากรายการในใบ">฿/ชิ้น</span><span className="text-right" title="ค่าสินค้าเป็นบาท (ไม่รวมค่าส่ง) — จากรายการในใบ">ยอด ฿</span></>}<span />
+                <div className={minWCls} style={minWStyle}>
+                <div className={`hidden ${GRID_MD} px-3 py-1 text-[10px] text-slate-400 border-y border-slate-200 bg-slate-100/70`} style={gridStyle}>
+                  {HEAD.map(([k, label, cls, tip]) => <span key={k} data-col={k} className={`relative ${cls}`} title={tip}>{label}<ColGrip {...cw.grip(k)} /></span>)}<span />
                 </div>
                 <div className="divide-y divide-slate-200">
                   {lines.length > 0 && !lines.some(rowShown) && <div className="px-3 py-3 text-center text-[11px] text-slate-400">— {rowFilter === "todo" ? "ไม่มีแถวที่ต้องจัดการแล้ว" : "ยังไม่มีแถวที่ลงใบ"} —</div>}
@@ -778,9 +793,9 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                     if (done) {
                       const notIn = (l.decision === "confirmed" || l.decision === "expense") && !applied && !busyRow;
                       return (
-                        <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} className={`${GRID} items-center px-3 py-1 ${zebra} ${l.decision === "skip" ? "text-slate-400" : "text-slate-500"} ${focusCls} ${drag.rowCls(dk)}`}>
+                        <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} style={gridStyle} className={`${GRID} items-center px-3 py-1 ${zebra} ${l.decision === "skip" ? "text-slate-400" : "text-slate-500"} ${focusCls} ${drag.rowCls(dk)}`}>
                           {noCell}
-                          <div className="min-w-0 flex items-center gap-1.5 max-md:flex-1">
+                          <div data-col="sb_name" className="min-w-0 flex items-center gap-1.5 max-md:flex-1">
                             {l.decision === "skip"
                               ? <span className="text-xs truncate" title={`${billText} ${thText}`}>ข้าม · บิล: {billText || thText || "—"}</span>
                               : <>
@@ -828,11 +843,11 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                           { label: "ลบแถว (AI อ่านผิด/ซ้ำ)", onClick: () => removeRow(b.id, i), danger: true, disabled: applied, title: applied ? "แถวนี้มีรายการในใบอยู่ — กดข้ามแทน" : undefined },
                         ];
                     return (
-                      <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/50" : zebra} ${focusCls} ${drag.rowCls(dk)}`}>
+                      <div key={l.rid ?? i} {...drag.rowProps(dk)} {...rowEvents} style={gridStyle} className={`${GRID} items-start px-3 py-1.5 ${l.level === "no" && !picked ? "bg-red-50/50" : zebra} ${focusCls} ${drag.rowCls(dk)}`}>
                         {noCell}
                         <div className="min-w-0 max-md:flex-1">
                           {/* บรรทัดบน: สินค้าของเรา (ตัวหนา) — ยังไม่จับคู่ = ชื่อตามบิล */}
-                          <div className="flex items-center gap-1.5 min-w-0">
+                          <div data-col="sb_name" className="flex items-center gap-1.5 min-w-0">
                             {g?.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-7 h-7 rounded object-cover border border-slate-100 shrink-0" />}
                             {added && !prodName ? (
                               <input value={l.name_th ?? ""} disabled={ro} onChange={(e) => setLine(b.id, i, { name_th: e.target.value || null })} placeholder="ชื่อรายการ"
@@ -951,7 +966,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
                 </div>
                 {/* ★ 2026-11-16 แถวรวมท้ายบิล (เจ้าของ: "อยากได้ Total ของแต่ละบิลด้วย") — ยอด ¥ แบบที่ใบคิด · ยอด ฿ จากรายการในใบ · เทียบยอดบิล */}
                 {lines.length > 0 && (
-                  <div className={`${GRID} items-center px-3 py-1.5 border-t border-slate-300 bg-slate-50 text-slate-800`}>
+                  <div style={gridStyle} className={`${GRID} items-center px-3 py-1.5 border-t border-slate-300 bg-slate-50 text-slate-800`}>
                     <span className="max-md:hidden" />
                     <span className="min-w-0 text-xs font-semibold max-md:basis-full">รวมบิลนี้ {T.rows} แถว{T.skipped > 0 && <span className="font-normal text-slate-400"> (ข้าม {T.skipped})</span>}<BillCheckBadge c={T.check} skipped={T.skipped} />
                       {(() => { const n = lines.filter((l) => l.decision !== "skip" && !(l.voucher_line_ids ?? []).length).length; return thb && n > 0 ? <span className="ml-1.5 text-[11px] font-normal text-slate-500" title="ยอด ฿ นับเฉพาะแถวที่ลงใบแล้ว">· ยังไม่ลงใบ {n} แถว (฿ ยังไม่นับ)</span> : null; })()}
@@ -1100,8 +1115,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false, 
             const bad = all.filter((x) => x.t.check && !x.t.check.ok).length;
             return (
               <div className="border-2 border-slate-300 rounded-lg overflow-hidden">
-                <div className="overflow-x-auto"><div className={thb ? "md:min-w-[54rem]" : "md:min-w-[46rem]"}>
-                  <div className={`${GRID} items-center px-3 py-2 bg-slate-100 text-slate-900`}>
+                <div className="overflow-x-auto"><div className={minWCls} style={minWStyle}>
+                  <div style={gridStyle} className={`${GRID} items-center px-3 py-2 bg-slate-100 text-slate-900`}>
                     <span className="max-md:hidden" />
                     <span className="min-w-0 text-sm font-semibold max-md:basis-full">รวมทุกบิล <span className="text-xs font-normal text-slate-500">{M.bills} บิล · {M.rows} แถว</span>
                       {bad > 0 ? <span className="ml-1.5 text-[11px] font-normal text-amber-700">⚠ ยอดไม่ตรงบิล {bad} ใบ</span> : all.every((x) => x.t.check?.ok) ? <span className="ml-1.5 text-[11px] font-normal text-emerald-700">✓ ตรงทุกบิล</span> : null}</span>

@@ -141,6 +141,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "line-items-grid.md", sameJob: "line-items",
   },
   {
+    key: "col-resize", label: "ลากขยายคอลัมน์ (ตารางที่เขียนเอง)", code: "useColWidths / ColGrip", category: "table",
+    source: { path: "components/col-resize" },
+    what: "ลากเส้นที่หัวคอลัมน์เพื่อปรับความกว้าง · ดับเบิลคลิก = พอดีเนื้อหา · คืนความกว้างเดิมได้ · จำต่อคน ตามไปทุกเครื่อง",
+    when: "ตาราง/กริดที่เขียนเองและยังย้ายไปตารางกลางไม่ได้ (เช่น แถวบิลร้านที่กางแก้ในแถว · ตารางกล่องในใบส่งของ)",
+    notWhen: "ตารางกลาง MiniTable / DataTable / LineItemsGrid มีลากขยายในตัวแล้ว — ห้ามใช้ซ้อน · ตารางใหม่ให้ใช้ตารางกลางก่อน",
+    doc: "col-resize.md",
+  },
+  {
     key: "sales-line-items", label: "ตารางบรรทัดเอกสารขาย", code: "SalesLineItems", category: "table",
     source: { path: "components/sales-line-items" },
     what: "บรรทัดสินค้าในใบเสนอราคา ใบสั่งขาย ใบส่งของ (เลือก SKU หน่วย ราคา ส่วนลด)",

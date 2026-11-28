@@ -8,6 +8,8 @@
  * ทดสอบ: lib/__tests__/delivery-bill-check.test.ts
  */
 
+import { lineDiscount } from "./landed-cost";
+
 export type ShipMethod = "cube" | "weight";
 export type DescRule = { keyword: string; method: ShipMethod };
 
@@ -169,4 +171,71 @@ export function boxWeightCheck(boxes: { weight_kg: number | null; m3: number | n
   const off = (box: number, line: number) => box > 0 && line > 0 && (line > box * 1.5 || line < box / 1.5);
   const r = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
   return { ok: !(off(box_kg, line_kg) || off(box_m3, line_m3)), box_kg: r(box_kg, 4), line_kg: r(line_kg, 4), box_m3: r(box_m3, 6), line_m3: r(line_m3, 6) };
+}
+
+// ---------------- ★ 2026-11-28 เกลี่ยน้ำหนัก/คิวของกล่องให้สินค้าทุกตัวในใบ "ตามมูลค่า" ----------------
+// เจ้าของ: "เอาที่เลือกสินค้าออกเลย" + เลือกแบบ A (ตามมูลค่า) — ไม่ต้องจับคู่ว่ากล่องไหนมีสินค้าอะไรแล้ว
+//   กล่องของใบนี้ (ทุกใบส่งของที่ใช้แล้ว) รวมกัน → แบ่งให้สินค้าทุกตัวตามสัดส่วนมูลค่า (จำนวน × ราคา − ส่วนลด) → หารจำนวนชิ้น = กก./คิว ต่อชิ้น
+//   ยังไม่มีราคาเลยทั้งใบ = แบ่งตามจำนวนชิ้น · ค่าส่งรวมของใบเท่าเดิมทุกแบบ ต่างกันแค่ต้นทุนต่อชิ้นของแต่ละสินค้า
+// ใช้ที่: lib/delivery-bill (applyVoucherBoxes · เซิร์ฟเวอร์) · หน้า /purchasing/vouchers/[id] (เช็กว่าต้องคิดใหม่ไหมตอนกดยืนยัน)
+export type SpreadBox = { weight_kg: number | null; m3: number | null; method?: ShipMethod | null };
+export type SpreadLine = { id: string; qty: number | null; unit_price: number | null; discount?: number | null; discount_pct?: number | null; is_product?: boolean };
+export type SpreadPer = { id: string; kg_per_unit: number | null; cbm_per_unit: number | null };
+export type SpreadResult = {
+  per: SpreadPer[];
+  /** วิธีคิดค่าส่งที่ติดไปที่สินค้า (กล่องส่วนใหญ่) · null = กล่องไม่ได้บอก (ตามหัวใบ) */
+  method: ShipMethod | null;
+  /** กล่องคิดคนละแบบ (คิว x กล่อง · กก. y กล่อง) — ทั้งใบใช้ method ข้างบน */
+  mixed: { cube: number; weight: number } | null;
+  basis: "value" | "qty" | null;
+  total_kg: number | null; total_m3: number | null;
+};
+const r9 = (x: number) => Math.round(x * 1e9) / 1e9;   // 9 ตำแหน่ง: ของชิ้นเล็กมาก (ห่วง 1,000 ชิ้น/0.0012 คิว)
+const nz = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+
+/** มูลค่าบรรทัด (สกุลของใบ) = จำนวน × ราคา − ส่วนลด · ไม่มีราคา = 0 */
+export function spreadLineValue(l: SpreadLine): number {
+  const q = nz(l.qty), u = nz(l.unit_price);
+  if (q <= 0 || u <= 0) return 0;
+  return Math.max(0, q * u - lineDiscount(u, q, l.discount, l.discount_pct));   // ส่วนลดสูตรเดียวกับใบ (lib/landed-cost)
+}
+
+export function spreadBoxesByValue(boxes: SpreadBox[], lines: SpreadLine[]): SpreadResult {
+  const prods = lines.filter((l) => l.is_product !== false && nz(l.qty) > 0);
+  const pool = prods.length ? prods : lines.filter((l) => nz(l.qty) > 0);
+  const hasKg = boxes.some((b) => b.weight_kg != null), hasM3 = boxes.some((b) => b.m3 != null);
+  const kg = boxes.reduce((a, b) => a + nz(b.weight_kg), 0), m3 = boxes.reduce((a, b) => a + nz(b.m3), 0);
+  const nc = boxes.filter((b) => b.method === "cube").length, nw = boxes.filter((b) => b.method === "weight").length;
+  const method: ShipMethod | null = nc || nw ? (nw > nc ? "weight" : "cube") : null;
+  const base = { method, mixed: nc && nw ? { cube: nc, weight: nw } : null, total_kg: hasKg ? r9(kg) : null, total_m3: hasM3 ? r9(m3) : null };
+  if (!pool.length || !boxes.length) return { per: [], basis: null, ...base };
+  let w = pool.map(spreadLineValue);
+  let basis: "value" | "qty" = "value";
+  if (w.reduce((a, b) => a + b, 0) <= 0) { w = pool.map((l) => nz(l.qty)); basis = "qty"; }
+  const sw = w.reduce((a, b) => a + b, 0);
+  const per = pool.map((l, i) => {
+    const q = nz(l.qty), share = w[i] / sw;
+    return { id: l.id, kg_per_unit: hasKg ? r9((kg * share) / q) : null, cbm_per_unit: hasM3 ? r9((m3 * share) / q) : null };
+  });
+  return { per, basis, ...base };
+}
+
+/**
+ * น้ำหนัก/คิวรวมของสินค้าในใบ (จำนวน × ต่อชิ้น) ยังเท่ากับกล่องที่ใช้แล้วไหม — ไม่เท่า = แก้จำนวน/เพิ่มสินค้า/แก้ต่อชิ้น หลังใช้ไปแล้ว
+ *   → true = กดยืนยันแล้วคิดใหม่ให้ (ข้อเสนอ 2) · เทียบแค่ "ยอดรวม" ใบเก่าที่เกลี่ยแบบเดิมแต่ยอดยังตรง จะไม่ถูกคิดใหม่เอง
+ */
+export function spreadStale(boxes: SpreadBox[], lines: (SpreadLine & { kg_per_unit: number | null; cbm_per_unit: number | null })[]): boolean {
+  if (!boxes.length) return false;
+  const prods = lines.filter((l) => l.is_product !== false && nz(l.qty) > 0);
+  const pool = prods.length ? prods : lines.filter((l) => nz(l.qty) > 0);
+  if (!pool.length) return false;
+  const off = (box: number, line: number) => Math.abs(box - line) > Math.max(1e-6, Math.abs(box) * 1e-3);
+  const kgOn = boxes.some((b) => b.weight_kg != null), m3On = boxes.some((b) => b.m3 != null);
+  const bkg = boxes.reduce((a, b) => a + nz(b.weight_kg), 0), bm3 = boxes.reduce((a, b) => a + nz(b.m3), 0);
+  const lkg = pool.reduce((a, l) => a + nz(l.qty) * nz(l.kg_per_unit), 0), lm3 = pool.reduce((a, l) => a + nz(l.qty) * nz(l.cbm_per_unit), 0);
+  if ((kgOn && off(bkg, lkg)) || (m3On && off(bm3, lm3))) return true;
+  // สินค้าที่เพิ่มทีหลัง (ยังไม่มีค่า) แต่ควรได้ส่วนแบ่ง — ยอดรวมยังตรงก็ต้องคิดใหม่
+  const exp = spreadBoxesByValue(boxes, pool);
+  const byId = new Map(pool.map((l) => [l.id, l]));
+  return exp.per.some((e) => { const l = byId.get(e.id); return !!l && ((nz(e.kg_per_unit) > 0 && nz(l.kg_per_unit) <= 0) || (nz(e.cbm_per_unit) > 0 && nz(l.cbm_per_unit) <= 0)); });
 }

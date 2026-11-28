@@ -2,7 +2,7 @@
  * ของกลาง — "ใบส่งของจากร้านขนส่ง" (Delivery Bill) ที่แนบกับใบสำคัญรับ
  *   1. parseDeliveryBillImage(): ให้ AI อ่านรูปใบส่งของ → รหัสขนส่ง (EK-########) + รายการ (P/o.No, Description, Pack, Package, Qty, Weight, M3)
  *   2. splitBillLineToVoucherLines(): แบ่งน้ำหนัก/คิวของบรรทัดในใบส่งของ ลงสินค้าที่ผู้ใช้จับคู่ (ต่อชิ้นเท่ากันทุกตัวในกลุ่ม)
- *   3. applyDeliveryBill(): เขียน kg_per_unit / cbm_per_unit ลงบรรทัดใบสำคัญ + รหัสขนส่งลงหัวใบ แล้วคิดใหม่
+ *   3. applyVoucherBoxes(): ★ 11-28 รวมกล่องของใบนี้ที่ใช้แล้ว (ทุกใบส่งของ) → เกลี่ยให้สินค้าทุกตัวตามมูลค่า → เขียน kg/cbm ต่อชิ้น + รหัสขนส่งลงหัวใบ แล้วคิดใหม่
  * ใช้ AI ตัวเดียวกับ AI แคปชั่น/รายละเอียดสินค้า (lib/ai-caption: OpenAI vision) — ไม่มี key = แจ้งผู้ใช้เป็นภาษาคน
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -13,6 +13,8 @@ import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isSupabaseRef } from "@/lib/file-ref";
 import { billFileParts } from "@/lib/bill-file-parts";
 import { BILL_ORDER_RULE as ORDER_RULE, orderByBillPosition } from "@/lib/bill-line-order";
+import { spreadBoxesByValue, type SpreadBox, type SpreadLine, type SpreadResult } from "@/lib/delivery-bill-check";
+import { rowOwner } from "@/lib/delivery-bill-share";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -140,37 +142,44 @@ export function splitBillLineToVoucherLines(line: { weight_kg: number | null; m3
   return targets.map((t) => ({ id: t.id, kg_per_unit: kg, cbm_per_unit: cbm }));
 }
 
-/** เอาน้ำหนัก/คิวจากใบส่งของ ไปใส่บรรทัดใบสำคัญที่จับคู่ไว้ + รหัสขนส่งลงหัวใบ แล้วคิดใหม่ · คืนจำนวนบรรทัดที่ถูกอัปเดต */
-export async function applyDeliveryBill(admin: Admin, voucherId: string, bill: { tracking_no: string | null; lines: DeliveryBillLine[] }): Promise<number> {
-  const { data: vls } = await admin.from("purchase_voucher_lines_v2").select("id, qty").eq("voucher_id", voucherId).not("is_active", "is", false);
-  const qtyOf = new Map(((vls ?? []) as Row[]).map((r) => [String(r.id), Number(r.qty) || 0]));
-  // สินค้าตัวหนึ่งอาจถูกจับคู่กับหลายบรรทัดในใบส่งของ (เช่น แยกกล่อง) → รวมค่าต่อชิ้น
-  const acc = new Map<string, { kg: number; cbm: number; hasKg: boolean; hasCbm: boolean; method: "cube" | "weight" | null }>();
-  for (const l of bill.lines) {
-    const targets = (l.voucher_line_ids ?? []).filter((id) => qtyOf.has(id)).map((id) => ({ id, qty: qtyOf.get(id) ?? 0 }));
-    if (targets.length === 0) continue;
-    for (const s of splitBillLineToVoucherLines(l, targets)) {
-      const a = acc.get(s.id) ?? { kg: 0, cbm: 0, hasKg: false, hasCbm: false, method: null };
-      if (s.kg_per_unit != null) { a.kg += s.kg_per_unit; a.hasKg = true; }
-      if (s.cbm_per_unit != null) { a.cbm += s.cbm_per_unit; a.hasCbm = true; }
-      if (l.method === "cube" || l.method === "weight") a.method = l.method;   // วิธีคิดของกล่อง (BOX=คิว, CLOTH BLOCK=กก.) ติดไปที่สินค้า
-      acc.set(s.id, a);
-    }
+/**
+ * ★ 2026-11-28 ใส่น้ำหนัก/คิวจากใบส่งของ (เจ้าของเลือก "เอาที่เลือกสินค้าออก" + เกลี่ยตามมูลค่า)
+ *   รวมกล่องของใบนี้ "ที่ใช้แล้ว" จากทุกใบส่งของ (ของใบนี้ + ใบที่ใช้ร่วม) → เกลี่ยให้สินค้าทุกตัวในใบตามมูลค่า (lib/delivery-bill-check spreadBoxesByValue)
+ *   → เขียน กก./คิว ต่อชิ้น + วิธีคิด (กล่องส่วนใหญ่) ลงบรรทัด · รหัสขนส่งลงหัวใบ (ถ้ายังว่าง) · คิดใบใหม่
+ *   ใบส่งของหลายใบ (ของมาหลายรอบ) = นับรวมกันเสมอ ไม่ทับกันเอง · คนเรียกต้องติด applied_at ที่แถวก่อนแล้วค่อยเรียก
+ * คืน { updated: จำนวนบรรทัดที่เขียน, spread }
+ */
+export async function applyVoucherBoxes(admin: Admin, voucherId: string, opts: { tracking_no?: string | null } = {}): Promise<{ updated: number; spread: SpreadResult }> {
+  const [{ data: own }, { data: shared }, { data: vls }] = await Promise.all([
+    admin.from("purchase_delivery_bills").select("id, voucher_id, status, lines").eq("voucher_id", voucherId).neq("kind", "seller").not("is_active", "is", false),
+    admin.from("purchase_delivery_bills").select("id, voucher_id, status, lines").contains("lines", [{ for_voucher_id: voucherId }]).neq("kind", "seller").not("is_active", "is", false),
+    admin.from("purchase_voucher_lines_v2").select("id, qty, unit_price, discount, discount_pct, item_sku_id").eq("voucher_id", voucherId).not("is_active", "is", false),
+  ]);
+  const seen = new Set<string>();
+  const boxes: SpreadBox[] = [];
+  for (const b of [...((own ?? []) as Row[]), ...((shared ?? []) as Row[])]) {
+    const bid = String(b.id); if (seen.has(bid)) continue; seen.add(bid);
+    const home = String(b.voucher_id);
+    const ls = (Array.isArray(b.lines) ? b.lines : []) as DeliveryBillLine[];
+    const legacy = b.status === "applied" && home === voucherId && !ls.some((l) => l.applied_at);   // ใช้ก่อนมีป้ายรายแถว = ทั้งใบใช้แล้ว
+    for (const l of ls) if (rowOwner(l, home) === voucherId && (l.applied_at || legacy)) boxes.push({ weight_kg: l.weight_kg ?? null, m3: l.m3 ?? null, method: l.method ?? null });
   }
-  let n = 0;
-  for (const [id, a] of acc) {
+  const lines: SpreadLine[] = ((vls ?? []) as Row[]).map((r) => ({ id: String(r.id), qty: num(r.qty), unit_price: num(r.unit_price), discount: num(r.discount), discount_pct: num(r.discount_pct), is_product: !!r.item_sku_id }));
+  const spread = spreadBoxesByValue(boxes, lines);
+  let updated = 0;
+  for (const p of spread.per) {
     const patch: Row = {};
-    if (a.hasKg) patch.kg_per_unit = Math.round(a.kg * 1e9) / 1e9;   // ★ 11-23 9 ตำแหน่ง: ของชิ้นเล็กมาก (ห่วง 1,000 ชิ้น/0.0012 คิว) ปัด 6 ตำแหน่งแล้วค่าส่งหาย 17%
-    if (a.hasCbm) patch.cbm_per_unit = Math.round(a.cbm * 1e9) / 1e9;
-    if (a.method) patch.ship_method = a.method;
+    if (p.kg_per_unit != null) patch.kg_per_unit = p.kg_per_unit;
+    if (p.cbm_per_unit != null) patch.cbm_per_unit = p.cbm_per_unit;
+    if (spread.method) patch.ship_method = spread.method;   // วิธีคิดของกล่อง (BOX=คิว, CLOTH BLOCK=กก.) ติดไปที่สินค้า
     if (Object.keys(patch).length === 0) continue;
-    const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", id).eq("voucher_id", voucherId);
-    if (!error) n++;
+    const { error } = await admin.from("purchase_voucher_lines_v2").update(patch).eq("id", p.id).eq("voucher_id", voucherId);
+    if (!error) updated++;
   }
-  if (bill.tracking_no) {
+  if (opts.tracking_no) {
     const { data: v } = await admin.from("purchase_vouchers_v2").select("tracking_no").eq("id", voucherId).maybeSingle();
-    if (!str((v as Row | null)?.tracking_no)) await admin.from("purchase_vouchers_v2").update({ tracking_no: bill.tracking_no }).eq("id", voucherId);
+    if (!str((v as Row | null)?.tracking_no)) await admin.from("purchase_vouchers_v2").update({ tracking_no: opts.tracking_no }).eq("id", voucherId);
   }
   await recomputeVoucher(admin, voucherId);
-  return n;
+  return { updated, spread };
 }
