@@ -1599,6 +1599,13 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ภาพย่อของวิดีโอในคลังและช่องวิดีโอ",
   },
   {
+    key: "video-segment", label: "เล่นคลิปเฉพาะช่วง (ตัดเริ่ม-จบ)", code: "VideoSegmentPlayer", category: "file",
+    source: { path: "components/video-segment" },
+    what: "ฝังเล่นคลิปจากลิงก์ YouTube / TikTok เฉพาะช่วงเริ่ม-จบ แล้ววน/หยุดเอง · Pinterest / Instagram เล่นทั้งคลิป + ป้ายบอกช่วง · ไม่ดาวน์โหลดไฟล์ · กติกาลิงก์ lib/video-shot",
+    when: "โชว์คลิปตัวอย่างเฉพาะบางช่วง — คลัง Video Shot และคลิปของขั้นตอนบทเรียน (/misc/learn)",
+    notWhen: "ไฟล์วิดีโอที่อัปขึ้นระบบเอง ใช้ <video> / VideoThumb · ฝังลิงก์ Pinterest/TikTok บนกระดานวาด ใช้ social-embed-frame ของ CanvasSketch",
+  },
+  {
     key: "file-ref", label: "เปิดดูไฟล์จากที่อยู่กลาง", code: "FileRefLink", category: "file",
     source: { path: "components/file-ref" },
     what: "เปิดไฟล์ที่เก็บไว้ไม่ว่าอยู่ R2 หรือ Supabase ส่วนตัว ด้วยรูปแบบที่อยู่เดียว (useFileRefUrls · useFileRefResolver · fetchFileRefBlob)",

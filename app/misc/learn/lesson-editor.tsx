@@ -17,15 +17,16 @@ import { DriveUploadBox } from "@/components/drive-upload-box";
 import { formatTimeText, parseTimeText, parseVideoLink, type Lesson, type LessonStatus } from "@/lib/learn";
 import type { LessonDraft } from "./use-learn";
 import { AnimPicker } from "./anim-picker";
+import { ShotPickerModal } from "./shots/shot-picker";
 import type { LessonAnimation } from "@/lib/lesson-anim";
 
 type StepForm = {
   title: string; body: string; image_r2_key: string; link_url: string;
-  video_url: string; video_start: string; video_r2_key: string; checklist: string;
+  video_url: string; video_start: string; video_end: string; video_r2_key: string; checklist: string;
   animation: LessonAnimation | null;
 };
 
-const blankStep = (): StepForm => ({ title: "", body: "", image_r2_key: "", link_url: "", video_url: "", video_start: "", video_r2_key: "", checklist: "", animation: null });
+const blankStep = (): StepForm => ({ title: "", body: "", image_r2_key: "", link_url: "", video_url: "", video_start: "", video_end: "", video_r2_key: "", checklist: "", animation: null });
 
 function toForm(l: Lesson | null) {
   return {
@@ -33,7 +34,7 @@ function toForm(l: Lesson | null) {
     source_url: l?.source_url ?? "", source_title: l?.source_title ?? "", status: (l?.status ?? "draft") as LessonStatus,
     steps: (l?.steps ?? []).map((s) => ({
       title: s.title, body: s.body ?? "", image_r2_key: s.image_r2_key ?? "", link_url: s.link_url ?? "",
-      video_url: s.video_url ?? "", video_start: formatTimeText(s.video_start_sec), video_r2_key: s.video_r2_key ?? "",
+      video_url: s.video_url ?? "", video_start: formatTimeText(s.video_start_sec), video_end: formatTimeText(s.video_end_sec), video_r2_key: s.video_r2_key ?? "",
       checklist: s.checklist.join("\n"), animation: s.animation ?? null,
     })) as StepForm[],
   };
@@ -60,6 +61,7 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [driveUrl, setDriveUrl] = useState(lesson?.drive_folder_url ?? null);
+  const [pickFor, setPickFor] = useState<number | null>(null);
   const dirty = JSON.stringify(f) !== JSON.stringify(initial);
 
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
@@ -75,13 +77,15 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
     if (f.source_url.trim() && !/^https?:\/\//i.test(f.source_url.trim())) { setErr("ลิงก์ที่มาต้องขึ้นต้นด้วย https://"); return; }
     const badTime = f.steps.findIndex((s) => s.video_start.trim() && parseTimeText(s.video_start) === null);
     if (badTime >= 0) { setErr(`ขั้นที่ ${badTime + 1}: นาทีในคลิปต้องเป็นแบบ 1:20 หรือ 80`); return; }
+    const badEnd = f.steps.findIndex((s) => s.video_end.trim() && (parseTimeText(s.video_end) === null || (parseTimeText(s.video_start) ?? -1) >= (parseTimeText(s.video_end) ?? 0)));
+    if (badEnd >= 0) { setErr(`ขั้นที่ ${badEnd + 1}: เวลาจบต้องเป็นแบบ 1:20 และมากกว่าเวลาเริ่ม`); return; }
     setErr(null); setBusy(true);
     const ok = await onSave({
       title: f.title.trim(), icon: f.icon.trim() || null, category: f.category.trim() || null, description: f.description.trim() || null,
       source_url: f.source_url.trim() || null, source_title: f.source_title.trim() || null, status: f.status,
       steps: f.steps.map((s) => ({
         title: s.title.trim(), body: s.body.trim() || null, image_r2_key: s.image_r2_key || null, link_url: s.link_url.trim() || null,
-        video_url: s.video_url.trim() || null, video_start_sec: parseTimeText(s.video_start), video_r2_key: s.video_r2_key || null,
+        video_url: s.video_url.trim() || null, video_start_sec: parseTimeText(s.video_start), video_end_sec: parseTimeText(s.video_end), video_r2_key: s.video_r2_key || null,
         checklist: s.checklist.split(/\r?\n/).map((x) => x.trim()).filter(Boolean),
         animation: s.animation,
       })),
@@ -159,12 +163,21 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
                   <div className="mt-2"><AnimPicker value={s.animation} onChange={(a) => patchStep(i, { animation: a })} /></div>
                   <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
                     <div>
-                      <label className={lbl}>คลิปของขั้นนี้ (ลิงก์ YouTube/TikTok/Drive)</label>
-                      <input value={s.video_url} onChange={(e) => patchStep(i, { video_url: e.target.value })} placeholder="ว่าง = ใช้คลิปหลักของบท" className={inp} />
+                      <label className={lbl}>คลิปของขั้นนี้ (ลิงก์ YouTube/TikTok/Pinterest/Drive)</label>
+                      <div className="flex gap-1.5">
+                        <input value={s.video_url} onChange={(e) => patchStep(i, { video_url: e.target.value })} placeholder="ว่าง = ใช้คลิปหลักของบท" className={`${inp} min-w-0 flex-1`} />
+                        <button type="button" onClick={() => setPickFor(i)} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-[12px] font-medium text-indigo-700 hover:bg-indigo-100" title="เลือกช็อตจากคลัง Video Shot"><Icon name="movie" /> คลังช็อต</button>
+                      </div>
                     </div>
-                    <div>
-                      <label className={lbl}>เริ่มที่นาที (เช่น 1:20)</label>
-                      <input value={s.video_start} onChange={(e) => patchStep(i, { video_start: e.target.value })} placeholder="1:20" className={inp} />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className={lbl}>เริ่มที่ (เช่น 1:20)</label>
+                        <input value={s.video_start} onChange={(e) => patchStep(i, { video_start: e.target.value })} placeholder="1:20" className={inp} />
+                      </div>
+                      <div>
+                        <label className={lbl}>จบที่ (คลิปของขั้นนี้)</label>
+                        <input value={s.video_end} onChange={(e) => patchStep(i, { video_end: e.target.value })} placeholder="ว่าง = ถึงจบ" className={inp} />
+                      </div>
                     </div>
                     <div>
                       <label className={lbl}>เช็กลิสต์ (1 บรรทัด = 1 ข้อ)</label>
@@ -205,6 +218,17 @@ export function LessonEditor({ lesson, categories, defaultCategory, onClose, onS
           ) : <p className="text-[12px] text-slate-400">บันทึกบทเรียนก่อน แล้วเปิดแก้อีกครั้งเพื่ออัปคลิปยาวขึ้น Drive</p>}
         </section>
       </div>
+      {pickFor !== null && (
+        <ShotPickerModal onClose={() => setPickFor(null)}
+          onPick={(sh) => {
+            const i = pickFor;
+            setPickFor(null);
+            patchStep(i, {
+              video_url: sh.url, video_start: formatTimeText(sh.start_sec), video_end: formatTimeText(sh.end_sec),
+              ...(f.steps[i]?.title.trim() ? {} : { title: sh.title }),
+            });
+          }} />
+      )}
     </ERPModal>
   );
 }

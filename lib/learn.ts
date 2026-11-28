@@ -22,6 +22,8 @@ export type LessonStep = {
   link_url: string | null;
   video_url: string | null;
   video_start_sec: number | null;
+  /** วินาทีที่หยุดคลิปของขั้นนี้ (null = เล่นถึงจบ) — ใช้กับคลิปของขั้นเอง (ตัวเล่นตัดช่วง components/video-segment) */
+  video_end_sec: number | null;
   video_r2_key: string | null;
   checklist: string[];
   animation: LessonAnimation | null;
@@ -49,7 +51,7 @@ export type Lesson = {
 
 /** คอลัมน์ที่อ่าน (บทเรียน / ขั้นตอน) */
 export const LESSON_COLS = "id, title, icon, description, category, status, source_url, source_title, drive_folder_url, sort_order, is_active, deleted_at, created_by, updated_by, created_at, updated_at";
-export const STEP_COLS = "id, guide_id, step_no, title, body, image_r2_key, link_url, video_url, video_start_sec, video_r2_key, checklist, animation, sort_order";
+export const STEP_COLS = "id, guide_id, step_no, title, body, image_r2_key, link_url, video_url, video_start_sec, video_end_sec, video_r2_key, checklist, animation, sort_order";
 
 export const UNCATEGORIZED = "ทั่วไป";
 
@@ -156,10 +158,12 @@ export function cleanSteps(v: unknown): LessonStep[] {
       link_url: str(s.link_url, 1000),
       video_url: str(s.video_url, 1000),
       video_start_sec: parseTimeText(s.video_start_sec),
+      video_end_sec: parseTimeText(s.video_end_sec),
       video_r2_key: str(s.video_r2_key, 500),
       checklist: cleanChecklist(s.checklist),
       animation: cleanAnimation(s.animation),
     };
+    if (step.video_end_sec !== null && step.video_start_sec !== null && step.video_end_sec <= step.video_start_sec) step.video_end_sec = null;
     const empty = !step.title && !step.body && !step.image_r2_key && !step.link_url && !step.video_url && !step.video_r2_key && !step.checklist.length && !step.animation;
     if (empty) continue;
     if (!step.title) step.title = `ขั้นตอน ${out.length + 1}`;

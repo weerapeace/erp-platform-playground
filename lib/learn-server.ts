@@ -10,7 +10,7 @@ export function stepRows(guideId: string, steps: LessonStep[]) {
   return steps.map((s, i) => ({
     guide_id: guideId, step_no: i + 1, sort_order: i,
     title: s.title, body: s.body, image_r2_key: s.image_r2_key, link_url: s.link_url,
-    video_url: s.video_url, video_start_sec: s.video_start_sec, video_r2_key: s.video_r2_key, checklist: s.checklist, animation: s.animation,
+    video_url: s.video_url, video_start_sec: s.video_start_sec, video_end_sec: s.video_end_sec, video_r2_key: s.video_r2_key, checklist: s.checklist, animation: s.animation,
   }));
 }
 

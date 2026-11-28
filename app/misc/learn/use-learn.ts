@@ -11,7 +11,7 @@ import type { Lesson, LessonStep } from "@/lib/learn";
 
 export type LessonDraft = Pick<Lesson, "title" | "icon" | "description" | "category" | "status" | "source_url" | "source_title"> & { steps: LessonStep[] };
 
-async function call(url: string, method: string, body?: unknown): Promise<{ data?: unknown; error?: string | null; canManage?: boolean }> {
+export async function call(url: string, method: string, body?: unknown): Promise<{ data?: unknown; error?: string | null; canManage?: boolean }> {
   try {
     const res = await apiFetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
     const json = await res.json().catch(() => ({ error: "เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง" }));

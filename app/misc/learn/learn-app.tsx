@@ -16,12 +16,23 @@ import { groupLessons, lessonMatches, UNCATEGORIZED, type Lesson } from "@/lib/l
 import { LessonReader } from "./lesson-reader";
 import { LessonEditor } from "./lesson-editor";
 import { useLessons, useLessonWrite, type LessonDraft } from "./use-learn";
+import { ShotsTab } from "./shots/shots-tab";
 
-type Tab = "all" | "draft" | "trash";
+type Tab = "all" | "shots" | "draft" | "trash";
 const ALL = "__all__";
 
 function readLessonParam(): string | null {
   try { return new URLSearchParams(window.location.search).get("lesson"); } catch { return null; }
+}
+function readTabParam(): Tab | null {
+  try { return new URLSearchParams(window.location.search).get("tab") === "shots" ? "shots" : null; } catch { return null; }
+}
+function writeTabParam(t: Tab) {
+  try {
+    const u = new URL(window.location.href);
+    if (t === "shots") u.searchParams.set("tab", "shots"); else u.searchParams.delete("tab");
+    window.history.replaceState(window.history.state, "", u.toString());
+  } catch { /* ไม่เป็นไร */ }
 }
 function writeLessonParam(id: string | null) {
   try {
@@ -71,7 +82,7 @@ export function LearnApp() {
   const [editing, setEditing] = useState<Lesson | "new" | null>(null);
   const [delTarget, setDelTarget] = useState<Lesson | null>(null);
 
-  useEffect(() => { const id = readLessonParam(); if (id) setOpenId(id); }, []);
+  useEffect(() => { const id = readLessonParam(); if (id) setOpenId(id); const t = readTabParam(); if (t) setTab(t); }, []);
   const open = useCallback((id: string | null) => { setOpenId(id); writeLessonParam(id); }, []);
 
   const drafts = useMemo(() => lessons.filter((l) => l.status === "draft"), [lessons]);
@@ -162,21 +173,21 @@ export function LearnApp() {
           <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800"><Icon name="school" /> ศูนย์เรียนรู้</h1>
           <p className="text-[13px] text-slate-500">บทเรียนสอนงานทีละขั้น — อ่าน ดูคลิป แล้วติ๊กเช็กลิสต์ตอนทำงานจริง</p>
         </div>
-        {canManage && (
+        {canManage && tab !== "shots" && (
           <button type="button" onClick={() => setEditing("new")} className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="plus" /> สร้างบทเรียน</button>
         )}
       </div>
 
-      {canManage && (
-        <div className="mb-4 flex gap-1 border-b border-slate-200 text-[13px]">
-          {([["all", `บทเรียน (${lessons.length})`], ["draft", `ร่างรอตรวจ (${drafts.length})`], ["trash", "ถังขยะ"]] as [Tab, string][]).map(([k, label]) => (
-            <button key={k} type="button" onClick={() => { setTab(k); setCat(ALL); }}
-              className={`-mb-px border-b-2 px-3 py-2 ${tab === k ? "border-indigo-600 font-medium text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{label}</button>
+      {(
+        <div className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200 text-[13px]">
+          {([["all", `บทเรียน (${lessons.length})`], ["shots", "Video Shot"], ...(canManage ? [["draft", `ร่างรอตรวจ (${drafts.length})`], ["trash", "ถังขยะ"]] : [])] as [Tab, string][]).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => { setTab(k); setCat(ALL); writeTabParam(k); }}
+              className={`-mb-px shrink-0 border-b-2 px-3 py-2 ${tab === k ? "border-indigo-600 font-medium text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-800"}`}>{label}</button>
           ))}
         </div>
       )}
 
-      {tab === "trash" ? <TrashList onChanged={reload} /> : lessons.length === 0 ? (
+      {tab === "shots" ? <ShotsTab /> : tab === "trash" ? <TrashList onChanged={reload} /> : lessons.length === 0 ? (
         <EmptyState icon={<Icon name="school" />} title="เริ่มบทเรียนแรก"
           hint={canManage ? "กด “สร้างบทเรียน” แล้วแปะลิงก์คลิปที่สอนดี ๆ หรือส่งลิงก์ให้ Claude ในแชตสรุปเป็นบทเรียน (จะขึ้นเป็นร่างให้ตรวจก่อน)" : "ยังไม่มีบทเรียนที่เผยแพร่ — รอหัวหน้าเพิ่มบทเรียนก่อนนะ"}
           onCreate={canManage ? () => setEditing("new") : undefined} createLabel="สร้างบทเรียน" />

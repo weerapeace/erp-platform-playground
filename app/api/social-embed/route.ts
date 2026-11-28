@@ -9,38 +9,11 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
-import { isSocialHost, parseSocialLink, socialEmbedSize, type SocialEmbedInfo, type SocialLink } from "@/lib/social-embed";
+import { parseSocialLink, socialEmbedSize, type SocialEmbedInfo } from "@/lib/social-embed";
+import { expandShortSocial, pinterestInfo } from "@/lib/social-embed-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
-
-/** ลิงก์สั้น → ลิงก์เต็ม (ตามการเด้งทีละขั้น สูงสุด 6 ครั้ง · ออกนอก Pinterest/TikTok = หยุด) */
-async function expandShort(url: string, signal: AbortSignal): Promise<SocialLink | null> {
-  let cur = url;
-  for (let hop = 0; hop < 6; hop++) {
-    const res = await fetch(cur, { method: "HEAD", redirect: "manual", signal, headers: { "User-Agent": UA } });
-    const loc = res.headers.get("location");
-    if (res.status < 300 || res.status >= 400 || !loc) break;
-    const next = new URL(loc, cur);
-    if (next.protocol !== "https:" || !isSocialHost(next.hostname)) return null;
-    cur = next.toString();
-    const l = parseSocialLink(cur);
-    if (l?.id) return l;
-  }
-  return null;
-}
-
-async function pinterestInfo(id: string, signal: AbortSignal): Promise<{ available: boolean; ratio: number | null; image: string | null }> {
-  const res = await fetch(`https://widgets.pinterest.com/v3/pidgets/pins/info/?pin_ids=${encodeURIComponent(id)}`, { signal, headers: { "User-Agent": UA, Accept: "application/json" } });
-  if (!res.ok) return { available: true, ratio: null, image: null }; // ถามไม่ได้ = ไม่รู้ → ลองฝังไปก่อน
-  const j = await res.json() as { data?: Array<{ images?: Record<string, { width: number; height: number; url: string }> } | null> };
-  const pin = j.data?.[0];
-  const img = pin?.images?.["564x"] ?? pin?.images?.["237x"] ?? pin?.images?.["236x"];
-  if (!img) return { available: false, ratio: null, image: null };
-  return { available: true, ratio: img.height > 0 ? img.width / img.height : null, image: img.url };
-}
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   // กระดานอยู่ทั้งฝั่งงาน (tasks) และฝั่งสินค้า (ใบงานออกแบบ/บอร์ดจ่ายงาน) → มีสิทธิ์ดูฝั่งใดฝั่งหนึ่งก็พอ
@@ -55,7 +28,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const timer = setTimeout(() => ctrl.abort(), 6000);
   try {
     if (!link.id) {
-      const full = await expandShort(link.url, ctrl.signal);
+      const full = await expandShortSocial(link.url, ctrl.signal);
       if (!full?.id) return NextResponse.json({ data: null, error: "เปิดลิงก์สั้นนี้ไม่ได้ ลองเปิดในแอปแล้ว copy ลิงก์เต็มมาวางแทน" });
       link = full;
     }

@@ -46,6 +46,9 @@ describe("cleanChecklist / cleanSteps", () => {
     expect(s).toHaveLength(2);
     expect(s[0].title).toBe("ขั้นตอน 1");
     expect(s[0].video_start_sec).toBe(80);
+    expect(s[0].video_end_sec).toBeNull();
+    expect(cleanSteps([{ title: "a", video_start_sec: 10, video_end_sec: "0:15" }])[0].video_end_sec).toBe(15);
+    expect(cleanSteps([{ title: "a", video_start_sec: 20, video_end_sec: 15 }])[0].video_end_sec).toBeNull();
     expect(s[1].checklist).toEqual(["ก", "ข"]);
   });
 });
