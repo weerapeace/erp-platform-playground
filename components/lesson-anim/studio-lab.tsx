@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { shortcutKey } from "@/lib/shortcut-key";
+import { Studio3D, webglAvailable } from "./studio-3d";
 import {
   BACKDROPS, BAG_COLORS, BAG_MATERIALS, BAG_SHAPES, CONTROLS, LIGHT_TYPES, MAX_ITEMS, MODIFIERS, RECIPES, SKIN, SUBJECTS,
   applyRecipe, cleanSetup, computeStudio, defaultSetup, explain, gearList, kelvinRgb, newControl, newLight, planXZ, ratioText, shadeAt,
@@ -383,6 +384,40 @@ function loadLast(initial?: StudioSetup): StudioSetup {
   return defaultSetup();
 }
 
+const CAM_KEY = "erp.studioLab.cam.v1";
+/** จอกล้อง: 3D (ค่าเริ่มต้น) · 2D (สำรอง — เครื่องไม่มีการ์ดจอ 3D / โหลดไม่ได้ / ผู้ใช้เลือกเอง) */
+function CameraBox({ s, r }: { s: StudioSetup; r: StudioResult }) {
+  const [mode, setMode] = useState<"3d" | "2d">(() => {
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(CAM_KEY); } catch { /* อ่านไม่ได้ */ }
+    return saved === "2d" || !webglAvailable() ? "2d" : "3d";
+  });
+  const [ready3d, setReady3d] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const pick = (m: "3d" | "2d") => { setMode(m); try { localStorage.setItem(CAM_KEY, m); } catch { /* ไม่เป็นไร */ } };
+  const show3d = mode === "3d" && !failed;
+  return (
+    <div className="relative">
+      {(!show3d || !ready3d) && <CameraView s={s} r={r} />}
+      {show3d && (
+        <div className={ready3d ? "" : "pointer-events-none absolute inset-0 opacity-0"}>
+          <Studio3D s={s} r={r} onReady={() => setReady3d(true)} onFail={() => { setFailed(true); setReady3d(false); }} />
+        </div>
+      )}
+      {show3d && !ready3d && <span className="absolute bottom-2 left-2 rounded bg-black/55 px-2 py-0.5 text-[11px] text-white">กำลังโหลดภาพ 3D…</span>}
+      <div className="absolute right-2 top-2 flex overflow-hidden rounded-md border border-white/40 bg-black/45 text-[11px] font-medium text-white backdrop-blur-sm" role="group" aria-label="แบบจอกล้อง">
+        {(["3d", "2d"] as const).map((m) => (
+          <button key={m} type="button" onClick={() => pick(m)} disabled={m === "3d" && failed}
+            className={`px-2 py-0.5 ${mode === m && !(m === "3d" && failed) || (m === "2d" && failed) ? "bg-white text-slate-900" : "hover:bg-white/20 disabled:opacity-40"}`}
+            title={m === "3d" ? (failed ? "เครื่องนี้แสดง 3D ไม่ได้" : "ภาพ 3 มิติ — เงาเกิดจากรูปทรงจริง") : "ภาพลายเส้น — เบา เหมาะกับมือถือเครื่องเก่า"}>
+            {m.toUpperCase()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** วาดเฉพาะในเบราว์เซอร์ — เลขทศนิยมของ Math.sin/cos ฝั่งเซิร์ฟเวอร์กับเบราว์เซอร์ต่างกันนิดหน่อย (hydration ไม่ตรง) + ต้องอ่านชุดล่าสุดจากเครื่อง */
 export function StudioLab(props: { initial?: StudioSetup; variant?: "page" | "embed" }) {
   const [ready, setReady] = useState(false);
@@ -587,7 +622,7 @@ function StudioLabInner({ initial, variant = "page" }: { initial?: StudioSetup; 
         {recipeBar}
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
           {views}
-          <div><p className="mb-1 text-[12px] text-slate-500">จอกล้อง (ภาพที่ถ่ายได้)</p><CameraView s={s} r={r} /></div>
+          <div><p className="mb-1 text-[12px] text-slate-500">จอกล้อง (ภาพที่ถ่ายได้)</p><CameraBox s={s} r={r} /></div>
         </div>
         {readout}
         {explainBox}
@@ -605,7 +640,7 @@ function StudioLabInner({ initial, variant = "page" }: { initial?: StudioSetup; 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[300px_minmax(0,1fr)_minmax(0,1.25fr)] lg:grid-rows-[auto_1fr] lg:[grid-template-areas:'ctl_plan_cam'_'ctl_plan_info']">
         <div className="sticky top-0 z-20 bg-white pb-1 lg:top-2 lg:self-start lg:[grid-area:cam]">
           <p className="mb-1 text-[12px] text-slate-500">จอกล้อง (ภาพที่ถ่ายได้)</p>
-          <CameraView s={s} r={r} />
+          <CameraBox s={s} r={r} />
         </div>
         <div className="order-1 space-y-2 lg:[grid-area:plan]">{views}{gearBox}</div>
         <div className="order-2 space-y-2 lg:[grid-area:info]">{readout}{explainBox}</div>
