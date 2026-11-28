@@ -874,6 +874,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "block-print.md",
   },
   {
+    key: "fabric-lay", label: "วางแบบบนผ้าลาย (อัลบั้มผ้า + แบบตัดต่อสินค้า + วางชิ้นบนผ้าขนาดจริง → JPEG สรุป)", code: "FabricLayHome · FabricAlbum · FabricModal · PatternEditor · PlanEditor · FabricLayPrintSheet · renderBagSummary · lib/fabric-lay", category: "feature",
+    source: { path: "components/fabric-lay" },
+    what: "อัลบั้มผ้าลายผืนจริง (รูปถ่าย → จิ้ม 4 มุมดัดตรง StraightenModal + ขนาดจริง + ตรวจระยะ 2 จุด · กรองประเภท/ขนาด) · แบบตัดเก็บต่อ Parent SKU หรือใบงานออกแบบ (ชิ้น = lib/pattern-shape ซม. · ส่วนของกระเป๋า · จำนวน · คู่พลิก · เผื่อเย็บ · โยน SVG/DXF/PNG หรือดึงจากสตูดิโอแพทเทิร์น) · แผนวาง: กระเป๋าหลายใบบนผ้า 1 ผืน ลาก/หมุน/พลิก เตือนล้นผ้า/ทับกัน/ทับส่วนที่ตัดแล้ว · JPEG สรุปต่อใบ (รูปกระเป๋า + ตำแหน่งบนผ้า + ชิ้นที่ตัดออกมา + คำอธิบาย) + คำสั่ง ChatGPT · ใบตัดผ้า · กดตัดแล้ว = หักพื้นที่ผ้า",
+    when: "ตัดชิ้นกระเป๋าจากผ้าลายผืนใหญ่ที่ต้องเลือกตำแหน่งลาย (ผ้าทอ/ผ้าพิมพ์ลายภาพ) แล้วอยากเห็นผล/สั่ง AI วาดรูปสินค้า · สูตรวางชิ้นบนผ้า (หมุน/พลิก/เช็กทับ/คำอธิบายตำแหน่ง) เรียก lib/fabric-lay ไม่เขียนใหม่",
+    notWhen: "คิดผ้าที่ต้องซื้อ/วางชิ้นอัตโนมัติให้ประหยัด (ผ้าพื้น ไม่สนลาย) → เครื่องคิดเลขผ้า lib/fabric-calc / วางแผนตัดผ้า lib/fabric-plan · วาดแพทเทิร์นใหม่ → สตูดิโอแพทเทิร์น · ดัดรูปเอกสารทั่วไป → photo-capture",
+    doc: "fabric-lay.md",
+  },
+  {
     key: "embroidery", label: "ไฟล์ปัก (โลโก้เวกเตอร์ → ฝีเข็ม → .DST ส่งร้านปัก)", code: "EmbroideryList · EmbroideryEditor · SelectStep · StitchPreview · EmbroiderySheet · lib/embroidery · lib/embroidery-pes", category: "feature",
     source: { path: "components/embroidery" },
     what: "เปิดโลโก้ .ai/.pdf/.svg (ตัวอ่านเดียวกับบล็อกพิมพ์ — ได้สีพื้นด้วย) → ตั้งขนาดจริง ความแน่นตามผ้า ชนิดฝีเข็มตามสี (อัตโนมัติ/ถมเต็ม/ซิกแซก/เดินเส้น) → คำนวณฝีเข็มในเบราว์เซอร์ ดูตัวอย่าง+เล่นลำดับ → ดาวน์โหลด .DST / .PES + ใบสั่งปัก · ขั้นเลือกส่วนที่จะปัก (แยกหลายงานได้) · ซูม/คลิกชิ้นตั้งฝีเข็ม · เตือนแบบกลุ่ม · ผูก Parent SKU",

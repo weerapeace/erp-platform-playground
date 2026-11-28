@@ -166,6 +166,14 @@ export const PARENT_LINK_SOURCES: ParentLinkSource[] = [
       date: day(r.due_date, r.created_at), href: `/design/pattern-tickets?id=${encodeURIComponent(s(r.id))}` }),
   },
   {
+    key: "fabric_lay_patterns", group: "design", label: "แบบตัดวางบนผ้าลาย", icon: "✂️",
+    table: "fabric_lay_patterns", select: "id, code, name, piece_count, bag_image, updated_at, is_active",
+    match: [{ by: "parent_id", column: "parent_sku_id" }], notFalse: "is_active",
+    order: { column: "updated_at", ascending: false },
+    toItem: (r) => ({ id: s(r.id), title: join(r.code, r.name) || "(ไม่มีชื่อ)", sub: `${s(r.piece_count)} ชิ้น`, image: s(r.bag_image) ? (/^(https?:|\/)/.test(s(r.bag_image)) ? { url: s(r.bag_image) } : { key: s(r.bag_image) }) : null,
+      date: day(r.updated_at), href: `/master/fabric-lay/patterns/${encodeURIComponent(s(r.id))}` }),
+  },
+  {
     key: "embroidery_designs", group: "design", label: "ไฟล์ปัก", icon: "🧵",
     table: "embroidery_designs", select: "id, code, name, stitch_count, color_count, updated_at, is_active",
     match: [{ by: "parent_id", column: "parent_sku_id" }], notFalse: "is_active",

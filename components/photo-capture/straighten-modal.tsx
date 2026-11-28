@@ -12,14 +12,21 @@ import { defaultQuad, isConvexQuad, outputSize, warpQuad, type Pt, type Quad } f
 
 const LABELS = ["บนซ้าย", "บนขวา", "ล่างขวา", "ล่างซ้าย"];
 
-export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zIndex }: {
+export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zIndex, aspect, initialQuad, title, description }: {
   open: boolean;
   zIndex?: number;
   /** blob URL ของรูปในเครื่อง */
   src: string;
   onClose: () => void;
-  onDone: (r: { blob: Blob; w: number; h: number }) => void | Promise<void>;
+  /** quad = มุมที่ใช้ (พิกัดพิกเซลในรูปเดิม) — เก็บไว้แก้ใหม่ได้ */
+  onDone: (r: { blob: Blob; w: number; h: number; quad: Quad }) => void | Promise<void>;
   maxSide?: number;
+  /** บังคับสัดส่วนรูปผลลัพธ์ กว้าง÷สูง (เช่น ผ้าจริง 90×60 ซม. = 1.5) — ไม่ส่ง = ใช้ความยาวด้านในรูป */
+  aspect?: number;
+  /** มุมเดิม (แก้มุมใหม่) — ไม่ส่ง = เข้ามาจากขอบรูป */
+  initialQuad?: Quad | null;
+  title?: string;
+  description?: string;
 }) {
   const toast = useToast();
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -35,7 +42,7 @@ export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zI
     loadImageEl(src).then((im) => {
       if (!alive) return;
       const w = im.naturalWidth, h = im.naturalHeight;
-      setSize({ w, h }); setQuad(defaultQuad(w, h));
+      setSize({ w, h }); setQuad(initialQuad && initialQuad.length === 4 ? initialQuad : defaultQuad(w, h));
     }).catch(() => toast.error("เปิดรูปไม่ได้"));
     return () => { alive = false; };
   }, [open, src]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -80,14 +87,18 @@ export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zI
       x1.drawImage(im, 0, 0, sw, sh);
       const srcPx = x1.getImageData(0, 0, sw, sh);
       const q = quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad;
-      const out = outputSize(q, maxSide);
+      const out0 = outputSize(q, maxSide);
+      // สัดส่วนจริง: ด้านยาวเท่าเดิม อีกด้านคิดจากสัดส่วนที่บังคับ
+      const out = aspect && aspect > 0
+        ? (aspect >= 1 ? { w: Math.max(out0.w, out0.h), h: Math.max(1, Math.round(Math.max(out0.w, out0.h) / aspect)) } : { w: Math.max(1, Math.round(Math.max(out0.w, out0.h) * aspect)), h: Math.max(out0.w, out0.h) })
+        : out0;
       const px = warpQuad(srcPx, q, out.w, out.h);
       const c2 = document.createElement("canvas"); c2.width = out.w; c2.height = out.h;
       const x2 = c2.getContext("2d");
       if (!x2) throw new Error("no canvas");
       x2.putImageData(new ImageData(px, out.w, out.h), 0, 0);
       const blob = await new Promise<Blob>((res, rej) => c2.toBlob((b) => (b ? res(b) : rej(new Error("toBlob"))), "image/jpeg", 0.9));
-      await onDone({ blob, w: out.w, h: out.h });
+      await onDone({ blob, w: out.w, h: out.h, quad });
       onClose();
     } catch (e) { toast.error("ดัดรูปไม่สำเร็จ: " + ((e as Error).message || "ลองใหม่")); }
     finally { setBusy(false); }
@@ -95,8 +106,8 @@ export function StraightenModal({ open, src, onClose, onDone, maxSide = 2400, zI
 
   const pct = (p: Pt) => (size ? { left: `${(p.x / size.w) * 100}%`, top: `${(p.y / size.h) * 100}%` } : {});
   return (
-    <ERPModal open={open} onClose={onClose} title="ดัดรูปให้ตรง" size="xl" loading={busy} zIndex={zIndex}
-      description="ลากจุดทั้ง 4 ไปวางที่มุมของแผ่น แล้วกด ดัดให้ตรง — ส่วนนอกกรอบจะถูกตัดทิ้ง"
+    <ERPModal open={open} onClose={onClose} title={title ?? "ดัดรูปให้ตรง"} size="xl" loading={busy} zIndex={zIndex}
+      description={description ?? "ลากจุดทั้ง 4 ไปวางที่มุมของแผ่น แล้วกด ดัดให้ตรง — ส่วนนอกกรอบจะถูกตัดทิ้ง"}
       footer={
         <div className="flex items-center justify-between w-full gap-2 flex-wrap">
           <button type="button" onClick={() => size && setQuad(defaultQuad(size.w, size.h))} disabled={busy}

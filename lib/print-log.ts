@@ -17,11 +17,12 @@
 // swatch_label = ป้ายแผงผ้า + QR (doc_id = sku_swatches.id) จาก /print/swatch-label?ids=
 // po_pick / po_pack / po_label = ใบหยิบ / ใบแพ็ก / ใบปะหน้า ของศูนย์ออเดอร์ (doc_id = platform_orders.id) จาก /print/platform-orders · ป้ายเอกสารใต้เลขออเดอร์ (2026-11-23)
 // emb_sheet = ใบสั่งปัก (doc_id = embroidery_designs.id) จาก /print/embroidery/<id>
+// fabric_lay = ใบตัดผ้าลาย (doc_id = fabric_lay_plans.id) จาก /print/fabric-lay/<id>
 // gift_card = การ์ดของขวัญจากหมายเหตุออเดอร์ (doc_id = order_gift_cards.id) จาก /print/order-gift-cards?ids=
-export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan", "swatch_label", "po_pick", "po_pack", "po_label", "gift_card", "engrave_sheet", "emb_sheet"] as const;
+export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice", "ds_pattern", "pattern_project", "fabric_plan", "swatch_label", "po_pick", "po_pack", "po_label", "gift_card", "engrave_sheet", "emb_sheet", "fabric_lay"] as const;
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 /** สิทธิ์ดู/บันทึกประวัติพิมพ์ต่อชนิด (ไม่ระบุ = ดูสินค้าได้ products.view) — ฝ่ายขายเปิดใบสั่งขายได้แต่อาจไม่มีสิทธิ์ดูสินค้า */
-export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view", pattern_project: "pattern_studio.view", po_pick: "platform_orders.view", po_pack: "platform_orders.view", po_label: "platform_orders.view", gift_card: "order_ops.view", engrave_sheet: "order_ops.view", emb_sheet: "embroidery.view" };
+export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view", pattern_project: "pattern_studio.view", po_pick: "platform_orders.view", po_pack: "platform_orders.view", po_label: "platform_orders.view", gift_card: "order_ops.view", engrave_sheet: "order_ops.view", emb_sheet: "embroidery.view", fabric_lay: "fabric_lay.view" };
 export const printDocPerm = (t: PrintDocType): string => PRINT_DOC_PERM[t] ?? "products.view";
 
 /** พิมพ์แบบไหน: print = กดพิมพ์ / Ctrl+P / บันทึก PDF จากหน้าต่างพิมพ์ · pdf = โหลด/เปิดไฟล์ PDF · link = เปิดไฟล์พิมพ์ในแท็บใหม่ / ส่งลิงก์ */

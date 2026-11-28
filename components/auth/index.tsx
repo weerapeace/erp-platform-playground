@@ -70,6 +70,7 @@ export type Permission =
   | "design_library.view" | "design_library.edit" | "design_library.manage"
   | "block_print.view" | "block_print.edit"   // 🧱 บล็อกพิมพ์ (/master/block-print)
   | "embroidery.view" | "embroidery.edit"   // 🧵 ไฟล์ปัก (/master/embroidery)
+  | "fabric_lay.view" | "fabric_lay.edit"   // ✂️ วางแบบบนผ้าลาย (/master/fabric-lay)
   | "cats.view" | "cats.edit"   // 🐾 ทะเบียนแมว (/misc/cats · แอปงานอื่นๆ)
   | "learn.view" | "learn.manage"   // 🎓 ศูนย์เรียนรู้ (/misc/learn · แอปงานอื่นๆ)
   | "short_links.create" | "short_links.manage"   // ลิงก์สั้น louismontini.co.th/go/ (lib/short-links)
