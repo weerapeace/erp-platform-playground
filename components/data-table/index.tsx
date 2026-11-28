@@ -18,6 +18,7 @@ import { formatDate } from "@/lib/date";
 import { formatAmount } from "@/lib/money";
 import { getStatusStyle, isUrgentStatus } from "@/lib/status-config";
 import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
+import { useVoiceHandler } from "@/components/voice-assistant/page-handlers";
 import {
   getRowActionStorageKey,
   loadRowActionSettings,
@@ -741,6 +742,8 @@ export function DataTable<T extends Record<string, unknown>>({
   };
   const [colDrag,          setColDrag]           = useState<string | null>(null);    // header drag
   const [globalSearch,     setGlobalSearch]     = useState("");
+  // 🎙️ ผู้ช่วยเสียง "ค้นในหน้านี้" — ตารางกลางรับคำค้นจากเสียงได้ทุกหน้า (ชั้น 2 · components/voice-assistant/page-handlers)
+  useVoiceHandler("search_here", (q) => setGlobalSearch(q));
   const [activeView,       setActiveView]       = useState(views[0]?.id ?? "all");
   const [showColumnMgr,    setShowColumnMgr]    = useState(false);
   const [actionSettings,   setActionSettings]   = useState<Record<string, RowActionSetting>>({});

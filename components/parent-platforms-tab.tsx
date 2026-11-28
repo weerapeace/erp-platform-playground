@@ -35,7 +35,7 @@ import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { isSellingPlatform } from "@/lib/selling-platforms";
 import { hasCreatePreview } from "@/lib/platform-create-registry";
-import { splitPlatformsByConnection } from "@/lib/platform-visibility";
+import { isListingOnSale, splitPlatformsByConnection } from "@/lib/platform-visibility";
 import { readinessText, type CreateReadiness } from "@/lib/platform-create-readiness";
 import { catalogAgeText, isCatalogStale } from "@/lib/catalog-refresh-plan";
 import { ListingLinks } from "@/components/platform-catalog/listing-links";
@@ -70,8 +70,8 @@ type ShopPreview = { images: string[]; price: number | null; sale: number | null
 /** ร้านที่เช็กกับร้านจริงได้ (ดึงเฉพาะตัวที่เปลี่ยน · app/api/platform-catalog/refresh-changed) */
 const SHOP_CHECKABLE = new Set(["lazada", "shopee", "tiktok", "line_shopping"]);
 
-const isOnSaleOf = (d: Draft | undefined, m: Matched[string] | undefined) =>
-  !!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id) || !!m;
+/** ลงขายแล้ว — กฎกลาง lib/platform-visibility (ผู้ช่วยเสียงใช้ตัวเดียวกัน) */
+const isOnSaleOf = (d: Draft | undefined, m: Matched[string] | undefined) => isListingOnSale(d, m);
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);

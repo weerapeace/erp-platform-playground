@@ -17,6 +17,8 @@ import { FORM_LANG_TEAM_KEY, effectiveLangMode, formLangsKey, parseLangList, res
 import { LangSettingsButton } from "@/components/master-crud/lang-settings";
 import { ParentSkuPicker, SkuPicker } from "@/components/pickers";   // เลือกต้นทางในป๊อป "คัดลอกจากรุ่นอื่น" (ของกลาง)
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
+import { takeVoicePrefill } from "@/components/voice-assistant/page-handlers";
+import { matchFormFields } from "@/lib/voice-assistant";
 import { DataTable, StatusModuleContext, type CardConfig, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog, ERPModal } from "@/components/modal";
@@ -1526,7 +1528,16 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
     setModalOpen(true);
   };
-  useNewParam(canCreate, openCreate);
+  // ?new=1 → เปิดฟอร์มเพิ่มใหม่ · มาจากผู้ช่วยเสียง "สร้างใหม่พร้อมค่า" = เติมค่าที่พูดลงช่องที่ชื่อตรงกัน (ยังไม่บันทึก · คนกดเอง)
+  useNewParam(canCreate, () => {
+    openCreate();
+    const said = typeof window !== "undefined" ? takeVoicePrefill(window.location.pathname) : null;
+    if (!said) return;
+    const editable = effectiveFields.filter((f) => !f.readonly).map((f) => ({ key: f.key, label: String(f.label ?? f.key) }));
+    const { patch, unmatched } = matchFormFields(said, editable);
+    if (Object.keys(patch).length) { setForm((p) => ({ ...p, ...patch })); setDirty(true); }
+    if (unmatched.length) notify.info(tr(`ผู้ช่วยเสียงเติมช่อง "${unmatched.join(", ")}" ไม่ได้ (ไม่เจอช่องชื่อนี้) — กรอกเองได้เลย`, `Voice assistant couldn't fill "${unmatched.join(", ")}" — please fill it in`));
+  });
   /** ⧉ ทำสำเนา — เปิดฟอร์ม "เพิ่มใหม่" พร้อมค่าจากรายการที่ดูอยู่ (รหัส/ช่องห้ามซ้ำ เว้นว่าง) · ยังไม่บันทึกจนกดเอง */
   const startDuplicate = () => {
     if (!canCreate) return;

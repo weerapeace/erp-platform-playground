@@ -1157,7 +1157,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "voice-assistant", label: "ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ)", code: "VoiceAssistant", category: "layout",
     source: { path: "components/voice-assistant" },
-    what: "กดค้างแล้วพูดคำสั่งภาษาไทย → เปิดหน้า · เพิ่ม SKU · ทำรายละเอียดสินค้า (เปิดตัวช่วยแทรกที่ขั้น AI ดูรูป) · ตอบกลับเป็นเสียง · ตัวฟังเสียงใช้ซ้ำได้ = useVoiceInput",
+    what: "กดค้างแล้วพูดคำสั่งภาษาไทย → คำสั่งพื้นฐานทุกหน้า (เปิดเอกสาร · ค้นในตาราง · สร้างใหม่พร้อมค่า) · คำสั่ง Platform (ลงทุกร้าน · ลงร้านไหนแล้ว · ลงร้านอื่น · ตรวจข้ามร้าน) · เพิ่ม SKU · ทำรายละเอียดสินค้า · ตอบเป็นเสียง · ตัวฟังเสียง = useVoiceInput · หน้าประกาศคำสั่ง = useVoiceHandler",
     when: "วางในเปลือกหน้ากลางแล้ว (PlaygroundShell / StandaloneShell) ขึ้นทุกหน้าเอง — คำสั่งใหม่ให้เพิ่มใน lib/voice-assistant (VOICE_ACTIONS + VOICE_COMMANDS/VOICE_COMMAND_INFO + normalizeVoiceReply) · ปุ่มกดค้างพูดในหน้าอื่น = useVoiceInput",
     notWhen: "อย่าเขียนตัวอัดเสียง/ตัวฟังเสียงเองในหน้าใด ๆ (ใช้ useVoiceInput) · อย่าให้ผู้ช่วยบันทึกโดยไม่มีคนกด — โหมด confirm ต้องโชว์สรุปให้กดยืนยันก่อน และบันทึกผ่าน API เดิม",
     doc: "voice-assistant.md",

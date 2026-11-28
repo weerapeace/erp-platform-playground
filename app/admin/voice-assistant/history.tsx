@@ -11,7 +11,7 @@ import { ErrorState, LoadingState, EmptyState } from "@/components/state-views";
 import { VOICE_COMMAND_INFO, type VoiceAction, type VoiceCommandKey } from "@/lib/voice-assistant";
 import { describeVoiceAction } from "./test-box";
 
-type LogRow = { id: string; created_at: string; metadata: { actor?: string | null; said?: string; action?: VoiceAction; page?: string | null; sku?: Record<string, unknown> | null; query?: string | null; reply?: string; dry?: boolean } | null };
+type LogRow = { id: string; created_at: string; metadata: { actor?: string | null; said?: string; action?: VoiceAction; page?: string | null; sku?: Record<string, unknown> | null; query?: string | null; values?: Record<string, string> | null; target?: string | null; reply?: string; dry?: boolean } | null };
 export type SettingsHistoryRow = { id: string; created_at: string; metadata: { actor?: string | null; changes?: { field: string; old: unknown; new: unknown }[] } | null };
 
 const when = (iso: string) => new Date(iso).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -51,7 +51,7 @@ export function VoiceCommandLog() {
                   <span className="block text-slate-800">“{m.said ?? ""}”</span>
                 </span>
                 <span className={`sm:w-64 text-[12px] ${m.action === "none" ? "text-slate-400" : "text-slate-700"}`}>
-                  {describeVoiceAction({ action: m.action ?? "none", page: m.page ?? undefined, sku: (m.sku ?? undefined) as never, query: m.query ?? undefined })}
+                  {describeVoiceAction({ action: m.action ?? "none", page: m.page ?? undefined, sku: (m.sku ?? undefined) as never, query: m.query ?? undefined, values: m.values ?? undefined, target: m.target ?? undefined })}
                 </span>
               </li>
             );

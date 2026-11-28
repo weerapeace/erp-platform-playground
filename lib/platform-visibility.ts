@@ -25,3 +25,35 @@ export function splitPlatformsByConnection<T>(
   }
   return { shown, hidden, brandHidden };
 }
+
+/* ─────────── สถานะ "สินค้านี้ลงร้านไหนแล้ว" (ใช้ร่วม: แท็บแพลตฟอร์มของ Parent SKU + ผู้ช่วยเสียง) ─────────── */
+
+type DraftLike = { status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null } | undefined;
+
+/** ลงขายบนร้านแล้ว = ร่างส่งขึ้นร้านสำเร็จ/มีรหัสบนร้าน หรือมีรายการบนร้านจับคู่อยู่ (นำเข้า/ดึงจากร้าน) */
+export const isListingOnSale = (d: DraftLike, matched: unknown): boolean =>
+  (!!d && (d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id)) || !!matched;
+
+export type ShopStatusInput = {
+  platforms: { id: string; code: string; name_th: string }[];
+  drafts: Record<string, DraftLike>;
+  accounts: Record<string, { is_active?: boolean } | undefined>;
+  matchedListings: Record<string, { id?: string | null } | undefined>;
+  hiddenPlatformCodes: string[];
+};
+export type ShopStatus = {
+  /** ร้านที่ลงแล้ว (ชื่อ) */
+  listed: { code: string; name: string; listingId: string | null }[];
+  /** ร้านที่เชื่อมแล้วแต่ยังไม่ลง (ชื่อ) */
+  notListed: { code: string; name: string }[];
+};
+
+/** สรุปจากคำตอบ GET /api/product-platforms?parent_sku_id= — กฎแบ่งแถวเดียวกับแท็บแพลตฟอร์ม (ร้านที่ไม่ได้เชื่อม/แบรนด์ซ่อน ไม่นับว่า "ยังไม่ลง") */
+export function shopStatusOf(ctx: ShopStatusInput): ShopStatus {
+  const onSale = (p: { id: string }) => isListingOnSale(ctx.drafts[p.id], ctx.matchedListings[p.id]);
+  const { shown } = splitPlatformsByConnection(ctx.platforms, (p) => !!ctx.accounts[p.id]?.is_active, onSale, (p) => ctx.hiddenPlatformCodes.includes(p.code));
+  return {
+    listed: shown.filter(onSale).map((p) => ({ code: p.code, name: p.name_th, listingId: ctx.matchedListings[p.id]?.id ?? null })),
+    notListed: shown.filter((p) => !onSale(p)).map((p) => ({ code: p.code, name: p.name_th })),
+  };
+}

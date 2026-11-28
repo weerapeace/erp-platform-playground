@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildVoiceSystemPrompt, cleanChoices, cleanHistory, matchChoiceLocally, normalizeVoiceReply, normalizeVoiceSettings, VOICE_COMMANDS, VOICE_EXAMPLE_LIMITS, VOICE_LIMITS } from "@/lib/voice-assistant";
+import { buildVoiceSystemPrompt, cleanChoices, cleanHistory, CROSS_CHECK_HREF, matchChoiceLocally, matchFormFields, normalizeVoiceReply, normalizeVoiceSettings, pageCommandsFor, VOICE_COMMANDS, VOICE_EXAMPLE_LIMITS, VOICE_LIMITS } from "@/lib/voice-assistant";
 import { isReasoningModel } from "@/lib/ai-caption-models";
 
 const pages = [
@@ -108,5 +108,44 @@ describe("ผู้ช่วยเสียง — ตั้งค่าคำ�
     expect(p).toContain("ขอดูหน้าสต็อก");
     expect(p).toContain("คำสั่งเพิ่ม SKU ถูกปิดอยู่");
     expect(p).toContain("product_detail");
+  });
+});
+
+describe("ผู้ช่วยเสียง รอบ 3 — คำสั่งพื้นฐาน + Platform", () => {
+  const base = { pages, choices: [], canAddSku: true };
+  it("เปิดเอกสาร / ค้นในหน้านี้ / สร้างใหม่", () => {
+    expect(normalizeVoiceReply({ action: "open_record", query: "PO-2026-0018" }, base)).toMatchObject({ action: "open_record", query: "PO-2026-0018" });
+    expect(normalizeVoiceReply({ action: "open_record" }, base).action).toBe("none");
+    // ค้นในหน้านี้ได้เฉพาะหน้าที่มีตารางลงชื่อไว้
+    expect(normalizeVoiceReply({ action: "search_here", query: "tote" }, base).action).toBe("none");
+    expect(normalizeVoiceReply({ action: "search_here", query: "tote" }, { ...base, pageCaps: ["search_here"] }).query).toBe("tote");
+    const c = normalizeVoiceReply({ action: "create_new", page_id: "p2", values: { ชื่อ: "ร้านเจริญผล", เบอร์: 812345678, "": "x", evil: { a: 1 } } }, base);
+    expect(c.page?.href).toBe("/master/skus");
+    expect(c.values).toEqual({ ชื่อ: "ร้านเจริญผล", เบอร์: "812345678" });
+    expect(normalizeVoiceReply({ action: "create_new", page_id: "nope" }, base).action).toBe("none");
+  });
+  it("คำสั่งร้าน: ต้องมีสินค้า · ไม่มีสิทธิ์ = ไม่ทำ · ตรวจข้ามร้าน = ลิงก์คงที่", () => {
+    expect(normalizeVoiceReply({ action: "copy_to_shop", query: "Ma tote", target: "Lazada" }, base)).toMatchObject({ action: "copy_to_shop", query: "Ma tote", target: "Lazada" });
+    expect(normalizeVoiceReply({ action: "shop_status", query: "x" }, { ...base, canPlatforms: false }).action).toBe("none");
+    expect(normalizeVoiceReply({ action: "list_all_shops" }, base).action).toBe("none");
+    expect(normalizeVoiceReply({ action: "cross_check" }, base).page?.href).toBe(CROSS_CHECK_HREF);
+  });
+  it("ปุ่มลัดคำสั่งของหน้านี้ — ตามหน้า + ตัวทำงาน + เปิดอยู่", () => {
+    const s = normalizeVoiceSettings(null);
+    expect(pageCommandsFor("/master/platform-listing", s)).toEqual(expect.arrayContaining(["list_all_shops", "shop_status", "copy_to_shop", "cross_check"]));
+    expect(pageCommandsFor("/purchase-orders", s)).toEqual([]);
+    expect(pageCommandsFor("/purchase-orders", s, ["search_here"])).toEqual(["search_here"]);
+    const off = normalizeVoiceSettings({ commands: { cross_check: { enabled: false } } });
+    expect(pageCommandsFor("/master/platform-catalog", off)).not.toContain("cross_check");
+    expect(pageCommandsFor("/master/parent-skus", s)).toContain("product_detail");
+  });
+  it("สร้างใหม่: จับชื่อช่องที่พูดกับช่องในฟอร์ม", () => {
+    const fields = [{ key: "name", label: "ชื่อ" }, { key: "phone", label: "เบอร์โทรศัพท์" }, { key: "tax_id", label: "เลขผู้เสียภาษี" }];
+    expect(matchFormFields({ ชื่อ: "ร้าน A", เบอร์โทร: "081", สีโปรด: "แดง" }, fields)).toEqual({ patch: { name: "ร้าน A", phone: "081" }, unmatched: ["สีโปรด"] });
+  });
+  it("คำสั่งระบบ: มีกติกาคำสั่งใหม่ + ไม่มีสิทธิ์ร้าน = บอกให้ขอสิทธิ์", () => {
+    const p = buildVoiceSystemPrompt(pages, { canAddSku: true, canPlatforms: false });
+    expect(p).toContain("open_record");
+    expect(p).toContain("ไม่มีสิทธิ์ดูการลงสินค้าบนแพลตฟอร์ม");
   });
 });

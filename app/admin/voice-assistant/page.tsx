@@ -19,7 +19,7 @@ import { ToggleSwitch } from "@/components/toggle-switch";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import {
-  normalizeVoiceSettings, VOICE_COMMAND_INFO, VOICE_COMMANDS, VOICE_EXAMPLE_LIMITS,
+  normalizeVoiceSettings, VOICE_COMMAND_INFO, VOICE_COMMANDS, VOICE_EXAMPLE_LIMITS, VOICE_GROUPS, type VoiceGroup,
   type VoiceCmdMode, type VoiceCommandKey, type VoiceSettings,
 } from "@/lib/voice-assistant";
 import { VoiceTestBox } from "./test-box";
@@ -110,8 +110,14 @@ function VoiceSettingsView() {
           </div>
 
           {tab === "cmds" ? (
-            <div className="space-y-2.5">
-              {VOICE_COMMANDS.map((k) => {
+            <div className="space-y-4">
+              {(Object.keys(VOICE_GROUPS) as VoiceGroup[]).map((g) => (
+              <section key={g} className="space-y-2.5">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <h2 className="text-[14px] font-semibold text-slate-800">{VOICE_GROUPS[g].label}</h2>
+                  <span className="text-[12px] text-slate-500">{VOICE_GROUPS[g].desc}</span>
+                </div>
+              {VOICE_COMMANDS.filter((k) => VOICE_COMMAND_INFO[k].group === g).map((k) => {
                 const info = VOICE_COMMAND_INFO[k];
                 const c = draft.commands[k];
                 const isOpen = openCmd === k;
@@ -130,6 +136,8 @@ function VoiceSettingsView() {
                     {isOpen && (
                       <div className="px-3 pb-3 sm:pl-[60px] space-y-3">
                         <p className="text-[12px] text-slate-500">{info.desc}</p>
+                        {info.pages && <p className="text-[11px] text-slate-400">ปุ่มลัดในหน้า: {info.pages.join(" · ")}</p>}
+                        {info.needsHandler && <p className="text-[11px] text-slate-400">ใช้ได้ในหน้าที่มีตารางกลาง (ตารางลงชื่อรับคำสั่งเอง)</p>}
                         {info.modes.length > 1 && (
                           <div>
                             <p className="text-[12px] text-slate-500 mb-1">ผู้ช่วยทำได้แค่ไหน</p>
@@ -152,8 +160,10 @@ function VoiceSettingsView() {
                   </div>
                 );
               })}
+              </section>
+              ))}
               <div className="rounded-xl border border-dashed border-slate-200 p-3 text-[12px] text-slate-500">
-                คำสั่งที่จะเพิ่มต่อ: เช็กสต็อก · เปิดใบขอซื้อ — บอกได้ว่าอยากได้คำสั่งไหนก่อน
+                หน้าอื่นเพิ่มคำสั่งของตัวเองได้ (ทะเบียน lib/voice-assistant + useVoiceHandler) — คำสั่งใหม่จะโผล่ที่นี่ให้เปิด/ปิดเอง · บอกได้ว่าอยากได้คำสั่งของหน้าไหนต่อ
               </div>
             </div>
           ) : (

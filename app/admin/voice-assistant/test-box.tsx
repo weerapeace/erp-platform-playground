@@ -11,7 +11,7 @@ import { useVoiceInput } from "@/components/voice-assistant/use-voice-input";
 import { VOICE_LIMITS, type VoiceReply } from "@/lib/voice-assistant";
 
 /** คำตอบของผู้ช่วย → ภาษาคน "ระบบจะ…" */
-export function describeVoiceAction(r: Pick<VoiceReply, "action" | "sku" | "query"> & { page?: { label?: string; href?: string } | string | null }): string {
+export function describeVoiceAction(r: Pick<VoiceReply, "action" | "sku" | "query" | "values" | "target"> & { page?: { label?: string; href?: string } | string | null }): string {
   const page = typeof r.page === "string" ? r.page : r.page?.label ?? r.page?.href;
   if (r.action === "open_page") return `เปิดหน้า ${page ?? ""}`.trim();
   if (r.action === "add_sku") {
@@ -20,6 +20,13 @@ export function describeVoiceAction(r: Pick<VoiceReply, "action" | "sku" | "quer
     return `เพิ่ม SKU${parts.length ? ` (${parts.join(" · ")})` : ""}`;
   }
   if (r.action === "product_detail") return `ทำรายละเอียดสินค้า · ค้นหา "${r.query ?? ""}"`;
+  if (r.action === "open_record") return `เปิดเอกสาร/รายการ · ค้นหา "${r.query ?? ""}"`;
+  if (r.action === "search_here") return `ค้นในตารางของหน้านี้ · "${r.query ?? ""}"`;
+  if (r.action === "create_new") { const v = Object.entries(r.values ?? {}).map(([k, x]) => `${k}: ${x}`).join(" · "); return `สร้างใหม่ที่หน้า ${page ?? ""}${v ? ` (${v})` : ""}`; }
+  if (r.action === "list_all_shops") return `ลงสินค้าทุกร้าน · สินค้า "${r.query ?? ""}" (เปิดตัวช่วย คนกดลงเอง)`;
+  if (r.action === "shop_status") return `บอกว่า "${r.query ?? ""}" ลงร้านไหนแล้ว`;
+  if (r.action === "copy_to_shop") return `ลงร้านอื่นจากรายการบนร้าน · สินค้า "${r.query ?? ""}"${r.target ? ` → ${r.target}` : ""}`;
+  if (r.action === "cross_check") return "เปิดหน้าตรวจข้ามร้าน";
   if (r.action === "choose") return "เลือกตัวเลือกที่ค้างอยู่";
   return "ไม่ทำอะไร (ตอบอย่างเดียว)";
 }

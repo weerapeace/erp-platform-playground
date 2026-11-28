@@ -10,6 +10,9 @@
  * - พูดตอบด้วยเสียงไทยของเบราว์เซอร์ (ฟรี) · ปิดเสียงได้ (จำในเครื่อง)
  * - ไม่บันทึกอะไรโดยไม่มีคนกด:
  *     เพิ่ม SKU  — form = เปิด SkuWizard ของเดิมพร้อมค่า · confirm = การ์ดสรุป (รหัสที่ระบบเสนอ) → "บันทึกเลย" (API เดียวกับ wizard) · ทั้งคู่มีปุ่ม "ย้อนกลับ" (ปิดใช้ SKU)
+ *     คำสั่งร้าน (ลงทุกร้าน/ลงร้านอื่น) — เปิด AddToPlatformWizard ของเดิมพร้อมติ๊กร้าน · ลงร้านไหนแล้ว = ตอบอย่างเดียว
+ *     ชั้น 1: เปิดเอกสาร (ค้นหารวม) · ค้นในหน้านี้ (ตารางกลางลงชื่อ useVoiceHandler) · สร้างใหม่พร้อมค่า (?new=1 + ฟอร์มกลางเติมค่า)
+ *     ปุ่มลัด "คำสั่งของหน้านี้" = pageCommandsFor (ทะเบียน lib/voice-assistant)
  *     รายละเอียดสินค้า — หาสินค้าแม่ → เปิดหน้า Parent SKU + ป๊อป "แทรก" ที่ขั้นจุดเด่น (AI ดูรูป) · confirm = AI ร่างให้เลย คนกด "แทรกและบันทึก"
  * PC = แผงลอยขวาล่าง · มือถือ = แผ่นเลื่อนขึ้นจากล่างเต็มกว้าง
  */
@@ -23,20 +26,28 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { announceParams } from "@/lib/open-param";
 import {
-  DEFAULT_VOICE_SETTINGS, matchChoiceLocally, VOICE_COMMAND_INFO, VOICE_COMMANDS, VOICE_LIMITS,
-  type VoiceChoice, type VoiceCommandSetting, type VoiceCommandKey, type VoiceReply, type VoiceSkuDraft, type VoiceTurn,
+  DEFAULT_VOICE_SETTINGS, matchChoiceLocally, pageCommandsFor, VOICE_COMMAND_INFO, VOICE_COMMANDS, VOICE_LIMITS,
+  type VoiceAction, type VoiceChoice, type VoiceCommandSetting, type VoiceCommandKey, type VoiceReply, type VoiceSkuDraft, type VoiceTurn,
 } from "@/lib/voice-assistant";
 import { useVoiceInput } from "./use-voice-input";
+import { runVoiceHandler, stashVoicePrefill, useVoiceHandlerKeys } from "./page-handlers";
+import { loadShopInfo, matchShop, type VoiceShopInfo } from "./platform-actions";
 import type { SkuWizardResult } from "@/app/master/skus/sku-wizard";
+import type { AddWizardParent, CopySourceRef } from "@/components/platform-listing/add-to-platform-wizard";
 
-// ตัวเพิ่ม SKU หนัก → โหลดเมื่อใช้จริงเท่านั้น (ไม่ถ่วงทุกหน้า)
+// ตัวเพิ่ม SKU / ตัวช่วยลงสินค้า หนัก → โหลดเมื่อใช้จริงเท่านั้น (ไม่ถ่วงทุกหน้า)
 const SkuWizard = dynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 
 type Commands = Record<VoiceCommandKey, VoiceCommandSetting>;
 type Status = { enabled: boolean; listen: boolean; commands: Commands; canManage: boolean };
 type Msg = { id: number; role: "user" | "assistant"; text: string };
-/** ตัวเลือกที่ค้าง: ประเภทสินค้า (เพิ่ม SKU) หรือสินค้าแม่ (ทำรายละเอียด) */
-type ChoiceKind = "tag" | "parent";
+/** ตัวเลือกที่ค้าง: ประเภทสินค้า (เพิ่ม SKU) · สินค้าแม่ (ทำรายละเอียด/คำสั่งร้าน) · เอกสาร (เปิดเอกสาร) */
+type ChoiceKind = "tag" | "parent" | "record";
+/** คำสั่งที่ทำต่อหลังเลือกสินค้าแม่ */
+type ParentAction = Extract<VoiceAction, "product_detail" | "list_all_shops" | "shop_status" | "copy_to_shop">;
+type PlatformWizardState = { parents: AddWizardParent[]; brandId: string | null; codes: string[]; sources?: Record<string, CopySourceRef> };
+const RECORD_SKIP = new Set(["page", "guide", "command"]);
 /** การ์ดยืนยันก่อนบันทึก SKU (โหมด confirm) */
 type SkuConfirm = { tagId: string; tagLabel: string; values: Record<string, string | number> };
 
@@ -77,7 +88,13 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
   const [confirm, setConfirm] = useState<SkuConfirm | null>(null);
   const [saving, setSaving] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [platformWizard, setPlatformWizard] = useState<PlatformWizardState | null>(null);
+  const [shopCard, setShopCard] = useState<VoiceShopInfo | null>(null);
   const pendingSku = useRef<VoiceSkuDraft>({});
+  const parentAction = useRef<{ action: ParentAction; target?: string }>({ action: "product_detail" });
+  const recordLinks = useRef<Record<string, string>>({});
+  const handlerKeys = useVoiceHandlerKeys();
+  const pageCmds = pageCommandsFor(pathname ?? "", { commands }, handlerKeys);
   const idRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -200,22 +217,96 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
     router.push(href);
     announceParams(href);
   };
-  const findParents = async (query: string) => {
+  /** หาสินค้าแม่ แล้วทำคำสั่งต่อ (ทำรายละเอียด / คำสั่งร้าน) · เจอหลายตัว = ให้เลือก */
+  const findParents = async (query: string, action: ParentAction, target?: string) => {
+    parentAction.current = { action, target };
     try {
       const qs = new URLSearchParams({ search: query, limit: "6" });
       const j = await apiFetch(`/api/master-v2/parent-skus?${qs}`).then((r) => r.json());
       const list = ((j.data ?? []) as { id: string; code?: string; name_th?: string; name_en?: string }[])
         .map((r) => ({ id: String(r.id), label: [r.code, r.name_th || r.name_en].filter(Boolean).join(" · ").slice(0, 80) }));
       if (!list.length) { say(`ไม่เจอสินค้า "${query}" ลองพูดรหัสหรือชื่อให้ชัดขึ้นครับ`); return; }
-      if (list.length === 1) { openDetail(list[0]); return; }
+      if (list.length === 1) { void onParent(list[0]); return; }
       say(`เจอ ${list.length} ตัว เลือกตัวที่ต้องการครับ`);
       offer(list, "parent");
     } catch { say("ค้นหาสินค้าไม่สำเร็จ ลองใหม่อีกครั้งครับ"); }
   };
 
+  // ── คำสั่งร้าน (ชั้น 3): สถานะร้าน → เปิดตัวช่วยลงสินค้าของเดิม (คนกดลงเอง) ──
+  const openPlatformWizard = (info: VoiceShopInfo, codes: string[], sources?: Record<string, CopySourceRef>) => {
+    setChoices([]); setShopCard(null);
+    setPlatformWizard({ parents: [{ id: info.parent.id, code: info.parent.code, name: info.parent.name }], brandId: info.parent.brandId, codes, sources });
+  };
+  const onParent = async (p: VoiceChoice) => {
+    const { action, target } = parentAction.current;
+    if (action === "product_detail") { openDetail(p); return; }
+    setChoices([]);
+    let info: VoiceShopInfo;
+    try {
+      const code = p.label.split(" · ")[0] ?? "";
+      info = await loadShopInfo(p.id, { code, name: p.label.split(" · ")[1] ?? null });
+    } catch (e) { say(e instanceof Error ? e.message : "โหลดสถานะร้านไม่สำเร็จ"); return; }
+    const names = (l: { name: string }[]) => l.map((x) => x.name).join(", ");
+    const who = info.parent.code || p.label;
+    if (action === "shop_status") {
+      say(info.listed.length
+        ? `${who} ลงแล้ว ${info.listed.length} ร้าน คือ ${names(info.listed)}${info.notListed.length ? ` ยังไม่ลง ${names(info.notListed)}` : " ครบทุกร้านที่เชื่อมแล้ว"} ครับ`
+        : `${who} ยังไม่ได้ลงร้านไหนเลยครับ${info.notListed.length ? ` ร้านที่เชื่อมไว้มี ${names(info.notListed)}` : ""}`);
+      setShopCard(info);
+      return;
+    }
+    if (action === "list_all_shops") {
+      if (!info.addable.length) { say(info.notListed.length ? `ร้านที่ยังไม่ลง (${names(info.notListed)}) ยังลงผ่านระบบไม่ได้ ต้องลงที่หลังร้านครับ` : `${who} ลงครบทุกร้านที่เชื่อมแล้วครับ`); return; }
+      say(`เปิดตัวช่วยลงสินค้า ${who} ติ๊ก ${names(info.addable)} ไว้ให้ ตรวจแล้วกดลงเองครับ`);
+      openPlatformWizard(info, info.addable.map((x) => x.code));
+      return;
+    }
+    // copy_to_shop: ต้นแบบ = ร้านแรกที่ลงแล้วและมีรายการบนร้าน
+    const src = info.listed.find((x) => x.listingId);
+    if (!src?.listingId) { say(`${who} ยังไม่มีร้านไหนที่ใช้เป็นต้นแบบได้ ลองสั่ง "ลงสินค้าทุกร้าน" แทนครับ`); return; }
+    const dest = target ? matchShop(target, info.addable) : null;
+    if (target && !dest) { say(`ร้าน "${target}" ยังไม่เชื่อม หรือ ${who} ลงไว้แล้ว / ระบบยังลงให้ไม่ได้ครับ`); return; }
+    const codes = dest ? [dest.code] : info.addable.map((x) => x.code);
+    if (!codes.length) { say(`${who} ลงครบทุกร้านที่ระบบลงให้ได้แล้วครับ`); return; }
+    say(`ใช้รายการบน ${src.name} เป็นต้นแบบ เปิดตัวช่วยลง ${dest ? dest.name : "ร้านที่ยังไม่ลง"} ให้แล้ว ตรวจแล้วกดลงเองครับ`);
+    openPlatformWizard(info, codes, { [info.parent.id]: { listing_id: src.listingId, platform_code: src.code, platform_name: src.name } });
+  };
+
+  // ── ชั้น 1: เปิดเอกสาร (ค้นหารวม · ของกลางเดียวกับช่องค้นหาบนสุด) ──
+  const goHref = (href: string) => { router.push(href); announceParams(href); };
+  const openRecord = async (query: string) => {
+    try {
+      const j = await apiFetch(`/api/global-search?q=${encodeURIComponent(query)}`).then((r) => r.json());
+      const hits = ((j.data ?? []) as { entity_type: string; id: string; label: string; sublabel: string | null; link_url: string }[])
+        .filter((h) => !RECORD_SKIP.has(h.entity_type) && h.link_url).slice(0, 6);
+      if (!hits.length) { say(`ไม่เจอ "${query}" ลองพูดเลขเอกสารหรือชื่อให้ชัดขึ้นครับ`); return; }
+      if (hits.length === 1) { say(`เปิด ${hits[0].label} ให้แล้วครับ`); goHref(hits[0].link_url); return; }
+      recordLinks.current = Object.fromEntries(hits.map((h) => [`${h.entity_type}:${h.id}`, h.link_url]));
+      say(`เจอ ${hits.length} รายการ เลือกตัวที่ต้องการครับ`);
+      offer(hits.map((h) => ({ id: `${h.entity_type}:${h.id}`, label: [h.label, h.sublabel].filter(Boolean).join(" · ").slice(0, 80) })), "record");
+    } catch { say("ค้นหาไม่สำเร็จ ลองใหม่อีกครั้งครับ"); }
+  };
+  /** ชั้น 1: สร้างใหม่พร้อมค่า — ฝากค่าที่พูดไว้ แล้วเปิด ?new=1 ของหน้านั้น (ฟอร์มกลางหยิบไปเติมเอง) */
+  const createNew = (href: string, values: Record<string, string>) => {
+    const path = href.split("?")[0];
+    if (Object.keys(values).length) stashVoicePrefill(path, values);
+    goHref(`${href}${href.includes("?") ? "&" : "?"}new=1`);
+  };
+
   const pick = (c: VoiceChoice | null) => {
-    if (choiceKind === "parent") { if (c) openDetail(c); else { setChoices([]); say("ยกเลิกแล้วครับ"); } return; }
+    if (choiceKind === "parent") { if (c) void onParent(c); else { setChoices([]); say("ยกเลิกแล้วครับ"); } return; }
+    if (choiceKind === "record") {
+      setChoices([]);
+      if (c && recordLinks.current[c.id]) { say(`เปิด ${c.label} ให้แล้วครับ`); goHref(recordLinks.current[c.id]); } else say("ยกเลิกแล้วครับ");
+      return;
+    }
     void afterTag(c);
+  };
+  /** ปุ่มลัด "คำสั่งของหน้านี้" — คำสั่งที่ไม่ต้องพูดค่าอะไร = ทำเลย · ที่เหลือใส่ตัวอย่างให้แก้แล้วส่ง */
+  const onChip = (k: VoiceCommandKey) => {
+    if (k === "cross_check") { void send(commands.cross_check.examples[0] || "เปิดหน้าตรวจข้ามร้าน"); return; }
+    setDraft(commands[k].examples[0] ?? VOICE_COMMAND_INFO[k].label);
+    setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   // ── ส่งคำสั่ง ──
@@ -235,14 +326,18 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
       const history: VoiceTurn[] = msgs.slice(-VOICE_LIMITS.historyTurns).map((m) => ({ role: m.role, text: m.text }));
       const res = await apiFetch("/api/voice-assistant/command", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, history, choices, path: pathname }),
+        body: JSON.stringify({ text, history, choices, path: pathname, page_caps: handlerKeys }),
       });
       const j = (await res.json().catch(() => ({}))) as VoiceReply & { error?: string };
       if (!res.ok) { push("assistant", j.error || "ผู้ช่วยตอบไม่ได้ตอนนี้ ลองใหม่อีกครั้ง"); return; }
       say(j.say);
-      if (j.action === "open_page" && j.page) { setChoices([]); router.push(j.page.href); }
+      setShopCard(null);
+      if ((j.action === "open_page" || j.action === "cross_check") && j.page) { setChoices([]); router.push(j.page.href); }
       else if (j.action === "add_sku") await offerCategories(j.sku ?? {});
-      else if (j.action === "product_detail" && j.query) await findParents(j.query);
+      else if ((j.action === "product_detail" || j.action === "list_all_shops" || j.action === "shop_status" || j.action === "copy_to_shop") && j.query) await findParents(j.query, j.action, j.target);
+      else if (j.action === "open_record" && j.query) await openRecord(j.query);
+      else if (j.action === "search_here" && j.query) { if (!runVoiceHandler("search_here", j.query)) push("assistant", "หน้านี้ไม่มีตารางให้ค้นแล้ว ลองเปิดหน้ารายการก่อนครับ"); }
+      else if (j.action === "create_new" && j.page) createNew(j.page.href, j.values ?? {});
       else if (j.action === "choose" && j.choiceId) { const c = choices.find((x) => x.id === j.choiceId); if (c) pick(c); }
     } catch {
       push("assistant", "เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง");
@@ -259,14 +354,14 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
 
   return (
     <>
-      {!open && !wizard && (
+      {!open && !wizard && !platformWizard && (
         <button type="button" onClick={() => setOpen(true)} title="ผู้ช่วยเสียง" aria-label="เปิดผู้ช่วยเสียง"
           className="fixed bottom-4 right-4 z-[55] h-12 w-12 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 flex items-center justify-center print:hidden">
           <Icon name="microphone" size={22} />
         </button>
       )}
 
-      {open && !wizard && (
+      {open && !wizard && !platformWizard && (
         <div role="dialog" aria-label="ผู้ช่วยเสียง"
           className="fixed z-[56] inset-x-0 bottom-0 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-[360px] max-h-[75vh] sm:max-h-[70vh] flex flex-col bg-white border border-slate-200 shadow-2xl rounded-t-2xl sm:rounded-2xl print:hidden">
           <div className="sm:hidden mx-auto mt-2 h-1 w-10 rounded-full bg-slate-300" />
@@ -287,6 +382,17 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
           </div>
 
           <div ref={listRef} className="flex-1 min-h-[140px] overflow-y-auto px-3 py-3 flex flex-col gap-2">
+            {pageCmds.length > 0 && (
+              <div>
+                <p className="text-[11px] text-slate-400 mb-1">คำสั่งของหน้านี้</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {pageCmds.map((k) => (
+                    <button key={k} type="button" onClick={() => onChip(k)} title={VOICE_COMMAND_INFO[k].desc}
+                      className="text-xs px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100">{VOICE_COMMAND_INFO[k].label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             {msgs.length === 0 && (
               <div className="text-[13px] text-slate-500 leading-relaxed">
                 {enabledCmds.length
@@ -309,8 +415,22 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
                   <button key={c.id} type="button" onClick={() => { push("user", c.label); pick(c); }}
                     className="text-xs px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 text-left">{c.label}</button>
                 ))}
-                <button type="button" onClick={() => { push("user", choiceKind === "parent" ? "ยกเลิก" : "เลือกเองในฟอร์ม"); pick(null); }}
-                  className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">{choiceKind === "parent" ? "ยกเลิก" : "เลือกเองในฟอร์ม"}</button>
+                <button type="button" onClick={() => { push("user", choiceKind === "tag" ? "เลือกเองในฟอร์ม" : "ยกเลิก"); pick(null); }}
+                  className="text-xs px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50">{choiceKind === "tag" ? "เลือกเองในฟอร์ม" : "ยกเลิก"}</button>
+              </div>
+            )}
+            {shopCard && (
+              <div className="self-stretch rounded-xl border border-slate-200 bg-white p-3 text-[13px]">
+                <p className="font-medium text-slate-800 mb-1.5">{shopCard.parent.code} · สถานะร้าน</p>
+                <div className="flex flex-wrap gap-1">
+                  {shopCard.listed.map((x) => <span key={x.code} className="rounded-full bg-emerald-50 text-emerald-700 px-2 py-0.5 text-[11px]">{x.name} ลงแล้ว</span>)}
+                  {shopCard.notListed.map((x) => <span key={x.code} className="rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 text-[11px]">{x.name} ยังไม่ลง</span>)}
+                  {!shopCard.listed.length && !shopCard.notListed.length && <span className="text-[12px] text-slate-400">แบรนด์นี้ยังไม่ได้เชื่อมร้าน</span>}
+                </div>
+                {shopCard.addable.length > 0 && (
+                  <button type="button" onClick={() => openPlatformWizard(shopCard, shopCard.addable.map((x) => x.code))}
+                    className="mt-2.5 h-8 px-3 rounded-lg bg-blue-600 text-white text-[13px] hover:bg-blue-700">ลงร้านที่เหลือ ({shopCard.addable.length})</button>
+                )}
               </div>
             )}
             {confirm && (
@@ -353,6 +473,12 @@ function VoiceAssistantPanel({ listenAvailable, commands, canManage }: { listenA
       {wizard && (
         <SkuWizard open onClose={() => { setWizard(null); setOpen(true); }} onCreated={(r) => { onCreated(r); setOpen(true); }}
           prefill={wizard.prefill} initialTagId={wizard.tagId} />
+      )}
+      {platformWizard && (
+        <AddToPlatformWizard open parents={platformWizard.parents} brandId={platformWizard.brandId}
+          initialPlatformCodes={platformWizard.codes} sources={platformWizard.sources}
+          onClose={() => { setPlatformWizard(null); setOpen(true); }}
+          onDone={() => say("ตัวช่วยลงสินค้าทำงานเสร็จแล้วครับ ดูผลในตัวช่วยได้เลย")} />
       )}
     </>
   );

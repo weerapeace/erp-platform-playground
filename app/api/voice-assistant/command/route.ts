@@ -3,7 +3,8 @@
  *
  * GET  → { enabled, listen, commands, can_manage } — ปุ่มไมค์โชว์ไหม (enabled = ฟีเจอร์เปิด + คนนี้ได้รับสิทธิ์ + ไม่เกินงบ) · listen = ใช้ตัวฟังของ OpenAI ได้ไหม
  *        commands = ค่าตั้งรายคำสั่ง (เปิด/โหมด/ตัวอย่าง จากหน้า /admin/voice-assistant) · can_manage = โชว์ปุ่มไปหน้าตั้งค่า
- * POST { text, history?, choices?, path?, dry? } → VoiceReply { say, action, page?, sku?, query?, choiceId? }
+ * POST { text, history?, choices?, path?, page_caps?, dry? } → VoiceReply { say, action, page?, sku?, query?, values?, target?, choiceId? }
+ *        page_caps = ตัวทำงานที่หน้าปัจจุบันมี (เช่น search_here จากตารางกลาง) — ชั้น 2 · components/voice-assistant/page-handlers
  *        dry = ลองพูดทดสอบจากหน้าตั้งค่า (หน้าจอไม่ทำตาม · ประวัติติดป้าย dry)
  *
  * - ผ่านด่านกลาง paid-services key "ai.voice_assistant" (ค่าเริ่ม gpt-6-luna · คิดน้อยเพื่อให้ตอบไว · แอดมินเปลี่ยนรุ่นได้)
@@ -20,7 +21,7 @@ import { apiCan } from "@/lib/api-auth";
 import { listVisiblePages, loadMyAccess } from "@/lib/menu-pages-server";
 import { writeAudit } from "@/lib/audit";
 import { loadVoiceSettings, voiceAllowed } from "@/lib/voice-assistant-server";
-import { buildVoiceSystemPrompt, buildVoiceUserPayload, cleanChoices, cleanHistory, normalizeVoiceReply, VOICE_LIMITS } from "@/lib/voice-assistant";
+import { buildVoiceSystemPrompt, buildVoiceUserPayload, cleanChoices, cleanHistory, cleanPageCaps, normalizeVoiceReply, VOICE_LIMITS } from "@/lib/voice-assistant";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -59,17 +60,20 @@ export async function POST(request: NextRequest) {
   const choices = cleanChoices(body.choices);
   const path = typeof body.path === "string" ? body.path.slice(0, 200) : "";
   const dry = body.dry === true;
+  const pageCaps = cleanPageCaps(body.page_caps);
 
   try {
-    const [access, canAddSku, canEditProducts, settings] = await Promise.all([
+    const [access, canAddSku, canEditProducts, canPlatforms, settings] = await Promise.all([
       loadMyAccess(sb, user.id).catch(() => ({ can: (k: string | null | undefined) => !k })),
       apiCan(request, "products.create"),
       apiCan(request, "products.edit"),
+      apiCan(request, "products.platforms.view"),
       loadVoiceSettings(),
     ]);
     const pages = await listVisiblePages(access.can);
-    const system = buildVoiceSystemPrompt(pages, canAddSku, settings, canEditProducts);
-    const content = [{ type: "text", text: buildVoiceUserPayload({ text, history, choices, path }) }];
+    const perms = { canAddSku, canEditProducts, canPlatforms };
+    const system = buildVoiceSystemPrompt(pages, perms, settings);
+    const content = [{ type: "text", text: buildVoiceUserPayload({ text, history, choices, path, pageCaps }) }];
     const ctx = { request, userId: user.id, effort: "low" as const };
     let raw: Record<string, unknown>;
     try {
@@ -80,11 +84,11 @@ export async function POST(request: NextRequest) {
       console.error("[voice-assistant] รุ่นหลักตอบไม่ได้ ลองรุ่นสำรอง:", e instanceof Error ? e.message : e);
       raw = await aiChat("ai.voice_assistant", system, content, 400, FALLBACK_MODEL, ctx);
     }
-    const reply = normalizeVoiceReply(raw, { pages, choices, canAddSku, canEditProducts, settings });
+    const reply = normalizeVoiceReply(raw, { pages, choices, ...perms, settings, pageCaps });
 
     await writeAudit(supabaseAdmin(), {
       action: "voice_command", entityType: "voice_assistant", actorId: user.id, actorName: user.email ?? null,
-      metadata: { said: text, path, action: reply.action, page: reply.page?.href ?? null, sku: reply.sku ?? null, query: reply.query ?? null, choice: reply.choiceId ?? null, reply: reply.say, ...(dry ? { dry: true } : {}) },
+      metadata: { said: text, path, action: reply.action, page: reply.page?.href ?? null, sku: reply.sku ?? null, query: reply.query ?? null, values: reply.values ?? null, target: reply.target ?? null, choice: reply.choiceId ?? null, reply: reply.say, ...(dry ? { dry: true } : {}) },
     });
     return NextResponse.json(reply, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
