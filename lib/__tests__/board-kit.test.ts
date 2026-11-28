@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import { clampToolboxPos, hotkeyCode, isTypingTarget, parseToolboxPos, wheelAction } from "@/lib/board-kit";
 
 describe("wheelAction", () => {
-  it("ล็อกอยู่ หมุนเฉย ๆ = ปล่อยให้หน้าเว็บเลื่อน", () => expect(wheelAction(true, false)).toBe("pass"));
-  it("ล็อกอยู่ + Ctrl = ซูม", () => expect(wheelAction(true, true)).toBe("zoom"));
-  it("ปลดล็อก = ซูม", () => expect(wheelAction(false, false)).toBe("zoom"));
-  it("ปลดล็อก กระดานแบบหมุน = เลื่อนภาพ", () => expect(wheelAction(false, false, false)).toBe("pan"));
+  it("หมุนเฉย ๆ = ปล่อยให้เลื่อนตามปกติ", () => expect(wheelAction(false)).toBe("pass"));
+  it("Ctrl = ซูม", () => expect(wheelAction(true)).toBe("zoom"));
 });
 
 describe("toolbox pos", () => {

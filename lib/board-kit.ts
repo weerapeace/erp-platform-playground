@@ -1,20 +1,18 @@
 /**
- * 🔒 ชุดกระดานแก้งาน (ส่วนคำนวณล้วน · ใช้กับ components/board-kit) — เจ้าของขอ 2026-11-26 เลือกแบบ A + ข้อ 1-4
- *   wheelAction = ล้อเมาส์บนกระดานควรทำอะไร (ล็อก = ปล่อยให้หน้าเว็บเลื่อน เว้นแต่กด Ctrl/⌘)
+ * 🧰 ชุดกระดานแก้งาน (ส่วนคำนวณล้วน · ใช้กับ components/board-kit) — เจ้าของขอ 2026-11-26 เลือกแบบ A + ข้อ 1-4
+ *   wheelAction = ล้อเมาส์บนกระดานควรทำอะไร (ไม่มีระบบล็อกแล้ว 2026-11-28: Ctrl/⌘ = ซูม · เฉย ๆ = ปล่อยให้เลื่อนตามปกติ)
  *   clampToolboxPos = กันกล่องเครื่องมือหลุดออกนอกกระดาน (ย่อจอ/ออกเต็มจอแล้วยังเห็น)
  *   hotkeyLetter = ปุ่มลัดตัวอักษร ใช้ตำแหน่งปุ่ม (KeyV) → แป้นไทยก็กดได้
  */
 
-export type WheelAction = "zoom" | "pan" | "pass";
+export type WheelAction = "zoom" | "pass";
 
 /**
- * locked = กระดานล็อกอยู่ · wheelZooms = ตอนปลดล็อก หมุนลูกกลิ้งเฉย ๆ แล้วซูม (false = เลื่อนภาพ แบบหน้าต่างวาดชิ้น)
- * คืน "pass" = ไม่ต้องทำอะไร ปล่อยให้หน้าเว็บเลื่อนตามปกติ (ห้าม preventDefault)
+ * ลูกกลิ้งบนกระดาน: Ctrl/⌘ = ซูม · หมุนเฉย ๆ = "pass" ไม่ต้องทำอะไร (ห้าม preventDefault)
+ *   → เบราว์เซอร์เลื่อนเอง: กรอบที่ซูมจนล้น = เลื่อนภาพในกรอบ · ไม่ล้น = เลื่อนหน้าเว็บ
  */
-export function wheelAction(locked: boolean, ctrl: boolean, wheelZooms = true): WheelAction {
-  if (ctrl) return "zoom";
-  if (locked) return "pass";
-  return wheelZooms ? "zoom" : "pan";
+export function wheelAction(ctrl: boolean): WheelAction {
+  return ctrl ? "zoom" : "pass";
 }
 
 export type ToolboxPos = { x: number; y: number; fold: boolean };

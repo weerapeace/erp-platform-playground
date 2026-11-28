@@ -25,7 +25,7 @@ import {
 import { textToOps, uploadFont, uploadedFontNames } from "@/lib/block-print-text";
 import { PieceThumb } from "./piece-thumb";
 import { useCanvasZoom, zoomLabel } from "./use-zoom";
-import { BoardFullscreenButton, BoardLockButton, BoardLockHint, BoardToolbox, useBoardLock, type BoardToolGroup } from "@/components/board-kit";
+import { BoardFullscreenButton, BoardToolbox, type BoardToolGroup } from "@/components/board-kit";
 import { FullscreenStage, useFullscreenStage } from "@/components/fullscreen-stage";
 import { SymbolPickerModal } from "./symbols-ui";
 import type { BlockSymbol } from "@/lib/block-print-symbols";
@@ -59,11 +59,9 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   const [pickPiece, setPickPiece] = useState(false);
   const [pickLib, setPickLib] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
-  const boardLock = useBoardLock("block_print_board_lock");
   const fsStage = useFullscreenStage("block_print_board_fullscreen", { phoneAlways: false });
-  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, !!layout, { locked: boardLock.locked, onLockedWheel: boardLock.nudge });
-  /** ล็อกเข้ม: กดชิ้นแล้วลาก = ไม่ย้าย แต่เตือนให้ปลดล็อก */
-  const blockedDrag = useRef<{ x: number; y: number } | null>(null);
+  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, !!layout);
+  /** ล็อกสัดส่วน ตอนพิมพ์กว้าง/สูงของชิ้น */
   const [lock, setLock] = useState(true);
   const [exporting, setExporting] = useState(false);
   const pieceById = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
@@ -197,11 +195,9 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   };
 
   // ───── คีย์ลัด (Delete · ลูกศร · Esc) ─────
-  const keyRef = useRef({ removeSel, nudge: (_dx: number, _dy: number) => {}, clear: () => {}, locked: true, warn: () => {} });
+  const keyRef = useRef({ removeSel, nudge: (_dx: number, _dy: number) => {}, clear: () => {} });
   keyRef.current = {
     removeSel,
-    locked: boardLock.locked,
-    warn: () => boardLock.nudge("edit"),
     nudge: (dx, dy) => sel.length && setItems((items) => items.map((i) => (sel.includes(i.id) ? { ...i, x: r3(i.x + dx), y: r3(i.y + dy) } : i))),
     clear: () => setSel([]),
   };
@@ -215,7 +211,6 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
       const step = e.shiftKey ? 1 : 0.1;
       const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
       const del = e.key === "Delete" || e.key === "Backspace";
-      if ((del || d) && keyRef.current.locked) { e.preventDefault(); keyRef.current.warn(); return; }
       if (del) { e.preventDefault(); keyRef.current.removeSel(); return; }
       if (d) { e.preventDefault(); keyRef.current.nudge(d[0], d[1]); }
     };
@@ -243,7 +238,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
     if (!layout) return;
     const p = toSvg(e);
     const hd = (e.target as Element).closest("[data-handle]");
-    if (hd && canEdit && one && !boardLock.locked) {
+    if (hd && canEdit && one) {
       drag.current = { kind: "resize", sx: p.x, sy: p.y, h: Number(hd.getAttribute("data-handle")), id: one.id, o: { x: one.x, y: one.y, w: one.w, h: one.h }, moved: false };
       e.currentTarget.setPointerCapture(e.pointerId);
       return;
@@ -256,7 +251,6 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
       else if (!sel.includes(id)) next = [id];
       setSel(next); setMsg("");
       if (!canEdit || e.shiftKey) return;
-      if (boardLock.locked) { blockedDrag.current = p; return; }
       const start = new Map(layout.items.filter((i) => next.includes(i.id)).map((i) => [i.id, { x: i.x, y: i.y }]));
       drag.current = { kind: "move", sx: p.x, sy: p.y, start, moved: false };
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -267,8 +261,6 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = (e: RPointerEvent) => {
-    const b = blockedDrag.current;
-    if (b) { const q = toSvg(e); if (Math.hypot(q.x - b.x, q.y - b.y) > 0.5) { blockedDrag.current = null; boardLock.nudge("edit"); } return; }
     const d = drag.current; if (!d || !layout) return;
     const p = toSvg(e);
     if (d.kind === "box") { setMq({ x: Math.min(d.sx, p.x), y: Math.min(d.sy, p.y), w: Math.abs(p.x - d.sx), h: Math.abs(p.y - d.sy) }); return; }
@@ -298,7 +290,6 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
     setLive(new Map([...d.start.entries()].map(([id, s]) => [id, { x: r3(s.x + dx), y: r3(s.y + dy) }])));
   };
   const onUp = () => {
-    blockedDrag.current = null;
     const d = drag.current; drag.current = null;
     if (!d || !layout) return;
     if (d.kind === "move" || d.kind === "resize") {
@@ -357,16 +348,16 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
   const sw = mmPerPx;   // ความหนาเส้นบนจอ = 1 จุดบนจอ
   const big = Math.max(1, zoom);   // ซูมเข้า → ตัวเลข/เส้นบอกระยะไม่ใหญ่ตาม
   const liveOne = one ? shown?.items.find((i) => i.id === one.id) ?? one : null;
-  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) — editing = ต้องปลดล็อกก่อน · ชิ้นจากคลัง/ไฟล์ อยู่แถบบน (เปิดตัวเลือก) */
+  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) · ชิ้นจากคลัง/ไฟล์ อยู่แถบบน (เปิดตัวเลือก) */
   const toolGroups: BoardToolGroup[] = [
     { key: "add", label: "วางชิ้น", tools: [
-      { key: "text", icon: "i:typography", label: "ข้อความ", hotkey: "T", editing: true, onClick: () => void addText() },
-      { key: "rect", icon: "i:square", label: "สี่เหลี่ยม", hotkey: "R", editing: true, onClick: () => addShape("rect") },
-      { key: "ellipse", icon: "i:circle", label: "วงกลม", hotkey: "E", editing: true, onClick: () => addShape("ellipse") },
-      { key: "line", icon: "i:line", label: "เส้นตรง", hotkey: "I", editing: true, onClick: () => addShape("line") },
+      { key: "text", icon: "i:typography", label: "ข้อความ", hotkey: "T", onClick: () => void addText() },
+      { key: "rect", icon: "i:square", label: "สี่เหลี่ยม", hotkey: "R", onClick: () => addShape("rect") },
+      { key: "ellipse", icon: "i:circle", label: "วงกลม", hotkey: "E", onClick: () => addShape("ellipse") },
+      { key: "line", icon: "i:line", label: "เส้นตรง", hotkey: "I", onClick: () => addShape("line") },
     ] },
     { key: "edit", label: "ชิ้นที่เลือก", tools: [
-      { key: "del", icon: "i:trash", label: sel.length > 1 ? `ลบ ${sel.length} ชิ้น` : "ลบชิ้นที่เลือก", hint: "Delete", editing: true, disabled: !sel.length, onClick: removeSel },
+      { key: "del", icon: "i:trash", label: sel.length > 1 ? `ลบ ${sel.length} ชิ้น` : "ลบชิ้นที่เลือก", hint: "Delete", disabled: !sel.length, onClick: removeSel },
     ] },
     { key: "hist", label: "ประวัติ", tools: [
       { key: "undo", icon: "i:arrow-back-up", label: "ย้อนกลับ", hint: "Ctrl+Z", onClick: undo },
@@ -428,7 +419,6 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
           <span className="w-10 text-center tabular-nums">{zoomLabel(zoom)}</span>
           <button type="button" aria-label="ซูมเข้า" onClick={() => zoomStep(1)} className="h-7 w-7 rounded-md border border-slate-200 bg-white">+</button>
           <button type="button" onClick={() => zoomTo(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2">พอดีจอ</button>
-          <BoardLockButton lock={boardLock} />
           <BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} />
         </span>
       </div>
@@ -443,7 +433,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
       <FullscreenStage fs={fsStage} className="">
       <div className={`grid gap-3 lg:grid-cols-[minmax(0,1fr)_290px] ${fsStage.on ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
         <section className="min-w-0 space-y-1.5">
-          {fsStage.on && <div className="flex justify-end gap-1"><BoardLockButton lock={boardLock} /><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></div>}
+          {fsStage.on && <div className="flex justify-end gap-1"><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></div>}
           <div className="relative">
           <div ref={boxRef} className={`${fsStage.on ? "max-h-[calc(100dvh-6rem)]" : "max-h-[70vh]"} overflow-auto rounded-xl bg-slate-100 p-2 md:p-3`}>
             {frame && shown && (
@@ -452,7 +442,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
                 role="img" aria-label={`บล็อก ${layout.name}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => { drag.current = null; setLive(null); setMq(null); }}>
                 <rect x={0} y={0} width={layout.w} height={layout.h} fill="#f8fafc" />
                 {shown.items.map((it) => <ItemView key={it.id} it={it} pieceById={pieceById} sw={sw} selected={sel.includes(it.id)} />)}
-                {canEdit && !boardLock.locked && liveOne && <ResizeHandles it={liveOne} mmPerPx={mmPerPx} unit={unit} showSize={!!live} />}
+                {canEdit && liveOne && <ResizeHandles it={liveOne} mmPerPx={mmPerPx} unit={unit} showSize={!!live} />}
                 {showDims && dims && <>
                   {dims.lines.map((l, i) => (
                     <line key={i} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} pointerEvents="none"
@@ -469,8 +459,7 @@ export function BlockLayoutEditor({ code, layouts, pieces, unit, paper, canEdit,
               </svg>
             )}
           </div>
-          {canEdit && <BoardToolbox prefKey="block_print_layout_toolbox" lock={boardLock} groups={toolGroups} />}
-          <BoardLockHint lock={boardLock} />
+          {canEdit && <BoardToolbox prefKey="block_print_layout_toolbox" groups={toolGroups} />}
           </div>
           <p className="text-xs text-slate-500">
             <span className="hidden lg:inline">ลากชิ้นเพื่อย้าย (ดูดขอบ/กึ่งกลางบล็อก) · ลากจุดมุม = ปรับขนาด (Shift = ยืดอิสระ) · Ctrl+ล้อเมาส์ = ซูม · Shift+คลิก หรือลากกรอบที่ว่าง = เลือกหลายชิ้น · ลูกศร = เลื่อน 0.1 มม. (Shift 1 มม.) · Delete = ลบ · Ctrl+Z = ย้อนกลับ</span>

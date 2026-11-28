@@ -14,7 +14,7 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { ErrorState, LoadingState } from "@/components/state-views";
-import { BoardFullscreenButton, BoardLockButton, BoardLockHint, BoardToolbox, useBoardLock, type BoardToolGroup } from "@/components/board-kit";
+import { BoardFullscreenButton, BoardToolbox, type BoardToolGroup } from "@/components/board-kit";
 import { FullscreenStage, useFullscreenStage } from "@/components/fullscreen-stage";
 import { useCanvasZoom, zoomLabel } from "@/components/block-print/use-zoom";
 import {
@@ -186,9 +186,8 @@ export function PlanEditor({ id }: { id: string }) {
   // ── ลากบนกระดาน ──
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const boardLock = useBoardLock("fabric_lay_board_lock");
   const fsStage = useFullscreenStage("fabric_lay_board_fullscreen", { phoneAlways: false });
-  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, !!doc, { locked: boardLock.locked, onLockedWheel: () => boardLock.nudge("wheel") });
+  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, !!doc);
   const drag = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null);
   const toCm = (e: React.PointerEvent): Pt | null => {
     const svg = svgRef.current; const m = svg?.getScreenCTM(); if (!svg || !m) return null;
@@ -199,7 +198,6 @@ export function PlanEditor({ id }: { id: string }) {
     e.stopPropagation();
     setSel(iid);
     if (!editable) return;
-    if (boardLock.locked) { boardLock.nudge("edit"); return; }
     const it = doc?.items.find((i) => i.id === iid); const p = toCm(e); if (!it || !p) return;
     drag.current = { id: iid, dx: p[0] - it.x, dy: p[1] - it.y, moved: false };
     try { (e.currentTarget as Element).setPointerCapture(e.pointerId); } catch { /* ไม่รองรับ */ }
@@ -238,7 +236,7 @@ export function PlanEditor({ id }: { id: string }) {
       else if (c === "ArrowRight") { e.preventDefault(); k.nudge(st, 0); }
       else if (c === "ArrowUp") { e.preventDefault(); k.nudge(0, -st); }
       else if (c === "ArrowDown") { e.preventDefault(); k.nudge(0, st); }
-      // R = หมุน · F = พลิก → กล่องเครื่องมือกลาง (BoardToolbox hotkey) ผูกให้แล้ว ห้ามผูกซ้ำ
+      // R = หมุน · M = พลิก → กล่องเครื่องมือกลาง (BoardToolbox hotkey) ผูกให้แล้ว ห้ามผูกซ้ำ
       else if (c === "Delete" || c === "Backspace") { e.preventDefault(); k.removeItem(k.sel); }
       else if (c === "Escape") setSel(null);
     };
@@ -253,9 +251,9 @@ export function PlanEditor({ id }: { id: string }) {
   const sw = Math.max(W, H) / 700 / Math.max(1, zoom);
   const toolGroups: BoardToolGroup[] = [
     { key: "piece", label: "ชิ้นที่เลือก", tools: [
-      { key: "rot", icon: "i:refresh", label: "หมุน 90°", hotkey: "R", editing: true, disabled: !selPlaced, onClick: () => rotate(90) },
-      { key: "flip", icon: "i:arrows-exchange", label: "พลิก", hotkey: "F", editing: true, disabled: !selPlaced, onClick: flip },
-      { key: "del", icon: "i:trash", label: "เอาออก", hint: "Delete", editing: true, disabled: !selPlaced, onClick: () => selPlaced && removeItem(selPlaced.item.id) },
+      { key: "rot", icon: "i:refresh", label: "หมุน 90°", hotkey: "R", disabled: !selPlaced, onClick: () => rotate(90) },
+      { key: "flip", icon: "i:arrows-exchange", label: "พลิก", hotkey: "M", disabled: !selPlaced, onClick: flip },
+      { key: "del", icon: "i:trash", label: "เอาออก", hint: "Delete", disabled: !selPlaced, onClick: () => selPlaced && removeItem(selPlaced.item.id) },
     ] },
     { key: "hist", label: "ประวัติ", tools: [
       { key: "undo", icon: "i:arrow-back-up", label: "ย้อนกลับ", hint: "Ctrl+Z", disabled: !past.current.length, onClick: undo },
@@ -342,7 +340,6 @@ export function PlanEditor({ id }: { id: string }) {
               <span className="w-10 text-center tabular-nums">{zoomLabel(zoom)}</span>
               <button type="button" aria-label="ซูมเข้า" onClick={() => zoomStep(1)} className="h-7 w-7 rounded-md border border-slate-200 bg-white">+</button>
               <button type="button" onClick={() => zoomTo(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2">พอดีจอ</button>
-              <BoardLockButton lock={boardLock} />
               <BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} />
             </span>
           </div>
@@ -354,10 +351,10 @@ export function PlanEditor({ id }: { id: string }) {
             </div>
           )}
           <FullscreenStage fs={fsStage} className="">
-            {fsStage.on && <div className="flex justify-end gap-1 pb-1"><BoardLockButton lock={boardLock} /><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></div>}
+            {fsStage.on && <div className="flex justify-end gap-1 pb-1"><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></div>}
             <div className="relative">
               <div ref={boxRef} className={`${fsStage.on ? "max-h-[calc(100dvh-5rem)]" : "max-h-[75vh]"} overflow-auto rounded-xl bg-slate-800 p-2`}>
-                <svg ref={svgRef} viewBox={`-2 -2 ${W + 4} ${H + 4}`} className="mx-auto block select-none" style={{ width: `${zoom * 100}%`, touchAction: !editable || boardLock.locked ? "auto" : "none" }}
+                <svg ref={svgRef} viewBox={`-2 -2 ${W + 4} ${H + 4}`} className="mx-auto block select-none" style={{ width: `${zoom * 100}%`, touchAction: editable && sel ? "none" : "pan-x pan-y" }}
                   onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerDown={() => setSel(null)} role="img" aria-label={`ผ้า ${fabric.name} ${W}×${H} ซม.`}>
                   <defs>
                     <pattern id="fl-hatch" width={2} height={2} patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width={2} height={2} fill="rgba(15,23,42,0.45)" /><line x1={0} y1={0} x2={0} y2={2} stroke="#fff" strokeWidth={0.5} /></pattern>
@@ -372,7 +369,7 @@ export function PlanEditor({ id }: { id: string }) {
                     const b = p.box, L = letters.get(p.item.id) ?? "";
                     const fs = Math.max(1.2, Math.min(b.w, b.h) / 5);
                     return (
-                      <g key={p.item.id} onPointerDown={onPieceDown(p.item.id)} style={{ cursor: editable ? (boardLock.locked ? "pointer" : "move") : "pointer" }}>
+                      <g key={p.item.id} onPointerDown={onPieceDown(p.item.id)} style={{ cursor: editable ? "move" : "pointer" }}>
                         <path d={polyD(p.cut) + p.holes.map((h) => polyD(h)).join("")} fillRule="evenodd" fill={`${c}${on ? "55" : "30"}`} stroke="#fff" strokeWidth={sw * (on ? 5 : 3.5)} />
                         <path d={polyD(p.cut)} fill="none" stroke={isBad ? "#ef4444" : c} strokeWidth={sw * (on ? 3 : 2)} />
                         {showAllow && p.piece.allow > 0 && <path d={polyD(p.sew)} fill="none" stroke="#fff" strokeWidth={sw * 1.2} strokeDasharray={`${sw * 4} ${sw * 3}`} pointerEvents="none" />}
@@ -383,13 +380,12 @@ export function PlanEditor({ id }: { id: string }) {
                   })}
                 </svg>
               </div>
-              {editable && <BoardToolbox prefKey="fabric_lay_toolbox" lock={boardLock} groups={toolGroups} />}
-              <BoardLockHint lock={boardLock} />
+              {editable && <BoardToolbox prefKey="fabric_lay_toolbox" groups={toolGroups} />}
             </div>
           </FullscreenStage>
           <p className="text-xs text-slate-500">
-            <span className="hidden lg:inline">ลากชิ้นเพื่อย้าย · ลูกศร = เลื่อน 1 มม. (Shift 1 ซม.) · R = หมุน 90° · F = พลิก · Delete = เอาออก · Ctrl+ลูกกลิ้ง = ซูม · </span>
-            <span className="lg:hidden">แตะชิ้นเพื่อเลือก ลากด้วยนิ้ว (ปลดล็อกกระดานก่อน) · ถ่าง 2 นิ้ว = ซูม · </span>
+            <span className="hidden lg:inline">ลากชิ้นเพื่อย้าย · ลูกศร = เลื่อน 1 มม. (Shift 1 ซม.) · R = หมุน 90° · M = พลิก · Delete = เอาออก · Ctrl+ลูกกลิ้ง = ซูม · </span>
+            <span className="lg:hidden">แตะชิ้นเพื่อเลือก แล้วลากด้วยนิ้ว (ไม่ได้เลือกชิ้น = นิ้วเลื่อนหน้าเว็บ) · ถ่าง 2 นิ้ว = ซูม · </span>
             เส้นตาราง = 10 ซม. · เส้นประขาว = เส้นเย็บ (ขอบนอก = เส้นตัด)
           </p>
         </section>

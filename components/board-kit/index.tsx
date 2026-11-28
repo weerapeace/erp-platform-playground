@@ -1,19 +1,16 @@
 "use client";
 /**
- * 🔒 ชุดกระดานแก้งาน (ของกลาง) — เจ้าของขอ 2026-11-26 "lock กระดานไว้ + ปุ่มขยายกระดาน + กล่องเครื่องมือใช้สะดวก" (เลือกแบบ A + ข้อ 1-4)
- *   useBoardLock     = ล็อกกระดาน (ค่าเริ่มต้นล็อก · จำต่อคน): ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl/⌘ + ลูกกลิ้ง = ซูม · ล็อกเข้ม = ห้ามแก้บนกระดาน (ดู/เลือกได้)
- *                      ปลด = กดกุญแจ หรือคีย์ L · มือถือ: ล็อก = นิ้วเดียวเลื่อนหน้าเว็บได้
- *   BoardLockButton  = ปุ่มกุญแจ (วางในแถบปุ่มซูมของกระดาน) + ฟองเตือนตอนหมุนลูกกลิ้ง/กดแก้ขณะล็อก (มีปุ่ม "ปลดล็อก")
+ * 🧰 ชุดกระดานแก้งาน (ของกลาง) — เจ้าของขอ 2026-11-26 (กล่องเครื่องมือแบบ A + ปุ่มลัด + เต็มจอ)
+ *   ⚠️ 2026-11-28 เจ้าของสั่ง "เอาระบบล็อกกระดานออกทั้งระบบ" → ไม่มีปุ่มกุญแจ/ฟองเตือน/คีย์ L แล้ว แก้งานได้ทันที
+ *   ลูกกลิ้งบนกระดาน = เลื่อนหน้าเว็บ (หรือเลื่อนภาพในกรอบที่ซูมอยู่) · Ctrl/⌘ + ลูกกลิ้ง = ซูม — lib/board-kit wheelAction
  *   BoardToolbox     = กล่องเครื่องมือลอยข้างซ้าย (แบบ A): ไอคอน + ชื่อ + ปุ่มลัด · ลากย้ายได้ · พับเหลือไอคอนได้ · จำตำแหน่งต่อคน
- *                      มือถือ = แถบล่างของกระดาน · เครื่องมือที่ editing = ต้องปลดล็อกก่อน
+ *                      มือถือ = แถบล่างของกระดาน
  *   BoardShortcuts   = ป๊อปปุ่มลัดทั้งหมด (กด ?)
- *   ปุ่มขยายเต็มจอ = ใช้ของกลางเดิม FullscreenStage (useFullscreenStage(..., { phoneAlways: false }))
+ *   ปุ่มขยายเต็มจอ = BoardFullscreenButton คู่ของกลางเดิม FullscreenStage (useFullscreenStage(..., { phoneAlways: false }))
  * ใช้:
- *   const lock = useBoardLock("embroidery_board_lock");
  *   <div className="relative">            ← กรอบกระดาน
- *     <MyCanvas locked={lock.locked} onLockedWheel={lock.nudge} />
- *     <BoardToolbox prefKey="embroidery_toolbox" lock={lock} groups={[{ key: "edit", label: "แก้งาน", tools: [...] }]} />
- *     <BoardLockButton lock={lock} />    ← ในแถบปุ่มซูม
+ *     <MyCanvas />
+ *     <BoardToolbox prefKey="embroidery_toolbox" groups={[{ key: "edit", label: "แก้งาน", tools: [...] }]} />
  *   </div>
  * doc: docs/board-kit.md
  */
@@ -22,76 +19,6 @@ import { Icon } from "@/components/icon";
 import { ERPModal } from "@/components/modal";
 import { useUserPref } from "@/lib/use-user-pref";
 import { clampToolboxPos, DEFAULT_TOOLBOX_POS, hotkeyCode, isTypingTarget, parseToolboxPos, type ToolboxPos } from "@/lib/board-kit";
-
-const parseBool = (v: unknown) => (typeof v === "boolean" ? v : null);
-
-export type BoardLock = {
-  locked: boolean;
-  set: (v: boolean) => void;
-  toggle: () => void;
-  /** แจ้งว่าผู้ใช้พยายามซูม/แก้ตอนล็อก → โชว์ฟองเตือน · why = "wheel" | "edit" */
-  nudge: (why?: "wheel" | "edit") => void;
-  /** ฟองเตือนที่กำลังโชว์ (null = ไม่โชว์) */
-  hint: "wheel" | "edit" | null;
-};
-
-/** prefKey = ชื่อจำค่าต่อคน (แยกตามกระดาน เช่น "embroidery_board_lock") · hotkey L = ล็อก/ปลด */
-export function useBoardLock(prefKey: string, opts: { hotkey?: boolean } = {}): BoardLock {
-  const [locked, setLocked] = useUserPref<boolean>(prefKey, true, parseBool);
-  const [hint, setHint] = useState<"wheel" | "edit" | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lockedRef = useRef(locked);
-  lockedRef.current = locked;
-  const set = useCallback((v: boolean) => { setLocked(v); if (!v) setHint(null); }, [setLocked]);
-  const toggle = useCallback(() => set(!lockedRef.current), [set]);
-  const nudge = useCallback((why: "wheel" | "edit" = "wheel") => {
-    setHint(why);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setHint(null), why === "edit" ? 3200 : 1800);
-  }, []);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  const hotkey = opts.hotkey ?? true;
-  useEffect(() => {
-    if (!hotkey) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "KeyL" || e.ctrlKey || e.metaKey || e.altKey || e.repeat || e.defaultPrevented) return;
-      if (isTypingTarget(e.target as HTMLElement | null)) return;
-      e.preventDefault();
-      toggle();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [hotkey, toggle]);
-
-  return { locked, set, toggle, nudge, hint };
-}
-
-/** ปุ่มกุญแจ (ขนาดเท่าปุ่มซูมของกระดาน) — ฟองเตือนลอยกลางกระดาน (ต้องอยู่ในกรอบ relative เดียวกับกระดาน) */
-export function BoardLockButton({ lock, className = "" }: { lock: BoardLock; className?: string }) {
-  return (
-    <button type="button" onClick={lock.toggle} aria-pressed={lock.locked}
-      title={lock.locked ? "กระดานล็อกอยู่ (L) — ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl + ลูกกลิ้ง = ซูม · กดเพื่อปลดล็อกแล้วแก้งาน" : "ปลดล็อกแล้ว (L) — ลูกกลิ้ง = ซูม · กดเพื่อล็อก"}
-      aria-label={lock.locked ? "ปลดล็อกกระดาน" : "ล็อกกระดาน"}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg border text-sm shadow-sm ${lock.locked ? "border-slate-200 bg-white/95 text-slate-700 hover:bg-slate-50" : "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"} ${className}`}>
-      <Icon value={lock.locked ? "i:lock" : "i:lock-open"} />
-    </button>
-  );
-}
-
-/** ฟองเตือนกลางกระดาน (ตอนหมุนลูกกลิ้ง/กดแก้ขณะล็อก) — วางในกรอบ relative ของกระดาน */
-export function BoardLockHint({ lock }: { lock: BoardLock }) {
-  if (!lock.hint || !lock.locked) return null;
-  return (
-    <div className="pointer-events-none absolute inset-x-2 top-1/2 z-20 flex -translate-y-1/2 justify-center">
-      <div className="pointer-events-auto flex max-w-sm flex-wrap items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-center text-xs text-amber-900 shadow-lg">
-        <Icon value="i:lock" />
-        <span>{lock.hint === "edit" ? "กระดานล็อกอยู่ — ปลดล็อกก่อนแก้งาน" : "กระดานล็อกอยู่ · ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl + ลูกกลิ้ง = ซูม"}</span>
-        <button type="button" onClick={() => lock.set(false)} className="rounded-lg border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100">ปลดล็อก (L)</button>
-      </div>
-    </div>
-  );
-}
 
 export type BoardTool = {
   key: string;
@@ -104,8 +31,6 @@ export type BoardTool = {
   hint?: string;
   active?: boolean;
   disabled?: boolean;
-  /** เป็นการแก้งาน → ล็อกอยู่ = กดไม่ได้ (โชว์ฟองให้ปลดล็อก) */
-  editing?: boolean;
   onClick: () => void;
 };
 export type BoardToolGroup = { key: string; label?: string; tools: BoardTool[] };
@@ -128,10 +53,9 @@ function useIsPhone() {
  *   PC: ลอยมุมซ้ายบน · ลากที่หัวกล่องเพื่อย้าย · ปุ่ม "ย่อ" = เหลือไอคอน · จำตำแหน่ง/ย่อต่อคน (prefKey)
  *   มือถือ: แถบล่างของกระดาน (ไอคอน + ชื่อสั้น) · ปุ่ม ? = ปุ่มลัดทั้งหมด
  */
-export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotkeys = true }: {
+export function BoardToolbox({ prefKey, groups, extraShortcuts = [], hotkeys = true }: {
   prefKey: string;
   groups: BoardToolGroup[];
-  lock?: BoardLock;
   /** ปุ่มลัดเพิ่มในป๊อป ? (เช่น { keys: "Ctrl+S", label: "บันทึก" }) */
   extraShortcuts?: { keys: string; label: string }[];
   hotkeys?: boolean;
@@ -155,9 +79,8 @@ export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotke
 
   const run = useCallback((t: BoardTool) => {
     if (t.disabled) return;
-    if (t.editing && lock?.locked) { lock.nudge("edit"); return; }
     t.onClick();
-  }, [lock]);
+  }, []);
 
   // ปุ่มลัดตัวอักษร + ? = ป๊อปปุ่มลัด
   const groupsRef = useRef(groups);
@@ -196,7 +119,7 @@ export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotke
   };
 
   const help = (
-    <BoardShortcuts open={helpOpen} onClose={() => setHelpOpen(false)} groups={groups} lock={!!lock} extra={extraShortcuts} />
+    <BoardShortcuts open={helpOpen} onClose={() => setHelpOpen(false)} groups={groups} extra={extraShortcuts} />
   );
 
   if (phone) {
@@ -208,7 +131,7 @@ export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotke
             <div key={t.key} className="flex flex-shrink-0 items-stretch">
               {sep ? <span aria-hidden className="mx-0.5 w-px self-stretch bg-slate-200" /> : null}
               <button type="button" onClick={() => run(t)} disabled={t.disabled} aria-pressed={t.active}
-                className={`flex min-w-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-[10px] leading-tight disabled:opacity-40 ${t.active ? "bg-indigo-50 text-indigo-700" : "text-slate-600"} ${t.editing && lock?.locked ? "opacity-60" : ""}`}>
+                className={`flex min-w-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 text-[10px] leading-tight disabled:opacity-40 ${t.active ? "bg-indigo-50 text-indigo-700" : "text-slate-600"}`}>
                 <Icon value={t.icon} size={18} />
                 <span className="max-w-[4.5rem] truncate">{t.label}</span>
               </button>
@@ -238,11 +161,10 @@ export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotke
             {!fold && g.label ? <div className="px-2 pb-0.5 pt-0.5 text-[10px] text-slate-400">{g.label}</div> : null}
             {g.tools.map((t) => {
               const keys = t.hotkey ?? t.hint;
-              const lockedEdit = t.editing && lock?.locked;
               return (
                 <button key={t.key} type="button" onClick={() => run(t)} disabled={t.disabled} aria-pressed={t.active}
-                  title={`${t.label}${keys ? ` (${keys})` : ""}${lockedEdit ? " — ปลดล็อกก่อน" : ""}`}
-                  className={`flex h-8 items-center gap-2 rounded-lg px-2 text-left disabled:opacity-40 ${fold ? "justify-center" : ""} ${t.active ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-700 hover:bg-slate-50"} ${lockedEdit ? "opacity-55" : ""}`}>
+                  title={`${t.label}${keys ? ` (${keys})` : ""}`}
+                  className={`flex h-8 items-center gap-2 rounded-lg px-2 text-left disabled:opacity-40 ${fold ? "justify-center" : ""} ${t.active ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
                   <Icon value={t.icon} size={17} />
                   {fold ? null : <span className="flex-1 whitespace-nowrap">{t.label}</span>}
                   {!fold && keys ? <kbd className="rounded border border-slate-200 px-1 font-sans text-[10px] text-slate-400">{keys}</kbd> : null}
@@ -269,13 +191,13 @@ export function BoardToolbox({ prefKey, groups, lock, extraShortcuts = [], hotke
 }
 
 /** ป๊อปปุ่มลัดทั้งหมด (กด ?) */
-export function BoardShortcuts({ open, onClose, groups, lock = true, fullscreen = true, extra = [] }: {
-  open: boolean; onClose: () => void; groups: BoardToolGroup[]; lock?: boolean; fullscreen?: boolean; extra?: { keys: string; label: string }[];
+export function BoardShortcuts({ open, onClose, groups, zoom = true, fullscreen = true, extra = [] }: {
+  open: boolean; onClose: () => void; groups: BoardToolGroup[]; zoom?: boolean; fullscreen?: boolean; extra?: { keys: string; label: string }[];
 }) {
   const rows: { keys: string; label: string }[] = [];
   for (const g of groups) for (const t of g.tools) { const k = t.hotkey ?? t.hint; if (k) rows.push({ keys: k, label: t.label }); }
   const view: { keys: string; label: string }[] = [
-    ...(lock ? [{ keys: "L", label: "ล็อก / ปลดล็อกกระดาน" }, { keys: "Ctrl + ลูกกลิ้ง", label: "ซูม (ใช้ได้ทั้งตอนล็อก)" }, { keys: "ลูกกลิ้ง", label: "ล็อกอยู่ = เลื่อนหน้าเว็บ · ปลดแล้ว = ซูม" }] : []),
+    ...(zoom ? [{ keys: "Ctrl + ลูกกลิ้ง", label: "ซูม" }, { keys: "ลูกกลิ้ง", label: "เลื่อนหน้าเว็บ (ซูมอยู่ = เลื่อนภาพ)" }] : []),
     ...(fullscreen ? [{ keys: "F", label: "ขยายกระดานเต็มจอ" }, { keys: "Esc", label: "ออกจากเต็มจอ" }] : []),
     { keys: "?", label: "เปิด/ปิดหน้านี้" },
   ];

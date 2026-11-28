@@ -13,7 +13,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { shortcutKey } from "@/lib/shortcut-key";
 import { useCanvasZoom, ZOOM_LEVELS } from "./use-zoom";
-import { BoardFullscreenButton, BoardLockButton, BoardLockHint, BoardToolbox, useBoardLock, type BoardToolGroup } from "@/components/board-kit";
+import { BoardFullscreenButton, BoardToolbox, type BoardToolGroup } from "@/components/board-kit";
 import { FullscreenStage, useFullscreenStage } from "@/components/fullscreen-stage";
 import {
   GROUP_DEFAULT, GROUP_GAP_MAX, KIND_NAME, applyGrouping, atomsOf, autoGroup, byPosition, groupsFromPieces, opsToSvgPath,
@@ -78,9 +78,8 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel, doneLabel = "ต�
 
   // ซูม: เริ่มที่ขนาดที่ชิ้นทั่วไปใหญ่พอให้คลิกได้ (~28px) · ปุ่ม − / + / พอดีจอ
   const boxRef = useRef<HTMLDivElement>(null);
-  const boardLock = useBoardLock("block_print_board_lock");
   const fsStage = useFullscreenStage("block_print_board_fullscreen", { phoneAlways: false });
-  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, true, { locked: boardLock.locked, onLockedWheel: boardLock.nudge });
+  const { zoom, zoomTo, step: zoomStep } = useCanvasZoom(boxRef, 1, true);
   useEffect(() => {
     const cw = boxRef.current?.clientWidth ?? 0;
     const sizes = views.filter((v) => !v.kind).map((v) => Math.max(v.box.ow, v.box.oh)).sort((a, b) => a - b);
@@ -184,15 +183,15 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel, doneLabel = "ต�
   const changed = !sameGroups(groups, start);
   const done = () => onDone(applyGrouping(pieces, groups));
 
-  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) — editing = ต้องปลดล็อกก่อน */
+  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) */
   const toolGroups: BoardToolGroup[] = [
     { key: "pick", label: "เลือก", tools: [
       { key: "all", icon: "i:list-check", label: allPicked ? "ล้างที่เลือก" : "เลือกทุกชิ้นที่ติ๊ก", hotkey: "A", onClick: pickAll },
     ] },
     { key: "edit", label: "แก้ชิ้น", tools: [
-      { key: "merge", icon: "i:link", label: `รวมเป็น 1 ชิ้น${picked.length > 1 ? ` (${picked.length})` : ""}`, hotkey: "M", editing: true, active: picked.length > 1, onClick: merge },
-      { key: "split", icon: "i:scissors", label: "แยกออก", hotkey: "S", editing: true, onClick: split },
-      { key: "hide", icon: "i:eye-off", label: "ไม่เอา / เอากลับ", hotkey: "H", editing: true, onClick: () => toggleOn() },
+      { key: "merge", icon: "i:link", label: `รวมเป็น 1 ชิ้น${picked.length > 1 ? ` (${picked.length})` : ""}`, hotkey: "M", active: picked.length > 1, onClick: merge },
+      { key: "split", icon: "i:scissors", label: "แยกออก", hotkey: "S", onClick: split },
+      { key: "hide", icon: "i:eye-off", label: "ไม่เอา / เอากลับ", hotkey: "H", onClick: () => toggleOn() },
     ] },
     { key: "hist", label: "ประวัติ", tools: [
       { key: "undo", icon: "i:arrow-back-up", label: "ย้อนกลับ", hint: "Ctrl+Z", onClick: undo },
@@ -230,7 +229,7 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel, doneLabel = "ต�
               <button type="button" onClick={() => zoomStep(1)} aria-label="ซูมเข้า" className="h-7 w-7 rounded-md border border-slate-200 bg-white hover:bg-slate-50">+</button>
               <button type="button" onClick={() => zoomTo(1)} className="h-7 rounded-md border border-slate-200 bg-white px-2 hover:bg-slate-50">พอดีจอ</button>
               {backdrop.size > 0 && <span className="ml-2 hidden text-slate-500 sm:inline">สีเทาอ่อน = ชิ้นพื้นใหญ่ (เลือกจากรายการด้านขวา)</span>}
-              <span className="ml-auto flex gap-1"><BoardLockButton lock={boardLock} /><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></span>
+              <span className="ml-auto flex gap-1"><BoardFullscreenButton on={fsStage.on} onToggle={fsStage.toggle} /></span>
             </div>
             <div className="relative">
             <div ref={boxRef} className={`${fsStage.on ? "max-h-[calc(100dvh-7rem)]" : "max-h-[65vh]"} overflow-auto rounded bg-white`}>
@@ -255,8 +254,7 @@ export function BlockPieceGrouper({ pieces, onDone, onCancel, doneLabel = "ต�
                 {mq && <rect x={mq.ax} y={mq.ay} width={mq.ow} height={mq.oh} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeDasharray="3 2" strokeWidth={1} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
               </svg>
             </div>
-            <BoardToolbox prefKey="block_print_group_toolbox" lock={boardLock} groups={toolGroups} />
-            <BoardLockHint lock={boardLock} />
+            <BoardToolbox prefKey="block_print_group_toolbox" groups={toolGroups} />
             </div>
           </div>
           <p className="text-xs text-slate-500">

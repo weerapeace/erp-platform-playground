@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { SaveBar } from "@/components/save-bar";
-import { BoardFullscreenButton, BoardLockButton, BoardLockHint, BoardToolbox, useBoardLock, type BoardToolGroup } from "@/components/board-kit";
+import { BoardFullscreenButton, BoardToolbox, type BoardToolGroup } from "@/components/board-kit";
 import { FullscreenStage, useFullscreenStage } from "@/components/fullscreen-stage";
 import { ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
@@ -84,8 +84,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
   const [nodeDrag, setNodeDrag] = useState<{ h: Handle; start: [number, number]; orig: BlockPiece; piece: BlockPiece } | null>(null);
   /** ขั้นเลือกส่วน: pieces = ชิ้นที่จะให้เลือก (ของเดิม หรือจากไฟล์ใหม่) */
   const [picking, setPicking] = useState<{ pieces: BlockPiece[]; fileName?: string; initialOn?: string[] } | null>(null);
-  // กระดาน: ล็อก (จำต่อคน) · เต็มจอ (มือถือไม่บังคับ เพราะมีแผงตั้งค่า)
-  const lock = useBoardLock("embroidery_board_lock");
+  // กระดาน: เต็มจอ (มือถือไม่บังคับ เพราะมีแผงตั้งค่า) · ไม่มีระบบล็อกกระดานแล้ว (เจ้าของสั่ง 2026-11-28)
   const fs = useFullscreenStage("embroidery_board_fullscreen", { phoneAlways: false });
   const [winH, setWinH] = useState(900);
   useEffect(() => {
@@ -93,8 +92,6 @@ export function EmbroideryEditor({ id }: { id: string }) {
     on(); window.addEventListener("resize", on);
     return () => window.removeEventListener("resize", on);
   }, []);
-  // ล็อกเข้ม: ล็อกแล้วกลับเป็นเครื่องมือเลือก (ห้ามลากทิศ/แก้จุดค้าง)
-  useEffect(() => { if (lock.locked) { setTool("select"); setDraft(null); setNodeDrag(null); } }, [lock.locked]);
 
   const keyOf = (s: Snap | null, m: Meta) => JSON.stringify([s?.settings, s?.rev ?? 0, s?.pieces.length, s?.pieces[0]?.d.length, s?.pieces.map((p) => (p.on === false ? 0 : 1)).join(""), m.name, m.note, m.parent?.id ?? null]);
 
@@ -319,7 +316,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
     });
     toast.success(`เปลี่ยนสีด้าย ${ids.length} ชิ้นแล้ว${label ? ` (${label})` : ""} — ย้อนกลับได้`);
   };
-  const pickTool = (t: EditTool) => { if (t !== "select" && lock.locked) { lock.nudge("edit"); return; } if (t !== "select" && !sel) { toast.error("คลิกเลือกชิ้นในภาพ หรือในรายการลำดับปักก่อน"); return; } setTool(t); setDraft(null); };
+  const pickTool = (t: EditTool) => { if (t !== "select" && !sel) { toast.error("คลิกเลือกชิ้นในภาพ หรือในรายการลำดับปักก่อน"); return; } setTool(t); setDraft(null); };
   /** ลากเส้นทิศฝีเข็มบนชิ้นที่เลือก (พิกัดงาน → เก็บเป็นพิกัดไฟล์) */
   const onDraw = (e: { phase: "down" | "move" | "up"; x: number; y: number }) => {
     if (!sel) return;
@@ -350,7 +347,7 @@ export function EmbroideryEditor({ id }: { id: string }) {
     });
     if (draft) { const [x1, y1] = v.toScreen(draft[0], draft[1]), [x2, y2] = v.toScreen(draft[2], draft[3]); out.push(<line key="draft" x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ea580c" strokeWidth={2.5} strokeDasharray="6 4" />); }
     // แก้จุด: เส้นขอบ (ชิ้นตัวอย่างระหว่างลาก) + จุดลากได้
-    if (tool === "node" && selPiece && !viewing && !lock.locked) {
+    if (tool === "node" && selPiece && !viewing) {
       const p = nodeDrag?.piece ?? selPiece;
       const a = frame.scale * v.k, [ox, oy] = S(p.ax, p.ay);
       out.push(<path key="outline" d={pieceShapes(p).map((sh) => opsToSvgPath(sh.d, a, a, ox, oy)).join(" ")} fill="rgba(79,70,229,0.08)" stroke="#4f46e5" strokeWidth={1.2} />);
@@ -385,13 +382,13 @@ export function EmbroideryEditor({ id }: { id: string }) {
   /** ความสูงกระดาน: เต็มจอ = เกือบทั้งจอ (เหลือแถบเล่นลำดับ) · มือถือ 300 */
   const phoneW = typeof window !== "undefined" && window.innerWidth < 768;
   const boardH = (desk: number) => (fs.on ? Math.max(260, winH - (phoneW ? 150 : 110)) : phoneW ? 300 : desk);
-  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) — editing = ต้องปลดล็อกก่อน */
+  /** กล่องเครื่องมือ (ของกลาง BoardToolbox) */
   const toolGroups: BoardToolGroup[] = [
     { key: "edit", label: "แก้งาน", tools: [
       { key: "select", icon: "i:pointer", label: "เลือกชิ้น", hotkey: "V", active: tool === "select", onClick: () => pickTool("select") },
-      { key: "dir", icon: "i:line", label: "ลากทิศฝีเข็ม", hotkey: "D", active: tool === "dir", editing: true, onClick: () => pickTool("dir") },
-      { key: "node", icon: "i:vector-bezier", label: "แก้จุดรูปทรง", hotkey: "N", active: tool === "node", editing: true, onClick: () => pickTool("node") },
-      { key: "text", icon: "i:typography", label: "ตัวหนังสือ", hotkey: "T", editing: true, onClick: () => setTextOpen(true) },
+      { key: "dir", icon: "i:line", label: "ลากทิศฝีเข็ม", hotkey: "D", active: tool === "dir", onClick: () => pickTool("dir") },
+      { key: "node", icon: "i:vector-bezier", label: "แก้จุดรูปทรง", hotkey: "N", active: tool === "node", onClick: () => pickTool("node") },
+      { key: "text", icon: "i:typography", label: "ตัวหนังสือ", hotkey: "T", onClick: () => setTextOpen(true) },
     ] },
     { key: "hist", label: "ประวัติ", tools: [
       { key: "undo", icon: "i:arrow-back-up", label: "ย้อนกลับ", hint: "Ctrl+Z", disabled: !history.length, onClick: undo },
@@ -444,18 +441,16 @@ export function EmbroideryEditor({ id }: { id: string }) {
           {compare && shopPlan && !shopOnly ? (
             <div className="grid gap-2 md:grid-cols-2">
               <div><div className="mb-1 text-xs font-medium text-slate-500">ระบบแปลง · {fmtNum(plan.stitches)} ฝี · {(plan.width / 10).toFixed(1)} × {(plan.height / 10).toFixed(1)} ซม.</div>
-                <StitchPreview plan={plan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={boardH(420)} locked={lock.locked} onLockedWheel={lock.nudge}><BoardLockHint lock={lock} /></StitchPreview></div>
+                <StitchPreview plan={plan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={boardH(420)} /></div>
               <div><div className="mb-1 text-xs font-medium text-slate-500">ไฟล์จากร้าน · {fmtNum(shopPlan.stitches)} ฝี · {(shopPlan.width / 10).toFixed(1)} × {(shopPlan.height / 10).toFixed(1)} ซม.</div>
-                <StitchPreview plan={shopPlan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={boardH(420)} locked={lock.locked} onLockedWheel={lock.nudge} /></div>
+                <StitchPreview plan={shopPlan} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} height={boardH(420)} /></div>
             </div>
           ) : (
             <StitchPreview plan={vplan} upto={upto ?? undefined} showJumps={showJumps} real={real} grid={grid} fabric={st.fabric} selectedId={viewing ? null : selectedId} focus={viewing ? null : focus}
               onPick={canEdit && !viewing ? setSelectedId : undefined} height={boardH(480)}
-              drawMode={tool === "dir" && !!sel && !viewing && !lock.locked} onDraw={onDraw} overlay={overlay}
-              locked={lock.locked} onLockedWheel={lock.nudge}
-              controls={<><BoardLockButton lock={lock} /><BoardFullscreenButton on={fs.on} onToggle={fs.toggle} /></>}>
-              {canEdit && !shopOnly && <BoardToolbox prefKey="embroidery_toolbox" lock={lock} groups={toolGroups} />}
-              <BoardLockHint lock={lock} />
+              drawMode={tool === "dir" && !!sel && !viewing} onDraw={onDraw} overlay={overlay}
+              controls={<BoardFullscreenButton on={fs.on} onToggle={fs.toggle} />}>
+              {canEdit && !shopOnly && <BoardToolbox prefKey="embroidery_toolbox" groups={toolGroups} />}
             </StitchPreview>
           )}
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">

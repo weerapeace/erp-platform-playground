@@ -3,19 +3,17 @@
  * 🧱 บล็อกพิมพ์ — ซูมภาพ (ใช้ร่วม: หน้าเลือกชิ้น grouper.tsx + หน้าจัดวางในบล็อก layout-editor.tsx)
  *   Ctrl + ล้อเมาส์ = ซูมตรงจุดที่ชี้ · ปุ่ม −/+ ไล่ระดับ 25% – 800% · "พอดีจอ" = 100% · มือถือถ่างนิ้ว 2 นิ้ว
  *   box = กล่องที่เลื่อนดูได้ (overflow-auto) ที่ครอบภาพ · ภาพกว้าง = zoom × ความกว้างกล่อง
- *   lock (ชุดกระดาน board-kit): locked = ลูกกลิ้งเฉย ๆ ส่งไปเลื่อนหน้าเว็บ (ไม่เลื่อนในกล่อง) · ปลดล็อก = ลูกกลิ้งเลื่อนในกล่องเหมือนเดิม · Ctrl+ลูกกลิ้ง = ซูมเสมอ
+ *   ลูกกลิ้งเฉย ๆ = เลื่อนตามปกติ (กล่องที่ซูมจนล้น = เลื่อนภาพ · ไม่ล้น = เลื่อนหน้าเว็บ) · Ctrl+ลูกกลิ้ง = ซูม (ไม่มีระบบล็อกกระดานแล้ว 2026-11-28)
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { scrollOuter, wheelAction } from "@/lib/board-kit";
+import { wheelAction } from "@/lib/board-kit";
 
 export const ZOOM_LEVELS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8];
 const MIN = ZOOM_LEVELS[0], MAX = ZOOM_LEVELS[ZOOM_LEVELS.length - 1];
 const clamp = (z: number) => Math.min(MAX, Math.max(MIN, z));
 
 /** active = กล่องภาพถูกวาดแล้ว (ใส่เมื่อกล่องโผล่ทีหลัง เช่น หลังสร้างบล็อกแรก) */
-export function useCanvasZoom(box: RefObject<HTMLDivElement | null>, initial = 1, active = true, lock?: { locked: boolean; onLockedWheel?: () => void }) {
-  const lockRef = useRef(lock);
-  lockRef.current = lock;
+export function useCanvasZoom(box: RefObject<HTMLDivElement | null>, initial = 1, active = true) {
   const [zoom, setZoomState] = useState(initial);
   const anchor = useRef<{ fx: number; fy: number; cx: number; cy: number } | null>(null);
   const zoomRef = useRef(zoom);
@@ -53,9 +51,7 @@ export function useCanvasZoom(box: RefObject<HTMLDivElement | null>, initial = 1
     const el = box.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
-      const act = wheelAction(!!lockRef.current?.locked, e.ctrlKey || e.metaKey, false);
-      if (act === "pan") return;   // ปลดล็อก = เลื่อนในกล่องตามปกติ
-      if (act === "pass") { e.preventDefault(); scrollOuter(el, e.deltaX, e.deltaY); lockRef.current?.onLockedWheel?.(); return; }
+      if (wheelAction(e.ctrlKey || e.metaKey) === "pass") return;   // เลื่อนตามปกติ
       e.preventDefault();
       const r = el.getBoundingClientRect();
       zoomTo(zoomRef.current * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX - r.left, e.clientY - r.top);

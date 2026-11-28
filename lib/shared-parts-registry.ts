@@ -1090,10 +1090,10 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "fullscreen-stage.md",
   },
   {
-    key: "board-kit", label: "ชุดกระดานแก้งาน (ล็อก · กล่องเครื่องมือลอย · ปุ่มลัด)", code: "useBoardLock · BoardLockButton · BoardLockHint · BoardToolbox · BoardShortcuts · BoardFullscreenButton", category: "layout",
+    key: "board-kit", label: "ชุดกระดานแก้งาน (กล่องเครื่องมือลอย · ปุ่มลัด · เต็มจอ)", code: "BoardToolbox · BoardShortcuts · BoardFullscreenButton · wheelAction", category: "layout",
     source: { path: "components/board-kit" },
-    what: "ของที่ทุกกระดานแก้งานใช้ร่วมกัน: ล็อกกระดาน (ค่าเริ่มต้นล็อก · จำต่อคน · ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl+ลูกกลิ้ง = ซูม · ล็อกเข้ม = ห้ามแก้บนกระดาน · คีย์ L · มือถือนิ้วเดียวเลื่อนหน้าได้) + ฟองเตือนพร้อมปุ่มปลดล็อก · กล่องเครื่องมือลอยซ้าย (ไอคอน + ชื่อ + ปุ่มลัด · ลากย้าย · ย่อเหลือไอคอน · จำตำแหน่งต่อคน · มือถือเป็นแถบล่าง) · ป๊อปปุ่มลัดทั้งหมด (?) · ปุ่มขยายเต็มจอขนาดเท่าปุ่มซูม (คู่ FullscreenStage phoneAlways:false)",
-    when: "หน้าที่มีกระดาน/ภาพให้แก้งาน มีเครื่องมือหลายแบบ และซูมด้วยลูกกลิ้ง (ตอนนี้: ไฟล์ปัก · บล็อกพิมพ์ หน้าเลือกชิ้น/จัดวาง · ShapeEditor ใส่แค่ล็อก) · กล่องที่เลื่อนดูได้ใช้ useCanvasZoom(box, 1, true, { locked, onLockedWheel })",
+    what: "ของที่ทุกกระดานแก้งานใช้ร่วมกัน (ไม่มีระบบล็อกกระดานแล้ว — เจ้าของสั่งเอาออก 2026-11-28 · ลูกกลิ้ง = เลื่อนหน้าเว็บ · Ctrl+ลูกกลิ้ง = ซูม · wheelAction): กล่องเครื่องมือลอยซ้าย (ไอคอน + ชื่อ + ปุ่มลัด · ลากย้าย · ย่อเหลือไอคอน · จำตำแหน่งต่อคน · มือถือเป็นแถบล่าง) · ป๊อปปุ่มลัดทั้งหมด (?) · ปุ่มขยายเต็มจอขนาดเท่าปุ่มซูม (คู่ FullscreenStage phoneAlways:false)",
+    when: "หน้าที่มีกระดาน/ภาพให้แก้งาน มีเครื่องมือหลายแบบ และซูมด้วยลูกกลิ้ง (ตอนนี้: ไฟล์ปัก · บล็อกพิมพ์ หน้าเลือกชิ้น/จัดวาง · วางแบบบนผ้าลาย · ShapeEditor ใช้แค่ wheelAction) · กล่องที่เลื่อนดูได้ใช้ useCanvasZoom(box, 1, true) · ห้ามใส่ระบบล็อกกลับ · ห้ามใช้ปุ่มลัด F (= เต็มจอ)",
     notWhen: "กระดานวาด Excalidraw (CanvasSketch) / ผัง FlowchartBoard มีแถบเครื่องมือของตัวเอง · ดูรูปซูมเฉย ๆ ไม่มีเครื่องมือ → ZoomBox · ปุ่มเต็มจอแบบมีปุ่มข้อความ → FullscreenToggle",
     doc: "board-kit.md",
   },
