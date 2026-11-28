@@ -109,7 +109,7 @@ export const PAID_SERVICES: PaidService[] = [
     usedAt: "ปุ่มไมค์มุมจอ (ทุกหน้า) — กดค้างแล้วพูด", provider: "openai", kind: "per_call",
     offBehavior: "สลับไปใช้ตัวฟังฟรีของเบราว์เซอร์ (Chrome/Edge/Safari) · เบราว์เซอร์ที่ไม่มีให้พิมพ์แทน",
     costHint: "~0.01–0.02 บาท/คำสั่ง (พูด ~5 วินาที · ตามรุ่นที่เลือก)", files: ["app/api/voice-assistant/transcribe/route.ts"], providerChoices: TRANSCRIBE_CHOICES },
-  { key: "ai.voice_assistant", th: "ผู้ช่วยเสียง — เข้าใจคำสั่ง (เปิดหน้า · เพิ่ม SKU)", en: "Voice assistant — understand commands", group: "ทั่วทั้งระบบ",
+  { key: "ai.voice_assistant", th: "ผู้ช่วยเสียง — เข้าใจคำสั่ง (เปิดหน้า · เพิ่ม SKU · ทำรายละเอียดสินค้า · ตั้งคำสั่งที่ /admin/voice-assistant)", en: "Voice assistant — understand commands", group: "ทั่วทั้งระบบ",
     usedAt: "ปุ่มไมค์มุมจอ (ทุกหน้า) — ปิดฟีเจอร์นี้ = ปุ่มไมค์ซ่อน · ช่วงทดลอง \"ทุกคน\" = เฉพาะแอดมิน → เปิดให้คนอื่นที่ \"ใครใช้ได้ → เฉพาะที่เลือก\"", provider: "openai", kind: "ai_chat",
     offBehavior: "ปุ่มไมค์มุมจอซ่อน · ทำงานผ่านเมนูได้ตามปกติ",
     costHint: "~0.03 บาท/คำสั่ง (gpt-6-luna) · ~0.5 บาท (รุ่นใหญ่)", files: ["app/api/voice-assistant/command/route.ts"], costProfile: { in: 4500, out: 300 } },

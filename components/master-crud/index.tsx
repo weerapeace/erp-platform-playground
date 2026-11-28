@@ -1149,7 +1149,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const [aiDetailOpen, setAiDetailOpen] = useState(false);              // ✨ ป๊อป "ให้ AI คิดรายละเอียดสินค้า"
   const [detailLoading, setDetailLoading] = useState(false);
   // ⏭ ป๊อป "＋ แทรก": ไปรายการถัดไปที่ช่องยังว่าง แล้วเปิดป๊อปให้เอง (รอโหลดค่าเต็มของรายการก่อน — fullReadyId)
-  const [insertNext, setInsertNext] = useState<{ id: string; field: string } | null>(null);
+  //    field "*" = ช่องแรกที่มีปุ่มแทรก · start "ai" = เปิดที่ขั้นจุดเด่น (AI ดูรูป) · auto = ให้ AI ร่างทันที (มาจากผู้ช่วยเสียง ?insert=ai&insert_auto=1)
+  const [insertNext, setInsertNext] = useState<{ id: string; field: string; start?: "ai"; auto?: boolean } | null>(null);
   const [fullReadyId, setFullReadyId] = useState<string | null>(null);
   const [insertScanning, setInsertScanning] = useState(false);
 
@@ -1640,10 +1641,17 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation / ผลจาก Global Search)
   // ของกลาง useOpenParam: อ่านจาก URL ตอน mount + ฟัง event ตอนอยู่หน้าเดิมแล้วมีคนสั่งเปิดใบอื่น
   //   + ?entry_mode=<โหมด> (ลิงก์ ↗ จากรายงานข้อมูลค้าง) → เปิดแล้วเข้าโหมดลงรายละเอียดเลย
+  //   + ?insert=ai[&insert_auto=1] (ผู้ช่วยเสียง "ทำรายละเอียดสินค้า") → เปิดป๊อป "＋ แทรก" ที่ขั้นจุดเด่นให้เอง แล้วลบพารามิเตอร์ออกจาก URL (กันเปิดซ้ำ)
   useOpenParam(canView, (id) => {
     setDrawerMode("view"); openEdit({ id } as Row);
-    const em = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("entry_mode") : null;
+    const sp = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const em = sp?.get("entry_mode");
     if (em) setActiveModeKey(em);
+    if (sp?.get("insert") === "ai") {
+      setInsertNext({ id: String(id), field: "*", start: "ai", auto: sp.get("insert_auto") === "1" });
+      const u = new URL(window.location.href); u.searchParams.delete("insert"); u.searchParams.delete("insert_auto");
+      window.history.replaceState(window.history.state, "", u.toString());
+    }
   });
   // 📷 สแกนแล้วเปิดลิ้นชัก — ถามของกลาง /api/scan/resolve (POST: รหัสมี # ได้) แล้วให้โมดูลบอกว่าเปิด id ไหน
   const onScanned = async (code: string) => {
@@ -3630,6 +3638,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           //   + แท็บขนาด/น้ำหนัก/ใส่อะไรได้/ขนาดช่อง (compartments) บันทึกกลับช่องของระเบียน (fields) — เฉพาะช่องที่ฟอร์มนี้มีและแก้ได้ (writable)
           //   หน้าแก้ไข = ใส่ค่าในฟอร์ม · หน้าดู = บันทึกทันที (PATCH ครั้งเดียวทุกช่อง · audit ของกลางที่ API)
           const INSERT_WRITABLE = ["size_length_cm", "size_height_cm", "size_thickness_cm", "weight_g", "handle_drop_cm", "strap_drop_cm", "strap_drop_max_cm", "fits", "compartments"];
+          const firstInsertKey = effectiveFields.find((x) => (x.uiStyle as Record<string, unknown> | undefined)?.insert_details)?.key;
           const insertBtn = (f: FieldDef, enKey: string): React.ReactNode => {
             if (!(f.uiStyle as Record<string, unknown> | undefined)?.insert_details) return null;
             if (!canEdit || f.readonly || (drawerMode === "view" && !editingId)) return null;
@@ -3643,7 +3652,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 copyFromApi={config.moduleKey === "parent-skus-v2" ? `${apiBase}${config.apiPath}` : undefined} currentId={editingId ?? null}
                 aiParentId={config.moduleKey === "parent-skus-v2" ? editingId ?? null : null}
                 onApplyNext={viewMode && editingId ? () => void goNextEmptyForInsert(f.key) : undefined}
-                autoOpen={!!insertNext && !!editingId && insertNext.id === String(editingId) && insertNext.field === f.key && fullReadyId === String(editingId)}
+                autoOpen={!!insertNext && !!editingId && insertNext.id === String(editingId) && (insertNext.field === f.key || (insertNext.field === "*" && f.key === firstInsertKey)) && fullReadyId === String(editingId)}
+                autoStart={insertNext?.start ? { ai: true, run: !!insertNext.auto } : undefined}
                 onAutoOpened={() => setInsertNext(null)}
                 onApply={async ({ th, en, fields }) => {
                   const withEn = !!enKey && en !== undefined;

@@ -1,8 +1,10 @@
 /**
  * /api/voice-assistant/command — ผู้ช่วยเสียง: เข้าใจคำสั่ง (กติกา lib/voice-assistant · คู่มือ docs/voice-assistant.md)
  *
- * GET  → { enabled, listen } — ปุ่มไมค์โชว์ไหม (enabled = ฟีเจอร์เปิด + คนนี้ได้รับสิทธิ์ + ไม่เกินงบ) · listen = ใช้ตัวฟังของ OpenAI ได้ไหม
- * POST { text, history?, choices?, path? } → VoiceReply { say, action, page?, sku?, choiceId? }
+ * GET  → { enabled, listen, commands, can_manage } — ปุ่มไมค์โชว์ไหม (enabled = ฟีเจอร์เปิด + คนนี้ได้รับสิทธิ์ + ไม่เกินงบ) · listen = ใช้ตัวฟังของ OpenAI ได้ไหม
+ *        commands = ค่าตั้งรายคำสั่ง (เปิด/โหมด/ตัวอย่าง จากหน้า /admin/voice-assistant) · can_manage = โชว์ปุ่มไปหน้าตั้งค่า
+ * POST { text, history?, choices?, path?, dry? } → VoiceReply { say, action, page?, sku?, query?, choiceId? }
+ *        dry = ลองพูดทดสอบจากหน้าตั้งค่า (หน้าจอไม่ทำตาม · ประวัติติดป้าย dry)
  *
  * - ผ่านด่านกลาง paid-services key "ai.voice_assistant" (ค่าเริ่ม gpt-6-luna · คิดน้อยเพื่อให้ตอบไว · แอดมินเปลี่ยนรุ่นได้)
  * - AI เลือกหน้าได้เฉพาะ "หน้าที่คนนี้เห็นได้" (ของกลาง lib/menu-pages-server — กฎเดียวกับค้นหารวม)
@@ -17,7 +19,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan } from "@/lib/api-auth";
 import { listVisiblePages, loadMyAccess } from "@/lib/menu-pages-server";
 import { writeAudit } from "@/lib/audit";
-import { voiceAllowed } from "@/lib/voice-assistant-server";
+import { loadVoiceSettings, voiceAllowed } from "@/lib/voice-assistant-server";
 import { buildVoiceSystemPrompt, buildVoiceUserPayload, cleanChoices, cleanHistory, normalizeVoiceReply, VOICE_LIMITS } from "@/lib/voice-assistant";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +40,10 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ enabled: false, listen: false }, { status: 401 });
   if (!openAiKey()) return NextResponse.json({ enabled: false, listen: false });
   const ctx = { request, userId: user.id };
-  const [allowed, on, listen] = await Promise.all([voiceAllowed(request, user.id), aiAvailable("ai.voice_assistant", ctx), aiAvailable("ai.voice_listen", ctx)]);
-  return NextResponse.json({ enabled: allowed && on, listen }, { headers: { "Cache-Control": "no-store" } });
+  const [allowed, on, listen, settings, canManage] = await Promise.all([
+    voiceAllowed(request, user.id), aiAvailable("ai.voice_assistant", ctx), aiAvailable("ai.voice_listen", ctx), loadVoiceSettings(), apiCan(request, "admin.paid_services"),
+  ]);
+  return NextResponse.json({ enabled: allowed && on, listen, commands: settings.commands, can_manage: canManage }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: NextRequest) {
@@ -54,14 +58,17 @@ export async function POST(request: NextRequest) {
   const history = cleanHistory(body.history);
   const choices = cleanChoices(body.choices);
   const path = typeof body.path === "string" ? body.path.slice(0, 200) : "";
+  const dry = body.dry === true;
 
   try {
-    const [access, canAddSku] = await Promise.all([
+    const [access, canAddSku, canEditProducts, settings] = await Promise.all([
       loadMyAccess(sb, user.id).catch(() => ({ can: (k: string | null | undefined) => !k })),
       apiCan(request, "products.create"),
+      apiCan(request, "products.edit"),
+      loadVoiceSettings(),
     ]);
     const pages = await listVisiblePages(access.can);
-    const system = buildVoiceSystemPrompt(pages, canAddSku);
+    const system = buildVoiceSystemPrompt(pages, canAddSku, settings, canEditProducts);
     const content = [{ type: "text", text: buildVoiceUserPayload({ text, history, choices, path }) }];
     const ctx = { request, userId: user.id, effort: "low" as const };
     let raw: Record<string, unknown>;
@@ -73,11 +80,11 @@ export async function POST(request: NextRequest) {
       console.error("[voice-assistant] รุ่นหลักตอบไม่ได้ ลองรุ่นสำรอง:", e instanceof Error ? e.message : e);
       raw = await aiChat("ai.voice_assistant", system, content, 400, FALLBACK_MODEL, ctx);
     }
-    const reply = normalizeVoiceReply(raw, { pages, choices, canAddSku });
+    const reply = normalizeVoiceReply(raw, { pages, choices, canAddSku, canEditProducts, settings });
 
     await writeAudit(supabaseAdmin(), {
       action: "voice_command", entityType: "voice_assistant", actorId: user.id, actorName: user.email ?? null,
-      metadata: { said: text, path, action: reply.action, page: reply.page?.href ?? null, sku: reply.sku ?? null, choice: reply.choiceId ?? null, reply: reply.say },
+      metadata: { said: text, path, action: reply.action, page: reply.page?.href ?? null, sku: reply.sku ?? null, query: reply.query ?? null, choice: reply.choiceId ?? null, reply: reply.say, ...(dry ? { dry: true } : {}) },
     });
     return NextResponse.json(reply, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {

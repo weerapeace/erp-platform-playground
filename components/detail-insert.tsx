@@ -227,6 +227,7 @@ export function DetailInsertButton({
   onApplyNext,
   autoOpen,
   onAutoOpened,
+  autoStart,
 }: {
   thText: string;
   enText: string;
@@ -251,11 +252,15 @@ export function DetailInsertButton({
   /** เปิดป๊อปให้เอง (มาถึงรายการถัดไปจากปุ่ม ⏭) — เปิดแล้วเรียก onAutoOpened */
   autoOpen?: boolean;
   onAutoOpened?: () => void;
+  /** ตอนเปิดเอง (autoOpen): ai = เปิดที่ขั้นจุดเด่น (✨ AI ดูรูป) · run = ให้ AI ร่างทันที (ผู้ช่วยเสียง โหมด "AI ร่างให้เลย") */
+  autoStart?: { ai: boolean; run: boolean };
 }) {
   const [open, setOpen] = useState(false);
+  const [start, setStart] = useState<{ ai: boolean; run: boolean } | null>(null);
   const { lang } = useLang();
   useEffect(() => {
     if (!autoOpen) return;
+    setStart(autoStart ?? null);
     setOpen(true);
     onAutoOpened?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -284,7 +289,9 @@ export function DetailInsertButton({
           values={values ?? {}}
           writable={writable ?? []}
           onApply={onApply}
-          onClose={() => setOpen(false)}
+          onClose={() => { setOpen(false); setStart(null); }}
+          startAi={!!start?.ai}
+          autoRunAi={!!start?.run}
           copyFrom={copyFromApi && fieldKey ? { api: copyFromApi, fieldKey, enFieldKey: enFieldKey ?? null, currentId: currentId ?? null } : null}
           aiParentId={aiParentId ?? null}
           onApplyNext={onApplyNext}
@@ -306,6 +313,8 @@ function DetailInsertModal({
   copyFrom,
   aiParentId,
   onApplyNext,
+  startAi,
+  autoRunAi,
 }: {
   thText: string;
   enText: string;
@@ -318,6 +327,10 @@ function DetailInsertModal({
   copyFrom?: CopyFromCfg | null;
   aiParentId?: string | null;
   onApplyNext?: () => void;
+  /** เปิดที่ขั้นจุดเด่น/แท็บ ✨ AI ดูรูป (ผู้ช่วยเสียง) */
+  startAi?: boolean;
+  /** ให้ AI ร่างทันทีเมื่อเปิดแท็บ AI */
+  autoRunAi?: boolean;
 }) {
   const toast = useToast();
   // 🌐 ภาษาหน้าจอของป๊อป — เริ่มตามภาษาของบัญชี · สลับในป๊อปได้ (ไม่เปลี่ยนภาษาทั้งระบบ · ไม่ต้องรีโหลด)
@@ -464,6 +477,14 @@ function DetailInsertModal({
     const ks = STEP_TABS[s].filter((k) => tabs.some((x) => x.key === k));
     if (ks.length && !ks.includes(tab)) openTab(ks[0]);
   };
+  // 🎙️ มาจากผู้ช่วยเสียง: ไปขั้นจุดเด่น (แท็บ AI) ครั้งเดียว เมื่อแท็บ AI พร้อม (สิทธิ์/ชุดตามประเภทโหลดเสร็จ)
+  const startedAiRef = useRef(false);
+  useEffect(() => {
+    if (!startAi || startedAiRef.current || !tabs.some((x) => x.key === "ai")) return;
+    startedAiRef.current = true;
+    if (stepMode) goStep("highlight"); else openTab("ai");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startAi, tabs, stepMode]);
   const nextStep = () => {
     setSkipped((p) => p.filter((x) => x !== step));
     goStep(stepAfter(steps, step, 1));
@@ -1267,7 +1288,7 @@ function DetailInsertModal({
             <div className={`${compactMat ? "" : "max-h-[22rem] overflow-auto"} space-y-1 pr-1`}>
               {tab === "ai" && aiParentId && (
                 <DetailInsertAi parentId={aiParentId} brandId={typeof values.brand_id === "string" ? values.brand_id : null} isEn={isEn}
-                  state={aiState} setState={setAiState} chosen={chosenTh} />
+                  state={aiState} setState={setAiState} chosen={chosenTh} autoRun={autoRunAi} />
               )}
 
               {tab === "phrase" && (

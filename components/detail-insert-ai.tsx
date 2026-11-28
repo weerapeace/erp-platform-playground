@@ -8,7 +8,7 @@
  * state อยู่ที่ป๊อปแม่ (components/detail-insert) — ล้างหน้า/ข้ามขั้นได้ · บรรทัดที่ติ๊ก = sel.ai (lib/detail-snippets composeLines)
  * API: /api/ai/desc-highlights (ศูนย์ AI key ai.desc_highlights · โควตาครั้งต่อคน) · /api/ai/desc-memory
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AiMemoryPanel } from "@/components/ai-memory";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
@@ -37,7 +37,7 @@ let seq = 0;
 const newId = () => `ai${Date.now().toString(36)}${(seq++).toString(36)}`;
 const key = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
-export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chosen }: {
+export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chosen, autoRun }: {
   parentId: string;
   brandId: string | null;
   isEn: boolean;
@@ -45,6 +45,8 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
   setState: (fn: (p: AiState) => AiState) => void;
   /** บรรทัดที่เลือกในขั้นอื่นแล้ว (ไทย) — ส่งให้ AI เลี่ยงเรื่องซ้ำ */
   chosen: string[];
+  /** ร่างทันทีครั้งเดียวเมื่อรู้ว่าใช้ได้ (ผู้ช่วยเสียง โหมด "AI ร่างให้เลย") — ข้อแนะนำติ๊กไว้ให้ คนกดแทรกและบันทึกเอง */
+  autoRun?: boolean;
 }) {
   const toast = useToast();
   const { user } = useAuth();
@@ -116,6 +118,14 @@ export function DetailInsertAi({ parentId, brandId, isEn, state, setState, chose
       setBusy(false);
     }
   };
+
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (!autoRun || autoRanRef.current || !status || denied || full || state.ran || busy) return;
+    autoRanRef.current = true;
+    void run(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, status, denied, full, state.ran]);
 
   const memCall = async (action: "add" | "remove", list: keyof Mem, text: string, scope: "brand" | "all" = "brand") => {
     try {

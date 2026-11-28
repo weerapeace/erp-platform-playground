@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildVoiceSystemPrompt, cleanChoices, cleanHistory, matchChoiceLocally, normalizeVoiceReply, VOICE_LIMITS } from "@/lib/voice-assistant";
+import { buildVoiceSystemPrompt, cleanChoices, cleanHistory, matchChoiceLocally, normalizeVoiceReply, normalizeVoiceSettings, VOICE_COMMANDS, VOICE_EXAMPLE_LIMITS, VOICE_LIMITS } from "@/lib/voice-assistant";
 import { isReasoningModel } from "@/lib/ai-caption-models";
 
 const pages = [
@@ -76,5 +76,37 @@ describe("รุ่น GPT ที่คิดก่อนตอบ", () => {
     expect(isReasoningModel("o3")).toBe(true);
     expect(isReasoningModel("gpt-4o-mini")).toBe(false);
     expect(isReasoningModel("gpt-4.1")).toBe(false);
+  });
+});
+
+describe("ผู้ช่วยเสียง — ตั้งค่าคำสั่ง (หน้า /admin/voice-assistant)", () => {
+  it("ค่าว่าง/เพี้ยน = ค่าเริ่มต้น · โหมดที่คำสั่งไม่รองรับ = ตัวแรก · ตัวอย่างตัดซ้ำ/ตัดยาว", () => {
+    const d = normalizeVoiceSettings(null);
+    expect(VOICE_COMMANDS.every((k) => d.commands[k].enabled && d.commands[k].mode === "form")).toBe(true);
+    const s = normalizeVoiceSettings({ commands: { open_page: { mode: "confirm", enabled: false }, add_sku: { mode: "confirm", examples: ["a", "a", " ", "x".repeat(500)] } } });
+    expect(s.commands.open_page).toMatchObject({ enabled: false, mode: "form" });
+    expect(s.commands.add_sku.mode).toBe("confirm");
+    expect(s.commands.add_sku.examples).toEqual(["a", "x".repeat(VOICE_EXAMPLE_LIMITS.chars)]);
+    expect(s.commands.product_detail.examples.length).toBeGreaterThan(0);
+  });
+
+  it("คำสั่งที่ปิด = ไม่ทำ แม้ AI จะตอบมา", () => {
+    const settings = normalizeVoiceSettings({ commands: { add_sku: { enabled: false } } });
+    expect(normalizeVoiceReply({ action: "add_sku", sku: { name_th: "x" } }, { pages, choices: [], canAddSku: true, settings }).action).toBe("none");
+    expect(normalizeVoiceReply({ action: "open_page", page_id: "p1" }, { pages, choices: [], canAddSku: true, settings }).action).toBe("open_page");
+  });
+
+  it("ทำรายละเอียดสินค้า: ต้องมีคำค้น · ไม่มีสิทธิ์แก้สินค้า = ไม่ทำ", () => {
+    expect(normalizeVoiceReply({ action: "product_detail", query: " Ma tote " }, { pages, choices: [], canAddSku: true }).query).toBe("Ma tote");
+    expect(normalizeVoiceReply({ action: "product_detail", query: "" }, { pages, choices: [], canAddSku: true }).action).toBe("none");
+    expect(normalizeVoiceReply({ action: "product_detail", query: "x" }, { pages, choices: [], canAddSku: true, canEditProducts: false }).action).toBe("none");
+  });
+
+  it("คำสั่งระบบให้ AI: ใส่ตัวอย่างคำพูด · คำสั่งที่ปิดบอกให้ตอบ none", () => {
+    const settings = normalizeVoiceSettings({ commands: { open_page: { examples: ["ขอดูหน้าสต็อก"] }, add_sku: { enabled: false } } });
+    const p = buildVoiceSystemPrompt(pages, true, settings);
+    expect(p).toContain("ขอดูหน้าสต็อก");
+    expect(p).toContain("คำสั่งเพิ่ม SKU ถูกปิดอยู่");
+    expect(p).toContain("product_detail");
   });
 });

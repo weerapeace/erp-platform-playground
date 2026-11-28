@@ -7,9 +7,22 @@
  */
 import { apiCan } from "@/lib/api-auth";
 import { featureAccess } from "@/lib/paid-services-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeVoiceSettings, VOICE_SETTINGS_KEY, type VoiceSettings } from "@/lib/voice-assistant";
 
 export const VOICE_FEATURE_KEY = "ai.voice_assistant";
 
 export async function voiceAllowed(request: Request, userId: string): Promise<boolean> {
   return featureAccess(VOICE_FEATURE_KEY, { request, userId }, await apiCan(request, "admin.paid_services"));
+}
+
+
+/** ค่าตั้งผู้ช่วยเสียง (หน้า /admin/voice-assistant) — ยังไม่เคยตั้ง/อ่านไม่ได้ = ค่าเริ่มต้น (ทุกคำสั่งเปิด · โหมดเปิดฟอร์ม) */
+export async function loadVoiceSettings(): Promise<VoiceSettings> {
+  try {
+    const { data } = await supabaseAdmin().from("ui_config").select("value").eq("key", VOICE_SETTINGS_KEY).maybeSingle();
+    return normalizeVoiceSettings((data as { value?: unknown } | null)?.value ?? null);
+  } catch {
+    return normalizeVoiceSettings(null);
+  }
 }

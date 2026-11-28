@@ -1157,11 +1157,11 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "voice-assistant", label: "ผู้ช่วยเสียง (ปุ่มไมค์มุมจอ)", code: "VoiceAssistant", category: "layout",
     source: { path: "components/voice-assistant" },
-    what: "กดค้างแล้วพูดคำสั่งภาษาไทย → ผู้ช่วยเปิดหน้าให้ หรือเปิดตัวเพิ่ม SKU พร้อมค่าที่พูด (คนกดบันทึกเอง) · ตอบกลับเป็นเสียง",
-    when: "วางในเปลือกหน้ากลางแล้ว (PlaygroundShell / StandaloneShell) ขึ้นทุกหน้าเอง — คำสั่งใหม่ให้เพิ่มใน lib/voice-assistant (VOICE_ACTIONS + normalizeVoiceReply)",
-    notWhen: "อย่าทำปุ่มไมค์/ตัวฟังเสียงแยกในหน้าใด ๆ · อย่าให้ผู้ช่วยบันทึกข้อมูลเอง — ให้เปิดฟอร์ม/ตัวช่วยของเดิมพร้อมค่า",
+    what: "กดค้างแล้วพูดคำสั่งภาษาไทย → เปิดหน้า · เพิ่ม SKU · ทำรายละเอียดสินค้า (เปิดตัวช่วยแทรกที่ขั้น AI ดูรูป) · ตอบกลับเป็นเสียง · ตัวฟังเสียงใช้ซ้ำได้ = useVoiceInput",
+    when: "วางในเปลือกหน้ากลางแล้ว (PlaygroundShell / StandaloneShell) ขึ้นทุกหน้าเอง — คำสั่งใหม่ให้เพิ่มใน lib/voice-assistant (VOICE_ACTIONS + VOICE_COMMANDS/VOICE_COMMAND_INFO + normalizeVoiceReply) · ปุ่มกดค้างพูดในหน้าอื่น = useVoiceInput",
+    notWhen: "อย่าเขียนตัวอัดเสียง/ตัวฟังเสียงเองในหน้าใด ๆ (ใช้ useVoiceInput) · อย่าให้ผู้ช่วยบันทึกโดยไม่มีคนกด — โหมด confirm ต้องโชว์สรุปให้กดยืนยันก่อน และบันทึกผ่าน API เดิม",
     doc: "voice-assistant.md",
-    note: "เปิด-ปิด · ใครใช้ได้ · งบ · รุ่น AI ตั้งที่ /admin/paid-services (ai.voice_listen + ai.voice_assistant)",
+    note: "คำสั่งไหนเปิด · ทำได้แค่ไหน · ตัวอย่างคำพูด · ลองพูดทดสอบ · ประวัติคำสั่ง = /admin/voice-assistant · เปิด-ปิดทั้งระบบ · ใครใช้ได้ · งบ · รุ่น AI = /admin/paid-services",
   },
   {
     key: "brand", label: "โลโก้และชื่อระบบ", code: "Logo / Wordmark", category: "layout",
